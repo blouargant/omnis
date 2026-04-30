@@ -36,7 +36,7 @@ Per-provider defaults:
 
 ```bash
 export GOOGLE_API_KEY=AIza…
-go run ./cmd/full console
+go run . console
 ```
 
 ### Anthropic

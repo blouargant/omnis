@@ -6,7 +6,7 @@ This document maps the codebase and explains how the pieces interact.
 
 ```
                       ┌────────────────────────────────────┐
-                      │            cmd/full                │
+                      │        agent-toolkit (root)        │
                       │  (launcher: REPL or web UI)        │
                       └─────────────────┬──────────────────┘
                                         │ wires
@@ -93,7 +93,7 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
 
 ### 5. Sub-agents
 
-Two generic sub-agents are wired by default in `cmd/full`:
+Two generic sub-agents are wired by default in the root `main.go`:
 
 - **investigator** — read-only evidence gatherer. Cites every finding
   with a source (file:line, command output, MCP resource id). Never

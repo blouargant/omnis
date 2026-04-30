@@ -1,9 +1,9 @@
 ---
-name: cmd-full-wiring
-description: Understand and modify the wiring of cmd/full/main.go — how tools, sub-agents, plugins and toolsets are assembled into the lead agent. Use when adding a sub-agent, swapping a plugin, changing the toolset list, or debugging why a feature isn't reaching the agent. Mention triggers - cmd/full, main.go, wiring, lead agent, agenttool, NewMultiLoader, plugins.
+name: root-wiring
+description: Understand and modify the wiring of main.go (root) — how tools, sub-agents, plugins and toolsets are assembled into the lead agent. Use when adding a sub-agent, swapping a plugin, changing the toolset list, or debugging why a feature isn't reaching the agent. Mention triggers - root binary, main.go, wiring, lead agent, agenttool, NewMultiLoader, plugins.
 ---
 
-# `cmd/full/main.go` wiring
+# `main.go (root)` wiring
 
 This is the only file in the project that **assembles** components.
 It contains no logic of its own — every change here is "I want
@@ -125,7 +125,7 @@ Don't touch this file. Drop a `skills/<name>/SKILL.md` — the
 PATH=$HOME/.local/go/bin:$PATH go build ./... && \
 PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
 
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full console
+PATH=$HOME/.local/go/bin:$PATH go run . console
 > what tools and skills do you have?
 ```
 

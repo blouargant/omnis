@@ -41,7 +41,7 @@ PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
 ```
 
 - [ ] Final line is `OK`.
-- [ ] If you touched `cmd/full/main.go`: `go run ./cmd/full console`
+- [ ] If you touched `main.go (root)`: `go run . console`
       starts and the agent enumerates the new tool/skill on demand.
 - [ ] If you touched `core/llm/`: pick one provider, set its env var,
       and confirm `BeforeModel` appears in `.agent_events.log`.

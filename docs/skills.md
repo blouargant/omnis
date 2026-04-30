@@ -103,7 +103,7 @@ reasoning when one matches.
 - **Encode safety inline.** Don't rely on `permissions.yaml` alone;
   state the destructive verbs in the Hard rules section so the model
   can self-restrict before even calling the tool.
-- **Test the trigger.** Run `cmd/full` and ask a typical question; see
+- **Test the trigger.** Run the root binary and ask a typical question; see
   whether `load_skill` picks the right skill. Adjust the description if
   not.
 

@@ -3,7 +3,8 @@
 MODULE      := github.com/blouargant/agent-toolkit
 BIN_DIR     := bin
 DIST_DIR    := dist
-CMD_DIR     := cmd
+EXAMPLES_DIR := examples
+ROOT_BIN    := agent-toolkit
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -21,8 +22,8 @@ BUILD_FLAGS := -trimpath -ldflags '$(LDFLAGS)'
 # Cross-compile target platforms (override with `make release PLATFORMS="linux/amd64"`).
 PLATFORMS   ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-# All command packages (cmd/<name>).
-CMDS        := $(notdir $(wildcard $(CMD_DIR)/*))
+# All example packages (examples/<name>).
+CMDS        := $(notdir $(wildcard $(EXAMPLES_DIR)/*))
 
 .DEFAULT_GOAL := help
 
@@ -47,12 +48,17 @@ test: ## Run unit tests
 	$(GO) test ./...
 
 .PHONY: build
-build: $(addprefix build-,$(CMDS)) ## Build all commands for the host platform
+build: build-root $(addprefix build-example-,$(CMDS)) ## Build the root binary and all examples for the host platform
 
-.PHONY: build-%
-build-%: ## Build a single command (e.g. make build-full)
+.PHONY: build-root
+build-root: ## Build the root agent-toolkit binary
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$* ./$(CMD_DIR)/$*
+	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(ROOT_BIN) .
+
+.PHONY: build-example-%
+build-example-%: ## Build a single example (e.g. make build-example-s01_loop)
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$* ./$(EXAMPLES_DIR)/$*
 
 .PHONY: release
 release: clean ## Build cross-platform release archives in dist/
@@ -63,9 +69,11 @@ release: clean ## Build cross-platform release archives in dist/
 		stage="$(DIST_DIR)/agent-toolkit_$(VERSION)_$${os}_$${arch}"; \
 		mkdir -p $$stage; \
 		echo ">> building $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+			$(GO) build $(BUILD_FLAGS) -o $$stage/$(ROOT_BIN)$${ext} . || exit 1; \
 		for cmd in $(CMDS); do \
 			CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-				$(GO) build $(BUILD_FLAGS) -o $$stage/$${cmd}$${ext} ./$(CMD_DIR)/$$cmd || exit 1; \
+				$(GO) build $(BUILD_FLAGS) -o $$stage/$${cmd}$${ext} ./$(EXAMPLES_DIR)/$$cmd || exit 1; \
 		done; \
 		cp README.md LICENSE $$stage/ 2>/dev/null || true; \
 		if [ "$$os" = "windows" ]; then \

@@ -45,7 +45,7 @@ func New() tool.Tool {
 }
 ```
 
-Then register it in `cmd/full/main.go`:
+Then register it in the root `main.go`:
 
 ```go
 leadTools = append(leadTools, mytool.New())
@@ -74,7 +74,7 @@ func MyPlugin(name string) (*plugin.Plugin, error) {
 }
 ```
 
-Wire it into `cmd/full/main.go`:
+Wire it into the root `main.go`:
 
 ```go
 if p, err := mypkg.MyPlugin("mine"); err == nil {

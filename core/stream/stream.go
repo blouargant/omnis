@@ -1,5 +1,5 @@
 // Package stream is a minimal helper to print streaming agent events to a
-// terminal (Phase 4 / s13). The launcher in cmd/full handles its own UI;
+// terminal (Phase 4 / s13). The launcher in the root binary handles its own UI;
 // stream is for the per-component cmd/sXX demos that just want to print.
 package stream
 

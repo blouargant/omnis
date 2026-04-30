@@ -16,7 +16,7 @@ A **generic, vendor-neutral agent harness** in Go, inspired by Anthropic's
 
 > The harness is generic and stays generic. The agent's effective
 > capability on any run = union of mounted **tools + skills + MCP
-> servers**. The same `cmd/full` binary becomes a code reviewer, a K8s
+> servers**. The same the root binary binary becomes a code reviewer, a K8s
 > diagnostician, a DBA, etc., purely by changing what is mounted.
 > **Never bake a domain into Go code or a system prompt.**
 
@@ -79,7 +79,7 @@ When you need depth on something, read the matching file under
 | How to specialise the agent (no Go change) | `docs/specialising.md`              |
 | Authoring `skills/<name>/SKILL.md`         | `docs/skills.md`                    |
 | `permissions.yaml` + `mcp_config.yaml`     | `docs/configuration.md`             |
-| The 23 demo binaries                       | `docs/cmd-catalog.md`               |
+| The 23 demo binaries                       | `docs/examples-catalog.md`               |
 | Adding tools / plugins / sub-agents        | `docs/extending.md`                 |
 
 ## When in doubt
@@ -88,7 +88,7 @@ When you need depth on something, read the matching file under
 - Adding a new tool surface → load via MCP (`config/mcp_config.yaml`).
 - Adding a destructive verb → pair it with a `permissions.yaml` rule.
 - Adding a generic capability to the agent → new tool in `core/tools` or
-  `internal/`, then wired into `cmd/full/main.go`.
+  `internal/`, then wired into `main.go (root)`.
 - Touching the `SystemPrompt` → ask yourself first: is this about
   *method* (good) or about a *domain* (bad)?
 

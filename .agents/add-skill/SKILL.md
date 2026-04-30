@@ -104,7 +104,7 @@ Keep `SKILL.md` slim; push detail into `references/`.
 
 ```bash
 PATH=$HOME/.local/go/bin:$PATH go build ./... && \
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full console
+PATH=$HOME/.local/go/bin:$PATH go run . console
 > list available skills    # the new one should appear
 > <a typical user prompt>  # the lead should call load_skill on it
 ```

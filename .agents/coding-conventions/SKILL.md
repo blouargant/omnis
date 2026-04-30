@@ -11,7 +11,7 @@ description: Go coding conventions, architectural rules and anti-patterns for th
    `skills/<name>/SKILL.md`, MCP servers, or `permissions.yaml`. If you
    are tempted to write `if topic == "kubernetes"` or to mention
    `kubectl` / `psql` / `aws` in a Go string literal under `core/` or
-   `cmd/full/`, **stop**. Move it to a skill.
+   `./`, **stop**. Move it to a skill.
 
 2. **The system prompt describes a method, not a domain.** When editing
    `core/agentkit/agentkit.go`'s `SystemPrompt`, only add things that
@@ -43,7 +43,7 @@ description: Go coding conventions, architectural rules and anti-patterns for th
   promise.
 - `cmd/sNN_<topic>/` — single-component demos. Each one isolates one
   feature; keep them ≤ ~150 lines.
-- `cmd/full/` — the wiring binary. It assembles components but
+- `./` — the wiring binary. It assembles components but
   contains no logic.
 - `skills/` — specialisation playbooks (Markdown, not Go).
 - `.agents/` — bootstrap skills for *the development agent itself* (the

@@ -1,6 +1,6 @@
 ---
 name: build-and-test
-description: How to build, vet, lint and run anything in the agent-toolkit repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, GOAGENT_PROVIDER, run cmd/full, run a demo.
+description: How to build, vet, lint and run anything in the agent-toolkit repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, GOAGENT_PROVIDER, run root binary, run a demo.
 compatibility: Requires Go 1.25 installed at $HOME/.local/go (no sudo). Network access only if calling a remote LLM provider.
 ---
 
@@ -51,8 +51,8 @@ Override the model with `GOAGENT_MODEL`. Full reference:
 ## Run the all-in-one launcher
 
 ```bash
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full console   # REPL
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full web webui # web UI
+PATH=$HOME/.local/go/bin:$PATH go run . console   # REPL
+PATH=$HOME/.local/go/bin:$PATH go run . web webui # web UI
 ```
 
 ## Run a single-component demo
@@ -60,10 +60,10 @@ PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full web webui # web UI
 The `cmd/sNN_*` binaries each isolate one component. Example:
 
 ```bash
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/s05_skills "load the review skill and apply it to README.md"
+PATH=$HOME/.local/go/bin:$PATH go run ./examples/s05_skills "load the review skill and apply it to README.md"
 ```
 
-Catalog: [docs/cmd-catalog.md](../../docs/cmd-catalog.md).
+Catalog: [docs/examples-catalog.md](../../docs/examples-catalog.md).
 
 ## Common failure modes
 

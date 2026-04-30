@@ -21,7 +21,7 @@ When the user wants a new specialist agent, walk this checklist:
 
 ## Scaffolding
 
-1. Create `cmd/<name>/main.go` modelled on `cmd/s01_loop/main.go`:
+1. Create `examples/<name>/main.go` modelled on `examples/s01_loop/main.go`:
    reuse `agentkit.NewModel`, `agentkit.New`, `agentkit.Runner`,
    `agentkit.RunOnce`.
 2. Compose tools from existing packages — do not hand-roll new tools
@@ -31,7 +31,7 @@ When the user wants a new specialist agent, walk this checklist:
    instruction. Skills are the unit of specialisation.
 4. If the agent should be reachable from the lead coordinator, register
    it via `agenttool.New` and add it to the multi-loader in
-   `cmd/full/main.go`.
+   the root `main.go`.
 5. Add or extend `config/permissions.yaml` for the new tool surface.
 6. (Optional) Subscribe a domain-specific event handler via `events.Bus`
    for observability.

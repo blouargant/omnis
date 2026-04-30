@@ -69,7 +69,7 @@ idiomatic Go.
 
 ## Wire it in
 
-Edit [`cmd/full/main.go`](../../cmd/full/main.go). Append to `leadTools`
+Edit [`main.go (root)`](../../main.go (root)). Append to `leadTools`
 **before** the `agentkit.New(...)` call for the lead:
 
 ```go
@@ -103,7 +103,7 @@ PATH=$HOME/.local/go/bin:$PATH go build ./... && \
 PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
 ```
 
-Then run `cmd/full` and ask the model to use the new tool.
+Then run the root binary and ask the model to use the new tool.
 
 ## Don'ts
 

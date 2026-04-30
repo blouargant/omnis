@@ -69,7 +69,7 @@ ask_user:
 
 ### Asker
 
-`cmd/full` uses `permissions.StdinAsker{}` which prompts on the
+The root binary uses `permissions.StdinAsker{}` which prompts on the
 terminal. Implement `permissions.Asker` to integrate with a different
 UI (web modal, Slack DM, etc.).
 
@@ -120,7 +120,7 @@ servers:
 
 - Servers spawn at startup. If a server fails to start, it is logged
   and skipped — the agent continues with the rest.
-- Servers are killed when `cmd/full` exits.
+- Servers are killed when the root binary exits.
 - Tool names are namespaced as `<server>/<tool>` to prevent collisions.
 
 ### Security
@@ -142,7 +142,7 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 | `.agent_events.log`   | `core/events`    | Append-only JSONL of every Before/After event    |
 | `.agent_memory.md`    | `internal/compress` | Persistent memory snapshot when context is compressed |
 
-Both are created in the working directory of `cmd/full`.
+Both are created in the working directory of the root binary.
 
 ## Environment variables (full list)
 

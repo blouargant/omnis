@@ -16,7 +16,7 @@
 //                 lazily via the load_skill tool
 //   - MCP       — external servers wired in via config/mcp_config.yaml
 //
-// The same cmd/full binary becomes a code reviewer, a Kubernetes triage
+// The same root binary becomes a code reviewer, a Kubernetes triage
 // assistant, a DBA helper, or a release engineer purely by changing what
 // is mounted. No code change is required to retarget the agent at a new
 // domain.
@@ -39,4 +39,4 @@
 //
 // Model selection is controlled at runtime by GOAGENT_PROVIDER, which
 // accepts gemini, anthropic, openai, and openai_compat. See core/llm.
-package agenttoolkit
+package main

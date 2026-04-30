@@ -78,7 +78,7 @@ hard-denied.
 ### Step 4 — Run
 
 ```bash
-go run ./cmd/full console
+go run . console
 > diagnose why pods in namespace payments are crash-looping
 ```
 
@@ -94,7 +94,7 @@ The lead agent:
 
 The repository ships `skills/k8s-triage/SKILL.md` as a complete example.
 With it in place plus a Kubernetes MCP server (or `kubectl` and the
-permission rules above), the same `cmd/full` binary becomes a K8s
+permission rules above), the same root binary becomes a K8s
 diagnostician with no Go change.
 
 ## Worked example: PostgreSQL DBA

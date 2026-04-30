@@ -1,14 +1,23 @@
-// cmd/full — the all-in-one harness binary. Wires every component together
-// and hands control to ADK's full launcher (interactive console + web).
+// agent-toolkit — the all-in-one harness binary. Wires every component
+// together and hands control to ADK's full launcher (interactive console
+// + web).
 //
 // Run modes:
 //
-//	go run ./cmd/full console      # interactive REPL
-//	go run ./cmd/full web webui    # local web UI
+//	go run . [flags] console      # interactive REPL
+//	go run . [flags] web webui    # local web UI
+//	go run . --tui                # custom tview chat UI
+//
+// Flags:
+//
+//	-s, --skills <dir>   Directory to load skills from (default "skills")
+//	    --tui            Launch the tview chat interface instead of the
+//	                     ADK launcher.
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 
@@ -33,18 +42,51 @@ import (
 	"github.com/blouargant/agent-toolkit/internal/tasks"
 	"github.com/blouargant/agent-toolkit/internal/teammates"
 	"github.com/blouargant/agent-toolkit/internal/todo"
+	"github.com/blouargant/agent-toolkit/internal/tui"
 	"github.com/blouargant/agent-toolkit/internal/worktree"
 )
 
+// options holds the CLI flags consumed by this binary before the launcher
+// subcommand (console / web ...) is dispatched.
+type options struct {
+	skillsDir string
+	tui       bool
+}
+
+// parseFlags extracts our own flags from args, returning the parsed
+// options and the remaining args to forward to the ADK launcher.
+func parseFlags(args []string) (options, []string, error) {
+	opts := options{skillsDir: "skills"}
+
+	fs := flag.NewFlagSet("agent-toolkit", flag.ContinueOnError)
+	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
+	fs.StringVar(&opts.skillsDir, "s", opts.skillsDir, "Directory to load skills from (shorthand)")
+	fs.BoolVar(&opts.tui, "tui", false, "Launch the tview chat interface (ignores launcher subcommand)")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nLauncher commands: console, web webui, ...\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return opts, nil, err
+	}
+	return opts, fs.Args(), nil
+}
+
 func main() {
 	ctx := context.Background()
-	if err := run(ctx); err != nil {
+	opts, rest, err := parseFlags(os.Args[1:])
+	if err != nil {
+		os.Exit(2)
+	}
+	if err := run(ctx, opts, rest); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, opts options, launcherArgs []string) error {
 	llm, err := agentkit.NewModel(ctx)
 	if err != nil {
 		return err
@@ -64,7 +106,7 @@ func run(ctx context.Context) error {
 	leadTools = append(leadTools, q.Tool())
 
 	var toolsets []tool.Toolset
-	if ts, err := skills.Toolset(ctx, "skills"); err == nil {
+	if ts, err := skills.Toolset(ctx, opts.skillsDir); err == nil {
 		toolsets = append(toolsets, ts)
 	}
 	if mc, err := mcpcfg.Load("config/mcp_config.yaml"); err == nil {
@@ -178,7 +220,25 @@ You have no built-in domain expertise. Lean on the mounted skills and tools to d
 		PluginConfig:   runner.PluginConfig{Plugins: plugins},
 	}
 
-	args := os.Args[1:]
+	if opts.tui {
+		r, err := runner.New(runner.Config{
+			AppName:           "agent-toolkit",
+			Agent:             lead,
+			SessionService:    cfg.SessionService,
+			AutoCreateSession: true,
+			PluginConfig:      cfg.PluginConfig,
+		})
+		if err != nil {
+			return fmt.Errorf("tui runner: %w", err)
+		}
+		return tui.Run(ctx, tui.Config{
+			Runner:  r,
+			Bus:     bus,
+			AppName: "agent-toolkit",
+		})
+	}
+
+	args := launcherArgs
 	if len(args) == 0 {
 		args = []string{"console"}
 	}

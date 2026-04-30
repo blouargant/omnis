@@ -18,7 +18,7 @@ export OPENAI_API_KEY=sk-…
 export GOAGENT_MODEL=their-model-id
 ```
 
-Done. Test with `go run ./cmd/full console`.
+Done. Test with `go run . console`.
 
 If the API is genuinely different, continue.
 
@@ -58,7 +58,7 @@ PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
 
 export GOAGENT_PROVIDER=newprov
 export NEWPROV_API_KEY=…
-PATH=$HOME/.local/go/bin:$PATH go run ./cmd/full console
+PATH=$HOME/.local/go/bin:$PATH go run . console
 > hello, who are you?
 ```
 

@@ -26,7 +26,7 @@ Then, depending on the task:
 - Adding a tool → [`add-tool`](add-tool/SKILL.md)
 - Adding a skill → [`add-skill`](add-skill/SKILL.md)
 - Adding a provider → [`add-llm-provider`](add-llm-provider/SKILL.md)
-- Wiring changes → [`cmd-full-wiring`](cmd-full-wiring/SKILL.md)
+- Wiring changes → [`root-wiring`](root-wiring/SKILL.md)
 - Closing the loop → [`change-checklist`](change-checklist/SKILL.md)
 
 ## Format

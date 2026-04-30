@@ -38,10 +38,10 @@ export GOAGENT_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
 
 # Interactive REPL
-go run ./cmd/full console
+go run . console
 
 # Local web UI
-go run ./cmd/full web webui
+go run . web webui
 ```
 
 Out of the box the agent has:
@@ -103,16 +103,16 @@ See [docs/providers.md](docs/providers.md) for details.
 
 ## Running the all-in-one binary
 
-[cmd/full/main.go](cmd/full/main.go) is the reference launcher; it wires
+[main.go](main.go) is the reference launcher; it wires
 every component together and hands control to ADK's `full` launcher.
 
 ```bash
-go run ./cmd/full console     # REPL
-go run ./cmd/full web webui   # web UI
+go run . console     # REPL
+go run . web webui   # web UI
 ```
 
-There are also 23 single-component demos under `cmd/sNN_*/` that mirror
-the article's phases. See [docs/cmd-catalog.md](docs/cmd-catalog.md).
+There are also 23 single-component demos under `examples/sNN_*/` that mirror
+the article's phases. See [docs/examples-catalog.md](docs/examples-catalog.md).
 
 ---
 
@@ -146,7 +146,7 @@ servers:
 The `skills/k8s-triage/SKILL.md` is already shipped as an example. Run:
 
 ```bash
-go run ./cmd/full console
+go run . console
 > diagnose why pods in namespace payments are crash-looping
 ```
 
@@ -200,7 +200,7 @@ agent-toolkit/
 | [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
 | [docs/configuration.md](docs/configuration.md)| `permissions.yaml` and `mcp_config.yaml` reference|
-| [docs/cmd-catalog.md](docs/cmd-catalog.md)    | The 23 single-component demo binaries             |
+| [docs/examples-catalog.md](docs/examples-catalog.md)    | The 23 single-component demo binaries             |
 | [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents and plugins          |
 
 ---
