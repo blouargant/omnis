@@ -1,0 +1,3 @@
+module github.com/blouargant/agent-toolkit
+
+go 1.25.5
