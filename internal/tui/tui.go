@@ -152,14 +152,16 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		busy = true
 		input.SetText("")
-		appendChat("\n[::b]you[-]\n%s\n", prompt)
-		appendChat("\n[::b]assistant[-]\n")
-
+		// All UI mutations happen off the main goroutine — calling
+		// QueueUpdateDraw here (the Enter handler runs ON the main
+		// goroutine) would deadlock the app.
 		go func() {
 			defer func() {
 				busy = false
 				app.QueueUpdateDraw(func() { app.SetFocus(input) })
 			}()
+			appendChat("\n[::b]you[-]\n%s\n", prompt)
+			appendChat("\n[::b]assistant[-]\n")
 			seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
 				&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
 				adkagent.RunConfig{})
@@ -202,8 +204,9 @@ func Run(ctx context.Context, cfg Config) error {
 		app.Stop()
 	}()
 
-	// Welcome banner.
-	appendChat("[gray]Welcome to %s. Type a message and press Enter.\nCtrl-L clears the chat. Ctrl-C / Esc to quit.[-]\n", cfg.AppName)
+	// Welcome banner. Write directly: app.Run() hasn't started yet, so
+	// QueueUpdateDraw would deadlock (its queue is only drained by Run).
+	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nCtrl-L clears the chat. Ctrl-C / Esc to quit.[-]\n", cfg.AppName)
 
 	return app.SetRoot(root, true).EnableMouse(true).Run()
 }
