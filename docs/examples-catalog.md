@@ -68,4 +68,15 @@ go run ./examples/sNN_<name> "<your prompt>"
 
 | Binary       | What it does                                                                    |
 |--------------|---------------------------------------------------------------------------------|
-| `./` (root `main.go`) | Wires every component together and hands control to ADK's `full` launcher (`console` REPL or `web` UI). This is the binary you specialise via `skills/` + `config/`. Run with `go run . console`. |
+| `./` (root `main.go`) | Wires every component together. Run with `go run . console` (ADK REPL), `go run . web webui` (ADK web UI), or `go run . --tui` (built-in tview chat). Specialise it via `skills/` + `config/`. |
+
+### Root-binary flags
+
+| Flag                | Default  | Effect                                                                |
+|---------------------|----------|-----------------------------------------------------------------------|
+| `-s`, `--skills DIR`| `skills` | Directory scanned for skill playbooks (`<name>/SKILL.md`).            |
+| `--tui`             | _off_    | Launch the built-in tview chat UI instead of an ADK launcher subcommand. |
+
+Flags must precede any launcher subcommand, e.g.
+`go run . --skills ./my-skills console`. See
+[configuration.md](configuration.md#command-line-flags) for details.

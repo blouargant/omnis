@@ -144,6 +144,51 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 
 Both are created in the working directory of the root binary.
 
+## Command-line flags
+
+The root binary accepts a few flags, parsed **before** the launcher
+subcommand (`console`, `web webui`, ...) is dispatched.
+
+```bash
+agent-toolkit [flags] [<launcher-command> [launcher-args]]
+```
+
+| Flag                | Default  | Effect                                                                                  |
+|---------------------|----------|-----------------------------------------------------------------------------------------|
+| `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
+| `--tui`             | _off_    | Launch the built-in [tview](https://github.com/rivo/tview) chat UI (`internal/tui`) instead of the ADK launcher. The launcher subcommand, if any, is ignored. |
+
+The flag parser is Go's standard `flag` package, so both `-skills` and
+`--skills` syntaxes work, and `=` is optional (`--skills=foo` and
+`--skills foo` are equivalent).
+
+### Examples
+
+```bash
+# Default ADK REPL with the default skills/ tree
+go run . console
+
+# ADK web UI with a custom skills directory
+go run . --skills ./reviewer-skills web webui
+
+# Built-in tview chat UI with the default skills tree
+go run . --tui
+
+# Built-in tview chat UI with a custom skills tree
+go run . -s ./k8s-skills --tui
+```
+
+### `--tui` keys
+
+| Key            | Action                              |
+|----------------|-------------------------------------|
+| `Enter`        | Send the current input              |
+| `Ctrl-L`       | Clear the chat pane                 |
+| `Ctrl-C`, `Esc`| Quit                                |
+
+The trace pane on the left subscribes to the [event bus](../core/events/events.go)
+so every model and tool invocation appears live.
+
 ## Environment variables (full list)
 
 | Variable             | Used by               | Purpose                                          |

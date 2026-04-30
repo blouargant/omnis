@@ -107,9 +107,26 @@ See [docs/providers.md](docs/providers.md) for details.
 every component together and hands control to ADK's `full` launcher.
 
 ```bash
-go run . console     # REPL
-go run . web webui   # web UI
+go run . console     # ADK interactive REPL (default if no command)
+go run . web webui   # ADK web UI
+go run . --tui       # built-in tview chat UI
 ```
+
+### Command-line flags
+
+| Flag                | Default    | Effect                                                                 |
+|---------------------|------------|------------------------------------------------------------------------|
+| `-s`, `--skills DIR`| `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.          |
+| `--tui`             | _off_      | Launch the built-in [tview](https://github.com/rivo/tview) chat UI instead of an ADK launcher subcommand. Trace pane on the left, streaming chat + input box on the right. Keys: `Enter` send, `Ctrl-L` clear, `Ctrl-C` / `Esc` quit. |
+
+Flags must come **before** any launcher subcommand:
+
+```bash
+go run . --skills ./my-skills console
+go run . -s ./reviewer-skills --tui
+```
+
+See [docs/configuration.md](docs/configuration.md#command-line-flags) for the full reference.
 
 There are also 23 single-component demos under `examples/sNN_*/` that mirror
 the article's phases. See [docs/examples-catalog.md](docs/examples-catalog.md).
