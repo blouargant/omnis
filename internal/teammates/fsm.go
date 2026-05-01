@@ -222,7 +222,7 @@ func (a *Agent) Tools() []tool.Tool {
 	})
 	tell, _ := functiontool.New(functiontool.Config{
 		Name:        "teammate_tell",
-		Description: "Send a one-way message to another agent. No reply.",
+		Description: "Send a one-way message to another agent. Required input fields: to (recipient mailbox name), body (message text). No reply.",
 	}, func(ctx tool.Context, in tellIn) (tellOut, error) {
 		from := a.resolveName(ctx, a.Name)
 		to := a.resolveName(ctx, in.To)
