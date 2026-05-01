@@ -137,35 +137,100 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 
 ## Other runtime files
 
-| File                                | Owner               | Purpose                                                              |
-|-------------------------------------|---------------------|----------------------------------------------------------------------|
-| `.agent_events.log`                 | `core/events`       | Append-only JSONL of every Before/After event                        |
-| `.agent_memory_<user>_<session>.md` | `internal/compress` | Per-session compressed-context snapshot (one file per user/session)  |
-
 All runtime files are created in the working directory of the root
-binary.
+binary. Every component that owns mutable state is **session-scoped**
+by default, so two concurrent sessions never share a file, queue or
+mailbox.
 
-### Compressed memory layout
+| File / resource                       | Owner                | Scope               | Purpose                                                          |
+|---------------------------------------|----------------------|---------------------|------------------------------------------------------------------|
+| `.agent_events.log`                   | `core/events`        | global              | Append-only JSONL of every Before/After event (audit log)        |
+| `.agent_memory_<user>_<session>.md`   | `internal/compress`  | per (user, session) | Compressed-context snapshot                                      |
+| `.agent_tasks_<user>_<session>.json`  | `internal/tasks`     | per (user, session) | Durable task graph                                               |
+| `.agent_todo_<user>_<session>.json`   | `internal/todo`      | per (user, session) | TodoWrite plan                                                   |
+| in-memory `bg.Queue`                  | `internal/bg`        | per (user, session) | Background-command notification stream                           |
+| mailbox name `<user>_<session>:<name>`| `internal/teammates` | per (user, session) | Inter-agent inbox key (file path or Redis channel)               |
+| `.mailboxes/*.jsonl`                  | `internal/teammates` | per mailbox name    | On-disk inbox files (one per resolved mailbox name)              |
 
-The `compress` plugin keeps an independent token counter and transcript
-buffer for **each `(userID, sessionID)` pair** observed in callback
-contexts, so concurrent users never share a counter or overwrite each
-other's summary. The root binary configures the file naming via
-`compress.Config.MemoryPathFunc`:
+## Session isolation
+
+The root [main.go](../main.go) declares a single `sessionSuffix(userID,
+sessionID) string` helper and feeds it to every session-scoped
+component so all five line up on disk and on the wire:
 
 ```go
+sessionSuffix := func(userID, sessionID string) string {
+    u := sanitizeID(userID)
+    s := sanitizeID(sessionID)
+    if u == "" { u = "anon" }
+    if s == "" { s = "default" }
+    return u + "_" + s
+}
+```
+
+IDs are sanitised (only `[A-Za-z0-9_.-]`) before being embedded in any
+filename or channel name, preventing path traversal.
+
+### How each component scopes itself
+
+| Component              | Constructor                                       | Hook                                  |
+|------------------------|---------------------------------------------------|---------------------------------------|
+| `internal/compress`    | `compress.Plugin(name, compress.Config{...})`     | `MemoryPathFunc(userID, sessionID)`   |
+| `internal/tasks`       | `tasks.NewSessionScoped(default, pathFor)`        | `pathFor(userID, sessionID)`          |
+| `internal/todo`        | `todo.NewSessionScoped(default, pathFor)`         | `pathFor(userID, sessionID)`          |
+| `internal/bg`          | `bg.NewSessionQueues(buf)`                        | per-session `*Queue` (in-memory)      |
+| `internal/teammates`   | `teammates.NewAgent(name, backend)`               | `Agent.NameFunc(userID, sessionID, name)` |
+
+Each session-scoped struct resolves the calling session's identity from
+the `tool.Context` passed to every tool invocation (`ctx.UserID()` /
+`ctx.SessionID()`). When both IDs are empty (e.g. very early callbacks
+before a session is registered) the constructor's default path is used
+as a safe fallback.
+
+### Example: wiring all five components in `main.go`
+
+```go
+sessionSuffix := func(u, s string) string { /* sanitise + fall-back */ }
+
+g := tasks.NewSessionScoped("", func(u, s string) string {
+    return fmt.Sprintf(".agent_tasks_%s.json", sessionSuffix(u, s))
+})
+store := todo.NewSessionScoped("", func(u, s string) string {
+    return fmt.Sprintf(".agent_todo_%s.json", sessionSuffix(u, s))
+})
+q := bg.NewSessionQueues(32)
+
+leadMailbox := teammates.NewAgent("lead", be)
+leadMailbox.NameFunc = func(u, s, name string) string {
+    return sessionSuffix(u, s) + ":" + name
+}
+
 compress.Plugin("compress", compress.Config{
-    MemoryPathFunc: func(userID, sessionID string) string {
-        return fmt.Sprintf(".agent_memory_%s_%s.md", sanitizeID(userID), sanitizeID(sessionID))
+    MemoryPathFunc: func(u, s string) string {
+        return fmt.Sprintf(".agent_memory_%s.md", sessionSuffix(u, s))
     },
     LLM: llm,
 })
 ```
 
-IDs are sanitised (only `[A-Za-z0-9_.-]`) before being embedded in the
-filename, preventing path traversal. For single-user demos (such as
-`examples/s06_compress`) the legacy `MemoryPath` field is still honoured
-and all sessions share one file.
+### Components that are *not* session-scoped (by design)
+
+| Component        | Why                                                                        |
+|------------------|----------------------------------------------------------------------------|
+| `core/events`    | Single audit log, cross-cutting observability.                             |
+| `internal/cache` | Global rolling prompt-cache hit-rate stats (atomic counters).              |
+| `internal/worktree` | Already isolated via the `path`/`branch` arguments the LLM supplies.    |
+| `internal/skills`, `internal/mcp` | Read-only configuration loaded once at startup.           |
+
+### Single-session demos
+
+The `examples/sNN_*` binaries each demonstrate one component in
+isolation. They use the back-compat constructors (`tasks.New("")`,
+`todo.NewStore("")`, `bg.NewQueue(buf)`, `compress.Config.MemoryPath`,
+`teammates.NewAgent(name, backend)` with no `NameFunc`) since they
+only ever run one session at a time. Switch to the `*SessionScoped` /
+`SessionQueues` / `NameFunc` variants when you embed the components in
+a multi-session host (the root binary, a long-running server, etc.).
 
 ## Command-line flags
 

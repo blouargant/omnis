@@ -11,6 +11,15 @@ go run ./examples/sNN_<name> "<your prompt>"
 (Set `GOAGENT_PROVIDER` and the appropriate API key first — see
 [providers.md](providers.md).)
 
+> **Single-session by design.** These demos use the back-compat
+> constructors (`tasks.New`, `todo.NewStore`, `bg.NewQueue`,
+> `compress.Config.MemoryPath`, `teammates.NewAgent` with no
+> `NameFunc`) and therefore share one file / queue / mailbox across
+> runs. The root [main.go](../main.go) instead uses the
+> `*SessionScoped` / `SessionQueues` / `NameFunc` variants so
+> concurrent `(user, session)` pairs stay isolated — see
+> [configuration.md#session-isolation](configuration.md#session-isolation).
+
 ## Phase 1 — Loop & basic tools
 
 | #   | Binary                | What it shows                                                |

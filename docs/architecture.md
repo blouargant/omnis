@@ -94,6 +94,29 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
   counters and transcript buffers are kept per `(userID, sessionID)` so
   concurrent sessions stay isolated.
 
+### Session isolation
+
+Every component that owns mutable state is **session-scoped** by
+default. The root binary declares one `sessionSuffix(userID, sessionID)`
+helper and feeds it to all of them, so a given session's task graph,
+todo plan, compressed memory, background queue and mailbox namespace
+all line up under the same suffix.
+
+| Component              | What gets scoped                                       |
+|------------------------|--------------------------------------------------------|
+| `internal/compress`    | `.agent_memory_<u>_<s>.md` + token counters            |
+| `internal/tasks`       | `.agent_tasks_<u>_<s>.json` + per-path mutex           |
+| `internal/todo`        | `.agent_todo_<u>_<s>.json` + per-path mutex            |
+| `internal/bg`          | one in-memory `*Queue` per `(user, session)`           |
+| `internal/teammates`   | mailbox names prefixed with `<u>_<s>:`                 |
+
+Non-session-scoped (by design): `core/events` (single audit log),
+`internal/cache` (global hit-rate counters), `internal/worktree` (already
+isolated by the `path`/`branch` argument), and the read-only loaders
+`internal/skills` / `internal/mcp`. See
+[configuration.md#session-isolation](configuration.md#session-isolation)
+for the full table and wiring snippet.
+
 ### 5. Sub-agents
 
 Two generic sub-agents are wired by default in the root `main.go`:

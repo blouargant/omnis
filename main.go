@@ -94,9 +94,32 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 
 	// ── Toolsets ─────────────────────────────────────────────────────────
 	repo, _ := os.Getwd()
-	g := tasks.New("")
-	q := bg.NewQueue(32)
-	store := todo.NewStore("")
+
+	// All session-scoped components share the same (userID, sessionID)
+	// → suffix mapping so a given session's task graph, plan, mailbox
+	// and background queue all line up on disk and on the wire.
+	sessionSuffix := func(userID, sessionID string) string {
+		u := sanitizeID(userID)
+		s := sanitizeID(sessionID)
+		if u == "" {
+			u = "anon"
+		}
+		if s == "" {
+			s = "default"
+		}
+		return u + "_" + s
+	}
+
+	// Per-session task graph (.agent_tasks_<u>_<s>.json).
+	g := tasks.NewSessionScoped("", func(u, s string) string {
+		return fmt.Sprintf(".agent_tasks_%s.json", sessionSuffix(u, s))
+	})
+	// Per-session background notification queue.
+	q := bg.NewSessionQueues(32)
+	// Per-session todo plan (.agent_todo_<u>_<s>.json).
+	store := todo.NewSessionScoped("", func(u, s string) string {
+		return fmt.Sprintf(".agent_todo_%s.json", sessionSuffix(u, s))
+	})
 
 	leadTools := []tool.Tool{}
 	leadTools = append(leadTools, fstools.New()...)
@@ -121,6 +144,11 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 	}
 	defer be.Close()
 	leadMailbox := teammates.NewAgent("lead", be)
+	// Namespace mailbox names per session so two concurrent sessions
+	// running an agent named "lead" never share an inbox.
+	leadMailbox.NameFunc = func(u, s, name string) string {
+		return sessionSuffix(u, s) + ":" + name
+	}
 	leadTools = append(leadTools, leadMailbox.Tools()...)
 
 	// Generic specialist sub-agents — domain-agnostic by design. Specialise
@@ -211,17 +239,7 @@ You have no built-in domain expertise. Lean on the mounted skills and tools to d
 		MemoryPathFunc: func(userID, sessionID string) string {
 			// Per-session memory file so concurrent users / sessions
 			// never share a counter or overwrite each other's summaries.
-			// Falls back to a stable name when IDs are empty (e.g. early
-			// callbacks before a session is registered).
-			u := sanitizeID(userID)
-			s := sanitizeID(sessionID)
-			if u == "" {
-				u = "anon"
-			}
-			if s == "" {
-				s = "default"
-			}
-			return fmt.Sprintf(".agent_memory_%s_%s.md", u, s)
+			return fmt.Sprintf(".agent_memory_%s.md", sessionSuffix(userID, sessionID))
 		},
 		LLM: llm,
 	}); err == nil {

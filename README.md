@@ -55,7 +55,12 @@ Out of the box the agent has:
 - MCP servers loaded from `config/mcp_config.yaml`
 - Permission gating from `config/permissions.yaml`
 - Event logging to `.agent_events.log`
-- Context compression to per-session `.agent_memory_<user>_<session>.md`
+- Per-session state isolation: each `(user, session)` pair gets its own
+  task graph (`.agent_tasks_<u>_<s>.json`), todo plan
+  (`.agent_todo_<u>_<s>.json`), compressed memory
+  (`.agent_memory_<u>_<s>.md`), background-notification queue and
+  mailbox namespace — concurrent sessions never share state. See
+  [docs/configuration.md#session-isolation](docs/configuration.md#session-isolation).
 
 ---
 

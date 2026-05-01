@@ -135,4 +135,14 @@ each, no third-party SDK.
 - **Use `agentkit.New`** so every agent inherits the universal system
   prompt.
 - **Pair every mutating tool with a permission rule.**
+- **Make stateful components session-scoped.** If your component holds
+  mutable state (a file, a queue, an inbox, a counter), expose a
+  `NewSessionScoped(default, pathFor)` (or equivalent `*Func` hook on
+  the existing constructor) that resolves the on-disk / on-the-wire
+  identifier from `tool.Context.UserID()` + `tool.Context.SessionID()`.
+  Mirror the pattern used by `internal/tasks`, `internal/todo`,
+  `internal/bg.SessionQueues`, `internal/teammates.Agent.NameFunc` and
+  `internal/compress.Config.MemoryPathFunc`. Keep a back-compat
+  single-path constructor for the `examples/sNN_*` demos. See
+  [configuration.md#session-isolation](configuration.md#session-isolation).
 - **Build & vet** before committing: `go build ./... && go vet ./...`.

@@ -32,7 +32,7 @@ func Print(w io.Writer, seq iter.Seq2[*session.Event, error]) error {
 				fmt.Fprintf(w, "\n[tool_call %s %v]\n", p.FunctionCall.Name, p.FunctionCall.Args)
 			}
 			if p.FunctionResponse != nil {
-				fmt.Fprintf(w, "\n[tool_result %s]\n", p.FunctionResponse.Name)
+				fmt.Fprintf(w, "\n[tool_result %s %v]\n", p.FunctionResponse.Name, p.FunctionResponse.Response)
 			}
 		}
 	}
