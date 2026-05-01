@@ -137,12 +137,35 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 
 ## Other runtime files
 
-| File                  | Owner            | Purpose                                          |
-|-----------------------|------------------|--------------------------------------------------|
-| `.agent_events.log`   | `core/events`    | Append-only JSONL of every Before/After event    |
-| `.agent_memory.md`    | `internal/compress` | Persistent memory snapshot when context is compressed |
+| File                                | Owner               | Purpose                                                              |
+|-------------------------------------|---------------------|----------------------------------------------------------------------|
+| `.agent_events.log`                 | `core/events`       | Append-only JSONL of every Before/After event                        |
+| `.agent_memory_<user>_<session>.md` | `internal/compress` | Per-session compressed-context snapshot (one file per user/session)  |
 
-Both are created in the working directory of the root binary.
+All runtime files are created in the working directory of the root
+binary.
+
+### Compressed memory layout
+
+The `compress` plugin keeps an independent token counter and transcript
+buffer for **each `(userID, sessionID)` pair** observed in callback
+contexts, so concurrent users never share a counter or overwrite each
+other's summary. The root binary configures the file naming via
+`compress.Config.MemoryPathFunc`:
+
+```go
+compress.Plugin("compress", compress.Config{
+    MemoryPathFunc: func(userID, sessionID string) string {
+        return fmt.Sprintf(".agent_memory_%s_%s.md", sanitizeID(userID), sanitizeID(sessionID))
+    },
+    LLM: llm,
+})
+```
+
+IDs are sanitised (only `[A-Za-z0-9_.-]`) before being embedded in the
+filename, preventing path traversal. For single-user demos (such as
+`examples/s06_compress`) the legacy `MemoryPath` field is still honoured
+and all sessions share one file.
 
 ## Command-line flags
 

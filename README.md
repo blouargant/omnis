@@ -55,7 +55,7 @@ Out of the box the agent has:
 - MCP servers loaded from `config/mcp_config.yaml`
 - Permission gating from `config/permissions.yaml`
 - Event logging to `.agent_events.log`
-- Context compression to `.agent_memory.md`
+- Context compression to per-session `.agent_memory_<user>_<session>.md`
 
 ---
 

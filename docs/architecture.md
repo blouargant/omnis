@@ -88,8 +88,11 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
 - **permissions** — gates bash and tool calls against
   `config/permissions.yaml` (allow / deny / ask).
 - **cache** — surfaces prompt-cache stats per turn.
-- **compress** — when context approaches the model window, extracts
-  durable facts to `.agent_memory.md` and compresses turns.
+- **compress** — when a session's context approaches the model window,
+  extracts durable facts to a per-session
+  `.agent_memory_<user>_<session>.md` file and compresses turns. Token
+  counters and transcript buffers are kept per `(userID, sessionID)` so
+  concurrent sessions stay isolated.
 
 ### 5. Sub-agents
 
