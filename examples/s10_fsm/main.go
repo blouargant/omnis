@@ -22,12 +22,19 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go func() {
-		m, err := be.Receive(ctx, "reviewer", 4*time.Second)
+		m, err := rev.Check(ctx, 4*time.Second)
 		if err != nil || m == nil {
 			return
 		}
-		_ = be.Send(ctx, m.From, teammates.Message{From: "reviewer", Body: "LGTM"})
+		_ = rev.Tell(ctx, m.From, "LGTM")
 	}()
+
+	// Wait briefly for reviewer.Check() to enter RESPONDING.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) && rev.State() != teammates.StateResponding {
+		time.Sleep(5 * time.Millisecond)
+	}
+	fmt.Println("reviewer state before ask:", rev.State())
 
 	fmt.Printf("lead state before ask: %s\n", lead.State())
 	reply, err := lead.Ask(ctx, "reviewer", "ok to merge?", 3*time.Second)
