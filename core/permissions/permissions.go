@@ -31,11 +31,28 @@ const (
 	DecisionAsk
 )
 
-// Rule is one entry in the YAML config.
+// Rule is one entry in the YAML config. It may be written as a bare string
+// (just the pattern) or as a mapping {pattern, reason}.
 type Rule struct {
 	Pattern string `yaml:"pattern"`
 	Reason  string `yaml:"reason"`
 	re      *regexp.Regexp
+}
+
+// UnmarshalYAML accepts either a plain scalar (the pattern) or a mapping
+// with explicit pattern/reason fields.
+func (r *Rule) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		r.Pattern = node.Value
+		return nil
+	}
+	type raw Rule
+	var tmp raw
+	if err := node.Decode(&tmp); err != nil {
+		return err
+	}
+	*r = Rule(tmp)
+	return nil
 }
 
 // Rules is the parsed permissions config.
