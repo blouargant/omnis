@@ -132,3 +132,12 @@ func RunOnce(ctx context.Context, r *runner.Runner, prompt string) iter.Seq2[*se
 		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
 		agent.RunConfig{})
 }
+
+// RunOnceStream is like RunOnce but asks ADK to stream LLM tokens as they
+// are produced (StreamingModeSSE). Use together with stream.Print to render
+// text incrementally.
+func RunOnceStream(ctx context.Context, r *runner.Runner, prompt string) iter.Seq2[*session.Event, error] {
+	return r.Run(ctx, "demo-user", "demo-session",
+		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
+		agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+}

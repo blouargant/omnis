@@ -23,11 +23,11 @@ func main() {
 	must(err)
 	r, err := agentkit.Runner("s13", a)
 	must(err)
-	prompt := "Stream a 5-line haiku about goroutines."
+	prompt := "Stream a 50-line haiku about goroutines."
 	if len(os.Args) > 1 {
 		prompt = os.Args[1]
 	}
-	must(stream.Print(os.Stdout, agentkit.RunOnce(ctx, r, prompt)))
+	must(stream.Print(os.Stdout, agentkit.RunOnceStream(ctx, r, prompt)))
 }
 
 func must(err error) {

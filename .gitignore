@@ -31,5 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 .agent_events.log
+.agent_tasks.json
 .mailboxes
 bin/
