@@ -1,7 +1,7 @@
 // Package llm picks an LLM provider based on environment and exposes a
 // common ADK model.LLM. Supported providers:
 //
-//   - gemini         (default; uses google.golang.org/adk/model/gemini)
+//   - gemini         (uses google.golang.org/adk/model/gemini)
 //   - anthropic      (Anthropic Messages API)
 //   - openai         (OpenAI Chat Completions API)
 //   - openai_compat  (any OpenAI-compatible endpoint, e.g. Ollama, vLLM,
@@ -9,7 +9,7 @@
 //
 // Selection env:
 //
-//	GOAGENT_PROVIDER  → one of the names above (default: gemini)
+//	GOAGENT_PROVIDER  → one of the names above (default: openai_compat)
 //	GOAGENT_MODEL     → provider-specific model id (defaults below)
 //
 // Auth env (per provider):
@@ -44,7 +44,7 @@ var defaultModel = map[string]string{
 func New(ctx context.Context) (model.LLM, error) {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("GOAGENT_PROVIDER")))
 	if provider == "" {
-		provider = "gemini"
+		provider = "openai_compat"
 	}
 	modelName := os.Getenv("GOAGENT_MODEL")
 	if modelName == "" {

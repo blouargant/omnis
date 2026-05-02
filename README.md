@@ -33,7 +33,7 @@ small in-tree adapter (no extra SDKs).
 ## Quick start
 
 ```bash
-# Pick your provider + key (defaults to Gemini)
+# Pick your provider + key (default provider is openai_compat)
 export GOAGENT_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
 
@@ -78,7 +78,7 @@ go build ./...
 
 ## Choosing an LLM provider
 
-Set `GOAGENT_PROVIDER` (default: `gemini`):
+Set `GOAGENT_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|

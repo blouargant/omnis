@@ -23,7 +23,7 @@ import (
 
 // DefaultModel is kept for documentation; the actual default is owned by
 // core/llm and depends on GOAGENT_PROVIDER.
-const DefaultModel = "gemini-2.5-flash"
+const DefaultModel = "gpt-4o-mini"
 
 // SystemPrompt is the harness's universal operating contract — domain-
 // agnostic by design. It describes a *method*, not a domain. Specialise an

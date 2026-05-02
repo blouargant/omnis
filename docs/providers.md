@@ -9,7 +9,7 @@ both adapters speak HTTP + SSE directly.
 
 | Variable           | Default   | Meaning                                                              |
 |--------------------|-----------|----------------------------------------------------------------------|
-| `GOAGENT_PROVIDER` | `gemini`  | One of `gemini`, `anthropic`, `openai`, `openai_compat`              |
+| `GOAGENT_PROVIDER` | `openai_compat`  | One of `gemini`, `anthropic`, `openai`, `openai_compat`              |
 | `GOAGENT_MODEL`    | per below | Provider-specific model id; overrides the default                    |
 
 Per-provider defaults:
@@ -32,7 +32,14 @@ Per-provider defaults:
 
 ## Examples
 
-### Gemini (default)
+### OpenAI-compatible (default)
+
+```bash
+export OPENAI_BASE_URL=http://localhost:11434/v1
+go run . console
+```
+
+### Gemini
 
 ```bash
 export GOOGLE_API_KEY=AIza…

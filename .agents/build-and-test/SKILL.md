@@ -36,7 +36,7 @@ not declare a task done until you've seen this output.**
 
 ## Pick an LLM provider
 
-The harness uses `GOAGENT_PROVIDER` (default: `gemini`):
+The harness uses `GOAGENT_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|

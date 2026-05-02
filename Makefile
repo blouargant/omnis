@@ -50,6 +50,10 @@ test: ## Run unit tests
 .PHONY: unit-tests
 unit-tests: test ## Run unit tests
 
+.PHONY: env-tests
+env-tests: ## Source .env and run LLM tests
+	@set -a; . ./.env; set +a; $(GO) test ./core/llm
+
 .PHONY: build
 build: build-root $(addprefix build-example-,$(CMDS)) ## Build the root binary and all examples for the host platform
 
