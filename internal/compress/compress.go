@@ -1,8 +1,21 @@
-// Package compress implements the article's "context compression at the 92%
-// threshold" (Phase 2 / s06). When the running token total of a session
-// exceeds Threshold tokens, we summarise the older half of the conversation
-// via a one-shot model call and write the summary to a memory file so the
-// agent can refer to it.
+// Package compress implements an intelligent context manager (Phase 2 / s06).
+//
+// Unlike the original v1 (which only wrote a side-car summary file), this
+// plugin actively rewrites the live LLMRequest.Contents via a
+// BeforeModelCallback so the conversation passed to the model stays under
+// budget. Compression is a pipeline of passes — dedupe, truncate, drop
+// unused skills, summarise the middle — applied in order until the token
+// count drops below a soft target.
+//
+// Triggers:
+//   - SOFT (default 75% of WindowTokens): runs the cheap passes only.
+//   - HARD (default 92%): runs the full pipeline, including LLM summary.
+//   - compact_now tool: lets the agent request compression explicitly.
+//   - Task switch: a heuristic on user turns flips a per-session
+//     forceCompact flag (see tasksniff.go).
+//
+// The .agent_memory.md side-car is kept as an audit trail, not as the
+// agent's only memory of dropped turns.
 package compress
 
 import (
@@ -18,149 +31,266 @@ import (
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
+	"google.golang.org/adk/tool"
 )
 
-// DefaultThreshold roughly mirrors a 92% fill of a 1M-token Gemini window.
-const DefaultThreshold = 920_000
+// Defaults.
+const (
+	DefaultWindowTokens       = 200_000 // safe baseline (Claude 3.5 Sonnet)
+	DefaultSoftRatio          = 0.75
+	DefaultHardRatio          = 0.92
+	DefaultKeepHeadTurns      = 2
+	DefaultKeepRecentTurns    = 4
+	DefaultToolResultMaxBytes = 4096
+	DefaultMemoryPath         = ".agent_memory.md"
+)
 
-// MemoryPath is where the running summary is persisted.
-const DefaultMemoryPath = ".agent_memory.md"
-
-// Config controls compression behaviour.
+// Config controls compression behaviour. v2 is a breaking change from v1:
+// the single Threshold field is replaced by a window+ratio model so the
+// same configuration scales across providers.
 type Config struct {
-	// Threshold in tokens. A summarisation pass runs once cumulative
-	// prompt+response token usage crosses it.
-	Threshold int64
-	// MemoryPath is the file the running summary is appended to when
-	// MemoryPathFunc is nil. Used as a single shared file across all
-	// sessions — only suitable for single-user demos.
-	MemoryPath string
-	// MemoryPathFunc, if set, is called per session to compute the file
-	// path the summary is appended to. It receives the userID and
-	// sessionID from the callback context and must return a writable file
-	// path. Use this to isolate per-session memory in multi-user setups.
-	MemoryPathFunc func(userID, sessionID string) string
-	// LLM used to generate the summary. If nil, compression runs in
-	// "stub" mode: it just notes the threshold was hit.
+	// WindowTokens is the model's effective context window in tokens.
+	// Soft and hard triggers fire at SoftRatio*WindowTokens and
+	// HardRatio*WindowTokens respectively. Defaults to DefaultWindowTokens.
+	WindowTokens int
+	// SoftRatio (0..1) — proactive trigger. Runs cheap passes only.
+	SoftRatio float64
+	// HardRatio (0..1) — safety-net trigger. Runs the full pipeline,
+	// including LLM-backed middle summarisation.
+	HardRatio float64
+	// KeepHeadTurns is the count of leading turns preserved verbatim
+	// (typically the original user goal + first lead reply).
+	KeepHeadTurns int
+	// KeepRecentTurns is the count of trailing turns preserved verbatim
+	// to maintain immediate coherence.
+	KeepRecentTurns int
+	// ToolResultMaxBytes caps individual FunctionResponse payloads.
+	ToolResultMaxBytes int
+	// LLM is used to summarise the dropped middle. If nil, an extractive
+	// fallback is used (no model call).
 	LLM model.LLM
+	// AuditPathFunc returns the per-session audit log path. When nil,
+	// the AuditPath field is used; when both are empty, audit logging
+	// is disabled.
+	AuditPathFunc func(userID, sessionID string) string
+	// AuditPath is the single audit log path used when AuditPathFunc is
+	// nil. Suitable for single-user demos only.
+	AuditPath string
 }
 
-// sessionState holds the per-session compression bookkeeping. Each session
-// has its own token counter, recent-text buffer, and busy flag so two users
-// hitting the harness concurrently never cross-contaminate each other's
-// summaries.
-type sessionState struct {
-	used       atomic.Int64
-	busy       atomic.Bool
-	mu         sync.Mutex
-	recentText string
-}
-
-// Plugin returns an ADK plugin that watches AfterModelCallback responses,
-// accumulates token usage per session, and triggers compression once a
-// session crosses cfg.Threshold. The second return value is a Wait function
-// that blocks until any in-flight compression goroutines have finished —
-// call it before the process exits to ensure memory files are fully
-// written.
-func Plugin(name string, cfg Config) (*plugin.Plugin, func(), error) {
-	if cfg.Threshold <= 0 {
-		cfg.Threshold = DefaultThreshold
+func (c *Config) applyDefaults() {
+	if c.WindowTokens <= 0 {
+		c.WindowTokens = DefaultWindowTokens
 	}
-	if cfg.MemoryPath == "" {
-		cfg.MemoryPath = DefaultMemoryPath
+	if c.SoftRatio <= 0 {
+		c.SoftRatio = DefaultSoftRatio
 	}
-	pathFor := cfg.MemoryPathFunc
-	if pathFor == nil {
-		pathFor = func(_, _ string) string { return cfg.MemoryPath }
+	if c.HardRatio <= 0 {
+		c.HardRatio = DefaultHardRatio
 	}
-
-	var (
-		wg       sync.WaitGroup
-		sessions sync.Map // sessionKey -> *sessionState
-	)
-
-	getState := func(key string) *sessionState {
-		if v, ok := sessions.Load(key); ok {
-			return v.(*sessionState)
+	if c.KeepHeadTurns <= 0 {
+		c.KeepHeadTurns = DefaultKeepHeadTurns
+	}
+	if c.KeepRecentTurns <= 0 {
+		c.KeepRecentTurns = DefaultKeepRecentTurns
+	}
+	if c.ToolResultMaxBytes <= 0 {
+		c.ToolResultMaxBytes = DefaultToolResultMaxBytes
+	}
+	if c.AuditPathFunc == nil {
+		path := c.AuditPath
+		if path == "" {
+			path = DefaultMemoryPath
 		}
-		v, _ := sessions.LoadOrStore(key, &sessionState{})
+		c.AuditPathFunc = func(_, _ string) string { return path }
+	}
+}
+
+// sessionState is the per-(userID, sessionID) bookkeeping.
+type sessionState struct {
+	mu              sync.Mutex
+	lastTokenCount  atomic.Int64
+	forceCompact    atomic.Bool
+	recentUserTurns []string // last few user prompts; used by task-switch sniffer
+}
+
+// Plugin returns the configured plugin plus a Wait function (kept for API
+// compatibility; the v2 plugin runs synchronously inside callbacks so
+// Wait is now a no-op).
+func Plugin(name string, cfg Config) (*plugin.Plugin, func(), error) {
+	p, _, wait, err := PluginWithTools(name, cfg)
+	return p, wait, err
+}
+
+// PluginWithTools is the full constructor: it returns the plugin, the
+// /compact tool list (mount via Toolset on the agent), a Wait function
+// (no-op, kept for compatibility), and any construction error.
+func PluginWithTools(name string, cfg Config) (*plugin.Plugin, []tool.Tool, func(), error) {
+	cfg.applyDefaults()
+	mgr := newManager(cfg)
+	p, err := plugin.New(plugin.Config{
+		Name:                name,
+		BeforeModelCallback: llmagent.BeforeModelCallback(mgr.beforeModel),
+		AfterModelCallback:  llmagent.AfterModelCallback(mgr.afterModel),
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return p, mgr.tools(), func() {}, nil
+}
+
+// manager owns all session state and the compression pipeline.
+type manager struct {
+	cfg      Config
+	sessions sync.Map // string -> *sessionState
+}
+
+func newManager(cfg Config) *manager { return &manager{cfg: cfg} }
+
+func (m *manager) state(userID, sessionID string) *sessionState {
+	key := userID + "\x00" + sessionID
+	if v, ok := m.sessions.Load(key); ok {
 		return v.(*sessionState)
 	}
+	v, _ := m.sessions.LoadOrStore(key, &sessionState{})
+	return v.(*sessionState)
+}
 
-	flush := func(ctx context.Context, st *sessionState, path string) {
-		st.mu.Lock()
-		text := st.recentText
-		st.recentText = ""
-		st.mu.Unlock()
-		if cfg.LLM == nil {
-			_ = appendMemory(path,
-				fmt.Sprintf("[compress] threshold %d reached; summary skipped (no LLM configured).", cfg.Threshold))
-			return
+func (m *manager) softLimit() int { return int(float64(m.cfg.WindowTokens) * m.cfg.SoftRatio) }
+func (m *manager) hardLimit() int { return int(float64(m.cfg.WindowTokens) * m.cfg.HardRatio) }
+
+// beforeModel inspects req.Contents, decides whether to compress, and
+// rewrites the slice in place if so.
+func (m *manager) beforeModel(ctx agent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+	if req == nil {
+		return nil, nil
+	}
+	st := m.state(ctx.UserID(), ctx.SessionID())
+
+	maybeMarkTaskSwitch(st, req.Contents)
+
+	before := CountContents(req.Contents)
+	st.lastTokenCount.Store(int64(before))
+
+	soft, hard := m.softLimit(), m.hardLimit()
+	forced := st.forceCompact.Swap(false)
+
+	var trigger string
+	switch {
+	case forced:
+		trigger = "forced"
+	case before >= hard:
+		trigger = "hard"
+	case before >= soft:
+		trigger = "soft"
+	default:
+		return nil, nil
+	}
+
+	newContents, applied := m.runPipeline(ctx, req.Contents, trigger == "hard" || trigger == "forced")
+	if applied == nil {
+		return nil, nil
+	}
+	req.Contents = newContents
+	after := CountContents(req.Contents)
+	m.audit(ctx, trigger, before, after, applied)
+	return nil, nil
+}
+
+// afterModel records the most recent UsageMetadata count for diagnostics.
+func (m *manager) afterModel(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+	if resp == nil || resp.UsageMetadata == nil {
+		return nil, nil
+	}
+	st := m.state(ctx.UserID(), ctx.SessionID())
+	st.lastTokenCount.Store(int64(resp.UsageMetadata.PromptTokenCount + resp.UsageMetadata.CandidatesTokenCount))
+	return nil, nil
+}
+
+// runPipeline applies passes in order. Returns (newContents, appliedPassNames)
+// or (nil, nil) when no pass altered the conversation.
+func (m *manager) runPipeline(ctx context.Context, contents []*genai.Content, includeSummariser bool) ([]*genai.Content, []string) {
+	var applied []string
+	soft := m.softLimit()
+	cur := contents
+
+	step := func(name string, p Pass) {
+		before := CountContents(cur)
+		next := p(cur, m.cfg.KeepRecentTurns)
+		if next == nil {
+			next = cur
 		}
-		if text == "" {
-			return
+		if CountContents(next) < before {
+			applied = append(applied, name)
 		}
+		cur = next
+	}
+
+	step("dedupe_tool_calls", PassDedupeToolCalls)
+	if CountContents(cur) <= soft {
+		return finalize(cur, applied)
+	}
+	step("truncate_tool_results", PassTruncateToolResults(m.cfg.ToolResultMaxBytes))
+	if CountContents(cur) <= soft {
+		return finalize(cur, applied)
+	}
+	step("drop_unused_skills", PassDropUnusedSkills)
+	if CountContents(cur) <= soft || !includeSummariser {
+		return finalize(cur, applied)
+	}
+	step("summarize_middle", PassSummarizeMiddle(m.cfg.KeepHeadTurns, m.summariser(ctx)))
+	return finalize(cur, applied)
+}
+
+func finalize(cur []*genai.Content, applied []string) ([]*genai.Content, []string) {
+	if len(applied) == 0 {
+		return nil, nil
+	}
+	return cur, applied
+}
+
+// summariser returns a closure that asks the configured LLM to summarise
+// the dropped middle. Returns nil if no LLM is configured.
+func (m *manager) summariser(ctx context.Context) func(string) (string, error) {
+	if m.cfg.LLM == nil {
+		return nil
+	}
+	return func(text string) (string, error) {
 		req := &model.LLMRequest{
 			Contents: []*genai.Content{
-				{Role: "user", Parts: []*genai.Part{{Text: "Summarise the following agent transcript in <300 words, preserving facts, file paths, decisions, and open issues:\n\n" + text}}},
+				{Role: "user", Parts: []*genai.Part{{Text: summariserPrompt + "\n\n" + text}}},
 			},
 		}
-		// Drain the streaming response into one string.
-		seq := cfg.LLM.GenerateContent(ctx, req, false)
-		var summary string
+		seq := m.cfg.LLM.GenerateContent(ctx, req, false)
+		var out string
 		for resp, err := range seq {
 			if err != nil {
-				_ = appendMemory(path, fmt.Sprintf("[compress] error: %v", err))
-				return
+				return "", err
 			}
 			if resp == nil || resp.Content == nil {
 				continue
 			}
 			for _, p := range resp.Content.Parts {
-				summary += p.Text
+				out += p.Text
 			}
 		}
-		_ = appendMemory(path, "## Compressed summary\n"+summary+"\n")
+		return out, nil
 	}
+}
 
-	cb := func(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
-		if resp == nil || resp.UsageMetadata == nil {
-			return nil, nil
-		}
-		userID, sessionID := ctx.UserID(), ctx.SessionID()
-		key := userID + "\x00" + sessionID
-		st := getState(key)
+const summariserPrompt = `Summarise the following agent transcript in fewer than 500 words.
+Preserve: file paths touched, tool names invoked, decisions made, open questions, and any errors encountered.
+Drop: small talk, intermediate reasoning, and verbose tool output.
+Write in past tense bullet points.`
 
-		var n int64
-		n += int64(resp.UsageMetadata.PromptTokenCount)
-		n += int64(resp.UsageMetadata.CandidatesTokenCount)
-		st.used.Add(n)
-		if resp.Content != nil {
-			st.mu.Lock()
-			for _, p := range resp.Content.Parts {
-				if p != nil && p.Text != "" {
-					st.recentText += p.Text + "\n"
-				}
-			}
-			st.mu.Unlock()
-		}
-		if st.used.Load() >= cfg.Threshold && st.busy.CompareAndSwap(false, true) {
-			path := pathFor(userID, sessionID)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer st.busy.Store(false)
-				defer st.used.Store(0)
-				flush(context.Background(), st, path)
-			}()
-		}
-		return nil, nil
+// audit appends a structured entry to the per-session memory file.
+func (m *manager) audit(ctx agent.CallbackContext, trigger string, before, after int, applied []string) {
+	path := m.cfg.AuditPathFunc(ctx.UserID(), ctx.SessionID())
+	if path == "" {
+		return
 	}
-	p, err := plugin.New(plugin.Config{
-		Name:               name,
-		AfterModelCallback: llmagent.AfterModelCallback(cb),
-	})
-	return p, wg.Wait, err
+	entry := fmt.Sprintf("## compression event\n- trigger: %s\n- tokens_before: %d\n- tokens_after: %d\n- passes: %v\n", trigger, before, after, applied)
+	_ = appendMemory(path, entry)
 }
 
 func appendMemory(path, text string) error {

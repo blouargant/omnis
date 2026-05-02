@@ -235,15 +235,18 @@ You have no built-in domain expertise. Lean on the mounted skills and tools to d
 	if _, cp, err := cache.Plugin("cache"); err == nil {
 		plugins = append(plugins, cp)
 	}
-	if cmp, _, err := compress.Plugin("compress", compress.Config{
-		MemoryPathFunc: func(userID, sessionID string) string {
-			// Per-session memory file so concurrent users / sessions
-			// never share a counter or overwrite each other's summaries.
+	if cmp, _, _, err := compress.PluginWithTools("compress", compress.Config{
+		// Per-session audit file so concurrent users / sessions
+		// never share a counter or overwrite each other's summaries.
+		AuditPathFunc: func(userID, sessionID string) string {
 			return fmt.Sprintf(".agent_memory_%s.md", sessionSuffix(userID, sessionID))
 		},
 		LLM: llm,
 	}); err == nil {
 		plugins = append(plugins, cmp)
+		// NOTE: compact_now tool returned here is intentionally not mounted
+		// on the lead in this entry-point; mount it explicitly when wiring
+		// a custom agent (see examples/s06_compress for the pattern).
 	}
 
 	cfg := &launcher.Config{

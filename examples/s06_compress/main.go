@@ -1,6 +1,6 @@
-// Component s06 — context compression (Phase 2 / s06). Plugs the
-// summariser-on-threshold AfterModelCallback. With a tiny threshold the
-// effect is observable on a single demo run.
+// Component s06 — intelligent context management (Phase 2 / s06). Wires
+// the v2 compress plugin and the compact_now tool, with tiny window
+// settings so the soft/hard triggers fire on a single demo run.
 package main
 
 import (
@@ -18,16 +18,19 @@ func main() {
 	ctx := context.Background()
 	llm, err := agentkit.NewModel(ctx)
 	must(err)
-	plug, wait, err := compress.Plugin("compress", compress.Config{
-		Threshold:  200, // tiny so the demo triggers at all
-		MemoryPath: ".agent_memory.md",
-		LLM:        llm,
+	plug, compactTools, wait, err := compress.PluginWithTools("compress", compress.Config{
+		WindowTokens: 800, // tiny so the demo triggers at all
+		SoftRatio:    0.5,
+		HardRatio:    0.8,
+		AuditPath:    ".agent_memory.md",
+		LLM:          llm,
 	})
 	must(err)
+	tools := append(fstools.New(), compactTools...)
 	a, err := agentkit.New(agentkit.AgentConfig{
 		Name:  "s06_compress",
 		Model: llm,
-		Tools: fstools.New(),
+		Tools: tools,
 	})
 	must(err)
 	r, err := agentkit.Runner("s06", a, plug)
@@ -37,8 +40,8 @@ func main() {
 		prompt = os.Args[1]
 	}
 	must(stream.Print(os.Stdout, agentkit.RunOnce(ctx, r, prompt)))
-	wait() // block until any in-flight compression goroutine finishes
-	fmt.Println("(see .agent_memory.md for the compressed summary)")
+	wait()
+	fmt.Println("(see .agent_memory.md for the compression audit log)")
 }
 
 func must(err error) {

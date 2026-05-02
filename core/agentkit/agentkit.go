@@ -65,6 +65,9 @@ Tool selection rules:
     couple of seconds; check the queue between turns.
   - Use teammate_ask / teammate_tell for inter-agent coordination, not
     plain text in the conversation.
+  - Call compact_now after completing a major sub-task to free context
+    for what's next; the harness will summarise the older middle of the
+    conversation before the next model call.
 
 If a step in this protocol references a tool you do not have, skip it
 silently rather than refusing the task.`

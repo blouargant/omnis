@@ -168,6 +168,18 @@ func Run(ctx context.Context, cfg Config) error {
 	// ── Wire event bus → trace pane ─────────────────────────────────────
 	if cfg.Bus != nil {
 		cfg.Bus.On(events.EventBeforeTool, func(_ string, p map[string]any) {
+			if p["tool"] == "load_skill" {
+				skillName := ""
+				if input, ok := p["input"].(map[string]any); ok {
+					if n, ok := input["name"].(string); ok {
+						skillName = n
+					}
+				}
+				if skillName != "" {
+					appendTrace("[magenta]★ skill[-] [::b]%s[-]", skillName)
+					return
+				}
+			}
 			appendTrace("[aqua]→ tool[-] %v", p["tool"])
 		})
 		cfg.Bus.On(events.EventAfterTool, func(_ string, p map[string]any) {
