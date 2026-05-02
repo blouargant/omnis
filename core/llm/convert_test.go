@@ -17,7 +17,7 @@ func TestSchemaToJSONAndToolDecls(t *testing.T) {
 		Type:        genai.TypeObject,
 		Description: "input",
 		Properties: map[string]*genai.Schema{
-			"name": {Type: genai.TypeString},
+			"name":  {Type: genai.TypeString},
 			"count": {Type: genai.TypeInteger, Minimum: &minimum, Maximum: &maximum},
 		},
 		Required: []string{"name"},

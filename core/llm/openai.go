@@ -57,8 +57,8 @@ type oaiMessage struct {
 }
 
 type oaiToolCall struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"` // always "function"
+	ID       string          `json:"id"`
+	Type     string          `json:"type"` // always "function"
 	Function oaiToolFuncCall `json:"function"`
 }
 

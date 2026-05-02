@@ -81,9 +81,9 @@ func TestAgentAskTellAndIllegalTransition(t *testing.T) {
 
 type errBackend struct{}
 
-func (errBackend) Send(context.Context, string, Message) error                  { return errors.New("send failed") }
+func (errBackend) Send(context.Context, string, Message) error                      { return errors.New("send failed") }
 func (errBackend) Receive(context.Context, string, time.Duration) (*Message, error) { return nil, nil }
-func (errBackend) Close() error                                                { return nil }
+func (errBackend) Close() error                                                     { return nil }
 
 func TestAgentAskResetsToIdleOnSendError(t *testing.T) {
 	t.Parallel()

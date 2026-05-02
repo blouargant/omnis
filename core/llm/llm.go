@@ -5,7 +5,7 @@
 //   - anthropic      (Anthropic Messages API)
 //   - openai         (OpenAI Chat Completions API)
 //   - openai_compat  (any OpenAI-compatible endpoint, e.g. Ollama, vLLM,
-//                     Together, Groq, Mistral; requires OPENAI_BASE_URL)
+//     Together, Groq, Mistral; requires OPENAI_BASE_URL)
 //
 // Selection env:
 //

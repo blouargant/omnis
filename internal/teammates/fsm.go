@@ -1,11 +1,12 @@
 // Package teammates: FSM and message-passing tools (article Phase 3 / s10).
 //
 // State diagram (article §"Communication Protocols"):
-//   IDLE → REQUESTING (sent a question, expects reply)
-//   IDLE → RESPONDING (received a question, must answer)
-//   REQUESTING → WAITING (sent, awaiting response)
-//   WAITING → IDLE (response received)
-//   RESPONDING → IDLE (sent the answer)
+//
+//	IDLE → REQUESTING (sent a question, expects reply)
+//	IDLE → RESPONDING (received a question, must answer)
+//	REQUESTING → WAITING (sent, awaiting response)
+//	WAITING → IDLE (response received)
+//	RESPONDING → IDLE (sent the answer)
 package teammates
 
 import (
