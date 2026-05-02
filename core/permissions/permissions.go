@@ -83,13 +83,14 @@ func Load(path string) (*Rules, error) {
 }
 
 func (r *Rules) compile() error {
-	for _, set := range [][]Rule{r.AlwaysDeny, r.AlwaysAllow, r.AskUser} {
-		for i := range set {
-			re, err := regexp.Compile("(?i)" + set[i].Pattern)
+	sets := []*[]Rule{&r.AlwaysDeny, &r.AlwaysAllow, &r.AskUser}
+	for _, set := range sets {
+		for i := range *set {
+			re, err := regexp.Compile("(?i)" + (*set)[i].Pattern)
 			if err != nil {
-				return fmt.Errorf("invalid pattern %q: %w", set[i].Pattern, err)
+				return fmt.Errorf("invalid pattern %q: %w", (*set)[i].Pattern, err)
 			}
-			set[i].re = re
+			(*set)[i].re = re
 		}
 	}
 	return nil

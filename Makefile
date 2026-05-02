@@ -47,6 +47,9 @@ vet: ## Run go vet
 test: ## Run unit tests
 	$(GO) test ./...
 
+.PHONY: unit-tests
+unit-tests: test ## Run unit tests
+
 .PHONY: build
 build: build-root $(addprefix build-example-,$(CMDS)) ## Build the root binary and all examples for the host platform
 
