@@ -218,6 +218,7 @@ agent-toolkit/
 |-----------------------------------------------|---------------------------------------------------|
 | [docs/architecture.md](docs/architecture.md)  | Component map, data flow, plugin lifecycle        |
 | [docs/methodology.md](docs/methodology.md)    | The Claude Code 7-step operating method           |
+| [docs/context-management.md](docs/context-management.md) | How context compression works + session decision log |
 | [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
 | [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
