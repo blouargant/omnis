@@ -93,7 +93,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 // ------------------ read ------------------
 
 type ReadIn struct {
-	Path      string `json:"path"`
+	Path      string `json:"file_path"`
 	StartLine int    `json:"start_line,omitempty"`
 	EndLine   int    `json:"end_line,omitempty"`
 }
@@ -137,7 +137,7 @@ func RunRead(_ context.Context, in ReadIn) (string, error) {
 // ------------------ write + revert ------------------
 
 type WriteIn struct {
-	Path    string `json:"path"`
+	Path    string `json:"file_path"`
 	Content string `json:"content"`
 }
 type WriteOut struct {
@@ -165,7 +165,7 @@ func RunWrite(_ context.Context, in WriteIn) (string, error) {
 }
 
 type RevertIn struct {
-	Path string `json:"path"`
+	Path string `json:"file_path"`
 }
 type RevertOut struct {
 	Result string `json:"result"`
@@ -294,13 +294,16 @@ func New() []tool.Tool {
 				return BashOut{Output: out}, nil
 			}),
 		mustTool("read",
-			"Read a file and return numbered lines. Use when you need to inspect file content or reference specific line numbers in a subsequent write. Returns up to 50,000 characters.",
+			"Read a file and return numbered lines. Use when you need to inspect file content or reference specific line numbers in a subsequent write. "+
+				"Arguments: `file_path` (string, required), "+
+				"`start_line` (int, optional, 1-based), `end_line` (int, optional). Returns up to 50,000 characters.",
 			func(_ tool.Context, in ReadIn) (ReadOut, error) {
 				out, _ := RunRead(context.Background(), in)
 				return ReadOut{Content: out}, nil
 			}),
 		mustTool("write",
-			"Write content to a file. Automatically snapshots the previous contents so you can revert. Creates parent directories if needed.",
+			"Write content to a file. Automatically snapshots the previous contents so you can revert. Creates parent directories if needed. "+
+				"Arguments: `file_path` (string, required), `content` (string, required).",
 			func(_ tool.Context, in WriteIn) (WriteOut, error) {
 				out, _ := RunWrite(context.Background(), in)
 				return WriteOut{Result: out}, nil
@@ -318,7 +321,8 @@ func New() []tool.Tool {
 				return GlobOut{Files: out}, nil
 			}),
 		mustTool("revert",
-			"Restore a file to its state before the last write call. Use when a write produced incorrect results.",
+			"Restore a file to its state before the last write call. Use when a write produced incorrect results. "+
+				"Arguments: `file_path` (string, required).",
 			func(_ tool.Context, in RevertIn) (RevertOut, error) {
 				out, _ := RunRevert(context.Background(), in)
 				return RevertOut{Result: out}, nil
