@@ -34,3 +34,5 @@ go.work.sum
 .agent_tasks.json
 .mailboxes
 bin/
+.agent_memory_k8s_e2e_context-e2e-1777745555.md
+.agent_statelog.json

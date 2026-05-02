@@ -223,6 +223,7 @@ agent-toolkit/
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
 | [docs/configuration.md](docs/configuration.md)| `permissions.yaml` and `mcp_config.yaml` reference|
 | [docs/examples-catalog.md](docs/examples-catalog.md)    | The 23 single-component demo binaries             |
+| [docs/k8s-context-compression-e2e.md](docs/k8s-context-compression-e2e.md) | Real-world Kubernetes context-compression validation |
 | [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents and plugins          |
 
 ---

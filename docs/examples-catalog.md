@@ -72,6 +72,7 @@ go run ./examples/sNN_<name> "<your prompt>"
 |-----|-----------------------|--------------------------------------------------------------|
 | s22 | `examples/s22_redis`       | Redis-backed teammate mailbox (`REDIS_URL` required).        |
 | s23 | `examples/s23_conflicts`   | Programmatic creation of conflicting worktrees → merge abort with conflict list. |
+| s24 | `examples/s24_k8s_context_e2e` | Real-world Kubernetes context-compression validation with pass/fail checks. |
 
 ## Full launcher
 
