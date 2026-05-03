@@ -6,7 +6,7 @@ auto-generated, so treat them as helpful hints rather than authoritative
 documentation.
 
 The directory is **flat** — every soft-skill is `softskills/<name>/SKILL.md`.
-Categories are tracked in YAML frontmatter (`category:`) and grouped here for
+Categories live in this file only (the SKILL.md frontmatter accepts only `name` and `description`); entries are grouped here for
 human navigation. The lead agent does **not** read this file; it discovers
 soft-skills through the `list_softskills` tool.
 

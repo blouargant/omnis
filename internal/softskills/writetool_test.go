@@ -11,7 +11,6 @@ import (
 const goodContent = `---
 name: demo
 description: A demo soft-skill used by tests.
-category: meta
 ---
 
 # Demo

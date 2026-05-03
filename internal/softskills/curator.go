@@ -70,10 +70,11 @@ Read each file with run_read. Do not invent paths.
 
 4. Generalize. Strip session-specific identifiers (replace concrete pod names, file paths, user IDs with placeholders or remove them entirely). The skill must read as a procedure, not a story.
 
-5. Write the SKILL.md using the standard layout. Frontmatter MUST contain:
+5. Write the SKILL.md using the standard layout. Frontmatter MUST contain ONLY these two fields (the loader rejects anything else):
    - name: <kebab-case-name> (lowercase letters, digits and dashes only)
    - description: <one sentence describing when to use this>
-   - category: <existing-category-or-new-one>
+
+   Categorisation lives in INDEX.md, not in the frontmatter.
 
    Body sections (in order):
    - # <Title>

@@ -15,14 +15,12 @@
 package softskills
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
@@ -421,16 +419,6 @@ func readAll(f *os.File) (string, error) {
 	return string(buf), nil
 }
 
-// flockExclusive / flockUnlock — POSIX advisory locks. On non-unix
-// platforms these become no-ops; the in-process mutex still serializes.
-func flockExclusive(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-}
-
-func flockUnlock(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-}
-
 // mustTool mirrors core/tools.mustTool but lives here to avoid a circular
 // import (this package is imported by agent/agent.go alongside core/tools).
 func mustTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool.Tool {
@@ -440,6 +428,3 @@ func mustTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool.Tool 
 	}
 	return t
 }
-
-// silence the unused-import warning when GOOS lacks Flock support
-var _ = context.Background

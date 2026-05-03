@@ -19,7 +19,6 @@ func TestToolsetRenamesAndDiscovers(t *testing.T) {
 	body := `---
 name: demo
 description: A learned demo procedure used by tests.
-category: meta
 ---
 
 # Demo

@@ -68,27 +68,15 @@ build-example-%: ## Build a single example (e.g. make build-example-s01_loop)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$* ./$(EXAMPLES_DIR)/$*
 
 .PHONY: release
-release: clean ## Build cross-platform release archives in dist/
+release: clean ## Build cross-platform release binaries of agent-toolkit in dist/
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
 		ext=""; [ "$$os" = "windows" ] && ext=".exe"; \
-		stage="$(DIST_DIR)/agent-toolkit_$(VERSION)_$${os}_$${arch}"; \
-		mkdir -p $$stage; \
+		out="$(DIST_DIR)/$(ROOT_BIN)_$(VERSION)_$${os}_$${arch}$${ext}"; \
 		echo ">> building $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-			$(GO) build $(BUILD_FLAGS) -o $$stage/$(ROOT_BIN)$${ext} . || exit 1; \
-		for cmd in $(CMDS); do \
-			CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-				$(GO) build $(BUILD_FLAGS) -o $$stage/$${cmd}$${ext} ./$(EXAMPLES_DIR)/$$cmd || exit 1; \
-		done; \
-		cp README.md LICENSE $$stage/ 2>/dev/null || true; \
-		if [ "$$os" = "windows" ]; then \
-			(cd $(DIST_DIR) && zip -qr $$(basename $$stage).zip $$(basename $$stage)); \
-		else \
-			tar -czf $$stage.tar.gz -C $(DIST_DIR) $$(basename $$stage); \
-		fi; \
-		rm -rf $$stage; \
+			$(GO) build $(BUILD_FLAGS) -o $$out . || exit 1; \
 	done
 	@echo ">> release artifacts:"; ls -1 $(DIST_DIR)
 

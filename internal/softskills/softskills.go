@@ -3,8 +3,9 @@
 // `skills/` directory of authored procedures).
 //
 // Layout: `<dir>/<name>/SKILL.md`. The directory is flat (same shape as
-// `skills/`); the YAML frontmatter SHOULD declare an optional `category`
-// field used by `softskills/INDEX.md` for human grouping. The lead model
+// `skills/`); the YAML frontmatter accepts only `name` and `description`
+// (the upstream skill loader rejects unknown fields). Human grouping
+// lives exclusively in `softskills/INDEX.md`. The lead model
 // discovers softskills through `list_softskills` / `load_softskill` and
 // treats them as lower-trust hints distilled from past sessions.
 package softskills
@@ -15,6 +16,7 @@ import (
 	"os"
 
 	"google.golang.org/adk/agent"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
@@ -103,12 +105,15 @@ var renameMap = map[string]string{
 }
 
 // runnableTool mirrors the unexported interface ADK type-asserts on when
-// dispatching tool calls. We must implement Declaration() and Run() so the
-// framework treats the wrapper as a callable tool.
+// dispatching tool calls. We must implement Declaration(), Run() and
+// ProcessRequest() so the framework treats the wrapper as a callable tool
+// (the LLM flow's toolPreprocess step rejects any tool that doesn't
+// implement ProcessRequest).
 type runnableTool interface {
 	tool.Tool
 	Declaration() *genai.FunctionDeclaration
 	Run(ctx tool.Context, args any) (map[string]any, error)
+	ProcessRequest(ctx tool.Context, req *model.LLMRequest) error
 }
 
 type renamedTool struct {
@@ -119,6 +124,42 @@ type renamedTool struct {
 
 func (rt *renamedTool) Name() string                            { return rt.name }
 func (rt *renamedTool) Declaration() *genai.FunctionDeclaration { return rt.decl }
+
+// ProcessRequest registers the *renamed* declaration with the LLM
+// request. The embedded runnableTool.ProcessRequest would otherwise pack
+// the underlying tool's original name (the upstream functionTool calls
+// PackTool with itself as receiver), defeating the rename. We replicate
+// PackTool's behaviour here against the wrapper. Run() dispatch keys off
+// req.Tools[name], so storing the wrapper under the new name routes
+// invocations back through us — and we forward Run() to the embedded
+// tool transparently.
+func (rt *renamedTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
+	if req.Tools == nil {
+		req.Tools = make(map[string]any)
+	}
+	if _, ok := req.Tools[rt.name]; ok {
+		return fmt.Errorf("duplicate tool: %q", rt.name)
+	}
+	req.Tools[rt.name] = rt
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	var funcTool *genai.Tool
+	for _, t := range req.Config.Tools {
+		if t != nil && t.FunctionDeclarations != nil {
+			funcTool = t
+			break
+		}
+	}
+	if funcTool == nil {
+		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
+			FunctionDeclarations: []*genai.FunctionDeclaration{rt.decl},
+		})
+	} else {
+		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, rt.decl)
+	}
+	return nil
+}
 
 func wrap(t tool.Tool, newName string) (tool.Tool, error) {
 	rt, ok := t.(runnableTool)

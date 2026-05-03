@@ -1,7 +1,6 @@
 ---
 name: how-the-library-works
 description: Explains the soft-skills system to the lead agent — when to consult learned procedures, how they differ from authored skills, and how new ones get created.
-category: meta
 ---
 
 # How the soft-skills library works
@@ -39,7 +38,7 @@ and only then creates a new entry.
 Each `softskills/<name>/SKILL.md` follows the same shape as an authored
 skill:
 
-- YAML frontmatter: `name`, `description`, optional `category`.
+- YAML frontmatter: `name`, `description` (only — extra fields are rejected by the loader). Categorisation lives in `softskills/INDEX.md`.
 - Body: **Context** (why it exists), **Steps** (numbered, concrete),
   **Constraints** (what to avoid), **Validation** (how to know it worked).
 
