@@ -40,52 +40,107 @@ var defaultModel = map[string]string{
 	"openai_compat": "gpt-4o-mini",
 }
 
+// Selection captures explicit model/provider connection settings.
+type Selection struct {
+	Provider string
+	Model    string
+	BaseURL  string
+	APIKey   string
+}
+
 // New returns an ADK LLM selected by GOAGENT_PROVIDER.
 func New(ctx context.Context) (model.LLM, error) {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("GOAGENT_PROVIDER")))
-	if provider == "" {
-		provider = "openai_compat"
+	return NewWithSelection(ctx, Selection{
+		Provider: os.Getenv("GOAGENT_PROVIDER"),
+		Model:    os.Getenv("GOAGENT_MODEL"),
+		BaseURL:  os.Getenv("GOAGENT_BASE_URL"),
+		APIKey:   os.Getenv("GOAGENT_API_KEY"),
+	})
+}
+
+// NewWith returns an ADK LLM using an explicit provider/model selection.
+// Empty values fall back to the package defaults, matching New().
+func NewWith(ctx context.Context, provider, modelName string) (model.LLM, error) {
+	return NewWithSelection(ctx, Selection{Provider: provider, Model: modelName})
+}
+
+// NewWithSelection returns an ADK LLM using explicit provider/model/baseURL/
+// apiKey settings. Empty values fall back to provider-specific environment
+// variables and defaults.
+func NewWithSelection(ctx context.Context, sel Selection) (model.LLM, error) {
+	provider, modelName, err := resolveProviderModel(sel.Provider, sel.Model)
+	if err != nil {
+		return nil, err
 	}
-	modelName := os.Getenv("GOAGENT_MODEL")
-	if modelName == "" {
-		modelName = defaultModel[provider]
+	baseURL := strings.TrimSpace(sel.BaseURL)
+	apiKey := strings.TrimSpace(sel.APIKey)
+
+	if apiKey == "" {
+		switch provider {
+		case "gemini":
+			apiKey = firstEnv("GOOGLE_API_KEY", "GEMINI_API_KEY")
+		case "anthropic":
+			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+		case "openai", "openai_compat":
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
 	}
-	if modelName == "" {
-		return nil, fmt.Errorf("llm: GOAGENT_MODEL must be set for provider %q", provider)
+	if baseURL == "" {
+		switch provider {
+		case "openai", "openai_compat":
+			baseURL = os.Getenv("OPENAI_BASE_URL")
+		case "anthropic":
+			baseURL = os.Getenv("ANTHROPIC_BASE_URL")
+		}
 	}
 
 	switch provider {
 	case "gemini":
-		key := firstEnv("GOOGLE_API_KEY", "GEMINI_API_KEY")
-		if key == "" {
+		if apiKey == "" {
 			return nil, fmt.Errorf("llm: gemini requires GOOGLE_API_KEY or GEMINI_API_KEY")
 		}
-		return gemini.NewModel(ctx, modelName, &genai.ClientConfig{APIKey: key})
+		return gemini.NewModel(ctx, modelName, &genai.ClientConfig{APIKey: apiKey})
 
 	case "anthropic":
-		key := os.Getenv("ANTHROPIC_API_KEY")
-		if key == "" {
+		if apiKey == "" {
 			return nil, fmt.Errorf("llm: anthropic requires ANTHROPIC_API_KEY")
 		}
-		return NewAnthropic(modelName, key, ""), nil
+		return NewAnthropic(modelName, apiKey, baseURL), nil
 
 	case "openai":
-		key := os.Getenv("OPENAI_API_KEY")
-		if key == "" {
+		if apiKey == "" {
 			return nil, fmt.Errorf("llm: openai requires OPENAI_API_KEY")
 		}
-		return NewOpenAI(modelName, key, ""), nil
+		return NewOpenAI(modelName, apiKey, baseURL), nil
 
 	case "openai_compat":
-		base := os.Getenv("OPENAI_BASE_URL")
-		if base == "" {
+		if baseURL == "" {
 			return nil, fmt.Errorf("llm: openai_compat requires OPENAI_BASE_URL")
 		}
-		return NewOpenAI(modelName, os.Getenv("OPENAI_API_KEY"), base), nil
+		return NewOpenAI(modelName, apiKey, baseURL), nil
 
 	default:
 		return nil, fmt.Errorf("llm: unknown provider %q (want gemini|anthropic|openai|openai_compat)", provider)
 	}
+}
+
+func resolveProviderModel(provider, modelName string) (string, string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = "openai_compat"
+	}
+	if _, ok := defaultModel[provider]; !ok {
+		return "", "", fmt.Errorf("llm: unknown provider %q (want gemini|anthropic|openai|openai_compat)", provider)
+	}
+
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		modelName = defaultModel[provider]
+	}
+	if modelName == "" {
+		return "", "", fmt.Errorf("llm: GOAGENT_MODEL must be set for provider %q", provider)
+	}
+	return provider, modelName, nil
 }
 
 func firstEnv(keys ...string) string {

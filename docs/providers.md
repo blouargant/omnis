@@ -5,12 +5,28 @@ inside [`core/llm`](../core/llm/llm.go) based on environment variables.
 There is no provider-specific SDK in `go.mod` for Anthropic or OpenAI:
 both adapters speak HTTP + SSE directly.
 
+The root binary can also load provider/model settings from
+[`config/agent.yaml`](configuration.md), including per-role model
+selection (`orchestrator`, `curator`, `reviewer`, `investigator`,
+`summariser`).
+
 ## Selection
 
 | Variable           | Default   | Meaning                                                              |
 |--------------------|-----------|----------------------------------------------------------------------|
 | `GOAGENT_PROVIDER` | `openai_compat`  | One of `gemini`, `anthropic`, `openai`, `openai_compat`              |
 | `GOAGENT_MODEL`    | per below | Provider-specific model id; overrides the default                    |
+| `GOAGENT_BASE_URL` | provider/env specific | Override API base URL used by the selected provider             |
+| `GOAGENT_API_KEY`  | provider/env specific | Override API key used by the selected provider                  |
+
+CLI global overrides:
+
+- `--provider <name>`
+- `--model <id>`
+- `--base-url <url>`
+- `--api-key <value>`
+
+Precedence is: CLI > env > `config/agent.yaml` > built-in defaults.
 
 Per-provider defaults:
 

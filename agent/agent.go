@@ -13,6 +13,7 @@ import (
 	"os"
 
 	adkagent "google.golang.org/adk/agent"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/blouargant/agent-toolkit/core/agentkit"
 	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/agent-toolkit/core/llm"
 	"github.com/blouargant/agent-toolkit/core/permissions"
 	fstools "github.com/blouargant/agent-toolkit/core/tools"
 	"github.com/blouargant/agent-toolkit/internal/bg"
@@ -72,6 +74,22 @@ type Options struct {
 	PermissionsConfigPath string
 	// AppName is the application name for the runner (default: "agent-toolkit").
 	AppName string
+	// ConfigPath is the runtime YAML configuration path (default: "config/agent.yaml").
+	ConfigPath string
+	// ConfigPathStrict returns an error when ConfigPath does not exist.
+	ConfigPathStrict bool
+	// ModelProvider overrides the global model provider for all roles not explicitly configured.
+	ModelProvider string
+	// ModelName overrides the global model for all roles not explicitly configured.
+	ModelName string
+	// ModelBaseURL overrides the global model base URL for all roles not explicitly configured.
+	ModelBaseURL string
+	// ModelAPIKey overrides the global model API key for all roles not explicitly configured.
+	ModelAPIKey string
+	// RoleModels overrides role-specific provider/model settings.
+	RoleModels map[string]RoleModelConfig
+	// CuratorEnabled explicitly enables/disables curator auto-run.
+	CuratorEnabled *bool
 }
 
 // NewAgent creates a fully configured agent-toolkit agent that can be used
@@ -81,11 +99,12 @@ type Options struct {
 // The caller is responsible for closing any resources (the function returns
 // a close function if needed).
 func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
-	if opts.SkillsDir == "" {
-		opts.SkillsDir = "skills"
+	runtime, err := ResolveRuntimeSettings(opts)
+	if err != nil {
+		return nil, err
 	}
-	if opts.SoftSkillsDir == "" {
-		opts.SoftSkillsDir = softskills.DefaultDir
+	if runtime.SoftSkillsDir == "" {
+		runtime.SoftSkillsDir = softskills.DefaultDir
 	}
 	if opts.Repo == "" {
 		repo, err := os.Getwd()
@@ -94,17 +113,30 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		}
 		opts.Repo = repo
 	}
-	if opts.MCPSConfigPath == "" {
-		opts.MCPSConfigPath = "config/mcp_config.yaml"
-	}
-	if opts.PermissionsConfigPath == "" {
-		opts.PermissionsConfigPath = "config/permissions.yaml"
-	}
-	if opts.AppName == "" {
-		opts.AppName = "agent-toolkit"
+
+	modelForRole := func(role string) (model.LLM, error) {
+		selection := runtime.RoleSelection(role)
+		m, err := llm.NewWithSelection(ctx, llm.Selection{
+			Provider: selection.Provider,
+			Model:    selection.Model,
+			BaseURL:  selection.BaseURL,
+			APIKey:   selection.APIKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("model role %q: %w", role, err)
+		}
+		return m, nil
 	}
 
-	llm, err := agentkit.NewModel(ctx)
+	orchestratorLLM, err := modelForRole("orchestrator")
+	if err != nil {
+		return nil, err
+	}
+	investigatorLLM, err := modelForRole("investigator")
+	if err != nil {
+		return nil, err
+	}
+	summariserLLM, err := modelForRole("summariser")
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +167,13 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	leadTools = append(leadTools, curateSessionTool())
 
 	var toolsets []tool.Toolset
-	if ts, err := skills.Toolset(ctx, opts.SkillsDir); err == nil {
+	if ts, err := skills.Toolset(ctx, runtime.SkillsDir); err == nil {
 		toolsets = append(toolsets, ts)
 	}
-	if sts, err := softskills.Toolset(ctx, opts.SoftSkillsDir); err == nil {
+	if sts, err := softskills.Toolset(ctx, runtime.SoftSkillsDir); err == nil {
 		toolsets = append(toolsets, sts)
 	}
-	if mc, err := mcpcfg.Load(opts.MCPSConfigPath); err == nil {
+	if mc, err := mcpcfg.Load(runtime.MCPConfigPath); err == nil {
 		if mts, err := mc.Toolsets(); err == nil {
 			toolsets = append(toolsets, mts...)
 		}
@@ -168,7 +200,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	investigator, err := agentkit.New(agentkit.AgentConfig{
 		Name:        "investigator",
 		Description: "Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.",
-		Model:       llm,
+		Model:       investigatorLLM,
 		Tools:       fstools.New(),
 		Toolsets:    toolsets,
 		Instruction: "You are an investigator. Use the available tools to collect concrete evidence before drawing any conclusion. Cite each finding with its source (file:line, command output, MCP resource id). Do not modify state.",
@@ -180,7 +212,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	summariser, err := agentkit.New(agentkit.AgentConfig{
 		Name:        "summariser",
 		Description: "Condenses long content into a structured brief.",
-		Model:       llm,
+		Model:       summariserLLM,
 		Instruction: "Reply with: (1) a one-sentence headline, (2) ≤ 7 bullets of the most important facts, (3) a short list of suggested next actions. No fluff.",
 	})
 	if err != nil {
@@ -195,7 +227,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	lead, err := agentkit.New(agentkit.AgentConfig{
 		Name:        "lead",
 		Description: "Generic coordinator agent. Specialise it by mounting domain-specific tools, skills, and MCP servers.",
-		Model:       llm,
+		Model:       orchestratorLLM,
 		Tools:       leadTools,
 		Toolsets:    toolsets,
 		SubAgents:   []adkagent.Agent{investigator, summariser},
@@ -239,7 +271,7 @@ Soft-skills: at the start of any non-trivial task, call 'list_softskills' once t
 	if eb, err := bus.Plugin("events"); err == nil {
 		plugins = append(plugins, eb)
 	}
-	if perms, err := permissions.NewPlugin("perms", opts.PermissionsConfigPath, permissions.StdinAsker{}); err == nil {
+	if perms, err := permissions.NewPlugin("perms", runtime.PermissionsConfigPath, permissions.StdinAsker{}); err == nil {
 		plugins = append(plugins, perms)
 	}
 	if _, cp, err := cache.Plugin("cache"); err == nil {
@@ -256,7 +288,7 @@ Soft-skills: at the start of any non-trivial task, call 'list_softskills' once t
 		StateLogPathFunc: func(userID, sessionID string) string {
 			return fmt.Sprintf(".agent_statelog_%s.json", sessionSuffix(userID, sessionID))
 		},
-		LLM: llm,
+		LLM: orchestratorLLM,
 	}); err == nil {
 		plugins = append(plugins, cmp)
 		// NOTE: compact_now tool returned here is intentionally not mounted
@@ -267,8 +299,13 @@ Soft-skills: at the start of any non-trivial task, call 'list_softskills' once t
 	// Curator hook: after each session ends, fire-and-forget the curator
 	// agent with the per-session audit + statelog paths. Best-effort —
 	// process exit aborts. To run synchronously, use `agent-toolkit curate`.
-	if !opts.DisableAutoCurate {
-		registerCuratorHook(bus, llm, opts.SoftSkillsDir, opts.SkillsDir, sessionSuffix)
+	if runtime.CuratorEnabled {
+		curatorLLM, err := modelForRole("curator")
+		if err != nil {
+			be.Close()
+			return nil, err
+		}
+		registerCuratorHook(bus, curatorLLM, runtime.SoftSkillsDir, runtime.SkillsDir, sessionSuffix)
 	}
 
 	// Create AgentLoader from the agents
@@ -285,7 +322,7 @@ Soft-skills: at the start of any non-trivial task, call 'list_softskills' once t
 		Plugins:      plugins,
 		EventBus:     bus,
 		RunnerConfig: runner.Config{
-			AppName:           opts.AppName,
+			AppName:           runtime.AppName,
 			Agent:             lead,
 			SessionService:    session.InMemoryService(),
 			AutoCreateSession: true,

@@ -1,0 +1,39 @@
+# Unified runtime config for agent-toolkit.
+# Precedence is: CLI flags > environment variables > this file > defaults.
+
+skills_dir: skills
+softskills_dir: softskills
+app_name: agent-toolkit
+mcp_config_path: config/mcp_config.yaml
+permissions_config_path: config/permissions.yaml
+
+features:
+  curator_enabled: true
+
+models:
+  # Global default used for roles without an explicit override.
+  default:
+    provider: openai_compat
+    model: gpt-4o-mini
+    base_url: http://localhost:11434/v1
+    # api_key accepts either a literal key or an environment variable name.
+    # If the value matches an existing env var name, its value is used.
+    api_key: OPENAI_API_KEY
+
+  # Optional role-specific overrides.
+  # Supported first-class role keys are:
+  # orchestrator, curator, reviewer, investigator, summariser
+  roles: {}
+  # roles:
+  #   orchestrator:
+  #     provider: anthropic
+  #     model: claude-sonnet-4-5
+  #     api_key: ANTHROPIC_API_KEY
+  #   curator:
+  #     provider: openai
+  #     model: gpt-4o-mini
+  #     base_url: https://api.openai.com/v1
+  #     api_key: sk-literal-or-env-var-name
+  #   reviewer:
+  #     provider: openai_compat
+  #     model: qwen2.5-coder

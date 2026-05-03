@@ -20,6 +20,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
@@ -36,12 +38,18 @@ type options struct {
 	softSkillsDir string
 	tui           bool
 	appName       string
+	configPath    string
+	modelProvider string
+	modelName     string
+	modelBaseURL  string
+	modelAPIKey   string
+	curatorRaw    string
 }
 
 // parseFlags extracts our own flags from args, returning the parsed
 // options and the remaining args to forward to the ADK launcher.
 func parseFlags(args []string) (options, []string, error) {
-	opts := options{skillsDir: "skills", softSkillsDir: "softskills", appName: "agent-toolkit"}
+	opts := options{}
 
 	fs := flag.NewFlagSet("agent-toolkit", flag.ContinueOnError)
 	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
@@ -49,6 +57,12 @@ func parseFlags(args []string) (options, []string, error) {
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
 	fs.BoolVar(&opts.tui, "tui", false, "Launch the tview chat interface (ignores launcher subcommand)")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
+	fs.StringVar(&opts.configPath, "config", "", "Path to runtime YAML config file (default: config/agent.yaml)")
+	fs.StringVar(&opts.modelProvider, "provider", "", "Global model provider override")
+	fs.StringVar(&opts.modelName, "model", "", "Global model override")
+	fs.StringVar(&opts.modelBaseURL, "base-url", "", "Global model base URL override")
+	fs.StringVar(&opts.modelAPIKey, "api-key", "", "Global model API key override")
+	fs.StringVar(&opts.curatorRaw, "curator-enabled", "", "Enable/disable auto-curator hook (true/false)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -74,6 +88,11 @@ func main() {
 }
 
 func run(ctx context.Context, opts options, launcherArgs []string) error {
+	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
+	if err != nil {
+		return err
+	}
+
 	// `curate` is a special pre-launcher subcommand that runs the
 	// soft-skills curator one-shot against an existing session's audit
 	// and statelog files. Useful for replaying curation manually.
@@ -83,9 +102,16 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 
 	// Create the fully configured agent using the agent package
 	result, err := agent.NewAgent(ctx, agent.Options{
-		SkillsDir:     opts.skillsDir,
-		SoftSkillsDir: opts.softSkillsDir,
-		AppName:       opts.appName,
+		SkillsDir:        opts.skillsDir,
+		SoftSkillsDir:    opts.softSkillsDir,
+		AppName:          opts.appName,
+		ConfigPath:       opts.configPath,
+		ConfigPathStrict: opts.configPath != "",
+		ModelProvider:    opts.modelProvider,
+		ModelName:        opts.modelName,
+		ModelBaseURL:     opts.modelBaseURL,
+		ModelAPIKey:      opts.modelAPIKey,
+		CuratorEnabled:   curatorEnabled,
 	})
 	if err != nil {
 		return err
@@ -99,7 +125,7 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		return tui.Run(ctx, tui.Config{
 			Runner:  r,
 			Bus:     result.EventBus,
-			AppName: opts.appName,
+			AppName: result.RunnerConfig.AppName,
 		})
 	}
 
@@ -114,4 +140,16 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		PluginConfig:   result.RunnerConfig.PluginConfig,
 	}
 	return full.NewLauncher().Execute(ctx, cfg, args)
+}
+
+func parseOptionalBool(raw string) (*bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid boolean %q (expected true/false)", raw)
+	}
+	return &v, nil
 }

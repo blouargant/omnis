@@ -18,11 +18,31 @@ import (
 	"strings"
 
 	"github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/agentkit"
+	"github.com/blouargant/agent-toolkit/core/llm"
 	"github.com/blouargant/agent-toolkit/internal/softskills"
 )
 
 func runCurate(ctx context.Context, opts options, args []string) error {
+	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
+	if err != nil {
+		return err
+	}
+	runtime, err := agent.ResolveRuntimeSettings(agent.Options{
+		SkillsDir:        opts.skillsDir,
+		SoftSkillsDir:    opts.softSkillsDir,
+		AppName:          opts.appName,
+		ConfigPath:       opts.configPath,
+		ConfigPathStrict: opts.configPath != "",
+		ModelProvider:    opts.modelProvider,
+		ModelName:        opts.modelName,
+		ModelBaseURL:     opts.modelBaseURL,
+		ModelAPIKey:      opts.modelAPIKey,
+		CuratorEnabled:   curatorEnabled,
+	})
+	if err != nil {
+		return err
+	}
+
 	fs := flag.NewFlagSet("curate", flag.ContinueOnError)
 	var (
 		user      string
@@ -60,14 +80,20 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 		return fmt.Errorf("neither audit nor statelog file exists (%s, %s)", auditPath, statePath)
 	}
 
-	llm, err := agentkit.NewModel(ctx)
+	selection := runtime.RoleSelection("curator")
+	model, err := llm.NewWithSelection(ctx, llm.Selection{
+		Provider: selection.Provider,
+		Model:    selection.Model,
+		BaseURL:  selection.BaseURL,
+		APIKey:   selection.APIKey,
+	})
 	if err != nil {
 		return fmt.Errorf("model: %w", err)
 	}
 	r, err := softskills.CuratorRunner(ctx, softskills.CuratorConfig{
-		Model:         llm,
-		SoftSkillsDir: opts.softSkillsDir,
-		SkillsDir:     opts.skillsDir,
+		Model:         model,
+		SoftSkillsDir: runtime.SoftSkillsDir,
+		SkillsDir:     runtime.SkillsDir,
 	})
 	if err != nil {
 		return fmt.Errorf("curator runner: %w", err)

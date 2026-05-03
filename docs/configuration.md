@@ -1,6 +1,83 @@
 # Configuration reference
 
-All runtime configuration lives in `config/`. Two files, both YAML.
+All runtime configuration lives in `config/`.
+
+Precedence for overlapping values is:
+
+1. CLI flags
+2. Environment variables
+3. YAML config
+4. Built-in defaults
+
+## `config/agent.yaml`
+
+Unified runtime config for app settings, feature flags, and role-based
+models.
+
+```yaml
+skills_dir: skills
+softskills_dir: softskills
+app_name: agent-toolkit
+mcp_config_path: config/mcp_config.yaml
+permissions_config_path: config/permissions.yaml
+
+features:
+  curator_enabled: true
+
+models:
+  default:
+    provider: openai_compat
+    model: gpt-4o-mini
+    base_url: http://localhost:11434/v1
+    api_key: OPENAI_API_KEY
+  roles:
+    orchestrator:
+      provider: anthropic
+      model: claude-sonnet-4-5
+    curator:
+      provider: openai
+      model: gpt-4o-mini
+    reviewer:
+      provider: openai_compat
+      model: qwen2.5-coder
+```
+
+### Model role keys
+
+The harness uses these first-class role names:
+
+- `orchestrator`
+- `curator`
+- `reviewer`
+- `investigator`
+- `summariser`
+
+Additional role keys are accepted for forward compatibility.
+
+If a role omits `provider` or `model`, missing fields fall back to
+`models.default`.
+
+`base_url` and `api_key` are also supported under `models.default` and
+per-role entries in `models.roles`.
+
+For `api_key`, the value can be either:
+
+- the key itself (literal), or
+- an environment variable name.
+
+When loading YAML, if `api_key` matches an existing env var name, the
+env var value is used.
+
+### CLI and env overrides
+
+- `--config` selects a runtime YAML file (default: `config/agent.yaml`).
+- `--provider`, `--model`, `--base-url`, and `--api-key` override
+  `models.default` globally.
+- `--curator-enabled` (`true` or `false`) overrides
+  `features.curator_enabled`.
+- `GOAGENT_PROVIDER`, `GOAGENT_MODEL`, `GOAGENT_BASE_URL`, and
+  `GOAGENT_API_KEY` override `models.default`.
+- `GOAGENT_CURATOR_ENABLED` overrides `features.curator_enabled`.
 
 ## `config/permissions.yaml`
 
@@ -244,6 +321,14 @@ agent-toolkit [flags] [<launcher-command> [launcher-args]]
 | Flag                | Default  | Effect                                                                                  |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
+| `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
+| `--name NAME`       | `agent-toolkit` | Application name used by the runner/UI. |
+| `--config FILE`     | `config/agent.yaml` | Runtime YAML config file path. |
+| `--provider NAME`   | from config/env/defaults | Global model provider override. |
+| `--model NAME`      | from config/env/defaults | Global model id override. |
+| `--base-url URL`    | from config/env/defaults | Global model base URL override. |
+| `--api-key VALUE`   | from config/env/defaults | Global model API key override. |
+| `--curator-enabled BOOL` | from config/env/defaults | Enable/disable the auto-curator hook (`true`/`false`). |
 | `--tui`             | _off_    | Launch the built-in [tview](https://github.com/rivo/tview) chat UI (`internal/tui`) instead of the ADK launcher. The launcher subcommand, if any, is ignored. |
 
 The flag parser is Go's standard `flag` package, so both `-skills` and
@@ -283,6 +368,9 @@ so every model and tool invocation appears live.
 |----------------------|-----------------------|--------------------------------------------------|
 | `GOAGENT_PROVIDER`   | `core/llm`            | Pick the LLM provider                            |
 | `GOAGENT_MODEL`      | `core/llm`            | Override the per-provider default model id       |
+| `GOAGENT_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
+| `GOAGENT_API_KEY`    | `core/llm`            | Override the model API key                       |
+| `GOAGENT_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
 | `GOOGLE_API_KEY`     | gemini provider       | Auth                                             |
 | `GEMINI_API_KEY`     | gemini provider       | Auth (alias for `GOOGLE_API_KEY`)                |
 | `ANTHROPIC_API_KEY`  | anthropic provider    | Auth                                             |
