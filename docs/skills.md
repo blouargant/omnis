@@ -115,3 +115,72 @@ reasoning when one matches.
   arguments or env.
 - ❌ Skills that exceed ~150 lines. Split into two; let the lead chain
   them.
+
+## Soft-skills (curator-managed)
+
+Alongside the hand-written `skills/` library, the harness maintains a
+parallel **`softskills/`** library that is written *by the agent itself*.
+After each session ends (or when the user asks "save this as a skill"),
+a dedicated **curator** sub-agent inspects the session's audit log and
+StateLog, decides whether the run produced a reusable insight, and if so
+appends a short SKILL.md plus an INDEX.md entry.
+
+| Aspect              | `skills/` (authored)             | `softskills/` (curated)              |
+|---------------------|----------------------------------|---------------------------------------|
+| Source              | Humans                           | Curator sub-agent                     |
+| Trigger to write    | `git commit`                     | `EventSessionEnd` or `curate_session` |
+| Format              | `<name>/SKILL.md` w/ frontmatter | Same                                  |
+| Loaded by lead via  | `list_skills` / `load_skill`     | `list_softskills` / `load_softskill`  |
+| Mutated by lead     | No                               | No (write tools mounted on curator only) |
+| Permissions         | n/a                              | `softskills/` writes denied to lead in `config/permissions.yaml` |
+
+### Lifecycle
+
+1. The lead works through the user's request as usual; `compress`
+   writes per-session `.agent_memory_<key>.md` (audit) and
+   `.agent_statelog_<key>.json`.
+2. When the session ends, the EventSessionEnd hook
+   ([agent/curator_hook.go](agent/curator_hook.go)) spawns the curator
+   in a goroutine bounded by a 2-minute timeout. The user can also call
+   the `curate_session` tool mid-session to *flag* the session as worth
+   curating.
+3. The curator reads both files plus the existing `softskills/INDEX.md`
+   and the authored skill list, then decides:
+   - **skip** — nothing reusable; no files touched.
+   - **create** — call `softskill_create(name, content)`.
+   - **update** — call `softskill_update(name, content, reason)`.
+   - **append-index** — call `softskill_index_append(category, name, summary)`.
+4. The next session's lead sees the new soft-skill via `list_softskills`
+   and may load it on demand.
+
+### Manual curation
+
+Run the curator on demand against an existing session's files:
+
+```bash
+agent-toolkit curate --user alice --session 2025-01-15-deploy
+# or
+agent-toolkit curate --audit .agent_memory_alice_2025...md \
+                     --statelog .agent_statelog_alice_2025...json
+```
+
+### Why the lead does not write
+
+Two reasons:
+
+1. **Quality**: the lead is busy solving the user's task; lifting "what
+   did we learn" into a clean skill is itself a non-trivial reasoning
+   step that benefits from a fresh context window.
+2. **Safety**: the write-side tools (`softskill_create`, `softskill_update`,
+   `softskill_index_append`) live on the curator only, and
+   `config/permissions.yaml` denies generic `write` / `bash` paths under
+   `softskills/`. The library cannot be corrupted by a confused lead.
+
+### Memory of loaded soft-skills within a session
+
+The harness does **not** record which soft-skills the lead loaded —
+once `load_softskill` returns, the content lives in the conversation
+window and the model carries it forward naturally. If the session is
+resumed, the compressor's audit log preserves the load call so context
+restoration is automatic.
+

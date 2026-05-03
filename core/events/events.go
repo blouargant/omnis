@@ -114,11 +114,21 @@ func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
 		b.Emit(EventAfterModel, map[string]any{"response": resp})
 		return nil, nil
 	}
-	beforeRun := func(_ agent.InvocationContext) (*genai.Content, error) {
-		b.Emit(EventSessionStart, nil)
+	beforeRun := func(ctx agent.InvocationContext) (*genai.Content, error) {
+		s := ctx.Session()
+		b.Emit(EventSessionStart, map[string]any{
+			"user_id":    s.UserID(),
+			"session_id": s.ID(),
+		})
 		return nil, nil
 	}
-	afterRun := func(_ agent.InvocationContext) { b.Emit(EventSessionEnd, nil) }
+	afterRun := func(ctx agent.InvocationContext) {
+		s := ctx.Session()
+		b.Emit(EventSessionEnd, map[string]any{
+			"user_id":    s.UserID(),
+			"session_id": s.ID(),
+		})
+	}
 	return plugin.New(plugin.Config{
 		Name:                name,
 		BeforeToolCallback:  llmagent.BeforeToolCallback(beforeTool),

@@ -28,6 +28,7 @@ import (
 	"github.com/blouargant/agent-toolkit/internal/compress"
 	mcpcfg "github.com/blouargant/agent-toolkit/internal/mcp"
 	"github.com/blouargant/agent-toolkit/internal/skills"
+	"github.com/blouargant/agent-toolkit/internal/softskills"
 	"github.com/blouargant/agent-toolkit/internal/tasks"
 	"github.com/blouargant/agent-toolkit/internal/teammates"
 	"github.com/blouargant/agent-toolkit/internal/todo"
@@ -56,6 +57,13 @@ type AgentResult struct {
 type Options struct {
 	// SkillsDir is the directory to load skills from (default: "skills").
 	SkillsDir string
+	// SoftSkillsDir is the directory to load curator-generated soft-skills
+	// from (default: "softskills"). Created if missing.
+	SoftSkillsDir string
+	// DisableAutoCurate disables the EventSessionEnd hook that fires the
+	// curator agent in the background. The manual `curate` CLI subcommand
+	// remains available regardless.
+	DisableAutoCurate bool
 	// Repo is the repository root for worktree tools (default: current working directory).
 	Repo string
 	// MCPSConfigPath is the path to the MCP config file (default: "config/mcp_config.yaml").
@@ -75,6 +83,9 @@ type Options struct {
 func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	if opts.SkillsDir == "" {
 		opts.SkillsDir = "skills"
+	}
+	if opts.SoftSkillsDir == "" {
+		opts.SoftSkillsDir = softskills.DefaultDir
 	}
 	if opts.Repo == "" {
 		repo, err := os.Getwd()
@@ -102,17 +113,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	// All session-scoped components share the same (userID, sessionID)
 	// → suffix mapping so a given session's task graph, plan, mailbox
 	// and background queue all line up on disk and on the wire.
-	sessionSuffix := func(userID, sessionID string) string {
-		u := sanitizeID(userID)
-		s := sanitizeID(sessionID)
-		if u == "" {
-			u = "anon"
-		}
-		if s == "" {
-			s = "default"
-		}
-		return u + "_" + s
-	}
+	sessionSuffix := SessionSuffix
 
 	// Per-session task graph (.agent_tasks_<u>_<s>.json).
 	g := tasks.NewSessionScoped("", func(u, s string) string {
@@ -131,10 +132,14 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	leadTools = append(leadTools, g.Tools()...)
 	leadTools = append(leadTools, worktree.Tools(opts.Repo)...)
 	leadTools = append(leadTools, q.Tool())
+	leadTools = append(leadTools, curateSessionTool())
 
 	var toolsets []tool.Toolset
 	if ts, err := skills.Toolset(ctx, opts.SkillsDir); err == nil {
 		toolsets = append(toolsets, ts)
+	}
+	if sts, err := softskills.Toolset(ctx, opts.SoftSkillsDir); err == nil {
+		toolsets = append(toolsets, sts)
 	}
 	if mc, err := mcpcfg.Load(opts.MCPSConfigPath); err == nil {
 		if mts, err := mc.Toolsets(); err == nil {
@@ -205,7 +210,9 @@ Operating method (always, regardless of the task):
   6. RESPECT permissions: if a tool call is denied, do NOT retry — report and ask the user.
   7. ESCALATE to the user when ambiguity remains after one round of evidence gathering.
 
-You have no built-in domain expertise. Lean on the mounted skills and tools to discover what is appropriate for the current environment.`,
+You have no built-in domain expertise. Lean on the mounted skills and tools to discover what is appropriate for the current environment.
+
+Soft-skills: at the start of any non-trivial task, call 'list_softskills' once to scan curator-distilled procedures from past sessions, and 'load_softskill' the relevant one before planning. Treat soft-skills as hints, not authority — defer to authored skills, tool docs and the user when they disagree.`,
 	})
 	if err != nil {
 		be.Close()
@@ -244,12 +251,24 @@ You have no built-in domain expertise. Lean on the mounted skills and tools to d
 		AuditPathFunc: func(userID, sessionID string) string {
 			return fmt.Sprintf(".agent_memory_%s.md", sessionSuffix(userID, sessionID))
 		},
+		// Per-session State Log path — consumed by the curator agent
+		// after EventSessionEnd to mine successful procedures.
+		StateLogPathFunc: func(userID, sessionID string) string {
+			return fmt.Sprintf(".agent_statelog_%s.json", sessionSuffix(userID, sessionID))
+		},
 		LLM: llm,
 	}); err == nil {
 		plugins = append(plugins, cmp)
 		// NOTE: compact_now tool returned here is intentionally not mounted
 		// on the lead in this entry-point; mount it explicitly when wiring
 		// a custom agent (see examples/s06_compress for the pattern).
+	}
+
+	// Curator hook: after each session ends, fire-and-forget the curator
+	// agent with the per-session audit + statelog paths. Best-effort —
+	// process exit aborts. To run synchronously, use `agent-toolkit curate`.
+	if !opts.DisableAutoCurate {
+		registerCuratorHook(bus, llm, opts.SoftSkillsDir, opts.SkillsDir, sessionSuffix)
 	}
 
 	// Create AgentLoader from the agents
@@ -295,4 +314,20 @@ func sanitizeID(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// SessionSuffix returns the deterministic per-session filename suffix used
+// across all components (tasks, todo, mailbox, audit, statelog). Exposed
+// so external callers (notably the `curate` CLI) can reconstruct the
+// per-session paths without duplicating the sanitizer.
+func SessionSuffix(userID, sessionID string) string {
+	u := sanitizeID(userID)
+	s := sanitizeID(sessionID)
+	if u == "" {
+		u = "anon"
+	}
+	if s == "" {
+		s = "default"
+	}
+	return u + "_" + s
 }

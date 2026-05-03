@@ -32,19 +32,21 @@ import (
 // options holds the CLI flags consumed by this binary before the launcher
 // subcommand (console / web ...) is dispatched.
 type options struct {
-	skillsDir string
-	tui       bool
-	appName   string
+	skillsDir     string
+	softSkillsDir string
+	tui           bool
+	appName       string
 }
 
 // parseFlags extracts our own flags from args, returning the parsed
 // options and the remaining args to forward to the ADK launcher.
 func parseFlags(args []string) (options, []string, error) {
-	opts := options{skillsDir: "skills", appName: "agent-toolkit"}
+	opts := options{skillsDir: "skills", softSkillsDir: "softskills", appName: "agent-toolkit"}
 
 	fs := flag.NewFlagSet("agent-toolkit", flag.ContinueOnError)
 	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
 	fs.StringVar(&opts.skillsDir, "s", opts.skillsDir, "Directory to load skills from (shorthand)")
+	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
 	fs.BoolVar(&opts.tui, "tui", false, "Launch the tview chat interface (ignores launcher subcommand)")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
 	fs.Usage = func() {
@@ -72,10 +74,18 @@ func main() {
 }
 
 func run(ctx context.Context, opts options, launcherArgs []string) error {
+	// `curate` is a special pre-launcher subcommand that runs the
+	// soft-skills curator one-shot against an existing session's audit
+	// and statelog files. Useful for replaying curation manually.
+	if len(launcherArgs) > 0 && launcherArgs[0] == "curate" {
+		return runCurate(ctx, opts, launcherArgs[1:])
+	}
+
 	// Create the fully configured agent using the agent package
 	result, err := agent.NewAgent(ctx, agent.Options{
-		SkillsDir: opts.skillsDir,
-		AppName:   opts.appName,
+		SkillsDir:     opts.skillsDir,
+		SoftSkillsDir: opts.softSkillsDir,
+		AppName:       opts.appName,
 	})
 	if err != nil {
 		return err

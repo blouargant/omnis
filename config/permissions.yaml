@@ -8,6 +8,15 @@ always_deny:
   - "mkfs"
   - "dd if=.* of=/dev/"
   - ":(){.*};:"          # fork bomb
+  # Reserve the soft-skills library for the curator sub-agent. The lead
+  # and any non-curator code path must not write into softskills/ via the
+  # generic fs tools — only the curator's `softskill_create` /
+  # `softskill_update` / `softskill_index_append` tools are allowed (and
+  # the curator runs in its own runner without this plugin attached).
+  - pattern: '^(write|revert) .*"path":"softskills/'
+    reason: "softskills/ is curator-managed; use curate_session instead"
+  - pattern: '^bash .*(>|>>|tee|rm|mv|cp) .*softskills/'
+    reason: "softskills/ is curator-managed; use curate_session instead"
 
 always_allow:
   # generic read-only inspection
