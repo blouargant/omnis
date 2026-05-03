@@ -106,8 +106,12 @@ func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
 		})
 		return nil, nil
 	}
-	beforeModel := func(_ agent.CallbackContext, _ *model.LLMRequest) (*model.LLMResponse, error) {
-		b.Emit(EventBeforeModel, nil)
+	beforeModel := func(_ agent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+		payload := map[string]any{}
+		if req != nil && req.Model != "" {
+			payload["model"] = req.Model
+		}
+		b.Emit(EventBeforeModel, payload)
 		return nil, nil
 	}
 	afterModel := func(_ agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {

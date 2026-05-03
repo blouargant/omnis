@@ -188,13 +188,26 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.Bus.On(events.EventToolError, func(_ string, p map[string]any) {
 			appendTrace("[red]✗ tool[-] %v: %v", p["tool"], p["error"])
 		})
-		cfg.Bus.On(events.EventBeforeModel, func(_ string, _ map[string]any) {
-			appendTrace("[blue]→ model[-]")
+		var modelCallCount int
+		var modelCallMu sync.Mutex
+		cfg.Bus.On(events.EventBeforeModel, func(_ string, p map[string]any) {
+			modelCallMu.Lock()
+			modelCallCount++
+			n := modelCallCount
+			modelCallMu.Unlock()
+			modelName, _ := p["model"].(string)
+			if modelName == "" {
+				modelName = "model"
+			}
+			appendTrace("[blue]→ %s[-] [gray](#%d)[-]", modelName, n)
 		})
 		cfg.Bus.On(events.EventAfterModel, func(_ string, _ map[string]any) {
 			appendTrace("[blue]✓ model[-]")
 		})
 		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
+			modelCallMu.Lock()
+			modelCallCount = 0
+			modelCallMu.Unlock()
 			appendTrace("[yellow]session start[-]")
 		})
 		cfg.Bus.On(events.EventSessionEnd, func(_ string, _ map[string]any) {
