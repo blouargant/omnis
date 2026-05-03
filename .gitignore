@@ -30,9 +30,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
-.agent_events.log
-.agent_tasks.json
+.agent_*
 .mailboxes
 bin/
-.agent_memory_k8s_e2e_context-e2e-1777745555.md
-.agent_statelog.json
