@@ -373,6 +373,19 @@ func Run(ctx context.Context, cfg Config) error {
 				fmt.Fprint(chatANSI, renderMarkdown(userMD, chatWidth()))
 			})
 			appendChat("[::b]assistant[-]\n")
+			turnInputStart := inputTokensTotal.Load()
+			turnOutputStart := outputTokensTotal.Load()
+			defer func() {
+				turnInput := inputTokensTotal.Load() - turnInputStart
+				turnOutput := outputTokensTotal.Load() - turnOutputStart
+				if turnInput < 0 {
+					turnInput = 0
+				}
+				if turnOutput < 0 {
+					turnOutput = 0
+				}
+				appendChat("%s\n", buildTurnUsageText(cfg, turnInput, turnOutput))
+			}()
 
 			seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
 				&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
@@ -467,6 +480,16 @@ func buildStatusText(cfg Config, inputTokens, outputTokens int64) string {
 		cfg.AppName, cfg.SessionID, cfg.UserID, inputTokens, outputTokens)
 	if dollars, ok := totalCostDollars(inputTokens, outputTokens, cfg.InputTokenPricePerMillion, cfg.OutputTokenPricePerMillion); ok {
 		text += fmt.Sprintf("   total: [green]$%.6f[-]", dollars)
+	}
+	return text
+}
+
+func buildTurnUsageText(cfg Config, inputTokens, outputTokens int64) string {
+	totalTokens := inputTokens + outputTokens
+	text := fmt.Sprintf("[gray]turn usage[-] in/out/total: [yellow]%d[-]/[yellow]%d[-]/[yellow]%d[-]",
+		inputTokens, outputTokens, totalTokens)
+	if dollars, ok := totalCostDollars(inputTokens, outputTokens, cfg.InputTokenPricePerMillion, cfg.OutputTokenPricePerMillion); ok {
+		text += fmt.Sprintf("   [green]$%.6f[-]", dollars)
 	}
 	return text
 }

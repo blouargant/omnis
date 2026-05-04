@@ -50,3 +50,21 @@ func TestBuildStatusText_HidesCostWithoutPrices(t *testing.T) {
 		t.Fatalf("status should not include dollar total when prices are missing: %q", text)
 	}
 }
+
+func TestBuildTurnUsageText_ContainsTokenBreakdownAndCost(t *testing.T) {
+	cfg := Config{InputTokenPricePerMillion: 0.6, OutputTokenPricePerMillion: 2.4}
+	text := buildTurnUsageText(cfg, 1000, 500)
+	if !strings.Contains(text, "in/out/total") {
+		t.Fatalf("turn usage should include token breakdown: %q", text)
+	}
+	if !strings.Contains(text, "$") {
+		t.Fatalf("turn usage should include dollar cost when prices are set: %q", text)
+	}
+}
+
+func TestBuildTurnUsageText_HidesCostWithoutPrices(t *testing.T) {
+	text := buildTurnUsageText(Config{}, 1000, 500)
+	if strings.Contains(text, "$") {
+		t.Fatalf("turn usage should not include dollar cost when prices are missing: %q", text)
+	}
+}
