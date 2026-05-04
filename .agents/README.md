@@ -14,20 +14,22 @@ specialisation skills for the *running* harness agent.
 
 A new development session should load these in order:
 
-1. [`project-overview`](project-overview/SKILL.md) — what this codebase
+1. [`project-overview`](skills/project-overview/SKILL.md) — what this codebase
    is, the design contract, the directory layout, the doc index.
-2. [`build-and-test`](build-and-test/SKILL.md) — environment, build
+2. [`build-and-test`](skills/build-and-test/SKILL.md) — environment, build
    command, provider env vars, common failures.
-3. [`coding-conventions`](coding-conventions/SKILL.md) — Go conventions,
+3. [`coding-conventions`](skills/coding-conventions/SKILL.md) — Go conventions,
    architectural rules, anti-patterns.
+4. [`grill-me`](skills/grill-me/SKILL.md) — review the plan or design with the user until reaching shared understanding.
+
 
 Then, depending on the task:
 
-- Adding a tool → [`add-tool`](add-tool/SKILL.md)
-- Adding a skill → [`add-skill`](add-skill/SKILL.md)
-- Adding a provider → [`add-llm-provider`](add-llm-provider/SKILL.md)
-- Wiring changes → [`root-wiring`](root-wiring/SKILL.md)
-- Closing the loop → [`change-checklist`](change-checklist/SKILL.md)
+- Adding a tool → [`add-tool`](skills/add-tool/SKILL.md)
+- Adding a skill → [`add-skill`](skills/add-skill/SKILL.md)
+- Adding a provider → [`add-llm-provider`](skills/add-llm-provider/SKILL.md)
+- Wiring changes → [`root-wiring`](skills/root-wiring/SKILL.md)
+- Closing the loop → [`change-checklist`](skills/change-checklist/SKILL.md)
 
 ## Format
 
