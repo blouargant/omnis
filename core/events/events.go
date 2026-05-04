@@ -21,9 +21,19 @@ import (
 )
 
 // Event names emitted by the bus.
+//
+// Lifecycle distinction:
+//   - EventSessionStart / EventSessionEnd fire ONCE per real session
+//     (e.g. TUI launch / quit). They are emitted by the front-end
+//     entry point, not by the per-run plugin callbacks.
+//   - EventRunStart / EventRunEnd fire on every Runner.Run() invocation
+//     (i.e. every user turn). They are emitted from the plugin's
+//     BeforeRun / AfterRun callbacks.
 const (
 	EventSessionStart       = "session_start"
 	EventSessionEnd         = "session_end"
+	EventRunStart           = "run_start"
+	EventRunEnd             = "run_end"
 	EventBeforeModel        = "before_model"
 	EventAfterModel         = "after_model"
 	EventBeforeTool         = "before_tool"
@@ -120,7 +130,7 @@ func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
 	}
 	beforeRun := func(ctx agent.InvocationContext) (*genai.Content, error) {
 		s := ctx.Session()
-		b.Emit(EventSessionStart, map[string]any{
+		b.Emit(EventRunStart, map[string]any{
 			"user_id":    s.UserID(),
 			"session_id": s.ID(),
 		})
@@ -128,7 +138,7 @@ func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
 	}
 	afterRun := func(ctx agent.InvocationContext) {
 		s := ctx.Session()
-		b.Emit(EventSessionEnd, map[string]any{
+		b.Emit(EventRunEnd, map[string]any{
 			"user_id":    s.UserID(),
 			"session_id": s.ID(),
 		})

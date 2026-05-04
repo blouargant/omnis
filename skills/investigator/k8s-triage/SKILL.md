@@ -12,6 +12,10 @@ assumes either:
 - a Kubernetes MCP server is mounted (preferred — it gives structured
   output and respects permissions).
 
+If the investigation becomes log-heavy (very large logs, unclear anchors,
+or repeated restarts), load `k8s-log-investigation` and follow its
+token-efficient anchor-first workflow.
+
 ## Procedure
 
 1. **Confirm the cluster context.** Run `kubectl config current-context`

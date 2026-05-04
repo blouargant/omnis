@@ -28,6 +28,7 @@ import (
 	"google.golang.org/adk/runner"
 
 	"github.com/blouargant/agent-toolkit/agent"
+	"github.com/blouargant/agent-toolkit/core/events"
 	"github.com/blouargant/agent-toolkit/internal/tui"
 )
 
@@ -140,6 +141,15 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		SessionService: result.RunnerConfig.SessionService,
 		AgentLoader:    result.AgentLoader,
 		PluginConfig:   result.RunnerConfig.PluginConfig,
+	}
+	// Emit the real session lifecycle events around the launcher so
+	// subscribers (notably the soft-skills curator) fire once on shutdown
+	// rather than on every per-turn run_end. The launcher creates the
+	// session at runtime so we don't know user_id / session_id upfront;
+	// the curator hook tolerates empty IDs by skipping.
+	if result.EventBus != nil {
+		result.EventBus.Emit(events.EventSessionStart, map[string]any{})
+		defer result.EventBus.Emit(events.EventSessionEnd, map[string]any{})
 	}
 	return full.NewLauncher().Execute(ctx, cfg, args)
 }

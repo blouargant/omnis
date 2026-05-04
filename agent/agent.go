@@ -567,7 +567,9 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	for _, ev := range []string{
 		events.EventBeforeTool, events.EventAfterTool,
 		events.EventBeforeModel, events.EventAfterModel,
-		events.EventToolError, events.EventSessionStart, events.EventSessionEnd,
+		events.EventToolError,
+		events.EventSessionStart, events.EventSessionEnd,
+		events.EventRunStart, events.EventRunEnd,
 	} {
 		bus.On(ev, logger)
 	}

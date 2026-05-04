@@ -309,13 +309,23 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			appendTrace("[blue]✓ model[-]")
 		})
-		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
+		cfg.Bus.On(events.EventRunStart, func(_ string, _ map[string]any) {
 			modelCallMu.Lock()
 			modelCallCount = 0
 			modelCallMu.Unlock()
+			appendTrace("[yellow]run start[-]")
+		})
+		cfg.Bus.On(events.EventRunEnd, func(_ string, _ map[string]any) {
+			appendTrace("[yellow]run end[-]")
+		})
+		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
+			// Reset cumulative token counters at the start of a real
+			// session. We deliberately DO NOT call QueueUpdateDraw here:
+			// EventSessionStart is emitted before app.Run() begins
+			// draining its update queue, so a draw call would deadlock
+			// the TUI (counters are already zero on launch anyway).
 			inputTokensTotal.Store(0)
 			outputTokensTotal.Store(0)
-			app.QueueUpdateDraw(setStatus)
 			appendTrace("[yellow]session start[-]")
 		})
 		cfg.Bus.On(events.EventSessionEnd, func(_ string, _ map[string]any) {
@@ -453,6 +463,26 @@ func Run(ctx context.Context, cfg Config) error {
 	// Welcome banner. Write directly: app.Run() hasn't started yet, so
 	// QueueUpdateDraw would deadlock (its queue is only drained by Run).
 	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nCtrl-L clears the chat. Ctrl-C / Esc to quit.[-]\n", cfg.AppName)
+
+	// Emit real session lifecycle events around the TUI run. These are
+	// distinct from the per-turn EventRunStart/EventRunEnd: subscribers
+	// like the soft-skills curator should fire ONCE here, not on every
+	// user turn.
+	//
+	// EventSessionStart is fired from a goroutine so its handlers (which
+	// call appendTrace → QueueUpdateDraw) execute once app.Run() is
+	// draining the update queue. Emitting it inline before app.Run()
+	// would deadlock.
+	if cfg.Bus != nil {
+		go cfg.Bus.Emit(events.EventSessionStart, map[string]any{
+			"user_id":    cfg.UserID,
+			"session_id": cfg.SessionID,
+		})
+		defer cfg.Bus.Emit(events.EventSessionEnd, map[string]any{
+			"user_id":    cfg.UserID,
+			"session_id": cfg.SessionID,
+		})
+	}
 
 	// Keep terminal mouse reporting disabled so users can use native
 	// mouse selection in the chat pane and paste into the input field.

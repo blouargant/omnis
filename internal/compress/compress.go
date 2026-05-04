@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,12 +142,13 @@ func (c *Config) applyDefaults() {
 
 // sessionState is the per-(userID, sessionID) bookkeeping.
 type sessionState struct {
-	mu              sync.Mutex
-	lastTokenCount  atomic.Int64
-	forceCompact    atomic.Bool
-	recentUserTurns []string // last few user prompts; used by task-switch sniffer
-	sumCache        *summaryCache
-	stateLog        stateLogState
+	mu               sync.Mutex
+	lastTokenCount   atomic.Int64
+	forceCompact     atomic.Bool
+	recentUserTurns  []string // last few user prompts; used by task-switch sniffer
+	recentModelTurns []string // last few model responses (text + tool calls); used by state-log extractor
+	sumCache         *summaryCache
+	stateLog         stateLogState
 }
 
 // Plugin returns the configured plugin plus a Wait function (kept for API
@@ -254,15 +256,58 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 	return nil, nil
 }
 
-// afterModel records the most recent UsageMetadata count and refreshes
-// the per-session State Log every StateLogEvery turns.
+// afterModel records the most recent UsageMetadata count, buffers the
+// model turn so the State Log extractor sees decisions/file paths/tool
+// calls (not only user prompts), and refreshes the per-session State Log
+// every StateLogEvery turns.
 func (m *manager) afterModel(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 	st := m.state(ctx.UserID(), ctx.SessionID())
 	if resp != nil && resp.UsageMetadata != nil {
 		st.lastTokenCount.Store(int64(resp.UsageMetadata.PromptTokenCount + resp.UsageMetadata.CandidatesTokenCount))
 	}
+	if rendered := renderModelTurn(resp); rendered != "" {
+		st.mu.Lock()
+		st.recentModelTurns = append(st.recentModelTurns, rendered)
+		if len(st.recentModelTurns) > taskSwitchKeepUserTurns {
+			st.recentModelTurns = st.recentModelTurns[len(st.recentModelTurns)-taskSwitchKeepUserTurns:]
+		}
+		st.mu.Unlock()
+	}
 	m.maybeRefreshStateLog(ctx, ctx.UserID(), ctx.SessionID(), st)
 	return nil, nil
+}
+
+// renderModelTurn flattens an LLM response into a single string suitable
+// for the State Log extractor: assistant text + a compact representation
+// of tool calls (name + arg keys) and tool responses (name only). We
+// deliberately avoid dumping full tool payloads to keep the prompt small
+// and to avoid leaking secrets through the extractor.
+func renderModelTurn(resp *model.LLMResponse) string {
+	if resp == nil || resp.Content == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range resp.Content.Parts {
+		if p == nil {
+			continue
+		}
+		if p.Text != "" {
+			b.WriteString(strings.TrimSpace(p.Text))
+			b.WriteByte('\n')
+		}
+		if p.FunctionCall != nil {
+			keys := make([]string, 0, len(p.FunctionCall.Args))
+			for k := range p.FunctionCall.Args {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			fmt.Fprintf(&b, "tool_call: %s(%s)\n", p.FunctionCall.Name, strings.Join(keys, ","))
+		}
+		if p.FunctionResponse != nil {
+			fmt.Fprintf(&b, "tool_response: %s\n", p.FunctionResponse.Name)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // emit pushes an event onto the configured bus (no-op when nil).
@@ -411,28 +456,46 @@ func (m *manager) maybeRefreshStateLog(ctx context.Context, userID, sessionID st
 	st.stateLog.turnsSince = 0
 }
 
-// stateLogDelta is a placeholder for "the conversation since last index".
-// We don't have access to the request here, so the AfterModel callback
-// receives only the response. We sidestep this by buffering recent user
-// turns in maybeMarkTaskSwitch and the lead's own output via the LLM
-// response. For now, render the most recent user prompt joined with the
-// model response — a minimal but useful delta.
+// stateLogDelta renders the conversation slice fed to the State Log
+// extractor. We buffer the last few user prompts (via maybeMarkTaskSwitch)
+// and the last few model responses (via afterModel), then interleave them
+// so the extractor sees decisions, file paths and tool names — not only
+// user questions. Returns an empty string when nothing has been buffered
+// yet.
 func (m *manager) stateLogDelta(st *sessionState) string {
 	st.mu.Lock()
-	recent := append([]string(nil), st.recentUserTurns...)
+	users := append([]string(nil), st.recentUserTurns...)
+	models := append([]string(nil), st.recentModelTurns...)
 	st.mu.Unlock()
-	if len(recent) == 0 {
+	if len(users) == 0 && len(models) == 0 {
 		return ""
 	}
-	// Use up to last 3 user turns to keep the call cheap.
-	if len(recent) > 3 {
-		recent = recent[len(recent)-3:]
+	// Cap each side to keep the call cheap.
+	if len(users) > taskSwitchKeepUserTurns {
+		users = users[len(users)-taskSwitchKeepUserTurns:]
+	}
+	if len(models) > taskSwitchKeepUserTurns {
+		models = models[len(models)-taskSwitchKeepUserTurns:]
 	}
 	var b strings.Builder
-	for _, t := range recent {
-		b.WriteString("user: ")
-		b.WriteString(t)
-		b.WriteString("\n")
+	// Interleave user[i] then model[i] so the extractor reads each
+	// question with its corresponding answer; trailing items from the
+	// longer slice are appended after.
+	n := len(users)
+	if len(models) > n {
+		n = len(models)
+	}
+	for i := 0; i < n; i++ {
+		if i < len(users) {
+			b.WriteString("user: ")
+			b.WriteString(users[i])
+			b.WriteString("\n")
+		}
+		if i < len(models) {
+			b.WriteString("assistant: ")
+			b.WriteString(models[i])
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

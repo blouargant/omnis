@@ -1,14 +1,17 @@
 // curator_hook.go — wires the soft-skills curator to the event bus.
 //
-// On every EventSessionEnd, we spawn the curator agent in a goroutine
-// with a 2-minute timeout. The curator reads the per-session audit and
-// state log files (written by the compress plugin) and decides whether
-// to create or update one soft-skill. Failures are logged and swallowed:
-// curation must never break the user-facing session.
+// On EventSessionEnd (real session shutdown — emitted once by the TUI on
+// quit, or by the launcher entry point — NOT the per-turn EventRunEnd),
+// we spawn the curator agent in a goroutine with a 2-minute timeout.
+// The curator reads the per-session audit and state log files (written
+// by the compress plugin) and decides whether to create or update one
+// soft-skill. Failures are logged and swallowed: curation must never
+// break the user-facing session.
 package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -72,6 +75,14 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				return
 			}
 
+			// Skip if the state log is still effectively empty. Even
+			// though EventSessionEnd now fires once per real session
+			// (not per turn), the gate guards against sessions that quit
+			// before producing any decisions or file facts.
+			if !stateLogHasSignal(statePath) {
+				return
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), curateTimeout)
 			defer cancel()
 
@@ -98,4 +109,27 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+// stateLogHasSignal returns true when the persisted state log contains
+// at least one decision or one file fact — i.e. the session has produced
+// material worth distilling into a soft-skill. A bare goal/open_issues
+// pair is not enough: those can be parroted from the very first user
+// prompt, well before the agent has done useful work.
+func stateLogHasSignal(path string) bool {
+	if path == "" {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var sl struct {
+		Decisions []string          `json:"decisions"`
+		Files     map[string]string `json:"files"`
+	}
+	if err := json.Unmarshal(data, &sl); err != nil {
+		return false
+	}
+	return len(sl.Decisions) > 0 || len(sl.Files) > 0
 }
