@@ -123,9 +123,11 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 			return fmt.Errorf("tui runner: %w", err)
 		}
 		return tui.Run(ctx, tui.Config{
-			Runner:  r,
-			Bus:     result.EventBus,
-			AppName: result.RunnerConfig.AppName,
+			Runner:                        r,
+			Bus:                           result.EventBus,
+			AppName:                       result.RunnerConfig.AppName,
+			InputTokenPricePerMillion:     result.LeaderInputTokenPricePerMillion,
+			OutputTokenPricePerMillion:    result.LeaderOutputTokenPricePerMillion,
 		})
 	}
 

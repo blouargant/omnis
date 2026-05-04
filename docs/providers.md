@@ -6,9 +6,8 @@ There is no provider-specific SDK in `go.mod` for Anthropic or OpenAI:
 both adapters speak HTTP + SSE directly.
 
 The root binary can also load provider/model settings from
-[`config/agent.yaml`](configuration.md), including per-role model
-selection (`orchestrator`, `curator`, `reviewer`, `investigator`,
-`summariser`).
+[`config/agent.yaml`](configuration.md), via a reusable `models`
+catalog and per-agent `model_ref` selection.
 
 ## Selection
 

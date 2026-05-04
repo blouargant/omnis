@@ -22,21 +22,31 @@ softskills_dir: yaml-soft
 app_name: yaml-app
 mcp_config_path: yaml-mcp.yaml
 permissions_config_path: yaml-perms.yaml
-features:
-  curator_enabled: false
 models:
-  default:
+  leader-default:
     provider: anthropic
     model: yaml-default-model
     base_url: https://yaml-base/v1
     api_key: YAML_KEY_ENV
-  roles:
-    orchestrator:
-      provider: openai
-      model: role-orchestrator-model
-    curator:
-      model: role-curator-model
-      api_key: CURATOR_KEY_ENV
+    context_length: 200000
+    input_token_price_per_million: 3
+    output_token_price_per_million: 15
+  curator-fast:
+    model: role-curator-model
+    api_key: CURATOR_KEY_ENV
+    context_length: 128000
+agents:
+  - name: leader
+    model_ref: leader-default
+  - name: curator
+    model_ref: curator-fast
+    enabled: false
+  - name: investigator
+    model_ref: leader-default
+    provider: openai
+    model: role-investigator-model
+    enabled: false
+    mailbox: false
 `))
 	t.Setenv("YAML_KEY_ENV", "resolved-yaml-key")
 
@@ -71,55 +81,107 @@ models:
 	if got := runtime.PermissionsConfigPath; got != "yaml-perms.yaml" {
 		t.Fatalf("PermissionsConfigPath = %q, want yaml-perms.yaml", got)
 	}
-	if runtime.CuratorEnabled {
-		t.Fatalf("CuratorEnabled = true, want false")
+
+	leader, ok := runtime.AgentConfig("leader")
+	if !ok {
+		t.Fatal("leader config missing")
 	}
-	if got := runtime.DefaultModel.Provider; got != "openai" {
-		t.Fatalf("DefaultModel.Provider = %q, want openai", got)
+	if got := leader.Provider; got != "openai" {
+		t.Fatalf("leader.Provider = %q, want openai", got)
 	}
-	if got := runtime.DefaultModel.Model; got != "cli-model" {
-		t.Fatalf("DefaultModel.Model = %q, want cli-model", got)
+	if got := leader.Model; got != "cli-model" {
+		t.Fatalf("leader.Model = %q, want cli-model", got)
 	}
-	if got := runtime.DefaultModel.BaseURL; got != "https://cli-base/v1" {
-		t.Fatalf("DefaultModel.BaseURL = %q, want https://cli-base/v1", got)
+	if got := leader.BaseURL; got != "https://cli-base/v1" {
+		t.Fatalf("leader.BaseURL = %q, want https://cli-base/v1", got)
 	}
-	if got := runtime.DefaultModel.APIKey; got != "cli-api-key" {
-		t.Fatalf("DefaultModel.APIKey = %q, want cli-api-key", got)
+	if got := leader.APIKey; got != "cli-api-key" {
+		t.Fatalf("leader.APIKey = %q, want cli-api-key", got)
+	}
+	if got := leader.ContextLength; got != 200000 {
+		t.Fatalf("leader.ContextLength = %d, want 200000", got)
+	}
+	if got := leader.InputTokenPricePerMillion; got != 3 {
+		t.Fatalf("leader.InputTokenPricePerMillion = %v, want 3", got)
+	}
+	if got := leader.OutputTokenPricePerMillion; got != 15 {
+		t.Fatalf("leader.OutputTokenPricePerMillion = %v, want 15", got)
 	}
 
-	orch := runtime.RoleSelection("orchestrator")
-	if orch.Provider != "openai" || orch.Model != "role-orchestrator-model" {
-		t.Fatalf("RoleSelection(orchestrator) = %#v, want provider=openai model=role-orchestrator-model", orch)
+	cur, ok := runtime.AgentConfig("curator")
+	if !ok {
+		t.Fatal("curator config missing")
 	}
-	cur := runtime.RoleSelection("curator")
-	if cur.Provider != "openai" || cur.Model != "role-curator-model" {
-		t.Fatalf("RoleSelection(curator) = %#v, want provider=openai model=role-curator-model", cur)
+	if cur.Enabled {
+		t.Fatal("curator.Enabled = true, want false")
 	}
-	if cur.APIKey != "resolved-curator-key" {
-		t.Fatalf("RoleSelection(curator).APIKey = %q, want resolved-curator-key", cur.APIKey)
+	if got := cur.Provider; got != "openai" {
+		t.Fatalf("curator.Provider = %q, want openai", got)
 	}
-	inv := runtime.RoleSelection("investigator")
-	if inv.Provider != "openai" || inv.Model != "cli-model" {
-		t.Fatalf("RoleSelection(investigator) = %#v, want provider=openai model=cli-model", inv)
+	if got := cur.Model; got != "role-curator-model" {
+		t.Fatalf("curator.Model = %q, want role-curator-model", got)
+	}
+	if got := cur.APIKey; got != "resolved-curator-key" {
+		t.Fatalf("curator.APIKey = %q, want resolved-curator-key", got)
+	}
+	if got := cur.ContextLength; got != 128000 {
+		t.Fatalf("curator.ContextLength = %d, want 128000", got)
+	}
+
+	inv, ok := runtime.AgentConfig("investigator")
+	if !ok {
+		t.Fatal("investigator config missing")
+	}
+	if inv.Enabled {
+		t.Fatal("investigator.Enabled = true, want false")
+	}
+	if inv.Mailbox {
+		t.Fatal("investigator.Mailbox = true, want false")
+	}
+	if inv.Provider != "openai" || inv.Model != "role-investigator-model" {
+		t.Fatalf("investigator = %#v, want provider=openai model=role-investigator-model", inv)
 	}
 }
 
 func TestResolveRuntimeSettingsAPIKeyLiteralWhenEnvMissing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	mustWrite(t, path, []byte(`
-models:
-  default:
+agents:
+  - name: leader
+    model_ref: default
     provider: openai_compat
     model: test-model
     api_key: sk-literal
+models:
+  default:
+    provider: openai_compat
+    model: fallback
 `))
 
 	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
-	if got := runtime.DefaultModel.APIKey; got != "sk-literal" {
-		t.Fatalf("DefaultModel.APIKey = %q, want sk-literal", got)
+	leader, ok := runtime.AgentConfig("leader")
+	if !ok {
+		t.Fatal("leader config missing")
+	}
+	if got := leader.APIKey; got != "sk-literal" {
+		t.Fatalf("leader.APIKey = %q, want sk-literal", got)
+	}
+}
+
+func TestResolveRuntimeSettingsUnknownModelRef(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	mustWrite(t, path, []byte(`
+agents:
+  - name: leader
+    model_ref: does-not-exist
+`))
+
+	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err == nil {
+		t.Fatal("ResolveRuntimeSettings() error = nil, want unknown model_ref error")
 	}
 }
 
@@ -141,8 +203,15 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if got := runtime.AppName; got != "agent-toolkit" {
 		t.Fatalf("AppName = %q, want agent-toolkit", got)
 	}
-	if !runtime.CuratorEnabled {
-		t.Fatal("CuratorEnabled = false, want true")
+	if _, ok := runtime.AgentConfig("leader"); !ok {
+		t.Fatal("default leader config missing")
+	}
+	curator, ok := runtime.AgentConfig("curator")
+	if !ok {
+		t.Fatal("default curator config missing")
+	}
+	if !curator.Enabled {
+		t.Fatal("curator.Enabled = false, want true")
 	}
 }
 
@@ -150,6 +219,20 @@ func TestResolveRuntimeSettingsStrictMissingConfig(t *testing.T) {
 	_, err := ResolveRuntimeSettings(Options{ConfigPath: "does-not-exist.yaml", ConfigPathStrict: true})
 	if err == nil {
 		t.Fatal("ResolveRuntimeSettings() error = nil, want error for missing config")
+	}
+}
+
+func TestResolveRuntimeSettingsRequiresLeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	mustWrite(t, path, []byte(`
+agents:
+  - name: investigator
+    provider: openai
+`))
+
+	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err == nil {
+		t.Fatal("ResolveRuntimeSettings() error = nil, want missing leader error")
 	}
 }
 

@@ -17,8 +17,10 @@ package tui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/glamour"
@@ -26,19 +28,100 @@ import (
 	"github.com/rivo/tview"
 
 	adkagent "google.golang.org/adk/agent"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/runner"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/agent-toolkit/core/events"
 )
 
+var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
+var oscColorResponseAtStartRE = regexp.MustCompile(`^(?:10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+\s*`)
+
+// stripTerminalControlSequences removes ANSI/OSC/DCS control sequences and
+// non-printable C0 controls from terminal text while keeping line breaks.
+func stripTerminalControlSequences(s string) string {
+	if s == "" {
+		return ""
+	}
+	b := []byte(s)
+	var out strings.Builder
+	out.Grow(len(b))
+
+	for i := 0; i < len(b); {
+		c := b[i]
+		if c == 0x1b { // ESC
+			if i+1 >= len(b) {
+				break
+			}
+			n := b[i+1]
+			switch n {
+			case '[': // CSI ... final-byte
+				i += 2
+				for i < len(b) {
+					if b[i] >= 0x40 && b[i] <= 0x7e {
+						i++
+						break
+					}
+					i++
+				}
+			case ']': // OSC ... BEL or ST
+				i += 2
+				for i < len(b) {
+					if b[i] == 0x07 {
+						i++
+						break
+					}
+					if b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+			case 'P', 'X', '^', '_': // DCS/SOS/PM/APC ... ST
+				i += 2
+				for i < len(b) {
+					if b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+			default:
+				// Short ESC sequence (e.g. ESC c), drop both bytes.
+				i += 2
+			}
+			continue
+		}
+
+		if c < 0x20 && c != '\n' && c != '\r' && c != '\t' {
+			i++
+			continue
+		}
+		out.WriteByte(c)
+		i++
+	}
+
+	return out.String()
+}
+
+// sanitizeInputText strips terminal control sequences and known OSC color
+// response artifacts that can leak into the input line on some terminals.
+func sanitizeInputText(s string) string {
+	s = stripTerminalControlSequences(s)
+	s = oscColorResponseAtStartRE.ReplaceAllString(s, "")
+	return oscColorResponseRE.ReplaceAllString(s, " ")
+}
+
 // Config bundles everything the TUI needs to run.
 type Config struct {
-	Runner    *runner.Runner
-	Bus       *events.Bus // optional; if non-nil, trace pane subscribes
-	UserID    string
-	SessionID string
-	AppName   string // shown in title bar
+	Runner                     *runner.Runner
+	Bus                        *events.Bus // optional; if non-nil, trace pane subscribes
+	UserID                     string
+	SessionID                  string
+	AppName                    string // shown in title bar
+	InputTokenPricePerMillion  float64
+	OutputTokenPricePerMillion float64
 }
 
 // Run starts the TUI event loop and blocks until the user quits or ctx
@@ -87,7 +170,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return renderer
 	}
 	renderMarkdown := func(md string, width int) string {
-		md = strings.TrimSpace(md)
+		md = strings.TrimSpace(stripTerminalControlSequences(md))
 		if md == "" {
 			return ""
 		}
@@ -119,6 +202,19 @@ func Run(ctx context.Context, cfg Config) error {
 		SetFieldBackgroundColor(tcell.ColorDefault)
 	input.SetBorder(true).SetTitle(" Type a message — Enter to send, Ctrl-C to quit ").
 		SetTitleAlign(tview.AlignLeft)
+	cleaningInput := false
+	input.SetChangedFunc(func(text string) {
+		if cleaningInput {
+			return
+		}
+		cleaned := sanitizeInputText(text)
+		if cleaned == text {
+			return
+		}
+		cleaningInput = true
+		input.SetText(cleaned)
+		cleaningInput = false
+	})
 
 	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(chat, 0, 1, false).
@@ -136,8 +232,12 @@ func Run(ctx context.Context, cfg Config) error {
 	status := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
-	status.SetText(fmt.Sprintf(" [::b]%s[-]   session: [yellow]%s[-]   user: [yellow]%s[-]",
-		cfg.AppName, cfg.SessionID, cfg.UserID))
+	var inputTokensTotal atomic.Int64
+	var outputTokensTotal atomic.Int64
+	setStatus := func() {
+		status.SetText(buildStatusText(cfg, inputTokensTotal.Load(), outputTokensTotal.Load()))
+	}
+	setStatus()
 
 	// ── Root layout ─────────────────────────────────────────────────────
 	main := tview.NewFlex().SetDirection(tview.FlexColumn).
@@ -201,13 +301,21 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			appendTrace("[blue]→ %s[-] [gray](#%d)[-]", modelName, n)
 		})
-		cfg.Bus.On(events.EventAfterModel, func(_ string, _ map[string]any) {
+		cfg.Bus.On(events.EventAfterModel, func(_ string, p map[string]any) {
+			if resp, ok := p["response"].(*model.LLMResponse); ok && resp != nil && resp.UsageMetadata != nil {
+				inputTokensTotal.Add(int64(resp.UsageMetadata.PromptTokenCount))
+				outputTokensTotal.Add(int64(resp.UsageMetadata.CandidatesTokenCount))
+				app.QueueUpdateDraw(setStatus)
+			}
 			appendTrace("[blue]✓ model[-]")
 		})
 		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
 			modelCallMu.Lock()
 			modelCallCount = 0
 			modelCallMu.Unlock()
+			inputTokensTotal.Store(0)
+			outputTokensTotal.Store(0)
+			app.QueueUpdateDraw(setStatus)
 			appendTrace("[yellow]session start[-]")
 		})
 		cfg.Bus.On(events.EventSessionEnd, func(_ string, _ map[string]any) {
@@ -259,7 +367,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 			// Render the user turn as markdown too (so code blocks /
 			// lists in the question look right).
-			userMD := fmt.Sprintf("**you**\n\n%s", prompt)
+			userMD := fmt.Sprintf("**you**\n\n%s", sanitizeInputText(prompt))
 			appendChat("\n")
 			app.QueueUpdateDraw(func() {
 				fmt.Fprint(chatANSI, renderMarkdown(userMD, chatWidth()))
@@ -289,7 +397,7 @@ func Run(ctx context.Context, cfg Config) error {
 					}
 					switch {
 					case p.Text != "":
-						mdBuf.WriteString(p.Text)
+						mdBuf.WriteString(stripTerminalControlSequences(p.Text))
 					case p.FunctionCall != nil:
 						flushMarkdown(&mdBuf)
 						appendChat("[aqua]⚙ %s[-] %s\n",
@@ -333,7 +441,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// QueueUpdateDraw would deadlock (its queue is only drained by Run).
 	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nCtrl-L clears the chat. Ctrl-C / Esc to quit.[-]\n", cfg.AppName)
 
-	return app.SetRoot(root, true).EnableMouse(true).Run()
+	// Keep terminal mouse reporting disabled so users can use native
+	// mouse selection in the chat pane and paste into the input field.
+	return app.SetRoot(root, true).Run()
 }
 
 // shortArgs renders tool args compactly for the inline chat display.
@@ -350,4 +460,22 @@ func shortArgs(args map[string]any) string {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func buildStatusText(cfg Config, inputTokens, outputTokens int64) string {
+	text := fmt.Sprintf(" [::b]%s[-]   session: [yellow]%s[-]   user: [yellow]%s[-]   tokens in/out: [yellow]%d[-]/[yellow]%d[-]",
+		cfg.AppName, cfg.SessionID, cfg.UserID, inputTokens, outputTokens)
+	if dollars, ok := totalCostDollars(inputTokens, outputTokens, cfg.InputTokenPricePerMillion, cfg.OutputTokenPricePerMillion); ok {
+		text += fmt.Sprintf("   total: [green]$%.6f[-]", dollars)
+	}
+	return text
+}
+
+func totalCostDollars(inputTokens, outputTokens int64, inputPricePerMillion, outputPricePerMillion float64) (float64, bool) {
+	if inputPricePerMillion <= 0 || outputPricePerMillion <= 0 {
+		return 0, false
+	}
+	inputCost := float64(inputTokens) * inputPricePerMillion / 1_000_000
+	outputCost := float64(outputTokens) * outputPricePerMillion / 1_000_000
+	return inputCost + outputCost, true
 }

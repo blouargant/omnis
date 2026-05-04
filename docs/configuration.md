@@ -11,8 +11,8 @@ Precedence for overlapping values is:
 
 ## `config/agent.yaml`
 
-Unified runtime config for app settings, feature flags, and role-based
-models.
+Unified runtime config for app settings, reusable model profiles, and
+agent wiring.
 
 ```yaml
 skills_dir: skills
@@ -21,44 +21,50 @@ app_name: agent-toolkit
 mcp_config_path: config/mcp_config.yaml
 permissions_config_path: config/permissions.yaml
 
-features:
-  curator_enabled: true
-
 models:
   default:
     provider: openai_compat
     model: gpt-4o-mini
     base_url: http://localhost:11434/v1
     api_key: OPENAI_API_KEY
-  roles:
-    orchestrator:
-      provider: anthropic
-      model: claude-sonnet-4-5
-    curator:
-      provider: openai
-      model: gpt-4o-mini
-    reviewer:
-      provider: openai_compat
-      model: qwen2.5-coder
+    context_length: 128000
+    input_token_price_per_million: 0.15
+    output_token_price_per_million: 0.6
+  premium:
+    provider: anthropic
+    model: claude-sonnet-4-5
+    api_key: ANTHROPIC_API_KEY
+    context_length: 200000
+    input_token_price_per_million: 3
+    output_token_price_per_million: 15
+
+agents:
+  - name: leader
+    model_ref: default
+  - name: investigator
+    model_ref: premium
+    tools: [fs, mcp]
+  - name: curator
+    model_ref: default
+    enabled: true
 ```
 
-### Model role keys
+### Models and references
 
-The harness uses these first-class role names:
+`models` is a reusable catalog of model profiles. Each profile supports:
 
-- `orchestrator`
-- `curator`
-- `reviewer`
-- `investigator`
-- `summariser`
+- `provider`, `model`, `base_url`, `api_key`
+- `context_length`
+- `input_token_price_per_million`
+- `output_token_price_per_million`
 
-Additional role keys are accepted for forward compatibility.
+Agents select one profile using `model_ref`.
 
-If a role omits `provider` or `model`, missing fields fall back to
-`models.default`.
+If an agent omits `model_ref`, it can still specify `provider` / `model`
+inline for backward compatibility.
 
-`base_url` and `api_key` are also supported under `models.default` and
-per-role entries in `models.roles`.
+If a non-leader agent omits model connection fields, they inherit from
+the leader.
 
 For `api_key`, the value can be either:
 
@@ -72,12 +78,13 @@ env var value is used.
 
 - `--config` selects a runtime YAML file (default: `config/agent.yaml`).
 - `--provider`, `--model`, `--base-url`, and `--api-key` override
-  `models.default` globally.
-- `--curator-enabled` (`true` or `false`) overrides
-  `features.curator_enabled`.
+  the leader agent model selection globally.
+- `--curator-enabled` (`true` or `false`) overrides the `curator`
+  agent's `enabled` value.
 - `GOAGENT_PROVIDER`, `GOAGENT_MODEL`, `GOAGENT_BASE_URL`, and
-  `GOAGENT_API_KEY` override `models.default`.
-- `GOAGENT_CURATOR_ENABLED` overrides `features.curator_enabled`.
+  `GOAGENT_API_KEY` override the leader agent model selection.
+- `GOAGENT_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
+  value.
 
 ## `config/permissions.yaml`
 

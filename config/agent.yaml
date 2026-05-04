@@ -1,39 +1,119 @@
 # Unified runtime config for agent-toolkit.
 # Precedence is: CLI flags > environment variables > this file > defaults.
 
-skills_dir: skills
+# Global defaults (used by every agent unless overridden in the agent entry).
+#skills_dir: skills
 softskills_dir: softskills
 app_name: agent-toolkit
 mcp_config_path: config/mcp_config.yaml
 permissions_config_path: config/permissions.yaml
 
-features:
-  curator_enabled: true
-
 models:
-  # Global default used for roles without an explicit override.
-  default:
+  # hosted profile for routine/background tasks.
+  hosted:
     provider: openai_compat
     model: test
     base_url: https://llm-gateway.ai.chapsvision.com/llm-gateway
     # api_key accepts either a literal key or an environment variable name.
     # If the value matches an existing env var name, its value is used.
     api_key: OPENAI_API_KEY
+    # Optional model metadata (for planning, hosteding, routing, etc.).
+    context_length: 128000
+    input_token_price_per_million: 0.6
+    output_token_price_per_million: 3.6
 
-  # Optional role-specific overrides.
-  # Supported first-class role keys are:
-  # orchestrator, curator, reviewer, investigator, summariser
-  roles: {}
-  # roles:
-  #   orchestrator:
-  #     provider: anthropic
-  #     model: claude-sonnet-4-5
-  #     api_key: ANTHROPIC_API_KEY
-  #   curator:
-  #     provider: openai
-  #     model: gpt-4o-mini
-  #     base_url: https://api.openai.com/v1
-  #     api_key: sk-literal-or-env-var-name
-  #   reviewer:
-  #     provider: openai_compat
-  #     model: qwen2.5-coder
+  # Coordinator profile for high-leverage reasoning turns.
+  balanced:
+    provider: openai_compat
+    model: gpt-4o-mini
+    base_url: https://llm-gateway.ai.chapsvision.com/llm-gateway
+    api_key: OPENAI_API_KEY
+    context_length: 128000
+    input_token_price_per_million: 0.6
+    output_token_price_per_million: 2.4
+
+  # Premium profile for difficult tasks requiring stronger reasoning.
+  premium:
+    provider: anthropic
+    model: claude-sonnet-4-5
+    api_key: ANTHROPIC_API_KEY
+    context_length: 200000
+    input_token_price_per_million: 3
+    output_token_price_per_million: 15
+
+# Each agent below can override skills_dir, softskills_dir, mcp_config_path
+# and permissions_config_path with its own values. When omitted the global
+# values above are used.
+#
+# Available tool groups for the `tools:` list (used by toolsForAgentConfig):
+#   - fs          : core filesystem read/write tools
+#   - mcp         : MCP server toolsets loaded from mcp_config_path
+#   - skills      : authored skills (list_skills / load_skill / load_skill_resource)
+#   - softskills  : curator-distilled soft-skills (list_softskills / load_softskill)
+#
+# The leader always receives every tool group plus task/todo/worktree/mailbox tools.
+# `tools:` only affects sub-agents.
+
+agents:
+  - name: leader
+    model_ref: hosted
+    description: Generic coordinator agent.
+    # instruction: Optional override appended after the global SystemPrompt.
+    # Per-agent path overrides (optional, default to the global values above):
+    skills_dir: skills/leader
+    # softskills_dir: softskills
+    # mcp_config_path: config/mcp_config.yaml
+
+  - name: investigator
+    model_ref: hosted
+    enabled: true
+    mailbox: true
+    tools: [fs, mcp, skills, softskills]
+    skills_dir: skills/investigator
+    description: Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.
+    # instruction: Optional agent-specific instruction override.
+    # Example: scope investigator to a dedicated read-only MCP config.
+    # mcp_config_path: config/mcp_config.investigator.yaml
+
+  - name: summariser
+    model_ref: hosted
+    enabled: true
+    mailbox: true
+    tools: []
+    description: Condenses long content into a structured brief.
+    # instruction: Optional agent-specific instruction override.
+
+  - name: curator
+    model_ref: hosted
+    enabled: true
+    mailbox: false
+    description: Post-session soft-skill curator.
+    # model_ref can point at a dedicated profile (for example: premium).
+    # softskills_dir: softskills
+
+  # Optional custom agents:
+  # - name: reviewer
+  #   enabled: true
+  #   mailbox: true
+  #   tools: [fs]
+  #   model_ref: premium
+  #   description: Reviews changes and provides structured feedback.
+  #   instruction: |
+  #     You are the reviewer agent. Focus on correctness, regressions, and missing tests.
+
+  # Example: a kitchen-sink agent showing every available tool group and every
+  # per-agent path override. Uncomment and adapt as needed.
+  # - name: power-user
+  #   enabled: true
+  #   mailbox: true
+  #   tools: [fs, mcp, skills, softskills]   # all available tool groups
+  #   model_ref: balanced
+  #   description: Full-spectrum specialist with access to every tool group.
+  #   instruction: |
+  #     You have access to filesystem, MCP servers, authored skills and
+  #     curator-distilled soft-skills. Discover skills first before acting.
+  #   skills_dir: skills
+  #   softskills_dir: softskills
+  #   mcp_config_path: config/mcp_config.yaml
+  #   permissions_config_path: config/permissions.yaml
+

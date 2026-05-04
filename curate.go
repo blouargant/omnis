@@ -80,12 +80,15 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 		return fmt.Errorf("neither audit nor statelog file exists (%s, %s)", auditPath, statePath)
 	}
 
-	selection := runtime.RoleSelection("curator")
+	curatorCfg, ok := runtime.AgentConfig("curator")
+	if !ok {
+		return fmt.Errorf("runtime config: missing curator agent config")
+	}
 	model, err := llm.NewWithSelection(ctx, llm.Selection{
-		Provider: selection.Provider,
-		Model:    selection.Model,
-		BaseURL:  selection.BaseURL,
-		APIKey:   selection.APIKey,
+		Provider: curatorCfg.Provider,
+		Model:    curatorCfg.Model,
+		BaseURL:  curatorCfg.BaseURL,
+		APIKey:   curatorCfg.APIKey,
 	})
 	if err != nil {
 		return fmt.Errorf("model: %w", err)

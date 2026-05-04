@@ -13,31 +13,78 @@ import (
 
 const defaultConfigPath = "config/agent.yaml"
 
-// RoleModelConfig describes model selection for one role.
-type RoleModelConfig struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	BaseURL  string `yaml:"base_url"`
-	APIKey   string `yaml:"api_key"`
+// AgentEntry describes one agent in the YAML runtime config.
+type AgentEntry struct {
+	Name                  string   `yaml:"name"`
+	ModelRef              string   `yaml:"model_ref"`
+	Provider              string   `yaml:"provider"`
+	Model                 string   `yaml:"model"`
+	BaseURL               string   `yaml:"base_url"`
+	APIKey                string   `yaml:"api_key"`
+	Description           string   `yaml:"description"`
+	Instruction           string   `yaml:"instruction"`
+	Enabled               *bool    `yaml:"enabled"`
+	Mailbox               *bool    `yaml:"mailbox"`
+	Tools                 []string `yaml:"tools"`
+	SkillsDir             string   `yaml:"skills_dir"`
+	SoftSkillsDir         string   `yaml:"softskills_dir"`
+	MCPConfigPath         string   `yaml:"mcp_config_path"`
+	PermissionsConfigPath string   `yaml:"permissions_config_path"`
+}
+
+// ModelEntry describes one reusable model profile in YAML runtime config.
+type ModelEntry struct {
+	Provider                   string  `yaml:"provider"`
+	Model                      string  `yaml:"model"`
+	BaseURL                    string  `yaml:"base_url"`
+	APIKey                     string  `yaml:"api_key"`
+	ContextLength              int     `yaml:"context_length"`
+	InputTokenPricePerMillion  float64 `yaml:"input_token_price_per_million"`
+	OutputTokenPricePerMillion float64 `yaml:"output_token_price_per_million"`
 }
 
 type runtimeConfigFile struct {
-	SkillsDir             string                     `yaml:"skills_dir"`
-	SoftSkillsDir         string                     `yaml:"softskills_dir"`
-	AppName               string                     `yaml:"app_name"`
-	MCPConfigPath         string                     `yaml:"mcp_config_path"`
-	PermissionsConfigPath string                     `yaml:"permissions_config_path"`
-	Features              runtimeConfigFeatures      `yaml:"features"`
-	Models                runtimeConfigModelSettings `yaml:"models"`
+	SkillsDir             string                `yaml:"skills_dir"`
+	SoftSkillsDir         string                `yaml:"softskills_dir"`
+	AppName               string                `yaml:"app_name"`
+	MCPConfigPath         string                `yaml:"mcp_config_path"`
+	PermissionsConfigPath string                `yaml:"permissions_config_path"`
+	Models                map[string]ModelEntry `yaml:"models"`
+	Agents                []AgentEntry          `yaml:"agents"`
 }
 
-type runtimeConfigFeatures struct {
-	CuratorEnabled *bool `yaml:"curator_enabled"`
+// RuntimeModelConfig is one normalized model profile.
+type RuntimeModelConfig struct {
+	Name                       string
+	Provider                   string
+	Model                      string
+	BaseURL                    string
+	APIKey                     string
+	ContextLength              int
+	InputTokenPricePerMillion  float64
+	OutputTokenPricePerMillion float64
 }
 
-type runtimeConfigModelSettings struct {
-	Default RoleModelConfig            `yaml:"default"`
-	Roles   map[string]RoleModelConfig `yaml:"roles"`
+// RuntimeAgentConfig is one fully-resolved agent configuration entry.
+type RuntimeAgentConfig struct {
+	Name                       string
+	ModelRef                   string
+	Provider                   string
+	Model                      string
+	BaseURL                    string
+	APIKey                     string
+	ContextLength              int
+	InputTokenPricePerMillion  float64
+	OutputTokenPricePerMillion float64
+	Description                string
+	Instruction                string
+	Enabled                    bool
+	Mailbox                    bool
+	Tools                      []string
+	SkillsDir                  string
+	SoftSkillsDir              string
+	MCPConfigPath              string
+	PermissionsConfigPath      string
 }
 
 // RuntimeSettings is the merged runtime configuration after precedence
@@ -49,39 +96,276 @@ type RuntimeSettings struct {
 	AppName               string
 	MCPConfigPath         string
 	PermissionsConfigPath string
-	CuratorEnabled        bool
-	DefaultModel          RoleModelConfig
-	RoleModels            map[string]RoleModelConfig
+	Models                map[string]RuntimeModelConfig
+	Agents                []RuntimeAgentConfig
 }
 
-// RoleSelection returns the effective provider/model for a role.
-func (s RuntimeSettings) RoleSelection(role string) RoleModelConfig {
-	role = strings.ToLower(strings.TrimSpace(role))
-	rm, ok := s.RoleModels[role]
-	if !ok {
-		return s.DefaultModel
+// AgentConfig returns the effective config for one agent name.
+func (s RuntimeSettings) AgentConfig(name string) (RuntimeAgentConfig, bool) {
+	needle := strings.ToLower(strings.TrimSpace(name))
+	if needle == "" {
+		return RuntimeAgentConfig{}, false
 	}
-	out := RoleModelConfig{
-		Provider: rm.Provider,
-		Model:    rm.Model,
-		BaseURL:  rm.BaseURL,
-		APIKey:   rm.APIKey,
+	for _, cfg := range s.Agents {
+		if strings.ToLower(strings.TrimSpace(cfg.Name)) == needle {
+			return cfg, true
+		}
 	}
-	if strings.TrimSpace(out.Provider) == "" {
-		out.Provider = s.DefaultModel.Provider
+	return RuntimeAgentConfig{}, false
+}
+
+// LeaderConfig returns the mandatory leader agent configuration.
+func (s RuntimeSettings) LeaderConfig() (RuntimeAgentConfig, bool) {
+	return s.AgentConfig("leader")
+}
+
+func normalizeTools(in []string) []string {
+	if len(in) == 0 {
+		return nil
 	}
-	// If a role changes provider but leaves model empty, keep model empty so
-	// llm.NewWith can apply the provider-specific default model.
-	if strings.TrimSpace(out.Model) == "" && strings.TrimSpace(rm.Provider) == "" {
-		out.Model = s.DefaultModel.Model
-	}
-	if strings.TrimSpace(out.BaseURL) == "" && strings.TrimSpace(rm.Provider) == "" {
-		out.BaseURL = s.DefaultModel.BaseURL
-	}
-	if strings.TrimSpace(out.APIKey) == "" && strings.TrimSpace(rm.Provider) == "" {
-		out.APIKey = s.DefaultModel.APIKey
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		t := strings.ToLower(strings.TrimSpace(raw))
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
 	}
 	return out
+}
+
+func defaultAgents() []RuntimeAgentConfig {
+	return []RuntimeAgentConfig{
+		{
+			Name:    "leader",
+			Enabled: true,
+			Mailbox: true,
+		},
+		{
+			Name:    "investigator",
+			Enabled: true,
+			Mailbox: true,
+			Tools:   []string{"fs", "mcp"},
+		},
+		{
+			Name:    "summariser",
+			Enabled: true,
+			Mailbox: true,
+			Tools:   []string{},
+		},
+		{
+			Name:    "curator",
+			Enabled: true,
+			Mailbox: false,
+		},
+	}
+}
+
+func normalizeModelCatalog(models map[string]ModelEntry) map[string]RuntimeModelConfig {
+	if len(models) == 0 {
+		return map[string]RuntimeModelConfig{}
+	}
+	out := make(map[string]RuntimeModelConfig, len(models))
+	for rawName, m := range models {
+		name := strings.ToLower(strings.TrimSpace(rawName))
+		if name == "" {
+			continue
+		}
+		out[name] = RuntimeModelConfig{
+			Name:                       name,
+			Provider:                   strings.TrimSpace(m.Provider),
+			Model:                      strings.TrimSpace(m.Model),
+			BaseURL:                    strings.TrimSpace(m.BaseURL),
+			APIKey:                     resolveAPIKeyReference(strings.TrimSpace(m.APIKey)),
+			ContextLength:              m.ContextLength,
+			InputTokenPricePerMillion:  m.InputTokenPricePerMillion,
+			OutputTokenPricePerMillion: m.OutputTokenPricePerMillion,
+		}
+	}
+	return out
+}
+
+func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeModelConfig) ([]RuntimeAgentConfig, error) {
+	out := make([]RuntimeAgentConfig, 0, len(entries))
+	for _, e := range entries {
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		if name == "" {
+			continue
+		}
+		modelRef := strings.ToLower(strings.TrimSpace(e.ModelRef))
+		refModel := RuntimeModelConfig{}
+		if modelRef != "" {
+			m, ok := modelCatalog[modelRef]
+			if !ok {
+				return nil, fmt.Errorf("runtime config: agent %q references unknown model_ref %q", name, modelRef)
+			}
+			refModel = m
+		}
+		enabled := true
+		if e.Enabled != nil {
+			enabled = *e.Enabled
+		}
+		mailbox := name != "curator"
+		if e.Mailbox != nil {
+			mailbox = *e.Mailbox
+		}
+		if name == "leader" {
+			enabled = true
+			mailbox = true
+		}
+		out = append(out, RuntimeAgentConfig{
+			Name:                       name,
+			ModelRef:                   modelRef,
+			Provider:                   firstNonEmpty(strings.TrimSpace(e.Provider), refModel.Provider),
+			Model:                      firstNonEmpty(strings.TrimSpace(e.Model), refModel.Model),
+			BaseURL:                    firstNonEmpty(strings.TrimSpace(e.BaseURL), refModel.BaseURL),
+			APIKey:                     resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(e.APIKey), refModel.APIKey)),
+			ContextLength:              refModel.ContextLength,
+			InputTokenPricePerMillion:  refModel.InputTokenPricePerMillion,
+			OutputTokenPricePerMillion: refModel.OutputTokenPricePerMillion,
+			Description:                strings.TrimSpace(e.Description),
+			Instruction:                strings.TrimSpace(e.Instruction),
+			Enabled:                    enabled,
+			Mailbox:                    mailbox,
+			Tools:                      normalizeTools(e.Tools),
+			SkillsDir:                  strings.TrimSpace(e.SkillsDir),
+			SoftSkillsDir:              strings.TrimSpace(e.SoftSkillsDir),
+			MCPConfigPath:              strings.TrimSpace(e.MCPConfigPath),
+			PermissionsConfigPath:      strings.TrimSpace(e.PermissionsConfigPath),
+		})
+	}
+	return out, nil
+}
+
+func inheritAgentModelFromLeader(in RuntimeAgentConfig, leader RuntimeAgentConfig) RuntimeAgentConfig {
+	out := in
+	if strings.TrimSpace(out.Provider) == "" {
+		out.Provider = leader.Provider
+	}
+	if strings.TrimSpace(out.Model) == "" {
+		out.Model = leader.Model
+	}
+	if strings.TrimSpace(out.BaseURL) == "" {
+		out.BaseURL = leader.BaseURL
+	}
+	if strings.TrimSpace(out.APIKey) == "" {
+		out.APIKey = leader.APIKey
+	}
+	if out.ContextLength == 0 {
+		out.ContextLength = leader.ContextLength
+	}
+	if out.InputTokenPricePerMillion == 0 {
+		out.InputTokenPricePerMillion = leader.InputTokenPricePerMillion
+	}
+	if out.OutputTokenPricePerMillion == 0 {
+		out.OutputTokenPricePerMillion = leader.OutputTokenPricePerMillion
+	}
+	return out
+}
+
+func withInheritedModels(agents []RuntimeAgentConfig) ([]RuntimeAgentConfig, error) {
+	var leader RuntimeAgentConfig
+	foundLeader := false
+	for _, a := range agents {
+		if a.Name == "leader" {
+			leader = a
+			foundLeader = true
+			break
+		}
+	}
+	if !foundLeader {
+		return nil, fmt.Errorf("runtime config: missing mandatory agents entry with name=leader")
+	}
+	out := make([]RuntimeAgentConfig, 0, len(agents))
+	for _, a := range agents {
+		if a.Name == "leader" {
+			out = append(out, a)
+			continue
+		}
+		out = append(out, inheritAgentModelFromLeader(a, leader))
+	}
+	return out, nil
+}
+
+func mergeAgentByName(agents []RuntimeAgentConfig, name string, f func(RuntimeAgentConfig) RuntimeAgentConfig) []RuntimeAgentConfig {
+	needle := strings.ToLower(strings.TrimSpace(name))
+	for i := range agents {
+		if agents[i].Name == needle {
+			agents[i] = f(agents[i])
+			return agents
+		}
+	}
+	return agents
+}
+
+func applyCuratorEnabledOverride(agents []RuntimeAgentConfig, enabled bool) []RuntimeAgentConfig {
+	for i := range agents {
+		if agents[i].Name == "curator" {
+			agents[i].Enabled = enabled
+			return agents
+		}
+	}
+	agents = append(agents, RuntimeAgentConfig{Name: "curator", Enabled: enabled, Mailbox: false})
+	return agents
+}
+
+func applyLeaderSelectionOverride(agents []RuntimeAgentConfig, provider, model, baseURL, apiKey string) []RuntimeAgentConfig {
+	return mergeAgentByName(agents, "leader", func(a RuntimeAgentConfig) RuntimeAgentConfig {
+		if strings.TrimSpace(provider) != "" {
+			a.Provider = strings.TrimSpace(provider)
+		}
+		if strings.TrimSpace(model) != "" {
+			a.Model = strings.TrimSpace(model)
+		}
+		if strings.TrimSpace(baseURL) != "" {
+			a.BaseURL = strings.TrimSpace(baseURL)
+		}
+		if strings.TrimSpace(apiKey) != "" {
+			a.APIKey = strings.TrimSpace(apiKey)
+		}
+		return a
+	})
+}
+
+func applyLeaderModelEnv(agents []RuntimeAgentConfig) []RuntimeAgentConfig {
+	provider := strings.TrimSpace(os.Getenv("GOAGENT_PROVIDER"))
+	model := strings.TrimSpace(os.Getenv("GOAGENT_MODEL"))
+	baseURL := strings.TrimSpace(os.Getenv("GOAGENT_BASE_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("GOAGENT_API_KEY"))
+	return applyLeaderSelectionOverride(agents, provider, model, baseURL, apiKey)
+}
+
+func mapAgentEntries(entries []RuntimeAgentConfig, fn func(RuntimeAgentConfig) RuntimeAgentConfig) []RuntimeAgentConfig {
+	out := make([]RuntimeAgentConfig, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, fn(e))
+	}
+	return out
+}
+
+func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
+	return RuntimeAgentConfig{
+		Name:                       strings.ToLower(strings.TrimSpace(in.Name)),
+		ModelRef:                   strings.ToLower(strings.TrimSpace(in.ModelRef)),
+		Provider:                   strings.TrimSpace(in.Provider),
+		Model:                      strings.TrimSpace(in.Model),
+		BaseURL:                    strings.TrimSpace(in.BaseURL),
+		APIKey:                     resolveAPIKeyReference(strings.TrimSpace(in.APIKey)),
+		ContextLength:              in.ContextLength,
+		InputTokenPricePerMillion:  in.InputTokenPricePerMillion,
+		OutputTokenPricePerMillion: in.OutputTokenPricePerMillion,
+		Description:                strings.TrimSpace(in.Description),
+		Instruction:                strings.TrimSpace(in.Instruction),
+		Enabled:                    in.Enabled,
+		Mailbox:                    in.Mailbox,
+		Tools:                      normalizeTools(in.Tools),
+		SkillsDir:                  strings.TrimSpace(in.SkillsDir),
+		SoftSkillsDir:              strings.TrimSpace(in.SoftSkillsDir),
+		MCPConfigPath:              strings.TrimSpace(in.MCPConfigPath),
+		PermissionsConfigPath:      strings.TrimSpace(in.PermissionsConfigPath),
+	}
 }
 
 // ResolveRuntimeSettings loads and merges runtime settings using precedence:
@@ -94,8 +378,8 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		AppName:               "agent-toolkit",
 		MCPConfigPath:         "config/mcp_config.yaml",
 		PermissionsConfigPath: "config/permissions.yaml",
-		CuratorEnabled:        true,
-		RoleModels:            map[string]RoleModelConfig{},
+		Models:                map[string]RuntimeModelConfig{},
+		Agents:                defaultAgents(),
 	}
 
 	if strings.TrimSpace(opts.ConfigPath) != "" {
@@ -127,33 +411,20 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(cfg.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(cfg.PermissionsConfigPath)
 	}
-	if cfg.Features.CuratorEnabled != nil {
-		out.CuratorEnabled = *cfg.Features.CuratorEnabled
+	if len(cfg.Models) > 0 {
+		out.Models = normalizeModelCatalog(cfg.Models)
 	}
-	out.DefaultModel = normalizedRoleModel(cfg.Models.Default)
-	for role, sel := range cfg.Models.Roles {
-		normalizedRole := strings.ToLower(strings.TrimSpace(role))
-		if normalizedRole == "" {
-			continue
+	if len(cfg.Agents) > 0 {
+		out.Agents, err = resolveAgentEntries(cfg.Agents, out.Models)
+		if err != nil {
+			return RuntimeSettings{}, err
 		}
-		out.RoleModels[normalizedRole] = normalizedRoleModel(sel)
 	}
 
 	// ENV
-	if v := strings.TrimSpace(os.Getenv("GOAGENT_PROVIDER")); v != "" {
-		out.DefaultModel.Provider = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GOAGENT_MODEL")); v != "" {
-		out.DefaultModel.Model = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GOAGENT_BASE_URL")); v != "" {
-		out.DefaultModel.BaseURL = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GOAGENT_API_KEY")); v != "" {
-		out.DefaultModel.APIKey = v
-	}
+	out.Agents = applyLeaderModelEnv(out.Agents)
 	if v, ok := parseBoolEnv("GOAGENT_CURATOR_ENABLED"); ok {
-		out.CuratorEnabled = v
+		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
 	}
 
 	// Options (highest precedence)
@@ -172,43 +443,22 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(opts.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(opts.PermissionsConfigPath)
 	}
-	if strings.TrimSpace(opts.ModelProvider) != "" {
-		out.DefaultModel.Provider = strings.TrimSpace(opts.ModelProvider)
-	}
-	if strings.TrimSpace(opts.ModelName) != "" {
-		out.DefaultModel.Model = strings.TrimSpace(opts.ModelName)
-	}
-	if strings.TrimSpace(opts.ModelBaseURL) != "" {
-		out.DefaultModel.BaseURL = strings.TrimSpace(opts.ModelBaseURL)
-	}
-	if strings.TrimSpace(opts.ModelAPIKey) != "" {
-		out.DefaultModel.APIKey = strings.TrimSpace(opts.ModelAPIKey)
-	}
-	for role, sel := range opts.RoleModels {
-		normalizedRole := strings.ToLower(strings.TrimSpace(role))
-		if normalizedRole == "" {
-			continue
-		}
-		out.RoleModels[normalizedRole] = normalizedRoleModel(sel)
-	}
+	out.Agents = applyLeaderSelectionOverride(out.Agents, opts.ModelProvider, opts.ModelName, opts.ModelBaseURL, opts.ModelAPIKey)
 	if opts.CuratorEnabled != nil {
-		out.CuratorEnabled = *opts.CuratorEnabled
+		out.Agents = applyCuratorEnabledOverride(out.Agents, *opts.CuratorEnabled)
 	} else if opts.DisableAutoCurate {
 		// Backward-compatible alias for explicitly disabling the hook.
-		out.CuratorEnabled = false
+		out.Agents = applyCuratorEnabledOverride(out.Agents, false)
+	}
+
+	out.Agents = mapAgentEntries(out.Agents, normalizedAgentConfig)
+	out.Agents, err = withInheritedModels(out.Agents)
+	if err != nil {
+		return RuntimeSettings{}, err
 	}
 
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
 	return out, nil
-}
-
-func normalizedRoleModel(in RoleModelConfig) RoleModelConfig {
-	return RoleModelConfig{
-		Provider: strings.TrimSpace(in.Provider),
-		Model:    strings.TrimSpace(in.Model),
-		BaseURL:  strings.TrimSpace(in.BaseURL),
-		APIKey:   resolveAPIKeyReference(strings.TrimSpace(in.APIKey)),
-	}
 }
 
 // resolveAPIKeyReference interprets api_key as either a literal key or an
@@ -246,4 +496,13 @@ func loadRuntimeConfig(path string) (runtimeConfigFile, error) {
 		return runtimeConfigFile{}, fmt.Errorf("runtime config %q: decode yaml: %w", path, err)
 	}
 	return cfg, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
