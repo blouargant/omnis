@@ -121,6 +121,7 @@ type Config struct {
 	UserID                     string
 	SessionID                  string
 	AppName                    string // shown in title bar
+	SubAgentNames              []string
 	InputTokenPricePerMillion  float64
 	OutputTokenPricePerMillion float64
 }
@@ -139,6 +140,14 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if cfg.AppName == "" {
 		cfg.AppName = "agent-toolkit"
+	}
+	subAgentSet := make(map[string]struct{}, len(cfg.SubAgentNames))
+	for _, name := range cfg.SubAgentNames {
+		n := strings.ToLower(strings.TrimSpace(name))
+		if n == "" {
+			continue
+		}
+		subAgentSet[n] = struct{}{}
 	}
 
 	app := tview.NewApplication()
@@ -407,14 +416,33 @@ func Run(ctx context.Context, cfg Config) error {
 		return w
 	}
 
-	// flushMarkdown renders `buf` (markdown source) into the chat pane
-	// via glamour + ANSIWriter, then clears the buffer.
-	flushMarkdown := func(buf *strings.Builder) {
+	// flushMarkdown renders `buf` (markdown source) into the chat pane.
+	// For normal assistant output it uses glamour + ANSIWriter; for
+	// sub-agent spans it prints a per-line prefixed block so delegated
+	// content is visually grouped.
+	flushMarkdown := func(buf *strings.Builder, subAgentName string) {
 		if buf.Len() == 0 {
 			return
 		}
 		text := buf.String()
 		buf.Reset()
+		if subAgentName != "" {
+			lines := strings.Split(strings.TrimSpace(stripTerminalControlSequences(text)), "\n")
+			app.QueueUpdateDraw(func() {
+				for _, line := range lines {
+					line = strings.TrimRight(line, "\r")
+					if line == "" {
+						fmt.Fprint(chat, "[yellow]│[-]\n")
+						continue
+					}
+					fmt.Fprintf(chat, "[yellow]│ %s[-] %s\n", subAgentName, tview.Escape(line))
+				}
+				if app.GetFocus() != chat {
+					chat.ScrollToEnd()
+				}
+			})
+			return
+		}
 		w := chatWidth()
 		out := renderMarkdown(text, w)
 		app.QueueUpdateDraw(func() {
@@ -522,13 +550,10 @@ func Run(ctx context.Context, cfg Config) error {
 				busy = false
 				app.QueueUpdateDraw(func() { setFocus(0) })
 			}()
-			// Render the user turn as markdown too (so code blocks /
-			// lists in the question look right).
-			userMD := fmt.Sprintf("**you**\n\n%s", sanitizeInputText(prompt))
-			appendChat("\n")
-			app.QueueUpdateDraw(func() {
-				fmt.Fprint(chatANSI, renderMarkdown(userMD, chatWidth()))
-			})
+			// Echo the user turn immediately as plain text so the first
+			// submission is visible right away even if markdown rendering
+			// is still warming up.
+			appendChat("\n[::b]you[-]\n\n%s\n", sanitizeInputText(prompt))
 			appendChat("[::b]assistant[-]\n")
 			turnInputStart := inputTokensTotal.Load()
 			turnOutputStart := outputTokensTotal.Load()
@@ -552,9 +577,16 @@ func Run(ctx context.Context, cfg Config) error {
 			// either when a non-text part arrives (tool call/response)
 			// or when the stream completes.
 			var mdBuf strings.Builder
+			var subAgentStack []string
+			currentSubAgent := func() string {
+				if len(subAgentStack) == 0 {
+					return ""
+				}
+				return subAgentStack[len(subAgentStack)-1]
+			}
 			for ev, err := range seq {
 				if err != nil {
-					flushMarkdown(&mdBuf)
+					flushMarkdown(&mdBuf, currentSubAgent())
 					appendChat("\n[red]error: %v[-]\n", err)
 					return
 				}
@@ -569,16 +601,27 @@ func Run(ctx context.Context, cfg Config) error {
 					case p.Text != "":
 						mdBuf.WriteString(stripTerminalControlSequences(p.Text))
 					case p.FunctionCall != nil:
-						flushMarkdown(&mdBuf)
+						flushMarkdown(&mdBuf, currentSubAgent())
+						if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(p.FunctionCall.Name))]; ok {
+							subAgentStack = append(subAgentStack, p.FunctionCall.Name)
+							appendChat("[yellow][::b]--- entering sub-agent: %s ---[-]\n", p.FunctionCall.Name)
+						}
 						appendChat("[aqua]⚙ %s[-] %s\n",
 							p.FunctionCall.Name, shortArgs(p.FunctionCall.Args))
 					case p.FunctionResponse != nil:
-						flushMarkdown(&mdBuf)
+						flushMarkdown(&mdBuf, currentSubAgent())
 						appendChat("[gray]↳ %s[-]\n", p.FunctionResponse.Name)
+						if len(subAgentStack) > 0 && subAgentStack[len(subAgentStack)-1] == p.FunctionResponse.Name {
+							appendChat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", p.FunctionResponse.Name)
+							subAgentStack = subAgentStack[:len(subAgentStack)-1]
+						}
 					}
 				}
 			}
-			flushMarkdown(&mdBuf)
+			for i := len(subAgentStack) - 1; i >= 0; i-- {
+				appendChat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", subAgentStack[i])
+			}
+			flushMarkdown(&mdBuf, currentSubAgent())
 		}()
 	}
 
@@ -624,6 +667,16 @@ func Run(ctx context.Context, cfg Config) error {
 	// QueueUpdateDraw would deadlock (its queue is only drained by Run).
 	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nTab / Shift-Tab to scroll Chat or Trace panes. Esc returns focus to input. Ctrl-L clears the chat. Ctrl-C to quit.[-]\n", cfg.AppName)
 
+	// Pre-warm markdown rendering so the first assistant turn avoids
+	// renderer initialization cost on the critical path.
+	go func() {
+		r := getRenderer(80)
+		if r == nil {
+			return
+		}
+		_, _ = r.Render("warmup")
+	}()
+
 	// Emit real session lifecycle events around the TUI run. These are
 	// distinct from the per-turn EventRunStart/EventRunEnd: subscribers
 	// like the soft-skills curator should fire ONCE here, not on every
@@ -646,6 +699,30 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Keep terminal mouse reporting disabled so users can use native
 	// mouse selection in the chat pane and paste into the input field.
+	var initialChatWidth int
+	var resizeWarmupDone bool
+	app.SetBeforeDrawFunc(func(tcell.Screen) bool {
+		w := chatWidth()
+		if w <= 0 {
+			return false
+		}
+		if initialChatWidth == 0 {
+			initialChatWidth = w
+			return false
+		}
+		if !resizeWarmupDone && w != initialChatWidth {
+			resizeWarmupDone = true
+			go func(width int) {
+				r := getRenderer(width)
+				if r == nil {
+					return
+				}
+				_, _ = r.Render("warmup")
+			}(w)
+		}
+		return false
+	})
+
 	return app.SetRoot(root, true).Run()
 }
 

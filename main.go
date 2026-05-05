@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -123,10 +124,16 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		if err != nil {
 			return fmt.Errorf("tui runner: %w", err)
 		}
+		subAgentNames := make([]string, 0, len(result.SubAgents))
+		for name := range result.SubAgents {
+			subAgentNames = append(subAgentNames, name)
+		}
+		sort.Strings(subAgentNames)
 		return tui.Run(ctx, tui.Config{
 			Runner:                        r,
 			Bus:                           result.EventBus,
 			AppName:                       result.RunnerConfig.AppName,
+			SubAgentNames:                 subAgentNames,
 			InputTokenPricePerMillion:     result.LeaderInputTokenPricePerMillion,
 			OutputTokenPricePerMillion:    result.LeaderOutputTokenPricePerMillion,
 		})
