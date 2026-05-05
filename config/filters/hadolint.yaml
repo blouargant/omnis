@@ -1,0 +1,22 @@
+name: "hadolint"
+version: 1
+description: "Condensed hadolint output: Dockerfile lint issues"
+
+match:
+  command: "hadolint"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more issues"
+
+on_error: "passthrough"

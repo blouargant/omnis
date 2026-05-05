@@ -44,13 +44,15 @@ type ModelEntry struct {
 }
 
 type runtimeConfigFile struct {
-	SkillsDir             string                `yaml:"skills_dir"`
-	SoftSkillsDir         string                `yaml:"softskills_dir"`
-	AppName               string                `yaml:"app_name"`
-	MCPConfigPath         string                `yaml:"mcp_config_path"`
-	PermissionsConfigPath string                `yaml:"permissions_config_path"`
-	Models                map[string]ModelEntry `yaml:"models"`
-	Agents                []AgentEntry          `yaml:"agents"`
+	SkillsDir               string                `yaml:"skills_dir"`
+	SoftSkillsDir           string                `yaml:"softskills_dir"`
+	AppName                 string                `yaml:"app_name"`
+	TokenOptimization       bool                  `yaml:"token_optimization"`
+	BashOutputFiltersDir    string                `yaml:"bash_output_filters_dir"`
+	MCPConfigPath           string                `yaml:"mcp_config_path"`
+	PermissionsConfigPath   string                `yaml:"permissions_config_path"`
+	Models                  map[string]ModelEntry `yaml:"models"`
+	Agents                  []AgentEntry          `yaml:"agents"`
 }
 
 // RuntimeModelConfig is one normalized model profile.
@@ -90,14 +92,16 @@ type RuntimeAgentConfig struct {
 // RuntimeSettings is the merged runtime configuration after precedence
 // resolution: defaults -> YAML -> ENV -> Options.
 type RuntimeSettings struct {
-	ConfigPath            string
-	SkillsDir             string
-	SoftSkillsDir         string
-	AppName               string
-	MCPConfigPath         string
-	PermissionsConfigPath string
-	Models                map[string]RuntimeModelConfig
-	Agents                []RuntimeAgentConfig
+	ConfigPath              string
+	SkillsDir               string
+	SoftSkillsDir           string
+	AppName                 string
+	BashOutputFilterEnabled bool
+	BashOutputFiltersDir    string
+	MCPConfigPath           string
+	PermissionsConfigPath   string
+	Models                  map[string]RuntimeModelConfig
+	Agents                  []RuntimeAgentConfig
 }
 
 // AgentConfig returns the effective config for one agent name.
@@ -372,14 +376,16 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 // defaults -> YAML -> ENV -> Options.
 func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out := RuntimeSettings{
-		ConfigPath:            defaultConfigPath,
-		SkillsDir:             "skills",
-		SoftSkillsDir:         "softskills",
-		AppName:               "agent-toolkit",
-		MCPConfigPath:         "config/mcp_config.yaml",
-		PermissionsConfigPath: "config/permissions.yaml",
-		Models:                map[string]RuntimeModelConfig{},
-		Agents:                defaultAgents(),
+		ConfigPath:              defaultConfigPath,
+		SkillsDir:               "skills",
+		SoftSkillsDir:           "softskills",
+		AppName:                 "agent-toolkit",
+		BashOutputFilterEnabled: false,
+		BashOutputFiltersDir:    "config/filters",
+		MCPConfigPath:           "config/mcp_config.yaml",
+		PermissionsConfigPath:   "config/permissions.yaml",
+		Models:                  map[string]RuntimeModelConfig{},
+		Agents:                  defaultAgents(),
 	}
 
 	if strings.TrimSpace(opts.ConfigPath) != "" {
@@ -404,6 +410,10 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.AppName) != "" {
 		out.AppName = strings.TrimSpace(cfg.AppName)
+	}
+	out.BashOutputFilterEnabled = cfg.TokenOptimization
+	if strings.TrimSpace(cfg.BashOutputFiltersDir) != "" {
+		out.BashOutputFiltersDir = strings.TrimSpace(cfg.BashOutputFiltersDir)
 	}
 	if strings.TrimSpace(cfg.MCPConfigPath) != "" {
 		out.MCPConfigPath = strings.TrimSpace(cfg.MCPConfigPath)

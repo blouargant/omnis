@@ -1,0 +1,22 @@
+name: "git-push"
+version: 1
+description: "Condensed git push: branch status and errors"
+
+match:
+  command: "git"
+  subcommand: "push"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "keep_lines"
+    pattern: "(->|up-to-date|Everything|error|fatal|rejected|\\[new|forced update|\\.\\.)"
+  - action: "truncate_lines"
+    max: 100
+
+on_error: "passthrough"

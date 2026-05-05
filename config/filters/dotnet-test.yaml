@@ -1,0 +1,25 @@
+name: "dotnet-test"
+version: 1
+description: "Condensed dotnet test: test results and failures"
+
+match:
+  command: "dotnet"
+  subcommand: "test"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Determining|Restored|Starting|\\s*$)"
+  - action: "keep_lines"
+    pattern: "(Passed|Failed|Skipped|Total tests|error|Error|Test Run|Duration|\\d+ passed|\\d+ failed)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more test output"
+
+on_error: "passthrough"

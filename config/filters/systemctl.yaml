@@ -1,0 +1,17 @@
+name: "systemctl"
+version: 1
+description: "Condensed systemctl output: service status"
+
+match:
+  command: "systemctl"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "(Loaded:|Active:|Main PID:|Status:|\\u25cf|failed|running|inactive|enabled|disabled|dead)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

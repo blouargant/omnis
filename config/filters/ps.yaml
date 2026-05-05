@@ -1,0 +1,15 @@
+name: "ps"
+version: 1
+description: "Condensed ps output: process list"
+
+match:
+  command: "ps"
+
+pipeline:
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 30
+    overflow_msg: "... more processes"
+
+on_error: "passthrough"

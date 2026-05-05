@@ -1,0 +1,22 @@
+name: "pnpm-install"
+version: 2
+description: "Condensed pnpm output: install summary and errors"
+
+match:
+  command: "pnpm"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\+{3,}|^Progress:|^\\s*$)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+    overflow_msg: "... more output truncated"
+
+on_error: "passthrough"

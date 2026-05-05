@@ -1,0 +1,21 @@
+name: "rsync"
+version: 1
+description: "Condensed rsync output: transfer summary"
+
+match:
+  command: "rsync"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "(sent |received |total size|speedup|error|rsync:|bytes/sec)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 10
+
+on_error: "passthrough"

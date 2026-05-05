@@ -1,0 +1,24 @@
+name: "vitest"
+version: 1
+description: "Condensed vitest output: test results and failures"
+
+match:
+  command: "vitest"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(at |\\s*$)"
+  - action: "keep_lines"
+    pattern: "(PASS|FAIL|Tests\\s|Test Files|Duration|AssertionError|expected|received|\\u2713|\\u2717|\\u25cf)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more test output"
+
+on_error: "passthrough"

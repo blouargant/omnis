@@ -1,0 +1,22 @@
+name: "just"
+version: 1
+description: "Condensed just output: task results"
+
+match:
+  command: "just"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

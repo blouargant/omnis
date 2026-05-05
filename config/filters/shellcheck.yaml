@@ -1,0 +1,26 @@
+name: "shellcheck"
+version: 1
+description: "Condensed shellcheck output: warnings by file"
+
+match:
+  command: "shellcheck"
+  exclude_flags: ["--version", "-V"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*\\^--|^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(^In |SC\\d+|error|warning|note|info|^\\s+\\d+)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more issues"
+
+on_error: "passthrough"

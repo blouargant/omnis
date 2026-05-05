@@ -1,0 +1,22 @@
+name: "git-commit"
+version: 1
+description: "Condensed git commit: branch, hash, and change summary"
+
+match:
+  command: "git"
+  subcommand: "commit"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "(^\\[|file.? changed|insertions?|deletions?|create mode|delete mode|rename|nothing to commit|error|fatal|On branch)"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 10
+
+on_error: "passthrough"

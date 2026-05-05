@@ -1,0 +1,22 @@
+name: "task"
+version: 1
+description: "Condensed task (taskfile) output"
+
+match:
+  command: "task"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^(task: |\\s*$)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

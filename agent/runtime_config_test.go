@@ -203,6 +203,12 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if got := runtime.AppName; got != "agent-toolkit" {
 		t.Fatalf("AppName = %q, want agent-toolkit", got)
 	}
+	if runtime.BashOutputFilterEnabled {
+		t.Fatal("BashOutputFilterEnabled = true, want false")
+	}
+	if got := runtime.BashOutputFiltersDir; got != "config/filters" {
+		t.Fatalf("BashOutputFiltersDir = %q, want config/filters", got)
+	}
 	if _, ok := runtime.AgentConfig("leader"); !ok {
 		t.Fatal("default leader config missing")
 	}
@@ -212,6 +218,29 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	}
 	if !curator.Enabled {
 		t.Fatal("curator.Enabled = false, want true")
+	}
+}
+
+func TestResolveRuntimeSettingsBashOutputFilterFromYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	mustWrite(t, path, []byte(`
+token_optimization: true
+bash_output_filters_dir: config/custom-filters
+agents:
+  - name: leader
+    provider: openai_compat
+    model: test
+`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	if !runtime.BashOutputFilterEnabled {
+		t.Fatal("BashOutputFilterEnabled = false, want true")
+	}
+	if got := runtime.BashOutputFiltersDir; got != "config/custom-filters" {
+		t.Fatalf("BashOutputFiltersDir = %q, want config/custom-filters", got)
 	}
 }
 

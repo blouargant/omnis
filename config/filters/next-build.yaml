@@ -1,0 +1,24 @@
+name: "next-build"
+version: 1
+description: "Condensed next.js build output: pages and errors"
+
+match:
+  command: "next"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*$|^\\s+info|Compiling|Collecting page data)"
+  - action: "keep_lines"
+    pattern: "(Route|Size|First Load|error|Error|warn|\\u25cb|\\u25cf|\\u03bb|\\u2714|Creating|Generating|Build error|Linting)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more routes"
+
+on_error: "passthrough"

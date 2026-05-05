@@ -1,0 +1,23 @@
+name: "pio"
+version: 1
+description: "Condensed PlatformIO output: build result"
+
+match:
+  command: "pio"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*(Compiling|Linking|Building|Checking)|^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(SUCCESS|FAILED|Error|error|warning|RAM:|Flash:|Environment)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+
+on_error: "passthrough"

@@ -1,0 +1,21 @@
+name: "docker-logs"
+version: 1
+description: "Condensed docker logs: deduplicated log lines"
+
+match:
+  command: "docker"
+  subcommand: "logs"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "dedup"
+    normalize: ["\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}", "\\d+\\.\\d+\\.\\d+\\.\\d+"]
+    top: 30
+  - action: "truncate_lines"
+    max: 120
+
+on_error: "passthrough"

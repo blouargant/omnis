@@ -1,0 +1,21 @@
+name: "shopify"
+version: 1
+description: "Condensed shopify CLI output"
+
+match:
+  command: "shopify"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+
+on_error: "passthrough"

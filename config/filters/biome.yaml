@@ -1,0 +1,25 @@
+name: "biome"
+version: 1
+description: "Condensed biome output: lint/format diagnostics"
+
+match:
+  command: "biome"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^(\\s*$|\\s+\\d+ \\|)"
+  - action: "keep_lines"
+    pattern: "(error|warning|Fixed|Checked|diagnostics|invalid|\\u2716|\\u2714)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more diagnostics"
+
+on_error: "passthrough"

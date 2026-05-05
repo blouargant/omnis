@@ -1,0 +1,25 @@
+name: "ty"
+version: 1
+description: "Condensed ty (Python type checker) output"
+
+match:
+  command: "ty"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more errors"
+  - action: "on_empty"
+    message: "ok (no errors)"
+
+on_error: "passthrough"

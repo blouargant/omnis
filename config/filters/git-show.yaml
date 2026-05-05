@@ -1,0 +1,22 @@
+name: "git-show"
+version: 1
+description: "Condensed git show: commit header and diffstat"
+
+match:
+  command: "git"
+  subcommand: "show"
+  exclude_flags: ["--stat", "--format", "--pretty", "--name-only", "--name-status"]
+
+inject:
+  args: ["--stat"]
+  skip_if_present: ["--stat", "--format", "--pretty", "--name-only", "--name-status", "-p", "--patch"]
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "\\S"
+  - action: "head"
+    n: 30
+    overflow_msg: "... more files changed"
+
+on_error: "passthrough"

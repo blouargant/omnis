@@ -1,0 +1,22 @@
+name: "git-pull"
+version: 1
+description: "Condensed git pull: merge summary and conflicts"
+
+match:
+  command: "git"
+  subcommand: "pull"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^(remote:|From |\\s*$)"
+  - action: "keep_lines"
+    pattern: "(Already up|Updating|Fast-forward|file.? changed|insertions?|deletions?|->|CONFLICT|error|fatal|Merge|rebase|Rewinding)"
+  - action: "truncate_lines"
+    max: 100
+
+on_error: "passthrough"

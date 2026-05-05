@@ -1,0 +1,69 @@
+name: "tsc"
+version: 3
+description: "Condensed tsc output: type errors and summary"
+
+match:
+  command: "tsc"
+  exclude_flags: ["--version", "-V"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  # Remove blank lines
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  # Remove source context lines (code snippets shown under errors)
+  - action: "remove_lines"
+    pattern: "^\\d+\\s+\\S"
+  # Remove underline/pointer lines (tildes or spaces followed by tildes)
+  - action: "remove_lines"
+    pattern: "^\\s+~"
+  # Keep error lines and summary
+  - action: "keep_lines"
+    pattern: "(error TS\\d+|warning TS\\d+|Found \\d+ error)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more errors truncated"
+  # If no errors, signal clean build
+  - action: "on_empty"
+    message: "ok (no type errors)"
+
+on_error: "passthrough"
+
+tests:
+  - name: "no errors"
+    input: ""
+    expected: |
+      ok (no type errors)
+  - name: "pretty format errors with context"
+    input: |
+      src/index.ts:3:1 - error TS2304: Cannot find name 'foo'.
+
+      3 foo = 1;
+        ~~~
+
+      src/utils.ts:10:5 - error TS2322: Type 'string' is not assignable to type 'number'.
+
+      10   const x: number = "hello";
+           ~
+
+      Found 2 errors in 2 files.
+    expected: |
+      index.ts:3:1 - error TS2304: Cannot find name 'foo'.
+      utils.ts:10:5 - error TS2322: Type 'string' is not assignable to type 'number'.
+      Found 2 errors in 2 files.
+  - name: "classic format errors"
+    input: |
+      src/index.ts(3,1): error TS2304: Cannot find name 'foo'.
+      src/utils.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.
+      Found 2 errors in 2 files.
+    expected: |
+      index.ts(3,1): error TS2304: Cannot find name 'foo'.
+      utils.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.
+      Found 2 errors in 2 files.

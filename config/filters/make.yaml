@@ -1,0 +1,41 @@
+name: "make"
+version: 2
+description: "Condensed make output: removes directory navigation noise"
+
+match:
+  command: "make"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^make\\[\\d+\\]: (Entering|Leaving) directory"
+  - action: "remove_lines"
+    pattern: "^(Nothing to be done for|make\\[\\d+\\]: Nothing to be done)"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more output truncated"
+  - action: "on_empty"
+    message: "ok"
+
+on_error: "passthrough"
+
+tests:
+  - name: "directory noise removed"
+    input: |
+      make[1]: Entering directory '/home/user/project'
+      gcc -o main main.c
+      make[1]: Leaving directory '/home/user/project'
+    expected: |
+      gcc -o main main.c
+  - name: "empty output returns ok"
+    input: ""
+    expected: |
+      ok

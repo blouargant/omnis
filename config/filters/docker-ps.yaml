@@ -1,0 +1,17 @@
+name: "docker-ps"
+version: 1
+description: "Condensed docker ps: container list with status"
+
+match:
+  command: "docker"
+  subcommand: "ps"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 30
+    overflow_msg: "... more containers"
+
+on_error: "passthrough"

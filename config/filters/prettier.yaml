@@ -1,0 +1,25 @@
+name: "prettier"
+version: 1
+description: "Condensed prettier output: formatting issues"
+
+match:
+  command: "prettier"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more files"
+  - action: "on_empty"
+    message: "ok (all formatted)"
+
+on_error: "passthrough"

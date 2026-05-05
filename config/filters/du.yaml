@@ -1,0 +1,15 @@
+name: "du"
+version: 1
+description: "Condensed du output: largest entries first"
+
+match:
+  command: "du"
+
+pipeline:
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "head"
+    n: 30
+    overflow_msg: "... more entries"
+
+on_error: "passthrough"

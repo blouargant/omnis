@@ -5,6 +5,8 @@
 #skills_dir: skills
 softskills_dir: softskills
 app_name: agent-toolkit
+token_optimization: true
+bash_output_filters_dir: config/filters
 mcp_config_path: config/mcp_config.yaml
 permissions_config_path: config/permissions.yaml
 

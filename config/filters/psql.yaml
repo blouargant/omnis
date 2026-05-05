@@ -1,0 +1,18 @@
+name: "psql"
+version: 1
+description: "Condensed psql output: query results"
+
+match:
+  command: "psql"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^[-+]+$"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 40
+    overflow_msg: "... more rows"
+
+on_error: "passthrough"

@@ -1,0 +1,20 @@
+name: "git-stash"
+version: 1
+description: "Condensed git stash: operation summary"
+
+match:
+  command: "git"
+  subcommand: "stash"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "(Saved|Dropped|stash@|Already|On branch|CONFLICT|error|fatal|No stash|No local changes)"
+  - action: "head"
+    n: 15
+
+on_error: "passthrough"

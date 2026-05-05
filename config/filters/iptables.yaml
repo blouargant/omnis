@@ -1,0 +1,17 @@
+name: "iptables"
+version: 1
+description: "Condensed iptables output: rules summary"
+
+match:
+  command: "iptables"
+
+pipeline:
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 30
+    overflow_msg: "... more rules"
+
+on_error: "passthrough"

@@ -1,0 +1,15 @@
+name: "jq"
+version: 1
+description: "Condensed jq output: truncated JSON"
+
+match:
+  command: "jq"
+
+pipeline:
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

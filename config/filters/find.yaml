@@ -1,0 +1,16 @@
+name: "find"
+version: 1
+description: "Condensed find output: compacts paths and truncates"
+
+match:
+  command: "find"
+
+pipeline:
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 50
+    overflow_msg: "... more files"
+
+on_error: "passthrough"

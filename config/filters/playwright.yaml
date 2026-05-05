@@ -1,0 +1,24 @@
+name: "playwright"
+version: 1
+description: "Condensed playwright output: test results and failures"
+
+match:
+  command: "playwright"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(at |\\s*$)"
+  - action: "keep_lines"
+    pattern: "(passed|failed|skipped|\\d+ test|Error|expect|Received|Expected|Timeout|\\u2713|\\u2717|\\u25cf)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more test output"
+
+on_error: "passthrough"

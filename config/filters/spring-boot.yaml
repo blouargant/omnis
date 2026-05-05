@@ -1,0 +1,23 @@
+name: "spring-boot"
+version: 1
+description: "Condensed spring-boot output: startup and errors"
+
+match:
+  command: "spring-boot"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "keep_lines"
+    pattern: "(Started |ERROR|Exception|WARN|Failed to|Tomcat started|Application run|BUILD)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+
+on_error: "passthrough"

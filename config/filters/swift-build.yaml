@@ -1,0 +1,26 @@
+name: "swift-build"
+version: 1
+description: "Condensed swift build output: errors and warnings"
+
+match:
+  command: "swift"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^Compiling |^Linking |^Build complete|^Fetching |^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(error:|warning:|Build complete|Build FAILED|note:|compile error)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+  - action: "on_empty"
+    message: "ok (compiled)"
+
+on_error: "passthrough"

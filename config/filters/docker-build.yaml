@@ -1,0 +1,75 @@
+name: "docker-build"
+version: 3
+description: "Condensed docker build: step names, final result, and errors"
+
+match:
+  command: "docker"
+  exclude_flags: ["--version", "-v"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  # Remove blank lines
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  # Remove sub-step detail lines (=> => sha256, => => extracting, => => transferring, etc.)
+  - action: "remove_lines"
+    pattern: "^\\s*=> => "
+  # Remove cache/download progress lines
+  - action: "remove_lines"
+    pattern: "(^\\s*#\\d+ [0-9.]+ |sha256:|^Downloading|^Extracting|already being pulled|Pulling fs layer|Waiting|Pull complete|Digest:|downloading|extracting)"
+  # Keep step headers, FROM, RUN, COPY, final output, and errors
+  - action: "keep_lines"
+    pattern: "(^\\s*=>|^Step \\d+|^\\s*#\\d+ |^Successfully |^ERROR|^error|naming to|exporting to image|DONE|CACHED|writing image)"
+  # Trim verbose step output to just step name
+  - action: "replace"
+    pattern: "^(\\s*#\\d+ \\[.+?\\]).*done$"
+    replacement: "$1 done"
+  # Strip leading whitespace for clean output
+  - action: "replace"
+    pattern: "^\\s+"
+    replacement: ""
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more steps truncated"
+
+on_error: "passthrough"
+
+tests:
+  - name: "buildkit output"
+    input: |
+      [+] Building 12.3s (8/8) FINISHED
+       => [internal] load build definition from Dockerfile                       0.0s
+       => => transferring dockerfile: 234B                                       0.0s
+       => [internal] load .dockerignore                                          0.0s
+       => => transferring context: 2B                                            0.0s
+       => [1/3] FROM docker.io/library/node:18-alpine                            0.0s
+       => CACHED [2/3] WORKDIR /app                                              0.0s
+       => [3/3] COPY . .                                                         0.5s
+       => => transferring context: 1.23MB                                        0.4s
+       => exporting to image                                                     0.3s
+       => => exporting layers                                                    0.2s
+       => => writing image sha256:abc123                                         0.0s
+       => => naming to docker.io/library/myapp:latest                            0.0s
+    expected: |
+      => [internal] load build definition from Dockerfile                       0.0s
+      => [internal] load .dockerignore                                          0.0s
+      => [1/3] FROM docker.io/library/node:18-alpine                            0.0s
+      => CACHED [2/3] WORKDIR /app                                              0.0s
+      => [3/3] COPY . .                                                         0.5s
+      => exporting to image                                                     0.3s
+  - name: "build error"
+    input: |
+       => [internal] load build definition from Dockerfile                       0.0s
+       => [1/2] FROM docker.io/library/node:18                                   0.0s
+       => ERROR [2/2] RUN npm install                                            5.2s
+       => => npm ERR! code ERESOLVE
+    expected: |
+      => [internal] load build definition from Dockerfile                       0.0s
+      => [1/2] FROM docker.io/library/node:18                                   0.0s
+      => ERROR [2/2] RUN npm install                                            5.2s

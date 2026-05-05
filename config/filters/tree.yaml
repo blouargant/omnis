@@ -1,0 +1,14 @@
+name: "tree"
+version: 1
+description: "Condensed tree output: truncates deep hierarchies"
+
+match:
+  command: "tree"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "head"
+    n: 50
+    overflow_msg: "... more entries"
+
+on_error: "passthrough"

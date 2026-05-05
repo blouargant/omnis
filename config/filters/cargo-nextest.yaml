@@ -1,0 +1,25 @@
+name: "cargo-nextest"
+version: 1
+description: "Condensed cargo nextest: test results summary"
+
+match:
+  command: "cargo"
+  subcommand: "nextest"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Compiling|Downloading|Downloaded|Blocking|Fresh)"
+  - action: "keep_lines"
+    pattern: "(PASS|FAIL|RETRY|ok|FAILED|Summary|\\d+ tests?|error|SIGTERM|TIMEOUT|Starting)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more test output"
+
+on_error: "passthrough"

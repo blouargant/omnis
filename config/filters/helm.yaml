@@ -1,0 +1,22 @@
+name: "helm"
+version: 1
+description: "Condensed helm output: release status and errors"
+
+match:
+  command: "helm"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

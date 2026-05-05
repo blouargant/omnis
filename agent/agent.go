@@ -379,6 +379,12 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := fstools.ConfigureBashOutputFilter(fstools.BashOutputFilterConfig{
+		Enabled:    runtime.BashOutputFilterEnabled,
+		FiltersDir: runtime.BashOutputFiltersDir,
+	}); err != nil {
+		return nil, fmt.Errorf("bootstrap bash output filter: %w", err)
+	}
 	leaderCfg, ok := runtime.LeaderConfig()
 	if !ok {
 		return nil, fmt.Errorf("runtime config: missing mandatory leader agent")
@@ -641,10 +647,10 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	}
 
 	return &AgentResult{
-		Agent:     lead,
-		SubAgents: subAgentMap,
-		Plugins:   plugins,
-		EventBus:  bus,
+		Agent:                            lead,
+		SubAgents:                        subAgentMap,
+		Plugins:                          plugins,
+		EventBus:                         bus,
 		LeaderInputTokenPricePerMillion:  leaderCfg.InputTokenPricePerMillion,
 		LeaderOutputTokenPricePerMillion: leaderCfg.OutputTokenPricePerMillion,
 		RunnerConfig: runner.Config{

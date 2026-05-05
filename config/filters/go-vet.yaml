@@ -1,0 +1,26 @@
+name: "go-vet"
+version: 1
+description: "Condensed go vet: issues by file"
+
+match:
+  command: "go"
+  subcommand: "vet"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^#\\s"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more issues"
+  - action: "on_empty"
+    message: "ok (no issues)"
+
+on_error: "passthrough"

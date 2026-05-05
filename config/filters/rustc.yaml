@@ -1,0 +1,23 @@
+name: "rustc"
+version: 2
+description: "Condensed rustc output: errors and warnings with locations"
+
+match:
+  command: "rustc"
+  exclude_flags: ["--version", "-V"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "keep_lines"
+    pattern: "(^error|^warning|^ -->|aborting due to|For more information|could not compile)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more errors truncated"
+
+on_error: "passthrough"

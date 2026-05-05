@@ -106,3 +106,84 @@ func TestRunGrepAndGlob(t *testing.T) {
 		t.Fatalf("RunGlob() = %q, want %q", files, pathA)
 	}
 }
+
+func TestRunBashOutputFilterOptIn(t *testing.T) {
+	dir := t.TempDir()
+	rules := `
+name: "printf-head"
+version: 1
+match:
+  command: "printf"
+pipeline:
+  - action: "head"
+    n: 1
+on_error: "passthrough"
+`
+	path := filepath.Join(dir, "printf.yaml")
+	if err := os.WriteFile(path, []byte(rules), 0o644); err != nil {
+		t.Fatalf("WriteFile(rules) error = %v", err)
+	}
+
+	if err := ConfigureBashOutputFilter(BashOutputFilterConfig{}); err != nil {
+		t.Fatalf("ConfigureBashOutputFilter(disable) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ConfigureBashOutputFilter(BashOutputFilterConfig{})
+	})
+
+	raw, err := RunBash(context.Background(), BashIn{Command: "printf 'a\\nb\\n'"})
+	if err != nil {
+		t.Fatalf("RunBash(raw) error = %v", err)
+	}
+	if raw != "a\nb" {
+		t.Fatalf("RunBash(raw) = %q, want %q", raw, "a\\nb")
+	}
+
+	if err := ConfigureBashOutputFilter(BashOutputFilterConfig{Enabled: true, FiltersDir: dir}); err != nil {
+		t.Fatalf("ConfigureBashOutputFilter(enable) error = %v", err)
+	}
+
+	filtered, err := RunBash(context.Background(), BashIn{Command: "printf 'a\\nb\\n'"})
+	if err != nil {
+		t.Fatalf("RunBash(filtered) error = %v", err)
+	}
+	if filtered != "a\n+1 more lines" {
+		t.Fatalf("RunBash(filtered) = %q, want %q", filtered, "a\\n+1 more lines")
+	}
+}
+
+func TestRunBashOutputFilterInjectsArgs(t *testing.T) {
+	dir := t.TempDir()
+	rules := `
+name: "echo-inject"
+version: 1
+match:
+  command: "echo"
+inject:
+  args: ["world"]
+  skip_if_present: ["world"]
+pipeline:
+  - action: "head"
+    n: 1
+on_error: "passthrough"
+`
+	path := filepath.Join(dir, "echo.yaml")
+	if err := os.WriteFile(path, []byte(rules), 0o644); err != nil {
+		t.Fatalf("WriteFile(rules) error = %v", err)
+	}
+
+	if err := ConfigureBashOutputFilter(BashOutputFilterConfig{Enabled: true, FiltersDir: dir}); err != nil {
+		t.Fatalf("ConfigureBashOutputFilter(enable) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ConfigureBashOutputFilter(BashOutputFilterConfig{})
+	})
+
+	out, err := RunBash(context.Background(), BashIn{Command: "echo hello"})
+	if err != nil {
+		t.Fatalf("RunBash() error = %v", err)
+	}
+	if out != "hello world" {
+		t.Fatalf("RunBash() = %q, want %q", out, "hello world")
+	}
+}

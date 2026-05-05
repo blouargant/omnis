@@ -1,0 +1,22 @@
+name: "curl"
+version: 1
+description: "Condensed curl output: response headers and body truncation"
+
+match:
+  command: "curl"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(\\*|>|\\{|\\}) "
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... response truncated"
+
+on_error: "passthrough"

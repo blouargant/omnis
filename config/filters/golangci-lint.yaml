@@ -1,0 +1,25 @@
+name: "golangci-lint"
+version: 1
+description: "Condensed golangci-lint: issues grouped by file"
+
+match:
+  command: "golangci-lint"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^(level=|WARN|INFO|DEBUG)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more issues"
+  - action: "on_empty"
+    message: "ok (0 issues)"
+
+on_error: "passthrough"

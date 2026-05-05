@@ -1,0 +1,27 @@
+name: "cargo-check"
+version: 1
+description: "Condensed cargo check: type errors and warnings"
+
+match:
+  command: "cargo"
+  subcommand: "check"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Compiling|Checking|Downloading|Downloaded|Fresh|Blocking)"
+  - action: "keep_lines"
+    pattern: "(^error|^warning|^ -->|Finished|could not compile|For more|generated \\d+)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more errors"
+  - action: "on_empty"
+    message: "ok (no errors)"
+
+on_error: "passthrough"

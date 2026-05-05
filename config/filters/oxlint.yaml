@@ -1,0 +1,25 @@
+name: "oxlint"
+version: 1
+description: "Condensed oxlint output: lint issues"
+
+match:
+  command: "oxlint"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*\\d+ \\||^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(error|warning|help:|\\d+ problems?|\\d+ errors?|\\d+ warnings?|\\u2716|\\u00d7)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more issues"
+
+on_error: "passthrough"

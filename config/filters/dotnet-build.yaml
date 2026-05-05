@@ -1,0 +1,26 @@
+name: "dotnet-build"
+version: 1
+description: "Condensed dotnet build: errors and build result"
+
+match:
+  command: "dotnet"
+  subcommand: "build"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Determining|Restored|Nothing to do|\\s*$)"
+  - action: "keep_lines"
+    pattern: "(error |warning |Build succeeded|Build FAILED|\\d+ Error|\\d+ Warning|Time Elapsed)"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more errors"
+
+on_error: "passthrough"

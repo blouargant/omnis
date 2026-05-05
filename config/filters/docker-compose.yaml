@@ -1,0 +1,22 @@
+name: "docker-compose"
+version: 1
+description: "Condensed docker-compose output: service status"
+
+match:
+  command: "docker-compose"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*(Pulling|Waiting|Extracting|Verifying|Pull complete|Digest:|Status:)|^\\s*$)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

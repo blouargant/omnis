@@ -1,0 +1,23 @@
+name: "uv-sync"
+version: 1
+description: "Condensed uv output: install summary"
+
+match:
+  command: "uv"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*(Downloading|Building|Preparing)|^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(Resolved|Installed|Uninstalled|Audited|error|warning|Already|packages in)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

@@ -1,0 +1,25 @@
+name: "ansible-playbook"
+version: 1
+description: "Condensed ansible-playbook: task results and recap"
+
+match:
+  command: "ansible-playbook"
+  exclude_flags: ["--version", "-V"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "keep_lines"
+    pattern: "(PLAY|TASK|ok:|changed:|failed:|fatal:|unreachable:|skipping:|RECAP|ERROR)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more tasks"
+
+on_error: "passthrough"

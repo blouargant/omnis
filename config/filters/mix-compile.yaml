@@ -1,0 +1,27 @@
+name: "mix-compile"
+version: 1
+description: "Condensed mix compile output: errors and warnings"
+
+match:
+  command: "mix"
+  subcommand: "compile"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^Compiling \\d+ file|^Generated |^\\s*$)"
+  - action: "keep_lines"
+    pattern: "(error|warning|\\*\\* )"
+  - action: "compact_path"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+  - action: "on_empty"
+    message: "ok (compiled)"
+
+on_error: "passthrough"

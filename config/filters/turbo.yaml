@@ -1,0 +1,23 @@
+name: "turbo"
+version: 1
+description: "Condensed turborepo output: task results summary"
+
+match:
+  command: "turbo"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*$|^\\s*\\u2502|cache hit|cache miss)"
+  - action: "keep_lines"
+    pattern: "(Tasks:|error|Error|FAIL|failed|succeeded|cached|Total|Duration)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+
+on_error: "passthrough"

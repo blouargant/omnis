@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blouargant/agent-toolkit/internal/filter"
+
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 )
@@ -36,12 +38,125 @@ const MaxToolOutput = 50_000
 var (
 	snapMu    sync.Mutex
 	snapshots = map[string]*string{}
+
+	bashFilterMu       sync.RWMutex
+	bashFilterEnabled  bool
+	bashFilterRegistry *filter.Registry
 )
 
 // alwaysBlock contains substrings that RunBash refuses outright. The
 // permissions package implements the full three-tier YAML governance; this
 // is the hard floor that always applies, even when permissions are disabled.
 var alwaysBlock = []string{"rm -rf /", ":(){:|:&};:", "mkfs"}
+
+// BashOutputFilterConfig controls optional output filtering for RunBash.
+type BashOutputFilterConfig struct {
+	Enabled    bool
+	FiltersDir string
+}
+
+// ConfigureBashOutputFilter loads and enables/disables bash output filtering.
+func ConfigureBashOutputFilter(cfg BashOutputFilterConfig) error {
+	bashFilterMu.Lock()
+	defer bashFilterMu.Unlock()
+
+	bashFilterEnabled = false
+	bashFilterRegistry = nil
+
+	if !cfg.Enabled {
+		return nil
+	}
+	rulesDir := strings.TrimSpace(cfg.FiltersDir)
+	if rulesDir == "" {
+		rulesDir = filter.DefaultRulesDir
+	}
+	filters, err := filter.LoadDir(rulesDir)
+	if err != nil {
+		return fmt.Errorf("bash output filter: load rules from %q: %w", rulesDir, err)
+	}
+	bashFilterRegistry = filter.NewRegistry(filters)
+	bashFilterEnabled = true
+	return nil
+}
+
+func maybeApplyBashOutputFilter(command, output string) string {
+	bashFilterMu.RLock()
+	enabled := bashFilterEnabled
+	reg := bashFilterRegistry
+	bashFilterMu.RUnlock()
+
+	if !enabled || reg == nil || strings.TrimSpace(output) == "" {
+		return output
+	}
+	filtered, applied, err := filter.ApplyForCommand(reg, command, output)
+	if err != nil || !applied {
+		return output
+	}
+	return strings.TrimRight(filtered, "\n")
+}
+
+func maybeInjectBashFilterArgs(command string) string {
+	bashFilterMu.RLock()
+	enabled := bashFilterEnabled
+	reg := bashFilterRegistry
+	bashFilterMu.RUnlock()
+
+	if !enabled || reg == nil || strings.TrimSpace(command) == "" {
+		return command
+	}
+	// Keep shell behavior unchanged for complex expressions.
+	if strings.ContainsAny(command, "|;&<>()`$") {
+		return command
+	}
+
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return command
+	}
+
+	binary := parts[0]
+	allArgs := []string{}
+	if len(parts) > 1 {
+		allArgs = parts[1:]
+	}
+
+	subcommand := ""
+	args := allArgs
+	if len(allArgs) > 0 {
+		subcommand = allArgs[0]
+		args = allArgs[1:]
+	}
+
+	f := reg.Match(filepath.Base(binary), subcommand, args)
+	if f == nil || f.Inject == nil {
+		return command
+	}
+
+	injectedArgs, changed := reg.ShouldInject(f, allArgs)
+	if !changed {
+		return command
+	}
+
+	tokens := append([]string{binary}, injectedArgs...)
+	quoted := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		quoted = append(quoted, shellQuote(tok))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, func(r rune) bool {
+		return !(r == '_' || r == '-' || r == '.' || r == '/' || r == ':' || r == '=' || r == '+' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	}) == -1 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
 
 // truncate caps s at MaxToolOutput.
 func truncate(s string) string {
@@ -75,7 +190,8 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", in.Command)
+	execCommand := maybeInjectBashFilterArgs(in.Command)
+	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", execCommand)
 	out, err := cmd.CombinedOutput()
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
@@ -84,6 +200,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	if err != nil && s == "" {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
+	s = maybeApplyBashOutputFilter(in.Command, s)
 	if s == "" {
 		return "(no output)", nil
 	}

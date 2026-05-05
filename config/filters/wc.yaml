@@ -1,0 +1,13 @@
+name: "wc"
+version: 1
+description: "Condensed wc output: limits long file lists"
+
+match:
+  command: "wc"
+
+pipeline:
+  - action: "head"
+    n: 30
+    overflow_msg: "... more files"
+
+on_error: "passthrough"

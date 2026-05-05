@@ -1,0 +1,24 @@
+name: "cargo-install"
+version: 1
+description: "Condensed cargo install: install summary"
+
+match:
+  command: "cargo"
+  subcommand: "install"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Compiling|Downloading|Downloaded|Updating|Fresh)"
+  - action: "keep_lines"
+    pattern: "(Installing|Installed|Replacing|error|warning|already installed)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 10
+
+on_error: "passthrough"

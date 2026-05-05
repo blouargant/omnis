@@ -1,0 +1,25 @@
+name: "go-build"
+version: 1
+description: "Condensed go build: errors only, ok on success"
+
+match:
+  command: "go"
+  subcommand: "build"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more errors"
+  - action: "on_empty"
+    message: "ok (compiled)"
+
+on_error: "passthrough"

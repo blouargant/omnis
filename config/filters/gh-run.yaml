@@ -1,0 +1,19 @@
+name: "gh-run"
+version: 1
+description: "Condensed gh run output: workflow run status"
+
+match:
+  command: "gh"
+  subcommand: "run"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more runs"
+
+on_error: "passthrough"

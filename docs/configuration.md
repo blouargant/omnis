@@ -18,6 +18,8 @@ agent wiring.
 skills_dir: skills
 softskills_dir: softskills
 app_name: agent-toolkit
+token_optimization: false
+bash_output_filters_dir: config/filters
 mcp_config_path: config/mcp_config.yaml
 permissions_config_path: config/permissions.yaml
 
@@ -62,6 +64,18 @@ Agents select one profile using `model_ref`.
 
 If an agent omits `model_ref`, it can still specify `provider` / `model`
 inline for backward compatibility.
+
+### Bash output filtering
+
+The `bash` tool can optionally post-process command output using declarative
+YAML pipelines imported from the snip filter format.
+
+- `token_optimization` (bool): global opt-in toggle.
+- `bash_output_filters_dir` (string): directory containing `.yaml`/`.yml`
+  filter rules.
+
+When disabled (default), `bash` output is unchanged. When enabled, matching
+commands are filtered before the tool's normal truncation step.
 
 If a non-leader agent omits model connection fields, they inherit from
 the leader.

@@ -1,0 +1,16 @@
+name: "diff"
+version: 1
+description: "Condensed diff output: keeps change markers and context"
+
+match:
+  command: "diff"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 60
+    overflow_msg: "... more changes"
+
+on_error: "passthrough"

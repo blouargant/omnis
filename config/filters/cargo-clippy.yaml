@@ -1,0 +1,27 @@
+name: "cargo-clippy"
+version: 1
+description: "Condensed cargo clippy: warnings and errors with locations"
+
+match:
+  command: "cargo"
+  subcommand: "clippy"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Compiling|Checking|Downloading|Downloaded|Fresh|Blocking)"
+  - action: "keep_lines"
+    pattern: "(^error|^warning|^ -->|Finished|could not compile|For more|generated \\d+)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more warnings"
+  - action: "on_empty"
+    message: "ok (no warnings)"
+
+on_error: "passthrough"

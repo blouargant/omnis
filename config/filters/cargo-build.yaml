@@ -1,0 +1,29 @@
+name: "cargo-build"
+version: 1
+description: "Condensed cargo build: removes compilation noise, keeps errors"
+
+match:
+  command: "cargo"
+  subcommand: "build"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*(Compiling|Downloading|Downloaded|Updating|Fresh|Blocking)"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "keep_lines"
+    pattern: "(^error|^warning|^ -->|Finished|aborting|could not compile|For more)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... more errors"
+  - action: "on_empty"
+    message: "ok (compiled)"
+
+on_error: "passthrough"

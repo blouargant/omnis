@@ -1,0 +1,16 @@
+name: "df"
+version: 1
+description: "Condensed df output: removes virtual filesystems"
+
+match:
+  command: "df"
+
+pipeline:
+  - action: "remove_lines"
+    pattern: "(^(tmpfs|devtmpfs|udev|none|overlay|shm) |^\\s*$)"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

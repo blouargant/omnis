@@ -1,0 +1,14 @@
+name: "stat"
+version: 1
+description: "Condensed stat output"
+
+match:
+  command: "stat"
+
+pipeline:
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

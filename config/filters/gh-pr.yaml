@@ -1,0 +1,19 @@
+name: "gh-pr"
+version: 1
+description: "Condensed gh pr output: PR list/view summary"
+
+match:
+  command: "gh"
+  subcommand: "pr"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more PRs"
+
+on_error: "passthrough"

@@ -1,0 +1,21 @@
+name: "skopeo"
+version: 1
+description: "Condensed skopeo output: image operations"
+
+match:
+  command: "skopeo"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^Getting image|^Copying |^Writing |^\\s*$)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

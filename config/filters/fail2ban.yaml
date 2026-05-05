@@ -1,0 +1,17 @@
+name: "fail2ban"
+version: 1
+description: "Condensed fail2ban-client output"
+
+match:
+  command: "fail2ban-client"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

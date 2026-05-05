@@ -1,0 +1,23 @@
+name: "composer-install"
+version: 1
+description: "Condensed composer output: install summary"
+
+match:
+  command: "composer"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^\\s*(- (Downloading|Installing|Updating)|Loading composer|Reading ))|^\\s*$"
+  - action: "keep_lines"
+    pattern: "(Package operations|Nothing to|Lock file|Generating|error|warning|Writing)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

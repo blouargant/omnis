@@ -1,0 +1,21 @@
+name: "ollama"
+version: 1
+description: "Condensed ollama output: model status and errors"
+
+match:
+  command: "ollama"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^pulling |^verifying |^writing |^\\s*$|^\\s+\\d+%)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

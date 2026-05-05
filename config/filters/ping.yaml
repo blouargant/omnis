@@ -1,0 +1,14 @@
+name: "ping"
+version: 1
+description: "Condensed ping output: statistics only"
+
+match:
+  command: "ping"
+
+pipeline:
+  - action: "keep_lines"
+    pattern: "(^PING|^---.*statistics|packets? transmitted|rtt |round-trip|^\\d+ bytes.*time=)"
+  - action: "tail"
+    n: 5
+
+on_error: "passthrough"

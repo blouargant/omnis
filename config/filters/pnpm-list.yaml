@@ -1,0 +1,17 @@
+name: "pnpm-list"
+version: 1
+description: "Condensed pnpm list output: dependency tree"
+
+match:
+  command: "pnpm"
+  subcommand: "list"
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "truncate_lines"
+    max: 100
+  - action: "head"
+    n: 40
+    overflow_msg: "... more dependencies"
+
+on_error: "passthrough"

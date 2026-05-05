@@ -1,0 +1,24 @@
+name: "quarto"
+version: 1
+description: "Condensed quarto output: render status"
+
+match:
+  command: "quarto"
+  exclude_flags: ["--version", "-V"]
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "^\\s*$"
+  - action: "keep_lines"
+    pattern: "(pandoc|Output|Error|error|warning|render)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 20
+
+on_error: "passthrough"

@@ -1,0 +1,22 @@
+name: "gcloud"
+version: 1
+description: "Condensed gcloud output: results and errors"
+
+match:
+  command: "gcloud"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "remove_lines"
+    pattern: "(^WARNING:|^\\s*$)"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 40
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

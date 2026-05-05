@@ -1,0 +1,20 @@
+name: "ssh"
+version: 1
+description: "Condensed ssh output: connection info and errors"
+
+match:
+  command: "ssh"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 30
+    overflow_msg: "... more output"
+
+on_error: "passthrough"

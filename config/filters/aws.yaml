@@ -1,0 +1,20 @@
+name: "aws"
+version: 1
+description: "Condensed AWS CLI output: truncated JSON responses"
+
+match:
+  command: "aws"
+
+streams:
+  - stdout
+  - stderr
+
+pipeline:
+  - action: "strip_ansi"
+  - action: "truncate_lines"
+    max: 120
+  - action: "head"
+    n: 50
+    overflow_msg: "... response truncated"
+
+on_error: "passthrough"
