@@ -269,6 +269,24 @@ func Run(ctx context.Context, cfg Config) error {
 	trace.SetBorder(true).SetTitle(" Trace ").SetTitleAlign(tview.AlignLeft)
 	trace.SetChangedFunc(func() { app.Draw() })
 
+	// Focus cycling: Tab / Shift-Tab rotates focus among input → chat → trace
+	// so the user can scroll either panel with arrow keys / Page Up / Page Down.
+	// Esc returns focus to the input field; Ctrl-C always quits.
+	focusList := []tview.Primitive{input, chat, trace}
+	focusIdx := 0
+	setFocus := func(idx int) {
+		focusIdx = idx
+		chat.SetBorderColor(tcell.ColorDefault)
+		trace.SetBorderColor(tcell.ColorDefault)
+		switch idx {
+		case 1: // chat
+			chat.SetBorderColor(tcell.ColorYellow)
+		case 2: // trace
+			trace.SetBorderColor(tcell.ColorYellow)
+		}
+		app.SetFocus(focusList[idx])
+	}
+
 	// ── Status bar ──────────────────────────────────────────────────────
 	status := tview.NewTextView().
 		SetDynamicColors(true).
@@ -294,7 +312,9 @@ func Run(ctx context.Context, cfg Config) error {
 		text := fmt.Sprintf(format, args...)
 		app.QueueUpdateDraw(func() {
 			fmt.Fprint(chat, text)
-			chat.ScrollToEnd()
+			if app.GetFocus() != chat {
+				chat.ScrollToEnd()
+			}
 		})
 	}
 	appendTrace := func(format string, args ...any) {
@@ -302,7 +322,9 @@ func Run(ctx context.Context, cfg Config) error {
 		text := fmt.Sprintf("[gray]%s[-] %s\n", ts, fmt.Sprintf(format, args...))
 		app.QueueUpdateDraw(func() {
 			fmt.Fprint(trace, text)
-			trace.ScrollToEnd()
+			if app.GetFocus() != trace {
+				trace.ScrollToEnd()
+			}
 		})
 	}
 
@@ -397,7 +419,9 @@ func Run(ctx context.Context, cfg Config) error {
 		out := renderMarkdown(text, w)
 		app.QueueUpdateDraw(func() {
 			fmt.Fprint(chatANSI, out)
-			chat.ScrollToEnd()
+			if app.GetFocus() != chat {
+				chat.ScrollToEnd()
+			}
 		})
 	}
 
@@ -496,9 +520,8 @@ func Run(ctx context.Context, cfg Config) error {
 		go func() {
 			defer func() {
 				busy = false
-				app.QueueUpdateDraw(func() { app.SetFocus(input) })
+				app.QueueUpdateDraw(func() { setFocus(0) })
 			}()
-
 			// Render the user turn as markdown too (so code blocks /
 			// lists in the question look right).
 			userMD := fmt.Sprintf("**you**\n\n%s", sanitizeInputText(prompt))
@@ -568,8 +591,21 @@ func Run(ctx context.Context, cfg Config) error {
 	// Global key bindings.
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Key() {
-		case tcell.KeyCtrlC, tcell.KeyEsc:
+		case tcell.KeyCtrlC:
 			app.Stop()
+			return nil
+		case tcell.KeyEsc:
+			if focusIdx == 0 {
+				app.Stop()
+			} else {
+				setFocus(0)
+			}
+			return nil
+		case tcell.KeyTab:
+			setFocus((focusIdx + 1) % len(focusList))
+			return nil
+		case tcell.KeyBacktab:
+			setFocus((focusIdx + len(focusList) - 1) % len(focusList))
 			return nil
 		case tcell.KeyCtrlL:
 			chat.Clear()
@@ -586,7 +622,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Welcome banner. Write directly: app.Run() hasn't started yet, so
 	// QueueUpdateDraw would deadlock (its queue is only drained by Run).
-	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nCtrl-L clears the chat. Ctrl-C / Esc to quit.[-]\n", cfg.AppName)
+	fmt.Fprintf(chat, "[gray]Welcome to %s. Type a message and press Enter.\nTab / Shift-Tab to scroll Chat or Trace panes. Esc returns focus to input. Ctrl-L clears the chat. Ctrl-C to quit.[-]\n", cfg.AppName)
 
 	// Emit real session lifecycle events around the TUI run. These are
 	// distinct from the per-turn EventRunStart/EventRunEnd: subscribers
