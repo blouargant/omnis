@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/blouargant/agent-toolkit/agent"
@@ -52,8 +53,8 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 	)
 	fs.StringVar(&user, "user", "", "User ID of the session to curate")
 	fs.StringVar(&session, "session", "", "Session ID to curate")
-	fs.StringVar(&auditPath, "audit", "", "Explicit path to the per-session audit (.agent_memory_*.md)")
-	fs.StringVar(&statePath, "statelog", "", "Explicit path to the per-session State Log (.agent_statelog_*.json)")
+	fs.StringVar(&auditPath, "audit", "", "Explicit path to the per-session audit (logs/agent_memory_*.md)")
+	fs.StringVar(&statePath, "statelog", "", "Explicit path to the per-session State Log (logs/agent_statelog_*.json)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit curate (--user <id> --session <id> | --audit <path> --statelog <path>)\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -69,10 +70,10 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 		}
 		key := agent.SessionSuffix(user, session)
 		if auditPath == "" {
-			auditPath = fmt.Sprintf(".agent_memory_%s.md", key)
+			auditPath = filepath.Join("logs", fmt.Sprintf("agent_memory_%s.md", key))
 		}
 		if statePath == "" {
-			statePath = fmt.Sprintf(".agent_statelog_%s.json", key)
+			statePath = filepath.Join("logs", fmt.Sprintf("agent_statelog_%s.json", key))
 		}
 	}
 

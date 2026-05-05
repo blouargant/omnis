@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/blouargant/agent-toolkit/core/agentkit"
 	"github.com/blouargant/agent-toolkit/core/events"
@@ -17,7 +19,9 @@ func main() {
 	llm, err := agentkit.NewModel(ctx)
 	must(err)
 	bus := events.NewBus()
-	logger, closeLog, err := events.FileLogger(".agent_events.log")
+	must(os.MkdirAll("logs", 0o755))
+	logName := "agent_events_" + time.Now().Format("20060102_150405") + ".log"
+	logger, closeLog, err := events.FileLogger(filepath.Join("logs", logName))
 	must(err)
 	defer closeLog()
 	counter, counterH := events.NewCounter()

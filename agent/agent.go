@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/model"
@@ -410,17 +411,26 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	// All session-scoped components share the same (userID, sessionID)
 	// → suffix mapping so a given session's task graph, plan, mailbox
 	// and background queue all line up on disk and on the wire.
-	sessionSuffix := SessionSuffix
+	// The suffix uses the agent build timestamp so log filenames are
+	// human-readable and sortable without needing the ADK session UUID.
+	buildTimestamp := time.Now().Format("20060102_150405")
+	sessionSuffix := func(userID, sessionID string) string {
+		u := sanitizeID(userID)
+		if u == "" {
+			u = "anon"
+		}
+		return u + "_" + buildTimestamp
+	}
 
-	// Per-session task graph (.agent_tasks_<u>_<s>.json).
+	// Per-session task graph (logs/agent_tasks_<u>_<s>.json).
 	g := tasks.NewSessionScoped("", func(u, s string) string {
-		return fmt.Sprintf(".agent_tasks_%s.json", sessionSuffix(u, s))
+		return filepath.Join("logs", fmt.Sprintf("agent_tasks_%s.json", sessionSuffix(u, s)))
 	})
 	// Per-session background notification queue.
 	q := bg.NewSessionQueues(32)
-	// Per-session todo plan (.agent_todo_<u>_<s>.json).
+	// Per-session todo plan (logs/agent_todo_<u>_<s>.json).
 	store := todo.NewSessionScoped("", func(u, s string) string {
-		return fmt.Sprintf(".agent_todo_%s.json", sessionSuffix(u, s))
+		return filepath.Join("logs", fmt.Sprintf("agent_todo_%s.json", sessionSuffix(u, s)))
 	})
 
 	leadTools := []tool.Tool{}
@@ -564,7 +574,11 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	// ── Plugins ──────────────────────────────────────────────────────────
 	var plugins []*plugin.Plugin
 	bus := events.NewBus()
-	logger, closeLog, err := events.FileLogger(".agent_events.log")
+	if err := os.MkdirAll("logs", 0o755); err != nil {
+		be.Close()
+		return nil, err
+	}
+	logger, closeLog, err := events.FileLogger(filepath.Join("logs", "agent_events_"+buildTimestamp+".log"))
 	if err != nil {
 		be.Close()
 		return nil, err
@@ -594,12 +608,12 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		// Per-session audit file so concurrent users / sessions
 		// never share a counter or overwrite each other's summaries.
 		AuditPathFunc: func(userID, sessionID string) string {
-			return fmt.Sprintf(".agent_memory_%s.md", sessionSuffix(userID, sessionID))
+			return filepath.Join("logs", fmt.Sprintf("agent_memory_%s.md", sessionSuffix(userID, sessionID)))
 		},
 		// Per-session State Log path — consumed by the curator agent
 		// after EventSessionEnd to mine successful procedures.
 		StateLogPathFunc: func(userID, sessionID string) string {
-			return fmt.Sprintf(".agent_statelog_%s.json", sessionSuffix(userID, sessionID))
+			return filepath.Join("logs", fmt.Sprintf("agent_statelog_%s.json", sessionSuffix(userID, sessionID)))
 		},
 		LLM: orchestratorLLM,
 	}); err == nil {

@@ -212,18 +212,12 @@ func Run(ctx context.Context, cfg Config) error {
 		SetFieldBackgroundColor(tcell.ColorDefault)
 	input.SetBorder(true).SetTitle(" Type a message — Enter to send, Ctrl-C to quit ").
 		SetTitleAlign(tview.AlignLeft)
-	cleaningInput := false
-	input.SetChangedFunc(func(text string) {
-		if cleaningInput {
-			return
-		}
-		cleaned := sanitizeInputText(text)
-		if cleaned == text {
-			return
-		}
-		cleaningInput = true
-		input.SetText(cleaned)
-		cleaningInput = false
+	// Reject non-printable characters at the field level so control sequences
+	// injected by the terminal (e.g. OSC color responses) never enter the
+	// buffer and corrupt the cursor/offset state. Residual multi-char sequences
+	// that slip through are stripped by sanitizeInputText() inside send().
+	input.SetAcceptanceFunc(func(_ string, lastChar rune) bool {
+		return lastChar >= 0x20
 	})
 
 	// Slash-command autocomplete: suggest matching commands when the
