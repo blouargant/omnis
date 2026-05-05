@@ -43,6 +43,8 @@ Tool protocol:
 2. If a soft-skill looks relevant, call ` + "`" + loadToolName + "`" + ` with ` + "`name=\"<SOFTSKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `) before planning.
 3. Use ` + "`" + resourceToolName + "`" + ` to read files inside a soft-skill directory (` + "`references/*`, `assets/*`, `scripts/*`" + `).
 4. If a soft-skill conflicts with an authored skill or a tool's own documentation, prefer the authored source and mention the conflict in your reply.
+
+IMPORTANT — do NOT use ` + "`load_skill`" + ` to open names returned by ` + "`" + listToolName + "`" + `. ` + "`load_skill`" + ` reads the authored ` + "`skills/`" + ` directory and will return "skill not found" for soft-skills, which live in ` + "`softskills/`" + ` and are only reachable through ` + "`" + loadToolName + "`" + `.
 `
 
 // Toolset returns an ADK tool.Toolset reading softskills from `dir`.

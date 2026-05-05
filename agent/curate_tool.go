@@ -25,6 +25,27 @@ var (
 	curateRequested = map[string]bool{}
 )
 
+// RequestCurateSession marks a session for curator processing. It is used
+// by the curate_session tool and by explicit UI shortcuts (for example
+// /learn in the TUI) so both paths share identical behavior.
+func RequestCurateSession(userID, sessionID, reason string) (string, error) {
+	if userID == "" || sessionID == "" {
+		return "", fmt.Errorf("missing user_id/session_id")
+	}
+	key := SessionSuffix(userID, sessionID)
+	curateRequestMu.Lock()
+	curateRequested[key] = true
+	curateRequestMu.Unlock()
+	path := fmt.Sprintf(".agent_curate_%s.txt", key)
+	if reason == "" {
+		reason = "manual curation request"
+	}
+	if err := os.WriteFile(path, []byte(reason+"\n"), 0o644); err != nil {
+		return "", err
+	}
+	return "Session marked for curation. The curator will examine the audit and statelog after the session ends.", nil
+}
+
 // CurateSessionRequested reports whether the lead asked to curate this
 // session. Consumed by registerCuratorHook to bypass the "no candidate"
 // short-circuit and treat the session as worth examining.
@@ -32,6 +53,15 @@ func CurateSessionRequested(sessionKey string) bool {
 	curateRequestMu.Lock()
 	defer curateRequestMu.Unlock()
 	return curateRequested[sessionKey]
+}
+
+// CurateSessionRequestedByIDs is a convenience helper for callers that
+// have user/session IDs rather than the pre-computed session suffix key.
+func CurateSessionRequestedByIDs(userID, sessionID string) bool {
+	if userID == "" || sessionID == "" {
+		return false
+	}
+	return CurateSessionRequested(SessionSuffix(userID, sessionID))
 }
 
 type curateIn struct {
@@ -53,13 +83,11 @@ func curateSessionTool() tool.Tool {
 			"the curator should learn from. The actual curation runs after the session ends. " +
 			"Argument: `reason` (string, required, one-line explanation).",
 	}, func(ctx tool.Context, in curateIn) (curateOut, error) {
-		key := SessionSuffix(ctx.UserID(), ctx.SessionID())
-		curateRequestMu.Lock()
-		curateRequested[key] = true
-		curateRequestMu.Unlock()
-		path := fmt.Sprintf(".agent_curate_%s.txt", key)
-		_ = os.WriteFile(path, []byte(in.Reason+"\n"), 0o644)
-		return curateOut{Result: "Session marked for curation. The curator will examine the audit and statelog after the session ends."}, nil
+		msg, err := RequestCurateSession(ctx.UserID(), ctx.SessionID(), in.Reason)
+		if err != nil {
+			return curateOut{}, err
+		}
+		return curateOut{Result: msg}, nil
 	})
 	if err != nil {
 		panic(fmt.Errorf("curate_session tool: %w", err))

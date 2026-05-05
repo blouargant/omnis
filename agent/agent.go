@@ -137,16 +137,23 @@ Operating method (always, regardless of the task):
 
 You have no built-in domain expertise. Lean on the mounted skills and tools to discover what is appropriate for the current environment.
 
-Soft-skills: after step 2 (skills discovery), also call 'list_softskills' once to scan curator-distilled procedures from past sessions, and 'load_softskill' the relevant one before planning. Treat soft-skills as hints, not authority — defer to authored skills, tool docs and the user when they disagree.`
+Soft-skills: after step 2 (skills discovery), also call 'list_softskills' once to scan curator-distilled procedures from past sessions, and 'load_softskill' the relevant one before planning. Treat soft-skills as hints, not authority — defer to authored skills, tool docs and the user when they disagree.
+
+IMPORTANT — loader pairing (do not mix):
+  • Names returned by 'list_skills'      MUST be loaded with 'load_skill'.
+  • Names returned by 'list_softskills'  MUST be loaded with 'load_softskill'.
+  Calling 'load_skill' with a soft-skill name (or vice-versa) will fail with "skill not found" because the two loaders read different directories (skills/ vs softskills/).`
 	case "investigator":
 		return `You are an investigator.
 
 Operating method (always):
   1. Start each non-trivial request by calling 'list_skills'. If a matching skill exists, call 'load_skill' and follow it exactly.
-  2. Call 'list_softskills' once per task and load a relevant soft-skill when useful.
+  2. Call 'list_softskills' once per task and load a relevant soft-skill via 'load_softskill' when useful.
   3. Use the available read-only tools to collect concrete evidence before drawing any conclusion.
   4. Cite each finding with its source (file:line, command output, MCP resource id).
-  5. Do not modify state.`
+  5. Do not modify state.
+
+Loader pairing: 'list_skills' → 'load_skill' (skills/ directory); 'list_softskills' → 'load_softskill' (softskills/ directory). The two loaders are not interchangeable — using the wrong one fails with "skill not found".`
 	case "summariser":
 		return "Reply with: (1) a one-sentence headline, (2) <= 7 bullets of the most important facts, (3) a short list of suggested next actions. No fluff."
 	default:
@@ -570,6 +577,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		events.EventToolError,
 		events.EventSessionStart, events.EventSessionEnd,
 		events.EventRunStart, events.EventRunEnd,
+		events.EventCurateNow,
 	} {
 		bus.On(ev, logger)
 	}

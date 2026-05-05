@@ -29,11 +29,14 @@ import (
 //   - EventRunStart / EventRunEnd fire on every Runner.Run() invocation
 //     (i.e. every user turn). They are emitted from the plugin's
 //     BeforeRun / AfterRun callbacks.
+//   - EventCurateNow is a manual trigger for immediate soft-skill
+//     curation during an active session (for example, TUI /learn-now).
 const (
 	EventSessionStart       = "session_start"
 	EventSessionEnd         = "session_end"
 	EventRunStart           = "run_start"
 	EventRunEnd             = "run_end"
+	EventCurateNow          = "curate_now"
 	EventBeforeModel        = "before_model"
 	EventAfterModel         = "after_model"
 	EventBeforeTool         = "before_tool"

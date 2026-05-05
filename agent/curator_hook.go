@@ -42,13 +42,14 @@ var (
 // (a) startup cost is paid only when the hook actually fires and (b) a
 // curator construction error never aborts the main agent boot.
 func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir string, sessionSuffix func(u, s string) string) {
-	bus.On(events.EventSessionEnd, func(_ string, payload map[string]any) {
+	handler := func(_ string, payload map[string]any) {
 		userID, _ := payload["user_id"].(string)
 		sessionID, _ := payload["session_id"].(string)
 		if userID == "" || sessionID == "" {
 			return // Cannot locate the per-session files without IDs.
 		}
 		key := sessionSuffix(userID, sessionID)
+		forced := CurateSessionRequested(key)
 		auditPath := fmt.Sprintf(".agent_memory_%s.md", key)
 		statePath := fmt.Sprintf(".agent_statelog_%s.json", key)
 
@@ -75,11 +76,10 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				return
 			}
 
-			// Skip if the state log is still effectively empty. Even
-			// though EventSessionEnd now fires once per real session
-			// (not per turn), the gate guards against sessions that quit
-			// before producing any decisions or file facts.
-			if !stateLogHasSignal(statePath) {
+			// Skip if the state log is still effectively empty unless the
+			// session was explicitly marked for curation (curate_session
+			// tool or /learn shortcut).
+			if !forced && !stateLogHasSignal(statePath) {
 				return
 			}
 
@@ -103,7 +103,9 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				return
 			}
 		}()
-	})
+	}
+	bus.On(events.EventSessionEnd, handler)
+	bus.On(events.EventCurateNow, handler)
 }
 
 func fileExists(p string) bool {

@@ -32,6 +32,7 @@ import (
 	"google.golang.org/adk/runner"
 	"google.golang.org/genai"
 
+	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
 )
 
@@ -216,6 +217,46 @@ func Run(ctx context.Context, cfg Config) error {
 		cleaningInput = false
 	})
 
+	// Slash-command autocomplete: suggest matching commands when the
+	// user starts typing "/".
+	slashCommands := []string{"/help", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status"}
+	slashCommandsDisplay := []string{
+		"/help",
+		"/learn",
+		"/learn-now",
+		"/learn-now <reason>",
+		"/learn <reason>",
+		"/status",
+	}
+	input.SetAutocompleteFunc(func(currentText string) []string {
+		trimmed := strings.TrimLeft(currentText, " ")
+		if !strings.HasPrefix(trimmed, "/") {
+			return nil
+		}
+		var matches []string
+		for _, label := range slashCommandsDisplay {
+			if strings.HasPrefix(label, trimmed) {
+				matches = append(matches, label)
+			}
+		}
+		return matches
+	})
+	input.SetAutocompletedFunc(func(text string, index int, source int) bool {
+		if source == tview.AutocompletedNavigate {
+			return false // keep dropdown open while navigating
+		}
+		// Find the corresponding raw command (without the display hint).
+		raw := text
+		for i, label := range slashCommandsDisplay {
+			if label == text && i < len(slashCommands) {
+				raw = slashCommands[i]
+				break
+			}
+		}
+		input.SetText(raw)
+		return true // close dropdown
+	})
+
 	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(chat, 0, 1, false).
 		AddItem(input, 3, 0, true)
@@ -318,6 +359,9 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.Bus.On(events.EventRunEnd, func(_ string, _ map[string]any) {
 			appendTrace("[yellow]run end[-]")
 		})
+		cfg.Bus.On(events.EventCurateNow, func(_ string, _ map[string]any) {
+			appendTrace("[yellow]curate now[-]")
+		})
 		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
 			// Reset cumulative token counters at the start of a real
 			// session. We deliberately DO NOT call QueueUpdateDraw here:
@@ -359,9 +403,89 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// busy flag prevents overlapping submissions.
 	busy := false
+	handleShortcut := func(raw string) {
+		line := strings.TrimSpace(raw)
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			return
+		}
+		cmd := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
+		switch cmd {
+		case "learn":
+			reason := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if reason == "" {
+				reason = "manual /learn request from TUI"
+			}
+			appendChat("\n[::b]assistant[-]\n")
+			msg, err := toolkitagent.RequestCurateSession(cfg.UserID, cfg.SessionID, reason)
+			if err != nil {
+				appendChat("[red]/learn failed:[-] %v\n", err)
+				return
+			}
+			appendChat("[green]%s[-]\n", msg)
+			appendChat("[gray]Tip:[-] curation runs on session end. Exit TUI with Ctrl-C when ready.\n")
+		case "learn-now":
+			reason := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if reason == "" {
+				reason = "manual /learn-now request from TUI"
+			}
+			appendChat("\n[::b]assistant[-]\n")
+			msg, err := toolkitagent.RequestCurateSession(cfg.UserID, cfg.SessionID, reason)
+			if err != nil {
+				appendChat("[red]/learn-now failed:[-] %v\n", err)
+				return
+			}
+			if cfg.Bus == nil {
+				appendChat("[green]%s[-]\n", msg)
+				appendChat("[yellow]Immediate curation unavailable:[-] event bus not configured.\n")
+				return
+			}
+			go cfg.Bus.Emit(events.EventCurateNow, map[string]any{
+				"user_id":    cfg.UserID,
+				"session_id": cfg.SessionID,
+			})
+			appendChat("[green]%s[-]\n", msg)
+			appendChat("[green]Triggered curation now.[-] Check trace/logs for curator completion.\n")
+		case "status":
+			requested := toolkitagent.CurateSessionRequestedByIDs(cfg.UserID, cfg.SessionID)
+			appendChat("\n[::b]assistant[-]\n")
+			appendChat("Session status:\n")
+			appendChat("  app: [aqua]%s[-]\n", cfg.AppName)
+			appendChat("  user: [aqua]%s[-]\n", cfg.UserID)
+			appendChat("  session: [aqua]%s[-]\n", cfg.SessionID)
+			appendChat("  curation_requested: [aqua]%t[-]\n", requested)
+			appendChat("  event_bus_configured: [aqua]%t[-]\n", cfg.Bus != nil)
+		case "help":
+			appendChat("\n[::b]assistant[-]\n")
+			appendChat("Available shortcuts:\n")
+			appendChat("  [aqua]/learn [reason][-]      Mark this session for soft-skill curation.\n")
+			appendChat("  [aqua]/learn-now [reason][-]  Mark and trigger soft-skill curation immediately.\n")
+			appendChat("  [aqua]/status[-]              Show current session and curation status.\n")
+			appendChat("  [aqua]/help[-]                Show this help.\n")
+		default:
+			appendChat("\n[::b]assistant[-]\n")
+			appendChat("[yellow]Unknown shortcut:[-] /%s (try /help)\n", cmd)
+		}
+	}
 
 	send := func(prompt string) {
-		if busy || strings.TrimSpace(prompt) == "" {
+		prompt = sanitizeInputText(prompt)
+		if strings.TrimSpace(prompt) == "" {
+			return
+		}
+		// Slash-command detection runs on the event-loop goroutine (it's
+		// just a string prefix check). The body of the shortcut MUST run
+		// in its own goroutine: appendChat → QueueUpdateDraw spawns a
+		// goroutine that calls Draw(), which tries to acquire the tview
+		// application mutex — but tview holds that mutex while dispatching
+		// key events, so calling QueueUpdateDraw synchronously here
+		// deadlocks the UI.
+		if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
+			input.SetText("")
+			go handleShortcut(prompt)
+			return
+		}
+		if busy {
 			return
 		}
 		busy = true
