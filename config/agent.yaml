@@ -36,12 +36,13 @@ models:
 
   # Premium profile for difficult tasks requiring stronger reasoning.
   premium:
-    provider: anthropic
-    model: claude-sonnet-4-5
-    api_key: ANTHROPIC_API_KEY
+    provider: openai_compat
+    model: claude-sonnet-4-6
+    base_url: https://llm-gateway.ai.chapsvision.com/llm-gateway
+    api_key: OPENAI_API_KEY
     context_length: 200000
-    input_token_price_per_million: 3
-    output_token_price_per_million: 15
+    input_token_price_per_million: 5
+    output_token_price_per_million: 26
 
 # Each agent below can override skills_dir, softskills_dir, mcp_config_path
 # and permissions_config_path with its own values. When omitted the global
@@ -58,7 +59,7 @@ models:
 
 agents:
   - name: leader
-    model_ref: hosted
+    model_ref: premium
     description: Generic coordinator agent.
     # instruction: Optional override appended after the global SystemPrompt.
     # Per-agent path overrides (optional, default to the global values above):
@@ -67,7 +68,7 @@ agents:
     # mcp_config_path: config/mcp_config.yaml
 
   - name: investigator
-    model_ref: hosted
+    model_ref: balanced
     enabled: true
     mailbox: true
     tools: [fs, mcp, skills, softskills]
@@ -78,7 +79,7 @@ agents:
     # mcp_config_path: config/mcp_config.investigator.yaml
 
   - name: summariser
-    model_ref: hosted
+    model_ref: balanced
     enabled: true
     mailbox: true
     tools: []
@@ -86,7 +87,7 @@ agents:
     # instruction: Optional agent-specific instruction override.
 
   - name: curator
-    model_ref: hosted
+    model_ref: balanced
     enabled: true
     mailbox: false
     description: Post-session soft-skill curator.

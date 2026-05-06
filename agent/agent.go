@@ -130,9 +130,9 @@ Operating method (always, regardless of the task):
        • If a skill in YOUR catalog matches the request, call 'load_skill' and follow it.
        • If a skill in a SUB-AGENT'S catalog matches the request, delegate to that sub-agent and explicitly tell it which skill to load (e.g. "use the k8s-triage skill to answer this").
   3. PLAN with task_create whenever the work has more than one step. Keep tasks small and verifiable.
-  4. INVESTIGATE before you act: gather evidence using your own read-only tools, MCP servers, or by delegating to the 'investigator' sub-agent. Never rely on assumptions when a tool can confirm.
+  4. INVESTIGATE before you act: gather evidence using your own read-only tools, MCP servers, or by delegating focused evidence questions to the 'investigator' sub-agent. Ask the investigator for compact cited findings: facts, sources, confidence, and open questions. Never rely on assumptions when a tool can confirm.
   5. ACT in small reversible steps. Prefer tools over shell, prefer dry-runs over mutations.
-  6. SUMMARISE long outputs through the 'summariser' sub-agent before reasoning over them.
+  6. CONTROL BULK before reasoning: use the 'summariser' sub-agent for oversized raw tool output, verbose investigator reports, or user-requested briefs. As a rule of thumb, summarise material over roughly 150-250 lines or 2k-4k tokens, but do not summarise concise investigator evidence briefs unless they are too large or poorly structured.
   7. RESPECT permissions: if a tool call is denied, do NOT retry — report and ask the user.
   8. ESCALATE to the user when ambiguity remains after one round of evidence gathering.
 
@@ -151,12 +151,13 @@ Operating method (always):
   1. Start each non-trivial request by calling 'list_skills'. If a matching skill exists, call 'load_skill' and follow it exactly.
   2. Call 'list_softskills' once per task and load a relevant soft-skill via 'load_softskill' when useful.
   3. Use the available read-only tools to collect concrete evidence before drawing any conclusion.
-  4. Cite each finding with its source (file:line, command output, MCP resource id).
-  5. Do not modify state.
+  4. Return a compact evidence brief, not a raw dump. Include findings, exact sources (file:line, command output, MCP resource id), confidence, and open questions.
+  5. Quote only decisive excerpts. Include bulk output only when it is essential to the user's question.
+  6. Do not modify state.
 
 Loader pairing: 'list_skills' → 'load_skill' (skills/ directory); 'list_softskills' → 'load_softskill' (softskills/ directory). The two loaders are not interchangeable — using the wrong one fails with "skill not found".`
 	case "summariser":
-		return "Reply with: (1) a one-sentence headline, (2) <= 7 bullets of the most important facts, (3) a short list of suggested next actions. No fluff."
+		return "Reply with: (1) a one-sentence headline, (2) <= 7 bullets of the most important facts, (3) a short list of suggested next actions. Preserve source anchors when present: file paths, line numbers, command names, exact error messages, resource ids, and uncertainty markers. Distinguish facts from guesses. No fluff."
 	default:
 		return "You are a specialist helper. Follow your instruction and use your tools to assist the leader agent."
 	}
@@ -322,6 +323,9 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 		}
 
 		sb.WriteString(fmt.Sprintf("**%s**: %s\n", cfg.Name, desc))
+		if guidance := defaultSubAgentUsageGuidance(cfg.Name); guidance != "" {
+			sb.WriteString(fmt.Sprintf("  - Use: %s\n", guidance))
+		}
 
 		if len(cfg.Tools) > 0 {
 			sb.WriteString(fmt.Sprintf("  - Tools: %s\n", strings.Join(cfg.Tools, ", ")))
@@ -357,6 +361,17 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 	}
 
 	return sb.String()
+}
+
+func defaultSubAgentUsageGuidance(name string) string {
+	switch name {
+	case "investigator":
+		return "Delegate focused evidence questions here; expect compact cited findings with sources, confidence, and open questions. Do not routinely send these reports to summariser unless they are oversized or poorly structured."
+	case "summariser":
+		return "Send oversized raw output, verbose reports, or user-requested briefs here; expect a lossy structured brief that preserves source anchors when present."
+	default:
+		return ""
+	}
 }
 
 func hasTool(tools []string, key string) bool {

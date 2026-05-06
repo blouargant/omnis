@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -262,6 +263,86 @@ agents:
 	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err == nil {
 		t.Fatal("ResolveRuntimeSettings() error = nil, want missing leader error")
+	}
+}
+
+func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
+	tests := []struct {
+		name        string
+		instruction string
+		want        []string
+	}{
+		{
+			name:        "leader",
+			instruction: defaultAgentInstruction("leader"),
+			want: []string{
+				"focused evidence questions to the 'investigator' sub-agent",
+				"compact cited findings",
+				"oversized raw tool output",
+				"150-250 lines or 2k-4k tokens",
+				"do not summarise concise investigator evidence briefs",
+			},
+		},
+		{
+			name:        "investigator",
+			instruction: defaultAgentInstruction("investigator"),
+			want: []string{
+				"compact evidence brief",
+				"exact sources",
+				"confidence",
+				"open questions",
+				"Quote only decisive excerpts",
+			},
+		},
+		{
+			name:        "summariser",
+			instruction: defaultAgentInstruction("summariser"),
+			want: []string{
+				"Preserve source anchors",
+				"file paths",
+				"line numbers",
+				"resource ids",
+				"Distinguish facts from guesses",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, want := range tt.want {
+				if !strings.Contains(tt.instruction, want) {
+					t.Fatalf("defaultAgentInstruction(%q) missing %q\n%s", tt.name, want, tt.instruction)
+				}
+			}
+		})
+	}
+}
+
+func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
+	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
+		{Name: "leader", Enabled: true},
+		{Name: "investigator", Enabled: true, Mailbox: true, Tools: []string{"fs", "skills"}},
+		{Name: "summariser", Enabled: true, Mailbox: true, Tools: []string{}},
+		{Name: "curator", Enabled: true},
+	}, RuntimeSettings{SkillsDir: t.TempDir()})
+
+	want := []string{
+		"**investigator**",
+		"Delegate focused evidence questions here",
+		"compact cited findings",
+		"Do not routinely send these reports to summariser",
+		"**summariser**",
+		"Send oversized raw output",
+		"lossy structured brief",
+		"preserves source anchors",
+	}
+	for _, s := range want {
+		if !strings.Contains(block, s) {
+			t.Fatalf("capabilities block missing %q\n%s", s, block)
+		}
+	}
+	if strings.Contains(block, "**leader**") || strings.Contains(block, "**curator**") {
+		t.Fatalf("capabilities block should exclude leader and curator\n%s", block)
 	}
 }
 
