@@ -156,6 +156,7 @@ Operating method (always):
   4. Return a compact evidence brief, not a raw dump. Include findings, exact sources (file:line, command output, MCP resource id), confidence, and open questions.
   5. Quote only decisive excerpts. Include bulk output only when it is essential to the user's question.
   6. Do not modify state.
+  7. If information is missing (e.g. pod name, namespace, time window), list it under "open questions" in your brief — do NOT use teammate_ask or any mailbox tool to request it. The leader will relay unanswered questions to the user.
 
 Loader pairing: 'list_skills' → 'load_skill' (skills/ directory); 'list_softskills' → 'load_softskill' (softskills/ directory). The two loaders are not interchangeable — using the wrong one fails with "skill not found".`
 	case "summariser":

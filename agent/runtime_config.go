@@ -150,13 +150,13 @@ func defaultAgents() []RuntimeAgentConfig {
 		{
 			Name:    "investigator",
 			Enabled: true,
-			Mailbox: true,
+			Mailbox: false,
 			Tools:   []string{"fs", "mcp"},
 		},
 		{
 			Name:    "summariser",
 			Enabled: true,
-			Mailbox: true,
+			Mailbox: false,
 			Tools:   []string{},
 		},
 		{
