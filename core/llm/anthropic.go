@@ -194,29 +194,41 @@ func (a *anthropic) GenerateContent(ctx context.Context, req *model.LLMRequest, 
 			yield(nil, err)
 			return
 		}
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			a.baseURL+"/messages", bytes.NewReader(body))
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("x-api-key", a.apiKey)
-		httpReq.Header.Set("anthropic-version", anthropicVersionHeader)
-		if stream {
-			httpReq.Header.Set("Accept", "text/event-stream")
-		}
-		resp, err := a.client.Do(httpReq)
-		if err != nil {
-			yield(nil, err)
+		var resp *http.Response
+		for attempt := 0; attempt < maxGenerateAttempts; attempt++ {
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				a.baseURL+"/messages", bytes.NewReader(body))
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			httpReq.Header.Set("x-api-key", a.apiKey)
+			httpReq.Header.Set("anthropic-version", anthropicVersionHeader)
+			if stream {
+				httpReq.Header.Set("Accept", "text/event-stream")
+			}
+			resp, err = a.client.Do(httpReq)
+			if err != nil {
+				if attempt < maxGenerateAttempts-1 && !contextDone(ctx) && waitBeforeRetry(ctx, retryDelay(nil, attempt)) {
+					continue
+				}
+				yield(nil, err)
+				return
+			}
+			if resp.StatusCode < 400 {
+				break
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			bodyText := string(b)
+			if attempt < maxGenerateAttempts-1 && shouldRetryHTTPError(resp.StatusCode, bodyText) && waitBeforeRetry(ctx, retryDelay(resp, attempt)) {
+				continue
+			}
+			yield(nil, fmt.Errorf("anthropic %s: %s", resp.Status, bodyText))
 			return
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			yield(nil, fmt.Errorf("anthropic %s: %s", resp.Status, string(b)))
-			return
-		}
 		if !stream {
 			var out antResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

@@ -93,6 +93,8 @@ type Options struct {
 	ModelAPIKey string
 	// CuratorEnabled explicitly enables/disables curator auto-run.
 	CuratorEnabled *bool
+	// DebugLogging enables full event payload logging, including model requests.
+	DebugLogging bool
 }
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {
@@ -599,7 +601,10 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		be.Close()
 		return nil, err
 	}
-	logger, closeLog, err := events.FileLogger(filepath.Join("logs", "agent_events_"+buildTimestamp+".log"))
+	logger, closeLog, err := events.FileLoggerWithOptions(
+		filepath.Join("logs", "agent_events_"+buildTimestamp+".log"),
+		events.FileLoggerOptions{FullPayload: opts.DebugLogging},
+	)
 	if err != nil {
 		be.Close()
 		return nil, err
@@ -616,7 +621,9 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	} {
 		bus.On(ev, logger)
 	}
-	if eb, err := bus.Plugin("events"); err == nil {
+	eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
+	if err == nil {
+		eb := eventsPlugin
 		plugins = append(plugins, eb)
 	}
 	if perms, err := permissions.NewPlugin("perms", runtime.PermissionsConfigPath, permissions.StdinAsker{}); err == nil {

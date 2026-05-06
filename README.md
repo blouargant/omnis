@@ -122,6 +122,7 @@ go run . --tui       # built-in tview chat UI
 | Flag                | Default    | Effect                                                                 |
 |---------------------|------------|------------------------------------------------------------------------|
 | `-s`, `--skills DIR`| `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.          |
+| `-d`, `--debug`     | _off_      | Write full conversation/event payloads to the run's event log instead of partial event summaries. Debug logs can contain prompts, tool outputs, conversation history and secrets already present in context. |
 | `--tui`             | _off_      | Launch the built-in [tview](https://github.com/rivo/tview) chat UI instead of an ADK launcher subcommand. Trace pane on the left, streaming chat + input box on the right. Keys: `Enter` send, `Ctrl-L` clear, `Ctrl-C` / `Esc` quit. |
 
 Flags must come **before** any launcher subcommand:

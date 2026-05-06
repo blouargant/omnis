@@ -11,6 +11,7 @@
 // Flags:
 //
 //	-s, --skills <dir>   Directory to load skills from (default "skills")
+//	-d, --debug          Log full conversation/event payloads
 //	    --tui            Launch the tview chat interface instead of the
 //	                     ADK launcher.
 package main
@@ -46,6 +47,7 @@ type options struct {
 	modelBaseURL  string
 	modelAPIKey   string
 	curatorRaw    string
+	debug         bool
 }
 
 // parseFlags extracts our own flags from args, returning the parsed
@@ -65,6 +67,8 @@ func parseFlags(args []string) (options, []string, error) {
 	fs.StringVar(&opts.modelBaseURL, "base-url", "", "Global model base URL override")
 	fs.StringVar(&opts.modelAPIKey, "api-key", "", "Global model API key override")
 	fs.StringVar(&opts.curatorRaw, "curator-enabled", "", "Enable/disable auto-curator hook (true/false)")
+	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
+	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -114,6 +118,7 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		ModelBaseURL:     opts.modelBaseURL,
 		ModelAPIKey:      opts.modelAPIKey,
 		CuratorEnabled:   curatorEnabled,
+		DebugLogging:     opts.debug,
 	})
 	if err != nil {
 		return err
@@ -130,12 +135,12 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		}
 		sort.Strings(subAgentNames)
 		return tui.Run(ctx, tui.Config{
-			Runner:                        r,
-			Bus:                           result.EventBus,
-			AppName:                       result.RunnerConfig.AppName,
-			SubAgentNames:                 subAgentNames,
-			InputTokenPricePerMillion:     result.LeaderInputTokenPricePerMillion,
-			OutputTokenPricePerMillion:    result.LeaderOutputTokenPricePerMillion,
+			Runner:                     r,
+			Bus:                        result.EventBus,
+			AppName:                    result.RunnerConfig.AppName,
+			SubAgentNames:              subAgentNames,
+			InputTokenPricePerMillion:  result.LeaderInputTokenPricePerMillion,
+			OutputTokenPricePerMillion: result.LeaderOutputTokenPricePerMillion,
 		})
 	}
 

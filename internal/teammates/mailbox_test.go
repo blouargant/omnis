@@ -4,8 +4,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"google.golang.org/genai"
+
+	"google.golang.org/adk/tool"
 )
 
 func TestJSONLBackendSendAndReceive(t *testing.T) {
@@ -94,5 +100,56 @@ func TestAgentAskResetsToIdleOnSendError(t *testing.T) {
 	}
 	if state := a.State(); state != StateIdle {
 		t.Fatalf("state = %s, want IDLE after send failure", state)
+	}
+}
+
+func TestTeammateToolSchemasDoNotRejectMissingArgs(t *testing.T) {
+	t.Parallel()
+
+	b, err := NewJSONLBackend(filepath.Join(t.TempDir(), "mailboxes"))
+	if err != nil {
+		t.Fatalf("NewJSONLBackend() error = %v", err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	tools := NewAgent("alice", b).Tools()
+	assertOptionalArgs(t, findTool(t, tools, "teammate_ask"), "to", "question")
+	assertOptionalArgs(t, findTool(t, tools, "teammate_tell"), "to", "body")
+}
+
+func findTool(t *testing.T, tools []tool.Tool, name string) tool.Tool {
+	t.Helper()
+	for _, current := range tools {
+		if current.Name() == name {
+			return current
+		}
+	}
+	t.Fatalf("tool %q not found", name)
+	return nil
+}
+
+func assertOptionalArgs(t *testing.T, tl tool.Tool, names ...string) {
+	t.Helper()
+	declTool, ok := tl.(interface {
+		Declaration() *genai.FunctionDeclaration
+	})
+	if !ok {
+		t.Fatalf("%s has no declaration", tl.Name())
+	}
+	decl := declTool.Declaration()
+	schema, ok := decl.ParametersJsonSchema.(*jsonschema.Schema)
+	if !ok {
+		t.Fatalf("%s parameters schema = %T, want *jsonschema.Schema", tl.Name(), decl.ParametersJsonSchema)
+	}
+	if len(schema.Required) != 0 {
+		t.Fatalf("%s required schema args = %v, want none", tl.Name(), schema.Required)
+	}
+	for _, name := range names {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("%s missing property %q in schema", tl.Name(), name)
+		}
+		if !strings.Contains(decl.Description, "`"+name+"`") {
+			t.Fatalf("%s description does not mention %q: %s", tl.Name(), name, decl.Description)
+		}
 	}
 }

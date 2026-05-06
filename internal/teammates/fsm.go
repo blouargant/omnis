@@ -12,6 +12,7 @@ package teammates
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -150,15 +151,15 @@ func (a *Agent) Check(ctx context.Context, timeout time.Duration) (*Message, err
 // ----------------------------------------------------------------------
 
 type askIn struct {
-	To       string `json:"to"`
-	Question string `json:"question"`
+	To       string `json:"to,omitempty"`
+	Question string `json:"question,omitempty"`
 }
 type askOut struct {
 	Reply string `json:"reply"`
 }
 type tellIn struct {
-	To   string `json:"to"`
-	Body string `json:"body"`
+	To   string `json:"to,omitempty"`
+	Body string `json:"body,omitempty"`
 }
 type tellOut struct {
 	Result string `json:"result"`
@@ -211,8 +212,12 @@ func (a *Agent) Tools() []tool.Tool {
 	ask, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_ask",
 		Description: "Send a question to another agent (by name) and wait up to 30s for a reply. " +
-			"Use when you need information another agent owns.",
+			"Use when you need information another agent owns. " +
+			"Arguments: `to` (string, required, recipient mailbox name), `question` (string, required, question text).",
 	}, func(ctx tool.Context, in askIn) (askOut, error) {
+		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Question) == "" {
+			return askOut{Reply: "Error: required arguments: to and question"}, nil
+		}
 		from := a.resolveName(ctx, a.Name)
 		to := a.resolveName(ctx, in.To)
 		reply, err := a.askWith(context.Background(), from, to, in.Question, 30*time.Second)
@@ -223,8 +228,11 @@ func (a *Agent) Tools() []tool.Tool {
 	})
 	tell, _ := functiontool.New(functiontool.Config{
 		Name:        "teammate_tell",
-		Description: "Send a one-way message to another agent. Required input fields: to (recipient mailbox name), body (message text). No reply.",
+		Description: "Send a one-way message to another agent. Arguments: `to` (string, required, recipient mailbox name), `body` (string, required, message text). No reply.",
 	}, func(ctx tool.Context, in tellIn) (tellOut, error) {
+		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Body) == "" {
+			return tellOut{Result: "Error: required arguments: to and body"}, nil
+		}
 		from := a.resolveName(ctx, a.Name)
 		to := a.resolveName(ctx, in.To)
 		if err := a.tellWith(context.Background(), from, to, in.Body); err != nil {

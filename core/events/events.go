@@ -6,6 +6,7 @@
 package events
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -50,6 +51,12 @@ const (
 // Handler receives the event name and a free-form payload map.
 type Handler func(event string, payload map[string]any)
 
+// PluginOptions controls how much data the event plugin emits.
+type PluginOptions struct {
+	// IncludeModelRequest emits the full model request on before_model events.
+	IncludeModelRequest bool
+}
+
 // Bus is a tiny in-process publish/subscribe bus.
 type Bus struct {
 	mu       sync.RWMutex
@@ -88,6 +95,11 @@ func (b *Bus) Emit(event string, payload map[string]any) {
 // Plugin wires the bus into ADK as before/after model + tool callbacks plus
 // a session start/end signal. Pass the resulting plugin to runner.Config.
 func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
+	return b.PluginWithOptions(name, PluginOptions{})
+}
+
+// PluginWithOptions wires the bus into ADK with configurable event payloads.
+func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin, error) {
 	timers := sync.Map{} // key = function-call id, value = time.Time
 
 	beforeTool := func(_ tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
@@ -123,6 +135,9 @@ func (b *Bus) Plugin(name string) (*plugin.Plugin, error) {
 		payload := map[string]any{}
 		if req != nil && req.Model != "" {
 			payload["model"] = req.Model
+		}
+		if opts.IncludeModelRequest && req != nil {
+			payload["request"] = req
 		}
 		b.Emit(EventBeforeModel, payload)
 		return nil, nil
@@ -162,9 +177,20 @@ func toolKey(t tool.Tool, args map[string]any) string {
 	return fmt.Sprintf("%s::%v", t.Name(), args)
 }
 
+// FileLoggerOptions controls the event file logger output format.
+type FileLoggerOptions struct {
+	// FullPayload writes JSONL event records with the complete payload.
+	FullPayload bool
+}
+
 // FileLogger writes events to a log file with timestamps. Returns a Handler
 // suitable for Bus.On, plus a closer function.
 func FileLogger(path string) (Handler, func() error, error) {
+	return FileLoggerWithOptions(path, FileLoggerOptions{})
+}
+
+// FileLoggerWithOptions writes events to a log file with configurable payload detail.
+func FileLoggerWithOptions(path string, opts FileLoggerOptions) (Handler, func() error, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, nil, err
@@ -173,6 +199,10 @@ func FileLogger(path string) (Handler, func() error, error) {
 	h := func(event string, payload map[string]any) {
 		mu.Lock()
 		defer mu.Unlock()
+		if opts.FullPayload {
+			writeFullPayloadEvent(f, event, payload)
+			return
+		}
 		ts := time.Now().Format("15:04:05.000")
 		fmt.Fprintf(f, "[%s] %s", ts, event)
 		if payload != nil {
@@ -189,6 +219,25 @@ func FileLogger(path string) (Handler, func() error, error) {
 		fmt.Fprintln(f)
 	}
 	return h, f.Close, nil
+}
+
+func writeFullPayloadEvent(f *os.File, event string, payload map[string]any) {
+	record := map[string]any{
+		"timestamp": time.Now().Format(time.RFC3339Nano),
+		"event":     event,
+		"payload":   payload,
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		record["payload"] = fmt.Sprintf("%+v", payload)
+		record["payload_error"] = err.Error()
+		data, err = json.Marshal(record)
+		if err != nil {
+			fmt.Fprintf(f, `{"timestamp":%q,"event":%q,"payload_error":%q}`+"\n", time.Now().Format(time.RFC3339Nano), event, err.Error())
+			return
+		}
+	}
+	f.Write(append(data, '\n'))
 }
 
 // Counter tallies events of a given name and prints a summary on demand.

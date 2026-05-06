@@ -350,6 +350,7 @@ agent-toolkit [flags] [<launcher-command> [launcher-args]]
 | `--base-url URL`    | from config/env/defaults | Global model base URL override. |
 | `--api-key VALUE`   | from config/env/defaults | Global model API key override. |
 | `--curator-enabled BOOL` | from config/env/defaults | Enable/disable the auto-curator hook (`true`/`false`). |
+| `-d`, `--debug`     | _off_ | Write full conversation/event payloads to the run's event log instead of partial event summaries. Debug logs can contain prompts, tool outputs, conversation history and secrets already present in context. |
 | `--tui`             | _off_    | Launch the built-in [tview](https://github.com/rivo/tview) chat UI (`internal/tui`) instead of the ADK launcher. The launcher subcommand, if any, is ignored. |
 
 The flag parser is Go's standard `flag` package, so both `-skills` and
