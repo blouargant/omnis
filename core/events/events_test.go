@@ -28,6 +28,28 @@ func TestBusEmitAndPanicIsolation(t *testing.T) {
 	}
 }
 
+// TestPayloadAgentField documents the plugin contract: every payload emitted
+// by PluginWithOptions carries an "agent" key so subscribers can route per
+// agent (lead vs sub-agent). Here we exercise the plain bus path used by
+// front-ends that emit synthesized events themselves (e.g. session start).
+func TestPayloadAgentField(t *testing.T) {
+	t.Parallel()
+
+	b := NewBus()
+	var got map[string]any
+	b.On(EventAfterTool, func(_ string, p map[string]any) { got = p })
+
+	b.Emit(EventAfterTool, map[string]any{
+		"agent":    "investigator",
+		"tool":     "read_file",
+		"duration": "12ms",
+	})
+
+	if got["agent"] != "investigator" {
+		t.Fatalf("agent = %v, want investigator", got["agent"])
+	}
+}
+
 func TestFileLoggerWithOptionsFullPayload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.log")
 	h, closeFn, err := FileLoggerWithOptions(path, FileLoggerOptions{FullPayload: true})

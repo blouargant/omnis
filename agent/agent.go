@@ -16,6 +16,7 @@ import (
 	"time"
 
 	adkagent "google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/runner"
@@ -58,6 +59,12 @@ type AgentResult struct {
 	LeaderInputTokenPricePerMillion float64
 	// LeaderOutputTokenPricePerMillion is the effective leader output token price.
 	LeaderOutputTokenPricePerMillion float64
+	// LeaderCachedInputTokenPricePerMillion is the effective leader cached
+	// input token price (Anthropic cache_read / OpenAI prompt cache).
+	LeaderCachedInputTokenPricePerMillion float64
+	// LeaderCacheCreationTokenPricePerMillion is the effective leader cache
+	// creation input token price (Anthropic cache_creation).
+	LeaderCacheCreationTokenPricePerMillion float64
 }
 
 // Options allows customizing the agent creation.
@@ -513,6 +520,15 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	leadMailbox.NameFunc = nameFunc
 	leadTools = append(leadTools, leadMailbox.Tools()...)
 
+	// Event bus — created here (rather than later, with the rest of the
+	// plugins) so its per-agent callbacks can be attached directly to each
+	// sub-agent. Sub-agents are wrapped via agenttool, which spawns its
+	// own internal runner that does NOT inherit the toolkit's runner-level
+	// plugins; without these per-agent callbacks the sub-agents' tool and
+	// model activity would never reach the bus (and thus the TUI / logs).
+	bus := events.NewBus()
+	subAgentCallbacks := bus.AgentCallbacks(events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
+
 	subAgents := []adkagent.Agent{}
 	subAgentMap := map[string]adkagent.Agent{}
 	seenNames := map[string]bool{"leader": true}
@@ -552,12 +568,17 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		}
 
 		sa, err := agentkit.New(agentkit.AgentConfig{
-			Name:        cfg.Name,
-			Description: desc,
-			Instruction: instr,
-			Model:       agentLLM,
-			Tools:       subTools,
-			Toolsets:    subToolsets,
+			Name:                 cfg.Name,
+			Description:          desc,
+			Instruction:          instr,
+			Model:                agentLLM,
+			Tools:                subTools,
+			Toolsets:             subToolsets,
+			BeforeToolCallbacks:  []llmagent.BeforeToolCallback{subAgentCallbacks.BeforeTool},
+			AfterToolCallbacks:   []llmagent.AfterToolCallback{subAgentCallbacks.AfterTool},
+			OnToolErrorCallbacks: []llmagent.OnToolErrorCallback{subAgentCallbacks.OnToolError},
+			BeforeModelCallbacks: []llmagent.BeforeModelCallback{subAgentCallbacks.BeforeModel},
+			AfterModelCallbacks:  []llmagent.AfterModelCallback{subAgentCallbacks.AfterModel},
 		})
 		if err != nil {
 			be.Close()
@@ -604,8 +625,11 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	}
 
 	// ── Plugins ──────────────────────────────────────────────────────────
+	// `bus` was created earlier so per-agent callbacks could be attached to
+	// sub-agents at construction time. Here we wire it as a runner-level
+	// plugin so the leader's tool/model activity, plus run start/end, also
+	// flow through it.
 	var plugins []*plugin.Plugin
-	bus := events.NewBus()
 	if err := os.MkdirAll("logs", 0o755); err != nil {
 		be.Close()
 		return nil, err
@@ -678,12 +702,14 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	}
 
 	return &AgentResult{
-		Agent:                            lead,
-		SubAgents:                        subAgentMap,
-		Plugins:                          plugins,
-		EventBus:                         bus,
-		LeaderInputTokenPricePerMillion:  leaderCfg.InputTokenPricePerMillion,
-		LeaderOutputTokenPricePerMillion: leaderCfg.OutputTokenPricePerMillion,
+		Agent:                                   lead,
+		SubAgents:                               subAgentMap,
+		Plugins:                                 plugins,
+		EventBus:                                bus,
+		LeaderInputTokenPricePerMillion:         leaderCfg.InputTokenPricePerMillion,
+		LeaderOutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,
+		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,
+		LeaderCacheCreationTokenPricePerMillion: leaderCfg.CacheCreationTokenPricePerMillion,
 		RunnerConfig: runner.Config{
 			AppName:           runtime.AppName,
 			Agent:             lead,

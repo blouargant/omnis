@@ -135,12 +135,14 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		}
 		sort.Strings(subAgentNames)
 		return tui.Run(ctx, tui.Config{
-			Runner:                     r,
-			Bus:                        result.EventBus,
-			AppName:                    result.RunnerConfig.AppName,
-			SubAgentNames:              subAgentNames,
-			InputTokenPricePerMillion:  result.LeaderInputTokenPricePerMillion,
-			OutputTokenPricePerMillion: result.LeaderOutputTokenPricePerMillion,
+			Runner:                            r,
+			Bus:                               result.EventBus,
+			AppName:                           result.RunnerConfig.AppName,
+			SubAgentNames:                     subAgentNames,
+			InputTokenPricePerMillion:         result.LeaderInputTokenPricePerMillion,
+			OutputTokenPricePerMillion:        result.LeaderOutputTokenPricePerMillion,
+			CachedInputTokenPricePerMillion:   result.LeaderCachedInputTokenPricePerMillion,
+			CacheCreationTokenPricePerMillion: result.LeaderCacheCreationTokenPricePerMillion,
 		})
 	}
 

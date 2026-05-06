@@ -34,13 +34,23 @@ type AgentEntry struct {
 
 // ModelEntry describes one reusable model profile in YAML runtime config.
 type ModelEntry struct {
-	Provider                   string  `yaml:"provider"`
-	Model                      string  `yaml:"model"`
-	BaseURL                    string  `yaml:"base_url"`
-	APIKey                     string  `yaml:"api_key"`
-	ContextLength              int     `yaml:"context_length"`
-	InputTokenPricePerMillion  float64 `yaml:"input_token_price_per_million"`
-	OutputTokenPricePerMillion float64 `yaml:"output_token_price_per_million"`
+	Provider                          string  `yaml:"provider"`
+	Model                             string  `yaml:"model"`
+	BaseURL                           string  `yaml:"base_url"`
+	APIKey                            string  `yaml:"api_key"`
+	ContextLength                     int     `yaml:"context_length"`
+	InputTokenPricePerMillion         float64 `yaml:"input_token_price_per_million"`
+	OutputTokenPricePerMillion        float64 `yaml:"output_token_price_per_million"`
+	// CachedInputTokenPricePerMillion is the price for prompt tokens served
+	// from the provider's prompt cache (Anthropic cache_read,
+	// OpenAI prompt_tokens_details.cached_tokens). Defaults to
+	// InputTokenPricePerMillion when unset (i.e. no cache discount).
+	CachedInputTokenPricePerMillion   float64 `yaml:"cached_input_token_price_per_million"`
+	// CacheCreationTokenPricePerMillion is the price for prompt tokens that
+	// populate the provider's prompt cache for the first time (Anthropic
+	// cache_creation_input_tokens). Defaults to InputTokenPricePerMillion
+	// when unset.
+	CacheCreationTokenPricePerMillion float64 `yaml:"cache_creation_token_price_per_million"`
 }
 
 type runtimeConfigFile struct {
@@ -57,36 +67,40 @@ type runtimeConfigFile struct {
 
 // RuntimeModelConfig is one normalized model profile.
 type RuntimeModelConfig struct {
-	Name                       string
-	Provider                   string
-	Model                      string
-	BaseURL                    string
-	APIKey                     string
-	ContextLength              int
-	InputTokenPricePerMillion  float64
-	OutputTokenPricePerMillion float64
+	Name                              string
+	Provider                          string
+	Model                             string
+	BaseURL                           string
+	APIKey                            string
+	ContextLength                     int
+	InputTokenPricePerMillion         float64
+	OutputTokenPricePerMillion        float64
+	CachedInputTokenPricePerMillion   float64
+	CacheCreationTokenPricePerMillion float64
 }
 
 // RuntimeAgentConfig is one fully-resolved agent configuration entry.
 type RuntimeAgentConfig struct {
-	Name                       string
-	ModelRef                   string
-	Provider                   string
-	Model                      string
-	BaseURL                    string
-	APIKey                     string
-	ContextLength              int
-	InputTokenPricePerMillion  float64
-	OutputTokenPricePerMillion float64
-	Description                string
-	Instruction                string
-	Enabled                    bool
-	Mailbox                    bool
-	Tools                      []string
-	SkillsDir                  string
-	SoftSkillsDir              string
-	MCPConfigPath              string
-	PermissionsConfigPath      string
+	Name                              string
+	ModelRef                          string
+	Provider                          string
+	Model                             string
+	BaseURL                           string
+	APIKey                            string
+	ContextLength                     int
+	InputTokenPricePerMillion         float64
+	OutputTokenPricePerMillion        float64
+	CachedInputTokenPricePerMillion   float64
+	CacheCreationTokenPricePerMillion float64
+	Description                       string
+	Instruction                       string
+	Enabled                           bool
+	Mailbox                           bool
+	Tools                             []string
+	SkillsDir                         string
+	SoftSkillsDir                     string
+	MCPConfigPath                     string
+	PermissionsConfigPath             string
 }
 
 // RuntimeSettings is the merged runtime configuration after precedence
@@ -178,14 +192,16 @@ func normalizeModelCatalog(models map[string]ModelEntry) map[string]RuntimeModel
 			continue
 		}
 		out[name] = RuntimeModelConfig{
-			Name:                       name,
-			Provider:                   strings.TrimSpace(m.Provider),
-			Model:                      strings.TrimSpace(m.Model),
-			BaseURL:                    strings.TrimSpace(m.BaseURL),
-			APIKey:                     resolveAPIKeyReference(strings.TrimSpace(m.APIKey)),
-			ContextLength:              m.ContextLength,
-			InputTokenPricePerMillion:  m.InputTokenPricePerMillion,
-			OutputTokenPricePerMillion: m.OutputTokenPricePerMillion,
+			Name:                              name,
+			Provider:                          strings.TrimSpace(m.Provider),
+			Model:                             strings.TrimSpace(m.Model),
+			BaseURL:                           strings.TrimSpace(m.BaseURL),
+			APIKey:                            resolveAPIKeyReference(strings.TrimSpace(m.APIKey)),
+			ContextLength:                     m.ContextLength,
+			InputTokenPricePerMillion:         m.InputTokenPricePerMillion,
+			OutputTokenPricePerMillion:        m.OutputTokenPricePerMillion,
+			CachedInputTokenPricePerMillion:   m.CachedInputTokenPricePerMillion,
+			CacheCreationTokenPricePerMillion: m.CacheCreationTokenPricePerMillion,
 		}
 	}
 	return out
@@ -220,24 +236,26 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			mailbox = true
 		}
 		out = append(out, RuntimeAgentConfig{
-			Name:                       name,
-			ModelRef:                   modelRef,
-			Provider:                   firstNonEmpty(strings.TrimSpace(e.Provider), refModel.Provider),
-			Model:                      firstNonEmpty(strings.TrimSpace(e.Model), refModel.Model),
-			BaseURL:                    firstNonEmpty(strings.TrimSpace(e.BaseURL), refModel.BaseURL),
-			APIKey:                     resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(e.APIKey), refModel.APIKey)),
-			ContextLength:              refModel.ContextLength,
-			InputTokenPricePerMillion:  refModel.InputTokenPricePerMillion,
-			OutputTokenPricePerMillion: refModel.OutputTokenPricePerMillion,
-			Description:                strings.TrimSpace(e.Description),
-			Instruction:                strings.TrimSpace(e.Instruction),
-			Enabled:                    enabled,
-			Mailbox:                    mailbox,
-			Tools:                      normalizeTools(e.Tools),
-			SkillsDir:                  strings.TrimSpace(e.SkillsDir),
-			SoftSkillsDir:              strings.TrimSpace(e.SoftSkillsDir),
-			MCPConfigPath:              strings.TrimSpace(e.MCPConfigPath),
-			PermissionsConfigPath:      strings.TrimSpace(e.PermissionsConfigPath),
+			Name:                              name,
+			ModelRef:                          modelRef,
+			Provider:                          firstNonEmpty(strings.TrimSpace(e.Provider), refModel.Provider),
+			Model:                             firstNonEmpty(strings.TrimSpace(e.Model), refModel.Model),
+			BaseURL:                           firstNonEmpty(strings.TrimSpace(e.BaseURL), refModel.BaseURL),
+			APIKey:                            resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(e.APIKey), refModel.APIKey)),
+			ContextLength:                     refModel.ContextLength,
+			InputTokenPricePerMillion:         refModel.InputTokenPricePerMillion,
+			OutputTokenPricePerMillion:        refModel.OutputTokenPricePerMillion,
+			CachedInputTokenPricePerMillion:   refModel.CachedInputTokenPricePerMillion,
+			CacheCreationTokenPricePerMillion: refModel.CacheCreationTokenPricePerMillion,
+			Description:                       strings.TrimSpace(e.Description),
+			Instruction:                       strings.TrimSpace(e.Instruction),
+			Enabled:                           enabled,
+			Mailbox:                           mailbox,
+			Tools:                             normalizeTools(e.Tools),
+			SkillsDir:                         strings.TrimSpace(e.SkillsDir),
+			SoftSkillsDir:                     strings.TrimSpace(e.SoftSkillsDir),
+			MCPConfigPath:                     strings.TrimSpace(e.MCPConfigPath),
+			PermissionsConfigPath:             strings.TrimSpace(e.PermissionsConfigPath),
 		})
 	}
 	return out, nil
@@ -265,6 +283,12 @@ func inheritAgentModelFromLeader(in RuntimeAgentConfig, leader RuntimeAgentConfi
 	}
 	if out.OutputTokenPricePerMillion == 0 {
 		out.OutputTokenPricePerMillion = leader.OutputTokenPricePerMillion
+	}
+	if out.CachedInputTokenPricePerMillion == 0 {
+		out.CachedInputTokenPricePerMillion = leader.CachedInputTokenPricePerMillion
+	}
+	if out.CacheCreationTokenPricePerMillion == 0 {
+		out.CacheCreationTokenPricePerMillion = leader.CacheCreationTokenPricePerMillion
 	}
 	return out
 }
@@ -351,24 +375,26 @@ func mapAgentEntries(entries []RuntimeAgentConfig, fn func(RuntimeAgentConfig) R
 
 func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 	return RuntimeAgentConfig{
-		Name:                       strings.ToLower(strings.TrimSpace(in.Name)),
-		ModelRef:                   strings.ToLower(strings.TrimSpace(in.ModelRef)),
-		Provider:                   strings.TrimSpace(in.Provider),
-		Model:                      strings.TrimSpace(in.Model),
-		BaseURL:                    strings.TrimSpace(in.BaseURL),
-		APIKey:                     resolveAPIKeyReference(strings.TrimSpace(in.APIKey)),
-		ContextLength:              in.ContextLength,
-		InputTokenPricePerMillion:  in.InputTokenPricePerMillion,
-		OutputTokenPricePerMillion: in.OutputTokenPricePerMillion,
-		Description:                strings.TrimSpace(in.Description),
-		Instruction:                strings.TrimSpace(in.Instruction),
-		Enabled:                    in.Enabled,
-		Mailbox:                    in.Mailbox,
-		Tools:                      normalizeTools(in.Tools),
-		SkillsDir:                  strings.TrimSpace(in.SkillsDir),
-		SoftSkillsDir:              strings.TrimSpace(in.SoftSkillsDir),
-		MCPConfigPath:              strings.TrimSpace(in.MCPConfigPath),
-		PermissionsConfigPath:      strings.TrimSpace(in.PermissionsConfigPath),
+		Name:                              strings.ToLower(strings.TrimSpace(in.Name)),
+		ModelRef:                          strings.ToLower(strings.TrimSpace(in.ModelRef)),
+		Provider:                          strings.TrimSpace(in.Provider),
+		Model:                             strings.TrimSpace(in.Model),
+		BaseURL:                           strings.TrimSpace(in.BaseURL),
+		APIKey:                            resolveAPIKeyReference(strings.TrimSpace(in.APIKey)),
+		ContextLength:                     in.ContextLength,
+		InputTokenPricePerMillion:         in.InputTokenPricePerMillion,
+		OutputTokenPricePerMillion:        in.OutputTokenPricePerMillion,
+		CachedInputTokenPricePerMillion:   in.CachedInputTokenPricePerMillion,
+		CacheCreationTokenPricePerMillion: in.CacheCreationTokenPricePerMillion,
+		Description:                       strings.TrimSpace(in.Description),
+		Instruction:                       strings.TrimSpace(in.Instruction),
+		Enabled:                           in.Enabled,
+		Mailbox:                           in.Mailbox,
+		Tools:                             normalizeTools(in.Tools),
+		SkillsDir:                         strings.TrimSpace(in.SkillsDir),
+		SoftSkillsDir:                     strings.TrimSpace(in.SoftSkillsDir),
+		MCPConfigPath:                     strings.TrimSpace(in.MCPConfigPath),
+		PermissionsConfigPath:             strings.TrimSpace(in.PermissionsConfigPath),
 	}
 }
 

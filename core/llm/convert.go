@@ -74,6 +74,14 @@ func schemaToJSON(s *genai.Schema) map[string]any {
 		if _, ok := out["properties"]; !ok {
 			out["properties"] = map[string]any{}
 		}
+		// Forbid extra/unknown properties at the schema level so the model
+		// is told up-front that only the declared fields are valid.
+		// The Go-side validator already enforces this; advertising it in
+		// the schema steers function-calling models away from inventing
+		// argument names like `cmd` or `file_path` for `bash`.
+		if _, ok := out["additionalProperties"]; !ok {
+			out["additionalProperties"] = false
+		}
 	}
 	return out
 }

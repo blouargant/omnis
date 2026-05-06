@@ -169,7 +169,7 @@ func truncate(s string) string {
 // ------------------ bash ------------------
 
 type BashIn struct {
-	Command string `json:"command" jsonschema:"shell command to execute"`
+	Command string `json:"command" jsonschema:"required,the exact shell command line to execute (this field is required and is the only accepted argument besides the optional 'timeout')"`
 	Timeout int    `json:"timeout,omitempty" jsonschema:"timeout in seconds, default 120"`
 }
 type BashOut struct {
@@ -405,7 +405,8 @@ func RunGlob(_ context.Context, in GlobIn) (string, error) {
 func New() []tool.Tool {
 	return []tool.Tool{
 		mustTool("bash",
-			"Run a shell command via /bin/sh -c. Use for arbitrary shell operations. Times out after 120s by default.",
+			"Run a shell command via /bin/sh -c. Use for arbitrary shell operations. Times out after 120s by default. "+
+				"Arguments: `command` (string, required) — the full shell command line to run. Do NOT use any other field name (e.g. `cmd`, `script`, `file_path`); calls with extra or missing properties are rejected.",
 			func(_ tool.Context, in BashIn) (BashOut, error) {
 				out, _ := RunBash(context.Background(), in)
 				return BashOut{Output: out}, nil

@@ -84,7 +84,14 @@ Categorisation:
 ADK plugins observe and mutate the agent loop. The OOTB harness wires:
 
 - **events** — file-logs every Before/AfterTool, Before/AfterModel,
-  ToolError, SessionStart, SessionEnd to `.agent_events.log`.
+  ToolError, SessionStart, SessionEnd to `.agent_events.log`. Every
+  payload carries an `agent` field with the name of the ADK agent
+  currently executing (lead or sub-agent), so subscribers can route
+  events per agent — the TUI uses it to interleave sub-agent activity
+  inside the Chat pane in real time and to indent rows in the Trace
+  pane. `EventAfterModel` payloads also include `model`, `duration`,
+  and a `usage` map (`prompt_tokens`, `candidates_tokens`,
+  `total_tokens`) for per-call telemetry.
 - **permissions** — gates bash and tool calls against
   `config/permissions.yaml` (allow / deny / ask).
 - **cache** — surfaces prompt-cache stats per turn.

@@ -12,6 +12,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,6 +58,10 @@ type oaiMessage struct {
 }
 
 type oaiToolCall struct {
+	// Index is set on streaming deltas to identify which tool call a
+	// fragment belongs to (each chunk usually carries a single entry, so
+	// the slice position is not enough to disambiguate parallel calls).
+	Index    *int            `json:"index,omitempty"`
 	ID       string          `json:"id"`
 	Type     string          `json:"type"` // always "function"
 	Function oaiToolFuncCall `json:"function"`
@@ -78,15 +83,20 @@ type oaiToolFuncDef struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
+type oaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type oaiRequest struct {
-	Model       string       `json:"model"`
-	Messages    []oaiMessage `json:"messages"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	Stream      bool         `json:"stream,omitempty"`
-	Temperature *float32     `json:"temperature,omitempty"`
-	MaxTokens   *int32       `json:"max_tokens,omitempty"`
-	TopP        *float32     `json:"top_p,omitempty"`
-	Stop        []string     `json:"stop,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []oaiMessage      `json:"messages"`
+	Tools         []oaiTool         `json:"tools,omitempty"`
+	Stream        bool              `json:"stream,omitempty"`
+	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
+	Temperature   *float32          `json:"temperature,omitempty"`
+	MaxTokens     *int32            `json:"max_tokens,omitempty"`
+	TopP          *float32          `json:"top_p,omitempty"`
+	Stop          []string          `json:"stop,omitempty"`
 }
 
 type oaiResponse struct {
@@ -101,7 +111,24 @@ type oaiUsage struct {
 	PromptTokens     int32 `json:"prompt_tokens"`
 	CompletionTokens int32 `json:"completion_tokens"`
 	TotalTokens      int32 `json:"total_tokens"`
-	PromptCacheHit   int32 `json:"prompt_cache_hit_tokens,omitempty"`
+	// DeepSeek-style legacy field: number of prompt tokens served from cache.
+	PromptCacheHit int32 `json:"prompt_cache_hit_tokens,omitempty"`
+	// OpenAI-native breakdown introduced with prompt caching.
+	PromptTokensDetails *struct {
+		CachedTokens int32 `json:"cached_tokens,omitempty"`
+	} `json:"prompt_tokens_details,omitempty"`
+}
+
+// cachedRead returns the number of prompt tokens served from the provider's
+// prompt cache, regardless of which field name the server populated.
+func (u *oaiUsage) cachedRead() int32 {
+	if u == nil {
+		return 0
+	}
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		return u.PromptTokensDetails.CachedTokens
+	}
+	return u.PromptCacheHit
 }
 
 // Streaming chunk.
@@ -217,6 +244,12 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 		Tools:    o.toTools(req),
 		Stream:   stream,
 	}
+	if stream {
+		// Ask the server to emit a final chunk carrying usage metadata.
+		// Without this, OpenAI omits prompt/completion token counts in
+		// streaming mode and the harness reports "0/0 tok".
+		r.StreamOptions = &oaiStreamOptions{IncludeUsage: true}
+	}
 	if req.Config != nil {
 		r.Temperature = req.Config.Temperature
 		r.TopP = req.Config.TopP
@@ -300,7 +333,7 @@ func (o *openAI) fromResponse(r *oaiResponse) *model.LLMResponse {
 			PromptTokenCount:        r.Usage.PromptTokens,
 			CandidatesTokenCount:    r.Usage.CompletionTokens,
 			TotalTokenCount:         r.Usage.TotalTokens,
-			CachedContentTokenCount: r.Usage.PromptCacheHit,
+			CachedContentTokenCount: r.Usage.cachedRead(),
 		}
 	}
 	return out
@@ -367,10 +400,14 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 			}
 		}
 		for i, tc := range delta.ToolCalls {
-			p, ok := pending[i]
+			idx := i
+			if tc.Index != nil {
+				idx = *tc.Index
+			}
+			p, ok := pending[idx]
 			if !ok {
 				p = &pendingCall{}
-				pending[i] = p
+				pending[idx] = p
 			}
 			if tc.ID != "" {
 				p.id = tc.ID
@@ -394,8 +431,13 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 	if collectedText.Len() > 0 {
 		c.Parts = append(c.Parts, &genai.Part{Text: collectedText.String()})
 	}
-	for i := 0; i < len(pending); i++ {
-		p := pending[i]
+	keys := make([]int, 0, len(pending))
+	for k := range pending {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	for _, k := range keys {
+		p := pending[k]
 		if p == nil {
 			continue
 		}
@@ -413,7 +455,7 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 			PromptTokenCount:        usage.PromptTokens,
 			CandidatesTokenCount:    usage.CompletionTokens,
 			TotalTokenCount:         usage.TotalTokens,
-			CachedContentTokenCount: usage.PromptCacheHit,
+			CachedContentTokenCount: usage.cachedRead(),
 		}
 	}
 	yield(final, nil)

@@ -37,6 +37,7 @@ import (
 
 	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/agent-toolkit/core/llm"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -178,14 +179,23 @@ func newChatTextView(changed func()) *tview.TextView {
 
 // Config bundles everything the TUI needs to run.
 type Config struct {
-	Runner                     *runner.Runner
-	Bus                        *events.Bus // optional; if non-nil, trace pane subscribes
-	UserID                     string
-	SessionID                  string
-	AppName                    string // shown in title bar
-	SubAgentNames              []string
-	InputTokenPricePerMillion  float64
-	OutputTokenPricePerMillion float64
+	Runner                            *runner.Runner
+	Bus                               *events.Bus // optional; if non-nil, trace pane subscribes
+	UserID                            string
+	SessionID                         string
+	AppName                           string // shown in title bar
+	SubAgentNames                     []string
+	InputTokenPricePerMillion         float64
+	OutputTokenPricePerMillion        float64
+	// CachedInputTokenPricePerMillion is applied to prompt tokens served
+	// from the provider's prompt cache. Defaults to
+	// InputTokenPricePerMillion (i.e. no discount) when zero.
+	CachedInputTokenPricePerMillion float64
+	// CacheCreationTokenPricePerMillion is applied to prompt tokens that
+	// populate the provider's prompt cache for the first time (Anthropic
+	// cache_creation_input_tokens). Defaults to InputTokenPricePerMillion
+	// when zero.
+	CacheCreationTokenPricePerMillion float64
 }
 
 // Run starts the TUI event loop and blocks until the user quits or ctx
@@ -310,9 +320,15 @@ func Run(ctx context.Context, cfg Config) error {
 		SetTextAlign(tview.AlignLeft)
 	var appRunning atomic.Bool
 	var inputTokensTotal atomic.Int64
+	var cachedInputTokensTotal atomic.Int64
+	var cacheCreationTokensTotal atomic.Int64
 	var outputTokensTotal atomic.Int64
 	setStatus := func() {
-		status.SetText(buildStatusText(cfg, inputTokensTotal.Load(), outputTokensTotal.Load()))
+		status.SetText(buildStatusText(cfg,
+			inputTokensTotal.Load(),
+			cachedInputTokensTotal.Load(),
+			cacheCreationTokensTotal.Load(),
+			outputTokensTotal.Load()))
 	}
 	setStatus()
 
@@ -357,9 +373,47 @@ func Run(ctx context.Context, cfg Config) error {
 		})
 	}
 
-	// ── Wire event bus → trace pane ─────────────────────────────────────
+	// subAgentLabel returns the sub-agent name from a payload "agent" field
+	// when it matches a known sub-agent, else "". Lead-agent events thus stay
+	// in their existing rendering path.
+	subAgentLabel := func(p map[string]any) string {
+		name, _ := p["agent"].(string)
+		if name == "" {
+			return ""
+		}
+		if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(name))]; ok {
+			return name
+		}
+		return ""
+	}
+
+	// subAgentDepth tracks nested sub-agent tool calls for trace indentation.
+	var subAgentDepth atomic.Int32
+	traceIndent := func(name string) string {
+		if name == "" {
+			return ""
+		}
+		d := int(subAgentDepth.Load())
+		if d < 1 {
+			d = 1
+		}
+		return strings.Repeat("  ", d) + "[gray]└[-] "
+	}
+
+	// appendSubAgentChat renders a live sub-agent activity line into the
+	// main Chat pane, indented under the parent with the existing yellow
+	// │ prefix used by entry/exit banners and per-line text rendering.
+	appendSubAgentChat := func(format string, args ...any) {
+		appendChat("[yellow]│ %s[-]\n", fmt.Sprintf(format, args...))
+	}
+
+	// ── Wire event bus → trace pane + chat (sub-agent live steps) ───────
 	if cfg.Bus != nil {
 		cfg.Bus.On(events.EventBeforeTool, func(_ string, p map[string]any) {
+			sub := subAgentLabel(p)
+			if sub != "" {
+				subAgentDepth.Add(1)
+			}
 			if p["tool"] == "load_skill" {
 				skillName := ""
 				if input, ok := p["input"].(map[string]any); ok {
@@ -368,17 +422,38 @@ func Run(ctx context.Context, cfg Config) error {
 					}
 				}
 				if skillName != "" {
-					appendTrace("[magenta]★ skill[-] [::b]%s[-]", skillName)
+					appendTrace("%s[magenta]★ skill[-] [::b]%s[-]", traceIndent(sub), skillName)
+					if sub != "" {
+						appendSubAgentChat("%s ★ skill [::b]%s[-]", sub, skillName)
+					}
 					return
 				}
 			}
-			appendTrace("[aqua]→ tool[-] %v", p["tool"])
+			appendTrace("%s[aqua]→ tool[-] %v", traceIndent(sub), p["tool"])
+			if sub != "" {
+				args, _ := p["input"].(map[string]any)
+				appendSubAgentChat("%s [aqua]⚙ %v[-] %s", sub, p["tool"], shortArgs(args))
+			}
 		})
 		cfg.Bus.On(events.EventAfterTool, func(_ string, p map[string]any) {
-			appendTrace("[green]✓ tool[-] %v  [gray](%v)[-]", p["tool"], p["duration"])
+			sub := subAgentLabel(p)
+			appendTrace("%s[green]✓ tool[-] %v  [gray](%v)[-]", traceIndent(sub), p["tool"], p["duration"])
+			if sub != "" {
+				appendSubAgentChat("%s [green]✓ %v[-]  [gray](%v)[-]", sub, p["tool"], p["duration"])
+				if d := subAgentDepth.Add(-1); d < 0 {
+					subAgentDepth.Store(0)
+				}
+			}
 		})
 		cfg.Bus.On(events.EventToolError, func(_ string, p map[string]any) {
-			appendTrace("[red]✗ tool[-] %v: %v", p["tool"], p["error"])
+			sub := subAgentLabel(p)
+			appendTrace("%s[red]✗ tool[-] %v: %v", traceIndent(sub), p["tool"], p["error"])
+			if sub != "" {
+				appendSubAgentChat("%s [red]✗ %v:[-] %v", sub, p["tool"], p["error"])
+				if d := subAgentDepth.Add(-1); d < 0 {
+					subAgentDepth.Store(0)
+				}
+			}
 		})
 		var modelCallCount int
 		var modelCallMu sync.Mutex
@@ -387,19 +462,42 @@ func Run(ctx context.Context, cfg Config) error {
 			modelCallCount++
 			n := modelCallCount
 			modelCallMu.Unlock()
+			sub := subAgentLabel(p)
 			modelName, _ := p["model"].(string)
 			if modelName == "" {
 				modelName = "model"
 			}
-			appendTrace("[blue]→ %s[-] [gray](#%d)[-]", modelName, n)
+			appendTrace("%s[blue]→ %s[-] [gray](#%d)[-]", traceIndent(sub), modelName, n)
 		})
 		cfg.Bus.On(events.EventAfterModel, func(_ string, p map[string]any) {
+			sub := subAgentLabel(p)
+			var promptTok, candTok, cachedTok, cacheCreateTok int64
 			if resp, ok := p["response"].(*model.LLMResponse); ok && resp != nil && resp.UsageMetadata != nil {
-				inputTokensTotal.Add(int64(resp.UsageMetadata.PromptTokenCount))
-				outputTokensTotal.Add(int64(resp.UsageMetadata.CandidatesTokenCount))
+				u := resp.UsageMetadata
+				promptTok = int64(u.PromptTokenCount)
+				candTok = int64(u.CandidatesTokenCount)
+				cachedTok = int64(u.CachedContentTokenCount)
+				for _, d := range u.CacheTokensDetails {
+					if d != nil && d.Modality == llm.CacheCreationModality {
+						cacheCreateTok += int64(d.TokenCount)
+					}
+				}
+				inputTokensTotal.Add(promptTok)
+				cachedInputTokensTotal.Add(cachedTok)
+				cacheCreationTokensTotal.Add(cacheCreateTok)
+				outputTokensTotal.Add(candTok)
 				app.QueueUpdateDraw(setStatus)
 			}
-			appendTrace("[blue]✓ model[-]")
+			appendTrace("%s[blue]✓ model[-]", traceIndent(sub))
+			if sub != "" {
+				modelName, _ := p["model"].(string)
+				if modelName == "" {
+					modelName = "model"
+				}
+				dur, _ := p["duration"].(time.Duration)
+				appendSubAgentChat("%s [blue]▸ %s[-]  [gray](%v, %d/%d tok)[-]",
+					sub, modelName, dur, promptTok, candTok)
+			}
 		})
 		cfg.Bus.On(events.EventRunStart, func(_ string, _ map[string]any) {
 			modelCallMu.Lock()
@@ -420,6 +518,8 @@ func Run(ctx context.Context, cfg Config) error {
 			// draining its update queue, so a draw call would deadlock
 			// the TUI (counters are already zero on launch anyway).
 			inputTokensTotal.Store(0)
+			cachedInputTokensTotal.Store(0)
+			cacheCreationTokensTotal.Store(0)
 			outputTokensTotal.Store(0)
 			appendTrace("[yellow]session start[-]")
 		})
@@ -576,17 +676,27 @@ func Run(ctx context.Context, cfg Config) error {
 			appendChat("\n[::b]you[-]\n\n%s\n", sanitizeInputText(prompt))
 			appendChat("[::b]assistant[-]\n")
 			turnInputStart := inputTokensTotal.Load()
+			turnCachedStart := cachedInputTokensTotal.Load()
+			turnCacheCreateStart := cacheCreationTokensTotal.Load()
 			turnOutputStart := outputTokensTotal.Load()
 			defer func() {
 				turnInput := inputTokensTotal.Load() - turnInputStart
+				turnCached := cachedInputTokensTotal.Load() - turnCachedStart
+				turnCacheCreate := cacheCreationTokensTotal.Load() - turnCacheCreateStart
 				turnOutput := outputTokensTotal.Load() - turnOutputStart
 				if turnInput < 0 {
 					turnInput = 0
 				}
+				if turnCached < 0 {
+					turnCached = 0
+				}
+				if turnCacheCreate < 0 {
+					turnCacheCreate = 0
+				}
 				if turnOutput < 0 {
 					turnOutput = 0
 				}
-				appendChat("%s\n", buildTurnUsageText(cfg, turnInput, turnOutput))
+				appendChat("%s\n", buildTurnUsageText(cfg, turnInput, turnCached, turnCacheCreate, turnOutput))
 			}()
 
 			seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
@@ -783,30 +893,57 @@ func shortArgs(args map[string]any) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-func buildStatusText(cfg Config, inputTokens, outputTokens int64) string {
+func buildStatusText(cfg Config, inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens int64) string {
 	text := fmt.Sprintf(" [::b]%s[-]   session: [yellow]%s[-]   user: [yellow]%s[-]   tokens in/out: [yellow]%d[-]/[yellow]%d[-]",
 		cfg.AppName, cfg.SessionID, cfg.UserID, inputTokens, outputTokens)
-	if dollars, ok := totalCostDollars(inputTokens, outputTokens, cfg.InputTokenPricePerMillion, cfg.OutputTokenPricePerMillion); ok {
+	if cachedInputTokens > 0 || cacheCreationTokens > 0 {
+		text += fmt.Sprintf(" [gray](cache r/w: %d/%d)[-]", cachedInputTokens, cacheCreationTokens)
+	}
+	if dollars, ok := totalCostDollars(inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens, cfg); ok {
 		text += fmt.Sprintf("   total: [green]$%.6f[-]", dollars)
 	}
 	return text
 }
 
-func buildTurnUsageText(cfg Config, inputTokens, outputTokens int64) string {
+func buildTurnUsageText(cfg Config, inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens int64) string {
 	totalTokens := inputTokens + outputTokens
 	text := fmt.Sprintf("[gray]turn usage[-] in/out/total: [yellow]%d[-]/[yellow]%d[-]/[yellow]%d[-]",
 		inputTokens, outputTokens, totalTokens)
-	if dollars, ok := totalCostDollars(inputTokens, outputTokens, cfg.InputTokenPricePerMillion, cfg.OutputTokenPricePerMillion); ok {
+	if cachedInputTokens > 0 || cacheCreationTokens > 0 {
+		text += fmt.Sprintf(" [gray](cache r/w: %d/%d)[-]", cachedInputTokens, cacheCreationTokens)
+	}
+	if dollars, ok := totalCostDollars(inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens, cfg); ok {
 		text += fmt.Sprintf("   [green]$%.6f[-]", dollars)
 	}
 	return text
 }
 
-func totalCostDollars(inputTokens, outputTokens int64, inputPricePerMillion, outputPricePerMillion float64) (float64, bool) {
-	if inputPricePerMillion <= 0 || outputPricePerMillion <= 0 {
+// totalCostDollars splits the prompt into three buckets — fresh, cache-read
+// and cache-creation — and applies a separate $/1M rate to each, then adds
+// the output cost. Returns ok=false when the input/output prices are not
+// configured. Cached/creation prices default to the input price (i.e. no
+// discount) when unset, which preserves the legacy single-rate behaviour.
+func totalCostDollars(inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens int64, cfg Config) (float64, bool) {
+	if cfg.InputTokenPricePerMillion <= 0 || cfg.OutputTokenPricePerMillion <= 0 {
 		return 0, false
 	}
-	inputCost := float64(inputTokens) * inputPricePerMillion / 1_000_000
-	outputCost := float64(outputTokens) * outputPricePerMillion / 1_000_000
-	return inputCost + outputCost, true
+	cachedPrice := cfg.CachedInputTokenPricePerMillion
+	if cachedPrice <= 0 {
+		cachedPrice = cfg.InputTokenPricePerMillion
+	}
+	creationPrice := cfg.CacheCreationTokenPricePerMillion
+	if creationPrice <= 0 {
+		creationPrice = cfg.InputTokenPricePerMillion
+	}
+	// Adapters normalise PromptTokenCount to the *total* prompt size,
+	// which already includes both cache-read and cache-creation tokens.
+	freshTokens := inputTokens - cachedInputTokens - cacheCreationTokens
+	if freshTokens < 0 {
+		freshTokens = 0
+	}
+	freshCost := float64(freshTokens) * cfg.InputTokenPricePerMillion / 1_000_000
+	cachedCost := float64(cachedInputTokens) * cachedPrice / 1_000_000
+	creationCost := float64(cacheCreationTokens) * creationPrice / 1_000_000
+	outputCost := float64(outputTokens) * cfg.OutputTokenPricePerMillion / 1_000_000
+	return freshCost + cachedCost + creationCost + outputCost, true
 }

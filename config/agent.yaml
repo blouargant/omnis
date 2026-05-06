@@ -24,15 +24,25 @@ models:
     input_token_price_per_million: 0.6
     output_token_price_per_million: 3.6
 
-  # Coordinator profile for high-leverage reasoning turns.
-  balanced:
+  # Simple model for routine/background tasks.
+  simple:
     provider: openai_compat
-    model: gpt-4o-mini
+    model: gpt-4o-mini-sweden
     base_url: https://llm-gateway.ai.chapsvision.com/llm-gateway
     api_key: OPENAI_API_KEY
     context_length: 128000
-    input_token_price_per_million: 0.6
-    output_token_price_per_million: 2.4
+    input_token_price_per_million: 0.17
+    output_token_price_per_million: 0.69
+
+  # Balanced model for general-purpose tasks.
+  balanced:
+    provider: openai_compat
+    model: gpt-4.1-mini-sweden
+    base_url: https://llm-gateway.ai.chapsvision.com/llm-gateway
+    api_key: OPENAI_API_KEY
+    context_length: 128000
+    input_token_price_per_million: 0.42
+    output_token_price_per_million: 1.68
 
   # Premium profile for difficult tasks requiring stronger reasoning.
   premium:

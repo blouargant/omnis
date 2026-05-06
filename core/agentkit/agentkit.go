@@ -43,8 +43,15 @@ task because your "role" doesn't fit — discover the mounted tools and
 skills, and let them define the role.
 
 Operating method (apply to every task, in order):
-  1. RESTATE the user's goal in one sentence. Confirm scope before any
-     irreversible action.
+  1. RESTATE the user's request in your own words as the very first
+     thing in your reply, BEFORE any tool call, planning, skill
+     lookup, or delegation. This lets the user verify you understood
+     correctly. Format it as: "Understood: <your restatement>." Then
+     confirm scope before any irreversible action.
+     EXCEPTION — skip the restatement (and act directly) only for
+     trivial acknowledgements such as "yes", "no", "do it",
+     "continue", "ok", "go", "stop", and similar short confirmations
+     or denials that refer to your previous turn.
   2. PLAN with todo_write or task_create whenever the task has more than
      one step. Keep steps small and individually verifiable.
   3. INVESTIGATE before you act. Read state with read-only tools first;
@@ -91,6 +98,17 @@ type AgentConfig struct {
 	Toolsets    []tool.Toolset
 	SubAgents   []agent.Agent
 	Model       model.LLM
+
+	// Optional per-agent callbacks. Use these to attach observers (e.g. an
+	// events bus) directly on the agent so they fire even when the agent is
+	// invoked outside the runner that owns the toolkit's plugin — most
+	// notably when a sub-agent is wrapped by agenttool, which spawns its own
+	// internal runner without inherited plugins.
+	BeforeToolCallbacks  []llmagent.BeforeToolCallback
+	AfterToolCallbacks   []llmagent.AfterToolCallback
+	OnToolErrorCallbacks []llmagent.OnToolErrorCallback
+	BeforeModelCallbacks []llmagent.BeforeModelCallback
+	AfterModelCallbacks  []llmagent.AfterModelCallback
 }
 
 // New constructs an llmagent with the article's default system prompt
@@ -107,13 +125,18 @@ func New(cfg AgentConfig) (agent.Agent, error) {
 		instr = SystemPrompt + "\n\n" + cfg.Instruction
 	}
 	return llmagent.New(llmagent.Config{
-		Name:        cfg.Name,
-		Description: cfg.Description,
-		Instruction: instr,
-		Model:       cfg.Model,
-		Tools:       cfg.Tools,
-		Toolsets:    cfg.Toolsets,
-		SubAgents:   cfg.SubAgents,
+		Name:                 cfg.Name,
+		Description:          cfg.Description,
+		Instruction:          instr,
+		Model:                cfg.Model,
+		Tools:                cfg.Tools,
+		Toolsets:             cfg.Toolsets,
+		SubAgents:            cfg.SubAgents,
+		BeforeToolCallbacks:  cfg.BeforeToolCallbacks,
+		AfterToolCallbacks:   cfg.AfterToolCallbacks,
+		OnToolErrorCallbacks: cfg.OnToolErrorCallbacks,
+		BeforeModelCallbacks: cfg.BeforeModelCallbacks,
+		AfterModelCallbacks:  cfg.AfterModelCallbacks,
 	})
 }
 

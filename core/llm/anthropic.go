@@ -106,6 +106,39 @@ type antUsage struct {
 	CacheCreationInputTokens int32 `json:"cache_creation_input_tokens,omitempty"`
 }
 
+// CacheCreationModality is the synthetic MediaModality value used to surface
+// Anthropic's `cache_creation_input_tokens` count via
+// genai.GenerateContentResponseUsageMetadata.CacheTokensDetails. genai has no
+// dedicated field for this, so consumers (e.g. the TUI cost calculation) must
+// look it up by modality string.
+const CacheCreationModality genai.MediaModality = "cache_creation"
+
+// anthropicUsageToGenai maps an antUsage onto the generic genai usage
+// metadata, normalising semantics to "PromptTokenCount = total prompt
+// tokens" (Anthropic's `input_tokens` is fresh-only, so we add cached read
+// + creation back in). Cache-read tokens are exposed via
+// CachedContentTokenCount; cache-creation tokens piggyback on
+// CacheTokensDetails using CacheCreationModality.
+func anthropicUsageToGenai(u *antUsage) *genai.GenerateContentResponseUsageMetadata {
+	if u == nil {
+		return nil
+	}
+	totalPrompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	md := &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:        totalPrompt,
+		CandidatesTokenCount:    u.OutputTokens,
+		TotalTokenCount:         totalPrompt + u.OutputTokens,
+		CachedContentTokenCount: u.CacheReadInputTokens,
+	}
+	if u.CacheCreationInputTokens > 0 {
+		md.CacheTokensDetails = []*genai.ModalityTokenCount{{
+			Modality:   CacheCreationModality,
+			TokenCount: u.CacheCreationInputTokens,
+		}}
+	}
+	return md
+}
+
 // ── Conversion: genai.Content → antMessage ───────────────────────────────
 
 func (a *anthropic) toMessages(req *model.LLMRequest) []antMessage {
@@ -260,12 +293,7 @@ func (a *anthropic) fromResponse(r *antResponse) *model.LLMResponse {
 	}
 	out := &model.LLMResponse{Content: c, TurnComplete: true}
 	if r.Usage != nil {
-		out.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
-			PromptTokenCount:        r.Usage.InputTokens,
-			CandidatesTokenCount:    r.Usage.OutputTokens,
-			TotalTokenCount:         r.Usage.InputTokens + r.Usage.OutputTokens,
-			CachedContentTokenCount: r.Usage.CacheReadInputTokens,
-		}
+		out.UsageMetadata = anthropicUsageToGenai(r.Usage)
 	}
 	return out
 }
@@ -327,12 +355,7 @@ func (a *anthropic) streamSSE(body io.Reader, yield func(*model.LLMResponse, err
 	}
 	final := &model.LLMResponse{Content: c, TurnComplete: true}
 	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
-		final.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
-			PromptTokenCount:        usage.InputTokens,
-			CandidatesTokenCount:    usage.OutputTokens,
-			TotalTokenCount:         usage.InputTokens + usage.OutputTokens,
-			CachedContentTokenCount: usage.CacheReadInputTokens,
-		}
+		final.UsageMetadata = anthropicUsageToGenai(&usage)
 	}
 	yield(final, nil)
 }

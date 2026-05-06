@@ -82,6 +82,25 @@ if p, err := mypkg.MyPlugin("mine"); err == nil {
 }
 ```
 
+### Filtering events by agent
+
+Every payload emitted by `events.Bus.Plugin` carries an `agent` key
+holding the running ADK agent's name (lead or sub-agent). Use it to
+route events per agent:
+
+```go
+bus.On(events.EventAfterTool, func(_ string, p map[string]any) {
+    name, _ := p["agent"].(string)
+    if name == "investigator" {
+        // ... only sub-agent tool calls
+    }
+})
+```
+
+`EventAfterModel` payloads also include `model`, `duration`, and a
+`usage` map (`prompt_tokens`, `candidates_tokens`, `total_tokens`) so
+you can attribute token spend to each agent.
+
 ## Add a new sub-agent
 
 Sub-agents are constructed with `agentkit.New` like the lead is. Keep
