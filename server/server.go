@@ -13,6 +13,10 @@ import (
 	"github.com/blouargant/agent-toolkit/core/events"
 )
 
+type renameRequest struct {
+	Title string `json:"title"`
+}
+
 type serverDeps struct {
 	Token       string
 	Runner      *runner.Runner
@@ -110,6 +114,41 @@ func newEngine(d serverDeps) *gin.Engine {
 			return
 		}
 		c.Status(http.StatusNoContent)
+	})
+	auth.PATCH("/sessions/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		var body renameRequest
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			return
+		}
+		title := strings.TrimSpace(body.Title)
+		if !d.Registry.SetTitle(id, title) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		if err := setConversationTitle(id, title); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		meta, _ := d.Registry.Get(id)
+		c.JSON(http.StatusOK, meta)
+	})
+	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
+		id := c.Param("id")
+		if _, ok := d.Registry.Get(id); !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		turns, err := loadConversationTurns(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if turns == nil {
+			turns = []ConversationTurn{}
+		}
+		c.JSON(http.StatusOK, gin.H{"turns": turns})
 	})
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 

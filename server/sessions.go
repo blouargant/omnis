@@ -13,6 +13,7 @@ import (
 // only track lifecycle metadata for listing in the UI.
 type SessionMeta struct {
 	ID         string    `json:"id"`
+	Title      string    `json:"title,omitempty"`
 	UserID     string    `json:"user_id"`
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at"`
@@ -27,7 +28,11 @@ type registry struct {
 }
 
 func newRegistry() *registry {
-	return &registry{items: make(map[string]*SessionMeta)}
+	r := &registry{items: make(map[string]*SessionMeta)}
+	for _, m := range loadPersistedSessions() {
+		r.items[m.ID] = m
+	}
+	return r
 }
 
 func (r *registry) New() *SessionMeta {
@@ -68,6 +73,18 @@ func (r *registry) Delete(id string) bool {
 		return false
 	}
 	delete(r.items, id)
+	deleteConversationFile(id)
+	return true
+}
+
+func (r *registry) SetTitle(id, title string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.items[id]
+	if !ok {
+		return false
+	}
+	m.Title = title
 	return true
 }
 

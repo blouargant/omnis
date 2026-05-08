@@ -64,18 +64,25 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
 
 		d.Registry.Touch(meta.ID)
-		streamEvents(ctx, c.Writer, seq, subCh)
+		assistantText := streamEvents(ctx, c.Writer, seq, subCh)
+		if ctx.Err() == nil && strings.TrimSpace(assistantText) != "" {
+			if err := appendConversationTurn(meta.ID, req.Prompt, assistantText); err != nil {
+				log.Printf("server: failed to persist turn: %v", err)
+			}
+		}
 	}
 }
 
 // streamEvents adapts an ADK event iterator into SSE frames written to w,
 // interleaved with sub-agent tool events from the shared event bus.
+// It returns the full assistant text produced during the turn.
 func streamEvents(
 	ctx context.Context,
 	w io.Writer,
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
-) {
+) string {
+	var assistantBuf strings.Builder
 	flusher, _ := w.(interface{ Flush() })
 	flush := func() {
 		if flusher != nil {
@@ -145,7 +152,7 @@ func streamEvents(
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return assistantBuf.String()
 
 		case be := <-subCh:
 			emitBusEvent(be)
@@ -160,14 +167,14 @@ func streamEvents(
 					default:
 						emit("done", map[string]any{})
 						log.Printf("server: stream complete")
-						return
+						return assistantBuf.String()
 					}
 				}
 			}
 			if aev.err != nil {
 				emit("error", map[string]string{"message": aev.err.Error()})
 				emit("done", map[string]any{})
-				return
+				return assistantBuf.String()
 			}
 			ev := aev.ev
 			if ev == nil || ev.Content == nil {
@@ -183,9 +190,11 @@ func streamEvents(
 						// Skip aggregated duplicate of the streamed text.
 					} else if isPartial {
 						emit("token", map[string]string{"text": p.Text})
+						assistantBuf.WriteString(p.Text)
 						sawPartialText = true
 					} else {
 						emit("message", map[string]string{"text": p.Text})
+						assistantBuf.WriteString(p.Text)
 					}
 				}
 				if p.FunctionCall != nil {

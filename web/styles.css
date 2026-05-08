@@ -74,11 +74,66 @@ body { display: flex; overflow: hidden; }
 }
 #session-list li:hover { background: #2a2d2e; color: #cccccc; }
 #session-list li.active { background: #37373d; color: #ffffff; }
+.session-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  gap: 4px;
+}
 #session-list li .meta {
-  display: block;
   font-size: 11px;
   color: #5a5a5a;
-  margin-top: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+#session-list li:hover .session-actions,
+#session-list li.active .session-actions { opacity: 1; }
+.session-action-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.1s, color 0.1s;
+}
+.session-action-btn:hover,
+.session-action-btn:focus { background: none; outline: none; opacity: 1; }
+.delete-btn:hover { color: #f48771; }
+.session-rename-input {
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #007acc;
+  border-radius: 3px;
+  color: #cccccc;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 1px 5px;
+  outline: none;
+  box-sizing: border-box;
 }
 
 #sidebar-footer {

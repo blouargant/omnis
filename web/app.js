@@ -156,17 +156,18 @@ function appendUserBubble(text) {
   els.transcript.appendChild(row);
 }
 
-// Update the floating prompt header to show the question that owns the agent
-// interaction currently in view. Takes the last user bubble whose row top is
-// at or above the transcript's visible bottom edge — i.e. the most recent
-// question that has entered the viewport (or scrolled above it).
+// Update the floating prompt header to show the question whose agent reply is
+// currently at the top of the viewport. That is the last question whose bubble
+// has scrolled completely above the transcript top — its reply is what the
+// reader sees first, so the header provides the matching context.
+// While a bubble is still visible no header is shown (the bubble itself is the label).
 function updatePinnedForScroll() {
   const transcriptRect = els.transcript.getBoundingClientRect();
   const userBubbles = els.transcript.querySelectorAll(".bubble-user");
   let activeText = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.top <= transcriptRect.bottom) activeText = bubble.textContent;
+    if (rowRect.bottom < transcriptRect.top) activeText = bubble.textContent;
   }
   if (activeText !== null) {
     els.promptHeader.textContent = activeText;
@@ -319,27 +320,119 @@ function renderSessions(sessions) {
     li.dataset.id = s.id;
     if (s.id === activeSessionId) li.classList.add("active");
     const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    li.innerHTML = `${s.id.slice(0, 8)}…<span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>`;
-    li.addEventListener("click", () => selectSession(s.id));
+    const displayName = s.title || (s.id.slice(0, 8) + "…");
+
+    li.innerHTML = `
+      <div class="session-name">${escHtml(displayName)}</div>
+      <div class="session-bottom-row">
+        <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
+        <div class="session-actions">
+          <button class="session-action-btn rename-btn" title="Rename" tabindex="-1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="session-action-btn delete-btn" title="Delete" tabindex="-1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `;
+
+    li.addEventListener("click", (e) => {
+      if (e.target.closest(".session-actions")) return;
+      selectSession(s.id);
+    });
+    li.querySelector(".rename-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRename(li, s.id, s.title || "");
+    });
+    li.querySelector(".delete-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSession(s.id, li);
+    });
+
     els.list.appendChild(li);
   }
 }
 
-function selectSession(id) {
+async function deleteSession(id, li) {
+  try {
+    await apiFetch(`/api/sessions/${id}`, { method: "DELETE" });
+    if (activeSessionId === id) {
+      activeSessionId = null;
+      clearPinnedPrompt();
+      els.transcript.innerHTML = "";
+    }
+    li.remove();
+  } catch (e) {
+    console.error("failed to delete session:", e);
+  }
+}
+
+function startRename(li, id, currentTitle) {
+  const nameEl = li.querySelector(".session-name");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "session-rename-input";
+  input.value = currentTitle;
+  input.placeholder = "Session name…";
+
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function commit() {
+    const title = input.value.trim();
+    try {
+      await apiFetch(`/api/sessions/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+    } catch (e) {
+      console.error("failed to rename session:", e);
+    }
+    await loadSessions();
+  }
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    if (e.key === "Escape") { loadSessions(); }
+  });
+  input.addEventListener("blur", commit);
+}
+
+async function selectSession(id) {
   activeSessionId = id;
   clearPinnedPrompt();
   els.transcript.innerHTML = "";
-  const row = document.createElement("div");
-  row.className = "msg-row";
-  const b = document.createElement("div");
-  b.className = "bubble-assistant";
-  b.style.opacity = ".4";
-  b.style.fontStyle = "italic";
-  b.textContent = "Previous turns are kept server-side and won't be re-rendered here.";
-  row.appendChild(b);
-  els.transcript.appendChild(row);
   for (const li of els.list.children) {
     li.classList.toggle("active", li.dataset.id === id);
+  }
+
+  try {
+    const res = await apiFetch(`/api/sessions/${id}/messages`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const turns = data.turns || [];
+    if (turns.length === 0) {
+      const row = document.createElement("div");
+      row.className = "msg-row";
+      const b = document.createElement("div");
+      b.className = "bubble-assistant";
+      b.style.opacity = ".4";
+      b.style.fontStyle = "italic";
+      b.textContent = "No messages yet.";
+      row.appendChild(b);
+      els.transcript.appendChild(row);
+      return;
+    }
+    for (const turn of turns) {
+      appendUserBubble(turn.user_text);
+      const bubble = appendAssistantBubble();
+      renderMarkdown(bubble, turn.assistant_text);
+    }
+    scrollBottom();
+  } catch (e) {
+    console.error("failed to load session history:", e);
   }
 }
 
