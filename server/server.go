@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/adk/runner"
 
+	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
 )
 
@@ -25,6 +26,8 @@ type serverDeps struct {
 	Registry    *registry
 	WebDir      string
 	AgentEvents *agentEventBroadcaster
+	// EventBus is the agent event bus, used to emit curate-now events.
+	EventBus *events.Bus
 	// RegisterSession registers a newly created session in the cross-session
 	// mailbox registry so other leaders can address it by name.
 	RegisterSession func(userID, sessionID, displayName string) error
@@ -267,6 +270,35 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"turns": turns})
 	})
 	auth.POST("/sessions/:id/messages", handleMessages(d))
+
+	auth.POST("/sessions/:id/curate", func(c *gin.Context) {
+		id := c.Param("id")
+		meta, ok := d.Registry.Get(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		var req struct {
+			Reason    string `json:"reason"`
+			Immediate bool   `json:"immediate"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		if req.Reason == "" {
+			req.Reason = "manual /learn request from web UI"
+		}
+		msg, err := toolkitagent.RequestCurateSession(meta.UserID, id, req.Reason)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Immediate && d.EventBus != nil {
+			d.EventBus.Emit(events.EventCurateNow, map[string]any{
+				"user_id":    meta.UserID,
+				"session_id": id,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"message": msg})
+	})
 
 	return r
 }

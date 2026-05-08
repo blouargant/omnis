@@ -31,9 +31,11 @@
     <div id="prompt-header"></div>
     <div id="transcript" aria-live="polite"></div>
     <div id="composer-wrap">
+      <div id="slash-menu" hidden></div>
       <form id="composer">
         <textarea id="prompt" rows="3" placeholder="Message the agent… (Ctrl+Enter to send)" required></textarea>
         <div class="composer-actions">
+          <button id="slash-btn" type="button" title="Slash commands (/)">/</button>
           <span id="status"></span>
           <button id="cancel" type="button" disabled>Stop</button>
           <button id="send" type="submit">Send</button>

@@ -13,8 +13,11 @@ const els = {
   list:          document.getElementById("session-list"),
   promptHeader:  document.getElementById("prompt-header"),
   transcript:    document.getElementById("transcript"),
+  composerWrap:  document.getElementById("composer-wrap"),
   composer:      document.getElementById("composer"),
   prompt:        document.getElementById("prompt"),
+  slashBtn:      document.getElementById("slash-btn"),
+  slashMenu:     document.getElementById("slash-menu"),
   send:          document.getElementById("send"),
   cancel:        document.getElementById("cancel"),
   status:        document.getElementById("status"),
@@ -204,13 +207,61 @@ function setPinnedPrompt(text) {
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
 function appendUserBubble(text, container) {
-  const isMailbox = typeof text === "string" && text.startsWith("[mailbox]");
+  if (typeof text === "string" && text.startsWith("[mailbox]")) {
+    appendMailboxBlock(text, container);
+    return;
+  }
   const row = document.createElement("div");
-  row.className = "msg-row msg-row-user" + (isMailbox ? " msg-row-mailbox" : "");
+  row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
-  bubble.className = "bubble-user" + (isMailbox ? " bubble-mailbox" : "");
+  bubble.className = "bubble-user";
   bubble.textContent = text;
   row.appendChild(bubble);
+  (container || els.transcript).appendChild(row);
+}
+
+// Parse a mailbox user_text into { from, body }.
+// Format: "[mailbox] Cross-session message received:\nFrom: <sender>\nBody: <body>"
+function parseMailboxText(text) {
+  const fromMatch = text.match(/^From:\s*(.+)$/m);
+  const bodyMatch = text.match(/^Body:\s*([\s\S]*)$/m);
+  return {
+    from: fromMatch ? fromMatch[1].trim() : "unknown",
+    body: bodyMatch ? bodyMatch[1].trim() : text,
+  };
+}
+
+// Render a mailbox push event as a collapsible block, like a tool call.
+function appendMailboxBlock(text, container) {
+  const { from, body } = parseMailboxText(text);
+
+  const row = document.createElement("div");
+  row.className = "tool-row";
+
+  const block = document.createElement("div");
+  block.className = "tool-block border-sky";
+
+  const header = document.createElement("div");
+  header.className = "tool-header";
+  header.innerHTML = `
+    <span class="tool-badge badge-sky">Inbox</span>
+    <span class="tool-desc">from ${escHtml(from)}</span>
+    <span class="tool-chevron">▶</span>
+  `;
+  header.addEventListener("click", () => block.classList.toggle("expanded"));
+
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "tool-body";
+  bodyEl.innerHTML = `
+    <div class="tool-section">
+      <div class="tool-section-label label-in">FROM: ${escHtml(from)}</div>
+      <pre class="tool-pre output">${escHtml(body)}</pre>
+    </div>
+  `;
+
+  block.appendChild(header);
+  block.appendChild(bodyEl);
+  row.appendChild(block);
   (container || els.transcript).appendChild(row);
 }
 
@@ -430,8 +481,12 @@ function renderSessions(sessions) {
     const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const displayName = s.title || s.id;
 
+    if (sessionSending.has(s.id)) li.classList.add("session-busy");
     li.innerHTML = `
-      <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+      <div class="session-name-row">
+        <span class="session-busy-dot"></span>
+        <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+      </div>
       <div class="session-bottom-row">
         <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
         <div class="session-actions">
@@ -460,6 +515,11 @@ function renderSessions(sessions) {
 
     els.list.appendChild(li);
   }
+}
+
+function setSessionBusy(sessionId, busy) {
+  const li = els.list.querySelector(`li[data-id="${CSS.escape(sessionId)}"]`);
+  if (li) li.classList.toggle("session-busy", busy);
 }
 
 async function deleteSession(id, li) {
@@ -572,6 +632,8 @@ async function selectSession(id) {
 }
 
 async function newChat() {
+  // Drop the outgoing session's push subscription before switching.
+  if (activeSessionId) unsubscribeSessionEvents(activeSessionId);
   try {
     const res = await apiFetch("/api/sessions", { method: "POST" });
     const data = await res.json();
@@ -691,6 +753,12 @@ async function* parseSSE(res) {
 async function sendMessage() {
   const prompt = els.prompt.value.trim();
   if (!prompt) return;
+  if (prompt.startsWith("/")) {
+    els.prompt.value = "";
+    hideSlashMenu();
+    await handleSlashCommand(prompt);
+    return;
+  }
   if (!activeSessionId) await newChat();
   if (!activeSessionId) return;
 
@@ -760,6 +828,7 @@ async function sendMessage() {
   const ctrl = new AbortController();
   sessionAbortCtrls.set(sessionId, ctrl);
   sessionSending.add(sessionId);
+  setSessionBusy(sessionId, true);
   setSessionStatus(sessionId, "thinking…");
   if (sessionId === activeSessionId) applySessionUI(sessionId);
 
@@ -862,12 +931,145 @@ async function sendMessage() {
     }
     sessionAbortCtrls.delete(sessionId);
     sessionSending.delete(sessionId);
+    setSessionBusy(sessionId, false);
     sessionStatus.delete(sessionId);
     if (sessionId === activeSessionId) applySessionUI(sessionId);
     // Track turn count so appendNewPushTurns knows where to start.
     sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
     loadSessions();
     scrollBottom();
+  }
+}
+
+// ─── Slash commands ───────────────────────────────────────────────────────────
+
+const SLASH_COMMANDS = [
+  { cmd: "/help",      args: "",         desc: "Show available commands" },
+  { cmd: "/learn",     args: "[reason]", desc: "Mark session for soft-skill curation (runs on session end)" },
+  { cmd: "/learn-now", args: "[reason]", desc: "Mark and immediately trigger soft-skill curation" },
+  { cmd: "/status",    args: "",         desc: "Show current session info" },
+];
+
+let slashMenuFocusIdx = -1;
+
+function renderSlashMenu(prefix) {
+  const p = prefix.toLowerCase();
+  const matches = p === "/" ? SLASH_COMMANDS : SLASH_COMMANDS.filter(c => c.cmd.startsWith(p));
+  if (matches.length === 0) { hideSlashMenu(); return; }
+  els.slashMenu.innerHTML = "";
+  matches.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "slash-menu-item";
+    row.dataset.value = item.cmd + (item.args ? " " : "");
+    row.innerHTML =
+      `<span class="slash-menu-cmd">${escHtml(item.cmd)}</span>` +
+      (item.args ? `<span class="slash-menu-args">${escHtml(item.args)}</span>` : "") +
+      `<span class="slash-menu-desc">${escHtml(item.desc)}</span>`;
+    row.addEventListener("mousedown", e => {
+      e.preventDefault(); // keep textarea focus
+      selectSlashCommand(item.cmd + (item.args ? " " : ""));
+    });
+    els.slashMenu.appendChild(row);
+  });
+  slashMenuFocusIdx = -1;
+  els.slashMenu.removeAttribute("hidden");
+  els.slashBtn.classList.add("active");
+}
+
+function hideSlashMenu() {
+  els.slashMenu.setAttribute("hidden", "");
+  els.slashBtn.classList.remove("active");
+  slashMenuFocusIdx = -1;
+}
+
+function updateSlashMenuFocus() {
+  const items = els.slashMenu.querySelectorAll(".slash-menu-item");
+  items.forEach((it, i) => it.classList.toggle("focused", i === slashMenuFocusIdx));
+  if (slashMenuFocusIdx >= 0 && items[slashMenuFocusIdx]) {
+    items[slashMenuFocusIdx].scrollIntoView({ block: "nearest" });
+  }
+}
+
+function selectSlashCommand(text) {
+  els.prompt.value = text;
+  els.prompt.setSelectionRange(text.length, text.length);
+  els.prompt.focus();
+  hideSlashMenu();
+}
+
+function appendCommandBubble(text, isError = false) {
+  const container = activeSessionId ? getContainer(activeSessionId) : els.transcript;
+  if (activeSessionId && !els.transcript.contains(container)) mountSession(activeSessionId);
+  const row = document.createElement("div");
+  row.className = "msg-row";
+  const bubble = document.createElement("div");
+  if (isError) {
+    bubble.className = "bubble-error";
+    bubble.textContent = text;
+  } else {
+    bubble.className = "bubble-assistant rendered";
+    renderMarkdown(bubble, text);
+  }
+  row.appendChild(bubble);
+  container.appendChild(row);
+  scrollBottom();
+}
+
+async function handleSlashCommand(raw) {
+  const trimmed = raw.trim();
+  const spaceIdx = trimmed.indexOf(" ");
+  const cmdPart = spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed;
+  const argPart = spaceIdx >= 0 ? trimmed.slice(spaceIdx + 1).trim() : "";
+  const cmd = cmdPart.slice(1).toLowerCase();
+
+  switch (cmd) {
+    case "help":
+      appendCommandBubble(
+        "**Available commands**\n\n" +
+        "- `/help` — Show this help\n" +
+        "- `/learn [reason]` — Mark session for soft-skill curation (runs on session end)\n" +
+        "- `/learn-now [reason]` — Mark and immediately trigger soft-skill curation\n" +
+        "- `/status` — Show current session info"
+      );
+      break;
+
+    case "status": {
+      const sid = activeSessionId || "none";
+      appendCommandBubble(
+        `**Session status**\n\n- Session: \`${sid}\`\n` +
+        `- Use \`/learn\` to schedule soft-skill curation`
+      );
+      break;
+    }
+
+    case "learn":
+    case "learn-now": {
+      if (!activeSessionId) {
+        appendCommandBubble("No active session — start a chat first.", true);
+        return;
+      }
+      const immediate = cmd === "learn-now";
+      const reason = argPart || `manual /${cmd} request from web UI`;
+      try {
+        const res = await fetch(`/api/sessions/${activeSessionId}/curate`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ reason, immediate }),
+        });
+        const data = await res.json();
+        if (!res.ok) { appendCommandBubble(data.error || "curate request failed", true); return; }
+        const note = immediate
+          ? "\n\nTriggered curation now. Check logs for curator completion."
+          : "\n\nCuration runs on session end.";
+        appendCommandBubble(data.message + note);
+      } catch (err) {
+        appendCommandBubble(String(err), true);
+      }
+      break;
+    }
+
+    default:
+      appendCommandBubble(`Unknown command: \`/${cmd}\` — try \`/help\``, true);
   }
 }
 
@@ -882,9 +1084,69 @@ els.cancel.addEventListener("click", () => {
   if (ctrl) ctrl.abort();
 });
 els.prompt.addEventListener("keydown", (e) => {
+  if (!els.slashMenu.hasAttribute("hidden")) {
+    const items = Array.from(els.slashMenu.querySelectorAll(".slash-menu-item"));
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      slashMenuFocusIdx = Math.min(slashMenuFocusIdx + 1, items.length - 1);
+      updateSlashMenuFocus();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      slashMenuFocusIdx = Math.max(slashMenuFocusIdx - 1, -1);
+      updateSlashMenuFocus();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (items.length === 1) {
+        selectSlashCommand(items[0].dataset.value);
+      } else if (items.length > 0) {
+        slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length;
+        updateSlashMenuFocus();
+      }
+      return;
+    }
+    if (e.key === "Enter" && slashMenuFocusIdx >= 0) {
+      e.preventDefault();
+      selectSlashCommand(items[slashMenuFocusIdx].dataset.value);
+      return;
+    }
+    if (e.key === "Escape") {
+      hideSlashMenu();
+      return;
+    }
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     sendMessage();
+  }
+});
+
+els.prompt.addEventListener("input", () => {
+  const val = els.prompt.value;
+  const firstLine = val.split("\n")[0];
+  const firstWord = firstLine.split(" ")[0];
+  if (val.startsWith("/") && !firstLine.includes(" ")) {
+    renderSlashMenu(firstWord);
+  } else {
+    hideSlashMenu();
+  }
+});
+
+els.slashBtn.addEventListener("click", () => {
+  if (!els.prompt.value.startsWith("/")) {
+    els.prompt.value = "/" + els.prompt.value;
+  }
+  els.prompt.focus();
+  const firstWord = els.prompt.value.split("\n")[0].split(" ")[0];
+  renderSlashMenu(firstWord);
+});
+
+document.addEventListener("mousedown", (e) => {
+  if (!els.slashMenu.hasAttribute("hidden") && !els.composerWrap.contains(e.target)) {
+    hideSlashMenu();
   }
 });
 
@@ -954,4 +1216,11 @@ els.sidebarToggle.addEventListener("click", () => {
   if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
   if (!token) promptForToken();
   await loadSessions();
+  // Auto-select the most recent session so the user is never left without an
+  // active session. This prevents implicit session creation inside sendMessage()
+  // which caused session/mailbox state to get scrambled.
+  if (!activeSessionId) {
+    const first = els.list.querySelector("li[data-id]");
+    if (first) await selectSession(first.dataset.id);
+  }
 })();

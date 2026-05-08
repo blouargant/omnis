@@ -104,11 +104,30 @@ body.resizing #sidebar { transition: none; }
 }
 #session-list li:hover { background: #2a2d2e; color: #cccccc; }
 #session-list li.active { background: #37373d; color: #ffffff; }
+.session-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
 .session-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
+.session-busy-dot {
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d4a017;
+  border: 1px solid #f0b429;
+  flex-shrink: 0;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+#session-list li.session-busy .session-busy-dot { display: block; }
 .session-bottom-row {
   display: flex;
   align-items: center;
@@ -276,16 +295,9 @@ body.resizing #sidebar-resize { transition: none; }
 
 /* Regular user message and floating pinned header — slightly lighter than the shared base. */
 #prompt-header,
-.msg-row-user .bubble-user:not(.bubble-mailbox) {
+.msg-row-user .bubble-user {
   background: #474747;
   border-color: #6a6a6a;
-}
-
-/* Mailbox (cross-session push) message — slightly darker than the base. */
-.bubble-mailbox {
-  background: #2a2a2a;
-  border-color: #3e3e42;
-  color: #b0b0b0;
 }
 
 /* User message row — narrower horizontal padding than agent rows so the
@@ -549,6 +561,7 @@ body.resizing #sidebar-resize { transition: none; }
   border-top: 1px solid #3e3e42;
   background: #252526;
   padding: 12px 32px;
+  position: relative;
 }
 #composer { display: flex; flex-direction: column; gap: 8px; }
 
@@ -632,6 +645,82 @@ body.resizing #sidebar-resize { transition: none; }
 }
 #cancel:hover:not(:disabled) { background: #3a0d0d; color: #f48771; border-color: #6e1f1f; }
 #cancel:disabled { opacity: 0.35; cursor: not-allowed; }
+
+#slash-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid #3e3e42;
+  color: #858585;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  line-height: 1;
+}
+#slash-btn:hover, #slash-btn.active {
+  background: #2a2d2e;
+  color: #cccccc;
+  border-color: #007acc;
+}
+
+/* ─── Slash command menu ────────────────────────────────────── */
+#slash-menu {
+  position: absolute;
+  bottom: calc(100% - 8px);
+  left: 32px;
+  right: 32px;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.5);
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+}
+#slash-menu[hidden] { display: none; }
+
+.slash-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #2d2d30;
+  transition: background 0.1s;
+}
+.slash-menu-item:last-child { border-bottom: none; }
+.slash-menu-item:hover, .slash-menu-item.focused { background: #37373d; }
+
+.slash-menu-cmd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: #4fc1ff;
+  flex-shrink: 0;
+}
+.slash-menu-args {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: #ce9178;
+  flex-shrink: 0;
+}
+.slash-menu-desc {
+  font-size: 12px;
+  color: #858585;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
 
 /* ─── Scrollbars ───────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

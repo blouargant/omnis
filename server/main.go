@@ -105,6 +105,7 @@ func run() error {
 		Runner:          r,
 		Registry:        registry,
 		WebDir:          webDir,
+		EventBus:        result.EventBus,
 		AgentEvents:     newAgentEventBroadcaster(result.EventBus),
 		RegisterSession:   result.RegisterSession,
 		RenameSession:     result.RenameSession,
