@@ -5,10 +5,10 @@ go 1.25.5
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/glamour v1.0.0
+	github.com/dustinkirkland/golang-petname v0.0.0-20260215035315-f0c533e9ce9b
 	github.com/gdamore/tcell/v2 v2.13.9
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/pkoukk/tiktoken-go v0.1.8
@@ -55,6 +55,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/safehtml v0.1.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.18.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect

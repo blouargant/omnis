@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	petname "github.com/dustinkirkland/golang-petname"
 )
 
 // SessionMeta is what we know about a chat session at the HTTP layer. ADK's
@@ -37,16 +37,27 @@ func newRegistry() *registry {
 
 func (r *registry) New() *SessionMeta {
 	now := time.Now()
+	r.mu.Lock()
 	m := &SessionMeta{
-		ID:         uuid.NewString(),
+		ID:         r.uniqueName(),
 		UserID:     defaultUserID,
 		CreatedAt:  now,
 		LastUsedAt: now,
 	}
-	r.mu.Lock()
 	r.items[m.ID] = m
 	r.mu.Unlock()
 	return m
+}
+
+// uniqueName generates a human-readable adjective-noun name that does not
+// collide with any session already in the registry. Must be called with r.mu held.
+func (r *registry) uniqueName() string {
+	for {
+		name := petname.Generate(2, "-")
+		if _, exists := r.items[name]; !exists {
+			return name
+		}
+	}
 }
 
 func (r *registry) Get(id string) (*SessionMeta, bool) {
