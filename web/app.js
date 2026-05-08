@@ -20,7 +20,49 @@ const els = {
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let activeSessionId = null;
-let abortCtrl = null;
+
+// ─── Per-session streaming state ─────────────────────────────────────────────
+// Tracks which sessions are actively streaming so switching sessions doesn't
+// carry over the disabled Send button or the "streaming…" status label.
+
+const sessionAbortCtrls = new Map(); // sessionId → AbortController
+const sessionSending    = new Set(); // sessionIds currently streaming
+const sessionStatus     = new Map(); // sessionId → status string
+
+function setSessionStatus(sessionId, s) {
+  sessionStatus.set(sessionId, s);
+  if (sessionId === activeSessionId) setStatus(s);
+}
+
+function applySessionUI(id) {
+  const active = sessionSending.has(id);
+  els.send.disabled   = active;
+  els.cancel.disabled = !active;
+  setStatus(sessionStatus.get(id) || "");
+}
+
+// ─── Per-session transcript containers ──────────────────────────────────────
+// Each session owns a detached <div style="display:contents"> that holds its
+// transcript DOM. Only one is mounted inside els.transcript at a time. This
+// preserves in-progress streaming DOM when the user switches sessions.
+
+const sessionContainers = new Map();
+
+function getContainer(sessionId) {
+  if (!sessionContainers.has(sessionId)) {
+    const div = document.createElement("div");
+    div.style.display = "contents";
+    sessionContainers.set(sessionId, div);
+  }
+  return sessionContainers.get(sessionId);
+}
+
+function mountSession(sessionId) {
+  const next = sessionId ? getContainer(sessionId) : null;
+  if (next && els.transcript.contains(next)) return; // already mounted
+  while (els.transcript.firstChild) els.transcript.removeChild(els.transcript.firstChild);
+  if (next) els.transcript.appendChild(next);
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -146,14 +188,14 @@ function setPinnedPrompt(text) {
 }
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
-function appendUserBubble(text) {
+function appendUserBubble(text, container) {
   const row = document.createElement("div");
   row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
   bubble.className = "bubble-user";
   bubble.textContent = text;
   row.appendChild(bubble);
-  els.transcript.appendChild(row);
+  (container || els.transcript).appendChild(row);
 }
 
 // Update the floating prompt header to show the question whose agent reply is
@@ -184,25 +226,25 @@ function clearPinnedPrompt() {
 
 // ─── DOM builders ───────────────────────────────────────────────────────────
 
-function appendAssistantBubble() {
+function appendAssistantBubble(container) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
   const bubble = document.createElement("div");
   bubble.className = "bubble-assistant";
   row.appendChild(bubble);
-  els.transcript.appendChild(row);
+  (container || els.transcript).appendChild(row);
   scrollBottom();
   return bubble;
 }
 
-function appendErrorBubble(text) {
+function appendErrorBubble(text, container) {
   const row = document.createElement("div");
   row.className = "msg-row error";
   const bubble = document.createElement("div");
   bubble.className = "bubble-error";
   bubble.textContent = text;
   row.appendChild(bubble);
-  els.transcript.appendChild(row);
+  (container || els.transcript).appendChild(row);
   scrollBottom();
 }
 
@@ -234,12 +276,12 @@ function buildToolBlock(name, args) {
 }
 
 // appendToolCall adds a top-level tool block to the transcript.
-function appendToolCall(name, args) {
+function appendToolCall(name, args, container) {
   const block = buildToolBlock(name, args);
   const row = document.createElement("div");
   row.className = "tool-row";
   row.appendChild(block);
-  els.transcript.appendChild(row);
+  (container || els.transcript).appendChild(row);
   scrollBottom();
   return block;
 }
@@ -403,10 +445,23 @@ function startRename(li, id, currentTitle) {
 async function selectSession(id) {
   activeSessionId = id;
   clearPinnedPrompt();
-  els.transcript.innerHTML = "";
   for (const li of els.list.children) {
     li.classList.toggle("active", li.dataset.id === id);
   }
+
+  applySessionUI(id);
+
+  const container = getContainer(id);
+
+  // If the container already has content it's either a live stream in progress
+  // or was previously viewed — just show it without re-fetching.
+  if (container.childNodes.length > 0) {
+    mountSession(id);
+    scrollBottom();
+    return;
+  }
+
+  mountSession(id);
 
   try {
     const res = await apiFetch(`/api/sessions/${id}/messages`);
@@ -422,12 +477,12 @@ async function selectSession(id) {
       b.style.fontStyle = "italic";
       b.textContent = "No messages yet.";
       row.appendChild(b);
-      els.transcript.appendChild(row);
+      container.appendChild(row);
       return;
     }
     for (const turn of turns) {
-      appendUserBubble(turn.user_text);
-      const bubble = appendAssistantBubble();
+      appendUserBubble(turn.user_text, container);
+      const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turn.assistant_text);
     }
     scrollBottom();
@@ -442,7 +497,8 @@ async function newChat() {
     const data = await res.json();
     activeSessionId = data.session_id;
     clearPinnedPrompt();
-    els.transcript.innerHTML = "";
+    mountSession(activeSessionId);
+    applySessionUI(activeSessionId);
     await loadSessions();
   } catch (e) { console.error(e); }
 }
@@ -481,8 +537,14 @@ async function sendMessage() {
   if (!activeSessionId) await newChat();
   if (!activeSessionId) return;
 
+  // Capture session identity and container. The user may switch sessions
+  // mid-stream; these captured references keep writes going to the right DOM.
+  const sessionId = activeSessionId;
+  const container = getContainer(sessionId);
+  if (!els.transcript.contains(container)) mountSession(sessionId);
+
   // Insert the user message into the transcript before streaming starts.
-  appendUserBubble(prompt);
+  appendUserBubble(prompt, container);
   scrollBottom();
   els.prompt.value = "";
 
@@ -494,7 +556,7 @@ async function sendMessage() {
 
   function ensureSegment() {
     if (!segBubble) {
-      segBubble = appendAssistantBubble();
+      segBubble = appendAssistantBubble(container);
       segAcc = "";
       segHadToken = false;
     }
@@ -538,20 +600,21 @@ async function sendMessage() {
   let activeOuterBlock = null;
   const innerPending = [];
 
-  abortCtrl = new AbortController();
-  els.send.disabled = true;
-  els.cancel.disabled = false;
-  setStatus("thinking…");
+  const ctrl = new AbortController();
+  sessionAbortCtrls.set(sessionId, ctrl);
+  sessionSending.add(sessionId);
+  setSessionStatus(sessionId, "thinking…");
+  if (sessionId === activeSessionId) applySessionUI(sessionId);
 
   try {
-    const res = await apiFetch(`/api/sessions/${activeSessionId}/messages`, {
+    const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({ prompt }),
-      signal: abortCtrl.signal,
+      signal: ctrl.signal,
     });
     if (!res.ok) {
       const txt = await res.text();
-      appendErrorBubble(`error ${res.status}: ${txt}`);
+      appendErrorBubble(`error ${res.status}: ${txt}`, container);
       return;
     }
 
@@ -563,7 +626,7 @@ async function sendMessage() {
           segAcc += data.text || "";
           scheduleRender();
           scrollBottom();
-          setStatus("streaming…");
+          setSessionStatus(sessionId, "streaming…");
           break;
         }
 
@@ -581,11 +644,11 @@ async function sendMessage() {
         case "tool_call": {
           // Seal the preceding text segment before showing the tool.
           finalizeSegment();
-          const block = appendToolCall(data.name, data.args);
+          const block = appendToolCall(data.name, data.args, container);
           pendingTools.push(block);
           activeOuterBlock = block;
           innerPending.length = 0;
-          setStatus(`running ${data.name}…`);
+          setSessionStatus(sessionId, `running ${data.name}…`);
           break;
         }
 
@@ -593,7 +656,7 @@ async function sendMessage() {
           const block = pendingTools.shift();
           if (block) resolveToolCall(block, data.response);
           activeOuterBlock = null;
-          setStatus("thinking…");
+          setSessionStatus(sessionId, "thinking…");
           break;
         }
 
@@ -619,7 +682,7 @@ async function sendMessage() {
 
         case "error": {
           finalizeSegment();
-          appendErrorBubble(data.message || String(data));
+          appendErrorBubble(data.message || String(data), container);
           break;
         }
 
@@ -629,9 +692,9 @@ async function sendMessage() {
     }
   } catch (e) {
     if (e.name === "AbortError") {
-      appendErrorBubble("(cancelled)");
+      appendErrorBubble("(cancelled)", container);
     } else {
-      appendErrorBubble(String(e));
+      appendErrorBubble(String(e), container);
     }
   } finally {
     finalizeSegment();
@@ -640,10 +703,10 @@ async function sendMessage() {
       const dot = b.querySelector(".tool-dot");
       if (dot) dot.classList.remove("pending");
     }
-    abortCtrl = null;
-    els.send.disabled = false;
-    els.cancel.disabled = true;
-    setStatus("");
+    sessionAbortCtrls.delete(sessionId);
+    sessionSending.delete(sessionId);
+    sessionStatus.delete(sessionId);
+    if (sessionId === activeSessionId) applySessionUI(sessionId);
     loadSessions();
     scrollBottom();
   }
@@ -655,7 +718,10 @@ els.transcript.addEventListener("scroll", updatePinnedForScroll);
 els.newChat.addEventListener("click", newChat);
 els.setToken.addEventListener("click", promptForToken);
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
-els.cancel.addEventListener("click", () => { if (abortCtrl) abortCtrl.abort(); });
+els.cancel.addEventListener("click", () => {
+  const ctrl = sessionAbortCtrls.get(activeSessionId);
+  if (ctrl) ctrl.abort();
+});
 els.prompt.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
