@@ -274,6 +274,20 @@ body.resizing #sidebar-resize { transition: none; }
   width: 100%;
 }
 
+/* Regular user message and floating pinned header — slightly lighter than the shared base. */
+#prompt-header,
+.msg-row-user .bubble-user:not(.bubble-mailbox) {
+  background: #474747;
+  border-color: #6a6a6a;
+}
+
+/* Mailbox (cross-session push) message — slightly darker than the base. */
+.bubble-mailbox {
+  background: #2a2a2a;
+  border-color: #3e3e42;
+  color: #b0b0b0;
+}
+
 /* User message row — narrower horizontal padding than agent rows so the
    bubble extends slightly beyond agent content on both sides. */
 .msg-row-user {

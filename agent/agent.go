@@ -74,6 +74,9 @@ type AgentResult struct {
 	// RenameSession updates the cross-session registry when a session is renamed,
 	// moving the mailbox address from oldName to newName.
 	RenameSession func(oldName, newName string) error
+	// UnregisterSession removes a session from the cross-session registry.
+	// Call this when a session is deleted so it no longer appears in teammate_list.
+	UnregisterSession func(displayName string) error
 	// WatchMailbox starts a background goroutine that polls the leader mailbox
 	// for (userID, sessionID). onMessage is called with (friendlyFromName, body)
 	// whenever a message arrives; the message is consumed by the goroutine and
@@ -764,6 +767,9 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		},
 		RenameSession: func(oldName, newName string) error {
 			return reg.Rename(oldName, newName)
+		},
+		UnregisterSession: func(displayName string) error {
+			return reg.Unregister(displayName)
 		},
 		WatchMailbox: func(ctx context.Context, userID, sessionID string, onMessage func(from, body string)) {
 			addr := nameFunc(userID, sessionID, "leader")

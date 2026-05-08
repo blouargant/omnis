@@ -204,10 +204,11 @@ function setPinnedPrompt(text) {
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
 function appendUserBubble(text, container) {
+  const isMailbox = typeof text === "string" && text.startsWith("[mailbox]");
   const row = document.createElement("div");
-  row.className = "msg-row msg-row-user";
+  row.className = "msg-row msg-row-user" + (isMailbox ? " msg-row-mailbox" : "");
   const bubble = document.createElement("div");
-  bubble.className = "bubble-user";
+  bubble.className = "bubble-user" + (isMailbox ? " bubble-mailbox" : "");
   bubble.textContent = text;
   row.appendChild(bubble);
   (container || els.transcript).appendChild(row);
@@ -270,6 +271,7 @@ function buildToolBlock(name, args) {
   const desc = toolDesc(name, args);
   const block = document.createElement("div");
   block.className = `tool-block border-${color}`;
+  block.dataset.toolName = (name || "").toLowerCase();
 
   const header = document.createElement("div");
   header.className = "tool-header";
@@ -318,24 +320,73 @@ function appendNestedToolCall(parentBlock, name, args) {
   return block;
 }
 
+// formatTeammateResponse returns a human-readable string for a teammate tool
+// response, or null to signal "suppress this output entirely".
+function formatTeammateResponse(response) {
+  if (!response || typeof response !== "object") return String(response || "");
+
+  // teammate_check: empty mailbox → suppress
+  if (response.message === "(none)") return null;
+
+  // teammate_check: message with [Sender] prefix → show structured
+  if (typeof response.message === "string") {
+    const m = response.message.match(/^\[(.+?)\]\s*([\s\S]*)$/);
+    if (m) return `From: ${m[1]}\n\n${m[2].trim()}`;
+    return response.message;
+  }
+
+  // teammate_ask: {"reply": "..."}
+  if (typeof response.reply === "string") {
+    const m = response.reply.match(/^\[(.+?)\]\s*([\s\S]*)$/);
+    if (m) return `From: ${m[1]}\n\n${m[2].trim()}`;
+    return response.reply;
+  }
+
+  // teammate_tell: {"result": "delivered"}
+  if (typeof response.result === "string") return response.result;
+
+  // teammate_list: {"sessions": {"name": "addr", ...}}
+  if (response.sessions && typeof response.sessions === "object") {
+    const names = Object.keys(response.sessions);
+    return names.length === 0 ? "(no sessions available)" : names.join("\n");
+  }
+
+  return JSON.stringify(response, null, 2);
+}
+
 function resolveToolCall(block, response) {
   const isError = response && typeof response === "object" && typeof response.error === "string";
+  const isTeammate = /^teammate/.test(block.dataset.toolName || "");
 
   const dot = block.querySelector(".tool-dot");
   if (dot) { dot.classList.remove("pending"); dot.classList.add(isError ? "error" : "done"); }
 
   const slot = block.querySelector(".tool-out-slot");
-  if (slot) {
-    const text = isError ? response.error : extractResponse(response);
+  if (!slot) return;
+
+  if (isTeammate && !isError) {
+    const formatted = formatTeammateResponse(response);
+    if (formatted === null) {
+      slot.remove();
+      return;
+    }
     const outDiv = document.createElement("div");
     outDiv.className = "tool-section";
-    outDiv.innerHTML = isError
-      ? `<div class="tool-section-label label-error">ERROR</div>
-         <pre class="tool-pre tool-error">${escHtml(text)}</pre>`
-      : `<div class="tool-section-label label-out">OUT</div>
-         <pre class="tool-pre output">${escHtml(text)}</pre>`;
+    outDiv.innerHTML = `<div class="tool-section-label label-out">OUT</div>
+       <pre class="tool-pre output">${escHtml(formatted)}</pre>`;
     slot.replaceWith(outDiv);
+    return;
   }
+
+  const text = isError ? response.error : extractResponse(response);
+  const outDiv = document.createElement("div");
+  outDiv.className = "tool-section";
+  outDiv.innerHTML = isError
+    ? `<div class="tool-section-label label-error">ERROR</div>
+       <pre class="tool-pre tool-error">${escHtml(text)}</pre>`
+    : `<div class="tool-section-label label-out">OUT</div>
+       <pre class="tool-pre output">${escHtml(text)}</pre>`;
+  slot.replaceWith(outDiv);
 }
 
 // ─── API helpers ─────────────────────────────────────────────────────────────

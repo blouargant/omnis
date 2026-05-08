@@ -30,6 +30,8 @@ type serverDeps struct {
 	RegisterSession func(userID, sessionID, displayName string) error
 	// RenameSession updates the cross-session registry when a session title changes.
 	RenameSession func(oldName, newName string) error
+	// UnregisterSession removes the session from the cross-session mailbox registry.
+	UnregisterSession func(displayName string) error
 	// WatchMailbox is forwarded from AgentResult to wire up per-session push.
 	WatchMailbox func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
 	// RunGuard serialises runner calls per session (shared with pushManager).
@@ -132,10 +134,26 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 	auth.DELETE("/sessions/:id", func(c *gin.Context) {
 		id := c.Param("id")
+		// Capture metadata before deleting: display name for the teammate
+		// registry and userID for log file paths.
+		var displayName string
+		userID := defaultUserID
+		if meta, ok := d.Registry.Get(id); ok {
+			userID = meta.UserID
+			if meta.Title != "" {
+				displayName = meta.Title
+			} else {
+				displayName = meta.ID
+			}
+		}
 		if !d.Registry.Delete(id) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
+		if d.UnregisterSession != nil && displayName != "" {
+			_ = d.UnregisterSession(displayName)
+		}
+		deleteSessionLogs(userID, id)
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
 		}

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/blouargant/agent-toolkit/agent"
 )
 
 const logsDir = "logs"
@@ -95,6 +97,21 @@ func setConversationTitle(sessionID, title string) error {
 
 func deleteConversationFile(sessionID string) {
 	_ = os.Remove(conversationPath(sessionID))
+}
+
+// deleteSessionLogs removes all per-session log files produced by the agent
+// runtime: tasks, todo, memory, and statelog. The conversation file is deleted
+// separately by deleteConversationFile via registry.Delete.
+func deleteSessionLogs(userID, sessionID string) {
+	suffix := agent.SessionSuffix(userID, sessionID)
+	for _, name := range []string{
+		fmt.Sprintf("agent_tasks_%s.json", suffix),
+		fmt.Sprintf("agent_todo_%s.json", suffix),
+		fmt.Sprintf("agent_memory_%s.md", suffix),
+		fmt.Sprintf("agent_statelog_%s.json", suffix),
+	} {
+		_ = os.Remove(filepath.Join(logsDir, name))
+	}
 }
 
 // loadPersistedSessions scans logs/ for conversation_*.json files and returns
