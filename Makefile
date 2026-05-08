@@ -62,6 +62,15 @@ build-root: ## Build the root agent-toolkit binary
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(ROOT_BIN) .
 
+.PHONY: build-server
+build-server: ## Build the HTTP API server (server/)
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/server ./server
+
+.PHONY: run-server
+run-server: ## Run the HTTP API server (requires GOAGENT_SERVER_TOKEN)
+	$(GO) run ./server
+
 .PHONY: build-example-%
 build-example-%: ## Build a single example (e.g. make build-example-s01_loop)
 	@mkdir -p $(BIN_DIR)

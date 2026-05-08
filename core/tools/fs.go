@@ -42,12 +42,26 @@ var (
 	bashFilterMu       sync.RWMutex
 	bashFilterEnabled  bool
 	bashFilterRegistry *filter.Registry
+
+	bashDefaultTimeout   time.Duration = 120 * time.Second
+	bashDefaultTimeoutMu sync.RWMutex
 )
 
 // alwaysBlock contains substrings that RunBash refuses outright. The
 // permissions package implements the full three-tier YAML governance; this
 // is the hard floor that always applies, even when permissions are disabled.
 var alwaysBlock = []string{"rm -rf /", ":(){:|:&};:", "mkfs"}
+
+// SetBashDefaultTimeout sets the default timeout applied when RunBash receives
+// a zero or negative Timeout value.
+func SetBashDefaultTimeout(d time.Duration) {
+	if d <= 0 {
+		d = 120 * time.Second
+	}
+	bashDefaultTimeoutMu.Lock()
+	bashDefaultTimeout = d
+	bashDefaultTimeoutMu.Unlock()
+}
 
 // BashOutputFilterConfig controls optional output filtering for RunBash.
 type BashOutputFilterConfig struct {
@@ -186,7 +200,9 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	timeout := time.Duration(in.Timeout) * time.Second
 	if timeout <= 0 {
-		timeout = 120 * time.Second
+		bashDefaultTimeoutMu.RLock()
+		timeout = bashDefaultTimeout
+		bashDefaultTimeoutMu.RUnlock()
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

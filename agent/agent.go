@@ -410,6 +410,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("bootstrap bash output filter: %w", err)
 	}
+	fstools.SetBashDefaultTimeout(time.Duration(runtime.BashTimeoutSeconds) * time.Second)
 	leaderCfg, ok := runtime.LeaderConfig()
 	if !ok {
 		return nil, fmt.Errorf("runtime config: missing mandatory leader agent")

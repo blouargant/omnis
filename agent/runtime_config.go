@@ -59,6 +59,7 @@ type runtimeConfigFile struct {
 	AppName                 string                `yaml:"app_name"`
 	TokenOptimization       bool                  `yaml:"token_optimization"`
 	BashOutputFiltersDir    string                `yaml:"bash_output_filters_dir"`
+	BashTimeoutSeconds      int                   `yaml:"bash_timeout_seconds"`
 	MCPConfigPath           string                `yaml:"mcp_config_path"`
 	PermissionsConfigPath   string                `yaml:"permissions_config_path"`
 	Models                  map[string]ModelEntry `yaml:"models"`
@@ -112,6 +113,7 @@ type RuntimeSettings struct {
 	AppName                 string
 	BashOutputFilterEnabled bool
 	BashOutputFiltersDir    string
+	BashTimeoutSeconds      int
 	MCPConfigPath           string
 	PermissionsConfigPath   string
 	Models                  map[string]RuntimeModelConfig
@@ -408,6 +410,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		AppName:                 "agent-toolkit",
 		BashOutputFilterEnabled: false,
 		BashOutputFiltersDir:    "config/filters",
+		BashTimeoutSeconds:      120,
 		MCPConfigPath:           "config/mcp_config.yaml",
 		PermissionsConfigPath:   "config/permissions.yaml",
 		Models:                  map[string]RuntimeModelConfig{},
@@ -440,6 +443,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out.BashOutputFilterEnabled = cfg.TokenOptimization
 	if strings.TrimSpace(cfg.BashOutputFiltersDir) != "" {
 		out.BashOutputFiltersDir = strings.TrimSpace(cfg.BashOutputFiltersDir)
+	}
+	if cfg.BashTimeoutSeconds > 0 {
+		out.BashTimeoutSeconds = cfg.BashTimeoutSeconds
 	}
 	if strings.TrimSpace(cfg.MCPConfigPath) != "" {
 		out.MCPConfigPath = strings.TrimSpace(cfg.MCPConfigPath)
