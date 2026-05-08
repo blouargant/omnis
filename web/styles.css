@@ -1,5 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 
+:root { --sidebar-w: 220px; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -13,22 +15,35 @@ body { display: flex; overflow: hidden; }
 
 /* ─── Sidebar ──────────────────────────────────────────────── */
 #sidebar {
-  width: 220px;
+  width: var(--sidebar-w);
+  min-width: 0;
   flex-shrink: 0;
   background: #252526;
   border-right: 1px solid #3e3e42;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.15s ease;
 }
+#sidebar.collapsed {
+  width: 0 !important;
+  border-right: none;
+}
+body.resizing #sidebar { transition: none; }
 
 #sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 12px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid #3e3e42;
   gap: 8px;
+}
+.sidebar-header-btns {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .app-name {
@@ -55,6 +70,22 @@ body { display: flex; overflow: hidden; }
 }
 #new-chat:hover { background: #2a2d2e; color: #cccccc; }
 
+#sidebar-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid #3e3e42;
+  color: #858585;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#sidebar-toggle:hover { background: #2a2d2e; color: #cccccc; }
+
 #session-list {
   list-style: none;
   margin: 0;
@@ -69,7 +100,6 @@ body { display: flex; overflow: hidden; }
   color: #858585;
   font-size: 12px;
   margin-bottom: 1px;
-  word-break: break-all;
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: #2a2d2e; color: #cccccc; }
@@ -152,6 +182,38 @@ body { display: flex; overflow: hidden; }
   text-align: left;
 }
 #set-token:hover { background: #2a2d2e; color: #cccccc; }
+
+/* ─── Sidebar resize handle ────────────────────────────────── */
+#sidebar-resize {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  transition: width 0.15s ease, background 0.15s;
+}
+#sidebar-resize:hover,
+#sidebar-resize.is-dragging { background: #007acc; }
+body.resizing #sidebar-resize { transition: none; }
+
+#sidebar.collapsed ~ #sidebar-resize {
+  width: 20px;
+  cursor: pointer;
+  background: #252526;
+  border-right: 1px solid #3e3e42;
+}
+#sidebar.collapsed ~ #sidebar-resize::after {
+  content: '›';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  line-height: 1;
+  color: #858585;
+}
+#sidebar.collapsed ~ #sidebar-resize:hover { background: #2a2d2e; }
+#sidebar.collapsed ~ #sidebar-resize:hover::after { color: #cccccc; }
 
 /* ─── Main chat ────────────────────────────────────────────── */
 #chat {

@@ -11,15 +11,21 @@
   <aside id="sidebar">
     <div id="sidebar-header">
       <span class="app-name">Agent Toolkit</span>
-      <button id="new-chat" type="button" title="New chat">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
+      <div class="sidebar-header-btns">
+        <button id="new-chat" type="button" title="New chat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button id="sidebar-toggle" type="button" title="Hide sidebar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
     </div>
     <ul id="session-list" aria-label="sessions"></ul>
     <div id="sidebar-footer">
       <button id="set-token" type="button">Set token</button>
     </div>
   </aside>
+  <div id="sidebar-resize" aria-hidden="true"></div>
 
   <main id="chat">
     <div id="prompt-header"></div>

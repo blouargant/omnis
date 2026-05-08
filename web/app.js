@@ -5,17 +5,19 @@
 const TOKEN_KEY = "agent_toolkit_token";
 
 const els = {
-  sidebar:      document.getElementById("sidebar"),
-  newChat:      document.getElementById("new-chat"),
-  setToken:     document.getElementById("set-token"),
-  list:         document.getElementById("session-list"),
-  promptHeader: document.getElementById("prompt-header"),
-  transcript:   document.getElementById("transcript"),
-  composer:     document.getElementById("composer"),
-  prompt:       document.getElementById("prompt"),
-  send:         document.getElementById("send"),
-  cancel:       document.getElementById("cancel"),
-  status:       document.getElementById("status"),
+  sidebar:       document.getElementById("sidebar"),
+  sidebarResize: document.getElementById("sidebar-resize"),
+  sidebarToggle: document.getElementById("sidebar-toggle"),
+  newChat:       document.getElementById("new-chat"),
+  setToken:      document.getElementById("set-token"),
+  list:          document.getElementById("session-list"),
+  promptHeader:  document.getElementById("prompt-header"),
+  transcript:    document.getElementById("transcript"),
+  composer:      document.getElementById("composer"),
+  prompt:        document.getElementById("prompt"),
+  send:          document.getElementById("send"),
+  cancel:        document.getElementById("cancel"),
+  status:        document.getElementById("status"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -362,10 +364,10 @@ function renderSessions(sessions) {
     li.dataset.id = s.id;
     if (s.id === activeSessionId) li.classList.add("active");
     const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const displayName = s.title || (s.id.slice(0, 8) + "…");
+    const displayName = s.title || s.id;
 
     li.innerHTML = `
-      <div class="session-name">${escHtml(displayName)}</div>
+      <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
       <div class="session-bottom-row">
         <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
         <div class="session-actions">
@@ -729,12 +731,70 @@ els.prompt.addEventListener("keydown", (e) => {
   }
 });
 
+// ─── Sidebar resize & toggle ─────────────────────────────────────────────────
+
+const SIDEBAR_MIN_W   = 140;
+const SIDEBAR_MAX_W   = 500;
+const SIDEBAR_W_KEY   = "agent_toolkit_sidebar_w";
+const SIDEBAR_COL_KEY = "agent_toolkit_sidebar_collapsed";
+
+let sidebarDragging = false;
+
+function setSidebarWidth(px) {
+  document.documentElement.style.setProperty("--sidebar-w", px + "px");
+  localStorage.setItem(SIDEBAR_W_KEY, px + "px");
+}
+
+function collapseSidebar() {
+  els.sidebar.classList.add("collapsed");
+  localStorage.setItem(SIDEBAR_COL_KEY, "1");
+}
+
+function expandSidebar() {
+  els.sidebar.classList.remove("collapsed");
+  localStorage.setItem(SIDEBAR_COL_KEY, "0");
+}
+
+els.sidebarResize.addEventListener("mousedown", (e) => {
+  if (els.sidebar.classList.contains("collapsed")) {
+    expandSidebar();
+    return;
+  }
+  sidebarDragging = true;
+  els.sidebarResize.classList.add("is-dragging");
+  document.body.classList.add("resizing");
+  document.body.style.userSelect = "none";
+  e.preventDefault();
+});
+
+document.addEventListener("mousemove", (e) => {
+  if (!sidebarDragging) return;
+  const w = Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, e.clientX));
+  setSidebarWidth(w);
+});
+
+document.addEventListener("mouseup", () => {
+  if (!sidebarDragging) return;
+  sidebarDragging = false;
+  els.sidebarResize.classList.remove("is-dragging");
+  document.body.classList.remove("resizing");
+  document.body.style.userSelect = "";
+});
+
+els.sidebarToggle.addEventListener("click", () => {
+  if (els.sidebar.classList.contains("collapsed")) expandSidebar();
+  else collapseSidebar();
+});
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 (async function init() {
   if (typeof marked !== "undefined") {
     marked.setOptions({ gfm: true, breaks: true });
   }
+  const savedW = localStorage.getItem(SIDEBAR_W_KEY);
+  if (savedW) document.documentElement.style.setProperty("--sidebar-w", savedW);
+  if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
   if (!token) promptForToken();
   await loadSessions();
 })();
