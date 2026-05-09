@@ -1336,6 +1336,42 @@ els.fileInput.addEventListener("change", async () => {
     console.error("upload error:", e);
   }
 });
+els.prompt.addEventListener("paste", async (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  const imageItems = Array.from(items).filter(it => it.kind === "file" && it.type.startsWith("image/"));
+  if (!imageItems.length) return;
+
+  e.preventDefault();
+
+  if (!activeSessionId) await newChat();
+  if (!activeSessionId) return;
+
+  const sessionId = activeSessionId;
+  const form = new FormData();
+  for (const item of imageItems) {
+    const file = item.getAsFile();
+    if (file) form.append("files", file, file.name || `screenshot-${Date.now()}.png`);
+  }
+
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      console.error("paste upload failed:", await res.text());
+      return;
+    }
+    const data = await res.json();
+    for (const f of (data.files || [])) addAttachment(sessionId, f);
+    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
+  } catch (err) {
+    console.error("paste upload error:", err);
+  }
+});
+
 els.cancel.addEventListener("click", () => {
   const ctrl = sessionAbortCtrls.get(activeSessionId);
   if (ctrl) ctrl.abort();
