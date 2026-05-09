@@ -898,6 +898,7 @@ async function sendMessage() {
   appendUserBubble(prompt, container);
   scrollBottom();
   els.prompt.value = "";
+  autoGrowPrompt();
 
   // Per-segment state: each burst of text between tool calls gets its own bubble.
   let segBubble = null;     // current assistant text element
@@ -1298,6 +1299,7 @@ els.prompt.addEventListener("keydown", (e) => {
 });
 
 els.prompt.addEventListener("input", () => {
+  autoGrowPrompt();
   const val = els.prompt.value;
   const firstLine = val.split("\n")[0];
   const firstWord = firstLine.split(" ")[0];
@@ -1325,17 +1327,37 @@ document.addEventListener("mousedown", (e) => {
 
 // ─── Composer resize ─────────────────────────────────────────────────────────
 
-const COMPOSER_MIN_H = 116;
-const COMPOSER_H_KEY = "agent_toolkit_composer_h";
+const COMPOSER_MIN_H  = 116;
+const COMPOSER_H_KEY  = "agent_toolkit_composer_h";
+const MAX_AUTO_LINES  = 10;
 
-let composerDragging  = false;
-let composerDragStartY = 0;
-let composerDragStartH = 0;
+let composerDragging       = false;
+let composerDragStartY     = 0;
+let composerDragStartH     = 0;
+let composerManuallyResized = false;
 
 function setComposerHeight(h) {
   const clamped = Math.max(COMPOSER_MIN_H, h);
   document.documentElement.style.setProperty("--composer-h", clamped + "px");
   localStorage.setItem(COMPOSER_H_KEY, clamped + "px");
+  if (!composerManuallyResized) {
+    composerManuallyResized = true;
+    els.composerWrap.classList.add("is-manual");
+    els.prompt.style.height = "";
+  }
+}
+
+function autoGrowPrompt() {
+  if (composerManuallyResized) return;
+  const el = els.prompt;
+  const cs = getComputedStyle(el);
+  const lineH  = parseFloat(cs.lineHeight);
+  const padY   = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const maxH   = lineH * MAX_AUTO_LINES + padY;
+  el.style.height = "auto";
+  const natural = Math.min(el.scrollHeight, maxH);
+  el.style.height = natural + "px";
+  el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
 }
 
 els.composerResize.addEventListener("mousedown", (e) => {
@@ -1461,7 +1483,13 @@ els.ctxCompactBtn.addEventListener("click", async (e) => {
   const savedW = localStorage.getItem(SIDEBAR_W_KEY);
   if (savedW) document.documentElement.style.setProperty("--sidebar-w", savedW);
   const savedComposerH = localStorage.getItem(COMPOSER_H_KEY);
-  if (savedComposerH) document.documentElement.style.setProperty("--composer-h", savedComposerH);
+  if (savedComposerH) {
+    document.documentElement.style.setProperty("--composer-h", savedComposerH);
+    composerManuallyResized = true;
+    els.composerWrap.classList.add("is-manual");
+  } else {
+    autoGrowPrompt();
+  }
   if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
   if (!token) promptForToken();
   await loadSessions();

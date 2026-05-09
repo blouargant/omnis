@@ -602,7 +602,6 @@ body.resizing-composer #composer-resize { transition: none; }
 
 #prompt {
   width: 100%;
-  flex: 1;
   min-height: calc(1.5em + 20px);
   background: #1e1e1e;
   border: 1px solid #3e3e42;
@@ -614,8 +613,12 @@ body.resizing-composer #composer-resize { transition: none; }
   resize: none;
   outline: none;
   line-height: 1.5;
-  overflow-y: auto;
+  overflow-y: hidden;
   transition: border-color 0.15s;
+}
+#composer-wrap.is-manual #prompt {
+  flex: 1;
+  overflow-y: auto;
 }
 #prompt:focus { border-color: #007acc; }
 #prompt::placeholder { color: #555558; }
