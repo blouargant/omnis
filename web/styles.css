@@ -1,6 +1,6 @@
 *, *::before, *::after { box-sizing: border-box; }
 
-:root { --sidebar-w: 220px; }
+:root { --sidebar-w: 220px; --col-w: 860px; }
 
 html, body {
   margin: 0;
@@ -268,7 +268,8 @@ body.resizing #sidebar-resize { transition: none; }
 #prompt-header {
   flex-shrink: 0;
   display: none;
-  margin: 16px 16px 0;
+  max-width: calc(var(--col-w) - 40px);
+  margin: 16px auto 0;
   /* Override .bubble-user's pre-wrap; the pinned header is a single-line label. */
   white-space: nowrap;
   overflow: hidden;
@@ -287,9 +288,10 @@ body.resizing #sidebar-resize { transition: none; }
 /* ─── Message rows ─────────────────────────────────────────── */
 .msg-row {
   display: flex;
-  padding: 2px 32px;
-  max-width: 100%;
-  margin-bottom: 2px;
+  padding: 2px 20px;
+  max-width: var(--col-w);
+  width: 100%;
+  margin: 0 auto 2px;
 }
 
 /* User bubble (history — inline, shares style with #prompt-header) */
@@ -304,17 +306,12 @@ body.resizing #sidebar-resize { transition: none; }
   border-color: #6a6a6a;
 }
 
-/* User message row — narrower horizontal padding than agent rows so the
-   bubble extends slightly beyond agent content on both sides. */
-.msg-row-user {
-  padding-left: 16px;
-  padding-right: 16px;
-}
-
 /* Assistant content — plain text, no bubble */
 .bubble-assistant {
-  max-width: 820px;
+  max-width: 700px;
   width: 100%;
+  margin-left: auto;
+  margin-right: auto;
   color: #cccccc;
   font-size: 14px;
   line-height: 1.65;
@@ -379,7 +376,9 @@ body.resizing #sidebar-resize { transition: none; }
 
 /* Error */
 .bubble-error {
-  max-width: 820px;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
   background: #3a0d0d;
   border: 1px solid #6e1f1f;
   color: #f48771;
@@ -393,13 +392,17 @@ body.resizing #sidebar-resize { transition: none; }
 /* ─── Tool blocks ──────────────────────────────────────────── */
 .tool-row {
   display: flex;
-  padding: 2px 32px;
-  margin-bottom: 2px;
+  padding: 2px 20px;
+  max-width: var(--col-w);
+  width: 100%;
+  margin: 0 auto 2px;
 }
 
 .tool-block {
-  max-width: 820px;
+  max-width: 700px;
   width: 100%;
+  margin-left: auto;
+  margin-right: auto;
   border-left: 2px solid;
   border-radius: 0 4px 4px 0;
   background: #252526;
@@ -564,10 +567,17 @@ body.resizing #sidebar-resize { transition: none; }
   flex-shrink: 0;
   border-top: 1px solid #3e3e42;
   background: #252526;
-  padding: 12px 32px;
+  padding: 12px 0;
   position: relative;
 }
-#composer { display: flex; flex-direction: column; gap: 8px; }
+#composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: var(--col-w);
+  margin: 0 auto;
+  padding: 0 20px;
+}
 
 #prompt {
   width: 100%;
@@ -705,8 +715,9 @@ body.resizing #sidebar-resize { transition: none; }
 #slash-menu {
   position: absolute;
   bottom: calc(100% - 8px);
-  left: 32px;
-  right: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(calc(var(--col-w) - 40px), calc(100% - 40px));
   background: #1e1e1e;
   border: 1px solid #3e3e42;
   border-radius: 6px;
