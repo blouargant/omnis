@@ -712,6 +712,89 @@ body.resizing-composer #composer-resize { transition: none; }
   border-color: #007acc;
 }
 
+/* ─── Attach button ────────────────────────────────────────── */
+#attach-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid #3e3e42;
+  color: #858585;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+#attach-btn:hover {
+  background: #2a2d2e;
+  color: #cccccc;
+  border-color: #007acc;
+}
+
+/* ─── Attachment chips in composer ────────────────────────── */
+#attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 2px 2px;
+}
+#attachments[hidden] { display: none; }
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #1e3a4a;
+  border: 1px solid #007acc;
+  color: #4fc3f7;
+  border-radius: 4px;
+  padding: 2px 6px 2px 8px;
+  font-size: 12px;
+  max-width: 200px;
+  overflow: hidden;
+}
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-chip-remove {
+  background: none;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  flex-shrink: 0;
+  transition: color 0.1s;
+}
+.attachment-chip-remove:hover { color: #f48771; }
+
+/* Chips shown inside a sent user bubble */
+.bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.attachment-chip-sent {
+  display: inline-block;
+  background: #1a2f3a;
+  border: 1px solid #2a5a7a;
+  color: #7cb9d4;
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─── Context ring ─────────────────────────────────────────── */
 #ctx-ring-wrap {
   display: inline-flex;

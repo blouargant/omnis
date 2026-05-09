@@ -170,6 +170,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			_ = d.UnregisterSession(displayName)
 		}
 		deleteSessionLogs(userID, id)
+		deleteSessionUploads(id)
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
 		}
@@ -319,6 +320,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
+	auth.POST("/sessions/:id/files", handleFileUpload(d))
 
 	auth.POST("/sessions/:id/compact", func(c *gin.Context) {
 		id := c.Param("id")

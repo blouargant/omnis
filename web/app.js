@@ -31,6 +31,9 @@ const els = {
   ctxPopBudget:   document.getElementById("ctx-pop-budget"),
   ctxCompactBtn:  document.getElementById("ctx-compact-btn"),
   composerResize: document.getElementById("composer-resize"),
+  fileInput:      document.getElementById("file-input"),
+  attachBtn:      document.getElementById("attach-btn"),
+  attachments:    document.getElementById("attachments"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -51,6 +54,62 @@ const sessionStatus     = new Map(); // sessionId → status string
 
 const sessionEventsCtrls = new Map(); // sessionId → AbortController
 const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
+
+// ─── Per-session file attachments ────────────────────────────────────────────
+// Pending uploads are stored per session so switching sessions preserves them.
+
+const sessionAttachments = new Map(); // sessionId → [{name, path, size}]
+
+function getAttachments(sessionId) {
+  return sessionAttachments.get(sessionId) || [];
+}
+
+function addAttachment(sessionId, file) {
+  const list = sessionAttachments.get(sessionId) || [];
+  list.push(file);
+  sessionAttachments.set(sessionId, list);
+}
+
+function removeAttachment(sessionId, path) {
+  const list = sessionAttachments.get(sessionId) || [];
+  sessionAttachments.set(sessionId, list.filter(f => f.path !== path));
+}
+
+function clearAttachments(sessionId) {
+  sessionAttachments.delete(sessionId);
+}
+
+function renderAttachmentsUI(sessionId) {
+  if (!els.attachments) return;
+  const files = getAttachments(sessionId);
+  if (files.length === 0) {
+    els.attachments.hidden = true;
+    els.attachments.innerHTML = "";
+    return;
+  }
+  els.attachments.hidden = false;
+  els.attachments.innerHTML = "";
+  for (const f of files) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    chip.title = f.path;
+    const name = document.createElement("span");
+    name.className = "attachment-chip-name";
+    name.textContent = f.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "attachment-chip-remove";
+    remove.setAttribute("aria-label", `Remove ${f.name}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      removeAttachment(sessionId, f.path);
+      renderAttachmentsUI(sessionId);
+    });
+    chip.appendChild(name);
+    chip.appendChild(remove);
+    els.attachments.appendChild(chip);
+  }
+}
 
 function setSessionStatus(sessionId, s) {
   sessionStatus.set(sessionId, s);
@@ -322,7 +381,7 @@ function setPinnedPrompt(text) {
 }
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
-function appendUserBubble(text, container) {
+function appendUserBubble(text, container, files) {
   if (typeof text === "string" && text.startsWith("[mailbox]")) {
     appendMailboxBlock(text, container);
     return;
@@ -331,7 +390,19 @@ function appendUserBubble(text, container) {
   row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
   bubble.className = "bubble-user";
-  bubble.textContent = text;
+  if (text) bubble.textContent = text;
+  if (files && files.length > 0) {
+    const chips = document.createElement("div");
+    chips.className = "bubble-attachments";
+    for (const f of files) {
+      const chip = document.createElement("span");
+      chip.className = "attachment-chip attachment-chip-sent";
+      chip.textContent = f.name;
+      chip.title = f.path;
+      chips.appendChild(chip);
+    }
+    bubble.appendChild(chips);
+  }
   row.appendChild(bubble);
   (container || els.transcript).appendChild(row);
 }
@@ -564,7 +635,7 @@ async function apiFetch(path, opts = {}) {
     throw new Error("token required");
   }
   const headers = authHeaders(opts.headers || {});
-  if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { ...opts, headers });
   if (res.status === 401) { promptForToken(); throw new Error("unauthorized"); }
   return res;
@@ -704,6 +775,7 @@ async function selectSession(id) {
   }
 
   applySessionUI(id);
+  renderAttachmentsUI(id);
 
   // Seed ring/popup with server-side estimates for sessions that have no
   // real-time SSE data yet (cold load or page refresh).
@@ -878,8 +950,9 @@ async function* parseSSE(res) {
 
 async function sendMessage() {
   const prompt = els.prompt.value.trim();
-  if (!prompt) return;
-  if (prompt.startsWith("/")) {
+  const pendingFiles = getAttachments(activeSessionId);
+  if (!prompt && pendingFiles.length === 0) return;
+  if (prompt.startsWith("/") && pendingFiles.length === 0) {
     els.prompt.value = "";
     hideSlashMenu();
     await handleSlashCommand(prompt);
@@ -891,14 +964,26 @@ async function sendMessage() {
   // Capture session identity and container. The user may switch sessions
   // mid-stream; these captured references keep writes going to the right DOM.
   const sessionId = activeSessionId;
+  const files = getAttachments(sessionId);
   const container = getContainer(sessionId);
   if (!els.transcript.contains(container)) mountSession(sessionId);
 
+  // Build the full prompt that includes any attached file paths for the agent.
+  let fullPrompt = prompt;
+  if (files.length > 0) {
+    const fileList = files.map(f => `- ${f.path}`).join("\n");
+    fullPrompt = prompt
+      ? `${prompt}\n\nAttached files:\n${fileList}`
+      : `Attached files:\n${fileList}`;
+  }
+
   // Insert the user message into the transcript before streaming starts.
-  appendUserBubble(prompt, container);
+  appendUserBubble(prompt, container, files.length > 0 ? files : null);
   scrollBottom();
   els.prompt.value = "";
   autoGrowPrompt();
+  clearAttachments(sessionId);
+  renderAttachmentsUI(sessionId);
 
   // Per-segment state: each burst of text between tool calls gets its own bubble.
   let segBubble = null;     // current assistant text element
@@ -962,7 +1047,7 @@ async function sendMessage() {
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt: fullPrompt }),
       signal: ctrl.signal,
     });
     if (!res.ok) {
@@ -1222,6 +1307,38 @@ async function handleSlashCommand(raw) {
 els.transcript.addEventListener("scroll", updatePinnedForScroll);
 els.newChat.addEventListener("click", newChat);
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
+
+els.attachBtn.addEventListener("click", () => els.fileInput.click());
+
+els.fileInput.addEventListener("change", async () => {
+  const picked = Array.from(els.fileInput.files);
+  if (!picked.length) return;
+  els.fileInput.value = "";
+
+  if (!activeSessionId) await newChat();
+  if (!activeSessionId) return;
+
+  const sessionId = activeSessionId;
+  const form = new FormData();
+  for (const f of picked) form.append("files", f);
+
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error("upload failed:", txt);
+      return;
+    }
+    const data = await res.json();
+    for (const f of (data.files || [])) addAttachment(sessionId, f);
+    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
+  } catch (e) {
+    console.error("upload error:", e);
+  }
+});
 els.cancel.addEventListener("click", () => {
   const ctrl = sessionAbortCtrls.get(activeSessionId);
   if (ctrl) ctrl.abort();

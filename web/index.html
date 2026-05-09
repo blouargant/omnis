@@ -35,8 +35,15 @@
       <div id="composer-resize" aria-hidden="true"></div>
       <div id="slash-menu" hidden></div>
       <form id="composer">
-        <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)" required></textarea>
+        <input type="file" id="file-input" multiple hidden />
+        <div id="attachments" hidden></div>
+        <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)"></textarea>
         <div class="composer-actions">
+          <button id="attach-btn" type="button" title="Attach files">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
           <button id="edit-mode-btn" type="button" title="Toggle Enter key: send vs new line">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4 7V4h16v3"/>
