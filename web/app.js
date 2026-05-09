@@ -968,14 +968,11 @@ async function sendMessage() {
   const container = getContainer(sessionId);
   if (!els.transcript.contains(container)) mountSession(sessionId);
 
-  // Build the full prompt that includes any attached file paths for the agent.
-  let fullPrompt = prompt;
-  if (files.length > 0) {
-    const fileList = files.map(f => `- ${f.path}`).join("\n");
-    fullPrompt = prompt
-      ? `${prompt}\n\nAttached files:\n${fileList}`
-      : `Attached files:\n${fileList}`;
-  }
+  // Collect uploaded file paths. Images are passed as structured data so the
+  // server can attach them as inline binary parts for vision-capable models.
+  // Non-image files are currently ignored (the agent can still find them via
+  // their on-disk paths if the user mentions them in the prompt).
+  const filePaths = files.map(f => f.path);
 
   // Insert the user message into the transcript before streaming starts.
   appendUserBubble(prompt, container, files.length > 0 ? files : null);
@@ -1047,7 +1044,7 @@ async function sendMessage() {
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ prompt: fullPrompt }),
+      body: JSON.stringify({ prompt, ...(filePaths.length > 0 && { files: filePaths }) }),
       signal: ctrl.signal,
     });
     if (!res.ok) {

@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,9 @@ type antContentBlk struct {
 	// type=text
 	Text string `json:"text,omitempty"`
 
+	// type=image
+	Source *antImageSource `json:"source,omitempty"`
+
 	// type=tool_use (assistant)
 	ID    string         `json:"id,omitempty"`
 	Name  string         `json:"name,omitempty"`
@@ -73,6 +77,12 @@ type antContentBlk struct {
 	// We always send a string for simplicity.
 	ResultContent string `json:"content,omitempty"`
 	IsError       bool   `json:"is_error,omitempty"`
+}
+
+type antImageSource struct {
+	Type      string `json:"type"`       // always "base64"
+	MediaType string `json:"media_type"` // e.g. "image/png"
+	Data      string `json:"data"`       // base64-encoded bytes
 }
 
 type antTool struct {
@@ -169,6 +179,15 @@ func (a *anthropic) toMessages(req *model.LLMRequest) []antMessage {
 					ID:    firstNonEmpty(p.FunctionCall.ID, p.FunctionCall.Name),
 					Name:  p.FunctionCall.Name,
 					Input: p.FunctionCall.Args,
+				})
+			case p.InlineData != nil:
+				blocks = append(blocks, antContentBlk{
+					Type: "image",
+					Source: &antImageSource{
+						Type:      "base64",
+						MediaType: p.InlineData.MIMEType,
+						Data:      base64.StdEncoding.EncodeToString(p.InlineData.Data),
+					},
 				})
 			case p.Text != "":
 				blocks = append(blocks, antContentBlk{Type: "text", Text: p.Text})

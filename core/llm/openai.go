@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,6 +88,18 @@ type oaiStreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// oaiContentPart is one element of an array-form message content, used when a
+// user message contains both text and images.
+type oaiContentPart struct {
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	ImageURL *oaiImageURL `json:"image_url,omitempty"`
+}
+
+type oaiImageURL struct {
+	URL string `json:"url"` // "data:<mime>;base64,<data>"
+}
+
 type oaiRequest struct {
 	Model         string            `json:"model"`
 	Messages      []oaiMessage      `json:"messages"`
@@ -153,16 +166,18 @@ func (o *openAI) toMessages(req *model.LLMRequest) []oaiMessage {
 		role := mapRoleOAI(c.Role)
 		var text strings.Builder
 		var calls []oaiToolCall
+		var imgParts []oaiContentPart
 		for _, p := range c.Parts {
 			switch {
 			case p == nil:
 				continue
 			case p.FunctionResponse != nil:
-				// Flush pending text/calls first.
-				if text.Len() > 0 || len(calls) > 0 {
-					msgs = append(msgs, buildAssistantMsg(role, text.String(), calls))
+				// Flush pending text/calls/images first.
+				if text.Len() > 0 || len(calls) > 0 || len(imgParts) > 0 {
+					msgs = append(msgs, buildUserMsg(role, text.String(), calls, imgParts))
 					text.Reset()
 					calls = nil
+					imgParts = nil
 				}
 				msgs = append(msgs, oaiMessage{
 					Role:       "tool",
@@ -178,26 +193,51 @@ func (o *openAI) toMessages(req *model.LLMRequest) []oaiMessage {
 						Arguments: jsonString(p.FunctionCall.Args),
 					},
 				})
+			case p.InlineData != nil:
+				imgParts = append(imgParts, oaiContentPart{
+					Type: "image_url",
+					ImageURL: &oaiImageURL{
+						URL: fmt.Sprintf("data:%s;base64,%s",
+							p.InlineData.MIMEType,
+							base64.StdEncoding.EncodeToString(p.InlineData.Data)),
+					},
+				})
 			case p.Text != "":
 				text.WriteString(p.Text)
 			}
 		}
-		if text.Len() > 0 || len(calls) > 0 {
-			msgs = append(msgs, buildAssistantMsg(role, text.String(), calls))
+		if text.Len() > 0 || len(calls) > 0 || len(imgParts) > 0 {
+			msgs = append(msgs, buildUserMsg(role, text.String(), calls, imgParts))
 		}
 	}
 	return msgs
 }
 
-func buildAssistantMsg(role, text string, calls []oaiToolCall) oaiMessage {
+// buildUserMsg constructs an oaiMessage for any role. When imgParts is
+// non-empty the content is sent as an array of typed parts (text + images)
+// so vision-capable models can process the inline image data.
+func buildUserMsg(role, text string, calls []oaiToolCall, imgParts []oaiContentPart) oaiMessage {
 	m := oaiMessage{Role: role}
-	if text != "" {
+	if len(imgParts) > 0 {
+		var parts []oaiContentPart
+		if text != "" {
+			parts = append(parts, oaiContentPart{Type: "text", Text: text})
+		}
+		parts = append(parts, imgParts...)
+		m.Content = parts
+	} else if text != "" {
 		m.Content = text
 	}
 	if len(calls) > 0 {
 		m.ToolCalls = calls
 	}
 	return m
+}
+
+// buildAssistantMsg constructs a text/tool-call message (no image support
+// needed for assistant turns).
+func buildAssistantMsg(role, text string, calls []oaiToolCall) oaiMessage {
+	return buildUserMsg(role, text, calls, nil)
 }
 
 func mapRoleOAI(r string) string {

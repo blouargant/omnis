@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -19,7 +20,8 @@ import (
 
 // messageRequest is the JSON body expected by POST /api/sessions/:id/messages.
 type messageRequest struct {
-	Prompt string `json:"prompt"`
+	Prompt string   `json:"prompt"`
+	Files  []string `json:"files,omitempty"` // absolute paths of uploaded files
 }
 
 // handleMessages drives one user turn against the lead agent and streams the
@@ -39,8 +41,8 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 			return
 		}
-		if strings.TrimSpace(req.Prompt) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "prompt is required"})
+		if strings.TrimSpace(req.Prompt) == "" && len(req.Files) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "prompt or files are required"})
 			return
 		}
 
@@ -66,8 +68,25 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			defer release()
 		}
 
+		parts := []*genai.Part{{Text: req.Prompt}}
+		for _, fp := range req.Files {
+			mime := imageMIME(fp)
+			if mime == "" {
+				continue
+			}
+			data, err := os.ReadFile(fp)
+			if err != nil {
+				log.Printf("server: skipping unreadable file %q: %v", fp, err)
+				continue
+			}
+			data, mime = shrinkIfNeeded(data, mime)
+			parts = append(parts, &genai.Part{
+				InlineData: &genai.Blob{MIMEType: mime, Data: data},
+			})
+		}
+
 		seq := d.Runner.Run(ctx, meta.UserID, meta.ID,
-			&genai.Content{Role: "user", Parts: []*genai.Part{{Text: req.Prompt}}},
+			&genai.Content{Role: "user", Parts: parts},
 			agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
 
 		d.Registry.Touch(meta.ID)
