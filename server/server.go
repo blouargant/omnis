@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -321,6 +322,9 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.POST("/sessions/:id/files", handleFileUpload(d))
+
+	root, _ := os.Getwd()
+	auth.GET("/browse", handleBrowse(root))
 
 	auth.POST("/sessions/:id/compact", func(c *gin.Context) {
 		id := c.Param("id")

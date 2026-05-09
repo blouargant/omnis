@@ -31,14 +31,25 @@ const els = {
   ctxPopBudget:   document.getElementById("ctx-pop-budget"),
   ctxCompactBtn:  document.getElementById("ctx-compact-btn"),
   composerResize: document.getElementById("composer-resize"),
-  fileInput:      document.getElementById("file-input"),
-  attachBtn:      document.getElementById("attach-btn"),
-  attachments:    document.getElementById("attachments"),
+  fileInput:          document.getElementById("file-input"),
+  attachBtn:          document.getElementById("attach-btn"),
+  attachMenu:         document.getElementById("attach-menu"),
+  attachComputer:     document.getElementById("attach-computer"),
+  attachContext:      document.getElementById("attach-context"),
+  attachments:        document.getElementById("attachments"),
+  ctxBrowserOverlay:  document.getElementById("ctx-browser-overlay"),
+  ctxBrowserClose:    document.getElementById("ctx-browser-close"),
+  ctxBrowserPath:     document.getElementById("ctx-browser-path"),
+  ctxBrowserList:     document.getElementById("ctx-browser-list"),
+  ctxBrowserCount:    document.getElementById("ctx-browser-count"),
+  ctxBrowserCancel:   document.getElementById("ctx-browser-cancel"),
+  ctxBrowserAdd:      document.getElementById("ctx-browser-add"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let activeSessionId = null;
 let sendOnEnter = true;
+const ctxBrowserSelected = new Map(); // path → {name, path, size}
 
 // ─── Per-session streaming state ─────────────────────────────────────────────
 // Tracks which sessions are actively streaming so switching sessions doesn't
@@ -1299,13 +1310,123 @@ async function handleSlashCommand(raw) {
   }
 }
 
+// ─── Context browser ─────────────────────────────────────────────────────────
+
+const _ctxFolderIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+const _ctxFileIcon  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>`;
+const _ctxBackIcon  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>`;
+
+function _ctxFmtSize(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1048576).toFixed(1) + " MB";
+}
+
+function _ctxSyncFooter() {
+  const n = ctxBrowserSelected.size;
+  els.ctxBrowserCount.textContent = n === 0 ? "No files selected" : `${n} file${n === 1 ? "" : "s"} selected`;
+  els.ctxBrowserAdd.disabled = n === 0;
+}
+
+async function _ctxLoad(path) {
+  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
+  let data;
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (e) {
+    console.error("browse error:", e);
+    return;
+  }
+
+  els.ctxBrowserPath.textContent = data.path;
+  els.ctxBrowserList.innerHTML = "";
+
+  if (data.parent) {
+    const li = document.createElement("li");
+    li.className = "ctx-browser-item is-dir";
+    li.innerHTML = `<span class="ctx-browser-item-icon">${_ctxBackIcon}</span><span class="ctx-browser-item-name">..</span>`;
+    li.addEventListener("click", () => _ctxLoad(data.parent));
+    els.ctxBrowserList.appendChild(li);
+  }
+
+  for (const e of (data.entries || [])) {
+    const li = document.createElement("li");
+    const sel = ctxBrowserSelected.has(e.path);
+    li.className = `ctx-browser-item${e.is_dir ? " is-dir" : ""}${sel ? " selected" : ""}`;
+
+    if (e.is_dir) {
+      li.innerHTML = `<span class="ctx-browser-item-icon">${_ctxFolderIcon}</span><span class="ctx-browser-item-name">${e.name}</span>`;
+      li.addEventListener("click", () => _ctxLoad(e.path));
+    } else {
+      li.innerHTML = `<span class="ctx-browser-item-icon">${_ctxFileIcon}</span><span class="ctx-browser-item-name">${e.name}</span><span class="ctx-browser-item-size">${_ctxFmtSize(e.size)}</span>`;
+      li.addEventListener("click", () => {
+        if (ctxBrowserSelected.has(e.path)) {
+          ctxBrowserSelected.delete(e.path);
+          li.classList.remove("selected");
+        } else {
+          ctxBrowserSelected.set(e.path, { name: e.name, path: e.path, size: e.size });
+          li.classList.add("selected");
+        }
+        _ctxSyncFooter();
+      });
+    }
+    els.ctxBrowserList.appendChild(li);
+  }
+}
+
+async function openCtxBrowser() {
+  ctxBrowserSelected.clear();
+  _ctxSyncFooter();
+  els.ctxBrowserOverlay.removeAttribute("hidden");
+  await _ctxLoad("");
+}
+
+function closeCtxBrowser() {
+  els.ctxBrowserOverlay.setAttribute("hidden", "");
+  ctxBrowserSelected.clear();
+}
+
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 els.transcript.addEventListener("scroll", updatePinnedForScroll);
 els.newChat.addEventListener("click", newChat);
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
 
-els.attachBtn.addEventListener("click", () => els.fileInput.click());
+// Attach button toggles the popup menu
+els.attachBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  els.attachMenu.toggleAttribute("hidden");
+});
+// Clicks outside the popup close it; clicks inside don't bubble up
+document.addEventListener("click", () => els.attachMenu.setAttribute("hidden", ""));
+els.attachMenu.addEventListener("click", (e) => e.stopPropagation());
+
+els.attachComputer.addEventListener("click", () => {
+  els.attachMenu.setAttribute("hidden", "");
+  els.fileInput.click();
+});
+els.attachContext.addEventListener("click", () => {
+  els.attachMenu.setAttribute("hidden", "");
+  openCtxBrowser();
+});
+
+// Context browser event handlers
+els.ctxBrowserClose.addEventListener("click", closeCtxBrowser);
+els.ctxBrowserCancel.addEventListener("click", closeCtxBrowser);
+els.ctxBrowserOverlay.addEventListener("click", (e) => {
+  if (e.target === els.ctxBrowserOverlay) closeCtxBrowser();
+});
+els.ctxBrowserAdd.addEventListener("click", async () => {
+  if (!ctxBrowserSelected.size) return;
+  if (!activeSessionId) await newChat();
+  if (!activeSessionId) { closeCtxBrowser(); return; }
+  const sid = activeSessionId;
+  for (const f of ctxBrowserSelected.values()) addAttachment(sid, f);
+  renderAttachmentsUI(sid);
+  closeCtxBrowser();
+});
 
 els.fileInput.addEventListener("change", async () => {
   const picked = Array.from(els.fileInput.files);

@@ -1002,3 +1002,164 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 @keyframes fadein  { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeout { from { opacity: 1; } to { opacity: 0; } }
+
+/* ─── Attach popup menu ────────────────────────────────────── */
+#attach-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+#attach-menu {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  overflow: hidden;
+  min-width: 190px;
+  z-index: 200;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+}
+#attach-menu[hidden] { display: none; }
+#attach-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: #cccccc;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+#attach-menu button:hover { background: #2a2d2e; }
+#attach-menu button + button { border-top: 1px solid #2d2d2d; }
+
+/* ─── Context browser modal ────────────────────────────────── */
+#ctx-browser-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#ctx-browser-overlay[hidden] { display: none; }
+#ctx-browser {
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 8px;
+  width: 560px;
+  max-width: 92vw;
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+#ctx-browser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+.ctx-browser-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cccccc;
+}
+#ctx-browser-close {
+  background: none;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+#ctx-browser-close:hover { color: #cccccc; background: #2a2d2e; }
+#ctx-browser-nav {
+  padding: 7px 16px;
+  border-bottom: 1px solid #2d2d2d;
+  font-size: 11px;
+  color: #858585;
+  word-break: break-all;
+  flex-shrink: 0;
+  font-family: monospace;
+}
+#ctx-browser-list-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+#ctx-browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ctx-browser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #cccccc;
+  user-select: none;
+  transition: background 0.1s;
+}
+.ctx-browser-item:hover { background: #2a2d2e; }
+.ctx-browser-item.selected { background: #1e3a4a; color: #4fc3f7; }
+.ctx-browser-item.selected:hover { background: #1e4055; }
+.ctx-browser-item-icon { flex-shrink: 0; display: flex; color: #858585; }
+.ctx-browser-item.is-dir .ctx-browser-item-icon { color: #dcb67a; }
+.ctx-browser-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-browser-item-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #858585;
+}
+#ctx-browser-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid #3e3e42;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#ctx-browser-count {
+  font-size: 12px;
+  color: #858585;
+}
+.ctx-browser-footer-btns {
+  display: flex;
+  gap: 8px;
+}
+#ctx-browser-cancel, #ctx-browser-add {
+  padding: 5px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid #3e3e42;
+  transition: background 0.1s, border-color 0.1s;
+}
+#ctx-browser-cancel { background: none; color: #cccccc; }
+#ctx-browser-cancel:hover { background: #2a2d2e; }
+#ctx-browser-add { background: #007acc; color: #fff; border-color: #007acc; }
+#ctx-browser-add:hover:not(:disabled) { background: #0098ff; border-color: #0098ff; }
+#ctx-browser-add:disabled { opacity: 0.4; cursor: not-allowed; }
