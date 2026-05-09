@@ -25,6 +25,11 @@
   overflow: hidden;
 }
 
+/* The explicit `display: flex` above wins over the browser's UA rule for the
+ * `hidden` attribute, so we re-assert `display: none` when hidden. Without
+ * this, panelEl.hidden = true leaves the panel visible. */
+#settings-panel[hidden] { display: none; }
+
 .settings-header {
   flex: 0 0 auto;
   padding: 1rem 1.5rem 0;

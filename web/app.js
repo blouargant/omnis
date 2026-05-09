@@ -578,6 +578,8 @@ function startRename(li, id, currentTitle) {
 }
 
 async function selectSession(id) {
+  // Leave the settings panel if it's open so the chat is visible.
+  if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   // Unsubscribe from the previous session's push events.
   if (activeSessionId && activeSessionId !== id) {
     unsubscribeSessionEvents(activeSessionId);
@@ -638,6 +640,8 @@ async function selectSession(id) {
 }
 
 async function newChat() {
+  // Leave the settings panel if it's open so the new chat is visible.
+  if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   // Drop the outgoing session's push subscription before switching.
   if (activeSessionId) unsubscribeSessionEvents(activeSessionId);
   try {
