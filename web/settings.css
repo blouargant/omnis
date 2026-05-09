@@ -234,7 +234,7 @@
   border: 1px solid #3e3e42;
   border-radius: 6px;
   padding: 0.75rem 1rem 1rem;
-  background: #252526;
+  background: #1e1e1e;
 }
 .form-section h3 {
   display: flex;
@@ -263,7 +263,7 @@
 
 .form-row {
   display: grid;
-  grid-template-columns: minmax(220px, max-content) 1fr;
+  grid-template-columns: 300px 1fr;
   align-items: center;
   gap: 0.75rem;
   font-size: 0.85rem;
@@ -308,7 +308,7 @@
 }
 
 .form-row-tools {
-  grid-template-columns: minmax(220px, max-content) 1fr;
+  grid-template-columns: 300px 1fr;
 }
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .tools-check  { font-weight: normal; color: #cccccc; }
@@ -318,7 +318,7 @@
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 0.75rem;
-  background: #1e1e1e;
+  background: #252526;
 }
 .form-card-header {
   display: flex;
@@ -469,3 +469,65 @@
 }
 .settings-body-content::-webkit-scrollbar-thumb:hover,
 .raw-editor::-webkit-scrollbar-thumb:hover { background: #525257; }
+
+/* In-app confirmation / prompt dialog */
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.app-dialog {
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 8px;
+  padding: 1.5rem;
+  min-width: 320px;
+  max-width: 460px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.app-dialog-msg {
+  margin: 0;
+  color: #cccccc;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.app-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  color: #cccccc;
+  font-size: 0.9rem;
+}
+.app-dialog-input:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.app-dialog-actions button {
+  background: #2a2d2e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #cccccc;
+}
+.app-dialog-actions button:hover { background: #333436; }
+.app-dialog-actions .btn-primary {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+.app-dialog-actions .btn-primary:hover { background: #1177bb; border-color: #1177bb; }

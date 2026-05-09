@@ -82,7 +82,7 @@
   }
 
   async function doRestart() {
-    if (!confirm("Restart the agent-toolkit server now? Active streams will be interrupted.")) return;
+    if (!await appConfirm("Restart the agent-toolkit server now? Active streams will be interrupted.")) return;
     setStatus("Restarting…");
     try {
       const r = await fetch("/api/server/restart", { method: "POST", headers: authHeaders() });
@@ -179,9 +179,9 @@
     statusEl.className = "settings-status" + (kind ? " " + kind : "");
   }
 
-  function setActiveFile(id) {
+  async function setActiveFile(id) {
     if (state.activeFile !== id && hasUnsavedActive() &&
-        !confirm("Discard unsaved changes in the current tab?")) {
+        !await appConfirm("Discard unsaved changes in the current tab?")) {
       return;
     }
     state.activeFile = id;
@@ -191,9 +191,9 @@
     renderBody();
   }
 
-  function setActiveView(v) {
+  async function setActiveView(v) {
     if (state.activeView === v) return;
-    if (hasUnsavedActive() && !confirm("Discard unsaved changes in this view?")) return;
+    if (hasUnsavedActive() && !await appConfirm("Discard unsaved changes in this view?")) return;
     state.activeView = v;
     viewToggleEl.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b.dataset.view === v);
@@ -328,7 +328,9 @@
       host.innerHTML = `
         <section class="form-section">
           <h3>Globals</h3>
-          <div class="form-grid" id="agent-globals"></div>
+          <div class="form-card" style="margin-bottom:0">
+            <div class="form-grid" id="agent-globals"></div>
+          </div>
         </section>
       `;
       renderAgentGlobals(d);
@@ -339,8 +341,8 @@
           <div id="agent-models"></div>
         </section>
       `;
-      bodyEl.querySelector("#add-model").addEventListener("click", () => {
-        let name = prompt("New model name:");
+      bodyEl.querySelector("#add-model").addEventListener("click", async () => {
+        let name = await appPrompt("New model name:");
         if (!name) return;
         name = name.trim().toLowerCase();
         if (!name || d.models[name]) return;
@@ -410,8 +412,8 @@
       for (const [k, kind] of fields) {
         grid.appendChild(field(k, m[k], kind, v => { m[k] = v; onChange(); }));
       }
-      row.querySelector(".del-btn").addEventListener("click", () => {
-        if (!confirm(`Remove model "${name}"?`)) return;
+      row.querySelector(".del-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove model "${name}"?`)) return;
         delete d.models[name];
         markFormDirty("agent");
         renderAgentModels(d);
@@ -498,8 +500,8 @@
         markFormDirty("agent"); renderAgentAgents(d);
       });
       if (!isLeader) {
-        row.querySelector(".del-btn").addEventListener("click", () => {
-          if (!confirm(`Remove agent "${a.name}"?`)) return;
+        row.querySelector(".del-btn").addEventListener("click", async () => {
+          if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
           d.agents.splice(idx, 1);
           markFormDirty("agent"); renderAgentAgents(d);
         });
@@ -520,7 +522,9 @@
         ${["always_deny", "always_allow", "ask_user"].map(k => `
           <section class="form-section">
             <h3>${k} <button type="button" class="add-btn" data-list="${k}">+ Add rule</button></h3>
-            <div class="rule-list" data-list="${k}"></div>
+            <div class="form-card" style="margin-bottom:0">
+              <div class="rule-list" data-list="${k}"></div>
+            </div>
           </section>
         `).join("")}
       </div>
@@ -683,8 +687,8 @@
         });
       };
       renderEnv();
-      row.querySelector(".add-env").addEventListener("click", () => {
-        let nk = prompt("Env var name:");
+      row.querySelector(".add-env").addEventListener("click", async () => {
+        let nk = await appPrompt("Env var name:");
         if (!nk) return;
         nk = nk.trim();
         if (!nk || nk in s.env) return;
@@ -692,14 +696,72 @@
         markFormDirty("mcp"); renderEnv();
       });
 
-      row.querySelector(".del-btn").addEventListener("click", () => {
-        if (!confirm(`Remove server "${s.name}"?`)) return;
+      row.querySelector(".del-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove server "${s.name}"?`)) return;
         d.servers.splice(idx, 1);
         markFormDirty("mcp"); renderMCPList(d);
       });
       el.appendChild(row);
     });
   }
+
+  // ─── Custom dialogs ────────────────────────────────────────────────────
+  function appDialog({ message, withInput = false, placeholder = "" }) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "app-dialog-overlay";
+
+      const box = document.createElement("div");
+      box.className = "app-dialog";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+
+      const msg = document.createElement("p");
+      msg.className = "app-dialog-msg";
+      msg.textContent = message;
+      box.appendChild(msg);
+
+      let inputEl = null;
+      if (withInput) {
+        inputEl = document.createElement("input");
+        inputEl.type = "text";
+        inputEl.className = "app-dialog-input";
+        inputEl.placeholder = placeholder;
+        box.appendChild(inputEl);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "app-dialog-actions";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "btn-primary";
+      okBtn.textContent = withInput ? "OK" : "Confirm";
+
+      const close = result => { overlay.remove(); resolve(result); };
+      cancelBtn.addEventListener("click", () => close(withInput ? null : false));
+      okBtn.addEventListener("click", () => close(withInput ? (inputEl.value.trim() || null) : true));
+      overlay.addEventListener("click", e => { if (e.target === overlay) close(withInput ? null : false); });
+      box.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); close(withInput ? null : false); }
+        if (e.key === "Enter")  { e.stopPropagation(); close(withInput ? (inputEl?.value.trim() || null) : true); }
+      });
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      (inputEl ?? okBtn).focus();
+    });
+  }
+
+  const appConfirm = msg => appDialog({ message: msg });
+  const appPrompt  = (msg, placeholder = "") => appDialog({ message: msg, withInput: true, placeholder });
 
   // ─── Field helpers ─────────────────────────────────────────────────────
   function field(label, val, kind, onChange) {
@@ -819,7 +881,7 @@
 
   async function discardActive() {
     if (!hasUnsavedActive()) return;
-    if (!confirm("Discard unsaved changes?")) return;
+    if (!await appConfirm("Discard unsaved changes?")) return;
     const id = state.activeFile;
     if (state.activeView === "raw") delete state.raw[id];
     else delete state.parsed[id];
