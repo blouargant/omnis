@@ -152,6 +152,39 @@ func streamEvents(
 				"name":  toolName,
 				"error": errMsg,
 			})
+		case events.EventCompressionSkipped:
+			tokens, _ := p["tokens"].(int)
+			soft, _ := p["soft"].(int)
+			hard, _ := p["hard"].(int)
+			window, _ := p["window"].(int)
+			emit("context_usage", map[string]any{
+				"tokens_used":   tokens,
+				"soft_limit":    soft,
+				"hard_limit":    hard,
+				"window_tokens": window,
+			})
+		case events.EventCompressionEnd:
+			after, _ := p["tokens_after"].(int)
+			soft, _ := p["soft"].(int)
+			hard, _ := p["hard"].(int)
+			window, _ := p["window"].(int)
+			emit("context_usage", map[string]any{
+				"tokens_used":   after,
+				"soft_limit":    soft,
+				"hard_limit":    hard,
+				"window_tokens": window,
+			})
+		case events.EventAfterModel:
+			// Sub-agent model call (leader is handled via the ADK event stream below).
+			usage, _ := p["usage"].(map[string]any)
+			if usage == nil {
+				return
+			}
+			emit("turn_usage", map[string]any{
+				"agent":         agentName,
+				"prompt_tokens": usage["prompt_tokens"],
+				"output_tokens": usage["candidates_tokens"],
+			})
 		}
 	}
 
@@ -222,6 +255,14 @@ func streamEvents(
 			}
 			if !isPartial {
 				sawPartialText = false
+				// Emit leader token counts so the browser can accumulate session cost.
+				if u := ev.LLMResponse.UsageMetadata; u != nil {
+					emit("turn_usage", map[string]any{
+						"agent":         "leader",
+						"prompt_tokens": int64(u.PromptTokenCount),
+						"output_tokens": int64(u.CandidatesTokenCount),
+					})
+				}
 			}
 		}
 	}

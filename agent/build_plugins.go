@@ -76,7 +76,8 @@ func buildPlugins(
 		StateLogPathFunc: func(userID, sessionID string) string {
 			return filepath.Join("logs", fmt.Sprintf("agent_statelog_%s.json", suffix(userID, sessionID)))
 		},
-		LLM: orchestratorLLM,
+		LLM:      orchestratorLLM,
+		EventBus: bus,
 	}); err == nil {
 		plugins = append(plugins, cmp)
 		// NOTE: compact_now tool returned here is intentionally not mounted

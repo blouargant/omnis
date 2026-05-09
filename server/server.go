@@ -15,6 +15,7 @@ import (
 
 	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/agent-toolkit/internal/compress"
 )
 
 type renameRequest struct {
@@ -70,11 +71,7 @@ type agentEventBroadcaster struct {
 
 func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 	b := &agentEventBroadcaster{subs: make(map[chan<- agentBusEvent]struct{})}
-	forward := func(ev string, p map[string]any) {
-		// Skip leader events — they are already surfaced by the ADK event stream.
-		if agent, _ := p["agent"].(string); agent == "leader" {
-			return
-		}
+	broadcast := func(ev string, p map[string]any) {
 		b.mu.RLock()
 		for ch := range b.subs {
 			select {
@@ -84,9 +81,19 @@ func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 		}
 		b.mu.RUnlock()
 	}
+	forward := func(ev string, p map[string]any) {
+		// Skip leader events — they are already surfaced by the ADK event stream.
+		if agent, _ := p["agent"].(string); agent == "leader" {
+			return
+		}
+		broadcast(ev, p)
+	}
 	bus.On(events.EventBeforeTool, forward)
 	bus.On(events.EventAfterTool, forward)
 	bus.On(events.EventToolError, forward)
+	bus.On(events.EventAfterModel, forward) // sub-agent model calls only; leader is in ADK stream
+	bus.On(events.EventCompressionSkipped, broadcast)
+	bus.On(events.EventCompressionEnd, broadcast)
 	return b
 }
 
@@ -275,7 +282,59 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"turns": turns})
 	})
+	auth.GET("/sessions/:id/usage-estimate", func(c *gin.Context) {
+		id := c.Param("id")
+		if _, ok := d.Registry.Get(id); !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		turns, err := loadConversationTurns(id)
+		if err != nil || len(turns) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"tokens_used": 0, "prompt_total": 0, "output_total": 0,
+				"window_tokens": compress.DefaultWindowTokens,
+				"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
+				"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),
+			})
+			return
+		}
+		// Simulate the rolling context to estimate API billing:
+		// each turn pays for the full accumulated context as its prompt.
+		var runningCtx, totalPrompt, totalOutput int
+		for _, turn := range turns {
+			userTok := compress.CountText(turn.UserText)
+			asstTok := compress.CountText(turn.AssistantText)
+			totalPrompt += runningCtx + userTok
+			totalOutput += asstTok
+			runningCtx += userTok + asstTok
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"tokens_used":   runningCtx,
+			"prompt_total":  totalPrompt,
+			"output_total":  totalOutput,
+			"window_tokens": compress.DefaultWindowTokens,
+			"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
+			"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),
+		})
+	})
+
 	auth.POST("/sessions/:id/messages", handleMessages(d))
+
+	auth.POST("/sessions/:id/compact", func(c *gin.Context) {
+		id := c.Param("id")
+		meta, ok := d.Registry.Get(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		if d.EventBus != nil {
+			d.EventBus.Emit(events.EventCompressNow, map[string]any{
+				"user_id":    meta.UserID,
+				"session_id": id,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "compression queued for next turn"})
+	})
 
 	registerConfigRoutes(auth, d.ConfigFiles, d.Restart)
 

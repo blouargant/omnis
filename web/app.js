@@ -21,6 +21,15 @@ const els = {
   send:          document.getElementById("send"),
   cancel:        document.getElementById("cancel"),
   status:        document.getElementById("status"),
+  ctxRingWrap:    document.getElementById("ctx-ring-wrap"),
+  ctxRingSvg:     document.getElementById("ctx-ring-svg"),
+  ctxRingFill:    document.querySelector(".ctx-ring-fill"),
+  ctxPopup:       document.getElementById("ctx-popup"),
+  ctxPopUsed:     document.getElementById("ctx-pop-used"),
+  ctxPopMax:      document.getElementById("ctx-pop-max"),
+  ctxPopPct:      document.getElementById("ctx-pop-pct"),
+  ctxPopBudget:   document.getElementById("ctx-pop-budget"),
+  ctxCompactBtn:  document.getElementById("ctx-compact-btn"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -52,6 +61,106 @@ function applySessionUI(id) {
   els.send.disabled   = active;
   els.cancel.disabled = !active;
   setStatus(sessionStatus.get(id) || "");
+  if (id === activeSessionId) {
+    setCtxRingSpinning(active);
+    renderCtxRing(id);
+  }
+}
+
+// ─── Context ring ────────────────────────────────────────────────────────────
+
+const CTX_RING_CIRCUMFERENCE = 56.55; // 2π × r(9)
+const sessionCtxUsage  = new Map(); // sessionId → {tokens_used, soft_limit, hard_limit, window_tokens}
+const sessionTokenAccum = new Map(); // sessionId → {prompt: number, output: number}
+
+// Approximate Sonnet-class pricing used for cost estimation.
+const PRICE_INPUT_PER_TOK  = 3.0  / 1_000_000; // $3  per million input tokens
+const PRICE_OUTPUT_PER_TOK = 15.0 / 1_000_000; // $15 per million output tokens
+
+function setCtxRingSpinning(spinning) {
+  if (els.ctxRingSvg) els.ctxRingSvg.classList.toggle("spinning", spinning);
+}
+
+function renderCtxRing(sessionId) {
+  if (!els.ctxRingFill || !els.ctxRingSvg || !els.ctxRingWrap) return;
+  const usage = sessionCtxUsage.get(sessionId);
+  if (!usage || !usage.window_tokens) {
+    els.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE;
+    els.ctxRingSvg.dataset.zone = "ok";
+    els.ctxRingWrap.classList.remove("has-data");
+    els.ctxRingWrap.title = "Context window — click for details";
+    return;
+  }
+  const { tokens_used, soft_limit, hard_limit, window_tokens } = usage;
+  const ratio = Math.min(tokens_used / window_tokens, 1);
+  const pct = Math.round(ratio * 100);
+  els.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE * (1 - ratio);
+  els.ctxRingSvg.dataset.zone = tokens_used >= hard_limit ? "danger"
+    : tokens_used >= soft_limit ? "warn" : "ok";
+  els.ctxRingWrap.classList.add("has-data");
+  els.ctxRingWrap.title = `Context: ${pct}% used — click for more information`;
+}
+
+function renderCtxPopup(sessionId) {
+  if (!els.ctxPopup) return;
+  const usage = sessionCtxUsage.get(sessionId);
+  if (!usage || !usage.window_tokens) {
+    els.ctxPopUsed.textContent   = "—";
+    els.ctxPopMax.textContent    = "—";
+    els.ctxPopPct.textContent    = "—";
+    els.ctxPopBudget.textContent = "—";
+    return;
+  }
+  const { tokens_used, window_tokens } = usage;
+  const ratio = Math.min(tokens_used / window_tokens, 1);
+  const pct   = Math.round(ratio * 100);
+  els.ctxPopUsed.textContent = tokens_used.toLocaleString();
+  els.ctxPopMax.textContent  = window_tokens.toLocaleString();
+  els.ctxPopPct.textContent  = `${pct}%`;
+
+  const acc  = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
+  const cost = acc.prompt * PRICE_INPUT_PER_TOK + acc.output * PRICE_OUTPUT_PER_TOK;
+  els.ctxPopBudget.textContent = cost > 0 ? `$${cost.toFixed(4)}` : "—";
+}
+
+// fetchUsageEstimate fetches a server-side token/cost estimate for a cold
+// session (no real-time SSE data yet) and seeds the ring + popup.
+async function fetchUsageEstimate(sessionId) {
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/usage-estimate`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.tokens_used && !data.prompt_total) return;
+    // Only seed if real-time events haven't already populated the maps.
+    if (!sessionCtxUsage.has(sessionId)) {
+      sessionCtxUsage.set(sessionId, {
+        tokens_used:   data.tokens_used   || 0,
+        window_tokens: data.window_tokens || 0,
+        soft_limit:    data.soft_limit    || 0,
+        hard_limit:    data.hard_limit    || 0,
+      });
+    }
+    if (!sessionTokenAccum.has(sessionId)) {
+      sessionTokenAccum.set(sessionId, {
+        prompt: data.prompt_total || 0,
+        output: data.output_total || 0,
+      });
+    }
+    if (sessionId === activeSessionId) renderCtxRing(sessionId);
+  } catch (e) {
+    console.error("failed to fetch usage estimate:", e);
+  }
+}
+
+function openCtxPopup() {
+  if (!els.ctxPopup) return;
+  renderCtxPopup(activeSessionId);
+  els.ctxPopup.removeAttribute("hidden");
+}
+
+function closeCtxPopup() {
+  if (!els.ctxPopup) return;
+  els.ctxPopup.setAttribute("hidden", "");
 }
 
 // ─── Per-session transcript containers ──────────────────────────────────────
@@ -534,6 +643,8 @@ async function deleteSession(id, li) {
     unsubscribeSessionEvents(id);
     sessionTurnCounts.delete(id);
     sessionContainers.delete(id);
+    sessionCtxUsage.delete(id);
+    sessionTokenAccum.delete(id);
     if (activeSessionId === id) {
       activeSessionId = null;
       clearPinnedPrompt();
@@ -592,6 +703,10 @@ async function selectSession(id) {
   }
 
   applySessionUI(id);
+
+  // Seed ring/popup with server-side estimates for sessions that have no
+  // real-time SSE data yet (cold load or page refresh).
+  if (!sessionCtxUsage.has(id)) fetchUsageEstimate(id);
 
   // Subscribe to background push events for the newly opened session.
   subscribeSessionEvents(id);
@@ -913,6 +1028,23 @@ async function sendMessage() {
         case "agent_tool_error": {
           const inner = innerPending.shift();
           if (inner) resolveToolCall(inner, { error: data.error });
+          break;
+        }
+
+        case "context_usage": {
+          sessionCtxUsage.set(sessionId, data);
+          if (sessionId === activeSessionId) renderCtxRing(sessionId);
+          break;
+        }
+
+        case "turn_usage": {
+          const acc = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
+          acc.prompt += (data.prompt_tokens || 0);
+          acc.output += (data.output_tokens || 0);
+          sessionTokenAccum.set(sessionId, acc);
+          if (sessionId === activeSessionId && els.ctxPopup && !els.ctxPopup.hasAttribute("hidden")) {
+            renderCtxPopup(sessionId);
+          }
           break;
         }
 
@@ -1243,6 +1375,43 @@ document.addEventListener("mouseup", () => {
 els.sidebarToggle.addEventListener("click", () => {
   if (els.sidebar.classList.contains("collapsed")) expandSidebar();
   else collapseSidebar();
+});
+
+// ─── Context ring popup ───────────────────────────────────────────────────────
+
+els.ctxRingWrap.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (els.ctxPopup.hasAttribute("hidden")) openCtxPopup();
+  else closeCtxPopup();
+});
+
+// Close popup when clicking outside it.
+document.addEventListener("click", (e) => {
+  if (els.ctxPopup && !els.ctxPopup.hasAttribute("hidden") &&
+      !els.ctxRingWrap.contains(e.target)) {
+    closeCtxPopup();
+  }
+});
+
+// Compress Now button.
+els.ctxCompactBtn.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (!activeSessionId) return;
+  els.ctxCompactBtn.disabled = true;
+  els.ctxCompactBtn.textContent = "Queuing…";
+  try {
+    const res = await apiFetch(`/api/sessions/${activeSessionId}/compact`, { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    els.ctxCompactBtn.textContent = "Queued ✓";
+  } catch (err) {
+    console.error("compact request failed:", err);
+    els.ctxCompactBtn.textContent = "Error";
+  }
+  setTimeout(() => {
+    els.ctxCompactBtn.disabled = false;
+    els.ctxCompactBtn.textContent = "Compress Now";
+    closeCtxPopup();
+  }, 1400);
 });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

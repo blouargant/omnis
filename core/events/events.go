@@ -46,6 +46,7 @@ const (
 	EventCompressionStart   = "compression_start"
 	EventCompressionEnd     = "compression_end"
 	EventCompressionSkipped = "compression_skipped"
+	EventCompressNow        = "compress_now"
 )
 
 // Handler receives the event name and a free-form payload map.

@@ -685,6 +685,115 @@ body.resizing #sidebar-resize { transition: none; }
   border-color: #007acc;
 }
 
+/* ─── Context ring ─────────────────────────────────────────── */
+#ctx-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.2s;
+  position: relative;
+}
+
+.ctx-ring-label {
+  font-size: 11px;
+  color: #858585;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+#ctx-ring-wrap:hover { opacity: 1; }
+#ctx-ring-wrap.has-data { opacity: 0.75; }
+#ctx-ring-wrap.has-data:hover { opacity: 1; }
+
+#ctx-ring-svg {
+  transform-origin: center;
+  overflow: visible;
+}
+#ctx-ring-svg.spinning {
+  animation: ctx-ring-spin 1.8s linear infinite;
+}
+@keyframes ctx-ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.ctx-ring-track {
+  stroke: #3e3e42;
+}
+.ctx-ring-fill {
+  stroke: #4ec9b0;
+  stroke-dasharray: 56.55;
+  stroke-dashoffset: 56.55;
+  transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
+}
+#ctx-ring-svg[data-zone="warn"]   .ctx-ring-fill { stroke: #ffab40; }
+#ctx-ring-svg[data-zone="danger"] .ctx-ring-fill { stroke: #f48771; }
+
+/* ─── Context popup ────────────────────────────────────────── */
+#ctx-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 210px;
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+  z-index: 200;
+  font-size: 12px;
+  cursor: default;
+}
+#ctx-popup[hidden] { display: none; }
+
+.ctx-popup-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #858585;
+  margin-bottom: 10px;
+}
+
+.ctx-popup-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 5px;
+  column-gap: 12px;
+  margin-bottom: 12px;
+}
+.ctx-popup-grid span:nth-child(odd) {
+  color: #858585;
+}
+.ctx-popup-grid span:nth-child(even) {
+  color: #cccccc;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+#ctx-compact-btn {
+  width: 100%;
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s;
+  margin-top: 2px;
+}
+#ctx-compact-btn:hover:not(:disabled) { background: #1177bb; }
+#ctx-compact-btn:disabled { background: #37373d; color: #555558; cursor: not-allowed; }
+
 #edit-mode-btn {
   width: 28px;
   height: 28px;

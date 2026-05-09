@@ -165,6 +165,18 @@ func Plugin(name string, cfg Config) (*plugin.Plugin, func(), error) {
 func PluginWithTools(name string, cfg Config) (*plugin.Plugin, []tool.Tool, func(), error) {
 	cfg.applyDefaults()
 	mgr := newManager(cfg)
+	// When an EventBus is configured, honour EventCompressNow requests so
+	// the web UI's "Compress Now" button can queue a forced compression cycle
+	// for a specific session without requiring a code-level callback.
+	if cfg.EventBus != nil {
+		cfg.EventBus.On(events.EventCompressNow, func(_ string, p map[string]any) {
+			userID, _ := p["user_id"].(string)
+			sessionID, _ := p["session_id"].(string)
+			if userID != "" && sessionID != "" {
+				mgr.state(userID, sessionID).forceCompact.Store(true)
+			}
+		})
+	}
 	p, err := plugin.New(plugin.Config{
 		Name:                name,
 		BeforeModelCallback: llmagent.BeforeModelCallback(mgr.beforeModel),
@@ -228,7 +240,7 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 		trigger = "soft"
 	default:
 		m.emit(events.EventCompressionSkipped, map[string]any{
-			"tokens": before, "soft": soft, "hard": hard,
+			"tokens": before, "soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
 		})
 		return nil, nil
 	}
@@ -243,6 +255,7 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 		m.emit(events.EventCompressionEnd, map[string]any{
 			"trigger": trigger, "tokens_before": before, "tokens_after": before,
 			"passes": []string{}, "duration_ms": time.Since(start).Milliseconds(),
+			"soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
 		})
 		return nil, nil
 	}
@@ -252,6 +265,7 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 	m.emit(events.EventCompressionEnd, map[string]any{
 		"trigger": trigger, "tokens_before": before, "tokens_after": after,
 		"passes": applied, "duration_ms": time.Since(start).Milliseconds(),
+		"soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
 	})
 	return nil, nil
 }
