@@ -106,10 +106,11 @@ func run() error {
 		}, meta.ID, meta.UserID)
 	}
 
-	// The restart coordinator is created up-front with a nil shutdown
-	// callback so it can be wired into the engine; the actual shutdown
-	// hook is installed after the *http.Server exists below.
-	restart := newRestartCoordinator(nil)
+	// The restart coordinator is a one-shot signal raised by the
+	// /api/server/restart handler. The actual shutdown + re-exec is
+	// performed below from this goroutine so it cannot race with normal
+	// server lifecycle (see comment on restartCoordinator).
+	restart := newRestartCoordinator()
 
 	engine := newEngine(serverDeps{
 		Token:           token,
@@ -136,11 +137,6 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: SSE responses are long-lived.
 	}
-	restart.setShutdown(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -151,6 +147,7 @@ func run() error {
 		close(errCh)
 	}()
 
+	var restartRequested bool
 	select {
 	case <-rootCtx.Done():
 		log.Printf("server: shutdown signal received")
@@ -158,12 +155,28 @@ func run() error {
 		if err != nil {
 			return err
 		}
+	case <-restart.Done():
+		restartRequested = true
+		log.Printf("server: restart requested")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+
+	if restartRequested {
+		bin, err := os.Executable()
+		if err != nil || bin == "" {
+			bin = os.Args[0]
+		}
+		log.Printf("server: re-execing %s", bin)
+		if err := reExec(bin, os.Args, os.Environ()); err != nil {
+			return fmt.Errorf("re-exec %s: %w", bin, err)
+		}
+		// reExec replaces this process on success and never returns;
+		// reaching this point is impossible without an error above.
 	}
 	return nil
 }

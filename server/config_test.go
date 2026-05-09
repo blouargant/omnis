@@ -18,7 +18,7 @@ func newTestEngine(t *testing.T, files configFiles) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api")
-	registerConfigRoutes(rg, files, newRestartCoordinator(func() {}))
+	registerConfigRoutes(rg, files, newRestartCoordinator())
 	return r
 }
 
@@ -125,6 +125,74 @@ func TestPutStaleMTime_409(t *testing.T) {
 	}
 }
 
+func TestPutMissingFileWithMTime_409(t *testing.T) {
+	// File is configured but does not yet exist on disk; client passing an
+	// mtime means it thinks it was editing a real file. checkMtime must
+	// reject the write rather than silently creating the file.
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "ghost.yaml")
+	r := newTestEngine(t, configFiles{Agent: missing})
+	w := do(t, r, http.MethodPut, "/api/config/file/agent", map[string]any{
+		"content": "key: new\n",
+		"mtime":   "2025-01-01T00:00:00Z",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("file must not have been created, stat err=%v", err)
+	}
+}
+
+func TestNoPathLeakInResponses(t *testing.T) {
+	p := tmpFile(t, "a.yaml", "key: v\n")
+	r := newTestEngine(t, configFiles{Agent: p})
+
+	w := do(t, r, http.MethodGet, "/api/config/file/agent", nil)
+	if strings.Contains(w.Body.String(), p) || strings.Contains(w.Body.String(), "\"path\"") {
+		t.Fatalf("raw GET leaked path: %s", w.Body.String())
+	}
+	w = do(t, r, http.MethodGet, "/api/config/files", nil)
+	if strings.Contains(w.Body.String(), p) || strings.Contains(w.Body.String(), "\"path\"") {
+		t.Fatalf("listing leaked path: %s", w.Body.String())
+	}
+	w = do(t, r, http.MethodGet, "/api/config/parsed/agent", nil)
+	if strings.Contains(w.Body.String(), p) || strings.Contains(w.Body.String(), "\"path\"") {
+		t.Fatalf("parsed GET leaked path: %s", w.Body.String())
+	}
+}
+
+func TestAtomicWritePreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "secret.yaml")
+	if err := os.WriteFile(p, []byte("k: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWriteFile(p, []byte("k: 2\n")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode not preserved: got %o want 600", st.Mode().Perm())
+	}
+}
+
+func TestDescribeConfigFile_Missing(t *testing.T) {
+	info := describeConfigFile("agent", filepath.Join(t.TempDir(), "nope.yaml"))
+	if info.Exists {
+		t.Fatal("Exists must be false for a missing file")
+	}
+	if info.Size != 0 {
+		t.Fatalf("Size must be 0, got %d", info.Size)
+	}
+	if info.Name != "agent" {
+		t.Fatalf("Name not preserved: %q", info.Name)
+	}
+}
+
 func TestParsedRoundTrip(t *testing.T) {
 	p := tmpFile(t, "perm.yaml", "always_deny:\n  - rm -rf /\n")
 	r := newTestEngine(t, configFiles{Permissions: p})
@@ -153,5 +221,30 @@ func TestParsedRoundTrip(t *testing.T) {
 	out, _ := os.ReadFile(p)
 	if !strings.Contains(string(out), "sudo rm") {
 		t.Fatalf("file content unexpected: %q", out)
+	}
+}
+
+func TestRestartEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	rg := r.Group("/api")
+	restart := newRestartCoordinator()
+	registerConfigRoutes(rg, configFiles{}, restart)
+
+	w := do(t, r, http.MethodPost, "/api/server/restart", nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("want 202, got %d body=%s", w.Code, w.Body.String())
+	}
+	select {
+	case <-restart.Done():
+		// ok
+	default:
+		t.Fatal("restart signal was not raised")
+	}
+
+	// Second call must remain idempotent and still return 202.
+	w = do(t, r, http.MethodPost, "/api/server/restart", nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("second call: want 202, got %d", w.Code)
 	}
 }

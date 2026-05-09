@@ -243,6 +243,10 @@ body.resizing #sidebar-resize { transition: none; }
   flex-direction: column;
   overflow: hidden;
   background: #252526;
+  /* Positioning context for the absolutely-positioned settings panel
+   * (see settings.css). Always set, not gated by a class, so the panel
+   * is correctly anchored regardless of load order. */
+  position: relative;
 }
 
 /* ─── Shared user message style (floating header + inline bubbles) ── */

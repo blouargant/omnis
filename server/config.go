@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -46,9 +45,9 @@ func (c configFiles) path(name string) (string, bool) {
 // the editor always targets the file actually loaded by the running agent.
 func resolveConfigFiles(opts agent.Options) configFiles {
 	out := configFiles{
-		Agent:       firstNonEmpty(strings.TrimSpace(opts.ConfigPath), "config/agent.yaml"),
-		Permissions: firstNonEmpty(strings.TrimSpace(opts.PermissionsConfigPath), "config/permissions.yaml"),
-		MCP:         firstNonEmpty(strings.TrimSpace(opts.MCPSConfigPath), "config/mcp_config.yaml"),
+		Agent:       firstNonEmpty(opts.ConfigPath, "config/agent.yaml"),
+		Permissions: firstNonEmpty(opts.PermissionsConfigPath, "config/permissions.yaml"),
+		MCP:         firstNonEmpty(opts.MCPSConfigPath, "config/mcp_config.yaml"),
 	}
 	settings, err := agent.ResolveRuntimeSettings(opts)
 	if err == nil {
@@ -84,20 +83,48 @@ func firstNonEmpty(values ...string) string {
 }
 
 // configFileInfo is the JSON shape returned by /api/config/files.
+// Path is intentionally not exposed to the browser: clients reference
+// files by their whitelisted name (agent / permissions / mcp).
 type configFileInfo struct {
 	Name  string    `json:"name"`
-	Path  string    `json:"path"`
+	Path  string    `json:"-"`
 	Size  int64     `json:"size"`
 	MTime time.Time `json:"mtime"`
 	Exists bool     `json:"exists"`
 }
 
 // configFilePayload is the JSON shape for read/write of a single file.
+// Path is server-internal (see configFileInfo).
 type configFilePayload struct {
 	Name    string    `json:"name"`
-	Path    string    `json:"path"`
+	Path    string    `json:"-"`
 	Content string    `json:"content"`
 	MTime   time.Time `json:"mtime"`
+}
+
+// checkMtime verifies the on-disk mtime of path matches want. When want
+// is nil it is a no-op. Returns (0, nil) when the caller may proceed,
+// otherwise the HTTP status + JSON body to return.
+func checkMtime(path string, want *time.Time) (int, gin.H) {
+	if want == nil {
+		return 0, nil
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return http.StatusConflict, gin.H{
+				"error": "file no longer exists on disk",
+			}
+		}
+		return http.StatusInternalServerError, gin.H{"error": err.Error()}
+	}
+	if !st.ModTime().Equal(*want) {
+		return http.StatusConflict, gin.H{
+			"error": "file changed on disk since it was loaded",
+			"mtime": st.ModTime(),
+		}
+	}
+	return 0, nil
 }
 
 // configWriteRequest is the request body for PUT /api/config/file/:name.
@@ -108,60 +135,28 @@ type configWriteRequest struct {
 	MTime *time.Time `json:"mtime,omitempty"`
 }
 
-// restartCoordinator orchestrates an in-place self re-exec triggered by the
-// web UI. The HTTP handler responds 202 immediately, then the goroutine
-// shuts the server down and execs a fresh copy of the binary with the same
-// arguments and environment.
+// restartCoordinator is a one-shot signal that the HTTP layer raises when
+// the user clicks "Restart server" in the web UI. The actual shutdown +
+// re-exec is performed by run() in main.go, which observes Done(). Doing
+// the work in run() (rather than in a detached goroutine here) avoids the
+// race where the main goroutine returns from select on srv.ListenAndServe
+// completion before the goroutine has a chance to call syscall.Exec.
 type restartCoordinator struct {
-	mu       sync.Mutex
-	pending  bool
-	shutdown func() // called to stop the HTTP server before exec.
+	once sync.Once
+	ch   chan struct{}
 }
 
-func newRestartCoordinator(shutdown func()) *restartCoordinator {
-	return &restartCoordinator{shutdown: shutdown}
+func newRestartCoordinator() *restartCoordinator {
+	return &restartCoordinator{ch: make(chan struct{})}
 }
 
-// setShutdown installs (or replaces) the shutdown callback. Used to break
-// the chicken-and-egg between the coordinator (referenced by the engine) and
-// the *http.Server (created after the engine).
-func (r *restartCoordinator) setShutdown(fn func()) {
-	r.mu.Lock()
-	r.shutdown = fn
-	r.mu.Unlock()
-}
-
-// trigger schedules a restart. Subsequent calls while one is pending are
-// idempotent.
+// trigger raises the restart signal. Idempotent.
 func (r *restartCoordinator) trigger() {
-	r.mu.Lock()
-	if r.pending {
-		r.mu.Unlock()
-		return
-	}
-	r.pending = true
-	shutdown := r.shutdown
-	r.mu.Unlock()
-
-	go func() {
-		// Give the HTTP response a moment to flush to the browser.
-		time.Sleep(200 * time.Millisecond)
-		if shutdown != nil {
-			shutdown()
-		}
-		// Resolve the executable path; fall back to os.Args[0] if the
-		// kernel cannot tell us. If exec fails (e.g. binary moved), the
-		// process exits and a supervisor must restart it.
-		bin, err := os.Executable()
-		if err != nil || bin == "" {
-			bin = os.Args[0]
-		}
-		_ = syscall.Exec(bin, os.Args, os.Environ())
-		// If we reach here, exec failed: terminate so a supervisor can
-		// take over.
-		os.Exit(0)
-	}()
+	r.once.Do(func() { close(r.ch) })
 }
+
+// Done returns a channel that is closed when a restart has been requested.
+func (r *restartCoordinator) Done() <-chan struct{} { return r.ch }
 
 // registerConfigRoutes mounts the configuration editor and restart endpoints.
 func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *restartCoordinator) {
@@ -220,19 +215,11 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid YAML: %v", err)})
 			return
 		}
-		// Optimistic mtime check.
-		if req.MTime != nil {
-			if st, err := os.Stat(path); err == nil {
-				if !st.ModTime().Equal(*req.MTime) {
-					c.JSON(http.StatusConflict, gin.H{
-						"error": "file changed on disk since it was loaded",
-						"mtime": st.ModTime(),
-					})
-					return
-				}
-			}
+		if status, body := checkMtime(path, req.MTime); status != 0 {
+			c.JSON(status, body)
+			return
 		}
-		if err := atomicWriteFile(path, []byte(req.Content), 0o644); err != nil {
+		if err := atomicWriteFile(path, []byte(req.Content)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -288,7 +275,6 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"name":  c.Param("name"),
-			"path":  path,
 			"data":  normalizeYAMLForJSON(parsed),
 			"mtime": mtime,
 		})
@@ -313,18 +299,11 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cannot serialize to YAML: %v", err)})
 			return
 		}
-		if req.MTime != nil {
-			if st, err := os.Stat(path); err == nil {
-				if !st.ModTime().Equal(*req.MTime) {
-					c.JSON(http.StatusConflict, gin.H{
-						"error": "file changed on disk since it was loaded",
-						"mtime": st.ModTime(),
-					})
-					return
-				}
-			}
+		if status, body := checkMtime(path, req.MTime); status != 0 {
+			c.JSON(status, body)
+			return
 		}
-		if err := atomicWriteFile(path, out, 0o644); err != nil {
+		if err := atomicWriteFile(path, out); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -335,7 +314,6 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"name":    c.Param("name"),
-			"path":    path,
 			"content": string(out),
 			"mtime":   mtime,
 		})
@@ -382,12 +360,16 @@ func describeConfigFile(name, path string) configFileInfo {
 }
 
 // atomicWriteFile writes data to path via a sibling temp file and renames
-// it into place. The temp file is removed on any failure.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+// it into place. The temp file is removed on any failure. The destination's
+// existing file mode is preserved when present; otherwise 0o644 is used.
+// The parent directory must already exist — writes fail loudly when it does
+// not, which is the right outcome for an editor that targets known files.
+func atomicWriteFile(path string, data []byte) error {
+	perm := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
 	}
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-cfg-*")
 	if err != nil {
 		return err

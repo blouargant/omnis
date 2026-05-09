@@ -1,30 +1,47 @@
-/* Settings panel — agent-toolkit configuration editor */
+/* Settings panel — agent-toolkit configuration editor (dark theme).
+ *
+ * Palette mirrors the chat surface defined in styles.css:
+ *   bg          #1e1e1e
+ *   panel bg    #252526
+ *   raised bg   #2a2d2e
+ *   border      #3e3e42
+ *   text        #cccccc
+ *   muted text  #858585
+ *   accent      #0e639c (VS Code blue)
+ *   accent hov  #1177bb
+ *   danger      #f48771
+ *   success     #89d185
+ *   warning bg  #5a4a1f
+ *   warning fg  #e2c08d
+ */
 
 #settings-panel {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #ffffff);
-  color: var(--fg, #111827);
+  background: #1e1e1e;
+  color: #cccccc;
   overflow: hidden;
 }
 
 .settings-header {
   flex: 0 0 auto;
   padding: 1rem 1.5rem 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #3e3e42;
+  background: #252526;
 }
 
 .settings-header h2 {
   margin: 0 0 0.25rem;
   font-size: 1.1rem;
+  color: #cccccc;
 }
 
 .settings-hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: #858585;
 }
 
 .settings-tabs {
@@ -41,13 +58,14 @@
   cursor: pointer;
   font-size: 0.9rem;
   border-radius: 6px 6px 0 0;
-  color: #4b5563;
+  color: #858585;
 }
+.settings-tabs button:hover { color: #cccccc; }
 
 .settings-tabs button.active {
-  background: #f9fafb;
-  border-color: #e5e7eb;
-  color: #111827;
+  background: #1e1e1e;
+  border-color: #3e3e42;
+  color: #cccccc;
   font-weight: 600;
 }
 
@@ -58,36 +76,38 @@
 }
 
 .settings-view-toggle button {
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: #2a2d2e;
+  border: 1px solid #3e3e42;
   padding: 0.25rem 0.7rem;
   cursor: pointer;
   font-size: 0.8rem;
   border-radius: 4px;
-  color: #4b5563;
+  color: #cccccc;
 }
+.settings-view-toggle button:hover { background: #333436; }
 
 .settings-view-toggle button.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
 }
 
 .settings-body {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 1rem 1.5rem;
+  background: #1e1e1e;
 }
 
 .settings-loading,
 .settings-error,
 .empty {
-  color: #6b7280;
+  color: #858585;
   font-size: 0.9rem;
   padding: 1rem 0;
 }
 
-.settings-error { color: #b91c1c; }
+.settings-error { color: #f48771; }
 
 .settings-footer {
   flex: 0 0 auto;
@@ -95,36 +115,39 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  border-top: 1px solid #e5e7eb;
-  background: #fafafa;
+  border-top: 1px solid #3e3e42;
+  background: #252526;
 }
 
 .settings-footer .settings-status {
   flex: 1;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: #858585;
 }
-.settings-footer .settings-status.success { color: #047857; }
-.settings-footer .settings-status.error   { color: #b91c1c; }
+.settings-footer .settings-status.success { color: #89d185; }
+.settings-footer .settings-status.error   { color: #f48771; }
 
 .settings-footer button {
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: #2a2d2e;
+  border: 1px solid #3e3e42;
   border-radius: 4px;
   padding: 0.4rem 0.9rem;
   font-size: 0.85rem;
   cursor: pointer;
+  color: #cccccc;
 }
+.settings-footer button:hover:not(:disabled) { background: #333436; }
 .settings-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
-.settings-footer .btn-save        { background: #2563eb; color: #fff; border-color: #2563eb; }
-.settings-footer .btn-save:disabled { background: #93c5fd; border-color: #93c5fd; }
-.settings-footer .btn-restart     { background: #dc2626; color: #fff; border-color: #dc2626; }
+.settings-footer .btn-save        { background: #0e639c; color: #ffffff; border-color: #0e639c; }
+.settings-footer .btn-save:hover:not(:disabled) { background: #1177bb; border-color: #1177bb; }
+.settings-footer .btn-save:disabled { background: #0e639c; border-color: #0e639c; opacity: 0.5; }
+
 
 /* Raw editor */
 .settings-raw { display: flex; flex-direction: column; height: 100%; }
 .raw-meta {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: #858585;
   margin-bottom: 0.4rem;
 }
 .raw-editor {
@@ -135,20 +158,24 @@
   font-size: 0.85rem;
   line-height: 1.45;
   padding: 0.75rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #3e3e42;
   border-radius: 4px;
   resize: vertical;
   white-space: pre;
   tab-size: 2;
+  background: #1e1e1e;
+  color: #cccccc;
 }
+.raw-editor:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
 
 /* Forms */
 .settings-form { display: flex; flex-direction: column; gap: 1.5rem; }
 
 .form-section {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #3e3e42;
   border-radius: 6px;
   padding: 0.75rem 1rem 1rem;
+  background: #252526;
 }
 .form-section h3 {
   display: flex;
@@ -156,15 +183,18 @@
   align-items: center;
   margin: 0 0 0.75rem;
   font-size: 0.95rem;
+  color: #cccccc;
 }
 .add-btn {
-  background: #f3f4f6;
-  border: 1px solid #d1d5db;
+  background: #2a2d2e;
+  border: 1px solid #3e3e42;
   border-radius: 4px;
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
   cursor: pointer;
+  color: #cccccc;
 }
+.add-btn:hover { background: #333436; }
 
 .form-grid {
   display: grid;
@@ -179,7 +209,7 @@
   font-size: 0.85rem;
 }
 .form-row > span {
-  color: #4b5563;
+  color: #858585;
   font-weight: 500;
 }
 .form-row input[type="text"],
@@ -187,14 +217,24 @@
 .form-row select,
 .form-row textarea {
   padding: 0.35rem 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #3e3e42;
   border-radius: 4px;
   font-size: 0.85rem;
   font-family: inherit;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+.form-row input[type="text"]:focus,
+.form-row input[type="number"]:focus,
+.form-row select:focus,
+.form-row textarea:focus {
+  outline: none;
+  border-color: #0e639c;
 }
 .form-row input[type="checkbox"] {
   align-self: flex-start;
   margin-top: 0.25rem;
+  accent-color: #0e639c;
 }
 .form-row-textarea { grid-column: 1 / -1; }
 .form-row-textarea textarea {
@@ -208,14 +248,14 @@
   grid-column: 1 / -1;
 }
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-.tools-check  { font-weight: normal; color: #111827; }
+.tools-check  { font-weight: normal; color: #cccccc; }
 
 .form-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #3e3e42;
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 0.75rem;
-  background: #fafafa;
+  background: #1e1e1e;
 }
 .form-card-header {
   display: flex;
@@ -223,19 +263,20 @@
   align-items: center;
   margin-bottom: 0.5rem;
 }
-.form-card-header strong { font-size: 0.9rem; }
+.form-card-header strong { font-size: 0.9rem; color: #cccccc; }
 .card-actions { display: flex; gap: 0.25rem; }
 .card-actions button { padding: 0.15rem 0.5rem; }
 
 .del-btn {
-  background: #fee2e2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  background: #3a1f1f;
+  border: 1px solid #5a2a2a;
+  color: #f48771;
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
   cursor: pointer;
   font-size: 0.8rem;
 }
+.del-btn:hover { background: #4a2525; }
 
 /* Permissions rules */
 .rule-row {
@@ -247,10 +288,14 @@
 .rule-row select,
 .rule-row input {
   padding: 0.3rem 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #3e3e42;
   border-radius: 4px;
   font-size: 0.85rem;
+  background: #1e1e1e;
+  color: #cccccc;
 }
+.rule-row select:focus,
+.rule-row input:focus { outline: none; border-color: #0e639c; }
 
 /* MCP key/value lists */
 .kv-list { margin-top: 0.6rem; }
@@ -260,7 +305,7 @@
   align-items: center;
   font-weight: 500;
   font-size: 0.85rem;
-  color: #4b5563;
+  color: #858585;
   margin-bottom: 0.3rem;
 }
 .kv-rows { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -269,7 +314,16 @@
   gap: 0.4rem;
   align-items: center;
 }
-.kv-row input { flex: 1; padding: 0.3rem 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.85rem; }
+.kv-row input {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+.kv-row input:focus { outline: none; border-color: #0e639c; }
 
 /* Restart-required banner */
 #restart-banner {
@@ -277,27 +331,29 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 1rem;
-  background: #fef3c7;
-  border-bottom: 1px solid #fcd34d;
-  color: #92400e;
+  background: #3a2f0a;
+  border-bottom: 1px solid #5a4a1f;
+  color: #e2c08d;
   font-size: 0.85rem;
 }
 #restart-banner .restart-banner-text { flex: 1; }
 #restart-banner button {
-  background: #b45309;
-  color: #fff;
+  background: #8a6d1a;
+  color: #ffffff;
   border: none;
   border-radius: 4px;
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
   cursor: pointer;
 }
+#restart-banner button:hover { background: #a3811f; }
 #restart-banner #restart-banner-dismiss {
   background: transparent;
-  color: #92400e;
+  color: #e2c08d;
   font-size: 1rem;
   padding: 0 0.3rem;
 }
+#restart-banner #restart-banner-dismiss:hover { background: rgba(255,255,255,0.05); }
 
 /* Settings sidebar button */
 #settings-btn {
@@ -313,8 +369,31 @@
   font-size: 0.85rem;
   color: inherit;
 }
-#settings-btn:hover { background: rgba(0,0,0,0.05); }
-#settings-btn.active { background: rgba(37, 99, 235, 0.1); border-color: rgba(37, 99, 235, 0.3); }
+#settings-btn:hover { background: #2a2d2e; }
+#settings-btn.active {
+  background: rgba(14, 99, 156, 0.25);
+  border-color: rgba(14, 99, 156, 0.5);
+  color: #cccccc;
+}
 
-/* Make #chat a positioning context for the absolutely-positioned panel. */
-#chat { position: relative; }
+/* When the settings panel is open, hide normal chat surfaces. The toggle is
+ * a single class on #chat (set by Settings.open/close) so we never fight
+ * with app.js over inline display styles. */
+#chat.chat--settings #transcript,
+#chat.chat--settings #composer-wrap,
+#chat.chat--settings #prompt-header {
+  display: none;
+}
+
+/* Scrollbar polish to match the chat dark theme. */
+.settings-body::-webkit-scrollbar,
+.raw-editor::-webkit-scrollbar { width: 10px; height: 10px; }
+.settings-body::-webkit-scrollbar-track,
+.raw-editor::-webkit-scrollbar-track { background: #1e1e1e; }
+.settings-body::-webkit-scrollbar-thumb,
+.raw-editor::-webkit-scrollbar-thumb {
+  background: #3e3e42;
+  border-radius: 5px;
+}
+.settings-body::-webkit-scrollbar-thumb:hover,
+.raw-editor::-webkit-scrollbar-thumb:hover { background: #525257; }

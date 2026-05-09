@@ -10,6 +10,7 @@
   ];
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
+  const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const TOOL_GROUPS = ["fs", "mcp", "skills", "softskills"];
 
   const state = {
@@ -52,21 +53,25 @@
     main.insertBefore(b, main.firstChild);
     b.querySelector("#restart-banner-btn").addEventListener("click", () => doRestart());
     b.querySelector("#restart-banner-dismiss").addEventListener("click", () => {
-      b.hidden = true; // soft-dismiss; flag stays in localStorage so it returns on reload
+      // Persistent dismissal until the next successful save re-arms the banner.
+      localStorage.setItem(BANNER_DISMISS_FLAG, "1");
+      b.hidden = true;
     });
     return b;
   }
 
   function showBanner() {
     localStorage.setItem(RESTART_FLAG, "1");
+    // Re-arm visibility: a fresh save invalidates any earlier dismissal.
+    localStorage.removeItem(BANNER_DISMISS_FLAG);
     const b = ensureBanner();
     b.hidden = false;
   }
 
   function refreshBannerVisibility() {
-    if (localStorage.getItem(RESTART_FLAG) === "1") {
-      ensureBanner().hidden = false;
-    }
+    if (localStorage.getItem(RESTART_FLAG) !== "1") return;
+    if (localStorage.getItem(BANNER_DISMISS_FLAG) === "1") return;
+    ensureBanner().hidden = false;
   }
 
   async function doRestart() {
@@ -79,6 +84,7 @@
         throw new Error(j.error || `HTTP ${r.status}`);
       }
       localStorage.removeItem(RESTART_FLAG);
+      localStorage.removeItem(BANNER_DISMISS_FLAG);
       const b = document.getElementById("restart-banner");
       if (b) b.hidden = true;
       setStatus("Server restarting — page will reload shortly…");
@@ -125,7 +131,6 @@
         <span class="settings-status"></span>
         <button type="button" class="btn-discard">Discard</button>
         <button type="button" class="btn-save">Save</button>
-        <button type="button" class="btn-restart">Restart server</button>
       </footer>
     `;
     const main = document.getElementById("chat");
@@ -151,7 +156,6 @@
 
     panelEl.querySelector(".btn-save").addEventListener("click", saveActive);
     panelEl.querySelector(".btn-discard").addEventListener("click", discardActive);
-    panelEl.querySelector(".btn-restart").addEventListener("click", doRestart);
 
     return panelEl;
   }
@@ -760,10 +764,12 @@
     ensurePanel();
     refreshBannerVisibility();
     state.open = true;
-    document.getElementById("transcript").style.display = "none";
-    document.getElementById("composer-wrap").style.display = "none";
-    document.getElementById("prompt-header").style.display = "none";
+    // Single CSS class drives chat-vs-settings layout; no inline style fights
+    // with app.js for control of #transcript / #composer-wrap / #prompt-header.
+    document.getElementById("chat").classList.add("chat--settings");
     panelEl.hidden = false;
+    const sb = document.getElementById("settings-btn");
+    if (sb) sb.classList.add("active");
     if (!tabsEl.querySelector("button.active")) {
       tabsEl.querySelector(`button[data-file="${state.activeFile}"]`).classList.add("active");
     }
@@ -774,9 +780,9 @@
     if (!state.open) return;
     state.open = false;
     if (panelEl) panelEl.hidden = true;
-    document.getElementById("transcript").style.display = "";
-    document.getElementById("composer-wrap").style.display = "";
-    document.getElementById("prompt-header").style.display = "";
+    document.getElementById("chat").classList.remove("chat--settings");
+    const sb = document.getElementById("settings-btn");
+    if (sb) sb.classList.remove("active");
   }
 
   function isOpen() { return state.open; }
