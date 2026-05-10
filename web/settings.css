@@ -313,6 +313,101 @@
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .tools-check  { font-weight: normal; color: #cccccc; }
 
+/* Combobox row: free-text input + custom dropdown panel + fetch button */
+.form-row-combo {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  align-items: start;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+.form-row-combo > span {
+  color: #858585;
+  font-weight: 500;
+  padding-top: 0.4rem;
+}
+.combo-wrap {
+  position: relative;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.combo-wrap input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+.combo-wrap input[type="text"]:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+.combo-fetch-btn {
+  flex: 0 0 auto;
+  background: #2a2d2e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.3rem 0.5rem;
+  transition: background 0.15s;
+}
+.combo-fetch-btn:hover:not(:disabled) { background: #333436; border-color: #555; }
+.combo-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.combo-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: #252526;
+  border: 1px solid #0e639c;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  max-height: 220px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* display:flex above must not win over the hidden attribute */
+.combo-panel[hidden] { display: none; }
+.combo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.combo-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #cccccc;
+  white-space: nowrap;
+}
+.combo-list li:hover { background: #094771; }
+.combo-list li.combo-empty {
+  color: #858585;
+  cursor: default;
+  font-style: italic;
+}
+.combo-list li.combo-empty:hover { background: transparent; }
+.combo-list li.combo-error { color: #f48771; font-style: normal; white-space: normal; }
+.combo-item-id   { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.combo-item-name { color: #858585; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; }
+
 .form-card {
   border: 1px solid #3e3e42;
   border-radius: 6px;

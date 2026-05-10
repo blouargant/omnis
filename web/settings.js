@@ -401,15 +401,22 @@
       `;
       const grid = row.querySelector(".form-grid");
       const onChange = () => markFormDirty("agent");
-      const fields = [
-        ["provider", "string"], ["model", "string"], ["base_url", "string"], ["api_key", "string"],
+
+      // provider field — plain text, but changing it clears cached model list
+      grid.appendChild(field("provider", m.provider, "string", v => { m.provider = v; onChange(); }));
+
+      // model field — combobox: free-text input + datalist populated from provider API
+      grid.appendChild(modelComboField(m, onChange));
+
+      const remainingFields = [
+        ["base_url", "string"], ["api_key", "string"],
         ["context_length", "number"],
         ["input_token_price_per_million", "number"],
         ["output_token_price_per_million", "number"],
         ["cached_input_token_price_per_million", "number"],
         ["cache_creation_token_price_per_million", "number"],
       ];
-      for (const [k, kind] of fields) {
+      for (const [k, kind] of remainingFields) {
         grid.appendChild(field(k, m[k], kind, v => { m[k] = v; onChange(); }));
       }
       row.querySelector(".del-btn").addEventListener("click", async () => {
@@ -420,6 +427,132 @@
       });
       el.appendChild(row);
     }
+  }
+
+  // modelComboField builds a form row for the "model" field: a free-text input
+  // with a custom dropdown panel populated from the provider's model list API.
+  // The panel shows ALL fetched models (filtered by what's typed); clicking one
+  // sets the value. The ⟳ button fetches and opens the panel automatically.
+  function modelComboField(m, onChange) {
+    const row = document.createElement("div");
+    row.className = "form-row form-row-combo";
+
+    const span = document.createElement("span");
+    span.textContent = "model";
+
+    const wrap = document.createElement("div");
+    wrap.className = "combo-wrap";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = m.model == null ? "" : String(m.model);
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("spellcheck", "false");
+
+    const panel = document.createElement("div");
+    panel.className = "combo-panel";
+    panel.hidden = true;
+
+    const list = document.createElement("ul");
+    list.className = "combo-list";
+    panel.appendChild(list);
+
+    // All fetched model objects [{id, display_name}]
+    let allModels = [];
+
+    function renderList(filter) {
+      const q = (filter || "").toLowerCase();
+      list.innerHTML = "";
+      const shown = q ? allModels.filter(mdl =>
+        mdl.id.toLowerCase().includes(q) ||
+        (mdl.display_name || "").toLowerCase().includes(q)
+      ) : allModels;
+      if (!shown.length) {
+        const li = document.createElement("li");
+        li.className = "combo-empty";
+        li.textContent = q ? "No match" : "No models loaded";
+        list.appendChild(li);
+        return;
+      }
+      for (const mdl of shown) {
+        const li = document.createElement("li");
+        li.dataset.value = mdl.id;
+        if (mdl.display_name && mdl.display_name !== mdl.id) {
+          li.innerHTML = `<span class="combo-item-id">${escHtml(mdl.id)}</span><span class="combo-item-name">${escHtml(mdl.display_name)}</span>`;
+        } else {
+          li.textContent = mdl.id;
+        }
+        li.addEventListener("mousedown", e => {
+          e.preventDefault(); // keep input focus
+          input.value = mdl.id;
+          m.model = mdl.id;
+          onChange();
+          panel.hidden = true;
+        });
+        list.appendChild(li);
+      }
+    }
+
+    function openPanel() { panel.hidden = false; renderList(input.value); }
+    function closePanel() { panel.hidden = true; }
+
+    input.addEventListener("input", () => {
+      m.model = input.value;
+      onChange();
+      if (!panel.hidden) renderList(input.value);
+    });
+    input.addEventListener("focus", () => {
+      if (allModels.length) { panel.hidden = false; renderList(""); }
+    });
+    input.addEventListener("blur", () => { setTimeout(closePanel, 150); });
+
+    const fetchBtn = document.createElement("button");
+    fetchBtn.type = "button";
+    fetchBtn.className = "combo-fetch-btn";
+    fetchBtn.title = "Load models from provider";
+    fetchBtn.textContent = "⟳";
+
+    fetchBtn.addEventListener("click", async () => {
+      const provider = (m.provider || "").trim();
+      if (!provider) { setStatus("Set a provider first."); return; }
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = "…";
+      setStatus("Fetching model list…");
+      try {
+        const params = new URLSearchParams({ provider });
+        if (m.api_key) params.set("api_key", m.api_key);
+        if (m.base_url) params.set("base_url", m.base_url);
+        const r = await fetch(`/api/providers/models?${params}`, { headers: authHeaders() });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || r.statusText);
+        allModels = j.models || [];
+        // Show all models unfiltered; typing will narrow the list.
+        panel.hidden = false;
+        renderList("");
+        input.focus();
+        setStatus(`Loaded ${allModels.length} model(s) from ${provider}.`);
+      } catch (e) {
+        // Show error inside the panel so it's visible even if the status bar is offscreen.
+        allModels = [];
+        list.innerHTML = "";
+        const li = document.createElement("li");
+        li.className = "combo-empty combo-error";
+        li.textContent = e.message;
+        list.appendChild(li);
+        panel.hidden = false;
+        setStatus("Failed to load models: " + e.message);
+      } finally {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = "⟳";
+      }
+    });
+
+    wrap.appendChild(input);
+    wrap.appendChild(fetchBtn);
+    wrap.appendChild(panel);
+    row.appendChild(span);
+    row.appendChild(wrap);
+    return row;
   }
 
   function renderAgentAgents(d) {

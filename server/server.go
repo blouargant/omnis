@@ -343,6 +343,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	registerConfigRoutes(auth, d.ConfigFiles, d.Restart)
+	registerProviderModelsRoute(auth)
 
 	auth.POST("/sessions/:id/curate", func(c *gin.Context) {
 		id := c.Param("id")
