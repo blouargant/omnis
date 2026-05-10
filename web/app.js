@@ -385,9 +385,28 @@ function pinnedPromptLabel(text) {
   return firstLine.length > 300 ? firstLine.slice(0, 300) + "…" : firstLine;
 }
 
-// Show text in the fixed header above the transcript.
-function setPinnedPrompt(text) {
-  els.promptHeader.textContent = pinnedPromptLabel(text);
+// Show text (and optional file chips) in the fixed header above the transcript.
+function setPinnedPrompt(text, files) {
+  els.promptHeader.innerHTML = "";
+  const label = pinnedPromptLabel(text);
+  if (label) {
+    const textEl = document.createElement("span");
+    textEl.className = "pinned-prompt-text";
+    textEl.textContent = label;
+    els.promptHeader.appendChild(textEl);
+  }
+  if (files && files.length > 0) {
+    const row = document.createElement("div");
+    row.className = "bubble-attachments";
+    for (const f of files) {
+      const chip = document.createElement("span");
+      chip.className = "attachment-chip";
+      chip.textContent = f.name;
+      chip.title = f.path || f.name;
+      row.appendChild(chip);
+    }
+    els.promptHeader.appendChild(row);
+  }
   els.promptHeader.classList.add("visible");
 }
 
@@ -401,6 +420,7 @@ function appendUserBubble(text, container, files) {
   row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
   bubble.className = "bubble-user";
+  bubble.dataset.text = text || "";
   if (text) bubble.textContent = text;
   if (files && files.length > 0) {
     const chips = document.createElement("div");
@@ -471,21 +491,23 @@ function appendMailboxBlock(text, container) {
 function updatePinnedForScroll() {
   const transcriptRect = els.transcript.getBoundingClientRect();
   const userBubbles = els.transcript.querySelectorAll(".bubble-user");
-  let activeText = null;
+  let activeBubble = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.bottom < transcriptRect.top) activeText = bubble.textContent;
+    if (rowRect.bottom < transcriptRect.top) activeBubble = bubble;
   }
-  if (activeText !== null) {
-    els.promptHeader.textContent = pinnedPromptLabel(activeText);
-    els.promptHeader.classList.add("visible");
+  if (activeBubble !== null) {
+    const text = activeBubble.dataset.text || "";
+    const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
+    const files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
+    setPinnedPrompt(text, files);
   } else {
-    els.promptHeader.classList.remove("visible");
+    clearPinnedPrompt();
   }
 }
 
 function clearPinnedPrompt() {
-  els.promptHeader.textContent = "";
+  els.promptHeader.innerHTML = "";
   els.promptHeader.classList.remove("visible");
 }
 
@@ -1490,6 +1512,62 @@ els.prompt.addEventListener("paste", async (e) => {
     if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
   } catch (err) {
     console.error("paste upload error:", err);
+  }
+});
+
+// ─── Drag-and-drop file upload ────────────────────────────────────────────────
+let dragCounter = 0;
+
+els.composerWrap.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer?.types.includes("Files")) return;
+  e.preventDefault();
+  dragCounter++;
+  els.composerWrap.classList.add("drag-over");
+});
+
+els.composerWrap.addEventListener("dragover", (e) => {
+  if (!e.dataTransfer?.types.includes("Files")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+});
+
+els.composerWrap.addEventListener("dragleave", () => {
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    els.composerWrap.classList.remove("drag-over");
+  }
+});
+
+els.composerWrap.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  els.composerWrap.classList.remove("drag-over");
+
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (!files.length) return;
+
+  if (!activeSessionId) await newChat();
+  if (!activeSessionId) return;
+
+  const sessionId = activeSessionId;
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      console.error("drop upload failed:", await res.text());
+      return;
+    }
+    const data = await res.json();
+    for (const f of (data.files || [])) addAttachment(sessionId, f);
+    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
+  } catch (err) {
+    console.error("drop upload error:", err);
   }
 });
 

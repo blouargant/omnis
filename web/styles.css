@@ -268,14 +268,19 @@ body.resizing #sidebar-resize { transition: none; }
 #prompt-header {
   flex-shrink: 0;
   display: none;
+  width: 100%;
   max-width: calc(var(--col-w) - 40px);
   margin: 16px auto 0;
-  /* Override .bubble-user's pre-wrap; the pinned header is a single-line label. */
+  white-space: normal;
+}
+#prompt-header.visible { display: block; }
+
+.pinned-prompt-text {
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#prompt-header.visible { display: block; }
 
 /* ─── Transcript ───────────────────────────────────────────── */
 #transcript {
@@ -622,6 +627,22 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 #prompt:focus { border-color: #007acc; }
 #prompt::placeholder { color: #555558; }
+
+#composer-wrap.drag-over::after {
+  content: "Drop files to attach";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 122, 204, 0.12);
+  border: 2px dashed #007acc;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #007acc;
+  font-size: 15px;
+  pointer-events: none;
+  z-index: 10;
+}
 
 .composer-actions {
   display: flex;
