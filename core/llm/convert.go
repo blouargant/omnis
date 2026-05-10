@@ -86,6 +86,33 @@ func schemaToJSON(s *genai.Schema) map[string]any {
 	return out
 }
 
+// toolParamsJSON returns the JSON-Schema map for a function declaration's
+// input parameters. ADK functiontool sets ParametersJsonSchema (any) rather
+// than Parameters (*genai.Schema), so we fall back to a marshal round-trip
+// when Parameters is nil.
+func toolParamsJSON(fd *genai.FunctionDeclaration) map[string]any {
+	if fd.Parameters != nil {
+		return schemaToJSON(fd.Parameters)
+	}
+	if fd.ParametersJsonSchema != nil {
+		b, err := json.Marshal(fd.ParametersJsonSchema)
+		if err == nil {
+			var m map[string]any
+			if err := json.Unmarshal(b, &m); err == nil {
+				// Ensure additionalProperties: false is propagated so the model
+				// knows the declared fields are the only valid ones.
+				if m["type"] == "object" {
+					if _, ok := m["additionalProperties"]; !ok {
+						m["additionalProperties"] = false
+					}
+				}
+				return m
+			}
+		}
+	}
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+
 // toolDecls flattens req.Config.Tools into a slice of FunctionDeclaration.
 func toolDecls(cfg *genai.GenerateContentConfig) []*genai.FunctionDeclaration {
 	if cfg == nil {

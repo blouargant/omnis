@@ -270,7 +270,7 @@ func (o *openAI) toTools(req *model.LLMRequest) []oaiTool {
 			Function: oaiToolFuncDef{
 				Name:        fd.Name,
 				Description: fd.Description,
-				Parameters:  schemaToJSON(fd.Parameters),
+				Parameters:  toolParamsJSON(fd),
 			},
 		})
 	}

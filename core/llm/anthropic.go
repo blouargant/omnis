@@ -207,7 +207,7 @@ func (a *anthropic) toTools(req *model.LLMRequest) []antTool {
 		out = append(out, antTool{
 			Name:        fd.Name,
 			Description: fd.Description,
-			InputSchema: schemaToJSON(fd.Parameters),
+			InputSchema: toolParamsJSON(fd),
 		})
 	}
 	return out
