@@ -35,7 +35,9 @@ func New() []tool.Tool {
 				return WriteOut{Result: out}, nil
 			}),
 		mustTool("grep",
-			"Search a regex pattern across files. Returns file paths and line numbers of matches. Use this rather than 'bash grep' for searching.",
+			"Search a regex pattern across files or a single file. Returns file:line matches. Prefer this over 'bash grep'. "+
+				"Arguments: `pattern` (string, required) — extended regex; `path` (string, optional) — file or directory to search, defaults to '.' (current directory); `recursive` (bool, optional) — recurse into subdirectories, default false. "+
+				"Do NOT pass `file_path`, `start_line`, or `end_line` — those belong to the 'read' tool.",
 			func(_ tool.Context, in GrepIn) (GrepOut, error) {
 				out, _ := RunGrep(context.Background(), in)
 				return GrepOut{Matches: out}, nil

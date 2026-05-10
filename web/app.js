@@ -276,8 +276,14 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+let _scrollPending = false;
 function scrollBottom() {
-  els.transcript.scrollTop = els.transcript.scrollHeight;
+  if (_scrollPending) return;
+  _scrollPending = true;
+  requestAnimationFrame(() => {
+    _scrollPending = false;
+    els.transcript.scrollTop = els.transcript.scrollHeight;
+  });
 }
 
 // ─── Tool metadata ──────────────────────────────────────────────────────────
@@ -379,14 +385,16 @@ function renderMarkdown(el, text) {
 
 // ─── Pinned prompt header ────────────────────────────────────────────────────
 
-// Reduce a (possibly huge / multi-line) user prompt to a one-line label.
+// Return the full prompt text for the pinned header; CSS handles 3-line clamping.
 function pinnedPromptLabel(text) {
-  const firstLine = String(text || "").split("\n", 1)[0];
-  return firstLine.length > 300 ? firstLine.slice(0, 300) + "…" : firstLine;
+  const s = String(text || "");
+  return s.length > 1000 ? s.slice(0, 1000) + "…" : s;
 }
 
-// Show text (and optional file chips) in the fixed header above the transcript.
-function setPinnedPrompt(text, files) {
+// Show the user prompt text in the floating header above the transcript.
+// Attachments are intentionally NOT rendered here — they live in the inline
+// user bubble so the floating header stays compact.
+function setPinnedPrompt(text, _files) {
   els.promptHeader.innerHTML = "";
   const label = pinnedPromptLabel(text);
   if (label) {
@@ -394,18 +402,6 @@ function setPinnedPrompt(text, files) {
     textEl.className = "pinned-prompt-text";
     textEl.textContent = label;
     els.promptHeader.appendChild(textEl);
-  }
-  if (files && files.length > 0) {
-    const row = document.createElement("div");
-    row.className = "bubble-attachments";
-    for (const f of files) {
-      const chip = document.createElement("span");
-      chip.className = "attachment-chip";
-      chip.textContent = f.name;
-      chip.title = f.path || f.name;
-      row.appendChild(chip);
-    }
-    els.promptHeader.appendChild(row);
   }
   els.promptHeader.classList.add("visible");
 }
@@ -421,7 +417,12 @@ function appendUserBubble(text, container, files) {
   const bubble = document.createElement("div");
   bubble.className = "bubble-user";
   bubble.dataset.text = text || "";
-  if (text) bubble.textContent = text;
+  if (text) {
+    const textEl = document.createElement("div");
+    textEl.className = "bubble-user-text";
+    textEl.textContent = text;
+    bubble.appendChild(textEl);
+  }
   if (files && files.length > 0) {
     const chips = document.createElement("div");
     chips.className = "bubble-attachments";
@@ -429,13 +430,43 @@ function appendUserBubble(text, container, files) {
       const chip = document.createElement("span");
       chip.className = "attachment-chip attachment-chip-sent";
       chip.textContent = f.name;
-      chip.title = f.path;
+      chip.title = f.path || f.name;
       chips.appendChild(chip);
     }
     bubble.appendChild(chips);
   }
   row.appendChild(bubble);
   (container || els.transcript).appendChild(row);
+  // After layout, decide whether the message overflows three lines and, if so,
+  // mark it truncated and add a click-to-expand affordance.
+  requestAnimationFrame(() => applyUserBubbleTruncation(bubble));
+}
+
+// applyUserBubbleTruncation clamps long user messages to ~3 lines and adds a
+// "Show more / Show less" affordance. Toggling is wired on the indicator only,
+// so users can still select text inside the bubble without expanding it.
+function applyUserBubbleTruncation(bubble) {
+  const textEl = bubble.querySelector(".bubble-user-text");
+  if (!textEl) return;
+  // Trigger clamp via class so we can measure overflow.
+  textEl.classList.add("clamped");
+  const overflows = textEl.scrollHeight - textEl.clientHeight > 1;
+  if (!overflows) {
+    textEl.classList.remove("clamped");
+    return;
+  }
+  bubble.classList.add("bubble-user-truncated");
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "bubble-user-toggle";
+  toggle.textContent = "Show more";
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const expanded = bubble.classList.toggle("bubble-user-expanded");
+    textEl.classList.toggle("clamped", !expanded);
+    toggle.textContent = expanded ? "Show less" : "Show more";
+  });
+  bubble.appendChild(toggle);
 }
 
 // Parse a mailbox user_text into { from, body }.
@@ -498,8 +529,13 @@ function updatePinnedForScroll() {
   }
   if (activeBubble !== null) {
     const text = activeBubble.dataset.text || "";
-    const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
-    const files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
+    let files = [];
+    if (activeBubble.dataset.files) {
+      try { files = JSON.parse(activeBubble.dataset.files); } catch { files = []; }
+    } else {
+      const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
+      files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
+    }
     setPinnedPrompt(text, files);
   } else {
     clearPinnedPrompt();
@@ -638,7 +674,15 @@ function resolveToolCall(block, response) {
   if (isTeammate && !isError) {
     const formatted = formatTeammateResponse(response);
     if (formatted === null) {
-      slot.remove();
+      // Empty teammate output (e.g. teammate_check on empty mailbox):
+      // remove the whole chip so it doesn't clutter the transcript.
+      const row = block.closest(".tool-row");
+      const parentNested = block.parentElement && block.parentElement.classList.contains("tool-nested")
+        ? block.parentElement
+        : null;
+      block.remove();
+      if (parentNested && parentNested.children.length === 0) parentNested.remove();
+      if (row && row.children.length === 0) row.remove();
       return;
     }
     const outDiv = document.createElement("div");
@@ -1090,11 +1134,11 @@ async function sendMessage() {
       switch (event) {
         case "token": {
           ensureSegment();
+          if (!segHadToken) setSessionStatus(sessionId, "streaming…");
           segHadToken = true;
           segAcc += data.text || "";
           scheduleRender();
           scrollBottom();
-          setSessionStatus(sessionId, "streaming…");
           break;
         }
 
