@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunBashSafetyFloorAndOutput(t *testing.T) {
@@ -28,82 +29,73 @@ func TestRunBashSafetyFloorAndOutput(t *testing.T) {
 	}
 }
 
-func TestRunReadWriteAndRevert(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "demo.txt")
+func TestRunBashAllSafetyPatterns(t *testing.T) {
+	t.Parallel()
 
-	msg, err := RunWrite(context.Background(), WriteIn{Path: path, Content: "a\nb\n"})
-	if err != nil {
-		t.Fatalf("RunWrite() error = %v", err)
-	}
-	if !strings.Contains(msg, "snapshot saved") {
-		t.Fatalf("RunWrite() = %q", msg)
-	}
-
-	read, err := RunRead(context.Background(), ReadIn{Path: path, StartLine: 2, EndLine: 2})
-	if err != nil {
-		t.Fatalf("RunRead() error = %v", err)
-	}
-	if read != "   2\tb\n" {
-		t.Fatalf("RunRead() = %q", read)
-	}
-
-	_, _ = RunWrite(context.Background(), WriteIn{Path: path, Content: "changed\n"})
-	reverted, err := RunRevert(context.Background(), RevertIn{Path: path})
-	if err != nil {
-		t.Fatalf("RunRevert() error = %v", err)
-	}
-	if !strings.Contains(reverted, "restored") {
-		t.Fatalf("RunRevert() = %q", reverted)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if string(data) != "a\nb\n" {
-		t.Fatalf("file contents after revert = %q", string(data))
+	for _, cmd := range alwaysBlock {
+		out, err := RunBash(context.Background(), BashIn{Command: cmd})
+		if err != nil {
+			t.Fatalf("RunBash(%q) error = %v", cmd, err)
+		}
+		if !strings.Contains(out, "command blocked by safety floor") {
+			t.Fatalf("RunBash(%q) not blocked: %q", cmd, out)
+		}
 	}
 }
 
-func TestRunRevertDeletesNewFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "new.txt")
-	_, _ = RunWrite(context.Background(), WriteIn{Path: path, Content: "new"})
-	result, err := RunRevert(context.Background(), RevertIn{Path: path})
+func TestRunBashNoOutput(t *testing.T) {
+	t.Parallel()
+
+	out, err := RunBash(context.Background(), BashIn{Command: "true"})
 	if err != nil {
-		t.Fatalf("RunRevert() error = %v", err)
+		t.Fatalf("RunBash() error = %v", err)
 	}
-	if !strings.Contains(result, "removed") {
-		t.Fatalf("RunRevert() = %q", result)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("file still exists after revert: %v", err)
+	if out != "(no output)" {
+		t.Fatalf("RunBash(true) = %q, want (no output)", out)
 	}
 }
 
-func TestRunGrepAndGlob(t *testing.T) {
-	dir := t.TempDir()
-	pathA := filepath.Join(dir, "a.txt")
-	pathB := filepath.Join(dir, "b.go")
-	if err := os.WriteFile(pathA, []byte("hello\nworld\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(a) error = %v", err)
+func TestRunBashTimeout(t *testing.T) {
+	t.Parallel()
+
+	// sleep 2 with a 1s timeout. The test takes up to 2s because the child
+	// sleep process keeps the pipe open until it exits naturally after /bin/sh
+	// is killed.
+	out, err := RunBash(context.Background(), BashIn{Command: "sleep 2", Timeout: 1})
+	if err != nil {
+		t.Fatalf("RunBash(timeout) error = %v", err)
 	}
-	if err := os.WriteFile(pathB, []byte("package demo\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(b) error = %v", err)
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("RunBash(timeout) = %q, want timed-out message", out)
+	}
+}
+
+func TestSetBashDefaultTimeout(t *testing.T) {
+	// Not parallel: mutates global state.
+	original := bashDefaultTimeout
+
+	SetBashDefaultTimeout(1 * time.Second)
+	out, err := RunBash(context.Background(), BashIn{Command: "sleep 2"})
+	if err != nil {
+		t.Fatalf("RunBash() error = %v", err)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("RunBash() with short default = %q, want timed-out message", out)
 	}
 
-	matches, err := RunGrep(context.Background(), GrepIn{Pattern: "hello", Path: dir, Recursive: true})
-	if err != nil {
-		t.Fatalf("RunGrep() error = %v", err)
-	}
-	if !strings.Contains(matches, "a.txt:1:hello") {
-		t.Fatalf("RunGrep() = %q", matches)
-	}
+	SetBashDefaultTimeout(original)
+}
 
-	files, err := RunGlob(context.Background(), GlobIn{Pattern: filepath.Join(dir, "*.txt")})
-	if err != nil {
-		t.Fatalf("RunGlob() error = %v", err)
-	}
-	if files != pathA {
-		t.Fatalf("RunGlob() = %q, want %q", files, pathA)
+func TestSetBashDefaultTimeoutZeroCoerced(t *testing.T) {
+	t.Parallel()
+
+	// Zero should coerce to 120s without panicking.
+	SetBashDefaultTimeout(0)
+	bashDefaultTimeoutMu.RLock()
+	got := bashDefaultTimeout
+	bashDefaultTimeoutMu.RUnlock()
+	if got != 120*time.Second {
+		t.Fatalf("SetBashDefaultTimeout(0) left timeout = %v, want 120s", got)
 	}
 }
 
