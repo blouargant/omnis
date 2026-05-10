@@ -113,11 +113,12 @@ func run() error {
 	restart := newRestartCoordinator()
 
 	engine := newEngine(serverDeps{
-		Token:           token,
-		Runner:          r,
-		Registry:        registry,
-		WebDir:          webDir,
-		EventBus:        result.EventBus,
+		Token:                token,
+		Runner:               r,
+		Registry:             registry,
+		WebDir:               webDir,
+		AllowFileAttachments: result.LeaderAllowFileAttachments,
+		EventBus:             result.EventBus,
 		AgentEvents:     newAgentEventBroadcaster(result.EventBus),
 		RegisterSession:   result.RegisterSession,
 		RenameSession:     result.RenameSession,

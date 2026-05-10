@@ -25,6 +25,7 @@ type AgentEntry struct {
 	Instruction           string   `yaml:"instruction"`
 	Enabled               *bool    `yaml:"enabled"`
 	Mailbox               *bool    `yaml:"mailbox"`
+	AllowFileAttachments  *bool    `yaml:"allow_file_attachments"`
 	Tools                 []string `yaml:"tools"`
 	SkillsDir             string   `yaml:"skills_dir"`
 	SoftSkillsDir         string   `yaml:"softskills_dir"`
@@ -97,6 +98,7 @@ type RuntimeAgentConfig struct {
 	Instruction                       string
 	Enabled                           bool
 	Mailbox                           bool
+	AllowFileAttachments              bool
 	Tools                             []string
 	SkillsDir                         string
 	SoftSkillsDir                     string
@@ -237,6 +239,10 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			enabled = true
 			mailbox = true
 		}
+		allowFileAttachments := false
+		if e.AllowFileAttachments != nil {
+			allowFileAttachments = *e.AllowFileAttachments
+		}
 		out = append(out, RuntimeAgentConfig{
 			Name:                              name,
 			ModelRef:                          modelRef,
@@ -253,6 +259,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			Instruction:                       strings.TrimSpace(e.Instruction),
 			Enabled:                           enabled,
 			Mailbox:                           mailbox,
+			AllowFileAttachments:              allowFileAttachments,
 			Tools:                             normalizeTools(e.Tools),
 			SkillsDir:                         strings.TrimSpace(e.SkillsDir),
 			SoftSkillsDir:                     strings.TrimSpace(e.SoftSkillsDir),
@@ -392,6 +399,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		Instruction:                       strings.TrimSpace(in.Instruction),
 		Enabled:                           in.Enabled,
 		Mailbox:                           in.Mailbox,
+		AllowFileAttachments:              in.AllowFileAttachments,
 		Tools:                             normalizeTools(in.Tools),
 		SkillsDir:                         strings.TrimSpace(in.SkillsDir),
 		SoftSkillsDir:                     strings.TrimSpace(in.SoftSkillsDir),

@@ -601,6 +601,8 @@
       // Mailbox defaults to true for leader when not explicitly set.
       grid.appendChild(field("mailbox", (isLeader && a.mailbox == null) ? true : a.mailbox, "bool", v => { a.mailbox = v; onChange(); }));
 
+      grid.appendChild(field("allow_file_attachments", a.allow_file_attachments || false, "bool", v => { a.allow_file_attachments = v; onChange(); }));
+
       // Tools default to all available for leader when not explicitly set.
       const effectiveTools = (isLeader && (!a.tools || !a.tools.length)) ? [...TOOL_GROUPS] : a.tools;
       grid.appendChild(toolsField("tools", effectiveTools, v => { a.tools = v; onChange(); }));

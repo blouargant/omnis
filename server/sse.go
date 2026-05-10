@@ -69,20 +69,29 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		}
 
 		parts := []*genai.Part{{Text: req.Prompt}}
+		var toolPaths []string
 		for _, fp := range req.Files {
 			mime := imageMIME(fp)
-			if mime == "" {
-				continue
+			if d.AllowFileAttachments && mime != "" {
+				data, err := os.ReadFile(fp)
+				if err != nil {
+					log.Printf("server: skipping unreadable file %q: %v", fp, err)
+					continue
+				}
+				data, mime = shrinkIfNeeded(data, mime)
+				parts = append(parts, &genai.Part{
+					InlineData: &genai.Blob{MIMEType: mime, Data: data},
+				})
+			} else {
+				toolPaths = append(toolPaths, fp)
 			}
-			data, err := os.ReadFile(fp)
-			if err != nil {
-				log.Printf("server: skipping unreadable file %q: %v", fp, err)
-				continue
+		}
+		if len(toolPaths) > 0 {
+			note := "\n\n[Attached files — use the `mime` and `read` tools to inspect them before processing]"
+			for _, p := range toolPaths {
+				note += "\n- " + p
 			}
-			data, mime = shrinkIfNeeded(data, mime)
-			parts = append(parts, &genai.Part{
-				InlineData: &genai.Blob{MIMEType: mime, Data: data},
-			})
+			parts[0] = &genai.Part{Text: req.Prompt + note}
 		}
 
 		seq := d.Runner.Run(ctx, meta.UserID, meta.ID,

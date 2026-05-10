@@ -61,6 +61,9 @@ type AgentResult struct {
 	// LeaderCacheCreationTokenPricePerMillion is the effective leader cache
 	// creation input token price (Anthropic cache_creation).
 	LeaderCacheCreationTokenPricePerMillion float64
+	// LeaderAllowFileAttachments controls whether the server embeds user-attached
+	// files inline in LLM messages (true) or injects file paths as text (false).
+	LeaderAllowFileAttachments bool
 
 	// RegisterSession registers a session's leader mailbox in the cross-session
 	// registry under displayName. Call this when a new session is created so
@@ -561,6 +564,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		LeaderOutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,
 		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,
 		LeaderCacheCreationTokenPricePerMillion: leaderCfg.CacheCreationTokenPricePerMillion,
+		LeaderAllowFileAttachments:              leaderCfg.AllowFileAttachments,
 		RunnerConfig: runner.Config{
 			AppName:           runtime.AppName,
 			Agent:             lead,

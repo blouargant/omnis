@@ -48,6 +48,9 @@ type serverDeps struct {
 	PushEvents *sessionPushBroadcaster
 	// rootCtx is the server's root context; used to scope watcher goroutines.
 	rootCtx context.Context
+	// AllowFileAttachments controls whether user-attached files are embedded
+	// inline in the LLM message (true) or injected as tool-accessible paths (false).
+	AllowFileAttachments bool
 	// ConfigFiles holds the absolute paths of the YAML files editable from
 	// the web UI (resolved once at startup; never derived from URLs).
 	ConfigFiles configFiles

@@ -64,8 +64,7 @@ func handleFileUpload(d serverDeps) gin.HandlerFunc {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write file: %v", copyErr)})
 					return
 				}
-				abs, _ := filepath.Abs(dst)
-				results = append(results, fileResult{Name: fh.Filename, Path: abs, Size: n})
+				results = append(results, fileResult{Name: fh.Filename, Path: dst, Size: n})
 			}
 		}
 

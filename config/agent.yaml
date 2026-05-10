@@ -74,6 +74,7 @@ agents:
   - name: leader
     model_ref: premium
     description: Generic coordinator agent.
+    # allow_file_attachments: false  # default: false — set true to embed supported images inline
     # instruction: Optional override appended after the global SystemPrompt.
     # Per-agent path overrides (optional, default to the global values above):
     skills_dir: skills/leader
