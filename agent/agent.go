@@ -76,6 +76,10 @@ type AgentResult struct {
 	// UnregisterSession removes a session from the cross-session registry.
 	// Call this when a session is deleted so it no longer appears in teammate_list.
 	UnregisterSession func(displayName string) error
+	// ListSessionRegistry returns a snapshot of the cross-session registry
+	// as a display-name → mailbox-address map. Used by the server's GC to
+	// detect entries whose underlying session no longer exists.
+	ListSessionRegistry func() map[string]string
 	// WatchMailbox starts a background goroutine that polls the leader mailbox
 	// for (userID, sessionID). onMessage is called with (friendlyFromName, body)
 	// whenever a message arrives; the message is consumed by the goroutine and
@@ -582,6 +586,9 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		},
 		UnregisterSession: func(displayName string) error {
 			return reg.Unregister(displayName)
+		},
+		ListSessionRegistry: func() map[string]string {
+			return reg.List()
 		},
 		WatchMailbox: func(ctx context.Context, userID, sessionID string, onMessage func(from, body string)) {
 			addr := nameFunc(userID, sessionID, "leader")

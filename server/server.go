@@ -38,6 +38,10 @@ type serverDeps struct {
 	RenameSession func(oldName, newName string) error
 	// UnregisterSession removes the session from the cross-session mailbox registry.
 	UnregisterSession func(displayName string) error
+	// ListSessionRegistry returns the current cross-session registry
+	// (display-name → mailbox-address). Used by the GC to detect orphan
+	// entries left behind by interrupted session deletions.
+	ListSessionRegistry func() map[string]string
 	// WatchMailbox is forwarded from AgentResult to wire up per-session push.
 	WatchMailbox func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
 	// RunGuard serialises runner calls per session (shared with pushManager).
@@ -136,6 +140,18 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	auth := api.Group("", authMiddleware(d.Token))
+	// POST /api/admin/gc — trigger a one-shot garbage-collection sweep over
+	// logs/ and logs/uploads/. Returns counts per category so ops tooling
+	// can verify what was cleaned. The periodic background sweep keeps
+	// running independently.
+	auth.POST("/admin/gc", func(c *gin.Context) {
+		stats := runGC(d.Registry, gcDeps{
+			listRegistry: d.ListSessionRegistry,
+			unregister:   d.UnregisterSession,
+		})
+		logGCStats("admin", stats)
+		c.JSON(http.StatusOK, stats)
+	})
 	auth.POST("/sessions", func(c *gin.Context) {
 		meta := d.Registry.New()
 		if d.RegisterSession != nil {

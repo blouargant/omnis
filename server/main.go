@@ -11,12 +11,15 @@
 //
 // Optional env:
 //
-//	GOAGENT_SERVER_ADDR     Listen address. Default ":8080".
-//	GOAGENT_CONFIG_PATH     Path to config/agent.yaml (forwarded to agent.NewAgent).
-//	GOAGENT_SKILLS_DIR      Skills directory.
-//	GOAGENT_SOFTSKILLS_DIR  Soft-skills directory.
-//	GOAGENT_WEB_DIR         Static UI directory. Default "web".
-//	GOAGENT_DEBUG           "1"/"true" to enable debug logging on the agent.
+//	GOAGENT_SERVER_ADDR         Listen address. Default ":8080".
+//	GOAGENT_CONFIG_PATH         Path to config/agent.yaml (forwarded to agent.NewAgent).
+//	GOAGENT_SKILLS_DIR          Skills directory.
+//	GOAGENT_SOFTSKILLS_DIR      Soft-skills directory.
+//	GOAGENT_WEB_DIR             Static UI directory. Default "web".
+//	GOAGENT_DEBUG               "1"/"true" to enable debug logging on the agent.
+//	GOAGENT_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
+//	                            files (e.g. "1h", "30m"). Default "1h". Set
+//	                            to "0" or "off" to disable.
 //
 // Plus all GOAGENT_* model selectors honored by core/llm.
 package main
@@ -85,6 +88,20 @@ func run() error {
 
 	registry := newRegistry()
 
+	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
+	// Runs an initial sweep synchronously so leftover files from a previous
+	// run are cleaned up before the server starts accepting traffic.
+	gcInterval, gcEnabled := parseGCInterval(os.Getenv("GOAGENT_SERVER_GC_INTERVAL"))
+	if gcEnabled {
+		log.Printf("server: garbage collector enabled (interval=%s)", gcInterval)
+	} else {
+		log.Printf("server: garbage collector disabled — running startup sweep only")
+	}
+	startGC(rootCtx, registry, gcDeps{
+		listRegistry: result.ListSessionRegistry,
+		unregister:   result.UnregisterSession,
+	}, gcInterval)
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 	pushMgr := newPushManager(runGuard, pushEvents, result.WatchMailbox)
@@ -120,9 +137,10 @@ func run() error {
 		AllowFileAttachments: result.LeaderAllowFileAttachments,
 		EventBus:             result.EventBus,
 		AgentEvents:     newAgentEventBroadcaster(result.EventBus),
-		RegisterSession:   result.RegisterSession,
-		RenameSession:     result.RenameSession,
-		UnregisterSession: result.UnregisterSession,
+		RegisterSession:     result.RegisterSession,
+		RenameSession:       result.RenameSession,
+		UnregisterSession:   result.UnregisterSession,
+		ListSessionRegistry: result.ListSessionRegistry,
 		WatchMailbox:    result.WatchMailbox,
 		RunGuard:        runGuard,
 		PushMgr:         pushMgr,

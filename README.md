@@ -40,8 +40,12 @@ export ANTHROPIC_API_KEY=sk-ant-…
 # Interactive REPL
 go run . console
 
-# Local web UI
+# Local ADK web UI
 go run . web webui
+
+# Custom HTTP server + chat UI (see "Running the web server" below)
+export GOAGENT_SERVER_TOKEN=$(openssl rand -hex 32)
+make run-server   # http://localhost:8080
 ```
 
 Out of the box the agent has:
@@ -136,6 +140,62 @@ See [docs/configuration.md](docs/configuration.md#command-line-flags) for the fu
 
 There are also 23 single-component demos under `examples/sNN_*/` that mirror
 the article's phases. See [docs/examples-catalog.md](docs/examples-catalog.md).
+
+---
+
+## Running the web server
+
+The repository ships a standalone HTTP server in [server/](server/) that
+exposes the lead agent over a JSON+SSE API and serves the vanilla-JS chat
+UI in [web/](web/). Unlike `go run . web webui` (which launches ADK's
+generic web UI), this is the **custom chat UI** with prompt-history,
+mailbox push, file attachments and the debug overlay described above.
+
+A bearer token is mandatory — the server refuses to start without one:
+
+```bash
+export GOAGENT_SERVER_TOKEN=$(openssl rand -hex 32)
+export ANTHROPIC_API_KEY=sk-ant-…        # or any other provider key
+```
+
+Optional env vars: `GOAGENT_SERVER_ADDR` (default `:8080`),
+`GOAGENT_WEB_DIR` (default `web`), `GOAGENT_CONFIG_PATH`,
+`GOAGENT_SKILLS_DIR`, `GOAGENT_SOFTSKILLS_DIR`, `GOAGENT_DEBUG`. See
+[server/main.go](server/main.go) for the full list.
+
+### Dev mode (no build step)
+
+Fast iteration — rebuilds on every invocation, picks up Go source changes
+immediately, and serves `web/` from the working tree so front-end edits
+are live-reload on browser refresh:
+
+```bash
+make run-server                          # equivalent to `go run ./server`
+# or directly:
+go run ./server
+```
+
+Then open <http://localhost:8080> and paste the token when prompted.
+
+### Compiled binary
+
+For production-ish use, build once and run the resulting binary:
+
+```bash
+make clean all                           # → bin/agent-toolkit, bin/server, bin/<examples>
+./bin/server
+```
+
+`make clean all` removes `bin/` and `dist/` then rebuilds the root
+binary, the **server** binary and every example. Run `bin/server` from
+the repository root so it can find the default `web/` and `config/`
+directories — or set `GOAGENT_WEB_DIR` / `GOAGENT_CONFIG_PATH` to point
+at absolute paths if you copy the binary elsewhere.
+
+> Enable the debug overlay in the browser by appending `?debug=1` to the
+> URL (or `localStorage.agent_toolkit_debug = "1"`). The overlay reports
+> live per-turn client + server streaming metrics — see the CLAUDE.md
+> "Web UI debug mode" section for the field reference.
 
 ---
 

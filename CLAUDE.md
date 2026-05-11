@@ -104,6 +104,7 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 | `GOAGENT_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `GOAGENT_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `GOAGENT_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
+| `GOAGENT_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `logs/` and `logs/uploads/` (default `1h`; `0` disables) |
 | `GOAGENT_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 
 ### Session isolation

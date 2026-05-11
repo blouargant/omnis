@@ -339,13 +339,29 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// Sticky-bottom autoscroll. The user is "pinned" to the bottom as long as
+// their scroll position is within STICK_THRESHOLD_PX of the end. While
+// pinned, streaming output keeps the view at the bottom. As soon as they
+// scroll up to read earlier content, we stop yanking them back — new tokens
+// keep arriving below their viewport without disturbing their position.
+// User-initiated actions (send, switch session, load history) call
+// scrollBottom(true) to re-pin unconditionally.
+const STICK_THRESHOLD_PX = 80;
+let _stickToBottom = true;
 let _scrollPending = false;
-function scrollBottom() {
+
+function isAtBottom(el) {
+  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_THRESHOLD_PX;
+}
+
+function scrollBottom(force = false) {
+  if (!force && !_stickToBottom) return;
   if (_scrollPending) return;
   _scrollPending = true;
   requestAnimationFrame(() => {
     _scrollPending = false;
     els.transcript.scrollTop = els.transcript.scrollHeight;
+    _stickToBottom = true;
   });
 }
 
@@ -361,8 +377,8 @@ const TOOL_META = [
   { match: /^revert/,            label: "Revert",   color: "rose"    },
   { match: /^load_skill/,        label: "Skill",    color: "orange"  },
   { match: /^list_skill/,        label: "Skills",   color: "orange"  },
-  { match: /^load_softskill/,    label: "SoftSkill",color: "orange"  },
-  { match: /^list_softskill/,    label: "Skills",   color: "orange"  },
+  { match: /^load_softskill/,    label: "Softskill", color: "orange" },
+  { match: /^list_softskill/,    label: "Softskills",color: "orange" },
   { match: /^task/,              label: "Task",     color: "indigo"  },
   { match: /^todo/,              label: "Todo",     color: "indigo"  },
   { match: /^teammate/,          label: "Teammate", color: "indigo"  },
@@ -430,6 +446,28 @@ function formatSkillsList(xml) {
   return skills.map(s => `${s.name}\n  ${s.description}`).join("\n\n");
 }
 
+// "how-the-library-works" is the curator's own meta-procedure — it explains
+// the soft-skill system to the lead agent itself and is not user-facing
+// content. We strip it from list_softskills chips: if it's the only entry,
+// the chip is suppressed entirely; otherwise it's filtered out of the list.
+const CURATOR_META_SOFTSKILL = "how-the-library-works";
+
+function countSoftskillsExcludingCurator(xml) {
+  const re = /<skill>\s*<name>([\s\S]*?)<\/name>/g;
+  let kept = 0, total = 0, m;
+  while ((m = re.exec(xml)) !== null) {
+    total++;
+    if (m[1].trim() !== CURATOR_META_SOFTSKILL) kept++;
+  }
+  return { kept, total };
+}
+
+function stripCuratorSoftskill(xml) {
+  const re = /<skill>\s*<name>([\s\S]*?)<\/name>[\s\S]*?<\/skill>\s*/g;
+  return xml.replace(re, (match, name) =>
+    name.trim() === CURATOR_META_SOFTSKILL ? "" : match);
+}
+
 // ─── Markdown ────────────────────────────────────────────────────────────────
 
 // Escape raw HTML blocks so agent output cannot inject scripts via markdown.
@@ -445,8 +483,123 @@ function renderMarkdown(el, text) {
   const t0 = AgentDebug.enabled ? performance.now() : 0;
   el.innerHTML = marked.parse(text || "");
   el.classList.add("rendered");
-  if (el._streamNode) { el._streamNode = null; el._streamLen = 0; }
+  if (el._stream) el._stream = null;
   if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
+}
+
+// ─── Incremental markdown streaming ──────────────────────────────────────────
+// Strategy: keep already-closed blocks rendered as HTML, append new tokens to
+// a single trailing "tail" node (Text or <pre><code>). When a block boundary
+// (blank line outside a fence) or a closing fence appears, parse just that
+// block with marked.parse and insert the result before the tail. Each parse
+// is O(block-size) instead of O(message²), so cost stays bounded as the
+// response grows. The tail keeps streaming at wire speed between flushes.
+
+function streamMdInit(bubble) {
+  bubble.textContent = "";
+  const tail = document.createTextNode("");
+  bubble.appendChild(tail);
+  bubble._stream = {
+    scanIdx: 0,         // chars of segAcc scanned for line boundaries
+    blockStart: 0,      // start of the current unfinished block in segAcc
+    inFence: false,
+    fenceCodeStart: 0,  // start of fenced code body (after opening fence line)
+    tailEl: tail,       // outer DOM node holding the streaming text
+    tailTextNode: tail, // Text node we appendData() into
+    tailKind: "text",
+    tailSyncedTo: 0,    // segAcc index up to which the tail mirrors
+  };
+}
+
+function streamMdReplaceTail(bubble, kind, lang) {
+  const s = bubble._stream;
+  s.tailEl.remove();
+  let newTail, textNode;
+  if (kind === "code") {
+    newTail = document.createElement("pre");
+    const code = document.createElement("code");
+    if (lang) code.className = "language-" + lang;
+    textNode = document.createTextNode("");
+    code.appendChild(textNode);
+    newTail.appendChild(code);
+  } else {
+    newTail = document.createTextNode("");
+    textNode = newTail;
+  }
+  bubble.appendChild(newTail);
+  s.tailEl = newTail;
+  s.tailTextNode = textNode;
+  s.tailKind = kind;
+  s.tailSyncedTo = kind === "code" ? s.fenceCodeStart : s.blockStart;
+}
+
+function streamMdFlushBlock(bubble, text) {
+  if (!text || !text.trim()) return;
+  const s = bubble._stream;
+  const t0 = AgentDebug.enabled ? performance.now() : 0;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = marked.parse(text);
+  while (wrap.firstChild) bubble.insertBefore(wrap.firstChild, s.tailEl);
+  if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
+}
+
+function streamMdAdvance(bubble, fullText) {
+  if (!bubble._stream) streamMdInit(bubble);
+  const s = bubble._stream;
+  // Process newly-completed lines for state transitions.
+  while (true) {
+    const nl = fullText.indexOf("\n", s.scanIdx);
+    if (nl === -1) break;
+    const lineStart = s.scanIdx;
+    const line = fullText.slice(lineStart, nl);
+    s.scanIdx = nl + 1;
+    const fence = /^```([\w+-]*)\s*$/.exec(line);
+    if (fence) {
+      if (s.inFence) {
+        // Closing fence — flush the whole fenced block (incl. opener/closer).
+        streamMdFlushBlock(bubble, fullText.slice(s.blockStart, nl + 1));
+        s.inFence = false;
+        s.blockStart = s.scanIdx;
+        streamMdReplaceTail(bubble, "text");
+      } else {
+        // Opening fence — flush any preceding prose, then switch to code mode.
+        if (lineStart > s.blockStart) {
+          streamMdFlushBlock(bubble, fullText.slice(s.blockStart, lineStart));
+        }
+        s.blockStart = lineStart;
+        s.inFence = true;
+        s.fenceCodeStart = s.scanIdx;
+        streamMdReplaceTail(bubble, "code", fence[1]);
+      }
+    } else if (!s.inFence && line.trim() === "" && lineStart > s.blockStart) {
+      // Blank line outside a fence — promote the block before it and reset
+      // the tail node so its previous content doesn't duplicate the new HTML.
+      streamMdFlushBlock(bubble, fullText.slice(s.blockStart, lineStart));
+      s.blockStart = s.scanIdx;
+      streamMdReplaceTail(bubble, "text");
+    }
+  }
+  // Append any unprocessed tail (incl. partial trailing line) to the live node.
+  const delta = fullText.slice(s.tailSyncedTo);
+  if (delta) s.tailTextNode.appendData(delta);
+  s.tailSyncedTo = fullText.length;
+}
+
+function streamMdFinalize(bubble, fullText) {
+  if (!bubble._stream) {
+    renderMarkdown(bubble, fullText);
+    return;
+  }
+  // Drain any remaining unprocessed text via streamMdAdvance, then flush
+  // whatever is still buffered in the tail (possibly an unclosed fence).
+  streamMdAdvance(bubble, fullText);
+  const s = bubble._stream;
+  let trailing = fullText.slice(s.blockStart);
+  if (s.inFence && !/```\s*$/.test(trailing)) trailing += "\n```";
+  streamMdFlushBlock(bubble, trailing);
+  s.tailEl.remove();
+  bubble._stream = null;
+  bubble.classList.add("rendered");
 }
 
 // ─── Pinned prompt header ────────────────────────────────────────────────────
@@ -729,13 +882,40 @@ function formatTeammateResponse(response) {
 
 function resolveToolCall(block, response) {
   const isError = response && typeof response === "object" && typeof response.error === "string";
-  const isTeammate = /^teammate/.test(block.dataset.toolName || "");
+  const toolName = block.dataset.toolName || "";
+  const isTeammate = /^teammate/.test(toolName);
+  const isSoftskillList = /^list_softskill/.test(toolName);
 
   const dot = block.querySelector(".tool-dot");
   if (dot) { dot.classList.remove("pending"); dot.classList.add(isError ? "error" : "done"); }
 
   const slot = block.querySelector(".tool-out-slot");
   if (!slot) return;
+
+  if (isSoftskillList && !isError && response && typeof response === "object") {
+    // The wrapped list_softskills tool inherits upstream skilltoolset's
+    // response schema, which uses the key `skills` — not `softskills` — so
+    // we have to filter whichever string field carries the XML payload.
+    const xmlKey = typeof response.softskills === "string" ? "softskills"
+                 : typeof response.skills === "string" ? "skills"
+                 : null;
+    if (xmlKey) {
+      const { kept } = countSoftskillsExcludingCurator(response[xmlKey]);
+      if (kept === 0) {
+        // Only the curator's own meta-procedure was listed — suppress the chip.
+        const row = block.closest(".tool-row");
+        const parentNested = block.parentElement && block.parentElement.classList.contains("tool-nested")
+          ? block.parentElement
+          : null;
+        block.remove();
+        if (parentNested && parentNested.children.length === 0) parentNested.remove();
+        if (row && row.children.length === 0) row.remove();
+        return;
+      }
+      // Hide the curator entry from the rendered list but keep the chip.
+      response = { ...response, [xmlKey]: stripCuratorSoftskill(response[xmlKey]) };
+    }
+  }
 
   if (isTeammate && !isError) {
     const formatted = formatTeammateResponse(response);
@@ -934,7 +1114,7 @@ async function selectSession(id) {
   // arrived while this session was not the active view.
   if (container.childNodes.length > 0) {
     mountSession(id);
-    scrollBottom();
+    scrollBottom(true);
     await appendNewPushTurns(id);
     return;
   }
@@ -964,7 +1144,7 @@ async function selectSession(id) {
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turn.assistant_text);
     }
-    scrollBottom();
+    scrollBottom(true);
   } catch (e) {
     console.error("failed to load session history:", e);
   }
@@ -1119,7 +1299,7 @@ async function sendMessage() {
 
   // Insert the user message into the transcript before streaming starts.
   appendUserBubble(prompt, container, files.length > 0 ? files : null);
-  scrollBottom();
+  scrollBottom(true);
   els.prompt.value = "";
   autoGrowPrompt();
   clearAttachments(sessionId);
@@ -1139,30 +1319,22 @@ async function sendMessage() {
     return segBubble;
   }
 
-  // Stream incoming tokens as plain text via a Text node attached to the
-  // bubble; markdown is parsed once at finalizeSegment. This avoids the
-  // O(n²) cost of re-running marked.parse on the full accumulated buffer per
-  // chunk and keeps perceived stream speed close to the wire rate.
+  // Stream incoming tokens via an incremental markdown renderer: completed
+  // blocks (separated by a blank line outside fenced code) are promoted to
+  // rendered HTML immediately; the trailing in-progress block stays as a
+  // Text node (or a <pre><code> inside a fence) and keeps appending at wire
+  // speed. See streamMdAdvance for the state machine.
   function scheduleRender() {
     if (!segBubble || !segAcc) return;
-    if (!segBubble._streamNode) {
-      segBubble.textContent = "";
-      const tn = document.createTextNode("");
-      segBubble.appendChild(tn);
-      segBubble._streamNode = tn;
-      segBubble._streamLen = 0;
-    }
-    const delta = segAcc.slice(segBubble._streamLen);
-    if (delta) segBubble._streamNode.appendData(delta);
-    segBubble._streamLen = segAcc.length;
+    streamMdAdvance(segBubble, segAcc);
   }
 
-  // Render and seal the current text segment, then reset. The streaming Text
-  // node is replaced wholesale by the rendered markdown HTML.
+  // Seal the current text segment: flush any remaining in-progress block and
+  // drop the streaming tail node.
   function finalizeSegment() {
     if (!segBubble) return;
     if (segAcc) {
-      renderMarkdown(segBubble, segAcc);
+      streamMdFinalize(segBubble, segAcc);
     } else {
       segBubble.remove();
     }
@@ -1391,7 +1563,7 @@ function appendCommandBubble(text, isError = false) {
   }
   row.appendChild(bubble);
   container.appendChild(row);
-  scrollBottom();
+  scrollBottom(true);
 }
 
 async function handleSlashCommand(raw) {
@@ -1532,7 +1704,10 @@ function closeCtxBrowser() {
 
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
-els.transcript.addEventListener("scroll", updatePinnedForScroll);
+els.transcript.addEventListener("scroll", () => {
+  _stickToBottom = isAtBottom(els.transcript);
+  updatePinnedForScroll();
+});
 els.newChat.addEventListener("click", newChat);
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
 

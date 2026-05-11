@@ -54,8 +54,11 @@ unit-tests: test ## Run unit tests
 env-tests: ## Source .env and run LLM tests
 	@set -a; . ./.env; set +a; $(GO) test ./core/llm
 
+.PHONY: all
+all: build ## Alias for `build` (root binary + server + examples)
+
 .PHONY: build
-build: build-root $(addprefix build-example-,$(CMDS)) ## Build the root binary and all examples for the host platform
+build: build-root build-server $(addprefix build-example-,$(CMDS)) ## Build the root binary, HTTP server and all examples for the host platform
 
 .PHONY: build-root
 build-root: ## Build the root agent-toolkit binary

@@ -1,136 +1,68 @@
-# Unified runtime config for agent-toolkit.
-# Precedence is: CLI flags > environment variables > this file > defaults.
-
-# Global defaults (used by every agent unless overridden in the agent entry).
-#skills_dir: skills
-softskills_dir: softskills
+agents:
+    - description: Generic coordinator agent.
+      model_ref: premium
+      name: leader
+      skills_dir: skills/leader
+    - allow_file_attachments: true
+      description: Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.
+      enabled: true
+      mailbox: true
+      model_ref: hosted
+      name: investigator
+      skills_dir: skills/investigator
+      tools:
+        - fs
+        - mcp
+        - skills
+        - softskills
+    - description: Condenses long content into a structured brief.
+      enabled: true
+      mailbox: true
+      model_ref: balanced
+      name: summariser
+      tools: []
+    - description: Post-session soft-skill curator.
+      enabled: true
+      mailbox: false
+      model_ref: balanced
+      name: curator
 app_name: agent-toolkit
-token_optimization: true
 bash_output_filters_dir: config/filters
 bash_timeout_seconds: 120
 mcp_config_path: config/mcp_config.yaml
-permissions_config_path: config/permissions.yaml
-
 models:
-  # hosted profile for routine/background tasks.
-  hosted:
-    provider: openai_compat
-    model: test
-    # base_url accepts either a literal URL or an environment variable name.
-    # If the value matches an existing env var name, its value is used.
-    base_url: OPENAI_BASE_URL
-    # api_key accepts either a literal key or an environment variable name.
-    # If the value matches an existing env var name, its value is used.
-    api_key: OPENAI_API_KEY
-    # Optional model metadata (for planning, hosteding, routing, etc.).
-    context_length: 128000
-    input_token_price_per_million: 0.6
-    output_token_price_per_million: 3.6
-
-  # Simple model for routine/background tasks.
-  simple:
-    provider: openai_compat
-    model: gpt-4o-mini-sweden
-    base_url: OPENAI_BASE_URL
-    api_key: OPENAI_API_KEY
-    context_length: 128000
-    input_token_price_per_million: 0.17
-    output_token_price_per_million: 0.69
-
-  # Balanced model for general-purpose tasks.
-  balanced:
-    provider: openai_compat
-    model: gpt-4.1-mini-sweden
-    base_url: OPENAI_BASE_URL
-    api_key: OPENAI_API_KEY
-    context_length: 128000
-    input_token_price_per_million: 0.42
-    output_token_price_per_million: 1.68
-
-  # Premium profile for difficult tasks requiring stronger reasoning.
-  premium:
-    provider: openai_compat
-    model: claude-sonnet-4-6
-    base_url: OPENAI_BASE_URL
-    api_key: OPENAI_API_KEY
-    context_length: 200000
-    input_token_price_per_million: 5
-    output_token_price_per_million: 26
-
-# Each agent below can override skills_dir, softskills_dir, mcp_config_path
-# and permissions_config_path with its own values. When omitted the global
-# values above are used.
-#
-# Available tool groups for the `tools:` list (used by toolsForAgentConfig):
-#   - fs          : core filesystem read/write tools
-#   - mcp         : MCP server toolsets loaded from mcp_config_path
-#   - skills      : authored skills (list_skills / load_skill / load_skill_resource)
-#   - softskills  : curator-distilled soft-skills (list_softskills / load_softskill)
-#
-# The leader always receives every tool group plus task/todo/worktree/mailbox tools.
-# `tools:` only affects sub-agents.
-
-agents:
-  - name: leader
-    model_ref: premium
-    description: Generic coordinator agent.
-    # allow_file_attachments: false  # default: false — set true to embed supported images inline
-    # instruction: Optional override appended after the global SystemPrompt.
-    # Per-agent path overrides (optional, default to the global values above):
-    skills_dir: skills/leader
-    # softskills_dir: softskills
-    # mcp_config_path: config/mcp_config.yaml
-
-  - name: investigator
-    model_ref: balanced
-    enabled: true
-    mailbox: true
-    tools: [fs, mcp, skills, softskills]
-    skills_dir: skills/investigator
-    description: Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.
-    # instruction: Optional agent-specific instruction override.
-    # Example: scope investigator to a dedicated read-only MCP config.
-    # mcp_config_path: config/mcp_config.investigator.yaml
-
-  - name: summariser
-    model_ref: balanced
-    enabled: true
-    mailbox: true
-    tools: []
-    description: Condenses long content into a structured brief.
-    # instruction: Optional agent-specific instruction override.
-
-  - name: curator
-    model_ref: balanced
-    enabled: true
-    mailbox: false
-    description: Post-session soft-skill curator.
-    # model_ref can point at a dedicated profile (for example: premium).
-    # softskills_dir: softskills
-
-  # Optional custom agents:
-  # - name: reviewer
-  #   enabled: true
-  #   mailbox: true
-  #   tools: [fs]
-  #   model_ref: premium
-  #   description: Reviews changes and provides structured feedback.
-  #   instruction: |
-  #     You are the reviewer agent. Focus on correctness, regressions, and missing tests.
-
-  # Example: a kitchen-sink agent showing every available tool group and every
-  # per-agent path override. Uncomment and adapt as needed.
-  # - name: power-user
-  #   enabled: true
-  #   mailbox: true
-  #   tools: [fs, mcp, skills, softskills]   # all available tool groups
-  #   model_ref: balanced
-  #   description: Full-spectrum specialist with access to every tool group.
-  #   instruction: |
-  #     You have access to filesystem, MCP servers, authored skills and
-  #     curator-distilled soft-skills. Discover skills first before acting.
-  #   skills_dir: skills
-  #   softskills_dir: softskills
-  #   mcp_config_path: config/mcp_config.yaml
-  #   permissions_config_path: config/permissions.yaml
-
+    balanced:
+        api_key: OPENAI_API_KEY
+        base_url: OPENAI_BASE_URL
+        context_length: 128000
+        input_token_price_per_million: 0.42
+        model: gpt-4.1-mini-sweden
+        output_token_price_per_million: 1.68
+        provider: openai_compat
+    hosted:
+        api_key: OPENAI_API_KEY
+        base_url: OPENAI_BASE_URL
+        context_length: 128000
+        input_token_price_per_million: 0.6
+        model: test
+        output_token_price_per_million: 3.6
+        provider: openai_compat
+    premium:
+        api_key: OPENAI_API_KEY
+        base_url: OPENAI_BASE_URL
+        context_length: 200000
+        input_token_price_per_million: 5
+        model: claude-sonnet-4-6
+        output_token_price_per_million: 26
+        provider: openai_compat
+    simple:
+        api_key: OPENAI_API_KEY
+        base_url: OPENAI_BASE_URL
+        context_length: 128000
+        input_token_price_per_million: 0.17
+        model: gpt-4o-mini-sweden
+        output_token_price_per_million: 0.69
+        provider: openai_compat
+permissions_config_path: config/permissions.yaml
+softskills_dir: softskills
+token_optimization: true
