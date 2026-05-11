@@ -4,6 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Toolkit</title>
+  <script>
+    // Apply the persisted theme synchronously before stylesheets resolve,
+    // so the page never flashes the default palette when a different theme
+    // is selected. Settings.js writes to this same localStorage key.
+    (function () {
+      try {
+        var t = localStorage.getItem("agent_toolkit_theme");
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (_) { /* ignore */ }
+    })();
+  </script>
   <link rel="stylesheet" href="/assets/styles.css" />
   <link rel="stylesheet" href="/assets/settings.css" />
   <script src="/assets/marked.min.js"></script>
@@ -21,9 +32,20 @@
         </button>
       </div>
     </div>
+    <div class="sidebar-section-label">Agent Sessions</div>
     <ul id="session-list" aria-label="sessions"></ul>
+    <div id="settings-menu" hidden>
+      <div class="sidebar-section-label">Settings</div>
+      <ul id="settings-menu-list" aria-label="settings sections"></ul>
+    </div>
     <div id="sidebar-footer">
-      <button id="settings-btn" type="button">⚙ Settings</button>
+      <button id="settings-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span>Settings</span>
+      </button>
     </div>
   </aside>
   <div id="sidebar-resize" aria-hidden="true"></div>

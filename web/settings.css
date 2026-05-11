@@ -1,14 +1,14 @@
 /* Settings panel — agent-toolkit configuration editor (dark theme).
  *
  * Palette mirrors the chat surface defined in styles.css:
- *   bg          #1e1e1e
- *   panel bg    #252526
- *   raised bg   #2a2d2e
- *   border      #3e3e42
- *   text        #cccccc
- *   muted text  #858585
- *   accent      #0e639c (VS Code blue)
- *   accent hov  #1177bb
+ *   bg          var(--bg)
+ *   panel bg    var(--bg-panel)
+ *   raised bg   var(--bg-raised)
+ *   border      var(--border)
+ *   text        var(--text)
+ *   muted text  var(--text-muted)
+ *   accent      var(--accent) (VS Code blue)
+ *   accent hov  var(--accent-hover)
  *   danger      #f48771
  *   success     #89d185
  *   warning bg  #5a4a1f
@@ -20,8 +20,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
   overflow: hidden;
 }
 
@@ -32,21 +32,39 @@
 
 .settings-header {
   flex: 0 0 auto;
-  padding: 1rem 1.5rem 0;
-  border-bottom: 1px solid #3e3e42;
-  background: #252526;
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
 }
 
-.settings-header h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
-  color: #cccccc;
+/* Breadcrumb: "Settings › Agent Configuration" */
+.settings-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.settings-breadcrumb-root {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.settings-breadcrumb-sep {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.settings-breadcrumb-current {
+  color: var(--text-strong);
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
+/* Settings hint (used inside form sections, no longer in the header). */
 .settings-hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .settings-tabs {
@@ -63,14 +81,14 @@
   cursor: pointer;
   font-size: 0.9rem;
   border-radius: 6px 6px 0 0;
-  color: #858585;
+  color: var(--text-muted);
 }
-.settings-tabs button:hover { color: #cccccc; }
+.settings-tabs button:hover { color: var(--text); }
 
 .settings-tabs button.active {
-  background: #1e1e1e;
-  border-color: #3e3e42;
-  color: #cccccc;
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -81,19 +99,19 @@
 }
 
 .settings-view-toggle button {
-  background: #2a2d2e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   padding: 0.25rem 0.7rem;
   cursor: pointer;
   font-size: 0.8rem;
   border-radius: 4px;
-  color: #cccccc;
+  color: var(--text);
 }
-.settings-view-toggle button:hover { background: #333436; }
+.settings-view-toggle button:hover { background: var(--bg-raised-hover); }
 
 .settings-view-toggle button.active {
-  background: #0e639c;
-  border-color: #0e639c;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #ffffff;
 }
 
@@ -102,7 +120,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #1e1e1e;
+  background: var(--bg);
 }
 
 .settings-body-toolbar {
@@ -119,7 +137,7 @@
 .settings-loading,
 .settings-error,
 .empty {
-  color: #858585;
+  color: var(--text-muted);
   font-size: 0.9rem;
   padding: 1rem 0;
 }
@@ -132,39 +150,39 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  border-top: 1px solid #3e3e42;
-  background: #252526;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
 }
 
 .settings-footer .settings-status {
   flex: 1;
   font-size: 0.85rem;
-  color: #858585;
+  color: var(--text-muted);
 }
 .settings-footer .settings-status.success { color: #89d185; }
 .settings-footer .settings-status.error   { color: #f48771; }
 
 .settings-footer button {
-  background: #2a2d2e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.4rem 0.9rem;
   font-size: 0.85rem;
   cursor: pointer;
-  color: #cccccc;
+  color: var(--text);
 }
-.settings-footer button:hover:not(:disabled) { background: #333436; }
+.settings-footer button:hover:not(:disabled) { background: var(--bg-raised-hover); }
 .settings-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
-.settings-footer .btn-save        { background: #0e639c; color: #ffffff; border-color: #0e639c; }
-.settings-footer .btn-save:hover:not(:disabled) { background: #1177bb; border-color: #1177bb; }
-.settings-footer .btn-save:disabled { background: #0e639c; border-color: #0e639c; opacity: 0.5; }
+.settings-footer .btn-save        { background: var(--accent); color: #ffffff; border-color: var(--accent); }
+.settings-footer .btn-save:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.settings-footer .btn-save:disabled { background: var(--accent); border-color: var(--accent); opacity: 0.5; }
 
 
 /* Raw editor */
 .settings-raw { display: flex; flex-direction: column; height: 100%; }
 .raw-meta {
   font-size: 0.8rem;
-  color: #858585;
+  color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
 .raw-editor {
@@ -175,15 +193,15 @@
   font-size: 0.85rem;
   line-height: 1.45;
   padding: 0.75rem;
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 4px;
   resize: vertical;
   white-space: pre;
   tab-size: 2;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
 }
-.raw-editor:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
+.raw-editor:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 
 /* Forms */
 .settings-content-inner { max-width: 1400px; margin: 0 auto; width: 100%; }
@@ -193,7 +211,7 @@
 .up-btn, .down-btn {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--text-strong);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
@@ -208,7 +226,7 @@
 .settings-subtabs {
   display: flex;
   gap: 0.25rem;
-  border-bottom: 1px solid #3e3e42;
+  border-bottom: 1px solid var(--border);
   margin-bottom: -1px;
 }
 .settings-subtabs button {
@@ -219,22 +237,22 @@
   cursor: pointer;
   font-size: 0.85rem;
   border-radius: 6px 6px 0 0;
-  color: #858585;
+  color: var(--text-muted);
 }
-.settings-subtabs button:hover { color: #cccccc; }
+.settings-subtabs button:hover { color: var(--text); }
 .settings-subtabs button.active {
-  background: #252526;
-  border-color: #3e3e42;
-  color: #cccccc;
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--text);
   font-weight: 600;
 }
 .settings-subtab-body { display: flex; flex-direction: column; gap: 1.5rem; }
 
 .form-section {
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem 1rem 1rem;
-  background: #1e1e1e;
+  background: var(--bg);
 }
 .form-section h3 {
   display: flex;
@@ -242,18 +260,18 @@
   align-items: center;
   margin: 0 0 0.75rem;
   font-size: 0.95rem;
-  color: #cccccc;
+  color: var(--text);
 }
 .add-btn {
-  background: #2a2d2e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
   cursor: pointer;
-  color: #cccccc;
+  color: var(--text);
 }
-.add-btn:hover { background: #333436; }
+.add-btn:hover { background: var(--bg-raised-hover); }
 
 .form-grid {
   display: grid;
@@ -269,7 +287,7 @@
   font-size: 0.85rem;
 }
 .form-row > span {
-  color: #858585;
+  color: var(--text-muted);
   font-weight: 500;
   word-break: break-word;
 }
@@ -278,12 +296,12 @@
 .form-row select,
 .form-row textarea {
   padding: 0.35rem 0.5rem;
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.85rem;
   font-family: inherit;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
   width: 100%;
 }
 .form-row input[type="text"]:focus,
@@ -291,12 +309,12 @@
 .form-row select:focus,
 .form-row textarea:focus {
   outline: none;
-  border-color: #0e639c;
+  border-color: var(--accent);
 }
 .form-row input[type="checkbox"] {
   justify-self: start;
   margin: 0;
-  accent-color: #0e639c;
+  accent-color: var(--accent);
 }
 .form-row-textarea { grid-template-columns: 1fr; }
 .form-row-textarea > span { margin-bottom: 0.2rem; }
@@ -311,7 +329,7 @@
   grid-template-columns: 300px 1fr;
 }
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-.tools-check  { font-weight: normal; color: #cccccc; }
+.tools-check  { font-weight: normal; color: var(--text); }
 
 /* Combobox row: free-text input + custom dropdown panel + fetch button */
 .form-row-combo {
@@ -322,7 +340,7 @@
   font-size: 0.85rem;
 }
 .form-row-combo > span {
-  color: #858585;
+  color: var(--text-muted);
   font-weight: 500;
   padding-top: 0.4rem;
 }
@@ -336,30 +354,30 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.35rem 0.5rem;
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.85rem;
   font-family: inherit;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
 }
 .combo-wrap input[type="text"]:focus {
   outline: none;
-  border-color: #0e639c;
+  border-color: var(--accent);
 }
 .combo-fetch-btn {
   flex: 0 0 auto;
-  background: #2a2d2e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #cccccc;
+  color: var(--text);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
   padding: 0.3rem 0.5rem;
   transition: background 0.15s;
 }
-.combo-fetch-btn:hover:not(:disabled) { background: #333436; border-color: #555; }
+.combo-fetch-btn:hover:not(:disabled) { background: var(--bg-raised-hover); border-color: #555; }
 .combo-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .combo-panel {
@@ -368,8 +386,8 @@
   left: 0;
   right: 0;
   z-index: 200;
-  background: #252526;
-  border: 1px solid #0e639c;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   max-height: 220px;
@@ -394,26 +412,26 @@
   padding: 0.3rem 0.6rem;
   cursor: pointer;
   font-size: 0.82rem;
-  color: #cccccc;
+  color: var(--text);
   white-space: nowrap;
 }
-.combo-list li:hover { background: #094771; }
+.combo-list li:hover { background: var(--accent-hover-bg); }
 .combo-list li.combo-empty {
-  color: #858585;
+  color: var(--text-muted);
   cursor: default;
   font-style: italic;
 }
 .combo-list li.combo-empty:hover { background: transparent; }
 .combo-list li.combo-error { color: #f48771; font-style: normal; white-space: normal; }
 .combo-item-id   { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-.combo-item-name { color: #858585; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; }
+.combo-item-name { color: var(--text-muted); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; }
 
 .form-card {
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 0.75rem;
-  background: #252526;
+  background: var(--bg-panel);
 }
 .form-card-header {
   display: flex;
@@ -421,7 +439,7 @@
   align-items: center;
   margin-bottom: 0.5rem;
 }
-.form-card-header strong { font-size: 0.9rem; color: #cccccc; }
+.form-card-header strong { font-size: 0.9rem; color: var(--text); }
 .card-actions { display: flex; gap: 0.25rem; align-items: center; }
 .card-actions button { padding: 0; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
 .card-actions .del-btn { width: 80px; }
@@ -455,14 +473,14 @@
 .rule-row select,
 .rule-row input {
   padding: 0.3rem 0.5rem;
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.85rem;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
 }
 .rule-row select:focus,
-.rule-row input:focus { outline: none; border-color: #0e639c; }
+.rule-row input:focus { outline: none; border-color: var(--accent); }
 
 /* MCP key/value lists */
 .kv-list { margin-top: 0.6rem; }
@@ -472,7 +490,7 @@
   align-items: center;
   font-weight: 500;
   font-size: 0.85rem;
-  color: #858585;
+  color: var(--text-muted);
   margin-bottom: 0.3rem;
 }
 .kv-rows { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -484,13 +502,13 @@
 .kv-row input {
   flex: 1;
   padding: 0.3rem 0.5rem;
-  border: 1px solid #3e3e42;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.85rem;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg);
+  color: var(--text);
 }
-.kv-row input:focus { outline: none; border-color: #0e639c; }
+.kv-row input:focus { outline: none; border-color: var(--accent); }
 
 /* Restart-required banner */
 #restart-banner {
@@ -524,7 +542,9 @@
 
 /* Settings sidebar button */
 #settings-btn {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   margin-top: 0.4rem;
   padding: 0.4rem 0.6rem;
@@ -536,11 +556,168 @@
   font-size: 0.85rem;
   color: inherit;
 }
-#settings-btn:hover { background: #2a2d2e; }
+#settings-btn svg { flex-shrink: 0; opacity: 0.8; }
+#settings-btn:hover { background: var(--bg-raised); }
+#settings-btn:hover svg { opacity: 1; }
 #settings-btn.active {
-  background: rgba(14, 99, 156, 0.25);
-  border-color: rgba(14, 99, 156, 0.5);
-  color: #cccccc;
+  background: var(--accent-bg-soft);
+  border-color: var(--accent-border-soft);
+  color: var(--text);
+}
+#settings-btn.active svg { opacity: 1; }
+
+/* ─── Sidebar section labels ──────────────────────────────────────────── */
+.sidebar-section-label {
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ─── In-sidebar settings menu (expands when Settings is open) ────────── */
+#settings-menu {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  max-height: 60%;
+  overflow: hidden;
+  animation: settings-menu-expand 0.18s ease-out;
+}
+#settings-menu[hidden] { display: none; }
+
+@keyframes settings-menu-expand {
+  from { max-height: 0; opacity: 0; }
+  to   { max-height: 60%; opacity: 1; }
+}
+
+#settings-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow-y: auto;
+}
+#settings-menu-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 1px;
+  border: 1px solid transparent;
+  transition: background 0.1s, color 0.1s;
+}
+#settings-menu-list li:hover { background: var(--bg-raised); color: var(--text); }
+#settings-menu-list li.active {
+  background: var(--accent-bg-soft);
+  border-color: var(--accent-border-soft);
+  color: var(--text-strong);
+}
+#settings-menu-list li svg { flex-shrink: 0; opacity: 0.85; }
+#settings-menu-list li.active svg { opacity: 1; }
+
+/* The category tab bar and Form/Raw view toggle inside the settings panel
+ * are replaced by the sidebar menu — hide them without removing from the DOM.
+ * Also collapse the now-empty toolbar so it doesn't reserve vertical space. */
+#settings-panel .settings-tabs,
+#settings-panel .settings-view-toggle,
+#settings-panel .settings-body-toolbar { display: none; }
+
+/* Raw YAML toggle: lives at the bottom of the sidebar menu and is offset
+ * with a separator so it reads as a mode switch, not a section. */
+#settings-menu-list li.settings-menu-raw {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 4px 4px;
+}
+#settings-menu-list li.settings-menu-raw.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Client-only sections (e.g. Appearance) have no Save/Discard footer
+ * and no Form/Raw toggle — hide those chrome elements. */
+.settings-panel--client-only .settings-body-toolbar,
+.settings-panel--client-only .settings-footer { display: none; }
+
+/* ─── Theme picker ────────────────────────────────────────────────────── */
+.theme-group-label {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.theme-group-label:first-of-type { margin-top: 0; }
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.theme-card:hover { border-color: var(--accent); }
+.theme-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-card-preview {
+  display: flex;
+  gap: 0.3rem;
+  height: 32px;
+  align-items: stretch;
+}
+.theme-swatch {
+  flex: 1 1 0;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.theme-card-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.theme-card-check {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 11px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.theme-card.active .theme-card-check {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* When the settings panel is open, hide normal chat surfaces. The toggle is
@@ -556,14 +733,14 @@
 .settings-body-content::-webkit-scrollbar,
 .raw-editor::-webkit-scrollbar { width: 10px; height: 10px; }
 .settings-body-content::-webkit-scrollbar-track,
-.raw-editor::-webkit-scrollbar-track { background: #1e1e1e; }
+.raw-editor::-webkit-scrollbar-track { background: var(--bg); }
 .settings-body-content::-webkit-scrollbar-thumb,
 .raw-editor::-webkit-scrollbar-thumb {
-  background: #3e3e42;
+  background: var(--border);
   border-radius: 5px;
 }
 .settings-body-content::-webkit-scrollbar-thumb:hover,
-.raw-editor::-webkit-scrollbar-thumb:hover { background: #525257; }
+.raw-editor::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 
 /* In-app confirmation / prompt dialog */
 .app-dialog-overlay {
@@ -576,8 +753,8 @@
   z-index: 9999;
 }
 .app-dialog {
-  background: #252526;
-  border: 1px solid #3e3e42;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1.5rem;
   min-width: 320px;
@@ -590,39 +767,39 @@
 }
 .app-dialog-msg {
   margin: 0;
-  color: #cccccc;
+  color: var(--text);
   font-size: 0.9rem;
   line-height: 1.5;
 }
 .app-dialog-input {
   width: 100%;
   box-sizing: border-box;
-  background: #3c3c3c;
-  border: 1px solid #3e3e42;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.4rem 0.6rem;
-  color: #cccccc;
+  color: var(--text);
   font-size: 0.9rem;
 }
-.app-dialog-input:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
+.app-dialog-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 .app-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
 }
 .app-dialog-actions button {
-  background: #2a2d2e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.4rem 0.9rem;
   font-size: 0.85rem;
   cursor: pointer;
-  color: #cccccc;
+  color: var(--text);
 }
-.app-dialog-actions button:hover { background: #333436; }
+.app-dialog-actions button:hover { background: var(--bg-raised-hover); }
 .app-dialog-actions .btn-primary {
-  background: #0e639c;
-  border-color: #0e639c;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #ffffff;
 }
-.app-dialog-actions .btn-primary:hover { background: #1177bb; border-color: #1177bb; }
+.app-dialog-actions .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }

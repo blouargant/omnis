@@ -3,11 +3,95 @@
 // Exposes Settings.open() / Settings.close() / Settings.isOpen().
 
 (function () {
+  // Small inline SVG icons rendered next to each entry in the sidebar menu.
+  const ICONS = {
+    agent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg>`,
+    permissions: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+    mcp: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+    appearance: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`,
+    raw: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+  };
+
+  // Pseudo-id used to mark the Raw YAML toggle in the sidebar menu. It is
+  // not a real section: clicking it flips activeView on the current file.
+  const RAW_VIEW_ID = "__raw__";
+
+  // Server-backed YAML configs. Each id matches /api/config/{parsed,file}/<id>.
   const FILES = [
     { id: "agent",       label: "Agent",       form: "agent" },
     { id: "permissions", label: "Permissions", form: "permissions" },
     { id: "mcp",         label: "MCP",         form: "mcp" },
   ];
+
+  // Sidebar menu entries (YAML configs + client-only views like Appearance).
+  // `title` is the human-readable section name shown in the breadcrumb header.
+  const APPEARANCE_ID = "appearance";
+  const MENU_ITEMS = [
+    { id: "agent",         label: "Agent",       title: "Agent Configuration",       kind: "yaml" },
+    { id: "permissions",   label: "Permissions", title: "Permissions",               kind: "yaml" },
+    { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "yaml" },
+    { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
+  ];
+
+  // Theme catalogue — id must match a [data-theme] selector in styles.css
+  // (empty id = the default :root palette, no attribute set).
+  // `tier` splits Principal (curated, default-quality) from Secondary
+  // (well-known community themes shipped as alternatives).
+  // `tone` groups Dark/Light within a tier in the picker.
+  const THEME_STORAGE_KEY = "agent_toolkit_theme";
+  const THEMES = [
+    // Principal
+    { id: "",                label: "VS Code Dark",    tier: "principal", tone: "Dark",  swatch: ["#1e1e1e", "#252526", "#0e639c", "#cccccc"] },
+    { id: "github-dark",     label: "GitHub Dark",     tier: "principal", tone: "Dark",  swatch: ["#0d1117", "#161b22", "#388bfd", "#e6edf3"] },
+    { id: "one-dark",        label: "One Dark",        tier: "principal", tone: "Dark",  swatch: ["#282c34", "#21252b", "#61afef", "#abb2bf"] },
+    { id: "vscode-light",    label: "VS Code Light",   tier: "principal", tone: "Light", swatch: ["#ffffff", "#f3f3f3", "#0e639c", "#1e1e1e"] },
+    { id: "github-light",    label: "GitHub Light",    tier: "principal", tone: "Light", swatch: ["#ffffff", "#f6f8fa", "#0969da", "#24292f"] },
+    // Secondary
+    { id: "dracula",         label: "Dracula",         tier: "secondary", tone: "Dark",  swatch: ["#282a36", "#21222c", "#bd93f9", "#f8f8f2"] },
+    { id: "nord",            label: "Nord",            tier: "secondary", tone: "Dark",  swatch: ["#2e3440", "#3b4252", "#5e81ac", "#d8dee9"] },
+    { id: "tokyo-night",     label: "Tokyo Night",     tier: "secondary", tone: "Dark",  swatch: ["#1a1b26", "#1f2335", "#7aa2f7", "#c0caf5"] },
+    { id: "solarized-dark",  label: "Solarized Dark",  tier: "secondary", tone: "Dark",  swatch: ["#002b36", "#073642", "#268bd2", "#93a1a1"] },
+    { id: "monokai",         label: "Monokai",         tier: "secondary", tone: "Dark",  swatch: ["#272822", "#1e1f1c", "#66d9ef", "#f8f8f2"] },
+    { id: "gruvbox-dark",    label: "Gruvbox Dark",    tier: "secondary", tone: "Dark",  swatch: ["#282828", "#1d2021", "#fe8019", "#ebdbb2"] },
+    { id: "solarized-light", label: "Solarized Light", tier: "secondary", tone: "Light", swatch: ["#fdf6e3", "#eee8d5", "#268bd2", "#586e75"] },
+  ];
+  const TIERS = [
+    { id: "principal", label: "Principal themes" },
+    { id: "secondary", label: "Secondary themes" },
+  ];
+
+  function getActiveTheme() {
+    return localStorage.getItem(THEME_STORAGE_KEY) || "";
+  }
+  function applyTheme(id, opts) {
+    const root = document.documentElement;
+    if (id) root.setAttribute("data-theme", id);
+    else root.removeAttribute("data-theme");
+    localStorage.setItem(THEME_STORAGE_KEY, id);
+    // Persist to the server so the choice survives restarts. Skipped when
+    // applying a value that just came from the server.
+    if (!opts || opts.persist !== false) {
+      fetch("/api/preferences", {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ theme: id }),
+      }).catch(() => { /* offline / unauthenticated — local cache wins */ });
+    }
+  }
+
+  // Pull the server-side theme once on boot and reconcile with the local
+  // cache (which the inline <head> script applied synchronously).
+  async function syncThemeFromServer() {
+    try {
+      const r = await fetch("/api/preferences", { headers: authHeaders() });
+      if (!r.ok) return;
+      const p = await r.json();
+      const serverTheme = (p && typeof p.theme === "string") ? p.theme : "";
+      if (serverTheme !== getActiveTheme()) {
+        applyTheme(serverTheme, { persist: false });
+      }
+    } catch (_) { /* ignore */ }
+  }
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
@@ -30,6 +114,7 @@
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
   let panelEl, tabsEl, viewToggleEl, bodyEl, footerEl, statusEl;
+  let sidebarMenuEl, sidebarMenuListEl; // in-sidebar settings categories
 
   function escHtml(s) {
     return String(s)
@@ -122,11 +207,11 @@
     panelEl.hidden = true;
     panelEl.innerHTML = `
       <header class="settings-header">
-        <h2>Configuration</h2>
-        <p class="settings-hint">
-          Edits are saved to disk. The running agent keeps the previously-loaded
-          configuration until the server is restarted.
-        </p>
+        <nav class="settings-breadcrumb" aria-label="Breadcrumb">
+          <span class="settings-breadcrumb-root">Settings</span>
+          <svg class="settings-breadcrumb-sep" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="settings-breadcrumb-current"></span>
+        </nav>
         <div class="settings-tabs" role="tablist"></div>
       </header>
       <div class="settings-body">
@@ -163,6 +248,7 @@
       b.addEventListener("click", () => setActiveFile(f.id));
       tabsEl.appendChild(b);
     }
+    buildSidebarMenu();
     viewToggleEl.querySelectorAll("button").forEach(b => {
       b.addEventListener("click", () => setActiveView(b.dataset.view));
     });
@@ -179,15 +265,78 @@
     statusEl.className = "settings-status" + (kind ? " " + kind : "");
   }
 
+  // Builds the in-sidebar category list (Agent / Permissions / MCP / Appearance).
+  // The list is rendered once into #settings-menu-list and stays in the DOM;
+  // open()/close() toggle the parent #settings-menu's visibility.
+  function buildSidebarMenu() {
+    sidebarMenuEl = document.getElementById("settings-menu");
+    sidebarMenuListEl = document.getElementById("settings-menu-list");
+    if (!sidebarMenuListEl || sidebarMenuListEl.children.length) return;
+    for (const m of MENU_ITEMS) {
+      const li = document.createElement("li");
+      li.dataset.file = m.id;
+      li.innerHTML = `${ICONS[m.id] || ""}<span>${escHtml(m.label)}</span>`;
+      li.addEventListener("click", () => setActiveFile(m.id));
+      sidebarMenuListEl.appendChild(li);
+    }
+    // Raw YAML is appended last so new section entries inserted into
+    // MENU_ITEMS always render above it.
+    const raw = document.createElement("li");
+    raw.dataset.file = RAW_VIEW_ID;
+    raw.className = "settings-menu-raw";
+    raw.innerHTML = `${ICONS.raw}<span>Raw YAML</span>`;
+    raw.addEventListener("click", () => {
+      if (raw.classList.contains("disabled")) return;
+      toggleRawView();
+    });
+    sidebarMenuListEl.appendChild(raw);
+  }
+
+  // Toggle between form and raw view for the currently active YAML file.
+  // No-op for client-only sections (e.g. Appearance) — they have no YAML.
+  async function toggleRawView() {
+    if (isClientOnly(state.activeFile)) return;
+    const next = state.activeView === "raw" ? "form" : "raw";
+    await setActiveView(next);
+  }
+
+  function syncActiveHighlight(id) {
+    tabsEl?.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("active", b.dataset.file === id);
+    });
+    sidebarMenuListEl?.querySelectorAll("li").forEach(li => {
+      const f = li.dataset.file;
+      if (f === RAW_VIEW_ID) {
+        li.classList.toggle("active", state.activeView === "raw" && !isClientOnly(id));
+        li.classList.toggle("disabled", isClientOnly(id));
+      } else {
+        li.classList.toggle("active", f === id);
+      }
+    });
+    updateBreadcrumb(id);
+  }
+
+  function updateBreadcrumb(id) {
+    if (!panelEl) return;
+    const el = panelEl.querySelector(".settings-breadcrumb-current");
+    if (!el) return;
+    const item = MENU_ITEMS.find(m => m.id === id);
+    const base = item ? item.title : "";
+    el.textContent = (state.activeView === "raw" && !isClientOnly(id))
+      ? `${base} › Raw YAML`
+      : base;
+  }
+
   async function setActiveFile(id) {
     if (state.activeFile !== id && hasUnsavedActive() &&
         !await appConfirm("Discard unsaved changes in the current tab?")) {
       return;
     }
     state.activeFile = id;
-    tabsEl.querySelectorAll("button").forEach(b => {
-      b.classList.toggle("active", b.dataset.file === id);
-    });
+    // Switching sections always returns to the form view; raw is opt-in
+    // per visit via the sidebar Raw YAML entry.
+    state.activeView = "form";
+    syncActiveHighlight(id);
     renderBody();
   }
 
@@ -195,19 +344,30 @@
     if (state.activeView === v) return;
     if (hasUnsavedActive() && !await appConfirm("Discard unsaved changes in this view?")) return;
     state.activeView = v;
-    viewToggleEl.querySelectorAll("button").forEach(b => {
+    viewToggleEl?.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b.dataset.view === v);
     });
+    syncActiveHighlight(state.activeFile);
     renderBody();
   }
 
   function hasUnsavedActive() {
+    if (state.activeFile === APPEARANCE_ID) return false;
     if (state.activeView === "raw") {
       const r = state.raw[state.activeFile];
       return r && r.dirty;
     }
     const p = state.parsed[state.activeFile];
     return p && p.dirty;
+  }
+
+  // True for menu entries with no server-side YAML — these hide the
+  // Form/Raw toggle and the Save/Discard footer.
+  function isClientOnly(id) { return id === APPEARANCE_ID; }
+
+  function applyClientOnlyChrome() {
+    const clientOnly = isClientOnly(state.activeFile);
+    panelEl.classList.toggle("settings-panel--client-only", clientOnly);
   }
 
   // ─── Loading ───────────────────────────────────────────────────────────
@@ -244,7 +404,12 @@
   async function renderBody() {
     bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
     setStatus("");
+    applyClientOnlyChrome();
     const id = state.activeFile;
+    if (isClientOnly(id)) {
+      if (id === APPEARANCE_ID) renderAppearance();
+      return;
+    }
     try {
       if (state.activeView === "raw") {
         if (!state.raw[id]) await loadRaw(id);
@@ -256,6 +421,57 @@
     } catch (e) {
       bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
     }
+  }
+
+  // ─── Appearance / theme picker ─────────────────────────────────────────
+  function renderAppearance() {
+    const active = getActiveTheme();
+
+    const cardHTML = t => `
+      <button type="button" class="theme-card ${active === t.id ? "active" : ""}" data-theme-id="${escHtml(t.id)}">
+        <span class="theme-card-preview">
+          ${t.swatch.map(c => `<span class="theme-swatch" style="background:${c}"></span>`).join("")}
+        </span>
+        <span class="theme-card-label">${escHtml(t.label)}</span>
+        <span class="theme-card-check" aria-hidden="true">✓</span>
+      </button>
+    `;
+
+    // Render: tier section header → per-tone subheader → grid of cards.
+    const sections = TIERS.map(tier => {
+      const inTier = THEMES.filter(t => t.tier === tier.id);
+      if (!inTier.length) return "";
+      const byTone = {};
+      for (const t of inTier) (byTone[t.tone] = byTone[t.tone] || []).push(t);
+      return `
+        <section class="form-section">
+          <h3>${escHtml(tier.label)}</h3>
+          ${Object.entries(byTone).map(([tone, list]) => `
+            <div class="theme-group-label">${escHtml(tone)}</div>
+            <div class="theme-grid">${list.map(cardHTML).join("")}</div>
+          `).join("")}
+        </section>
+      `;
+    }).join("");
+
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <p class="settings-hint" style="margin:0;">
+          Pick a color palette. Applied immediately and saved on the server.
+        </p>
+        ${sections}
+      </div>
+    `;
+
+    bodyEl.querySelectorAll(".theme-card").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.themeId;
+        applyTheme(id);
+        bodyEl.querySelectorAll(".theme-card").forEach(b => {
+          b.classList.toggle("active", b.dataset.themeId === id);
+        });
+      });
+    });
   }
 
   function renderRaw(id) {
@@ -1035,9 +1251,8 @@
     panelEl.hidden = false;
     const sb = document.getElementById("settings-btn");
     if (sb) sb.classList.add("active");
-    if (!tabsEl.querySelector("button.active")) {
-      tabsEl.querySelector(`button[data-file="${state.activeFile}"]`).classList.add("active");
-    }
+    if (sidebarMenuEl) sidebarMenuEl.hidden = false;
+    syncActiveHighlight(state.activeFile);
     renderBody();
   }
 
@@ -1048,6 +1263,7 @@
     document.getElementById("chat").classList.remove("chat--settings");
     const sb = document.getElementById("settings-btn");
     if (sb) sb.classList.remove("active");
+    if (sidebarMenuEl) sidebarMenuEl.hidden = true;
   }
 
   function isOpen() { return state.open; }
@@ -1063,6 +1279,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     refreshBannerVisibility();
+    syncThemeFromServer();
     const btn = document.getElementById("settings-btn");
     if (btn) btn.addEventListener("click", () => {
       if (isOpen()) close(); else open();
