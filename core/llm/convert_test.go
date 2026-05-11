@@ -42,6 +42,33 @@ func TestSchemaToJSONAndToolDecls(t *testing.T) {
 	}
 }
 
+func TestToolParamsJSONEmptyInputSchema(t *testing.T) {
+	t.Parallel()
+
+	// ADK's functiontool emits ParametersJsonSchema (not Parameters) and for an
+	// empty input struct omits the "properties" key. Azure/LiteLLM rejects that
+	// with "object schema missing properties", so toolParamsJSON must inject an
+	// empty properties map.
+	fd := &genai.FunctionDeclaration{
+		Name:                 "no_args",
+		ParametersJsonSchema: map[string]any{"type": "object", "additionalProperties": false},
+	}
+	m := toolParamsJSON(fd)
+	if m["type"] != "object" {
+		t.Fatalf("type = %v", m["type"])
+	}
+	props, ok := m["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties missing or wrong type: %#v", m["properties"])
+	}
+	if len(props) != 0 {
+		t.Fatalf("expected empty properties map, got %#v", props)
+	}
+	if m["additionalProperties"] != false {
+		t.Fatalf("additionalProperties = %v", m["additionalProperties"])
+	}
+}
+
 func TestSystemTextArgsAndFunctionResponseHelpers(t *testing.T) {
 	t.Parallel()
 

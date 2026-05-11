@@ -99,9 +99,14 @@ func toolParamsJSON(fd *genai.FunctionDeclaration) map[string]any {
 		if err == nil {
 			var m map[string]any
 			if err := json.Unmarshal(b, &m); err == nil {
-				// Ensure additionalProperties: false is propagated so the model
-				// knows the declared fields are the only valid ones.
+				// Ensure properties + additionalProperties:false are present.
+				// ADK's schema generator omits "properties" for empty input
+				// structs, which Azure/LiteLLM rejects with "object schema
+				// missing properties" — supply an empty object explicitly.
 				if m["type"] == "object" {
+					if _, ok := m["properties"]; !ok {
+						m["properties"] = map[string]any{}
+					}
 					if _, ok := m["additionalProperties"]; !ok {
 						m["additionalProperties"] = false
 					}

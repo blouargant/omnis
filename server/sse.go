@@ -117,6 +117,12 @@ func streamEvents(
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
 ) string {
+	debug := strings.EqualFold(os.Getenv("GOAGENT_DEBUG"), "true") || os.Getenv("GOAGENT_DEBUG") == "1"
+	streamStart := time.Now()
+	var firstTokenAt time.Time
+	var tokenCount int
+	var tokenBytes int
+
 	var assistantBuf strings.Builder
 	flusher, _ := w.(interface{ Flush() })
 	flush := func() {
@@ -131,6 +137,30 @@ func streamEvents(
 		}
 		_, _ = io.WriteString(w, "event: "+event+"\ndata: "+string(data)+"\n\n")
 		flush()
+	}
+	emitDone := func() {
+		total := time.Since(streamStart)
+		var ttfbMs int64
+		var tokPerSec float64
+		if !firstTokenAt.IsZero() {
+			ttfbMs = firstTokenAt.Sub(streamStart).Milliseconds()
+			streamDur := total - firstTokenAt.Sub(streamStart)
+			if streamDur > 0 {
+				tokPerSec = float64(tokenCount) / streamDur.Seconds()
+			}
+		}
+		emit("debug_timing", map[string]any{
+			"ttfb_ms":     ttfbMs,
+			"total_ms":    total.Milliseconds(),
+			"tokens":      tokenCount,
+			"token_bytes": tokenBytes,
+			"tok_per_sec": tokPerSec,
+		})
+		if debug {
+			log.Printf("server: stream timing ttfb=%dms total=%dms tokens=%d bytes=%d tok/s=%.1f",
+				ttfbMs, total.Milliseconds(), tokenCount, tokenBytes, tokPerSec)
+		}
+		emit("done", map[string]any{})
 	}
 
 	// Convert the rangefunc ADK iterator to a channel so we can select on it
@@ -233,7 +263,7 @@ func streamEvents(
 					case be := <-subCh:
 						emitBusEvent(be)
 					default:
-						emit("done", map[string]any{})
+						emitDone()
 						log.Printf("server: stream complete")
 						return assistantBuf.String()
 					}
@@ -241,7 +271,7 @@ func streamEvents(
 			}
 			if aev.err != nil {
 				emit("error", map[string]string{"message": aev.err.Error()})
-				emit("done", map[string]any{})
+				emitDone()
 				return assistantBuf.String()
 			}
 			ev := aev.ev
@@ -258,6 +288,11 @@ func streamEvents(
 						// ADK emits the full streamed text again in a final non-partial
 						// event; skip it to avoid sending duplicate content to the client.
 					} else if isPartial {
+						if firstTokenAt.IsZero() {
+							firstTokenAt = time.Now()
+						}
+						tokenCount++
+						tokenBytes += len(p.Text)
 						emit("token", map[string]string{"text": p.Text})
 						assistantBuf.WriteString(p.Text)
 						sawPartialText = true

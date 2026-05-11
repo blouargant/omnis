@@ -4,6 +4,69 @@
 
 const TOKEN_KEY = "agent_toolkit_token";
 
+// ─── Debug instrumentation ───────────────────────────────────────────────────
+// General-purpose debugging tool for the web UI. Surfaces a small fixed badge
+// in the top-right corner of the page with live per-turn metrics:
+//
+//   [client] ttfb / chunks / chunks-per-sec / bytes / cumulative markdown parse
+//   [server] same dimensions reported by the backend (sent as a `debug_timing`
+//            SSE event right before `done`)
+//
+// Enable by appending `?debug=1` to the URL, or by setting
+// `localStorage.agent_toolkit_debug = "1"` (persistent across reloads). Disable
+// by removing the param / clearing the storage key.
+//
+// Exposed on `window.AgentDebug` so additional probes can hook in from the
+// browser console without touching this file — e.g. `AgentDebug.token(42)` to
+// account for an out-of-band chunk. Add new measurements by extending the
+// object below and calling `_paint()` after mutating state.
+const AgentDebug = {
+  enabled: new URLSearchParams(location.search).get("debug") === "1"
+        || localStorage.getItem("agent_toolkit_debug") === "1",
+  badge: null,
+  tStart: 0, tFirstToken: 0, tEnd: 0,
+  tokens: 0, bytes: 0,
+  renderMs: 0, renderCount: 0,
+  server: null,
+  reset() {
+    this.tStart = this.tFirstToken = this.tEnd = 0;
+    this.tokens = this.bytes = 0;
+    this.renderMs = 0; this.renderCount = 0;
+    this.server = null;
+  },
+  start() { this.reset(); this.tStart = performance.now(); this._paint(); },
+  firstToken() { if (!this.tFirstToken) this.tFirstToken = performance.now(); },
+  token(bytes) { this.tokens++; this.bytes += bytes | 0; this._paint(); },
+  render(ms) { this.renderMs += ms; this.renderCount++; this._paint(); },
+  serverTiming(d) { this.server = d; this._paint(); },
+  end() { this.tEnd = performance.now(); this._paint(); },
+  _paint() {
+    if (!this.enabled) return;
+    if (!this.badge) {
+      const b = document.createElement("div");
+      b.id = "debug-badge";
+      b.style.cssText = "position:fixed;top:6px;right:8px;z-index:9999;background:#111c;color:#cdf;font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;padding:6px 8px;border:1px solid #345;border-radius:6px;max-width:380px;white-space:pre;pointer-events:none";
+      document.body.appendChild(b);
+      this.badge = b;
+    }
+    const now = this.tEnd || performance.now();
+    const ttfb = this.tFirstToken ? (this.tFirstToken - this.tStart) : 0;
+    const streamElapsed = now - (this.tFirstToken || this.tStart);
+    const tps = (this.tokens && streamElapsed > 0) ? (this.tokens * 1000 / streamElapsed) : 0;
+    const lines = [
+      `[client] ttfb=${ttfb.toFixed(0)}ms  chunks=${this.tokens}  ${tps.toFixed(1)}/s  bytes=${this.bytes}`,
+      `         render=${this.renderMs.toFixed(0)}ms across ${this.renderCount} parse(s)`,
+    ];
+    if (this.server) {
+      lines.push(`[server] ttfb=${this.server.ttfb_ms}ms  chunks=${this.server.tokens}  ${(this.server.tok_per_sec||0).toFixed(1)}/s  total=${this.server.total_ms}ms`);
+    }
+    this.badge.textContent = lines.join("\n");
+  },
+};
+AgentDebug.reset();
+if (AgentDebug.enabled) AgentDebug._paint();
+window.AgentDebug = AgentDebug;
+
 const els = {
   sidebar:       document.getElementById("sidebar"),
   sidebarResize: document.getElementById("sidebar-resize"),
@@ -379,8 +442,11 @@ function renderMarkdown(el, text) {
     el.textContent = text;
     return;
   }
+  const t0 = AgentDebug.enabled ? performance.now() : 0;
   el.innerHTML = marked.parse(text || "");
   el.classList.add("rendered");
+  if (el._streamNode) { el._streamNode = null; el._streamLen = 0; }
+  if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
 }
 
 // ─── Pinned prompt header ────────────────────────────────────────────────────
@@ -1063,7 +1129,6 @@ async function sendMessage() {
   let segBubble = null;     // current assistant text element
   let segAcc = "";          // accumulated text for the current segment
   let segHadToken = false;  // whether we received streaming tokens this segment
-  let segRenderTimer = null; // throttle handle for incremental markdown renders
 
   function ensureSegment() {
     if (!segBubble) {
@@ -1074,25 +1139,27 @@ async function sendMessage() {
     return segBubble;
   }
 
-  // Schedule a markdown render of the current segment, throttled to ~200 ms.
-  // The very first call renders immediately so the user sees content at once.
+  // Stream incoming tokens as plain text via a Text node attached to the
+  // bubble; markdown is parsed once at finalizeSegment. This avoids the
+  // O(n²) cost of re-running marked.parse on the full accumulated buffer per
+  // chunk and keeps perceived stream speed close to the wire rate.
   function scheduleRender() {
     if (!segBubble || !segAcc) return;
-    if (!segBubble.innerHTML) {
-      // First content — render right away for instant feedback.
-      renderMarkdown(segBubble, segAcc);
-      return;
+    if (!segBubble._streamNode) {
+      segBubble.textContent = "";
+      const tn = document.createTextNode("");
+      segBubble.appendChild(tn);
+      segBubble._streamNode = tn;
+      segBubble._streamLen = 0;
     }
-    if (segRenderTimer !== null) clearTimeout(segRenderTimer);
-    segRenderTimer = setTimeout(() => {
-      segRenderTimer = null;
-      if (segBubble && segAcc) renderMarkdown(segBubble, segAcc);
-    }, 200);
+    const delta = segAcc.slice(segBubble._streamLen);
+    if (delta) segBubble._streamNode.appendData(delta);
+    segBubble._streamLen = segAcc.length;
   }
 
-  // Render and seal the current text segment, then reset.
+  // Render and seal the current text segment, then reset. The streaming Text
+  // node is replaced wholesale by the rendered markdown HTML.
   function finalizeSegment() {
-    if (segRenderTimer !== null) { clearTimeout(segRenderTimer); segRenderTimer = null; }
     if (!segBubble) return;
     if (segAcc) {
       renderMarkdown(segBubble, segAcc);
@@ -1130,15 +1197,23 @@ async function sendMessage() {
       return;
     }
 
+    AgentDebug.start();
     for await (const { event, data } of parseSSE(res)) {
       switch (event) {
         case "token": {
           ensureSegment();
-          if (!segHadToken) setSessionStatus(sessionId, "streaming…");
+          if (!segHadToken) { AgentDebug.firstToken(); setSessionStatus(sessionId, "streaming…"); }
           segHadToken = true;
-          segAcc += data.text || "";
+          const txt = data.text || "";
+          segAcc += txt;
+          AgentDebug.token(txt.length);
           scheduleRender();
           scrollBottom();
+          break;
+        }
+
+        case "debug_timing": {
+          AgentDebug.serverTiming(data);
           break;
         }
 
@@ -1227,6 +1302,7 @@ async function sendMessage() {
     }
   } finally {
     finalizeSegment();
+    AgentDebug.end();
     // Clean up any still-pending tool dots (e.g. on cancel).
     for (const b of [...pendingTools, ...innerPending]) {
       const dot = b.querySelector(".tool-dot");

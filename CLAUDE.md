@@ -104,7 +104,7 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 | `GOAGENT_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `GOAGENT_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `GOAGENT_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
-| `GOAGENT_DEBUG` | Log full conversation/event payloads |
+| `GOAGENT_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 
 ### Session isolation
 
@@ -133,3 +133,37 @@ description: One-line description shown in list_skills output
 ```
 
 The leader auto-discovers skills at startup; no config change required.
+
+### Web UI debug mode
+
+The web UI ships with a built-in debug overlay for inspecting streaming
+performance and other client-side metrics. Enable it by either:
+
+- Appending `?debug=1` to the URL, or
+- Setting `localStorage.agent_toolkit_debug = "1"` (persists across reloads).
+
+A small monospace badge appears in the top-right corner showing live per-turn
+metrics:
+
+```
+[client] ttfb=120ms  chunks=84  42.3/s  bytes=1980
+         render=18ms across 1 parse(s)
+[server] ttfb=95ms  chunks=84  44.1/s  total=2010ms
+```
+
+- **client** metrics are measured in the browser (TTFB from `fetch()` start,
+  cumulative `marked.parse` cost, chunks-per-second based on token-event
+  arrival).
+- **server** metrics are emitted by the backend as a `debug_timing` SSE event
+  right before `done` (see [server/sse.go](server/sse.go) `emitDone`). They
+  reflect the rate at which the agent is producing tokens on the wire,
+  independent of any browser-side cost.
+
+The instrumentation API is exposed on `window.AgentDebug` for ad-hoc probing
+from the browser console. Extend it by adding new fields to the object in
+[web/app.js](web/app.js) and calling `_paint()` after mutating state — keeping
+the badge as the single surface for new client-side measurements.
+
+Streaming itself always uses incremental Text-node appends; `marked.parse` runs
+once per segment at finalize. Don't reintroduce per-chunk markdown rendering —
+it makes the UI feel slow even when the wire is fast.
