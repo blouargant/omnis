@@ -112,7 +112,7 @@
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
-    skills: { activeSubtab: "registry", editing: null }, // skills panel state
+    skills: { editing: null }, // skills panel state
   };
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
@@ -844,15 +844,35 @@
       ta.value = a.instruction || "";
       ta.addEventListener("input", () => { a.instruction = ta.value; onChange(); });
 
-      // Skills block — async, populates after card renders.
+      // Skills block — collapsible, collapsed by default.
       if (a.skills_dir !== undefined) {
         const skillsSection = document.createElement("div");
         skillsSection.className = "skills-agent-section";
-        skillsSection.innerHTML = `<div class="skills-agent-section-label">Skills</div>`;
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "skills-agent-toggle";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.innerHTML = `<i class="skills-agent-chevron">▶</i> Skills`;
+
         const skillsBody = document.createElement("div");
+        skillsBody.className = "skills-agent-body";
+        skillsBody.hidden = true;
+
+        let loaded = false;
+        toggle.addEventListener("click", () => {
+          const expanded = toggle.getAttribute("aria-expanded") === "true";
+          toggle.setAttribute("aria-expanded", String(!expanded));
+          skillsBody.hidden = expanded;
+          if (!loaded) {
+            loaded = true;
+            populateAgentSkillBlock(skillsBody, a.name);
+          }
+        });
+
+        skillsSection.appendChild(toggle);
         skillsSection.appendChild(skillsBody);
         row.appendChild(skillsSection);
-        populateAgentSkillBlock(skillsBody, a.name);
       }
 
       row.querySelector(".up-btn")?.addEventListener("click", () => {
@@ -1354,7 +1374,6 @@
       manageLink.type = "button"; manageLink.className = "skills-manage-link";
       manageLink.textContent = "Manage in Skills →";
       manageLink.addEventListener("click", () => {
-        state.skills.activeSubtab = "per-agent";
         state.skills.editing = null;
         setActiveFile("skills");
       });
@@ -1398,26 +1417,8 @@
       return;
     }
 
-    const sub = state.skills.activeSubtab;
-    bodyEl.innerHTML = `
-      <div class="settings-form">
-        <div class="settings-subtabs" role="tablist">
-          <button type="button" data-subtab="registry" class="${sub === "registry" ? "active" : ""}">Registry</button>
-          <button type="button" data-subtab="per-agent" class="${sub === "per-agent" ? "active" : ""}">Per-agent</button>
-        </div>
-        <div class="skills-subtab-body"></div>
-      </div>
-    `;
-    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
-      b.addEventListener("click", () => {
-        if (state.skills.activeSubtab === b.dataset.subtab) return;
-        state.skills.activeSubtab = b.dataset.subtab;
-        renderSkills();
-      });
-    });
-    const host = bodyEl.querySelector(".skills-subtab-body");
-    if (sub === "registry") await renderSkillsRegistryTab(host);
-    else await renderSkillsPerAgentTab(host);
+    bodyEl.innerHTML = `<div class="settings-form"><div class="skills-subtab-body"></div></div>`;
+    await renderSkillsRegistryTab(bodyEl.querySelector(".skills-subtab-body"));
   }
 
   async function renderSkillsRegistryTab(host) {
@@ -1600,48 +1601,6 @@
         saveStatus.className = "skill-save-status error";
       } finally { saveBtn.disabled = false; }
     });
-  }
-
-  async function renderSkillsPerAgentTab(host) {
-    host.innerHTML = `<p class="settings-loading">Loading…</p>`;
-    let agents, registry;
-    try {
-      [agents, registry] = await Promise.all([
-        skillsGet("/skills/agents").then(r => r.agents || []),
-        skillsGet("/skills/registry").then(r => r.skills || []),
-      ]);
-    } catch (e) {
-      host.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
-      return;
-    }
-    host.innerHTML = "";
-    const section = document.createElement("section");
-    section.className = "form-section";
-    const h3 = document.createElement("h3"); h3.textContent = "Agent skills";
-    section.appendChild(h3);
-
-    for (const agentInfo of agents) {
-      const card = document.createElement("div");
-      card.className = "form-card";
-      const header = document.createElement("div");
-      header.className = "form-card-header";
-      header.innerHTML = `<strong>${escHtml(agentInfo.name)}</strong>` +
-        (agentInfo.skills_dir ? ` <span class="settings-hint">(${escHtml(agentInfo.skills_dir)})</span>` : "");
-      card.appendChild(header);
-      const body = document.createElement("div");
-      card.appendChild(body);
-
-      const refresh = async () => {
-        try {
-          const fresh = await skillsGet("/skills/agents");
-          const fa = (fresh.agents || []).find(a => a.name === agentInfo.name);
-          if (fa) renderSkillBlockContent(body, fa, registry, refresh);
-        } catch (_) {}
-      };
-      renderSkillBlockContent(body, agentInfo, registry, refresh);
-      section.appendChild(card);
-    }
-    host.appendChild(section);
   }
 
   // ─── Skills — upload helpers ───────────────────────────────────────────
