@@ -28,9 +28,9 @@
   // `title` is the human-readable section name shown in the breadcrumb header.
   const APPEARANCE_ID = "appearance";
   const MENU_ITEMS = [
+    { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "agent",         label: "Agent",       title: "Agent Configuration",       kind: "yaml" },
     { id: "permissions",   label: "Permissions", title: "Permissions",               kind: "yaml" },
-    { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "yaml" },
     { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
   ];
@@ -106,13 +106,13 @@
   ];
 
   const state = {
-    activeFile: "agent",
+    activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "globals", // only used when activeFile === 'agent'
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
-    skills: { editing: null }, // skills panel state
+    skills: { editing: null, browsingRemote: null, viewingRemote: null }, // skills panel state
   };
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
@@ -339,6 +339,12 @@
     // Switching sections always returns to the form view; raw is opt-in
     // per visit via the sidebar Raw YAML entry.
     state.activeView = "form";
+    // Clicking "Skills" always resets sub-navigation back to the root list.
+    if (id === "skills") {
+      state.skills.editing = null;
+      state.skills.browsingRemote = null;
+      state.skills.viewingRemote = null;
+    }
     syncActiveHighlight(id);
     renderBody();
   }
@@ -1149,6 +1155,120 @@
   const appConfirm = msg => appDialog({ message: msg });
   const appPrompt  = (msg, placeholder = "") => appDialog({ message: msg, withInput: true, placeholder });
 
+  // ─── Registry multi-field dialog ───────────────────────────────────────
+
+  function detectRegistryProvider(rawURL) {
+    try {
+      const u = new URL(rawURL);
+      if (u.hostname === "github.com") return "github";
+      if (u.hostname === "gitlab.com" || u.pathname.includes("/-/tree/")) return "gitlab";
+      if (u.pathname.includes("/src/branch/")) return "gitea";
+    } catch (_) {}
+    return "";
+  }
+
+  function appRegistryDialog({ title = "Add Remote Registry", initial = {}, isEdit = false } = {}) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "app-dialog-overlay";
+
+      const box = document.createElement("div");
+      box.className = "app-dialog registry-dialog";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+
+      const titleEl = document.createElement("p");
+      titleEl.className = "app-dialog-msg";
+      titleEl.textContent = title;
+      box.appendChild(titleEl);
+
+      const form = document.createElement("div");
+      form.className = "registry-dialog-form";
+      const tokenPlaceholder = isEdit && initial.hasToken
+        ? "Leave blank to keep existing token"
+        : "PAT / PRIVATE-TOKEN / personal token…";
+      form.innerHTML = `
+        <div class="registry-dialog-field">
+          <label for="reg-dlg-name">Name <span class="registry-dialog-hint">(optional)</span></label>
+          <input type="text" id="reg-dlg-name" autocomplete="off"
+            placeholder="My skill registry"
+            value="${escHtml(initial.name || "")}" />
+        </div>
+        <div class="registry-dialog-field">
+          <label for="reg-dlg-url">Repository URL</label>
+          <input type="url" id="reg-dlg-url" autocomplete="off"
+            placeholder="https://github.com/owner/repo/tree/main/skills"
+            value="${escHtml(initial.url || "")}" />
+          <span class="registry-dialog-hint">GitHub · GitLab · Gitea (cloud or self-hosted)</span>
+        </div>
+        <div class="registry-dialog-field">
+          <label for="reg-dlg-provider">Provider</label>
+          <select id="reg-dlg-provider">
+            <option value="">Auto-detect</option>
+            <option value="github"${initial.provider === "github" ? " selected" : ""}>GitHub</option>
+            <option value="gitlab"${initial.provider === "gitlab" ? " selected" : ""}>GitLab</option>
+            <option value="gitea"${initial.provider === "gitea" ? " selected" : ""}>Gitea</option>
+          </select>
+        </div>
+        <div class="registry-dialog-field">
+          <label for="reg-dlg-token">Access token <span class="registry-dialog-hint">(optional, for private repos)</span></label>
+          <input type="password" id="reg-dlg-token" autocomplete="off"
+            placeholder="${escHtml(tokenPlaceholder)}" />
+        </div>
+      `;
+      box.appendChild(form);
+
+      const urlInput      = form.querySelector("#reg-dlg-url");
+      const providerSelect = form.querySelector("#reg-dlg-provider");
+
+      urlInput.addEventListener("input", () => {
+        if (providerSelect.value !== "") return;
+        const detected = detectRegistryProvider(urlInput.value.trim());
+        if (detected) providerSelect.value = detected;
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "app-dialog-actions";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "btn-primary";
+      okBtn.textContent = isEdit ? "Save" : "Add";
+
+      const close = result => { overlay.remove(); resolve(result); };
+      cancelBtn.addEventListener("click", () => close(null));
+      okBtn.addEventListener("click", () => {
+        const urlVal = form.querySelector("#reg-dlg-url").value.trim();
+        if (!urlVal) { form.querySelector("#reg-dlg-url").focus(); return; }
+        close({
+          name:     form.querySelector("#reg-dlg-name").value.trim(),
+          url:      urlVal,
+          provider: form.querySelector("#reg-dlg-provider").value,
+          token:    form.querySelector("#reg-dlg-token").value,
+        });
+      });
+
+      overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
+      box.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); close(null); }
+        if (e.key === "Enter" && e.target.tagName !== "SELECT") {
+          e.stopPropagation(); okBtn.click();
+        }
+      });
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      (initial.url ? form.querySelector("#reg-dlg-name") : urlInput).focus();
+    });
+  }
+
   // ─── Field helpers ─────────────────────────────────────────────────────
   function field(label, val, kind, onChange) {
     const row = document.createElement("label");
@@ -1416,6 +1536,14 @@
       await renderSkillDetailView();
       return;
     }
+    if (state.skills.viewingRemote) {
+      await renderRemoteSkillDetailView();
+      return;
+    }
+    if (state.skills.browsingRemote) {
+      await renderRemoteBrowseView();
+      return;
+    }
 
     bodyEl.innerHTML = `<div class="settings-form"><div class="skills-subtab-body"></div></div>`;
     await renderSkillsRegistryTab(bodyEl.querySelector(".skills-subtab-body"));
@@ -1437,7 +1565,7 @@
         <h3>Installed skills
           <button type="button" class="add-btn" id="skill-new">+ New</button>
           <label class="add-btn skill-upload-label" id="skill-upload-label" style="cursor:pointer">
-            ↑ Upload archive
+            Upload archive
             <input type="file" id="skill-upload-input" accept=".zip,.tar.gz,.tgz" style="display:none">
           </label>
         </h3>
@@ -1446,6 +1574,7 @@
     `;
 
     renderSkillCards(host.querySelector("#skills-registry-list"), skills);
+    await renderRemoteRegistriesSection(host);
 
     host.querySelector("#skill-new").addEventListener("click", async () => {
       const name = await appPrompt("Skill name (lowercase, hyphens ok):", "my-skill");
@@ -1477,45 +1606,82 @@
       `;
       return;
     }
+    const grid = document.createElement("div");
+    grid.className = "skill-marketplace-grid";
     for (const sk of skills) {
       const card = document.createElement("div");
-      card.className = "form-card";
+      card.className = "skill-mkt-card";
+
+      const dateStr = sk.mtime ? new Date(sk.mtime).toLocaleDateString("en-CA") : "";
+      const tagsHtml = (sk.tags && sk.tags.length)
+        ? `<div class="skill-mkt-tags">${sk.tags.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")}</div>`
+        : "";
+      const authorHtml = sk.author
+        ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">${escHtml(sk.author)}</span></div>`
+        : "";
       const linkedStr = sk.linked_in && sk.linked_in.length
-        ? `Used by: <strong>${escHtml(sk.linked_in.join(", "))}</strong>`
-        : `<span class="skills-unlinked">Not linked to any agent</span>`;
+        ? `<span class="skill-mkt-linked">Used by: ${escHtml(sk.linked_in.join(", "))}</span>`
+        : `<span class="skill-mkt-unlinked">Not linked</span>`;
+
       card.innerHTML = `
-        <div class="form-card-header">
-          <strong>${escHtml(sk.name)}</strong>
-          <span class="card-actions">
-            <button type="button" class="add-btn skill-edit-btn">View / Edit</button>
-            <button type="button" class="del-btn skill-del-btn">Delete</button>
-          </span>
+        <div class="skill-mkt-header">
+          <span class="skill-mkt-filename">${ICONS.skills}${escHtml(sk.name)}</span>
         </div>
-        <p class="skill-card-desc">${escHtml(sk.description || "(no description)")}</p>
-        <p class="skill-card-links settings-hint">${linkedStr}</p>
+        <div class="skill-mkt-body">
+          ${authorHtml}
+          <p class="skill-mkt-desc">${escHtml(sk.description || "(no description)")}</p>
+          ${tagsHtml}
+        </div>
+        <div class="skill-mkt-footer">
+          <span class="skill-mkt-date">${dateStr}</span>
+          <span class="skill-mkt-footer-right">${linkedStr}</span>
+        </div>
       `;
-      card.querySelector(".skill-edit-btn").addEventListener("click", () => {
+      card.addEventListener("click", () => {
         state.skills.editing = { name: sk.name };
         renderSkills();
       });
-      card.querySelector(".skill-del-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Delete skill "${sk.name}"?`)) return;
-        try {
-          await skillsDel(`/skills/registry/${sk.name}`);
-          renderSkills();
-        } catch (e) {
-          if (e.code === "LINKED_IN_AGENTS") {
-            const agents = (e.details && e.details.agents || []).join(", ");
-            if (!await appConfirm(`"${sk.name}" is still used by: ${agents}. Remove links and delete?`)) return;
-            try { await skillsDel(`/skills/registry/${sk.name}?force=1`); renderSkills(); }
-            catch (e2) { setStatus("Delete failed: " + e2.message, "error"); }
-          } else {
-            setStatus("Delete failed: " + e.message, "error");
-          }
-        }
-      });
-      container.appendChild(card);
+      grid.appendChild(card);
     }
+    container.appendChild(grid);
+  }
+
+  function parseFrontmatter(content) {
+    const s = content.trimStart();
+    if (!s.startsWith("---")) return {};
+    const rest = s.slice(3);
+    const idx = rest.indexOf("\n---");
+    if (idx < 0) return {};
+    const result = {};
+    let section = null;
+    for (const line of rest.slice(0, idx).split("\n")) {
+      if (!line.trim()) continue;
+      const indented = line.startsWith("  ") || line.startsWith("\t");
+      const col = line.indexOf(":");
+      if (col < 0) continue;
+      const key = line.slice(0, col).trim();
+      const val = line.slice(col + 1).trim();
+      if (indented && section) {
+        if (val.startsWith("[") && val.endsWith("]")) {
+          result[section][key] = val.slice(1, -1).split(",").map(t => t.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+        } else {
+          result[section][key] = val;
+        }
+      } else if (!indented) {
+        if (val === "") { section = key; result[key] = {}; }
+        else { section = null; result[key] = val; }
+      }
+    }
+    return result;
+  }
+
+  function stripFrontmatter(content) {
+    const s = content.trimStart();
+    if (!s.startsWith("---")) return content;
+    const rest = s.slice(3);
+    const idx = rest.indexOf("\n---");
+    if (idx < 0) return content;
+    return rest.slice(idx + 4).trimStart();
   }
 
   async function renderSkillDetailView() {
@@ -1527,26 +1693,23 @@
       bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
       return;
     }
-    const linkedStr = detail.linked_in && detail.linked_in.length
-      ? detail.linked_in.join(", ") : "none";
 
     bodyEl.innerHTML = `
       <div class="settings-form skill-detail-view">
         <div class="skill-detail-header">
-          <button type="button" class="skill-back-btn">← Registry</button>
-          <span class="skill-detail-name">${escHtml(detail.name)}</span>
-          <span class="settings-hint">Used by: ${escHtml(linkedStr)}</span>
+          <button type="button" class="skill-back-btn">Back to registry</button>
         </div>
-        ${detail.description ? `<p class="settings-hint skill-detail-desc">${escHtml(detail.description)}</p>` : ""}
-        <div class="skill-resource-tabs"></div>
-        <textarea class="skill-md-editor raw-editor" spellcheck="false"></textarea>
+        <div class="skill-frontmatter-card" id="skill-fm-card"></div>
+        <div class="skill-content-wrap">
+          <div class="skill-resource-tabs"></div>
+          <div class="skill-md-preview markdown-body"></div>
+          <textarea class="skill-md-editor raw-editor" spellcheck="false" hidden></textarea>
+        </div>
         <div class="skill-detail-footer">
+          <button type="button" class="del-btn skill-del-btn">Delete</button>
           <span class="skill-save-status"></span>
-          <button type="button" class="btn-primary skill-save-btn">Save</button>
+          <button type="button" class="add-btn skill-edit-btn">Edit</button>
         </div>
-        <p class="settings-hint" style="margin-top:8px">
-          Skills live in <code>skills-registry/installed/</code> — commit changes yourself to track them in git.
-        </p>
       </div>
     `;
 
@@ -1555,11 +1718,105 @@
       renderSkills();
     });
 
-    const tabsEl = bodyEl.querySelector(".skill-resource-tabs");
-    const ta = bodyEl.querySelector(".skill-md-editor");
-    let currentMtime = detail.mtime;
+    const tabsEl   = bodyEl.querySelector(".skill-resource-tabs");
+    const preview  = bodyEl.querySelector(".skill-md-preview");
+    const ta       = bodyEl.querySelector(".skill-md-editor");
+    const footer   = bodyEl.querySelector(".skill-detail-footer");
+    const saveStatus = bodyEl.querySelector(".skill-save-status");
+    let currentMtime   = detail.mtime;
     let currentContent = detail.content;
-    let currentReadOnly = false;
+    let currentTab     = "skill-md";
+    let isEditing      = false;
+
+    function renderPreview(content) {
+      if (typeof marked !== "undefined") {
+        preview.innerHTML = marked.parse(stripFrontmatter(content));
+      } else {
+        preview.textContent = stripFrontmatter(content);
+      }
+    }
+
+    function renderFrontmatterCard(content) {
+      const fm = parseFrontmatter(content);
+      const fmCard = bodyEl.querySelector("#skill-fm-card");
+      const rows = [];
+      for (const [k, v] of Object.entries(fm)) {
+        if (typeof v === "object" && !Array.isArray(v)) {
+          for (const [sk, sv] of Object.entries(v)) {
+            const display = Array.isArray(sv)
+              ? sv.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")
+              : escHtml(String(sv));
+            const cls = Array.isArray(sv) ? "skill-fm-value skill-fm-tags" : "skill-fm-value";
+            rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(sk)}</span><span class="${cls}">${display}</span></div>`);
+          }
+        } else {
+          const display = Array.isArray(v)
+            ? v.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")
+            : escHtml(String(v));
+          const cls = Array.isArray(v) ? "skill-fm-value skill-fm-tags" : "skill-fm-value";
+          rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(k)}</span><span class="${cls}">${display}</span></div>`);
+        }
+      }
+      fmCard.innerHTML = rows.join("");
+    }
+
+    function setEditMode(editing) {
+      isEditing = editing;
+      if (editing) {
+        preview.hidden = true;
+        ta.hidden = false;
+        ta.value = currentContent;
+        footer.innerHTML = `
+          <button type="button" class="btn-discard skill-cancel-btn">Discard</button>
+          <span class="skill-save-status"></span>
+          <button type="button" class="btn-save skill-save-btn">Save</button>
+        `;
+        footer.querySelector(".skill-cancel-btn").addEventListener("click", () => setEditMode(false));
+        footer.querySelector(".skill-save-btn").addEventListener("click", async () => {
+          const saveBtn = footer.querySelector(".skill-save-btn");
+          const status  = footer.querySelector(".skill-save-status");
+          saveBtn.disabled = true; status.textContent = "Saving…"; status.className = "skill-save-status";
+          try {
+            currentContent = ta.value;
+            const res = await skillsPut(`/skills/registry/${name}`, { content: currentContent, mtime: currentMtime });
+            currentMtime = res.mtime;
+            renderFrontmatterCard(currentContent);
+            status.textContent = "Saved."; status.className = "skill-save-status success";
+            setTimeout(() => setEditMode(false), 800);
+          } catch (e) {
+            status.textContent = "Save failed: " + e.message;
+            status.className = "skill-save-status error";
+          } finally { saveBtn.disabled = false; }
+        });
+      } else {
+        ta.hidden = true;
+        preview.hidden = false;
+        renderPreview(currentContent);
+        footer.innerHTML = `
+          <button type="button" class="del-btn skill-del-btn">Delete</button>
+          <span class="skill-save-status"></span>
+          <button type="button" class="btn-save skill-edit-btn">Edit</button>
+        `;
+        footer.querySelector(".skill-edit-btn").addEventListener("click", () => setEditMode(true));
+        footer.querySelector(".skill-del-btn").addEventListener("click", async () => {
+          if (!await appConfirm(`Delete skill "${name}"?`)) return;
+          try {
+            await skillsDel(`/skills/registry/${name}`);
+            state.skills.editing = null;
+            renderSkills();
+          } catch (e) {
+            if (e.code === "LINKED_IN_AGENTS") {
+              const agents = (e.details && e.details.agents || []).join(", ");
+              if (!await appConfirm(`"${name}" is still used by: ${agents}. Remove links and delete?`)) return;
+              try { await skillsDel(`/skills/registry/${name}?force=1`); state.skills.editing = null; renderSkills(); }
+              catch (e2) { setStatus("Delete failed: " + e2.message, "error"); }
+            } else {
+              setStatus("Delete failed: " + e.message, "error");
+            }
+          }
+        });
+      }
+    }
 
     // Build resource sub-tabs.
     const resourceDirs = [...new Set((detail.resources || []).map(r => r.split("/")[0]))];
@@ -1567,40 +1824,374 @@
       const count = (detail.resources || []).filter(r => r.startsWith(d + "/")).length;
       return { label: `${d}/ (${count})`, key: d };
     })];
-    tabsEl.innerHTML = `<div class="settings-subtabs" role="tablist" style="margin-bottom:8px">
+    tabsEl.innerHTML = `<div class="settings-subtabs" role="tablist">
       ${tabs.map((t, i) => `<button type="button" data-tabkey="${escHtml(t.key)}" class="${i === 0 ? "active" : ""}">${escHtml(t.label)}</button>`).join("")}
     </div>`;
     tabsEl.querySelectorAll("button").forEach(btn => {
       btn.addEventListener("click", () => {
         tabsEl.querySelectorAll("button").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
-        if (btn.dataset.tabkey === "skill-md") {
-          ta.value = currentContent; ta.readOnly = false; currentReadOnly = false;
+        currentTab = btn.dataset.tabkey;
+        if (currentTab === "skill-md") {
+          if (isEditing) { ta.hidden = false; preview.hidden = true; ta.value = currentContent; }
+          else           { ta.hidden = true;  preview.hidden = false; renderPreview(currentContent); }
         } else {
-          const files = (detail.resources || []).filter(r => r.startsWith(btn.dataset.tabkey + "/"));
+          const files = (detail.resources || []).filter(r => r.startsWith(currentTab + "/"));
           ta.value = files.length ? files.join("\n") : "(empty)";
-          ta.readOnly = true; currentReadOnly = true;
+          ta.hidden = false; preview.hidden = true;
+          ta.readOnly = true;
         }
       });
     });
 
-    ta.value = currentContent;
-    ta.addEventListener("input", () => { if (!currentReadOnly) currentContent = ta.value; });
+    // Initial render.
+    renderFrontmatterCard(currentContent);
+    setEditMode(false);
+  }
 
-    const saveBtn = bodyEl.querySelector(".skill-save-btn");
-    const saveStatus = bodyEl.querySelector(".skill-save-status");
-    saveBtn.addEventListener("click", async () => {
-      saveBtn.disabled = true; saveStatus.textContent = "Saving…"; saveStatus.className = "skill-save-status";
+  // ─── Skills — remote registries ───────────────────────────────────────
+
+  async function renderRemoteRegistriesSection(host) {
+    const section = document.createElement("section");
+    section.className = "form-section";
+    section.innerHTML = `
+      <h3>Remote registries
+        <button type="button" class="add-btn" id="remote-reg-add">+ Add</button>
+      </h3>
+      <div id="remote-reg-list"></div>
+    `;
+    host.appendChild(section);
+
+    const listEl = section.querySelector("#remote-reg-list");
+    await refreshRemoteRegList(listEl);
+
+    section.querySelector("#remote-reg-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog();
+      if (!result) return;
       try {
-        const res = await skillsPut(`/skills/registry/${name}`, { content: currentContent, mtime: currentMtime });
-        currentMtime = res.mtime;
-        saveStatus.textContent = "Saved."; saveStatus.className = "skill-save-status success";
-        setTimeout(() => { if (saveStatus.textContent === "Saved.") saveStatus.textContent = ""; }, 2000);
+        await skillsPost("/skills/remotes", result);
+        await refreshRemoteRegList(listEl);
       } catch (e) {
-        saveStatus.textContent = "Save failed: " + e.message;
-        saveStatus.className = "skill-save-status error";
-      } finally { saveBtn.disabled = false; }
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
     });
+  }
+
+  async function refreshRemoteRegList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/skills/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install skills.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.skills.browsingRemote = { id: r.id, name: r.name, url: r.url };
+        renderSkills();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", hasToken: !!r.has_token },
+          isEdit: true,
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/skills/remotes/${r.id}`, result);
+          delete remoteSkillsCache[r.id];
+          await refreshRemoteRegList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/skills/remotes/${r.id}`);
+          delete remoteSkillsCache[r.id];
+          await refreshRemoteRegList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  const remoteSkillsCache = {}; // keyed by registry ID → { skills, timestamp }
+  const REMOTE_CACHE_TTL = 90 * 60 * 1000; // 90 minutes
+
+  async function renderRemoteBrowseView() {
+    const { id, name } = state.skills.browsingRemote;
+    const cached = remoteSkillsCache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    bodyEl.innerHTML = `
+      <div class="settings-form skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registry</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the full repository tree for SKILL.md files. This may take a moment.</p>
+          </div>
+        ` : ""}
+        <div id="remote-browse-content"></div>
+      </div>
+    `;
+    bodyEl.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.skills.browsingRemote = null;
+      renderSkills();
+    });
+
+    const contentEl = bodyEl.querySelector("#remote-browse-content");
+
+    function populateContent(skills) {
+      contentEl.innerHTML = "";
+
+      const truncated = skills.some(sk => sk.dir_path === "__truncated__");
+      const realSkills = skills.filter(sk => sk.dir_path !== "__truncated__");
+
+      const skillCount = realSkills.length;
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${skillCount} skill${skillCount !== 1 ? "s" : ""}${truncated ? " (tree truncated — some skills may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!realSkills.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No skills found in this registry.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const sk of realSkills) {
+        const g = sk.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(sk);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1;
+        if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      function buildSkillCard(sk) {
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card";
+
+        const tagsHtml = (sk.tags && sk.tags.length)
+          ? `<div class="skill-mkt-tags">${sk.tags.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")}</div>`
+          : "";
+        const authorHtml = sk.author
+          ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">${escHtml(sk.author)}</span></div>`
+          : "";
+        const actionHtml = sk.installed
+          ? `<span class="remote-skill-installed-badge">Installed</span>`
+          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+
+        card.innerHTML = `
+          <div class="skill-mkt-header">
+            <span class="skill-mkt-filename">${ICONS.skills}${escHtml(sk.name)}</span>
+            ${actionHtml}
+          </div>
+          <div class="skill-mkt-body">
+            ${authorHtml}
+            <p class="skill-mkt-desc">${escHtml(sk.description || "(no description)")}</p>
+            ${tagsHtml}
+          </div>
+        `;
+
+        if (!sk.installed) {
+          const installBtn = card.querySelector(".remote-install-btn");
+          installBtn.addEventListener("click", async () => {
+            installBtn.disabled = true;
+            installBtn.textContent = "Installing…";
+            try {
+              const res = await skillsPost(`/skills/remotes/${id}/install/${sk.dir_path}`, {});
+              installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+              sk.installed = true;
+              setStatus(`Skill "${res.name}" installed successfully.`, "success");
+            } catch (e) {
+              installBtn.disabled = false;
+              installBtn.textContent = "Install";
+              setStatus("Install failed: " + e.message, "error");
+            }
+          });
+        }
+
+        card.addEventListener("click", e => {
+          if (e.target.closest(".remote-install-btn")) return;
+          state.skills.viewingRemote = { ...state.skills.browsingRemote, skill: sk };
+          renderSkills();
+        });
+
+        return card;
+      }
+
+      for (const group of sortedGroups) {
+        const groupSkills = grouped.get(group);
+        if (group) {
+          const groupHdr = document.createElement("div");
+          groupHdr.className = "remote-group-header";
+          groupHdr.textContent = group.replace(/\//g, " › ");
+          contentEl.appendChild(groupHdr);
+        }
+        const grid = document.createElement("div");
+        grid.className = "skill-marketplace-grid";
+        for (const sk of groupSkills) grid.appendChild(buildSkillCard(sk));
+        contentEl.appendChild(grid);
+      }
+    }
+
+    // Show cached data immediately while the fresh fetch runs in the background.
+    if (hasCached) populateContent(cached.skills);
+
+    let skills;
+    try {
+      const res = await skillsGet(`/skills/remotes/${id}/browse`);
+      skills = res.skills || [];
+    } catch (e) {
+      if (!hasCached) {
+        const loadEl = bodyEl.querySelector(".remote-browse-loading");
+        if (loadEl) loadEl.outerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      }
+      const badge = bodyEl.querySelector(".remote-browse-refresh-badge");
+      if (badge) badge.hidden = true;
+      return;
+    }
+
+    // Guard: user may have navigated away while the fetch was in flight.
+    if (!bodyEl.contains(contentEl)) return;
+
+    remoteSkillsCache[id] = { skills, timestamp: Date.now() };
+
+    const loadEl = bodyEl.querySelector(".remote-browse-loading");
+    if (loadEl) loadEl.remove();
+    const badge = bodyEl.querySelector(".remote-browse-refresh-badge");
+    if (badge) badge.hidden = true;
+
+    populateContent(skills);
+  }
+
+  async function renderRemoteSkillDetailView() {
+    const { id, name, skill } = state.skills.viewingRemote;
+    bodyEl.innerHTML = `
+      <div class="settings-form skill-detail-view">
+        <div class="skill-detail-header">
+          <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
+        </div>
+        <div class="skill-frontmatter-card" id="skill-fm-card">
+          <p class="settings-loading">Loading…</p>
+        </div>
+        <div class="skill-content-wrap">
+          <div class="skill-md-preview markdown-body"></div>
+        </div>
+        <div class="skill-detail-footer">
+          <span></span>
+          <span class="skill-save-status"></span>
+          ${skill.installed
+            ? `<span class="remote-skill-installed-badge">Installed</span>`
+            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+        </div>
+      </div>
+    `;
+
+    bodyEl.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.skills.viewingRemote = null;
+      renderSkills();
+    });
+
+    const preview = bodyEl.querySelector(".skill-md-preview");
+    const fmCard  = bodyEl.querySelector("#skill-fm-card");
+
+    let content;
+    try {
+      const res = await skillsGet(`/skills/remotes/${id}/skill/${skill.dir_path}`);
+      content = res.content;
+    } catch (e) {
+      fmCard.innerHTML = "";
+      preview.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+
+    // Frontmatter card.
+    const fm = parseFrontmatter(content);
+    const rows = [];
+    for (const [k, v] of Object.entries(fm)) {
+      if (typeof v === "object" && !Array.isArray(v)) {
+        for (const [sk2, sv] of Object.entries(v)) {
+          const display = Array.isArray(sv)
+            ? sv.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")
+            : escHtml(String(sv));
+          const cls = Array.isArray(sv) ? "skill-fm-value skill-fm-tags" : "skill-fm-value";
+          rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(sk2)}</span><span class="${cls}">${display}</span></div>`);
+        }
+      } else {
+        const display = Array.isArray(v)
+          ? v.map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("")
+          : escHtml(String(v));
+        const cls = Array.isArray(v) ? "skill-fm-value skill-fm-tags" : "skill-fm-value";
+        rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(k)}</span><span class="${cls}">${display}</span></div>`);
+      }
+    }
+    fmCard.innerHTML = rows.join("") || "";
+
+    // Markdown preview.
+    if (typeof marked !== "undefined") {
+      preview.innerHTML = marked.parse(stripFrontmatter(content));
+    } else {
+      preview.textContent = stripFrontmatter(content);
+    }
+
+    // Install button.
+    const installBtn = bodyEl.querySelector(".remote-install-btn");
+    if (installBtn) {
+      installBtn.addEventListener("click", async () => {
+        installBtn.disabled = true;
+        installBtn.textContent = "Installing…";
+        const statusEl = bodyEl.querySelector(".skill-save-status");
+        try {
+          const res = await skillsPost(`/skills/remotes/${id}/install/${skill.dir_path}`, {});
+          installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+          skill.installed = true;
+          setStatus(`Skill "${res.name}" installed successfully.`, "success");
+        } catch (e) {
+          installBtn.disabled = false;
+          installBtn.textContent = "Install";
+          if (statusEl) { statusEl.textContent = e.message; statusEl.className = "skill-save-status error"; }
+        }
+      });
+    }
   }
 
   // ─── Skills — upload helpers ───────────────────────────────────────────

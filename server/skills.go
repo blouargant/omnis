@@ -32,8 +32,9 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // skillsDeps holds resolved filesystem paths for skills management.
 type skillsDeps struct {
-	RegistryDir string // abs path to skills-registry/installed/
-	AgentYAML   string // abs path to agent.yaml (re-read on each request for freshness)
+	RegistryDir         string // abs path to skills-registry/installed/
+	AgentYAML           string // abs path to agent.yaml (re-read on each request for freshness)
+	RemoteRegistriesCfg string // abs path to config/remote_registries.json
 }
 
 // resolveSkillsDeps derives skills paths from the already-resolved config files.
@@ -43,17 +44,52 @@ func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
 		registryDir = v
 	}
 	absReg, _ := filepath.Abs(registryDir)
+	cfgDir := filepath.Dir(cfgFiles.Agent)
+	absRemoteCfg, _ := filepath.Abs(filepath.Join(cfgDir, "remote_registries.json"))
 	return skillsDeps{
-		RegistryDir: absReg,
-		AgentYAML:   cfgFiles.Agent,
+		RegistryDir:         absReg,
+		AgentYAML:           cfgFiles.Agent,
+		RemoteRegistriesCfg: absRemoteCfg,
 	}
 }
 
 // ── Frontmatter ────────────────────────────────────────────────────────────
 
 type skillFrontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name        string                 `yaml:"name"`
+	Description string                 `yaml:"description"`
+	Metadata    map[string]interface{} `yaml:"metadata"`
+}
+
+func (fm skillFrontmatter) author() string {
+	if fm.Metadata == nil {
+		return ""
+	}
+	s, _ := fm.Metadata["author"].(string)
+	return s
+}
+
+func (fm skillFrontmatter) tags() []string {
+	if fm.Metadata == nil {
+		return nil
+	}
+	raw, ok := fm.Metadata["tags"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // parseSkillFrontmatter extracts YAML front matter (--- ... ---) from a SKILL.md.
@@ -78,11 +114,14 @@ func parseSkillFrontmatter(content []byte) (skillFrontmatter, error) {
 // ── Registry helpers ───────────────────────────────────────────────────────
 
 type skillInfo struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	MTime       time.Time `json:"mtime"`
-	Size        int64     `json:"size"`
-	LinkedIn    []string  `json:"linked_in"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Author      string                 `json:"author,omitempty"`
+	Tags        []string               `json:"tags,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	MTime       time.Time              `json:"mtime"`
+	Size        int64                  `json:"size"`
+	LinkedIn    []string               `json:"linked_in"`
 }
 
 // listRegistrySkills scans registryDir and returns metadata for each skill.
@@ -114,6 +153,9 @@ func listRegistrySkills(registryDir string) ([]skillInfo, error) {
 		info := skillInfo{
 			Name:        displayName,
 			Description: fm.Description,
+			Author:      fm.author(),
+			Tags:        fm.tags(),
+			Metadata:    fm.Metadata,
 			Size:        int64(len(data)),
 			LinkedIn:    []string{},
 		}
@@ -567,6 +609,9 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		c.JSON(http.StatusOK, gin.H{
 			"name":        firstNonEmpty(fm.Name, name),
 			"description": fm.Description,
+			"author":      fm.author(),
+			"tags":        fm.tags(),
+			"metadata":    fm.Metadata,
 			"content":     string(data),
 			"mtime":       mtime,
 			"resources":   collectResources(filepath.Join(deps.RegistryDir, name)),
@@ -819,6 +864,9 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		}
 		c.Status(http.StatusNoContent)
 	})
+
+	// ── Remote registries ─────────────────────────────────────────────────
+	registerRemoteRegistryRoutes(rg, deps.RemoteRegistriesCfg, deps.RegistryDir)
 
 	// POST /agents/:agent/skills — bulk action: body {"action":"all"} or {"action":"none"}.
 	rg.POST("/agents/:agent/skills", func(c *gin.Context) {

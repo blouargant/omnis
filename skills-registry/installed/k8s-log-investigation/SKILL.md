@@ -1,6 +1,9 @@
 ---
 name: k8s-log-investigation
 description: Investigate Kubernetes pod logs efficiently when logs are large. Use whenever the user mentions kubernetes, k8s, pod logs, errors, warnings, exceptions, crash loops, or asks to diagnose logs without dumping everything.
+metadata:
+  author: blouargant@chapsvision.com
+  tags: [ "kubernetes", "logs", "investigation", "playbook" ]
 ---
 
 # Kubernetes Log Investigation

@@ -162,7 +162,8 @@
 .settings-footer .settings-status.success { color: #89d185; }
 .settings-footer .settings-status.error   { color: #f48771; }
 
-.settings-footer button {
+.settings-footer button,
+.skill-detail-footer button {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -171,11 +172,16 @@
   cursor: pointer;
   color: var(--text);
 }
-.settings-footer button:hover:not(:disabled) { background: var(--bg-raised-hover); }
-.settings-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
-.settings-footer .btn-save        { background: var(--accent); color: #ffffff; border-color: var(--accent); }
-.settings-footer .btn-save:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-.settings-footer .btn-save:disabled { background: var(--accent); border-color: var(--accent); opacity: 0.5; }
+.settings-footer button:hover:not(:disabled),
+.skill-detail-footer button:hover:not(:disabled) { background: var(--bg-raised-hover); }
+.settings-footer button:disabled,
+.skill-detail-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.settings-footer .btn-save,
+.skill-detail-footer .btn-save        { background: var(--accent); color: #ffffff; border-color: var(--accent); }
+.settings-footer .btn-save:hover:not(:disabled),
+.skill-detail-footer .btn-save:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.settings-footer .btn-save:disabled,
+.skill-detail-footer .btn-save:disabled { background: var(--accent); border-color: var(--accent); opacity: 0.5; }
 
 
 /* Raw editor */
@@ -804,11 +810,40 @@
 }
 .app-dialog-actions .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
+/* Registry multi-field dialog */
+.registry-dialog { min-width: 420px; max-width: 520px; }
+.registry-dialog-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.registry-dialog-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.registry-dialog-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.registry-dialog-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+.registry-dialog-field input,
+.registry-dialog-field select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+.registry-dialog-field input:focus,
+.registry-dialog-field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
 /* ─── Skills panel ─────────────────────────────────────────────────────── */
 
-.skills-subtab-body { padding-top: 0.5rem; }
+.skills-subtab-body { padding-top: 0.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
 
-/* Registry cards */
+/* Registry cards — legacy (kept for agent blocks) */
 .skill-card-desc {
   margin: 0.25rem 0 0.1rem;
   font-size: 0.85rem;
@@ -817,6 +852,127 @@
 .skill-card-links { margin: 0.15rem 0 0; font-size: 0.8rem; }
 .skills-unlinked { opacity: 0.55; }
 .skill-upload-label { display: inline-flex; align-items: center; }
+
+/* Marketplace-style skill cards */
+.skill-marketplace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.9rem;
+  padding: 0.25rem 0 0.5rem;
+}
+.skill-mkt-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  cursor: pointer;
+}
+.skill-mkt-card:hover { border-color: var(--accent); }
+
+/* Terminal-style header bar */
+.skill-mkt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.skill-mkt-dots { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.dot-red    { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green  { background: #28c840; }
+.skill-mkt-filename {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-mkt-filename svg { stroke: var(--accent); flex-shrink: 0; }
+
+/* Card body */
+.skill-mkt-body {
+  flex: 1;
+  padding: 0.65rem 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.skill-mkt-author {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+.skill-mkt-author-icon {
+  font-size: 0.65rem;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.skill-mkt-author-name {
+  color: var(--accent);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-mkt-desc {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--text);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skill-mkt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+.skill-mkt-tag {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* Card footer */
+.skill-mkt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--border);
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.skill-mkt-date { font-size: 0.75rem; color: var(--text-muted); flex-shrink: 0; }
+.skill-mkt-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.skill-mkt-linked { font-size: 0.75rem; color: var(--text-muted); }
+.skill-mkt-unlinked { font-size: 0.75rem; opacity: 0.45; }
+.skill-mkt-del-btn { padding: 0.15rem 0.5rem !important; font-size: 0.75rem !important; height: auto !important; width: auto !important; }
+.skill-detail-footer .del-btn { width: auto; height: auto; padding: 0.4rem 0.9rem; font-size: 0.85rem; background: #3a1f1f; border-color: #5a2a2a; color: #f48771; }
+.skill-detail-footer .del-btn:hover { background: #4a2525; }
 
 /* Drop-zone active overlay */
 .drop-active { outline: 2px dashed var(--accent); outline-offset: -4px; }
@@ -841,8 +997,82 @@
 }
 .skill-back-btn:hover { background: var(--bg-raised); color: var(--text); }
 .skill-detail-name { font-weight: 600; font-size: 1rem; }
-.skill-detail-desc { margin: 0 0 0.5rem; }
-.skill-md-editor { min-height: 320px; resize: vertical; }
+.skill-detail-desc { margin: 0 0 0.4rem; }
+.skill-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+}
+.skill-frontmatter-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.skill-fm-row { display: flex; align-items: baseline; gap: 0.75rem; }
+.skill-fm-key { color: var(--accent); flex-shrink: 0; min-width: 90px; }
+.skill-fm-value { color: var(--text); }
+.skill-fm-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.skill-content-wrap { display: flex; flex-direction: column; }
+.skill-content-wrap .settings-subtabs { margin-bottom: 0; }
+.skill-md-editor { min-height: 520px; resize: vertical; border-top-left-radius: 0; }
+
+.skill-md-preview {
+  border-top-left-radius: 0;
+  min-height: 520px;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  overflow-y: auto;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--text);
+}
+.skill-md-preview h1, .skill-md-preview h2, .skill-md-preview h3,
+.skill-md-preview h4, .skill-md-preview h5, .skill-md-preview h6 {
+  color: var(--text);
+  margin: 1.1em 0 0.4em;
+  font-weight: 600;
+}
+.skill-md-preview h1 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.skill-md-preview h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.skill-md-preview p  { margin: 0.5em 0; }
+.skill-md-preview ul, .skill-md-preview ol { margin: 0.4em 0; padding-left: 1.5em; }
+.skill-md-preview li { margin: 0.2em 0; }
+.skill-md-preview code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--bg-raised);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.skill-md-preview pre {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.skill-md-preview pre code { background: none; padding: 0; }
+.skill-md-preview blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5em 0;
+  padding: 0.2em 0.75em;
+  color: var(--text-muted);
+}
+.skill-md-preview strong { color: var(--text); }
+.skill-md-preview a { color: var(--accent); }
 .skill-detail-footer {
   display: flex;
   align-items: center;
@@ -958,4 +1188,135 @@
 .skills-agent-body {
   margin-top: 0.4rem;
   overflow: hidden;
+}
+
+/* ── Remote registries ──────────────────────────────────────────────────── */
+
+.remote-reg-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  background: var(--bg-raised);
+}
+.remote-reg-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.remote-reg-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.remote-reg-url {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.remote-reg-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.remote-reg-actions .del-btn,
+.remote-reg-actions .edit-btn {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8rem;
+}
+.edit-btn {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text);
+}
+.edit-btn:hover { background: var(--bg-raised-hover); }
+.remote-reg-provider {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  text-transform: capitalize;
+}
+
+/* Remote browse view */
+.remote-browse-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.remote-browse-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.remote-browse-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.remote-browse-loading {
+  padding: 0.5rem 0;
+}
+.remote-browse-top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.remote-browse-refresh-badge {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Remote skill cards */
+.remote-skill-card .skill-mkt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.remote-skill-installed-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  background: rgba(137, 209, 133, 0.15);
+  color: #89d185;
+  border: 1px solid rgba(137, 209, 133, 0.3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.remote-install-btn {
+  flex-shrink: 0;
+}
+
+/* Remote skill group headers */
+.remote-group-header {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin: 1.1rem 0 0.45rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+.remote-group-header:first-child {
+  margin-top: 0;
 }
