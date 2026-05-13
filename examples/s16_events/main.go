@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/core/stream"
-	fstools "github.com/blouargant/agent-toolkit/core/tools"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/core/stream"
+	fstools "github.com/blouargant/yoke/core/tools"
 )
 
 func main() {

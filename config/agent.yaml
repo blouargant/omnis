@@ -45,7 +45,7 @@ agents:
       mailbox: false
       model_ref: balanced
       name: curator
-app_name: agent-toolkit
+app_name: yoke
 bash_output_filters_dir: config/filters
 bash_timeout_seconds: 120
 mcp_config_path: config/mcp_config.yaml

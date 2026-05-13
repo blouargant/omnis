@@ -1,4 +1,4 @@
-// Package agent provides a ready-to-use agent-toolkit agent that can be
+// Package agent provides a ready-to-use yoke agent that can be
 // imported and used by other Go projects.
 //
 // Usage:
@@ -23,19 +23,19 @@ import (
 	"google.golang.org/adk/tool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/core/llm"
-	fstools "github.com/blouargant/agent-toolkit/core/tools"
-	"github.com/blouargant/agent-toolkit/internal/askuser"
-	"github.com/blouargant/agent-toolkit/internal/bg"
-	mcpcfg "github.com/blouargant/agent-toolkit/internal/mcp"
-	"github.com/blouargant/agent-toolkit/internal/skills"
-	"github.com/blouargant/agent-toolkit/internal/softskills"
-	"github.com/blouargant/agent-toolkit/internal/tasks"
-	"github.com/blouargant/agent-toolkit/internal/teammates"
-	"github.com/blouargant/agent-toolkit/internal/todo"
-	"github.com/blouargant/agent-toolkit/internal/worktree"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/core/llm"
+	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/bg"
+	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/yoke/internal/skills"
+	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/yoke/internal/tasks"
+	"github.com/blouargant/yoke/internal/teammates"
+	"github.com/blouargant/yoke/internal/todo"
+	"github.com/blouargant/yoke/internal/worktree"
 )
 
 // AgentResult holds the fully configured agent and its supporting components.
@@ -111,7 +111,7 @@ type Options struct {
 	MCPSConfigPath string
 	// PermissionsConfigPath is the path to the permissions config (default: "config/permissions.yaml").
 	PermissionsConfigPath string
-	// AppName is the application name for the runner (default: "agent-toolkit").
+	// AppName is the application name for the runner (default: "yoke").
 	AppName string
 	// ConfigPath is the runtime YAML configuration path (default: "config/agent.yaml").
 	ConfigPath string
@@ -384,7 +384,7 @@ func hasTool(tools []string, key string) bool {
 	return false
 }
 
-// NewAgent creates a fully configured agent-toolkit agent that can be used
+// NewAgent creates a fully configured yoke agent that can be used
 // by other Go projects. It returns the agent, runner config, and supporting
 // components.
 //
@@ -577,7 +577,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 
 	// Curator hook: after each session ends, fire-and-forget the curator
 	// agent with the per-session audit + statelog paths. Best-effort —
-	// process exit aborts. To run synchronously, use `agent-toolkit curate`.
+	// process exit aborts. To run synchronously, use `yoke curate`.
 	if curatorCfg, ok := runtime.AgentConfig("curator"); ok && curatorCfg.Enabled {
 		curatorLLM, err := modelForAgent(curatorCfg)
 		if err == nil {

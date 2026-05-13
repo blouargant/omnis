@@ -28,8 +28,8 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	fstools "github.com/blouargant/agent-toolkit/core/tools"
+	"github.com/blouargant/yoke/core/agentkit"
+	fstools "github.com/blouargant/yoke/core/tools"
 )
 
 // CuratorPrompt is the curator's role-specific instruction. Appended to

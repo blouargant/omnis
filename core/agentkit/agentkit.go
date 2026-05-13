@@ -18,7 +18,7 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/agent-toolkit/core/llm"
+	"github.com/blouargant/yoke/core/llm"
 )
 
 // DefaultModel is kept for documentation; the actual default is owned by

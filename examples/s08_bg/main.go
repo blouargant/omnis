@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/stream"
-	"github.com/blouargant/agent-toolkit/internal/bg"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/stream"
+	"github.com/blouargant/yoke/internal/bg"
 )
 
 func main() {

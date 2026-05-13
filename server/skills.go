@@ -18,7 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/agent-toolkit/agent"
+	"github.com/blouargant/yoke/agent"
 )
 
 const (

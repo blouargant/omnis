@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/agent-toolkit/internal/askuser"
+	"github.com/blouargant/yoke/internal/askuser"
 )
 
 // askUserIn is the JSON schema for the ask_user tool.

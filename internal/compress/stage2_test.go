@@ -14,7 +14,7 @@ import (
 
 	"google.golang.org/adk/model"
 
-	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/yoke/core/events"
 )
 
 // countingLLM wraps a fixed summary and counts how many times

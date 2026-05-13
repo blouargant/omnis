@@ -1,11 +1,11 @@
-// curate.go — `agent-toolkit curate` subcommand. Runs the soft-skills
+// curate.go — `yoke curate` subcommand. Runs the soft-skills
 // curator agent one-shot against an existing session's audit + statelog
 // files. Synchronous (unlike the EventSessionEnd hook which fires async).
 //
 // Usage:
 //
-//	agent-toolkit curate --user <id> --session <id>
-//	agent-toolkit curate --audit <path> --statelog <path>
+//	yoke curate --user <id> --session <id>
+//	yoke curate --audit <path> --statelog <path>
 //
 // At least one of (audit, statelog) must resolve to an existing file.
 package main
@@ -18,9 +18,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/llm"
-	"github.com/blouargant/agent-toolkit/internal/softskills"
+	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/llm"
+	"github.com/blouargant/yoke/internal/softskills"
 )
 
 func runCurate(ctx context.Context, opts options, args []string) error {
@@ -56,7 +56,7 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 	fs.StringVar(&auditPath, "audit", "", "Explicit path to the per-session audit (logs/agent_memory_*.md)")
 	fs.StringVar(&statePath, "statelog", "", "Explicit path to the per-session State Log (logs/agent_statelog_*.json)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit curate (--user <id> --session <id> | --audit <path> --statelog <path>)\n\nFlags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: yoke curate (--user <id> --session <id> | --audit <path> --statelog <path>)\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

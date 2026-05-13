@@ -8,10 +8,10 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/core/permissions"
-	"github.com/blouargant/agent-toolkit/internal/cache"
-	"github.com/blouargant/agent-toolkit/internal/compress"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/core/permissions"
+	"github.com/blouargant/yoke/internal/cache"
+	"github.com/blouargant/yoke/internal/compress"
 )
 
 // buildPlugins wires the runner-level plugins (events bridge, permissions,

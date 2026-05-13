@@ -59,7 +59,7 @@ func TestTotalCostDollars_DefaultsCachedToInputPrice(t *testing.T) {
 
 func TestBuildStatusText_ContainsTokensAndCost(t *testing.T) {
 	cfg := Config{
-		AppName:                    "agent-toolkit",
+		AppName:                    "yoke",
 		SessionID:                  "s1",
 		UserID:                     "u1",
 		InputTokenPricePerMillion:  0.6,
@@ -76,7 +76,7 @@ func TestBuildStatusText_ContainsTokensAndCost(t *testing.T) {
 }
 
 func TestBuildStatusText_HidesCostWithoutPrices(t *testing.T) {
-	cfg := Config{AppName: "agent-toolkit", SessionID: "s1", UserID: "u1"}
+	cfg := Config{AppName: "yoke", SessionID: "s1", UserID: "u1"}
 	text := buildStatusText(cfg, 1234, 0, 0, 567)
 	if strings.Contains(text, "$") {
 		t.Fatalf("status should not include dollar total when prices are missing: %q", text)
@@ -84,7 +84,7 @@ func TestBuildStatusText_HidesCostWithoutPrices(t *testing.T) {
 }
 
 func TestBuildStatusText_ShowsCacheBreakdownWhenPresent(t *testing.T) {
-	cfg := Config{AppName: "agent-toolkit", SessionID: "s1", UserID: "u1"}
+	cfg := Config{AppName: "yoke", SessionID: "s1", UserID: "u1"}
 	text := buildStatusText(cfg, 1234, 800, 100, 567)
 	if !strings.Contains(text, "cache r/w: 800/100") {
 		t.Fatalf("status should expose cache read/write counts: %q", text)

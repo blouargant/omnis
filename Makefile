@@ -1,6 +1,6 @@
 # Yoke Makefile
 
-MODULE      := github.com/blouargant/agent-toolkit
+MODULE      := github.com/blouargant/yoke
 BIN_DIR     := bin
 DIST_DIR    := dist
 EXAMPLES_DIR := examples

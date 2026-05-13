@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/stream"
-	"github.com/blouargant/agent-toolkit/internal/worktree"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/stream"
+	"github.com/blouargant/yoke/internal/worktree"
 )
 
 func main() {

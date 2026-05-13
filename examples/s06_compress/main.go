@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/stream"
-	fstools "github.com/blouargant/agent-toolkit/core/tools"
-	"github.com/blouargant/agent-toolkit/internal/compress"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/stream"
+	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/yoke/internal/compress"
 )
 
 func main() {

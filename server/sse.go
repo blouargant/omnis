@@ -15,7 +15,7 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/yoke/core/events"
 )
 
 // messageRequest is the JSON body expected by POST /api/sessions/:id/messages.

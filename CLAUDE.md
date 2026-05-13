@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Build
 make build              # root binary + all examples (host platform)
-make build-root         # bin/agent-toolkit only
+make build-root         # bin/yoke only
 make build-server       # bin/server (HTTP API)
 make release            # cross-platform binaries → dist/
 

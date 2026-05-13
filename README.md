@@ -1,4 +1,4 @@
-# agent-toolkit
+# yoke
 
 A **generic, vendor-neutral agent harness** built in Go, inspired by the
 methodology proven by Anthropic's **Claude Code**. The harness encodes a
@@ -73,8 +73,8 @@ Out of the box the agent has:
 Requires Go ≥ 1.25.
 
 ```bash
-git clone https://github.com/blouargant/agent-toolkit
-cd agent-toolkit
+git clone https://github.com/blouargant/yoke
+cd yoke
 go build ./...
 ```
 
@@ -182,7 +182,7 @@ Then open <http://localhost:8080> and paste the token when prompted.
 For production-ish use, build once and run the resulting binary:
 
 ```bash
-make clean all                           # → bin/agent-toolkit, bin/server, bin/<examples>
+make clean all                           # → bin/yoke, bin/server, bin/<examples>
 ./bin/server
 ```
 
@@ -244,7 +244,7 @@ See [docs/specialising.md](docs/specialising.md) for the full recipe.
 ## Project layout
 
 ```
-agent-toolkit/
+yoke/
 ├── cmd/
 │   ├── full/                    # all-in-one launcher (REPL + web)
 │   └── sNN_*/                   # 23 single-component demos (one per article phase)

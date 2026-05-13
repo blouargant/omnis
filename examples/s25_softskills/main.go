@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/internal/softskills"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/internal/softskills"
 )
 
 func main() {

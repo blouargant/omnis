@@ -10,9 +10,9 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/agenttool"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/internal/teammates"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/teammates"
 )
 
 // buildSubAgents constructs every enabled sub-agent (skipping leader and

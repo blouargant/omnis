@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/agent"
+	"github.com/blouargant/yoke/agent"
 )
 
 // gcTestEnv chdirs into a temp directory so the GC sees an isolated filesystem.

@@ -1,6 +1,6 @@
 ---
 name: coding-conventions
-description: Go coding conventions, architectural rules and anti-patterns for the agent-toolkit repository. Use whenever writing or reviewing Go code in this repo. Mention triggers - write Go code, refactor, code review, conventions, style, architecture rule, where should this go.
+description: Go coding conventions, architectural rules and anti-patterns for the yoke repository. Use whenever writing or reviewing Go code in this repo. Mention triggers - write Go code, refactor, code review, conventions, style, architecture rule, where should this go.
 ---
 
 # Coding conventions

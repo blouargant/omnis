@@ -5,9 +5,9 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	mcpcfg "github.com/blouargant/agent-toolkit/internal/mcp"
-	"github.com/blouargant/agent-toolkit/internal/skills"
-	"github.com/blouargant/agent-toolkit/internal/softskills"
+	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/yoke/internal/skills"
+	"github.com/blouargant/yoke/internal/softskills"
 )
 
 // buildLeaderToolsets resolves the leader's effective skills, soft-skills

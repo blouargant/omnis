@@ -1,16 +1,16 @@
 ---
 name: project-overview
-description: Bootstrap context for a new development session on the agent-toolkit repository. Use at the start of every session to learn what this codebase is, its design contract, the directory layout, and where each concern lives. Mention triggers - new session, get up to speed, project structure, where is X, what does this repo do.
+description: Bootstrap context for a new development session on the yoke repository. Use at the start of every session to learn what this codebase is, its design contract, the directory layout, and where each concern lives. Mention triggers - new session, get up to speed, project structure, where is X, what does this repo do.
 license: project
 metadata:
   audience: dev-agent
   scope: repo-bootstrap
 ---
 
-# Project overview — agent-toolkit
+# Project overview — yoke
 
 A **generic, vendor-neutral agent harness** in Go, inspired by Anthropic's
-**Claude Code** methodology. Module path: `github.com/blouargant/agent-toolkit`.
+**Claude Code** methodology. Module path: `github.com/blouargant/yoke`.
 
 ## The single most important rule
 
@@ -36,7 +36,7 @@ a `skills/<name>/SKILL.md` instead.**
 ## Directory map
 
 ```
-agent-toolkit/
+yoke/
 ├── cmd/
 │   ├── full/                  # all-in-one launcher (REPL + web). The binary you specialise.
 │   └── sNN_<topic>/           # 23 single-component demos, one per article phase

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/internal/filter"
+	"github.com/blouargant/yoke/internal/filter"
 )
 
 // alwaysBlock contains substrings that RunBash refuses outright. The

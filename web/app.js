@@ -1,4 +1,4 @@
-// Vanilla-JS client for the agent-toolkit HTTP API.
+// Vanilla-JS client for the yoke HTTP API.
 // Uses fetch + ReadableStream to consume SSE (EventSource doesn't allow
 // custom headers, so we use fetch with Authorization).
 

@@ -258,8 +258,8 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if got := runtime.SoftSkillsDir; got != "softskills" {
 		t.Fatalf("SoftSkillsDir = %q, want softskills", got)
 	}
-	if got := runtime.AppName; got != "agent-toolkit" {
-		t.Fatalf("AppName = %q, want agent-toolkit", got)
+	if got := runtime.AppName; got != "yoke" {
+		t.Fatalf("AppName = %q, want yoke", got)
 	}
 	if runtime.BashOutputFilterEnabled {
 		t.Fatal("BashOutputFilterEnabled = true, want false")

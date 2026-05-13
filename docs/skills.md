@@ -158,9 +158,9 @@ appends a short SKILL.md plus an INDEX.md entry.
 Run the curator on demand against an existing session's files:
 
 ```bash
-agent-toolkit curate --user alice --session 2025-01-15-deploy
+yoke curate --user alice --session 2025-01-15-deploy
 # or
-agent-toolkit curate --audit .agent_memory_alice_2025...md \
+yoke curate --audit .agent_memory_alice_2025...md \
                      --statelog .agent_statelog_alice_2025...json
 ```
 

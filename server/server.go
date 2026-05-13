@@ -16,10 +16,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/adk/runner"
 
-	toolkitagent "github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/internal/askuser"
-	"github.com/blouargant/agent-toolkit/internal/compress"
+	toolkitagent "github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/compress"
 )
 
 type renameRequest struct {

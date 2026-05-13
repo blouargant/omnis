@@ -35,10 +35,10 @@ import (
 	"google.golang.org/adk/runner"
 	"google.golang.org/genai"
 
-	toolkitagent "github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/core/llm"
-	"github.com/blouargant/agent-toolkit/internal/askuser"
+	toolkitagent "github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/core/llm"
+	"github.com/blouargant/yoke/internal/askuser"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -213,7 +213,7 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.SessionID = fmt.Sprintf("tui-%d", time.Now().Unix())
 	}
 	if cfg.AppName == "" {
-		cfg.AppName = "agent-toolkit"
+		cfg.AppName = "yoke"
 	}
 	subAgentSet := make(map[string]struct{}, len(cfg.SubAgentNames))
 	for _, name := range cfg.SubAgentNames {

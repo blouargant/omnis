@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/blouargant/agent-toolkit/core/agentkit"
-	"github.com/blouargant/agent-toolkit/core/stream"
+	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/core/stream"
 )
 
 func main() {

@@ -37,8 +37,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/agentkit"
+	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/agentkit"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func run() error {
 		ConfigPathStrict: os.Getenv("YOKE_CONFIG_PATH") != "",
 		SkillsDir:        os.Getenv("YOKE_SKILLS_DIR"),
 		SoftSkillsDir:    os.Getenv("YOKE_SOFTSKILLS_DIR"),
-		AppName:          envOr("YOKE_APP_NAME", "agent-toolkit-server"),
+		AppName:          envOr("YOKE_APP_NAME", "yoke-server"),
 		DebugLogging:     debug,
 	}
 

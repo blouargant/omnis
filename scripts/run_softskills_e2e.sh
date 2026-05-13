@@ -3,7 +3,7 @@
 #
 # 1) Builds the binary.
 # 2) Synthesises a realistic-looking audit + statelog for a fake session.
-# 3) Runs `agent-toolkit curate --audit ... --statelog ...`.
+# 3) Runs `yoke curate --audit ... --statelog ...`.
 # 4) Prints any new files under softskills/.
 #
 # Requires .env to be configured for whatever LLM provider you use.
@@ -25,8 +25,8 @@ if [[ -z "${YOKE_PROVIDER:-}" ]]; then
   exit 1
 fi
 
-echo "==> Building agent-toolkit"
-go build -o bin/agent-toolkit ./
+echo "==> Building yoke"
+go build -o bin/yoke ./
 
 KEY="softskills_e2e_$(date +%s)"
 AUDIT=".agent_memory_${KEY}.md"
@@ -73,7 +73,7 @@ cat > "$STATE" <<'EOF'
 EOF
 
 echo "==> Running curator"
-./bin/agent-toolkit curate \
+./bin/yoke curate \
   --audit "$AUDIT" \
   --statelog "$STATE" \
   --softskills softskills

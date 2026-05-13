@@ -35,5 +35,5 @@ go.work.sum
 bin/
 dist/
 logs/
-/agent-toolkit
+/yoke
 /server/server

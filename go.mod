@@ -1,4 +1,4 @@
-module github.com/blouargant/agent-toolkit
+module github.com/blouargant/yoke
 
 go 1.25.5
 

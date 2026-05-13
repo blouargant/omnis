@@ -20,8 +20,8 @@ import (
 
 	"google.golang.org/adk/model"
 
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/internal/softskills"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/softskills"
 )
 
 // curateTimeout caps how long a single curator invocation may run.

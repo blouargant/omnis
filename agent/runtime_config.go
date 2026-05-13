@@ -417,7 +417,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		ConfigPath:              defaultConfigPath,
 		SkillsDir:               "skills",
 		SoftSkillsDir:           "softskills",
-		AppName:                 "agent-toolkit",
+		AppName:                 "yoke",
 		BashOutputFilterEnabled: false,
 		BashOutputFiltersDir:    "config/filters",
 		BashTimeoutSeconds:      120,

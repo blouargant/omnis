@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/agent-toolkit/internal/askuser"
+	"github.com/blouargant/yoke/internal/askuser"
 )
 
 // askUserResponseRequest is the JSON body for POST /api/sessions/:id/ask-user/:qid.

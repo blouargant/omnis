@@ -6,7 +6,7 @@ This document maps the codebase and explains how the pieces interact.
 
 ```
                       ┌────────────────────────────────────┐
-                      │        agent-toolkit (root)        │
+                      │        yoke (root)        │
                       │  (launcher: REPL or web UI)        │
                       └─────────────────┬──────────────────┘
                                         │ wires

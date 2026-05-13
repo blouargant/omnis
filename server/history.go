@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/agent"
+	"github.com/blouargant/yoke/agent"
 )
 
 const logsDir = "logs"

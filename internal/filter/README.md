@@ -14,7 +14,7 @@ The following files were copied and adapted from snip to keep integration scope 
 - types.go
 - utils.go
 
-The following files were added in agent-toolkit to wire this subsystem into the current runtime and tests:
+The following files were added in yoke to wire this subsystem into the current runtime and tests:
 
 - loader.go
 - match.go

@@ -17,7 +17,7 @@ agent wiring.
 ```yaml
 skills_dir: skills
 softskills_dir: softskills
-app_name: agent-toolkit
+app_name: yoke
 token_optimization: false
 bash_output_filters_dir: config/filters
 mcp_config_path: config/mcp_config.yaml
@@ -336,14 +336,14 @@ The root binary accepts a few flags, parsed **before** the launcher
 subcommand (`console`, `web webui`, ...) is dispatched.
 
 ```bash
-agent-toolkit [flags] [<launcher-command> [launcher-args]]
+yoke [flags] [<launcher-command> [launcher-args]]
 ```
 
 | Flag                | Default  | Effect                                                                                  |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
 | `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
-| `--name NAME`       | `agent-toolkit` | Application name used by the runner/UI. |
+| `--name NAME`       | `yoke` | Application name used by the runner/UI. |
 | `--config FILE`     | `config/agent.yaml` | Runtime YAML config file path. |
 | `--provider NAME`   | from config/env/defaults | Global model provider override. |
 | `--model NAME`      | from config/env/defaults | Global model id override. |

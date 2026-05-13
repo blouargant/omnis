@@ -1,4 +1,4 @@
-// Settings panel — agent-toolkit configuration editor.
+// Settings panel — yoke configuration editor.
 // Loaded after app.js. Uses the same `token` and `authHeaders` defined there.
 // Exposes Settings.open() / Settings.close() / Settings.isOpen().
 

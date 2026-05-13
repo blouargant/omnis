@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/agent-toolkit/agent"
+	"github.com/blouargant/yoke/agent"
 )
 
 // defaultGCInterval is the period between sweeps when YOKE_SERVER_GC_INTERVAL

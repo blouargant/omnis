@@ -1,4 +1,4 @@
-// agent-toolkit — the all-in-one harness binary. Wires every component
+// yoke — the all-in-one harness binary. Wires every component
 // together and hands control to ADK's full launcher (interactive console
 // + web).
 //
@@ -29,10 +29,10 @@ import (
 	"google.golang.org/adk/cmd/launcher/full"
 	"google.golang.org/adk/runner"
 
-	"github.com/blouargant/agent-toolkit/agent"
-	"github.com/blouargant/agent-toolkit/core/events"
-	"github.com/blouargant/agent-toolkit/internal/askuser"
-	"github.com/blouargant/agent-toolkit/internal/tui"
+	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/tui"
 )
 
 // options holds the CLI flags consumed by this binary before the launcher
@@ -56,7 +56,7 @@ type options struct {
 func parseFlags(args []string) (options, []string, error) {
 	opts := options{}
 
-	fs := flag.NewFlagSet("agent-toolkit", flag.ContinueOnError)
+	fs := flag.NewFlagSet("yoke", flag.ContinueOnError)
 	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
 	fs.StringVar(&opts.skillsDir, "s", opts.skillsDir, "Directory to load skills from (shorthand)")
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
@@ -71,7 +71,7 @@ func parseFlags(args []string) (options, []string, error) {
 	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
 	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: agent-toolkit [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: yoke [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nLauncher commands: console, web webui, ...\n")
 	}
