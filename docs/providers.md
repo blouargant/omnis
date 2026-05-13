@@ -13,10 +13,10 @@ catalog and per-agent `model_ref` selection.
 
 | Variable           | Default   | Meaning                                                              |
 |--------------------|-----------|----------------------------------------------------------------------|
-| `GOAGENT_PROVIDER` | `openai_compat`  | One of `gemini`, `anthropic`, `openai`, `openai_compat`              |
-| `GOAGENT_MODEL`    | per below | Provider-specific model id; overrides the default                    |
-| `GOAGENT_BASE_URL` | provider/env specific | Override API base URL used by the selected provider             |
-| `GOAGENT_API_KEY`  | provider/env specific | Override API key used by the selected provider                  |
+| `YOKE_PROVIDER` | `openai_compat`  | One of `gemini`, `anthropic`, `openai`, `openai_compat`              |
+| `YOKE_MODEL`    | per below | Provider-specific model id; overrides the default                    |
+| `YOKE_BASE_URL` | provider/env specific | Override API base URL used by the selected provider             |
+| `YOKE_API_KEY`  | provider/env specific | Override API key used by the selected provider                  |
 
 CLI global overrides:
 
@@ -64,34 +64,34 @@ go run . console
 ### Anthropic
 
 ```bash
-export GOAGENT_PROVIDER=anthropic
+export YOKE_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
-export GOAGENT_MODEL=claude-opus-4-5    # optional
+export YOKE_MODEL=claude-opus-4-5    # optional
 ```
 
 ### OpenAI
 
 ```bash
-export GOAGENT_PROVIDER=openai
+export YOKE_PROVIDER=openai
 export OPENAI_API_KEY=sk-…
-export GOAGENT_MODEL=gpt-4o
+export YOKE_MODEL=gpt-4o
 ```
 
 ### OpenAI-compatible — local Ollama
 
 ```bash
-export GOAGENT_PROVIDER=openai_compat
+export YOKE_PROVIDER=openai_compat
 export OPENAI_BASE_URL=http://localhost:11434/v1
-export GOAGENT_MODEL=llama3.1:70b
+export YOKE_MODEL=llama3.1:70b
 ```
 
 ### OpenAI-compatible — Groq
 
 ```bash
-export GOAGENT_PROVIDER=openai_compat
+export YOKE_PROVIDER=openai_compat
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export OPENAI_API_KEY=gsk_…
-export GOAGENT_MODEL=llama-3.3-70b-versatile
+export YOKE_MODEL=llama-3.3-70b-versatile
 ```
 
 ### OpenAI-compatible — vLLM / Together / Mistral / DeepInfra

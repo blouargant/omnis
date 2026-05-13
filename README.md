@@ -34,7 +34,7 @@ small in-tree adapter (no extra SDKs).
 
 ```bash
 # Pick your provider + key (default provider is openai_compat)
-export GOAGENT_PROVIDER=anthropic
+export YOKE_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
 
 # Interactive REPL
@@ -44,7 +44,7 @@ go run . console
 go run . web webui
 
 # Custom HTTP server + chat UI (see "Running the web server" below)
-export GOAGENT_SERVER_TOKEN=$(openssl rand -hex 32)
+export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
 make run-server   # http://localhost:8080
 ```
 
@@ -82,7 +82,7 @@ go build ./...
 
 ## Choosing an LLM provider
 
-Set `GOAGENT_PROVIDER` (default: `openai_compat`):
+Set `YOKE_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|
@@ -91,19 +91,19 @@ Set `GOAGENT_PROVIDER` (default: `openai_compat`):
 | `openai`        | `OPENAI_API_KEY`                                 | `gpt-4o-mini`        |
 | `openai_compat` | `OPENAI_API_KEY` (optional) + `OPENAI_BASE_URL`  | `gpt-4o-mini`        |
 
-Override the model with `GOAGENT_MODEL`. Examples:
+Override the model with `YOKE_MODEL`. Examples:
 
 ```bash
 # Local Ollama
-export GOAGENT_PROVIDER=openai_compat
+export YOKE_PROVIDER=openai_compat
 export OPENAI_BASE_URL=http://localhost:11434/v1
-export GOAGENT_MODEL=llama3.1:70b
+export YOKE_MODEL=llama3.1:70b
 
 # Groq
-export GOAGENT_PROVIDER=openai_compat
+export YOKE_PROVIDER=openai_compat
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export OPENAI_API_KEY=gsk_…
-export GOAGENT_MODEL=llama-3.3-70b-versatile
+export YOKE_MODEL=llama-3.3-70b-versatile
 ```
 
 See [docs/providers.md](docs/providers.md) for details.
@@ -154,13 +154,13 @@ mailbox push, file attachments and the debug overlay described above.
 A bearer token is mandatory — the server refuses to start without one:
 
 ```bash
-export GOAGENT_SERVER_TOKEN=$(openssl rand -hex 32)
+export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
 export ANTHROPIC_API_KEY=sk-ant-…        # or any other provider key
 ```
 
-Optional env vars: `GOAGENT_SERVER_ADDR` (default `:8080`),
-`GOAGENT_WEB_DIR` (default `web`), `GOAGENT_CONFIG_PATH`,
-`GOAGENT_SKILLS_DIR`, `GOAGENT_SOFTSKILLS_DIR`, `GOAGENT_DEBUG`. See
+Optional env vars: `YOKE_SERVER_ADDR` (default `:8080`),
+`YOKE_WEB_DIR` (default `web`), `YOKE_CONFIG_PATH`,
+`YOKE_SKILLS_DIR`, `YOKE_SOFTSKILLS_DIR`, `YOKE_DEBUG`. See
 [server/main.go](server/main.go) for the full list.
 
 ### Dev mode (no build step)
@@ -189,7 +189,7 @@ make clean all                           # → bin/agent-toolkit, bin/server, bi
 `make clean all` removes `bin/` and `dist/` then rebuilds the root
 binary, the **server** binary and every example. Run `bin/server` from
 the repository root so it can find the default `web/` and `config/`
-directories — or set `GOAGENT_WEB_DIR` / `GOAGENT_CONFIG_PATH` to point
+directories — or set `YOKE_WEB_DIR` / `YOKE_CONFIG_PATH` to point
 at absolute paths if you copy the binary elsewhere.
 
 > Enable the debug overlay in the browser by appending `?debug=1` to the

@@ -1144,7 +1144,7 @@ async function apiFetch(path, opts = {}) {
 }
 
 function promptForToken() {
-  const t = window.prompt("Enter API bearer token (GOAGENT_SERVER_TOKEN):", token || "");
+  const t = window.prompt("Enter API bearer token (YOKE_SERVER_TOKEN):", token || "");
   if (t !== null) {
     token = t.trim();
     localStorage.setItem(TOKEN_KEY, token);

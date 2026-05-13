@@ -12,7 +12,7 @@ import (
 	"github.com/blouargant/agent-toolkit/agent"
 )
 
-// defaultGCInterval is the period between sweeps when GOAGENT_SERVER_GC_INTERVAL
+// defaultGCInterval is the period between sweeps when YOKE_SERVER_GC_INTERVAL
 // is unset. Sweeps are cheap (a few stat calls per file in logs/) so an hourly
 // cadence is conservative.
 const defaultGCInterval = time.Hour
@@ -40,7 +40,7 @@ type gcDeps struct {
 	unregister   func(displayName string) error
 }
 
-// parseGCInterval reads GOAGENT_SERVER_GC_INTERVAL. Returns the configured
+// parseGCInterval reads YOKE_SERVER_GC_INTERVAL. Returns the configured
 // duration and an enabled flag. "0" or "off" disables the periodic sweep.
 // Invalid values fall back to the default with a warning.
 func parseGCInterval(raw string) (time.Duration, bool) {
@@ -53,7 +53,7 @@ func parseGCInterval(raw string) (time.Duration, bool) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		log.Printf("gc: invalid GOAGENT_SERVER_GC_INTERVAL=%q, using default %s", raw, defaultGCInterval)
+		log.Printf("gc: invalid YOKE_SERVER_GC_INTERVAL=%q, using default %s", raw, defaultGCInterval)
 		return defaultGCInterval, true
 	}
 	return d, true

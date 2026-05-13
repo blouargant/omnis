@@ -13,7 +13,7 @@ component X to be part of the running agent".
 
 ```
             ┌──────────────┐
-            │ agentkit.NewModel(ctx)  ← reads GOAGENT_PROVIDER
+            │ agentkit.NewModel(ctx)  ← reads YOKE_PROVIDER
             └──────┬───────┘
                    │ llm
                    ▼

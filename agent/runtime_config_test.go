@@ -8,11 +8,11 @@ import (
 )
 
 func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
-	t.Setenv("GOAGENT_PROVIDER", "openai_compat")
-	t.Setenv("GOAGENT_MODEL", "env-model")
-	t.Setenv("GOAGENT_BASE_URL", "https://env-base/v1")
-	t.Setenv("GOAGENT_API_KEY", "env-global-key")
-	t.Setenv("GOAGENT_CURATOR_ENABLED", "true")
+	t.Setenv("YOKE_PROVIDER", "openai_compat")
+	t.Setenv("YOKE_MODEL", "env-model")
+	t.Setenv("YOKE_BASE_URL", "https://env-base/v1")
+	t.Setenv("YOKE_API_KEY", "env-global-key")
+	t.Setenv("YOKE_CURATOR_ENABLED", "true")
 	t.Setenv("CURATOR_KEY_ENV", "resolved-curator-key")
 
 	dir := t.TempDir()
@@ -244,9 +244,9 @@ agents:
 }
 
 func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
-	t.Setenv("GOAGENT_PROVIDER", "")
-	t.Setenv("GOAGENT_MODEL", "")
-	t.Setenv("GOAGENT_CURATOR_ENABLED", "")
+	t.Setenv("YOKE_PROVIDER", "")
+	t.Setenv("YOKE_MODEL", "")
+	t.Setenv("YOKE_CURATOR_ENABLED", "")
 
 	runtime, err := ResolveRuntimeSettings(Options{})
 	if err != nil {

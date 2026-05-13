@@ -1,6 +1,6 @@
 ---
 name: build-and-test
-description: How to build, vet, lint and run anything in the agent-toolkit repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, GOAGENT_PROVIDER, run root binary, run a demo.
+description: How to build, vet, lint and run anything in the agent-toolkit repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, YOKE_PROVIDER, run root binary, run a demo.
 compatibility: Requires Go 1.25 installed at $HOME/.local/go (no sudo). Network access only if calling a remote LLM provider.
 ---
 
@@ -36,7 +36,7 @@ not declare a task done until you've seen this output.**
 
 ## Pick an LLM provider
 
-The harness uses `GOAGENT_PROVIDER` (default: `openai_compat`):
+The harness uses `YOKE_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|
@@ -45,7 +45,7 @@ The harness uses `GOAGENT_PROVIDER` (default: `openai_compat`):
 | `openai`        | `OPENAI_API_KEY`                                 | `gpt-4o-mini`        |
 | `openai_compat` | `OPENAI_API_KEY` (optional) + `OPENAI_BASE_URL`  | `gpt-4o-mini`        |
 
-Override the model with `GOAGENT_MODEL`. Full reference:
+Override the model with `YOKE_MODEL`. Full reference:
 [docs/providers.md](../../docs/providers.md).
 
 ## Run the all-in-one launcher
@@ -70,7 +70,7 @@ Catalog: [docs/examples-catalog.md](../../docs/examples-catalog.md).
 | Symptom                                              | Fix                                                                 |
 |------------------------------------------------------|---------------------------------------------------------------------|
 | `go: command not found`                              | You forgot the `PATH=$HOME/.local/go/bin:$PATH` prefix.             |
-| `agentkit.NewModel: llm: ANTHROPIC_API_KEY required` | Set the right env var for `GOAGENT_PROVIDER`.                       |
+| `agentkit.NewModel: llm: ANTHROPIC_API_KEY required` | Set the right env var for `YOKE_PROVIDER`.                       |
 | `mailbox backend: …`                                 | `REDIS_URL` set but unreachable, or unset & expected redis backend. |
 | MCP server fails at startup                          | Logged and skipped; agent continues. Check `npx`/`uvx` availability.|
 | Permission prompt loops                              | Add an explicit `always_allow` rule in `config/permissions.yaml`.   |

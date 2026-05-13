@@ -5,23 +5,23 @@
 //
 // Required env:
 //
-//	GOAGENT_SERVER_TOKEN  Bearer token required on every /api/* call
+//	YOKE_SERVER_TOKEN  Bearer token required on every /api/* call
 //	                      (except /api/health). Server refuses to start if
 //	                      empty (fail-closed).
 //
 // Optional env:
 //
-//	GOAGENT_SERVER_ADDR         Listen address. Default ":8080".
-//	GOAGENT_CONFIG_PATH         Path to config/agent.yaml (forwarded to agent.NewAgent).
-//	GOAGENT_SKILLS_DIR          Skills directory.
-//	GOAGENT_SOFTSKILLS_DIR      Soft-skills directory.
-//	GOAGENT_WEB_DIR             Static UI directory. Default "web".
-//	GOAGENT_DEBUG               "1"/"true" to enable debug logging on the agent.
-//	GOAGENT_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
+//	YOKE_SERVER_ADDR         Listen address. Default ":8080".
+//	YOKE_CONFIG_PATH         Path to config/agent.yaml (forwarded to agent.NewAgent).
+//	YOKE_SKILLS_DIR          Skills directory.
+//	YOKE_SOFTSKILLS_DIR      Soft-skills directory.
+//	YOKE_WEB_DIR             Static UI directory. Default "web".
+//	YOKE_DEBUG               "1"/"true" to enable debug logging on the agent.
+//	YOKE_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
 //	                            files (e.g. "1h", "30m"). Default "1h". Set
 //	                            to "0" or "off" to disable.
 //
-// Plus all GOAGENT_* model selectors honored by core/llm.
+// Plus all YOKE_* model selectors honored by core/llm.
 package main
 
 import (
@@ -49,25 +49,25 @@ func main() {
 }
 
 func run() error {
-	token := strings.TrimSpace(os.Getenv("GOAGENT_SERVER_TOKEN"))
+	token := strings.TrimSpace(os.Getenv("YOKE_SERVER_TOKEN"))
 	if token == "" {
-		return errors.New("GOAGENT_SERVER_TOKEN is required (server refuses to start unauthenticated)")
+		return errors.New("YOKE_SERVER_TOKEN is required (server refuses to start unauthenticated)")
 	}
 
-	addr := envOr("GOAGENT_SERVER_ADDR", ":8080")
-	webDir := envOr("GOAGENT_WEB_DIR", "web")
+	addr := envOr("YOKE_SERVER_ADDR", ":8080")
+	webDir := envOr("YOKE_WEB_DIR", "web")
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	debug, _ := strconv.ParseBool(os.Getenv("GOAGENT_DEBUG"))
+	debug, _ := strconv.ParseBool(os.Getenv("YOKE_DEBUG"))
 
 	agentOpts := agent.Options{
-		ConfigPath:       os.Getenv("GOAGENT_CONFIG_PATH"),
-		ConfigPathStrict: os.Getenv("GOAGENT_CONFIG_PATH") != "",
-		SkillsDir:        os.Getenv("GOAGENT_SKILLS_DIR"),
-		SoftSkillsDir:    os.Getenv("GOAGENT_SOFTSKILLS_DIR"),
-		AppName:          envOr("GOAGENT_APP_NAME", "agent-toolkit-server"),
+		ConfigPath:       os.Getenv("YOKE_CONFIG_PATH"),
+		ConfigPathStrict: os.Getenv("YOKE_CONFIG_PATH") != "",
+		SkillsDir:        os.Getenv("YOKE_SKILLS_DIR"),
+		SoftSkillsDir:    os.Getenv("YOKE_SOFTSKILLS_DIR"),
+		AppName:          envOr("YOKE_APP_NAME", "agent-toolkit-server"),
 		DebugLogging:     debug,
 	}
 
@@ -92,7 +92,7 @@ func run() error {
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous
 	// run are cleaned up before the server starts accepting traffic.
-	gcInterval, gcEnabled := parseGCInterval(os.Getenv("GOAGENT_SERVER_GC_INTERVAL"))
+	gcInterval, gcEnabled := parseGCInterval(os.Getenv("YOKE_SERVER_GC_INTERVAL"))
 	if gcEnabled {
 		log.Printf("server: garbage collector enabled (interval=%s)", gcInterval)
 	} else {

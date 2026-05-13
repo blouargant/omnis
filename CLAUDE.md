@@ -26,7 +26,7 @@ go run . console                        # interactive REPL
 go run . web webui                      # local ADK web UI
 go run . --tui                          # tview chat UI
 go run . -d console                     # debug: log full payloads
-make run-server                         # HTTP API (requires GOAGENT_SERVER_TOKEN)
+make run-server                         # HTTP API (requires YOKE_SERVER_TOKEN)
 go run . curate <audit.md> <state.json> # manual soft-skill curation
 
 # Examples
@@ -97,15 +97,15 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 
 | Variable | Purpose |
 |---|---|
-| `GOAGENT_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
-| `GOAGENT_MODEL` | Provider-specific model ID |
-| `GOAGENT_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
-| `GOAGENT_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
-| `GOAGENT_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
-| `GOAGENT_SERVER_TOKEN` | Bearer token required to start the HTTP server |
-| `GOAGENT_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
-| `GOAGENT_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `logs/` and `logs/uploads/` (default `1h`; `0` disables) |
-| `GOAGENT_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
+| `YOKE_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
+| `YOKE_MODEL` | Provider-specific model ID |
+| `YOKE_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
+| `YOKE_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
+| `YOKE_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
+| `YOKE_SERVER_TOKEN` | Bearer token required to start the HTTP server |
+| `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
+| `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `logs/` and `logs/uploads/` (default `1h`; `0` disables) |
+| `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 
 ### Session isolation
 

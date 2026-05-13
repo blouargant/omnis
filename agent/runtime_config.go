@@ -369,10 +369,10 @@ func applyLeaderSelectionOverride(agents []RuntimeAgentConfig, provider, model, 
 }
 
 func applyLeaderModelEnv(agents []RuntimeAgentConfig) []RuntimeAgentConfig {
-	provider := strings.TrimSpace(os.Getenv("GOAGENT_PROVIDER"))
-	model := strings.TrimSpace(os.Getenv("GOAGENT_MODEL"))
-	baseURL := strings.TrimSpace(os.Getenv("GOAGENT_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("GOAGENT_API_KEY"))
+	provider := strings.TrimSpace(os.Getenv("YOKE_PROVIDER"))
+	model := strings.TrimSpace(os.Getenv("YOKE_MODEL"))
+	baseURL := strings.TrimSpace(os.Getenv("YOKE_BASE_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("YOKE_API_KEY"))
 	return applyLeaderSelectionOverride(agents, provider, model, baseURL, apiKey)
 }
 
@@ -478,7 +478,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 
 	// ENV
 	out.Agents = applyLeaderModelEnv(out.Agents)
-	if v, ok := parseBoolEnv("GOAGENT_CURATOR_ENABLED"); ok {
+	if v, ok := parseBoolEnv("YOKE_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
 	}
 

@@ -40,7 +40,7 @@ type skillsDeps struct {
 // resolveSkillsDeps derives skills paths from the already-resolved config files.
 func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
 	registryDir := "skills-registry/installed"
-	if v := os.Getenv("GOAGENT_SKILLS_REGISTRY_DIR"); v != "" {
+	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
 		registryDir = v
 	}
 	absReg, _ := filepath.Abs(registryDir)

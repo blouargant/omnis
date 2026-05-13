@@ -37,6 +37,6 @@
 //
 // # Provider neutrality
 //
-// Model selection is controlled at runtime by GOAGENT_PROVIDER, which
+// Model selection is controlled at runtime by YOKE_PROVIDER, which
 // accepts gemini, anthropic, openai, and openai_compat. See core/llm.
 package main

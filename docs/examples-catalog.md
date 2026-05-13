@@ -8,7 +8,7 @@ modify components in isolation. Run any of them with:
 go run ./examples/sNN_<name> "<your prompt>"
 ```
 
-(Set `GOAGENT_PROVIDER` and the appropriate API key first — see
+(Set `YOKE_PROVIDER` and the appropriate API key first — see
 [providers.md](providers.md).)
 
 > **Single-session by design.** These demos use the back-compat

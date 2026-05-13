@@ -1,10 +1,10 @@
-# Agent Toolkit Makefile
+# Yoke Makefile
 
 MODULE      := github.com/blouargant/agent-toolkit
 BIN_DIR     := bin
 DIST_DIR    := dist
 EXAMPLES_DIR := examples
-ROOT_BIN    := agent-toolkit
+ROOT_BIN    := yoke
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -61,7 +61,7 @@ all: build ## Alias for `build` (root binary + server + examples)
 build: build-root build-server $(addprefix build-example-,$(CMDS)) ## Build the root binary, HTTP server and all examples for the host platform
 
 .PHONY: build-root
-build-root: ## Build the root agent-toolkit binary
+build-root: ## Build the root yoke binary
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(ROOT_BIN) .
 
@@ -71,7 +71,7 @@ build-server: ## Build the HTTP API server (server/)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/server ./server
 
 .PHONY: run-server
-run-server: ## Run the HTTP API server (requires GOAGENT_SERVER_TOKEN)
+run-server: ## Run the HTTP API server (requires YOKE_SERVER_TOKEN)
 	$(GO) run ./server
 
 .PHONY: build-example-%
@@ -80,7 +80,7 @@ build-example-%: ## Build a single example (e.g. make build-example-s01_loop)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$* ./$(EXAMPLES_DIR)/$*
 
 .PHONY: release
-release: clean ## Build cross-platform release binaries of agent-toolkit in dist/
+release: clean ## Build cross-platform release binaries of yoke in dist/
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \

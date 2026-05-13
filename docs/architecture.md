@@ -45,7 +45,7 @@ This document maps the codebase and explains how the pieces interact.
 ### 1. Provider layer — `core/llm`
 
 A tiny dispatcher that selects a `model.LLM` implementation based on
-`GOAGENT_PROVIDER`. Adapters for Anthropic and OpenAI live in this
+`YOKE_PROVIDER`. Adapters for Anthropic and OpenAI live in this
 package and speak HTTP+SSE directly — no third-party SDK is pulled in.
 See [providers.md](providers.md).
 

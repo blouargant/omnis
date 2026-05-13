@@ -203,7 +203,7 @@
   }
 
   async function doRestart() {
-    if (!await appConfirm("Restart the agent-toolkit server now? Active streams will be interrupted.")) return;
+    if (!await appConfirm("Restart the yoke server now? Active streams will be interrupted.")) return;
     setStatus("Restarting…");
     showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
     try {

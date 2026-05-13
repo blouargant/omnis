@@ -117,7 +117,7 @@ func streamEvents(
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
 ) string {
-	debug := strings.EqualFold(os.Getenv("GOAGENT_DEBUG"), "true") || os.Getenv("GOAGENT_DEBUG") == "1"
+	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
 	streamStart := time.Now()
 	var firstTokenAt time.Time
 	var tokenCount int

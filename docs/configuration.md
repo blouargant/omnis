@@ -95,9 +95,9 @@ env var value is used.
   the leader agent model selection globally.
 - `--curator-enabled` (`true` or `false`) overrides the `curator`
   agent's `enabled` value.
-- `GOAGENT_PROVIDER`, `GOAGENT_MODEL`, `GOAGENT_BASE_URL`, and
-  `GOAGENT_API_KEY` override the leader agent model selection.
-- `GOAGENT_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
+- `YOKE_PROVIDER`, `YOKE_MODEL`, `YOKE_BASE_URL`, and
+  `YOKE_API_KEY` override the leader agent model selection.
+- `YOKE_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
   value.
 
 ## `config/permissions.yaml`
@@ -388,11 +388,11 @@ so every model and tool invocation appears live.
 
 | Variable             | Used by               | Purpose                                          |
 |----------------------|-----------------------|--------------------------------------------------|
-| `GOAGENT_PROVIDER`   | `core/llm`            | Pick the LLM provider                            |
-| `GOAGENT_MODEL`      | `core/llm`            | Override the per-provider default model id       |
-| `GOAGENT_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
-| `GOAGENT_API_KEY`    | `core/llm`            | Override the model API key                       |
-| `GOAGENT_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
+| `YOKE_PROVIDER`   | `core/llm`            | Pick the LLM provider                            |
+| `YOKE_MODEL`      | `core/llm`            | Override the per-provider default model id       |
+| `YOKE_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
+| `YOKE_API_KEY`    | `core/llm`            | Override the model API key                       |
+| `YOKE_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
 | `GOOGLE_API_KEY`     | gemini provider       | Auth                                             |
 | `GEMINI_API_KEY`     | gemini provider       | Auth (alias for `GOOGLE_API_KEY`)                |
 | `ANTHROPIC_API_KEY`  | anthropic provider    | Auth                                             |
