@@ -97,16 +97,19 @@
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
-  const TOOL_GROUPS = ["fs", "mcp", "skills", "softskills", "calc", "ddg", "web"];
+  const TOOL_GROUPS = ["fs", "mcp", "skills", "softskills", "calc", "ddg", "serpapi", "web"];
   const TOOL_DESCRIPTIONS = {
     fs:         "File-system tools: read, write, grep, glob, revert files, and run bash commands.",
     mcp:        "MCP (Model Context Protocol) tools: connect to external MCP servers defined in mcp_config.yaml.",
     skills:     "Skill tools: load and list skill playbooks from the skills/ directory.",
     softskills: "Soft-skill tools: load and list curator-distilled procedures from the softskills/ directory.",
     calc:       "Calculator: evaluate mathematical expressions (arithmetic, sqrt, trig, log, pow…).",
-    ddg:        "Web search: search the web via DuckDuckGo and return a list of titled results with snippets.",
+    ddg:        "Web search: search the web via DuckDuckGo (no API key required).",
+    serpapi:    "Web search: search the web via SerpAPI (Google). Requires serpapi_key in globals. Cannot be used together with ddg.",
     web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
   };
+  // Tools that are mutually exclusive: selecting one auto-deselects the other.
+  const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
 
   const AGENT_SUBTABS = [
     { id: "globals", label: "Globals" },
@@ -634,6 +637,7 @@
       ["token_optimization", "bool"], ["bash_output_filters_dir", "string"],
       ["bash_timeout_seconds", "number"],
       ["mcp_config_path", "string"], ["permissions_config_path", "string"],
+      ["serpapi_key", "string"],
     ];
     el.innerHTML = "";
     for (const [key, kind] of fields) {
@@ -864,7 +868,7 @@
 
       // Tools default to all available for leader when not explicitly set.
       const effectiveTools = (isLeader && (!a.tools || !a.tools.length)) ? [...TOOL_GROUPS] : a.tools;
-      grid.appendChild(toolsField("tools", effectiveTools, v => { a.tools = v; onChange(); }));
+      grid.appendChild(toolsField("tools", effectiveTools, v => { a.tools = v; onChange(); }, { serpApiKeySet: !!d.serpapi_key }));
 
       // skills_dir / softskills_dir show "(default)" placeholder for leader when absent.
       const skillsRow = field("skills_dir", a.skills_dir, "string", v => { a.skills_dir = v; onChange(); });
@@ -1351,7 +1355,8 @@
     return row;
   }
 
-  function toolsField(label, val, onChange) {
+  function toolsField(label, val, onChange, opts) {
+    const serpApiKeySet = opts && !!opts.serpApiKeySet;
     const row = document.createElement("div");
     row.className = "form-row form-row-tools";
     const span = document.createElement("span");
@@ -1360,16 +1365,35 @@
     const wrap = document.createElement("div");
     wrap.className = "tools-checks";
     const cur = new Set(Array.isArray(val) ? val : []);
+    const cbByTool = {};
     for (const t of TOOL_GROUPS) {
       const lab = document.createElement("label");
       lab.className = "tools-check";
       const cb = document.createElement("input");
       cb.type = "checkbox";
+      cb.dataset.tool = t;
       cb.checked = cur.has(t);
+      // serpapi requires its API key; disable checkbox when key is absent.
+      if (t === "serpapi" && !serpApiKeySet) {
+        cb.disabled = true;
+        lab.className += " tools-check-disabled";
+        lab.title = "Set serpapi_key in Globals to enable this tool.";
+      }
       cb.addEventListener("change", () => {
-        if (cb.checked) cur.add(t); else cur.delete(t);
+        if (cb.checked) {
+          cur.add(t);
+          // Auto-deselect the mutually-exclusive peer.
+          const peer = TOOL_MUTEX[t];
+          if (peer && cbByTool[peer]) {
+            cur.delete(peer);
+            cbByTool[peer].checked = false;
+          }
+        } else {
+          cur.delete(t);
+        }
         onChange(Array.from(cur));
       });
+      cbByTool[t] = cb;
       lab.appendChild(cb);
       lab.appendChild(document.createTextNode(" " + t));
       const desc = TOOL_DESCRIPTIONS[t];

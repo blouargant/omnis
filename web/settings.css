@@ -336,6 +336,8 @@
 }
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .tools-check  { font-weight: normal; color: var(--text); }
+.tools-check-disabled { opacity: 0.4; cursor: not-allowed; }
+.tools-check-disabled input { cursor: not-allowed; }
 
 .tool-tip-icon {
   display: inline-flex;

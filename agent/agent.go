@@ -223,6 +223,8 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			tools = append(tools, fstools.NewCalcTools()...)
 		case "ddg":
 			tools = append(tools, fstools.NewDDGTools()...)
+		case "serpapi":
+			tools = append(tools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
 		case "web":
 			tools = append(tools, fstools.NewWebTools()...)
 		}

@@ -63,6 +63,7 @@ type runtimeConfigFile struct {
 	BashTimeoutSeconds      int                   `yaml:"bash_timeout_seconds"`
 	MCPConfigPath           string                `yaml:"mcp_config_path"`
 	PermissionsConfigPath   string                `yaml:"permissions_config_path"`
+	SerpAPIKey              string                `yaml:"serpapi_key"`
 	Models                  map[string]ModelEntry `yaml:"models"`
 	Agents                  []AgentEntry          `yaml:"agents"`
 }
@@ -118,6 +119,7 @@ type RuntimeSettings struct {
 	BashTimeoutSeconds      int
 	MCPConfigPath           string
 	PermissionsConfigPath   string
+	SerpAPIKey              string
 	Models                  map[string]RuntimeModelConfig
 	Agents                  []RuntimeAgentConfig
 }
@@ -460,6 +462,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(cfg.PermissionsConfigPath)
+	}
+	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
+		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))
 	}
 	if len(cfg.Models) > 0 {
 		out.Models = normalizeModelCatalog(cfg.Models)
