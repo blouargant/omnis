@@ -45,6 +45,20 @@
   --bubble-user-bg: #3c3c3c;
   --bubble-user-border: #595959;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+
+  /* Danger — destructive buttons, error states */
+  --danger-fg: #f48771;
+  --danger-bg: #3a1f1f;
+  --danger-border: #5a2a2a;
+  --danger-bg-hover: #4a2525;
+  --danger-bg-soft: rgba(244, 135, 113, 0.12);
+
+  /* Warning — restart banner, advisory notices */
+  --warn-fg: #e2c08d;
+  --warn-bg: #3a2f0a;
+  --warn-border: #5a4a1f;
+  --warn-action-bg: #8a6d1a;
+  --warn-action-hover: #a3811f;
 }
 
 [data-theme="github-dark"] {
@@ -123,6 +137,16 @@
   --bubble-user-bg: #e8e8e8;
   --bubble-user-border: #cccccc;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --danger-fg: #a1260d;
+  --danger-bg: rgba(161, 38, 13, 0.08);
+  --danger-border: rgba(161, 38, 13, 0.30);
+  --danger-bg-hover: rgba(161, 38, 13, 0.15);
+  --danger-bg-soft: rgba(161, 38, 13, 0.08);
+  --warn-fg: #7c5100;
+  --warn-bg: rgba(124, 81, 0, 0.08);
+  --warn-border: rgba(124, 81, 0, 0.28);
+  --warn-action-bg: rgba(124, 81, 0, 0.14);
+  --warn-action-hover: rgba(124, 81, 0, 0.24);
 }
 
 [data-theme="github-light"] {
@@ -149,6 +173,16 @@
   --bubble-user-bg: #eaeef2;
   --bubble-user-border: #d0d7de;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --danger-fg: #b31d28;
+  --danger-bg: rgba(179, 29, 40, 0.08);
+  --danger-border: rgba(179, 29, 40, 0.30);
+  --danger-bg-hover: rgba(179, 29, 40, 0.15);
+  --danger-bg-soft: rgba(179, 29, 40, 0.08);
+  --warn-fg: #7c5100;
+  --warn-bg: rgba(124, 81, 0, 0.08);
+  --warn-border: rgba(124, 81, 0, 0.28);
+  --warn-action-bg: rgba(124, 81, 0, 0.14);
+  --warn-action-hover: rgba(124, 81, 0, 0.24);
 }
 
 /* ── Secondary themes ─────────────────────────────────────────────── */
@@ -333,6 +367,16 @@
   --bubble-user-bg: #eee8d5;
   --bubble-user-border: #d7d0b3;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --danger-fg: #cb4b16;
+  --danger-bg: rgba(203, 75, 22, 0.09);
+  --danger-border: rgba(203, 75, 22, 0.30);
+  --danger-bg-hover: rgba(203, 75, 22, 0.16);
+  --danger-bg-soft: rgba(203, 75, 22, 0.09);
+  --warn-fg: #b58900;
+  --warn-bg: rgba(181, 137, 0, 0.09);
+  --warn-border: rgba(181, 137, 0, 0.28);
+  --warn-action-bg: rgba(181, 137, 0, 0.14);
+  --warn-action-hover: rgba(181, 137, 0, 0.24);
 }
 
 html, body {

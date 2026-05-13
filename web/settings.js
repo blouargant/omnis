@@ -112,15 +112,16 @@
   const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
 
   const AGENT_SUBTABS = [
-    { id: "globals", label: "Globals" },
-    { id: "models",  label: "Models"  },
     { id: "agents",  label: "Agents"  },
+    { id: "models",  label: "Models"  },
+    { id: "globals", label: "Global Environment" },
   ];
 
   const state = {
     activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
-    activeAgentSubtab: "globals", // only used when activeFile === 'agent'
+    activeAgentSubtab: "agents", // only used when activeFile === 'agent'
+    activeAgentIdx: 0,            // selected agent in the fleet list
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
@@ -587,21 +588,18 @@
 
     const host = bodyEl.querySelector(".settings-subtab-body");
     if (sub === "globals") {
-      host.innerHTML = `
-        <section class="form-section">
-          <h3>Globals</h3>
-          <div class="form-card" style="margin-bottom:0">
-            <div class="form-grid" id="agent-globals"></div>
-          </div>
-        </section>
-      `;
+      host.innerHTML = `<div id="agent-globals-host" class="env-sections"></div>`;
       renderAgentGlobals(d);
     } else if (sub === "models") {
       host.innerHTML = `
-        <section class="form-section">
-          <h3>Models <button type="button" class="add-btn" id="add-model">+ Add model</button></h3>
-          <div id="agent-models"></div>
-        </section>
+        <div class="model-panel-header">
+          <div>
+            <h2 class="model-panel-title">Configured Models</h2>
+            <p class="model-panel-desc">Define the language models available for orchestration. These endpoints will be used by your agents based on their assigned capabilities.</p>
+          </div>
+          <button type="button" class="add-btn model-add-btn" id="add-model">+ Add model</button>
+        </div>
+        <div id="agent-models"></div>
       `;
       bodyEl.querySelector("#add-model").addEventListener("click", async () => {
         let name = await appPrompt("New model name:");
@@ -615,13 +613,20 @@
       renderAgentModels(d);
     } else {
       host.innerHTML = `
-        <section class="form-section">
-          <h3>Agents <button type="button" class="add-btn" id="add-agent">+ Add agent</button></h3>
-          <div id="agent-agents"></div>
-        </section>
+        <div class="agent-split-layout">
+          <div class="agent-fleet-panel">
+            <div class="agent-fleet-header">
+              <span class="agent-fleet-title">ACTIVE FLEET</span>
+              <button type="button" class="agent-fleet-add" id="add-agent" title="Add agent">+</button>
+            </div>
+            <div class="agent-fleet-list" id="agent-fleet-list"></div>
+          </div>
+          <div class="agent-detail-panel" id="agent-detail-panel"></div>
+        </div>
       `;
       bodyEl.querySelector("#add-agent").addEventListener("click", () => {
         d.agents.push({ name: "new-agent", enabled: true, mailbox: false, tools: [] });
+        state.activeAgentIdx = d.agents.length - 1;
         markFormDirty(id);
         renderAgentAgents(d);
       });
@@ -631,65 +636,302 @@
   }
 
   function renderAgentGlobals(d) {
-    const el = bodyEl.querySelector("#agent-globals");
-    const fields = [
-      ["skills_dir", "string"], ["softskills_dir", "string"], ["app_name", "string"],
-      ["token_optimization", "bool"], ["bash_output_filters_dir", "string"],
-      ["bash_timeout_seconds", "number"],
-      ["mcp_config_path", "string"], ["permissions_config_path", "string"],
-      ["serpapi_key", "string"],
-    ];
-    el.innerHTML = "";
-    for (const [key, kind] of fields) {
-      const row = field(key, d[key], kind, v => { d[key] = v; markFormDirty("agent"); });
-      el.appendChild(row);
+    const el = bodyEl.querySelector("#agent-globals-host");
+    const onChange = () => markFormDirty("agent");
+
+    function envText(key) {
+      const wrap = document.createElement("div");
+      wrap.className = "env-field";
+      const lbl = document.createElement("label");
+      lbl.className = "env-field-label";
+      lbl.textContent = key;
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.className = "env-field-input";
+      inp.value = d[key] == null ? "" : String(d[key]);
+      inp.addEventListener("input", () => { d[key] = inp.value; onChange(); });
+      wrap.appendChild(lbl);
+      wrap.appendChild(inp);
+      return wrap;
     }
+
+    function envNum(key) {
+      const wrap = document.createElement("div");
+      wrap.className = "env-field";
+      const lbl = document.createElement("label");
+      lbl.className = "env-field-label";
+      lbl.textContent = key;
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "env-field-input";
+      inp.value = d[key] == null ? "" : d[key];
+      inp.addEventListener("input", () => {
+        const n = inp.value === "" ? undefined : Number(inp.value);
+        d[key] = Number.isFinite(n) ? n : undefined;
+        onChange();
+      });
+      wrap.appendChild(lbl);
+      wrap.appendChild(inp);
+      return wrap;
+    }
+
+    function envSection(title, desc, buildFn) {
+      const s = document.createElement("div");
+      s.className = "env-section";
+      const hdr = document.createElement("div");
+      hdr.className = "env-section-hdr";
+      const ttl = document.createElement("span");
+      ttl.className = "env-section-title";
+      ttl.textContent = title;
+      hdr.appendChild(ttl);
+      if (desc) {
+        const d2 = document.createElement("p");
+        d2.className = "env-section-desc";
+        d2.textContent = desc;
+        hdr.appendChild(d2);
+      }
+      s.appendChild(hdr);
+      const body = document.createElement("div");
+      body.className = "env-section-body";
+      buildFn(body);
+      s.appendChild(body);
+      return s;
+    }
+
+    el.innerHTML = "";
+
+    // CORE DIRECTORIES
+    el.appendChild(envSection("CORE DIRECTORIES", "Paths where skill and soft-skill playbooks are stored.", body => {
+      const g = document.createElement("div");
+      g.className = "env-grid-2";
+      g.appendChild(envText("skills_dir"));
+      g.appendChild(envText("softskills_dir"));
+      body.appendChild(g);
+    }));
+
+    // IDENTITY & OPTIMIZATION
+    el.appendChild(envSection("IDENTITY & OPTIMIZATION", null, body => {
+      const row = document.createElement("div");
+      row.className = "env-id-row";
+
+      const nameWrap = document.createElement("div");
+      nameWrap.className = "env-field";
+      const nameLbl = document.createElement("label");
+      nameLbl.className = "env-field-label";
+      nameLbl.textContent = "app_name";
+      const nameInp = document.createElement("input");
+      nameInp.type = "text";
+      nameInp.className = "env-field-input";
+      nameInp.value = d.app_name == null ? "" : String(d.app_name);
+      nameInp.addEventListener("input", () => { d.app_name = nameInp.value; onChange(); });
+      nameWrap.appendChild(nameLbl);
+      nameWrap.appendChild(nameInp);
+      row.appendChild(nameWrap);
+
+      const optWrap = document.createElement("div");
+      optWrap.className = "env-check-wrap";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = "env-token-opt";
+      cb.checked = !!d.token_optimization;
+      cb.addEventListener("change", () => { d.token_optimization = cb.checked; onChange(); });
+      const optLbl = document.createElement("label");
+      optLbl.htmlFor = "env-token-opt";
+      optLbl.textContent = "token_optimization";
+      optWrap.appendChild(cb);
+      optWrap.appendChild(optLbl);
+      row.appendChild(optWrap);
+
+      body.appendChild(row);
+    }));
+
+    // RUNTIME CONFIG
+    el.appendChild(envSection("RUNTIME CONFIG", null, body => {
+      const g = document.createElement("div");
+      g.className = "env-grid-2";
+      g.appendChild(envText("bash_output_filters_dir"));
+      g.appendChild(envNum("bash_timeout_seconds"));
+      g.appendChild(envText("mcp_config_path"));
+      g.appendChild(envText("permissions_config_path"));
+      body.appendChild(g);
+    }));
+
+    // EXTERNAL API KEYS
+    el.appendChild(envSection("EXTERNAL API KEYS", null, body => {
+      body.className += " env-section-keys";
+      const wrap = document.createElement("div");
+      wrap.className = "env-field";
+      const lbl = document.createElement("label");
+      lbl.className = "env-field-label";
+      lbl.textContent = "serpapi_key";
+      const inputWrap = document.createElement("div");
+      inputWrap.className = "env-secret-wrap";
+      const inp = document.createElement("input");
+      inp.type = "password";
+      inp.className = "env-field-input";
+      inp.value = d.serpapi_key == null ? "" : String(d.serpapi_key);
+      inp.addEventListener("input", () => { d.serpapi_key = inp.value; onChange(); });
+      const eye = document.createElement("button");
+      eye.type = "button";
+      eye.className = "env-secret-eye";
+      eye.title = "Show/hide";
+      eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+      eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
+      inputWrap.appendChild(inp);
+      inputWrap.appendChild(eye);
+      wrap.appendChild(lbl);
+      wrap.appendChild(inputWrap);
+      body.appendChild(wrap);
+    }));
   }
 
   function renderAgentModels(d) {
     const el = bodyEl.querySelector("#agent-models");
     el.innerHTML = "";
     const names = Object.keys(d.models);
-    if (!names.length) { el.innerHTML = `<p class="empty">No models defined.</p>`; return; }
-    for (const name of names) {
+
+    const grid = document.createElement("div");
+    grid.className = "model-cards-grid";
+
+    names.forEach((name, i) => {
       const m = d.models[name] || {};
-      const row = document.createElement("div");
-      row.className = "form-card";
-      row.innerHTML = `
-        <div class="form-card-header">
-          <strong>${escHtml(name)}</strong>
-          <button type="button" class="del-btn">Remove</button>
-        </div>
-        <div class="form-grid"></div>
-      `;
-      const grid = row.querySelector(".form-grid");
       const onChange = () => markFormDirty("agent");
+      const isActive = true;
 
-      // provider field — plain text, but changing it clears cached model list
-      grid.appendChild(field("provider", m.provider, "string", v => { m.provider = v; onChange(); }));
+      const card = document.createElement("div");
+      card.className = "model-card";
+      card.innerHTML = `
+        <div class="model-card-hdr">
+          <div class="model-card-title">
+            <span class="model-status-dot ${isActive ? "dot-active" : "dot-standby"}"></span>
+            <strong>${escHtml(name.toUpperCase())}</strong>
+            <span class="model-status-badge ${isActive ? "badge-active" : "badge-standby"}">${isActive ? "ACTIVE" : "STANDBY"}</span>
+          </div>
+          <button type="button" class="model-remove-link">⏷ REMOVE</button>
+        </div>
+        <div class="model-card-body"></div>
+      `;
+      const body = card.querySelector(".model-card-body");
 
-      // model field — combobox: free-text input + datalist populated from provider API
-      grid.appendChild(modelComboField(m, onChange));
-
-      const remainingFields = [
-        ["base_url", "string"], ["api_key", "string"],
-        ["context_length", "number"],
-        ["input_token_price_per_million", "number"],
-        ["output_token_price_per_million", "number"],
-        ["cached_input_token_price_per_million", "number"],
-        ["cache_creation_token_price_per_million", "number"],
-      ];
-      for (const [k, kind] of remainingFields) {
-        grid.appendChild(field(k, m[k], kind, v => { m[k] = v; onChange(); }));
+      function modelField(key, val, onCh) {
+        const f = document.createElement("div");
+        f.className = "model-field";
+        const lbl = document.createElement("label");
+        lbl.className = "model-field-label";
+        lbl.textContent = key.toUpperCase().replace(/_/g, " ");
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "model-field-input";
+        inp.value = val == null ? "" : String(val);
+        inp.addEventListener("input", () => onCh(inp.value));
+        f.appendChild(lbl);
+        f.appendChild(inp);
+        return f;
       }
-      row.querySelector(".del-btn").addEventListener("click", async () => {
+
+      function modelNumField(key, val) {
+        const f = document.createElement("div");
+        f.className = "model-field";
+        const lbl = document.createElement("label");
+        lbl.className = "model-field-label";
+        lbl.textContent = key.toUpperCase().replace(/_/g, " ");
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.className = "model-field-input";
+        inp.value = val == null ? "" : val;
+        inp.addEventListener("input", () => {
+          const n = inp.value === "" ? undefined : Number(inp.value);
+          m[key] = Number.isFinite(n) ? n : undefined;
+          onChange();
+        });
+        f.appendChild(lbl);
+        f.appendChild(inp);
+        return f;
+      }
+
+      const fg = document.createElement("div");
+      fg.className = "model-field-grid";
+
+      // PROVIDER
+      fg.appendChild(modelField("provider", m.provider, v => { m.provider = v; onChange(); }));
+
+      // MODEL (combobox)
+      const combo = modelComboField(m, onChange);
+      combo.className = "model-field model-field-combo";
+      const comboSpan = combo.querySelector("span");
+      if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
+      fg.appendChild(combo);
+
+      // BASE URL (full width)
+      const urlF = modelField("base_url", m.base_url, v => { m.base_url = v; onChange(); });
+      urlF.classList.add("model-field-full");
+      fg.appendChild(urlF);
+
+      // API KEY (password, full width)
+      const keyF = document.createElement("div");
+      keyF.className = "model-field model-field-full";
+      const keyLbl = document.createElement("label");
+      keyLbl.className = "model-field-label";
+      keyLbl.textContent = "API KEY";
+      const keyWrap = document.createElement("div");
+      keyWrap.className = "env-secret-wrap";
+      const keyInp = document.createElement("input");
+      keyInp.type = "password";
+      keyInp.className = "model-field-input";
+      keyInp.value = m.api_key == null ? "" : String(m.api_key);
+      keyInp.addEventListener("input", () => { m.api_key = keyInp.value; onChange(); });
+      const keyEye = document.createElement("button");
+      keyEye.type = "button";
+      keyEye.className = "env-secret-eye";
+      keyEye.title = "Show/hide";
+      keyEye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+      keyEye.addEventListener("click", () => { keyInp.type = keyInp.type === "password" ? "text" : "password"; });
+      keyWrap.appendChild(keyInp);
+      keyWrap.appendChild(keyEye);
+      keyF.appendChild(keyLbl);
+      keyF.appendChild(keyWrap);
+      fg.appendChild(keyF);
+
+      fg.appendChild(modelNumField("context_length", m.context_length));
+      fg.appendChild(modelNumField("input_token_price_per_million", m.input_token_price_per_million));
+      fg.appendChild(modelNumField("cached_input_token_price_per_million", m.cached_input_token_price_per_million));
+      fg.appendChild(modelNumField("output_token_price_per_million", m.output_token_price_per_million));
+
+      body.appendChild(fg);
+
+      card.querySelector(".model-remove-link").addEventListener("click", async () => {
         if (!await appConfirm(`Remove model "${name}"?`)) return;
         delete d.models[name];
         markFormDirty("agent");
         renderAgentModels(d);
       });
-      el.appendChild(row);
-    }
+      grid.appendChild(card);
+    });
+
+    // Empty "Configure New Endpoint" card
+    const emptyCard = document.createElement("div");
+    emptyCard.className = "model-card model-card-empty";
+    const emptyBtn = document.createElement("button");
+    emptyBtn.type = "button";
+    emptyBtn.className = "model-card-empty-btn";
+    emptyBtn.innerHTML = `
+      <span class="model-card-empty-icon">⊕</span>
+      <span class="model-card-empty-label">Configure New Endpoint</span>
+      <span class="model-card-empty-sub">Add custom LLM providers or endpoints</span>
+    `;
+    emptyBtn.addEventListener("click", async () => {
+      let name = await appPrompt("New model name:");
+      if (!name) return;
+      name = name.trim().toLowerCase();
+      if (!name || d.models[name]) return;
+      d.models[name] = { provider: "", model: "", base_url: "", api_key: "" };
+      markFormDirty("agent");
+      renderAgentModels(d);
+    });
+    emptyCard.appendChild(emptyBtn);
+    grid.appendChild(emptyCard);
+
+    el.appendChild(grid);
   }
 
   // modelComboField builds a form row for the "model" field: a free-text input
@@ -818,125 +1060,375 @@
     return row;
   }
 
+  const TOOL_ICONS = {
+    fs:         `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+    mcp:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>`,
+    skills:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+    softskills: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    calc:       `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="12" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/><line x1="16" y1="10" x2="16" y2="18"/></svg>`,
+    ddg:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+    serpapi:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+    web:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+  };
+  const TOOL_DISPLAY = {
+    fs: "FileSystem v2", mcp: "Context Proto", skills: "Core Skills",
+    softskills: "Soft Skills", calc: "Math Eng", ddg: "Web Search",
+    serpapi: "SerpAPI", web: "Browser Tool",
+  };
+
   function renderAgentAgents(d) {
-    const el = bodyEl.querySelector("#agent-agents");
-    el.innerHTML = "";
-    if (!d.agents.length) { el.innerHTML = `<p class="empty">No agents defined.</p>`; return; }
-    const modelOptions = Object.keys(d.models || {});
-    const leaderIsFirst = d.agents[0]?.name === "leader";
+    const fleetList = bodyEl.querySelector("#agent-fleet-list");
+    const detailPanel = bodyEl.querySelector("#agent-detail-panel");
+    if (!fleetList || !detailPanel) return;
 
+    if (!d.agents.length) {
+      fleetList.innerHTML = `<p class="empty" style="padding:1rem">No agents defined.</p>`;
+      detailPanel.innerHTML = "";
+      return;
+    }
+
+    if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = d.agents.length - 1;
+    if (state.activeAgentIdx < 0) state.activeAgentIdx = 0;
+
+    // Fleet list
+    fleetList.innerHTML = "";
     d.agents.forEach((a, idx) => {
-      const isLeader = a.name === "leader";
-      // Leader is pinned at top; no agent may move above it.
-      const upDisabled   = idx === 0 || (leaderIsFirst && idx === 1);
-      const downDisabled = idx === d.agents.length - 1 || isLeader;
-
-      const row = document.createElement("div");
-      row.className = "form-card";
-      row.innerHTML = `
-        <div class="form-card-header">
-          <strong>${escHtml(a.name || "(unnamed)")}</strong>
-          <span class="card-actions">
-            ${isLeader ? "" : `<button type="button" class="up-btn" title="Move up" ${upDisabled ? "disabled" : ""}>▲</button>`}
-            ${isLeader ? "" : `<button type="button" class="down-btn" title="Move down" ${downDisabled ? "disabled" : ""}>▼</button>`}
-            ${isLeader ? "" : `<button type="button" class="del-btn">Remove</button>`}
-          </span>
+      const item = document.createElement("div");
+      item.className = "agent-fleet-item" + (idx === state.activeAgentIdx ? " active" : "");
+      item.innerHTML = `
+        <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
+        <div class="agent-fleet-info">
+          <span class="agent-fleet-name">${escHtml(a.name || "(unnamed)")}</span>
+          <span class="agent-fleet-model">${escHtml(a.model_ref || "")}</span>
         </div>
-        <div class="form-grid"></div>
-        <label class="form-row form-row-textarea">
-          <span>instruction</span>
-          <textarea rows="3"></textarea>
-        </label>
       `;
-      const grid = row.querySelector(".form-grid");
-      const onChange = () => markFormDirty("agent");
-
-      const nameRow = field("name", a.name, "string", v => { a.name = v; renderAgentAgents(d); });
-      if (isLeader) nameRow.querySelector("input").disabled = true;
-      grid.appendChild(nameRow);
-      grid.appendChild(selectField("model_ref", a.model_ref || "", modelOptions, v => { a.model_ref = v; onChange(); }));
-
-      // Leader is always enabled — show the checkbox but lock it.
-      const enabledRow = field("enabled", isLeader ? true : a.enabled, "bool", v => { a.enabled = v; onChange(); });
-      if (isLeader) enabledRow.querySelector("input").disabled = true;
-      grid.appendChild(enabledRow);
-
-      // Mailbox defaults to true for leader when not explicitly set.
-      grid.appendChild(field("mailbox", (isLeader && a.mailbox == null) ? true : a.mailbox, "bool", v => { a.mailbox = v; onChange(); }));
-
-      grid.appendChild(field("allow_file_attachments", a.allow_file_attachments || false, "bool", v => { a.allow_file_attachments = v; onChange(); }));
-
-      // Tools default to all available for leader when not explicitly set.
-      const effectiveTools = (isLeader && (!a.tools || !a.tools.length)) ? [...TOOL_GROUPS] : a.tools;
-      grid.appendChild(toolsField("tools", effectiveTools, v => { a.tools = v; onChange(); }, { serpApiKeySet: !!d.serpapi_key }));
-
-      // skills_dir / softskills_dir show "(default)" placeholder for leader when absent.
-      const skillsRow = field("skills_dir", a.skills_dir, "string", v => { a.skills_dir = v; onChange(); });
-      if (isLeader && !a.skills_dir) skillsRow.querySelector("input").placeholder = "(default)";
-      grid.appendChild(skillsRow);
-
-      const softskillsRow = field("softskills_dir", a.softskills_dir, "string", v => { a.softskills_dir = v; onChange(); });
-      if (isLeader && !a.softskills_dir) softskillsRow.querySelector("input").placeholder = "(default)";
-      grid.appendChild(softskillsRow);
-
-      grid.appendChild(field("mcp_config_path", a.mcp_config_path, "string", v => { a.mcp_config_path = v; onChange(); }));
-      grid.appendChild(field("permissions_config_path", a.permissions_config_path, "string", v => { a.permissions_config_path = v; onChange(); }));
-      grid.appendChild(field("description", a.description, "string", v => { a.description = v; onChange(); }));
-
-      const ta = row.querySelector("textarea");
-      ta.value = a.instruction || "";
-      ta.addEventListener("input", () => { a.instruction = ta.value; onChange(); });
-
-      // Skills block — collapsible, collapsed by default.
-      if (a.skills_dir !== undefined) {
-        const skillsSection = document.createElement("div");
-        skillsSection.className = "skills-agent-section";
-
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "skills-agent-toggle";
-        toggle.setAttribute("aria-expanded", "false");
-        toggle.innerHTML = `<i class="skills-agent-chevron">▶</i> Skills`;
-
-        const skillsBody = document.createElement("div");
-        skillsBody.className = "skills-agent-body";
-        skillsBody.hidden = true;
-
-        let loaded = false;
-        toggle.addEventListener("click", () => {
-          const expanded = toggle.getAttribute("aria-expanded") === "true";
-          toggle.setAttribute("aria-expanded", String(!expanded));
-          skillsBody.hidden = expanded;
-          if (!loaded) {
-            loaded = true;
-            populateAgentSkillBlock(skillsBody, a.name);
-          }
-        });
-
-        skillsSection.appendChild(toggle);
-        skillsSection.appendChild(skillsBody);
-        row.appendChild(skillsSection);
-      }
-
-      row.querySelector(".up-btn")?.addEventListener("click", () => {
-        if (upDisabled) return;
-        [d.agents[idx - 1], d.agents[idx]] = [d.agents[idx], d.agents[idx - 1]];
-        markFormDirty("agent"); renderAgentAgents(d);
-      });
-      row.querySelector(".down-btn")?.addEventListener("click", () => {
-        if (downDisabled) return;
-        [d.agents[idx + 1], d.agents[idx]] = [d.agents[idx], d.agents[idx + 1]];
-        markFormDirty("agent"); renderAgentAgents(d);
-      });
-      if (!isLeader) {
-        row.querySelector(".del-btn").addEventListener("click", async () => {
-          if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
-          d.agents.splice(idx, 1);
-          markFormDirty("agent"); renderAgentAgents(d);
-        });
-      }
-      el.appendChild(row);
+      item.addEventListener("click", () => { state.activeAgentIdx = idx; renderAgentAgents(d); });
+      fleetList.appendChild(item);
     });
+
+    // Detail panel
+    renderAgentDetail(d, state.activeAgentIdx, Object.keys(d.models || {}));
+  }
+
+  function renderAgentDetail(d, idx, modelOptions) {
+    const detailPanel = bodyEl.querySelector("#agent-detail-panel");
+    const a = d.agents[idx];
+    if (!a) { detailPanel.innerHTML = ""; return; }
+
+    const isLeader = a.name === "leader";
+    const onChange = () => markFormDirty("agent");
+
+    detailPanel.innerHTML = "";
+
+    // Title bar
+    const titleBar = document.createElement("div");
+    titleBar.className = "agent-detail-titlebar";
+    const isEnabled = isLeader ? true : a.enabled !== false;
+    titleBar.innerHTML = `
+      <div class="agent-detail-title-left">
+        <h2 class="agent-detail-name">${escHtml(a.name || "(unnamed)")}</h2>
+        <span class="agent-live-badge">LIVE</span>
+      </div>
+      <label class="agent-active-toggle-wrap">
+        <span class="agent-active-toggle-label">Active State</span>
+        <span class="agent-toggle-switch">
+          <input type="checkbox" class="agent-toggle-input" ${isEnabled ? "checked" : ""} ${isLeader ? "disabled" : ""}>
+          <span class="agent-toggle-slider"></span>
+        </span>
+      </label>
+    `;
+    titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
+      a.enabled = e.target.checked;
+      // update dot in fleet list
+      const dot = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-dot");
+      if (dot) { dot.className = "agent-fleet-dot " + (a.enabled ? "dot-live" : "dot-off"); }
+      onChange();
+    });
+    detailPanel.appendChild(titleBar);
+
+    const body = document.createElement("div");
+    body.className = "agent-detail-body";
+
+    // ── General Settings ──
+    const genSection = document.createElement("section");
+    genSection.className = "agent-detail-section";
+    const genHdr = document.createElement("div");
+    genHdr.className = "agent-section-hdr";
+    genHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><h3>General Settings</h3>`;
+    genSection.appendChild(genHdr);
+
+    const genGrid = document.createElement("div");
+    genGrid.className = "agent-gen-grid";
+
+    function genField(labelText, buildInput) {
+      const f = document.createElement("div");
+      f.className = "agent-gen-field";
+      const lbl = document.createElement("label");
+      lbl.className = "agent-gen-label";
+      lbl.textContent = labelText;
+      f.appendChild(lbl);
+      buildInput(f);
+      return f;
+    }
+
+    // Agent Display Name
+    genGrid.appendChild(genField("Agent Display Name", f => {
+      const inp = document.createElement("input");
+      inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a.name || "";
+      if (isLeader) inp.disabled = true;
+      inp.addEventListener("input", () => {
+        a.name = inp.value;
+        detailPanel.querySelector(".agent-detail-name").textContent = a.name || "(unnamed)";
+        const nameEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-name");
+        if (nameEl) nameEl.textContent = a.name || "(unnamed)";
+        onChange();
+      });
+      f.appendChild(inp);
+    }));
+
+    // Model Reference
+    genGrid.appendChild(genField("Model Reference", f => {
+      const sel = document.createElement("select");
+      sel.className = "agent-gen-input";
+      for (const o of ["", ...modelOptions]) {
+        const opt = document.createElement("option");
+        opt.value = o; opt.textContent = o || "(none)";
+        if (o === (a.model_ref || "")) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      sel.addEventListener("change", () => {
+        a.model_ref = sel.value;
+        const modelEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-model");
+        if (modelEl) modelEl.textContent = a.model_ref || "";
+        onChange();
+      });
+      f.appendChild(sel);
+    }));
+
+    genSection.appendChild(genGrid);
+    body.appendChild(genSection);
+
+    // ── Available Tools ──
+    const toolSection = document.createElement("section");
+    toolSection.className = "agent-detail-section";
+    const toolHdr = document.createElement("div");
+    toolHdr.className = "agent-section-hdr";
+    toolHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><h3>Available Tools</h3>`;
+    toolSection.appendChild(toolHdr);
+
+    const toolGrid = document.createElement("div");
+    toolGrid.className = "agent-tools-grid";
+    const effectiveTools = (isLeader && (!a.tools || !a.tools.length)) ? [...TOOL_GROUPS] : (a.tools || []);
+    const cur = new Set(effectiveTools);
+    const btnByTool = {};
+    const toolEntries = [];
+
+    for (const t of TOOL_GROUPS) {
+      const isSerpDisabled = t === "serpapi" && !d.serpapi_key;
+      const isOn = cur.has(t);
+      const btn = document.createElement("div");
+      btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isSerpDisabled ? " tool-disabled" : "");
+      btn.innerHTML = `
+        <div class="agent-tool-icon">${TOOL_ICONS[t] || ""}</div>
+        <div class="agent-tool-info">
+          <span class="agent-tool-name">${escHtml(t)}</span>
+          <span class="agent-tool-desc">${escHtml(TOOL_DISPLAY[t] || "")}</span>
+        </div>
+        <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
+      `;
+      if (!isSerpDisabled) {
+        btn.addEventListener("click", () => {
+          const wasOn = cur.has(t);
+          if (wasOn) {
+            cur.delete(t);
+            btn.classList.remove("tool-on");
+            btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
+          } else {
+            cur.add(t);
+            const peer = TOOL_MUTEX[t];
+            if (peer && btnByTool[peer]) {
+              cur.delete(peer);
+              btnByTool[peer].classList.remove("tool-on");
+              btnByTool[peer].querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
+            }
+            btn.classList.add("tool-on");
+            btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-on";
+          }
+          a.tools = Array.from(cur);
+          onChange();
+        });
+      }
+      btnByTool[t] = btn;
+      toolEntries.push({ btn, isOn });
+    }
+
+    // ── Feature toggle cards (Mailbox, Allow File Attachments) ──
+    const featureCards = [
+      {
+        key: "mailbox", label: "mailbox", desc: "Inter-Agent Mail",
+        icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="M16 19h6"/><path d="M19 16v6"/></svg>`,
+        getValue: () => (isLeader && a.mailbox == null) ? true : !!a.mailbox,
+        setValue: v => { a.mailbox = v; onChange(); },
+      },
+      {
+        key: "allow_file_attachments", label: "files", desc: "File Attachments",
+        icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
+        getValue: () => !!a.allow_file_attachments,
+        setValue: v => { a.allow_file_attachments = v; onChange(); },
+      },
+    ];
+    for (const fc of featureCards) {
+      let fcOn = fc.getValue();
+      const fcBtn = document.createElement("div");
+      fcBtn.className = "agent-tool-card" + (fcOn ? " tool-on" : "");
+      fcBtn.innerHTML = `
+        <div class="agent-tool-icon">${fc.icon}</div>
+        <div class="agent-tool-info">
+          <span class="agent-tool-name">${escHtml(fc.label)}</span>
+          <span class="agent-tool-desc">${escHtml(fc.desc)}</span>
+        </div>
+        <div class="agent-tool-toggle-pill ${fcOn ? "pill-on" : "pill-off"}"></div>
+      `;
+      fcBtn.addEventListener("click", () => {
+        fcOn = !fcOn;
+        fc.setValue(fcOn);
+        fcBtn.classList.toggle("tool-on", fcOn);
+        fcBtn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (fcOn ? "pill-on" : "pill-off");
+      });
+      toolEntries.push({ btn: fcBtn, isOn: fcOn });
+    }
+
+    // selected first, then unselected
+    toolEntries.sort((a, b) => Number(b.isOn) - Number(a.isOn));
+    for (const { btn } of toolEntries) toolGrid.appendChild(btn);
+
+    toolSection.appendChild(toolGrid);
+    body.appendChild(toolSection);
+
+    // ── Skills ──
+    const skillsSec = document.createElement("section");
+    skillsSec.className = "agent-detail-section";
+    const skillsHdr = document.createElement("div");
+    skillsHdr.className = "agent-section-hdr";
+    skillsHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><h3>Skills</h3>`;
+    skillsSec.appendChild(skillsHdr);
+    const skillsBody = document.createElement("div");
+    skillsBody.className = "skills-agent-body";
+    skillsSec.appendChild(skillsBody);
+    populateAgentSkillBlock(skillsBody, a.name);
+    body.appendChild(skillsSec);
+
+    // ── Instruction Set ──
+    const instrSection = document.createElement("section");
+    instrSection.className = "agent-detail-section";
+    const instrHdr = document.createElement("div");
+    instrHdr.className = "agent-section-hdr";
+    instrHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><h3>Instruction Set</h3>`;
+    instrSection.appendChild(instrHdr);
+
+    const instrBody = document.createElement("div");
+    instrBody.className = "agent-instr-body";
+
+    // Public Description
+    const descF = document.createElement("div");
+    descF.className = "agent-instr-field";
+    const descLbl = document.createElement("label");
+    descLbl.className = "agent-instr-label";
+    descLbl.textContent = "Public Description";
+    const descInp = document.createElement("input");
+    descInp.type = "text"; descInp.className = "agent-gen-input";
+    descInp.placeholder = "Explain what this agent does in one sentence…";
+    descInp.value = a.description || "";
+    descInp.addEventListener("input", () => { a.description = descInp.value; onChange(); });
+    descF.appendChild(descLbl);
+    descF.appendChild(descInp);
+    instrBody.appendChild(descF);
+
+    // System Instructions
+    const sysF = document.createElement("div");
+    sysF.className = "agent-instr-field";
+    const sysTop = document.createElement("div");
+    sysTop.className = "agent-instr-top-row";
+    const sysLbl = document.createElement("label");
+    sysLbl.className = "agent-instr-label";
+    sysLbl.textContent = "System Instructions";
+    const sysCount = document.createElement("span");
+    sysCount.className = "agent-instr-count";
+    const instrVal = a.instruction || "";
+    sysCount.textContent = Math.round(instrVal.length / 4) + " tokens used";
+    sysTop.appendChild(sysLbl);
+    sysTop.appendChild(sysCount);
+    sysF.appendChild(sysTop);
+    const ta = document.createElement("textarea");
+    ta.className = "agent-instr-textarea"; ta.rows = 8; ta.value = instrVal;
+    ta.addEventListener("input", () => {
+      a.instruction = ta.value;
+      sysCount.textContent = Math.round(ta.value.length / 4) + " tokens used";
+      onChange();
+    });
+    sysF.appendChild(ta);
+    instrBody.appendChild(sysF);
+
+    instrSection.appendChild(instrBody);
+    body.appendChild(instrSection);
+
+    // ── Advanced paths (collapsible) ──
+    const adv = document.createElement("details");
+    adv.className = "agent-advanced";
+    adv.innerHTML = `<summary class="agent-advanced-summary">Advanced path overrides</summary>`;
+    const advGrid = document.createElement("div");
+    advGrid.className = "agent-gen-grid";
+    for (const [key, label] of [
+      ["skills_dir", "skills_dir"], ["softskills_dir", "softskills_dir"],
+      ["mcp_config_path", "mcp_config_path"], ["permissions_config_path", "permissions_config_path"],
+    ]) {
+      const f = document.createElement("div");
+      f.className = "agent-gen-field";
+      const lbl = document.createElement("label");
+      lbl.className = "agent-gen-label"; lbl.textContent = label;
+      const inp = document.createElement("input");
+      inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a[key] || "";
+      if (isLeader && !a[key]) inp.placeholder = "(default)";
+      inp.addEventListener("input", () => { a[key] = inp.value; onChange(); });
+      f.appendChild(lbl); f.appendChild(inp); advGrid.appendChild(f);
+    }
+    adv.appendChild(advGrid);
+    body.appendChild(adv);
+
+    // ── Move / Delete ──
+    if (!isLeader) {
+      const leaderFirst = d.agents[0]?.name === "leader";
+      const upOk   = idx > 0 && !(leaderFirst && idx === 1);
+      const downOk = idx < d.agents.length - 1;
+      const acts = document.createElement("div");
+      acts.className = "agent-detail-actions";
+      const upBtn = document.createElement("button");
+      upBtn.type = "button"; upBtn.className = "up-btn"; upBtn.textContent = "▲ Move up";
+      if (!upOk) upBtn.disabled = true;
+      const dnBtn = document.createElement("button");
+      dnBtn.type = "button"; dnBtn.className = "down-btn"; dnBtn.textContent = "▼ Move down";
+      if (!downOk) dnBtn.disabled = true;
+      const delBtn = document.createElement("button");
+      delBtn.type = "button"; delBtn.className = "del-btn"; delBtn.textContent = "Remove agent";
+      upBtn.addEventListener("click", () => {
+        [d.agents[idx - 1], d.agents[idx]] = [d.agents[idx], d.agents[idx - 1]];
+        state.activeAgentIdx = idx - 1; markFormDirty("agent"); renderAgentAgents(d);
+      });
+      dnBtn.addEventListener("click", () => {
+        [d.agents[idx + 1], d.agents[idx]] = [d.agents[idx], d.agents[idx + 1]];
+        state.activeAgentIdx = idx + 1; markFormDirty("agent"); renderAgentAgents(d);
+      });
+      delBtn.addEventListener("click", async () => {
+        if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
+        d.agents.splice(idx, 1);
+        if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = Math.max(0, d.agents.length - 1);
+        markFormDirty("agent"); renderAgentAgents(d);
+      });
+      acts.appendChild(upBtn); acts.appendChild(dnBtn); acts.appendChild(delBtn);
+      body.appendChild(acts);
+    }
+
+    detailPanel.appendChild(body);
   }
 
   // ── permissions.yaml form ──
@@ -1486,18 +1978,34 @@
       p.textContent = "No skills installed.";
       container.appendChild(p);
     } else {
+      const skillIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`;
+
       const grid = document.createElement("div");
-      grid.className = "skills-check-grid";
-      for (const sk of registry) {
-        const label = document.createElement("label");
-        label.className = "skills-check-item";
-        label.dataset.skill = sk.name;
-        const cb = document.createElement("input");
-        cb.type = "checkbox"; cb.checked = linked.has(sk.name);
-        cb.addEventListener("change", async () => {
-          cb.disabled = true;
+      grid.className = "agent-tools-grid";
+
+      const sorted = [...registry].sort((a, b) => Number(linked.has(b.name)) - Number(linked.has(a.name)));
+      for (const sk of sorted) {
+        let isOn = linked.has(sk.name);
+        const card = document.createElement("div");
+        card.className = "agent-tool-card" + (isOn ? " tool-on" : "");
+        card.dataset.skill = sk.name;
+        card.innerHTML = `
+          <div class="agent-tool-icon">${skillIcon}</div>
+          <div class="agent-tool-info">
+            <span class="agent-tool-name">${escHtml(sk.name)}</span>
+            <span class="agent-tool-desc">${escHtml(sk.description || "")}</span>
+          </div>
+          <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
+        `;
+        card.addEventListener("click", async () => {
+          if (card.classList.contains("tool-loading")) return;
+          const wasOn = isOn;
+          isOn = !wasOn;
+          card.classList.toggle("tool-on", isOn);
+          card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (isOn ? "pill-on" : "pill-off");
+          card.classList.add("tool-loading");
           try {
-            if (cb.checked) {
+            if (isOn) {
               await skillsPost(`/skills/agents/${agentInfo.name}/skills/${sk.name}`, null);
               linked.add(sk.name);
             } else {
@@ -1505,20 +2013,13 @@
               linked.delete(sk.name);
             }
           } catch (e) {
-            cb.checked = !cb.checked;
+            isOn = wasOn;
+            card.classList.toggle("tool-on", isOn);
+            card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (isOn ? "pill-on" : "pill-off");
             setStatus("Skills: " + e.message, "error");
-          } finally { cb.disabled = false; }
+          } finally { card.classList.remove("tool-loading"); }
         });
-        label.appendChild(cb);
-        const nameSpan = document.createElement("span");
-        nameSpan.className = "skills-check-name"; nameSpan.textContent = sk.name;
-        label.appendChild(nameSpan);
-        if (sk.description) {
-          const desc = document.createElement("span");
-          desc.className = "skills-check-desc"; desc.textContent = sk.description;
-          label.appendChild(desc);
-        }
-        grid.appendChild(label);
+        grid.appendChild(card);
       }
       container.appendChild(grid);
 
@@ -1538,8 +2039,11 @@
         try {
           const res = await skillsPost(`/skills/agents/${agentInfo.name}/skills`, { action: "all" });
           (res.linked || []).forEach(n => linked.add(n));
-          container.querySelectorAll(".skills-check-item input").forEach(cb => {
-            if (linked.has(cb.closest(".skills-check-item").dataset.skill)) cb.checked = true;
+          grid.querySelectorAll(".agent-tool-card").forEach(card => {
+            if (linked.has(card.dataset.skill)) {
+              card.classList.add("tool-on");
+              card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-on";
+            }
           });
         } catch (e) { setStatus("Skills: " + e.message, "error"); }
         finally { enableAllBtn.disabled = disableAllBtn.disabled = false; }
@@ -1551,7 +2055,10 @@
         try {
           await skillsPost(`/skills/agents/${agentInfo.name}/skills`, { action: "none" });
           linked.clear();
-          container.querySelectorAll(".skills-check-item input").forEach(cb => { cb.checked = false; });
+          grid.querySelectorAll(".agent-tool-card").forEach(card => {
+            card.classList.remove("tool-on");
+            card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
+          });
         } catch (e) { setStatus("Skills: " + e.message, "error"); }
         finally { enableAllBtn.disabled = disableAllBtn.disabled = false; }
       });
