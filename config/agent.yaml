@@ -3,6 +3,12 @@ agents:
       model_ref: premium
       name: leader
       skills_dir: skills/leader
+      tools:
+        - fs
+        - mcp
+        - skills
+        - softskills
+        - calc
     - allow_file_attachments: true
       description: Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.
       enabled: true
@@ -15,6 +21,7 @@ agents:
         - mcp
         - skills
         - softskills
+        - calc
     - description: Condenses long content into a structured brief.
       enabled: true
       mailbox: true

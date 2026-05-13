@@ -180,6 +180,10 @@ func run() error {
 	case <-restart.Done():
 		restartRequested = true
 		log.Printf("server: restart requested")
+		// Cancel rootCtx so all goroutines and request handlers watching
+		// ctx.Done() (SSE streams in particular) return promptly, allowing
+		// srv.Shutdown to complete before the deadline.
+		stop()
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

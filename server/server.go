@@ -140,6 +140,17 @@ func newEngine(d serverDeps) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), requestLogger())
 
+	// Propagate server shutdown into every request context so long-lived SSE
+	// handlers terminate promptly when rootCtx is cancelled (e.g. on restart).
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		stopFn := context.AfterFunc(d.rootCtx, cancel)
+		defer stopFn()
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
 	// Static UI (no auth — served at the root).
 	indexPath := filepath.Join(d.WebDir, "index.html")
 	r.StaticFile("/", indexPath)

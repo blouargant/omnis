@@ -219,6 +219,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			if resolvedSoftSkillTS != nil {
 				toolsets = append(toolsets, resolvedSoftSkillTS)
 			}
+		case "calc":
+			tools = append(tools, fstools.NewCalcTools()...)
+		case "ddg":
+			tools = append(tools, fstools.NewDDGTools()...)
+		case "web":
+			tools = append(tools, fstools.NewWebTools()...)
 		}
 	}
 	return tools, toolsets
@@ -457,6 +463,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 
 	leadTools := []tool.Tool{}
 	leadTools = append(leadTools, fstools.New()...)
+	leadTools = append(leadTools, fstools.NewCalcTools()...)
 	leadTools = append(leadTools, store.Tools()...)
 	leadTools = append(leadTools, g.Tools()...)
 	leadTools = append(leadTools, worktree.Tools(opts.Repo)...)

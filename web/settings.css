@@ -337,6 +337,46 @@
 .tools-checks { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .tools-check  { font-weight: normal; color: var(--text); }
 
+.tool-tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  margin-left: 0.25em;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted, #888);
+  font-size: 0.85em;
+  font-weight: bold;
+  cursor: default;
+  position: relative;
+  vertical-align: middle;
+  user-select: none;
+}
+.tool-tip-icon:hover { background: var(--accent, #4a9eff); color: #fff; }
+.tool-tip-box {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  padding: 0.4em 0.6em;
+  background: var(--surface2, #2a2a2a);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.4;
+  white-space: normal;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+.tool-tip-icon:hover .tool-tip-box { display: block; }
+
 /* Combobox row: free-text input + custom dropdown panel + fetch button */
 .form-row-combo {
   display: grid;
@@ -545,6 +585,39 @@
   padding: 0 0.3rem;
 }
 #restart-banner #restart-banner-dismiss:hover { background: rgba(255,255,255,0.05); }
+
+/* Full-page restart overlay */
+#restart-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  color: #e2c08d;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+#restart-overlay[hidden] { display: none; }
+#restart-overlay-spinner {
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 3px solid rgba(226, 192, 141, 0.25);
+  border-top-color: #e2c08d;
+  border-radius: 50%;
+  animation: restart-spin 0.8s linear infinite;
+}
+@keyframes restart-spin {
+  to { transform: rotate(360deg); }
+}
+#restart-overlay-msg {
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.5;
+}
 
 /* Settings sidebar button */
 #settings-btn {

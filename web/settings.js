@@ -97,7 +97,16 @@
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
-  const TOOL_GROUPS = ["fs", "mcp", "skills", "softskills"];
+  const TOOL_GROUPS = ["fs", "mcp", "skills", "softskills", "calc", "ddg", "web"];
+  const TOOL_DESCRIPTIONS = {
+    fs:         "File-system tools: read, write, grep, glob, revert files, and run bash commands.",
+    mcp:        "MCP (Model Context Protocol) tools: connect to external MCP servers defined in mcp_config.yaml.",
+    skills:     "Skill tools: load and list skill playbooks from the skills/ directory.",
+    softskills: "Soft-skill tools: load and list curator-distilled procedures from the softskills/ directory.",
+    calc:       "Calculator: evaluate mathematical expressions (arithmetic, sqrt, trig, log, pow…).",
+    ddg:        "Web search: search the web via DuckDuckGo and return a list of titled results with snippets.",
+    web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
+  };
 
   const AGENT_SUBTABS = [
     { id: "globals", label: "Globals" },
@@ -169,9 +178,30 @@
     ensureBanner().hidden = false;
   }
 
+  function showRestartingOverlay(msg) {
+    let el = document.getElementById("restart-overlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "restart-overlay";
+      el.innerHTML = `
+        <div id="restart-overlay-spinner"></div>
+        <div id="restart-overlay-msg"></div>
+      `;
+      document.body.appendChild(el);
+    }
+    el.querySelector("#restart-overlay-msg").textContent = msg || "Server is restarting…";
+    el.hidden = false;
+  }
+
+  function hideRestartingOverlay() {
+    const el = document.getElementById("restart-overlay");
+    if (el) el.hidden = true;
+  }
+
   async function doRestart() {
     if (!await appConfirm("Restart the agent-toolkit server now? Active streams will be interrupted.")) return;
     setStatus("Restarting…");
+    showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
     try {
       const r = await fetch("/api/server/restart", { method: "POST", headers: authHeaders() });
       if (!r.ok) {
@@ -183,6 +213,7 @@
       const b = document.getElementById("restart-banner");
       if (b) b.hidden = true;
       setStatus("Server restarting — page will reload shortly…");
+      showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
       // Poll /api/health until reachable, then reload.
       const start = Date.now();
       const tick = async () => {
@@ -191,6 +222,7 @@
           if (h.ok) { window.location.reload(); return; }
         } catch (_) { /* not yet up */ }
         if (Date.now() - start > 30000) {
+          hideRestartingOverlay();
           setStatus("Server did not come back within 30s. Reload manually.");
           return;
         }
@@ -198,6 +230,7 @@
       };
       setTimeout(tick, 1000);
     } catch (e) {
+      hideRestartingOverlay();
       setStatus("Restart failed: " + e.message);
     }
   }
@@ -1339,6 +1372,18 @@
       });
       lab.appendChild(cb);
       lab.appendChild(document.createTextNode(" " + t));
+      const desc = TOOL_DESCRIPTIONS[t];
+      if (desc) {
+        const tip = document.createElement("span");
+        tip.className = "tool-tip-icon";
+        tip.textContent = "?";
+        tip.setAttribute("aria-label", desc);
+        const tipBox = document.createElement("span");
+        tipBox.className = "tool-tip-box";
+        tipBox.textContent = desc;
+        tip.appendChild(tipBox);
+        lab.appendChild(tip);
+      }
       wrap.appendChild(lab);
     }
     row.appendChild(wrap);
