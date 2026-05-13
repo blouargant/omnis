@@ -9,7 +9,8 @@ metadata:
 # Kubernetes Log Investigation
 
 Use this skill to triage pod logs with a token-efficient workflow:
-find suspicious anchors first, then expand around those anchors, and only
+find anchor log lines that match high-signal problem patterns first, then
+expand around those anchors, and only
 fetch full logs as a last resort.
 
 ## When to use it
@@ -20,17 +21,25 @@ fetch full logs as a last resort.
 
 ## Procedure
 
+### Phase 1: Scope and pod selection
+
 1. **Confirm scope first.** Identify cluster context, namespace, workload,
    and time window. Ask for missing values before pulling logs.
 2. **Pick target pods.** Prefer the newest unhealthy pod(s) from the
    workload selector. If multiple replicas fail, sample one or two first.
 3. **Start with a narrow log window.** Pull only a recent slice (for
    example `--tail=200` and optionally `--since=10m`).
-4. **Search for anchors, do not dump all logs.** Scan for likely problem
-   patterns using case-insensitive matching, for example:
+
+### Phase 2: Anchor search
+
+4. **Search for anchors, do not dump all logs.** Treat anchors as log lines
+   matching high-signal problem patterns (case-insensitive), for example:
    - `error|warn|warning|fatal|panic|exception|traceback`
    - `failed|failure|timeout|timed out|refused|unavailable`
    - `oomkilled|backoff|crashloop|segfault`
+
+### Phase 3: Anchor expansion and lifecycle correlation
+
 5. **Expand around anchors with small context.** For each interesting
    match, expand with `grep -A 5 -B 5` (or equivalent). Keep the first
    expansion small.
@@ -39,10 +48,16 @@ fetch full logs as a last resort.
 7. **Correlate with container lifecycle.** If restart/crash behavior is
    present, check previous container logs (`--previous`) and compare with
    current logs.
-8. **If no anchors are found, widen carefully.** Increase tail/since window
-   and retry anchor search before considering full logs.
+
+### Phase 4: If anchors are missing
+
+8. **Widen carefully and retry anchor search.** Increase tail/since window
+   and repeat Phase 2 before considering full logs.
 9. **Last resort only: retrieve complete logs.** Pull full logs only when
    anchor search and progressive widening fail to produce clues.
+
+### Phase 5: Report
+
 10. **Report findings succinctly.** Provide top anchors, short surrounding
     excerpts, likely root cause category, and the smallest next action.
 

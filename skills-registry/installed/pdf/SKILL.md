@@ -8,11 +8,17 @@ metadata:
 
 # PDF
 
-If `pdftotext` is available on the host:
+1. Check whether `pdftotext` is available on the host.
 
-1. Use `bash` to run `pdftotext -layout <input> -`.
-2. Read the captured stdout.
-3. Summarise per-section.
+If `pdftotext` is available:
 
-If `pdftotext` is missing, suggest `brew install poppler` (macOS) or
-`apt-get install poppler-utils` (Debian/Ubuntu) and stop.
+2. Use `bash` to run `pdftotext -layout <input> -`.
+3. Read the captured stdout.
+4. Summarise each section using document headings when present; if no
+  headings are detectable, summarise in sequential equal-length chunks.
+
+If `pdftotext` is missing:
+
+2. Suggest `brew install poppler` (macOS) or `apt-get install poppler-utils`
+  (Debian/Ubuntu).
+3. Stop.

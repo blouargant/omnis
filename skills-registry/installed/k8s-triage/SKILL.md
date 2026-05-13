@@ -15,9 +15,14 @@ assumes either:
 - a Kubernetes MCP server is mounted (preferred — it gives structured
   output and respects permissions).
 
-If the investigation becomes log-heavy (very large logs, unclear anchors,
-or repeated restarts), load `k8s-log-investigation` and follow its
-token-efficient anchor-first workflow.
+If neither `kubectl` nor Kubernetes MCP is available, stop command-based
+triage and ask the user for manual evidence (for example: `kubectl get`
+output, `describe pod`, recent events, and the last 200 log lines).
+
+If the investigation becomes log-heavy (for example: log output exceeds about
+5,000 lines or ~5 MB, no clear anchors after scanning at least 2,000 recent
+lines, or the same pod restarts 3+ times within 30 minutes), load
+`k8s-log-investigation` and follow its token-efficient anchor-first workflow.
 
 ## Procedure
 
@@ -44,8 +49,10 @@ token-efficient anchor-first workflow.
 
 ## Hard rules
 
-- Never `kubectl delete` without explicit user confirmation.
-- Never modify production namespaces (`prod`, `prd`, `production`, or any
-  context containing `prod`) without an explicit user override.
-- If RBAC denies a read, escalate — do not retry with a different
-  account.
+1. **Priority 1 (safety).** Never `kubectl delete` without explicit user
+   confirmation.
+2. **Priority 2 (production guardrails).** Never modify production
+   namespaces (`prod`, `prd`, `production`, or any context containing
+   `prod`) without an explicit user override.
+3. **Priority 3 (access boundaries).** If RBAC denies a read, escalate —
+   do not retry with a different account.
