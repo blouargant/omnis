@@ -243,6 +243,15 @@ func streamEvents(
 				"prompt_tokens": usage["prompt_tokens"],
 				"output_tokens": usage["candidates_tokens"],
 			})
+		case events.EventAskUser:
+			// Forward the full question payload so the browser can render
+			// the question widget.
+			emit("ask_user", p)
+		case events.EventAskUserCancel:
+			emit("ask_user_cancel", map[string]any{
+				"question_id": p["question_id"],
+				"session_id":  p["session_id"],
+			})
 		}
 	}
 

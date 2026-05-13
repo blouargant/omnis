@@ -846,6 +846,185 @@ function appendNestedToolCall(parentBlock, name, args) {
   return block;
 }
 
+// ─── Ask-user widget ─────────────────────────────────────────────────────────
+// Maps questionId → { card, sessionId } so ask_user_cancel can collapse it.
+const pendingAskWidgets = new Map();
+
+// renderAskUserWidget creates an interactive card for a structured question.
+// Widgets are appended to a fixed slot just above the composer (#ask-user-slot)
+// and tagged with the owning session so we can show/hide them on session switch.
+function renderAskUserWidget(sessionId, q) {
+  const slot = document.getElementById("ask-user-slot");
+  if (!slot) return;
+
+  const row = document.createElement("div");
+  row.className = "ask-user-row";
+  row.setAttribute("data-ask-id", q.question_id);
+  row.setAttribute("data-session-id", sessionId);
+  if (sessionId !== activeSessionId) row.style.display = "none";
+
+  const card = document.createElement("div");
+  card.className = "ask-user-card";
+
+  const promptEl = document.createElement("div");
+  promptEl.className = "ask-user-prompt";
+  promptEl.textContent = q.prompt;
+  card.appendChild(promptEl);
+
+  const kind = q.kind;
+  const choices = Array.isArray(q.choices) ? q.choices : [];
+
+  let getAnswer;
+
+  if (kind === "single" || kind === "confirm") {
+    const choicesDiv = document.createElement("div");
+    choicesDiv.className = "ask-user-choices";
+    let selectedValue = null;
+    choices.forEach(ch => {
+      const label = document.createElement("label");
+      label.className = "ask-user-choice";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "ask_" + q.question_id;
+      radio.value = ch;
+      radio.addEventListener("change", () => { selectedValue = ch; });
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(ch));
+      choicesDiv.appendChild(label);
+    });
+    card.appendChild(choicesDiv);
+    getAnswer = () => selectedValue ? { selected: [selectedValue], text: "", cancelled: false } : null;
+  } else if (kind === "multi") {
+    const choicesDiv = document.createElement("div");
+    choicesDiv.className = "ask-user-choices";
+    const checkboxes = [];
+    choices.forEach(ch => {
+      const label = document.createElement("label");
+      label.className = "ask-user-choice";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = ch;
+      checkboxes.push(cb);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(ch));
+      choicesDiv.appendChild(label);
+    });
+    card.appendChild(choicesDiv);
+    let textArea = null;
+    if (q.allow_text) {
+      textArea = document.createElement("textarea");
+      textArea.className = "ask-user-text-input";
+      textArea.placeholder = "Additional notes (optional)…";
+      card.appendChild(textArea);
+    }
+    getAnswer = () => {
+      const sel = checkboxes.filter(c => c.checked).map(c => c.value);
+      return { selected: sel, text: textArea ? textArea.value.trim() : "", cancelled: false };
+    };
+  } else {
+    // text
+    const textArea = document.createElement("textarea");
+    textArea.className = "ask-user-text-input";
+    textArea.placeholder = "Your answer…";
+    card.appendChild(textArea);
+    getAnswer = () => ({ selected: [], text: textArea.value.trim(), cancelled: false });
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "ask-user-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "ask-user-cancel-btn";
+  cancelBtn.textContent = "Skip";
+  actions.appendChild(cancelBtn);
+
+  const submitBtn = document.createElement("button");
+  submitBtn.className = "ask-user-submit";
+  submitBtn.textContent = "Submit";
+  actions.appendChild(submitBtn);
+
+  card.appendChild(actions);
+  row.appendChild(card);
+  slot.appendChild(row);
+  pendingAskWidgets.set(q.question_id, { row, card, sessionId });
+  scrollBottom();
+
+  function resolveWidget(answer) {
+    pendingAskWidgets.delete(q.question_id);
+    card.classList.add("resolved");
+    row.classList.add("resolved");
+    // Replace interactive content with a summary.
+    while (card.lastChild) card.removeChild(card.lastChild);
+    const icon = answer.cancelled ? "✗" : "✓";
+    let summary;
+    if (answer.cancelled) {
+      summary = "skipped";
+    } else if (answer.selected && answer.selected.length) {
+      summary = answer.selected.join(", ");
+      if (answer.text) summary += " — " + answer.text;
+    } else {
+      summary = answer.text || "(empty)";
+    }
+    const resolved = document.createElement("div");
+    resolved.className = "ask-user-resolved-text";
+    resolved.textContent = icon + " " + summary;
+    card.appendChild(resolved);
+    // Move out of the bottom slot into the transcript so it scrolls as history.
+    const container = getContainer(sessionId);
+    if (container) container.appendChild(row);
+    scrollBottom();
+  }
+
+  submitBtn.addEventListener("click", async () => {
+    const answer = getAnswer();
+    if (!answer) return;
+    submitBtn.disabled = true;
+    cancelBtn.disabled = true;
+    try {
+      const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${q.question_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(answer),
+      });
+      if (res.ok) resolveWidget(answer);
+      else submitBtn.disabled = false;
+    } catch { submitBtn.disabled = false; }
+  });
+
+  cancelBtn.addEventListener("click", async () => {
+    submitBtn.disabled = true;
+    cancelBtn.disabled = true;
+    const answer = { selected: [], text: "", cancelled: true };
+    try {
+      const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${q.question_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(answer),
+      });
+      if (res.ok) resolveWidget(answer);
+      else { submitBtn.disabled = false; cancelBtn.disabled = false; }
+    } catch { submitBtn.disabled = false; cancelBtn.disabled = false; }
+  });
+}
+
+// cancelAskUserWidget collapses a pending widget when the server cancels the question.
+function cancelAskUserWidget(questionId) {
+  const entry = pendingAskWidgets.get(questionId);
+  if (!entry) return;
+  pendingAskWidgets.delete(questionId);
+  const { row, card, sessionId } = entry;
+  card.classList.add("resolved");
+  row.classList.add("resolved");
+  while (card.lastChild) card.removeChild(card.lastChild);
+  const resolved = document.createElement("div");
+  resolved.className = "ask-user-resolved-text";
+  resolved.textContent = "✗ cancelled";
+  card.appendChild(resolved);
+  // Move out of the bottom slot into the transcript so it scrolls as history.
+  const container = getContainer(sessionId);
+  if (container) container.appendChild(row);
+}
+
 // formatTeammateResponse returns a human-readable string for a teammate tool
 // response, or null to signal "suppress this output entirely".
 function formatTeammateResponse(response) {
@@ -1040,6 +1219,16 @@ async function deleteSession(id, li) {
     sessionContainers.delete(id);
     sessionCtxUsage.delete(id);
     sessionTokenAccum.delete(id);
+    // Remove any pending ask_user widgets belonging to this session.
+    const slot = document.getElementById("ask-user-slot");
+    if (slot) {
+      for (const row of [...slot.children]) {
+        if (row.getAttribute("data-session-id") === id) row.remove();
+      }
+    }
+    for (const [qid, entry] of pendingAskWidgets) {
+      if (entry.sessionId === id) pendingAskWidgets.delete(qid);
+    }
     if (activeSessionId === id) {
       activeSessionId = null;
       clearPinnedPrompt();
@@ -1095,6 +1284,14 @@ async function selectSession(id) {
   clearPinnedPrompt();
   for (const li of els.list.children) {
     li.classList.toggle("active", li.dataset.id === id);
+  }
+
+  // Toggle ask-user widgets so only this session's pending question is visible.
+  const slot = document.getElementById("ask-user-slot");
+  if (slot) {
+    for (const row of slot.children) {
+      row.style.display = row.getAttribute("data-session-id") === id ? "" : "none";
+    }
   }
 
   applySessionUI(id);
@@ -1182,9 +1379,13 @@ async function subscribeSessionEvents(sessionId) {
       signal: ctrl.signal,
     });
     if (!res.ok) return;
-    for await (const { event } of parseSSE(res)) {
+    for await (const { event, data } of parseSSE(res)) {
       if (event === "mailbox_push" && !sessionSending.has(sessionId)) {
         await appendNewPushTurns(sessionId);
+      } else if (event === "ask_user" && data && typeof data === "object") {
+        renderAskUserWidget(sessionId, data);
+      } else if (event === "ask_user_cancel" && data && data.question_id) {
+        cancelAskUserWidget(data.question_id);
       }
     }
   } catch (e) {
@@ -1459,6 +1660,17 @@ async function sendMessage() {
         case "error": {
           finalizeSegment();
           appendErrorBubble(data.message || String(data), container);
+          break;
+        }
+
+        case "ask_user": {
+          finalizeSegment();
+          renderAskUserWidget(sessionId, data);
+          break;
+        }
+
+        case "ask_user_cancel": {
+          cancelAskUserWidget(data.question_id);
           break;
         }
 

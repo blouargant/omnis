@@ -38,6 +38,7 @@ import (
 	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
 	"github.com/blouargant/agent-toolkit/core/llm"
+	"github.com/blouargant/agent-toolkit/internal/askuser"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -181,6 +182,7 @@ func newChatTextView(changed func()) *tview.TextView {
 type Config struct {
 	Runner                            *runner.Runner
 	Bus                               *events.Bus // optional; if non-nil, trace pane subscribes
+	AskUserRegistry                   *askuser.Registry // optional; if non-nil, renders ask_user modals
 	UserID                            string
 	SessionID                         string
 	AppName                           string // shown in title bar
@@ -337,9 +339,13 @@ func Run(ctx context.Context, cfg Config) error {
 		AddItem(trace, 36, 0, false).
 		AddItem(rightPane, 0, 1, true)
 
-	root := tview.NewFlex().SetDirection(tview.FlexRow).
+	baseFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(status, 1, 0, false).
 		AddItem(main, 0, 1, true)
+
+	// Pages wraps baseFlex and lets us overlay ask_user modals.
+	pages := tview.NewPages().AddPage("main", baseFlex, true, true)
+	root := pages
 
 	// Helpers: thread-safe UI updates.
 	// Guard: QueueUpdateDraw in tview v0.42+ is synchronous — it blocks the
@@ -525,6 +531,25 @@ func Run(ctx context.Context, cfg Config) error {
 		})
 		cfg.Bus.On(events.EventSessionEnd, func(_ string, _ map[string]any) {
 			appendTrace("[yellow]session end[-]")
+		})
+	}
+
+	// ── ask_user modal ───────────────────────────────────────────────────
+	// When the agent calls ask_user, we receive EventAskUser on the bus
+	// and render an interactive modal. The user's answer is fed back to
+	// the registry, which unblocks the tool call.
+	if cfg.AskUserRegistry != nil {
+		cfg.AskUserRegistry.SetNotify(func(q askuser.Question) {
+			if !appRunning.Load() {
+				return
+			}
+			// Only respond to questions for this TUI's session.
+			if q.SessionID != "" && q.SessionID != cfg.SessionID {
+				return
+			}
+			app.QueueUpdateDraw(func() {
+				showAskUserModal(app, pages, input, cfg.AskUserRegistry, q)
+			})
 		})
 	}
 
@@ -946,4 +971,120 @@ func totalCostDollars(inputTokens, cachedInputTokens, cacheCreationTokens, outpu
 	creationCost := float64(cacheCreationTokens) * creationPrice / 1_000_000
 	outputCost := float64(outputTokens) * cfg.OutputTokenPricePerMillion / 1_000_000
 	return freshCost + cachedCost + creationCost + outputCost, true
+}
+
+// showAskUserModal renders an interactive modal for the given question and
+// wires the result back to the registry. It must be called from within an
+// app.QueueUpdateDraw closure.
+//
+// For "single" and "confirm" kinds: a tview.Modal with one button per choice
+// + a Cancel button.
+// For "multi" and "text" kinds: a tview.Form with the relevant inputs.
+func showAskUserModal(
+	app *tview.Application,
+	pages *tview.Pages,
+	returnFocus tview.Primitive,
+	reg *askuser.Registry,
+	q askuser.Question,
+) {
+	pageName := "ask_user:" + q.ID
+
+	resolve := func(ans askuser.Answer) {
+		pages.RemovePage(pageName)
+		app.SetFocus(returnFocus)
+		_ = reg.Resolve(q.SessionID, q.ID, ans)
+	}
+	cancel := func() { resolve(askuser.Answer{Cancelled: true}) }
+
+	title := " Question "
+	switch q.Kind {
+	case askuser.KindSingle, askuser.KindConfirm:
+		modal := tview.NewModal().SetText(q.Prompt)
+		buttons := append([]string{}, q.Choices...)
+		buttons = append(buttons, "Cancel")
+		modal.AddButtons(buttons)
+		modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Cancel" || buttonIndex >= len(q.Choices) {
+				cancel()
+				return
+			}
+			resolve(askuser.Answer{Selected: []string{buttonLabel}})
+		})
+		pages.AddPage(pageName, modal, false, true)
+		app.SetFocus(modal)
+
+	case askuser.KindMulti:
+		form := tview.NewForm()
+		form.SetTitle(title).SetBorder(true)
+		form.AddTextView("Question", q.Prompt, 0, 2, true, false)
+		checked := make([]bool, len(q.Choices))
+		for i, c := range q.Choices {
+			i := i // capture
+			form.AddCheckbox(c, false, func(ch bool) { checked[i] = ch })
+		}
+		if q.AllowText {
+			form.AddInputField("Custom answer", q.Default, 0, nil, nil)
+		}
+		form.AddButton("Submit", func() {
+			// Check for custom text first.
+			if q.AllowText {
+				if field, ok := form.GetFormItemByLabel("Custom answer").(*tview.InputField); ok {
+					if t := strings.TrimSpace(field.GetText()); t != "" {
+						resolve(askuser.Answer{Text: t})
+						return
+					}
+				}
+			}
+			var sel []string
+			for i, c := range q.Choices {
+				if checked[i] {
+					sel = append(sel, c)
+				}
+			}
+			if len(sel) == 0 {
+				cancel()
+				return
+			}
+			resolve(askuser.Answer{Selected: sel})
+		})
+		form.AddButton("Cancel", cancel)
+		form.SetCancelFunc(cancel)
+		pages.AddPage(pageName, centered(form, 60, 3+len(q.Choices)+4), true, true)
+		app.SetFocus(form)
+
+	default: // KindText
+		form := tview.NewForm()
+		form.SetTitle(title).SetBorder(true)
+		form.AddTextView("Question", q.Prompt, 0, 3, true, false)
+		form.AddInputField("Answer", q.Default, 0, nil, nil)
+		form.AddButton("Submit", func() {
+			field, ok := form.GetFormItemByLabel("Answer").(*tview.InputField)
+			if !ok {
+				cancel()
+				return
+			}
+			t := strings.TrimSpace(field.GetText())
+			if t == "" {
+				cancel()
+				return
+			}
+			resolve(askuser.Answer{Text: t})
+		})
+		form.AddButton("Cancel", cancel)
+		form.SetCancelFunc(cancel)
+		pages.AddPage(pageName, centered(form, 60, 10), true, true)
+		app.SetFocus(form)
+	}
+}
+
+// centered wraps a primitive in a flex that centres it with the given width
+// and height. Used to position ask_user forms in the middle of the screen.
+func centered(p tview.Primitive, width, height int) tview.Primitive {
+	return tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(p, height, 0, true).
+			AddItem(nil, 0, 1, false), width, 0, true).
+		AddItem(nil, 0, 1, false)
 }

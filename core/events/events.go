@@ -47,6 +47,13 @@ const (
 	EventCompressionEnd     = "compression_end"
 	EventCompressionSkipped = "compression_skipped"
 	EventCompressNow        = "compress_now"
+	// EventAskUser is fired when the ask_user tool registers a new question.
+	// Payload keys: question_id, session_id, kind, prompt, choices,
+	//               allow_text, default, timeout_secs.
+	EventAskUser = "ask_user"
+	// EventAskUserCancel is fired when a question is resolved (answered,
+	// cancelled, or timed out). Payload keys: question_id, session_id.
+	EventAskUserCancel = "ask_user_cancel"
 )
 
 // Handler receives the event name and a free-form payload map.

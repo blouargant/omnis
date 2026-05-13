@@ -137,6 +137,7 @@ func run() error {
 		WebDir:               webDir,
 		AllowFileAttachments: result.LeaderAllowFileAttachments,
 		EventBus:             result.EventBus,
+		AskUserRegistry:      result.AskUserRegistry,
 		AgentEvents:     newAgentEventBroadcaster(result.EventBus),
 		RegisterSession:     result.RegisterSession,
 		RenameSession:       result.RenameSession,

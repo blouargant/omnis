@@ -31,6 +31,7 @@ import (
 
 	"github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/agent-toolkit/internal/askuser"
 	"github.com/blouargant/agent-toolkit/internal/tui"
 )
 
@@ -137,6 +138,7 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		return tui.Run(ctx, tui.Config{
 			Runner:                            r,
 			Bus:                               result.EventBus,
+			AskUserRegistry:                   result.AskUserRegistry,
 			AppName:                           result.RunnerConfig.AppName,
 			SubAgentNames:                     subAgentNames,
 			InputTokenPricePerMillion:         result.LeaderInputTokenPricePerMillion,
@@ -144,6 +146,11 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 			CachedInputTokenPricePerMillion:   result.LeaderCachedInputTokenPricePerMillion,
 			CacheCreationTokenPricePerMillion: result.LeaderCacheCreationTokenPricePerMillion,
 		})
+	}
+
+	// Console / ADK launcher mode: stdin-based ask_user surface.
+	if result.AskUserRegistry != nil {
+		askuser.InstallStdinAsker(result.AskUserRegistry)
 	}
 
 	args := launcherArgs

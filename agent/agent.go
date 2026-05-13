@@ -27,6 +27,7 @@ import (
 	"github.com/blouargant/agent-toolkit/core/events"
 	"github.com/blouargant/agent-toolkit/core/llm"
 	fstools "github.com/blouargant/agent-toolkit/core/tools"
+	"github.com/blouargant/agent-toolkit/internal/askuser"
 	"github.com/blouargant/agent-toolkit/internal/bg"
 	mcpcfg "github.com/blouargant/agent-toolkit/internal/mcp"
 	"github.com/blouargant/agent-toolkit/internal/skills"
@@ -64,6 +65,11 @@ type AgentResult struct {
 	// LeaderAllowFileAttachments controls whether the server embeds user-attached
 	// files inline in LLM messages (true) or injects file paths as text (false).
 	LeaderAllowFileAttachments bool
+	// AskUserRegistry is the shared ask_user question/answer registry.
+	// Surfaces (web server, TUI, console) use it to receive questions and
+	// deliver answers. Call AskUserRegistry.SetNotify / SetCancel to attach
+	// a surface after agent construction.
+	AskUserRegistry *askuser.Registry
 
 	// RegisterSession registers a session's leader mailbox in the cross-session
 	// registry under displayName. Call this when a new session is created so
@@ -457,6 +463,10 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	leadTools = append(leadTools, q.Tool())
 	leadTools = append(leadTools, curateSessionTool())
 
+	// ask_user registry — created before the event bus so the notify/cancel
+	// callbacks can reference the bus once it is created below.
+	askUserReg := askuser.NewRegistry()
+
 	skillTS, softSkillTS, mcpToolsets, toolsets := buildLeaderToolsets(ctx, runtime, leaderCfg)
 
 	be, err := teammates.ChooseBackend()
@@ -489,6 +499,20 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	// plugins; without these per-agent callbacks the sub-agents' tool and
 	// model activity would never reach the bus (and thus the TUI / logs).
 	bus := events.NewBus()
+
+	// Wire ask_user registry notifications through the event bus so server
+	// and TUI surfaces receive questions and cancellations as bus events.
+	askUserReg.SetNotify(func(q askuser.Question) {
+		bus.Emit(events.EventAskUser, askuser.QuestionToPayload(q))
+	})
+	askUserReg.SetCancel(func(q askuser.Question) {
+		bus.Emit(events.EventAskUserCancel, map[string]any{
+			"question_id": q.ID,
+			"session_id":  q.SessionID,
+		})
+	})
+	leadTools = append(leadTools, fstools.NewAskUserTool(askUserReg))
+
 	subAgentCallbacks := bus.AgentCallbacks(events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
 
 	subAgentMap, subAgents, subAgentLeaderTools, err := buildSubAgents(
@@ -564,6 +588,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		SubAgents:                               subAgentMap,
 		Plugins:                                 plugins,
 		EventBus:                                bus,
+		AskUserRegistry:                         askUserReg,
 		LeaderInputTokenPricePerMillion:         leaderCfg.InputTokenPricePerMillion,
 		LeaderOutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,
 		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,

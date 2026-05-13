@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +18,7 @@ import (
 
 	toolkitagent "github.com/blouargant/agent-toolkit/agent"
 	"github.com/blouargant/agent-toolkit/core/events"
+	"github.com/blouargant/agent-toolkit/internal/askuser"
 	"github.com/blouargant/agent-toolkit/internal/compress"
 )
 
@@ -55,6 +58,8 @@ type serverDeps struct {
 	// AllowFileAttachments controls whether user-attached files are embedded
 	// inline in the LLM message (true) or injected as tool-accessible paths (false).
 	AllowFileAttachments bool
+	// AskUserRegistry receives ask_user tool questions and delivers answers.
+	AskUserRegistry *askuser.Registry
 	// ConfigFiles holds the absolute paths of the YAML files editable from
 	// the web UI (resolved once at startup; never derived from URLs).
 	ConfigFiles configFiles
@@ -104,6 +109,11 @@ func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 	bus.On(events.EventAfterModel, forward) // sub-agent model calls only; leader is in ADK stream
 	bus.On(events.EventCompressionSkipped, broadcast)
 	bus.On(events.EventCompressionEnd, broadcast)
+	// ask_user events are forwarded verbatim to all active SSE streams so
+	// the browser can render the question widget. The cancel event lets
+	// the browser dismiss the widget when a question is resolved server-side.
+	bus.On(events.EventAskUser, broadcast)
+	bus.On(events.EventAskUserCancel, broadcast)
 	return b
 }
 
@@ -231,6 +241,16 @@ func newEngine(d serverDeps) *gin.Engine {
 			ch = make(chan struct{})
 		}
 
+		// Replay any pending ask_user questions so a reconnecting client
+		// can render widgets for questions that were asked before reconnect.
+		if d.AskUserRegistry != nil {
+			for _, q := range d.AskUserRegistry.Pending(id) {
+				data, _ := json.Marshal(askuser.QuestionToPayload(q))
+				_, _ = fmt.Fprintf(c.Writer, "event: ask_user\ndata: %s\n\n", data)
+			}
+			flush()
+		}
+
 		heartbeat := time.NewTicker(30 * time.Second)
 		defer heartbeat.Stop()
 		ctx := c.Request.Context()
@@ -343,6 +363,7 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.POST("/sessions/:id/files", handleFileUpload(d))
+	auth.POST("/sessions/:id/ask-user/:qid", handleAskUserResponse(d))
 
 	root, _ := os.Getwd()
 	auth.GET("/browse", handleBrowse(root))
