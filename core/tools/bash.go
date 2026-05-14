@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/blouargant/yoke/internal/filter"
@@ -173,6 +174,19 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	defer cancel()
 	execCommand := maybeInjectBashFilterArgs(in.Command)
 	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", execCommand)
+	// Put the shell in its own process group so that all child processes it
+	// spawns are part of the same group. When the context deadline fires,
+	// cmd.Cancel kills the entire group (negative PID), ensuring orphaned
+	// children don't keep the stdout/stderr pipes open and cause
+	// CombinedOutput to hang past the timeout.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
