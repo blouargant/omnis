@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -77,8 +78,8 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 		}
 		key := sessionSuffix(userID, sessionID)
 		forced := CurateSessionRequested(key)
-		auditPath := fmt.Sprintf(".agent_memory_%s.md", key)
-		statePath := fmt.Sprintf(".agent_statelog_%s.json", key)
+		auditPath := filepath.Join("logs", fmt.Sprintf("agent_memory_%s.md", key))
+		statePath := filepath.Join("logs", fmt.Sprintf("agent_statelog_%s.json", key))
 
 		curatorMu.Lock()
 		if curatorRunning[key] {
