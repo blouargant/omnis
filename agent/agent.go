@@ -176,7 +176,7 @@ func defaultToolKeys(name string) []string {
 	}
 }
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, mcpToolsets []tool.Toolset) ([]tool.Tool, []tool.Toolset) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, mcpToolsets []tool.Toolset) ([]tool.Tool, []tool.Toolset, string) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -210,33 +210,40 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 		}
 	}
 
-	tools := []tool.Tool{}
+	agentTools := []tool.Tool{}
 	toolsets := []tool.Toolset{}
+	hasSkills, hasSoftSkills := false, false
 	for _, key := range keys {
 		switch key {
 		case "fs":
-			tools = append(tools, fstools.New()...)
+			agentTools = append(agentTools, fstools.New()...)
 		case "mcp":
 			toolsets = append(toolsets, resolvedMCPToolsets...)
 		case "skills":
 			if resolvedSkillTS != nil {
 				toolsets = append(toolsets, resolvedSkillTS)
+				hasSkills = true
 			}
 		case "softskills":
 			if resolvedSoftSkillTS != nil {
 				toolsets = append(toolsets, resolvedSoftSkillTS)
+				hasSoftSkills = true
 			}
 		case "calc":
-			tools = append(tools, fstools.NewCalcTools()...)
+			agentTools = append(agentTools, fstools.NewCalcTools()...)
 		case "ddg":
-			tools = append(tools, fstools.NewDDGTools()...)
+			agentTools = append(agentTools, fstools.NewDDGTools()...)
 		case "serpapi":
-			tools = append(tools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
+			agentTools = append(agentTools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
 		case "web":
-			tools = append(tools, fstools.NewWebTools()...)
+			agentTools = append(agentTools, fstools.NewWebTools()...)
 		}
 	}
-	return tools, toolsets
+	extraInstruction := ""
+	if hasSkills && hasSoftSkills {
+		extraInstruction = softskills.LoaderRule
+	}
+	return agentTools, toolsets, extraInstruction
 }
 
 // skillCatalogEntry is one skill discovered on disk for documentation
@@ -551,6 +558,10 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		leaderInstruction = defaultAgentInstruction("leader")
 	}
 
+	// Append loader rule when both skills and softskills toolsets are mounted.
+	if skillTS != nil && softSkillTS != nil {
+		leaderInstruction += softskills.LoaderRule
+	}
 	// Append dynamic sub-agent capabilities to the leader instruction
 	leaderInstruction += buildSubAgentCapabilitiesBlock(runtime.Agents, runtime)
 

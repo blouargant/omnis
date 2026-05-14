@@ -37,6 +37,15 @@ const (
 	resourceToolName = "load_softskill_resource"
 )
 
+// LoaderRule is injected into any agent that has both skills and softskills
+// toolsets mounted, so it always knows which loader to pair with which source.
+const LoaderRule = `
+LOADER RULE — never break this:
+- Names from 'list_skills'     → load with 'load_skill'     (reads skills/ directory)
+- Names from 'list_softskills' → load with 'load_softskill' (reads softskills/ directory)
+Using the wrong loader always returns "skill not found". Never use 'load_skill' with a name from 'list_softskills', and never use 'load_softskill' with a name from 'list_skills'.
+`
+
 const instruction = `You also have access to **soft-skills**: learned procedures distilled by a curator agent from past sessions. They live alongside authored skills but are auto-generated, so treat them as helpful hints rather than authoritative documentation.
 
 Tool protocol:
