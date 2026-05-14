@@ -68,7 +68,7 @@ func buildSubAgents(
 		}
 
 		subTools, subToolsets, extraInstr := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, mcpToolsets)
-		instr += extraInstr
+		instr = extraInstr + instr
 		if cfg.Mailbox {
 			mb := teammates.NewAgent(cfg.Name, be)
 			mb.NameFunc = nameFunc

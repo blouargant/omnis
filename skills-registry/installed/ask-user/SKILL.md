@@ -6,23 +6,8 @@ description: |
   answer before it can proceed. Renders an interactive widget in the web UI and
   TUI, and falls back to stdin on the console.
 metadata:
-  tags: ["user input", "decision gate", "interaction pattern", "questions", "interactive"]
-  triggers:
-    - "ask the user"
-    - "ask user"
-    - "ask questions"
-    - "question the user"
-    - "gather user input"
-    - "need user input"
-    - "interactive planning"
-    - "present options"
-    - "ask before proceeding"
-    - "choice gate"
-    - "user decision"
-    - "clarify with user"
-    - "confirm with user"
-    - "collect user preferences"
-  
+  tags: "user input, decision gate, interaction pattern, questions, interactive"
+  triggers: "ask the user, ask user, ask questions, question the user, gather user input, need user input, interactive planning, present options, ask before proceeding, choice gate, user decision, clarify with user, confirm with user, collect user preferences"
 ---
 
 # Ask User — Choice Gate Pattern

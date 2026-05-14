@@ -3,7 +3,7 @@ name: k8s-triage
 description: Diagnose an unhealthy Kubernetes workload — pods crash-looping, deployments not ready, services not reachable. Use whenever the user mentions kubernetes, k8s, kubectl, pods, deployments, namespaces, or attaches a kubectl error.
 metadata:
   author: blouargant@chapsvision.com
-  tags: [ "kubernetes", "triage", "diagnosis", "playbook" ]
+  tags: "kubernetes, triage, diagnosis, playbook"
 ---
 
 # Kubernetes Triage

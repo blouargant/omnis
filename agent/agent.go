@@ -558,9 +558,9 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		leaderInstruction = defaultAgentInstruction("leader")
 	}
 
-	// Append loader rule when both skills and softskills toolsets are mounted.
+	// Prepend loader rule when both skills and softskills toolsets are mounted.
 	if skillTS != nil && softSkillTS != nil {
-		leaderInstruction += softskills.LoaderRule
+		leaderInstruction = softskills.LoaderRule + leaderInstruction
 	}
 	// Append dynamic sub-agent capabilities to the leader instruction
 	leaderInstruction += buildSubAgentCapabilitiesBlock(runtime.Agents, runtime)

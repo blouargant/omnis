@@ -3,7 +3,7 @@ name: pdf
 description: Extract or summarise text from a local PDF file.
 metadata:
   author: blouargant@chapsvision.com
-  tags: [ "file", "pdf", "text extraction" ]
+  tags: "file, pdf, text extraction"
 ---
 
 # PDF
