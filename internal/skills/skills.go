@@ -11,6 +11,8 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
+
+	"github.com/blouargant/yoke/internal/fsutil"
 )
 
 // Toolset returns an ADK tool.Toolset reading skills from `dir`.
@@ -26,7 +28,7 @@ func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
 	// always available. User-defined skills from the filesystem are layered on
 	// top via a merged source. Builtin skills take priority (listed first) so a
 	// duplicate name in the user directory is rejected at startup.
-	fsSrc := skill.NewFileSystemSource(os.DirFS(dir))
+	fsSrc := skill.NewFileSystemSource(fsutil.NewSymlinkDirFS(dir))
 	src := skill.NewMergedSource(builtinSource(), fsSrc)
 	// NOTE: the default system instruction shipped by ADK v1.2 tells the
 	// model to call `load_skill` with `skill_name="..."`, but the tool's

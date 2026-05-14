@@ -21,6 +21,8 @@ import (
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
 	"google.golang.org/genai"
+
+	"github.com/blouargant/yoke/internal/fsutil"
 )
 
 // DefaultDir is the root softskills directory used when none is supplied.
@@ -56,7 +58,7 @@ func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("softskills dir: %w", err)
 	}
-	src := skill.NewFileSystemSource(os.DirFS(dir))
+	src := skill.NewFileSystemSource(fsutil.NewSymlinkDirFS(dir))
 
 	inner, err := skilltoolset.New(ctx, skilltoolset.Config{
 		Source:            src,
