@@ -846,6 +846,64 @@ function appendNestedToolCall(parentBlock, name, args) {
   return block;
 }
 
+// ─── Curator block ───────────────────────────────────────────────────────────
+
+function appendCuratorBlock(container) {
+  const block = document.createElement("div");
+  block.className = "tool-block border-orange";
+  block.innerHTML =
+    `<div class="tool-header">` +
+      `<span class="tool-dot pending"></span>` +
+      `<span class="tool-badge badge-orange">Curator</span>` +
+      `<span class="tool-desc">analyzing session…</span>` +
+      `<span class="tool-chevron">▶</span>` +
+    `</div>` +
+    `<div class="tool-body"><div class="tool-out-slot"></div></div>`;
+  block.querySelector(".tool-header").addEventListener("click", () => block.classList.toggle("expanded"));
+  const row = document.createElement("div");
+  row.className = "tool-row";
+  row.appendChild(block);
+  (container || els.transcript).appendChild(row);
+  scrollBottom();
+  return block;
+}
+
+function resolveCuratorBlock(block, data, errorMsg) {
+  const dot  = block.querySelector(".tool-dot");
+  const desc = block.querySelector(".tool-desc");
+  const slot = block.querySelector(".tool-out-slot");
+
+  if (errorMsg) {
+    if (dot)  { dot.classList.remove("pending"); dot.classList.add("error"); }
+    if (desc) desc.textContent = "curation failed";
+    if (slot) {
+      const div = document.createElement("div");
+      div.className = "tool-section";
+      div.innerHTML =
+        `<div class="tool-section-label label-error">ERROR</div>` +
+        `<pre class="tool-pre tool-error">${escHtml(errorMsg)}</pre>`;
+      slot.replaceWith(div);
+    }
+    return;
+  }
+
+  const text = data.skipped
+    ? (data.reason || "Session too shallow for soft-skill curation.")
+    : (data.summary || "Curation complete.");
+
+  if (dot)  { dot.classList.remove("pending"); dot.classList.add("done"); }
+  if (desc) desc.textContent = data.skipped ? "nothing to learn" : "curation complete";
+  if (slot) {
+    const div = document.createElement("div");
+    div.className = "tool-section";
+    div.innerHTML =
+      `<div class="tool-section-label label-out">OUT</div>` +
+      `<pre class="tool-pre output">${escHtml(text)}</pre>`;
+    slot.replaceWith(div);
+  }
+  if (!data.skipped) block.classList.add("expanded");
+}
+
 // ─── Ask-user widget ─────────────────────────────────────────────────────────
 // Maps questionId → { card, sessionId } so ask_user_cancel can collapse it.
 const pendingAskWidgets = new Map();
@@ -1709,7 +1767,7 @@ async function sendMessage() {
 const SLASH_COMMANDS = [
   { cmd: "/help",      args: "",         desc: "Show available commands" },
   { cmd: "/learn",     args: "[reason]", desc: "Mark session for soft-skill curation (runs on session end)" },
-  { cmd: "/learn-now", args: "[reason]", desc: "Mark and immediately trigger soft-skill curation" },
+  { cmd: "/learn-now", args: "[reason]", desc: "Immediately run soft-skill curation and show result" },
   { cmd: "/status",    args: "",         desc: "Show current session info" },
 ];
 
@@ -1791,7 +1849,7 @@ async function handleSlashCommand(raw) {
         "**Available commands**\n\n" +
         "- `/help` — Show this help\n" +
         "- `/learn [reason]` — Mark session for soft-skill curation (runs on session end)\n" +
-        "- `/learn-now [reason]` — Mark and immediately trigger soft-skill curation\n" +
+        "- `/learn-now [reason]` — Immediately run soft-skill curation and show result\n" +
         "- `/status` — Show current session info"
       );
       break;
@@ -1805,28 +1863,73 @@ async function handleSlashCommand(raw) {
       break;
     }
 
-    case "learn":
+    case "learn": {
+      if (!activeSessionId) {
+        appendCommandBubble("No active session — start a chat first.", true);
+        return;
+      }
+      const reason = argPart || "manual /learn request from web UI";
+      try {
+        const res = await apiFetch(`/api/sessions/${activeSessionId}/curate`, {
+          method: "POST",
+          body: JSON.stringify({ reason, immediate: false }),
+        });
+        if (!res.ok) {
+          const d = await res.json();
+          appendCommandBubble(d.error || "curate request failed", true);
+          return;
+        }
+        appendCommandBubble("Session marked for soft-skill curation — runs on session end.");
+      } catch (err) {
+        appendCommandBubble(String(err), true);
+      }
+      break;
+    }
+
     case "learn-now": {
       if (!activeSessionId) {
         appendCommandBubble("No active session — start a chat first.", true);
         return;
       }
-      const immediate = cmd === "learn-now";
-      const reason = argPart || `manual /${cmd} request from web UI`;
+      const reason = argPart || "manual /learn-now request from web UI";
+      const container = getContainer(activeSessionId);
+      if (!els.transcript.contains(container)) mountSession(activeSessionId);
+      const curatorBlock = appendCuratorBlock(container);
+      scrollBottom(true);
       try {
-        const res = await fetch(`/api/sessions/${activeSessionId}/curate`, {
+        const res = await apiFetch(`/api/sessions/${activeSessionId}/curate`, {
           method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ reason, immediate }),
+          body: JSON.stringify({ reason, immediate: true }),
         });
-        const data = await res.json();
-        if (!res.ok) { appendCommandBubble(data.error || "curate request failed", true); return; }
-        const note = immediate
-          ? "\n\nTriggered curation now. Check logs for curator completion."
-          : "\n\nCuration runs on session end.";
-        appendCommandBubble(data.message + note);
+        if (!res.ok) {
+          const txt = await res.text();
+          let errMsg = "curate request failed";
+          try { const d = JSON.parse(txt); errMsg = d.error || errMsg; } catch (_) {}
+          resolveCuratorBlock(curatorBlock, {}, errMsg);
+          return;
+        }
+        let gotStart = false;
+        for await (const { event, data } of parseSSE(res)) {
+          if (event === "curator_start") {
+            gotStart = true;
+          } else if (event === "curator_end") {
+            resolveCuratorBlock(curatorBlock, data || {}, (data && data.error) || null);
+          } else if (event === "done") {
+            break;
+          }
+        }
+        // If the curator was skipped before emitting curator_start, gotStart
+        // is false and curator_end was emitted directly — the block is already
+        // resolved. Nothing extra to do.
+        if (!gotStart) {
+          // curator_end may not have arrived (timeout / empty session); show generic skip.
+          const dot = curatorBlock.querySelector(".tool-dot");
+          if (dot && dot.classList.contains("pending")) {
+            resolveCuratorBlock(curatorBlock, { skipped: true, reason: "no response from curator" }, null);
+          }
+        }
       } catch (err) {
-        appendCommandBubble(String(err), true);
+        resolveCuratorBlock(curatorBlock, {}, String(err));
       }
       break;
     }

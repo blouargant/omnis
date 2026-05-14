@@ -98,8 +98,26 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				}
 			}()
 
+			emitEnd := func(summary string, skipped bool, reason string, err error) {
+				p := map[string]any{
+					"user_id":    userID,
+					"session_id": sessionID,
+					"summary":    summary,
+					"skipped":    skipped,
+					"reason":     reason,
+					"error":      "",
+				}
+				if err != nil {
+					p["error"] = err.Error()
+				}
+				bus.Emit(events.EventCuratorEnd, p)
+			}
+
 			// Skip if neither input exists — nothing to learn from.
 			if !fileExists(auditPath) && !fileExists(statePath) {
+				if forced {
+					emitEnd("", true, "no session data to learn from", nil)
+				}
 				return
 			}
 
@@ -107,8 +125,16 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 			// sessions that are too shallow to have learnable procedures.
 			// Forced sessions (/learn) bypass all threshold checks.
 			if !curatorGate(statePath, forced, agentNames, gate) {
+				if forced {
+					emitEnd("", true, "session too shallow for soft-skill curation", nil)
+				}
 				return
 			}
+
+			bus.Emit(events.EventCuratorStart, map[string]any{
+				"user_id":    userID,
+				"session_id": sessionID,
+			})
 
 			ctx, cancel := context.WithTimeout(context.Background(), curateTimeout)
 			defer cancel()
@@ -121,16 +147,20 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 			})
 			if err != nil {
 				log.Printf("curator: build failed for session %s: %v", key, err)
+				emitEnd("", false, "", fmt.Errorf("curator build failed: %w", err))
 				return
 			}
-			if _, err := softskills.Curate(ctx, r, softskills.CurateInputs{
+			summary, err := softskills.Curate(ctx, r, softskills.CurateInputs{
 				AuditPath:    auditPath,
 				StateLogPath: statePath,
 				AgentNames:   agentNames,
-			}); err != nil {
+			})
+			if err != nil {
 				log.Printf("curator: run failed for session %s: %v", key, err)
+				emitEnd("", false, "", fmt.Errorf("curation failed: %w", err))
 				return
 			}
+			emitEnd(summary, false, "", nil)
 		}()
 	}
 	bus.On(events.EventSessionEnd, handler)

@@ -54,6 +54,13 @@ const (
 	// EventAskUserCancel is fired when a question is resolved (answered,
 	// cancelled, or timed out). Payload keys: question_id, session_id.
 	EventAskUserCancel = "ask_user_cancel"
+	// EventCuratorStart is fired when the curator agent begins processing a
+	// session. Payload keys: user_id, session_id.
+	EventCuratorStart = "curator_start"
+	// EventCuratorEnd is fired when the curator finishes (or is skipped).
+	// Payload keys: user_id, session_id, summary (string), skipped (bool),
+	//               reason (string, when skipped), error (string, on failure).
+	EventCuratorEnd = "curator_end"
 )
 
 // Handler receives the event name and a free-form payload map.
