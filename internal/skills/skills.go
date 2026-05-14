@@ -46,7 +46,7 @@ Skills are folders of instructions and resources that extend your capabilities f
 This is very important:
 
 1. Use the ` + "`list_skills`" + ` tool to discover what skills are available.
-2. If a skill seems relevant to the current user query, you MUST call the ` + "`load_skill`" + ` tool with the argument ` + "`name=\"<SKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `) to read its full instructions before proceeding.
+2. For EACH skill whose description is relevant to the current task, call ` + "`load_skill`" + ` with ` + "`name=\"<SKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `). Load ALL relevant skills — do not stop at the first match.
 3. Once you have read the instructions, follow them exactly as documented before replying to the user. If the instructions list multiple steps, complete all of them in order.
 4. The ` + "`load_skill_resource`" + ` tool is for viewing files within a skill's directory (e.g., ` + "`references/*`, `assets/*`, `scripts/*`" + `). Do NOT use other tools to access these files.
 `
