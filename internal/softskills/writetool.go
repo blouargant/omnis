@@ -316,6 +316,13 @@ func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
 	if err != nil {
 		return indexOut{Result: "Error: " + err.Error()}, nil
 	}
+	// Guard: the SKILL.md must exist before its index entry is written.
+	// Prevents dangling entries when softskill_create is called in wrong
+	// order or has failed.
+	skillFile := filepath.Join(indexRoot, name, "SKILL.md")
+	if _, err := os.Stat(skillFile); errors.Is(err, os.ErrNotExist) {
+		return indexOut{Result: fmt.Sprintf("Error: %s does not exist — call softskill_create first, then softskill_index_append", skillFile)}, nil
+	}
 	indexPath := filepath.Join(indexRoot, indexFileName)
 	if err := w.ensureInside(indexPath); err != nil {
 		return indexOut{Result: "Error: " + err.Error()}, nil

@@ -22,6 +22,3 @@ The curator MUST keep this index up to date when creating or removing a
 soft-skill. Append new entries under the matching category (create the
 category section if it does not exist). Use surgical edits, not rewrites.
 -->
-
-### kubernetes
-- **diagnose-gpu-smi-hang** — Systematically diagnose nvidia-smi hangs by checking GPU daemonsets, library paths, and driver version mismatches.

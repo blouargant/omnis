@@ -7,8 +7,8 @@
 //
 // Inputs the curator consumes (all already produced per-session by the
 // existing compress plugin and StateLog):
-//   - .agent_memory_<sessionSuffix>.md — distilled audit (compress plugin).
-//   - .agent_statelog_<sessionSuffix>.json — structured session insights.
+//   - logs/agent_memory_<sessionSuffix>.md — distilled audit (compress plugin).
+//   - logs/agent_statelog_<sessionSuffix>.json — structured session insights.
 //
 // The curator is intentionally NOT given write access to anything outside
 // the softskills directory. It uses the three softskill_* tools defined in

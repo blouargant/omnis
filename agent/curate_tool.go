@@ -36,9 +36,12 @@ func RequestCurateSession(userID, sessionID, reason string) (string, error) {
 	curateRequestMu.Lock()
 	curateRequested[key] = true
 	curateRequestMu.Unlock()
-	path := fmt.Sprintf(".agent_curate_%s.txt", key)
+	path := fmt.Sprintf("logs/agent_curate_%s.txt", key)
 	if reason == "" {
 		reason = "manual curation request"
+	}
+	if err := os.MkdirAll("logs", 0o755); err != nil {
+		return "", err
 	}
 	if err := os.WriteFile(path, []byte(reason+"\n"), 0o644); err != nil {
 		return "", err

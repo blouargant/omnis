@@ -120,6 +120,9 @@ func TestUpdateAcceptsRealChange(t *testing.T) {
 func TestIndexAppendCreatesSection(t *testing.T) {
 	root := t.TempDir()
 	w := &writer{root: root}
+	skillDir := filepath.Join(root, "rollout-debug")
+	_ = os.MkdirAll(skillDir, 0o755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: rollout-debug\ndescription: test\n---\n"), 0o644)
 	out, _ := w.appendIndex(nil, indexIn{Category: "kubernetes", Name: "rollout-debug", Summary: "Diagnose stuck deployments"})
 	if !strings.Contains(out.Result, "appended") {
 		t.Fatalf("got %q", out.Result)
@@ -134,6 +137,9 @@ func TestIndexAppendCreatesSection(t *testing.T) {
 func TestIndexAppendIdempotent(t *testing.T) {
 	root := t.TempDir()
 	w := &writer{root: root}
+	skillDir := filepath.Join(root, "demo")
+	_ = os.MkdirAll(skillDir, 0o755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: demo\ndescription: test\n---\n"), 0o644)
 	in := indexIn{Category: "meta", Name: "demo", Summary: "first"}
 	_, _ = w.appendIndex(nil, in)
 	out, _ := w.appendIndex(nil, in)
@@ -150,6 +156,12 @@ func TestIndexAppendConcurrent(t *testing.T) {
 	root := t.TempDir()
 	w := &writer{root: root}
 	const n = 8
+	for i := 0; i < n; i++ {
+		name := "skill-" + string(rune('a'+i))
+		skillDir := filepath.Join(root, name)
+		_ = os.MkdirAll(skillDir, 0o755)
+		_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: "+name+"\ndescription: test\n---\n"), 0o644)
+	}
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for i := 0; i < n; i++ {
