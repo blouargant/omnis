@@ -7,7 +7,7 @@ description: Explains the soft-skills system to the lead agent — when to consu
 
 ## What soft-skills are
 
-Soft-skills are short, actionable procedures the curator agent has distilled
+Soft-skills are short, advisory procedures the curator agent has distilled
 from successful past sessions. Each one captures a sequence of steps that
 worked, plus the constraints that made it work.
 
@@ -18,12 +18,16 @@ conflict in your reply.
 
 ## When to consult them
 
+Soft-skills inform your planning and are consulted before authoritative sources
+(authored skills, tool documentation, explicit user instructions) take
+precedence. Use them to shape your approach, not to override other guidance.
+
 - At the start of any non-trivial task: call `list_softskills` once to scan
   the available descriptions. The list is cheap (frontmatter only).
 - Whenever the user's request matches a soft-skill description, call
   `load_softskill` with `name="<SOFTSKILL_NAME>"` before planning.
-- Skip the lookup for trivial requests (single-tool answers, conversational
-  replies).
+- Skip the lookup for requests that involve only one tool use or are limited to
+  simple conversational responses, such as greetings or acknowledgments.
 
 ## When new soft-skills are created
 
