@@ -46,6 +46,17 @@ LOADER RULE — never break this:
 Using the wrong loader always returns "skill not found". Never use 'load_skill' with a name from 'list_softskills', and never use 'load_softskill' with a name from 'list_skills'.
 `
 
+// LoaderProtocol is prepended to any agent instruction whose tools include
+// the 'softskills' group. It guarantees that the agent always discovers and
+// loads relevant soft-skills before planning, regardless of what its own
+// instruction file says.
+const LoaderProtocol = `
+Soft-skill protocol — at the start of every non-trivial task:
+- Call 'list_softskills' once to scan curator-distilled procedures from past sessions.
+- If any soft-skill looks relevant, call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name') before planning.
+- Treat soft-skills as hints rather than authority; defer to authored skills, tool docs, and the user when they disagree.
+`
+
 const instruction = `You also have access to **soft-skills**: learned procedures distilled by a curator agent from past sessions. They live alongside authored skills but are auto-generated, so treat them as helpful hints rather than authoritative documentation.
 
 Tool protocol:

@@ -239,9 +239,19 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			agentTools = append(agentTools, fstools.NewWebTools()...)
 		}
 	}
-	extraInstruction := ""
+	var instructionParts []string
+	if hasSkills {
+		instructionParts = append(instructionParts, skills.LoaderProtocol)
+	}
+	if hasSoftSkills {
+		instructionParts = append(instructionParts, softskills.LoaderProtocol)
+	}
 	if hasSkills && hasSoftSkills {
-		extraInstruction = softskills.LoaderRule
+		instructionParts = append(instructionParts, softskills.LoaderRule)
+	}
+	extraInstruction := ""
+	if len(instructionParts) > 0 {
+		extraInstruction = strings.Join(instructionParts, "\n") + "\n"
 	}
 	return agentTools, toolsets, extraInstruction
 }

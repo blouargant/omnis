@@ -15,6 +15,17 @@ import (
 	"github.com/blouargant/yoke/internal/fsutil"
 )
 
+// LoaderProtocol is prepended to any agent instruction whose tools include
+// the 'skills' group. It guarantees that the agent always discovers and loads
+// authored skills before planning, regardless of what its own instruction
+// file says.
+const LoaderProtocol = `
+Skill protocol — at the start of every non-trivial task:
+- Call 'list_skills' once to see authored procedures available to you.
+- For EACH skill whose description matches the task, call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL relevant skills; do not stop at the first match.
+- Follow each loaded skill's instructions exactly before continuing.
+`
+
 // Toolset returns an ADK tool.Toolset reading skills from `dir`.
 // `dir` is created if missing so demos still work.
 func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
