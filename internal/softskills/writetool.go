@@ -17,6 +17,7 @@ package softskills
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,23 +136,36 @@ type createOut struct {
 }
 
 func (w *writer) create(_ tool.Context, in createIn) (createOut, error) {
+	// Allow "agent/name" shorthand in the Name field so the model can use
+	// the path notation it sees in prompts without a separate Agent param.
+	if in.Agent == "" {
+		if parts := strings.SplitN(in.Name, "/", 2); len(parts) == 2 {
+			in.Agent, in.Name = parts[0], parts[1]
+		}
+	}
 	skillDir, target, err := w.skillPath(in.Agent, in.Name)
 	if err != nil {
+		log.Printf("softskills: create agent=%q name=%q: path error: %v", in.Agent, in.Name, err)
 		return createOut{Result: "Error: " + err.Error()}, nil
 	}
 	if _, err := os.Stat(target); err == nil {
 		return createOut{Result: fmt.Sprintf("Error: soft-skill %q already exists at %s; use softskill_update instead", in.Name, target)}, nil
 	}
 	if err := validateSkillContent(in.Name, in.Content); err != nil {
+		log.Printf("softskills: create agent=%q name=%q: content invalid: %v", in.Agent, in.Name, err)
 		return createOut{Result: "Error: " + err.Error()}, nil
 	}
+	content := normalizeSkillName(in.Content, in.Name)
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		log.Printf("softskills: create agent=%q name=%q: mkdir %s: %v", in.Agent, in.Name, skillDir, err)
 		return createOut{Result: fmt.Sprintf("Error creating dir: %v", err)}, nil
 	}
-	if err := os.WriteFile(target, []byte(in.Content), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		log.Printf("softskills: create agent=%q name=%q: write %s: %v", in.Agent, in.Name, target, err)
 		return createOut{Result: fmt.Sprintf("Error writing %s: %v", target, err)}, nil
 	}
-	return createOut{Result: fmt.Sprintf("created %s (%d bytes)", target, len(in.Content))}, nil
+	log.Printf("softskills: created %s", target)
+	return createOut{Result: fmt.Sprintf("created %s (%d bytes)", target, len(content))}, nil
 }
 
 // ── softskill_update ─────────────────────────────────────────────────────
@@ -167,11 +181,17 @@ type updateOut struct {
 }
 
 func (w *writer) update(_ tool.Context, in updateIn) (updateOut, error) {
+	if in.Agent == "" {
+		if parts := strings.SplitN(in.Name, "/", 2); len(parts) == 2 {
+			in.Agent, in.Name = parts[0], parts[1]
+		}
+	}
 	if len(strings.TrimSpace(in.Reason)) < minReasonLen {
 		return updateOut{Result: fmt.Sprintf("Error: `reason` must be at least %d non-whitespace chars explaining the genuine improvement", minReasonLen)}, nil
 	}
 	_, target, err := w.skillPath(in.Agent, in.Name)
 	if err != nil {
+		log.Printf("softskills: update agent=%q name=%q: path error: %v", in.Agent, in.Name, err)
 		return updateOut{Result: "Error: " + err.Error()}, nil
 	}
 	prev, err := os.ReadFile(target)
@@ -187,10 +207,13 @@ func (w *writer) update(_ tool.Context, in updateIn) (updateOut, error) {
 	if isTrivialChange(string(prev), in.Content) {
 		return updateOut{Result: "Error: change rejected as trivial (whitespace-only or below 3% diff). Soft-skills must only change for substantive improvements."}, nil
 	}
-	if err := os.WriteFile(target, []byte(in.Content), 0o644); err != nil {
+	content := normalizeSkillName(in.Content, in.Name)
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		log.Printf("softskills: update agent=%q name=%q: write %s: %v", in.Agent, in.Name, target, err)
 		return updateOut{Result: fmt.Sprintf("Error writing %s: %v", target, err)}, nil
 	}
-	return updateOut{Result: fmt.Sprintf("updated %s (%d bytes; reason: %s)", target, len(in.Content), strings.TrimSpace(in.Reason))}, nil
+	log.Printf("softskills: updated %s", target)
+	return updateOut{Result: fmt.Sprintf("updated %s (%d bytes; reason: %s)", target, len(content), strings.TrimSpace(in.Reason))}, nil
 }
 
 // ── softskill_delete ─────────────────────────────────────────────────────
@@ -300,6 +323,12 @@ type indexOut struct {
 }
 
 func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
+	// Allow "agent/name" shorthand in the Name field.
+	if in.Agent == "" {
+		if parts := strings.SplitN(in.Name, "/", 2); len(parts) == 2 {
+			in.Agent, in.Name = parts[0], parts[1]
+		}
+	}
 	cat := strings.TrimSpace(in.Category)
 	name := strings.TrimSpace(in.Name)
 	summary := strings.TrimSpace(in.Summary)
@@ -446,11 +475,60 @@ func validateSkillContent(name, content string) error {
 	if !strings.Contains(header, "description:") {
 		return errors.New("frontmatter missing `description:`")
 	}
+	// Accept both "name: <skill>" and "name: <agent>/<skill>" — the model
+	// sometimes writes the full path notation. The caller should normalize
+	// the content before persisting (see normalizeSkillName).
 	expected := "name: " + name
 	if !strings.Contains(header, expected) {
-		return fmt.Errorf("frontmatter `name:` must equal %q (the directory name)", name)
+		suffix := "/" + name
+		ok := false
+		for _, line := range strings.SplitAfter(header, "\n") {
+			if after, cut := strings.CutPrefix(strings.TrimSpace(line), "name:"); cut {
+				val := strings.TrimSpace(after)
+				if val == name || strings.HasSuffix(val, suffix) {
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
+			return fmt.Errorf("frontmatter `name:` must equal %q (the directory name)", name)
+		}
 	}
 	return nil
+}
+
+// normalizeSkillName rewrites the frontmatter `name:` field to the bare skill
+// name, stripping any leading "agent/" prefix the model may have written.
+func normalizeSkillName(content, name string) string {
+	suffix := "/" + name
+	var out strings.Builder
+	inFrontmatter := false
+	closed := false
+	for i, line := range strings.SplitAfter(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == "---" {
+			inFrontmatter = true
+			out.WriteString(line)
+			continue
+		}
+		if inFrontmatter && !closed {
+			if trimmed == "---" {
+				closed = true
+				out.WriteString(line)
+				continue
+			}
+			if after, cut := strings.CutPrefix(trimmed, "name:"); cut {
+				val := strings.TrimSpace(after)
+				if strings.HasSuffix(val, suffix) && val != name {
+					out.WriteString("name: " + name + "\n")
+					continue
+				}
+			}
+		}
+		out.WriteString(line)
+	}
+	return out.String()
 }
 
 // isTrivialChange returns true when prev and next normalize to the same

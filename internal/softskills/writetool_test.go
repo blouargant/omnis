@@ -117,6 +117,29 @@ func TestUpdateAcceptsRealChange(t *testing.T) {
 	}
 }
 
+func TestCreateAgentSlashNameShorthand(t *testing.T) {
+	root := t.TempDir()
+	w := &writer{root: root}
+	// Model passes "investigator/diagnose-foo" in Name instead of using Agent field.
+	content := "---\nname: investigator/diagnose-foo\ndescription: Test.\n---\n\n# T\n"
+	out, _ := w.create(nil, createIn{Name: "investigator/diagnose-foo", Content: content})
+	if strings.HasPrefix(out.Result, "Error") {
+		t.Fatalf("expected success, got %q", out.Result)
+	}
+	target := filepath.Join(root, "investigator", "diagnose-foo", "SKILL.md")
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("SKILL.md not written: %v", err)
+	}
+	// frontmatter name must be normalized to bare skill name
+	if strings.Contains(string(body), "investigator/") {
+		t.Errorf("frontmatter still contains path prefix:\n%s", body)
+	}
+	if !strings.Contains(string(body), "name: diagnose-foo") {
+		t.Errorf("frontmatter missing correct name:\n%s", body)
+	}
+}
+
 func TestIndexAppendCreatesSection(t *testing.T) {
 	root := t.TempDir()
 	w := &writer{root: root}
