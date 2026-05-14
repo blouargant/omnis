@@ -24,6 +24,8 @@ MANDATORY SKILL DISCOVERY — this rule is non-negotiable and overrides every ot
 - Your VERY FIRST tool call for ANY task MUST be 'list_skills'. No bash, no kubectl, no MCP calls, no other tools may precede it.
 - Even if the task seems obvious or you "already know" how to do it, you MUST call 'list_skills' first and inspect every entry.
 - For EACH skill whose description overlaps ANY aspect of the task, you MUST call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL matching skills — do not stop at the first match.
+- Skills covering the same domain are COMPLEMENTARY, never alternatives. If two skills both mention the task's technology (e.g. 'kubernetes' in both 'k8s-triage' and 'k8s-log-investigation'), you MUST load BOTH. Picking only "the closest match" is a protocol violation.
+- A skill is "matching" if ANY keyword in its description overlaps the task — the technology (kubernetes, postgres, redis…), the artefact (pod, table, container…), or the symptom (crash, freeze, error, slow, hang…). Err on the side of loading more skills, not fewer.
 - Loaded skill instructions OVERRIDE your default behaviour. Follow them exactly before taking any other action.
 - Skipping skill discovery is a protocol violation. If you find yourself reaching for bash/kubectl/mcp before list_skills, stop and call list_skills first.
 `
