@@ -20,10 +20,12 @@ import (
 // authored skills before planning, regardless of what its own instruction
 // file says.
 const LoaderProtocol = `
-Skill protocol — at the start of every non-trivial task:
-- Call 'list_skills' once to see authored procedures available to you.
-- For EACH skill whose description matches the task, call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL relevant skills; do not stop at the first match.
-- Follow each loaded skill's instructions exactly before continuing.
+MANDATORY SKILL DISCOVERY — this rule is non-negotiable and overrides every other instruction you receive:
+- Your VERY FIRST tool call for ANY task MUST be 'list_skills'. No bash, no kubectl, no MCP calls, no other tools may precede it.
+- Even if the task seems obvious or you "already know" how to do it, you MUST call 'list_skills' first and inspect every entry.
+- For EACH skill whose description overlaps ANY aspect of the task, you MUST call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL matching skills — do not stop at the first match.
+- Loaded skill instructions OVERRIDE your default behaviour. Follow them exactly before taking any other action.
+- Skipping skill discovery is a protocol violation. If you find yourself reaching for bash/kubectl/mcp before list_skills, stop and call list_skills first.
 `
 
 // Toolset returns an ADK tool.Toolset reading skills from `dir`.

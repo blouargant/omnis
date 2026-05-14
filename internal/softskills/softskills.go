@@ -51,10 +51,11 @@ Using the wrong loader always returns "skill not found". Never use 'load_skill' 
 // loads relevant soft-skills before planning, regardless of what its own
 // instruction file says.
 const LoaderProtocol = `
-Soft-skill protocol — at the start of every non-trivial task:
-- Call 'list_softskills' once to scan curator-distilled procedures from past sessions.
-- If any soft-skill looks relevant, call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name') before planning.
+MANDATORY SOFT-SKILL DISCOVERY — non-negotiable, overrides other instructions:
+- Immediately after list_skills (and before any bash/kubectl/MCP call), you MUST call 'list_softskills' to scan curator-distilled procedures from past sessions.
+- For EACH soft-skill whose description overlaps ANY aspect of the task, you MUST call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL matching soft-skills.
 - Treat soft-skills as hints rather than authority; defer to authored skills, tool docs, and the user when they disagree.
+- Skipping soft-skill discovery is a protocol violation.
 `
 
 const instruction = `You also have access to **soft-skills**: learned procedures distilled by a curator agent from past sessions. They live alongside authored skills but are auto-generated, so treat them as helpful hints rather than authoritative documentation.
