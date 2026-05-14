@@ -70,6 +70,9 @@ type AgentResult struct {
 	// deliver answers. Call AskUserRegistry.SetNotify / SetCancel to attach
 	// a surface after agent construction.
 	AskUserRegistry *askuser.Registry
+	// CuratorIdleTimeout is the idle-session duration after which the server
+	// should trigger an automatic curation run. Zero means disabled.
+	CuratorIdleTimeout time.Duration
 
 	// RegisterSession registers a session's leader mailbox in the cross-session
 	// registry under displayName. Call this when a new session is created so
@@ -189,8 +192,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 		}
 	}
 	resolvedSoftSkillTS := softSkillTS
-	if cfg.SoftSkillsDir != "" && cfg.SoftSkillsDir != runtime.SoftSkillsDir {
-		if sts, err := softskills.Toolset(ctx, cfg.SoftSkillsDir); err == nil {
+	agentSoftSkillsDir := cfg.SoftSkillsDir
+	if agentSoftSkillsDir == "" && cfg.Name != "" {
+		agentSoftSkillsDir = filepath.Join(runtime.SoftSkillsDir, cfg.Name)
+	}
+	if agentSoftSkillsDir != "" && agentSoftSkillsDir != runtime.SoftSkillsDir {
+		if sts, err := softskills.Toolset(ctx, agentSoftSkillsDir); err == nil {
 			resolvedSoftSkillTS = sts
 		}
 	}
@@ -581,7 +588,18 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 	if curatorCfg, ok := runtime.AgentConfig("curator"); ok && curatorCfg.Enabled {
 		curatorLLM, err := modelForAgent(curatorCfg)
 		if err == nil {
-			registerCuratorHook(bus, curatorLLM, runtime.SoftSkillsDir, runtime.SkillsDir, sessionSuffix)
+			var subAgentNames []string
+			for _, cfg := range runtime.Agents {
+				if cfg.Name == "leader" || cfg.Name == "curator" || !cfg.Enabled {
+					continue
+				}
+				subAgentNames = append(subAgentNames, cfg.Name)
+			}
+			gate := CuratorGateConfig{
+				MinTurns:         runtime.CuratorMinTurns,
+				MinSubAgentCalls: runtime.CuratorMinSubAgentCalls,
+			}
+			registerCuratorHook(bus, curatorLLM, runtime.SoftSkillsDir, runtime.SkillsDir, subAgentNames, gate, sessionSuffix)
 		}
 	}
 
@@ -603,6 +621,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,
 		LeaderCacheCreationTokenPricePerMillion: leaderCfg.CacheCreationTokenPricePerMillion,
 		LeaderAllowFileAttachments:              leaderCfg.AllowFileAttachments,
+		CuratorIdleTimeout:                      runtime.CuratorIdleTimeout,
 		RunnerConfig: runner.Config{
 			AppName:           runtime.AppName,
 			Agent:             lead,

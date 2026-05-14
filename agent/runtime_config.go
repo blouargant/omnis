@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -122,6 +123,14 @@ type RuntimeSettings struct {
 	SerpAPIKey              string
 	Models                  map[string]RuntimeModelConfig
 	Agents                  []RuntimeAgentConfig
+	// Curator gate thresholds (YOKE_CURATOR_MIN_TURNS / YOKE_CURATOR_MIN_SUB_AGENT_CALLS).
+	// Zero values fall back to the defaults in CuratorGateConfig.
+	CuratorMinTurns         int
+	CuratorMinSubAgentCalls int
+	// CuratorIdleTimeout is the idle-session duration after which the Web UI
+	// server fires an automatic curation run (YOKE_CURATOR_IDLE_TIMEOUT).
+	// Zero means disabled.
+	CuratorIdleTimeout      time.Duration
 }
 
 // AgentConfig returns the effective config for one agent name.
@@ -480,6 +489,17 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out.Agents = applyLeaderModelEnv(out.Agents)
 	if v, ok := parseBoolEnv("YOKE_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOKE_CURATOR_MIN_TURNS"))); err == nil && v > 0 {
+		out.CuratorMinTurns = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOKE_CURATOR_MIN_SUB_AGENT_CALLS"))); err == nil && v > 0 {
+		out.CuratorMinSubAgentCalls = v
+	}
+	if raw := strings.TrimSpace(os.Getenv("YOKE_CURATOR_IDLE_TIMEOUT")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			out.CuratorIdleTimeout = d
+		}
 	}
 
 	// Options (highest precedence)

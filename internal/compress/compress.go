@@ -145,6 +145,7 @@ type sessionState struct {
 	mu               sync.Mutex
 	lastTokenCount   atomic.Int64
 	forceCompact     atomic.Bool
+	totalTurns       atomic.Int64 // monotonically incremented in afterModel; stamped into StateLog
 	recentUserTurns  []string // last few user prompts; used by task-switch sniffer
 	recentModelTurns []string // last few model responses (text + tool calls); used by state-log extractor
 	sumCache         *summaryCache
@@ -276,6 +277,7 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 // every StateLogEvery turns.
 func (m *manager) afterModel(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 	st := m.state(ctx.UserID(), ctx.SessionID())
+	st.totalTurns.Add(1)
 	if resp != nil && resp.UsageMetadata != nil {
 		st.lastTokenCount.Store(int64(resp.UsageMetadata.PromptTokenCount + resp.UsageMetadata.CandidatesTokenCount))
 	}
@@ -465,8 +467,9 @@ func (m *manager) maybeRefreshStateLog(ctx context.Context, userID, sessionID st
 	defer st.stateLog.mu.Unlock()
 	if delta != nil {
 		st.stateLog.log.merge(delta)
-		_ = persistStateLog(m.cfg.StateLogPathFunc(userID, sessionID), &st.stateLog.log)
 	}
+	st.stateLog.log.TurnCount = int(st.totalTurns.Load())
+	_ = persistStateLog(m.cfg.StateLogPathFunc(userID, sessionID), &st.stateLog.log)
 	st.stateLog.turnsSince = 0
 }
 

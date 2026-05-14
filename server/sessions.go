@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -18,6 +19,11 @@ type SessionMeta struct {
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at"`
 	Turns      int       `json:"turns"`
+	// Harvested is set by the idle harvester after it fires curator evaluation
+	// for this session. A harvested session is skipped by the idle scanner until
+	// new activity (Touch) clears the flag. The flag is persisted in the
+	// conversation file so it survives server restarts.
+	Harvested bool `json:"harvested,omitempty"`
 }
 
 const defaultUserID = "web-user"
@@ -68,13 +74,33 @@ func (r *registry) Get(id string) (*SessionMeta, bool) {
 }
 
 // Touch marks a session as used and increments the turn counter.
+// It also clears the Harvested flag so the idle harvester will re-evaluate
+// the session after enough new activity accumulates. The on-disk flag is
+// cleared by the next appendConversationTurn call.
 func (r *registry) Touch(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if m, ok := r.items[id]; ok {
 		m.LastUsedAt = time.Now()
 		m.Turns++
+		m.Harvested = false
 	}
+}
+
+// MarkHarvested flags a session so the idle harvester skips it until new
+// activity arrives. The flag is persisted to disk asynchronously so it
+// survives server restarts.
+func (r *registry) MarkHarvested(id string) {
+	r.mu.Lock()
+	if m, ok := r.items[id]; ok {
+		m.Harvested = true
+	}
+	r.mu.Unlock()
+	go func() {
+		if err := setConversationHarvested(id, true); err != nil {
+			log.Printf("harvester: failed to persist harvested flag for session %s: %v", id, err)
+		}
+	}()
 }
 
 func (r *registry) Delete(id string) bool {

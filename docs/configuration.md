@@ -99,6 +99,20 @@ env var value is used.
   `YOKE_API_KEY` override the leader agent model selection.
 - `YOKE_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
   value.
+- `YOKE_CURATOR_MIN_TURNS` — minimum number of model responses before
+  non-forced curation is considered (default: `3`). Sessions shorter
+  than this are skipped automatically.
+- `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` — minimum total sub-agent
+  invocations required when no explicit decision was recorded (default:
+  `2`). Together with `MIN_TURNS`, this forms the pre-flight gate that
+  avoids spinning up the curator LLM for trivial sessions.
+- `YOKE_CURATOR_IDLE_TIMEOUT` — duration (e.g. `30m`, `2h`) after
+  which an idle Web UI session automatically triggers curator evaluation.
+  `0` or unset disables the idle trigger (default: disabled). The Web UI
+  never fires `EventSessionEnd`, so this is the primary auto-curation
+  path for server deployments. After firing, the session is marked
+  **Harvested** and skipped by all subsequent scans until the user sends
+  a new message — no repeated evaluations of long-idle sessions.
 
 ## `config/permissions.yaml`
 
@@ -393,6 +407,9 @@ so every model and tool invocation appears live.
 | `YOKE_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
 | `YOKE_API_KEY`    | `core/llm`            | Override the model API key                       |
 | `YOKE_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
+| `YOKE_CURATOR_MIN_TURNS` | `agent`     | Minimum model-response count before non-forced curation (default: `3`) |
+| `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` | `agent` | Minimum sub-agent calls required when no decision recorded (default: `2`) |
+| `YOKE_CURATOR_IDLE_TIMEOUT` | `server` | Idle period after which the Web UI auto-triggers curator (e.g. `30m`; `0` = disabled); session is marked Harvested after firing |
 | `GOOGLE_API_KEY`     | gemini provider       | Auth                                             |
 | `GEMINI_API_KEY`     | gemini provider       | Auth (alias for `GOOGLE_API_KEY`)                |
 | `ANTHROPIC_API_KEY`  | anthropic provider    | Auth                                             |

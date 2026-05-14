@@ -152,17 +152,20 @@ type StateLog struct {
     OpenIssues []string          // pending questions
     Files      map[string]string // path → one-line fact
     Tools      map[string]int    // tool_name → cumulative call count
+    TurnCount  int               // total model-response count (tracked by compress plugin, not LLM-extracted)
 }
 ```
 
 ### Lifecycle
 
-1. `AfterModelCallback` increments a turn counter per session.
+1. `AfterModelCallback` increments an atomic `totalTurns` counter per session.
 2. Every `StateLogEvery` turns (default 5) — or on `compact_now` — the extractor runs.
 3. The extractor sends the last 3 user turns to `StateLogLLM` (falls back to `LLM`) with a strict "JSON only" prompt.
 4. The returned JSON is `json.Unmarshal`'d into a `StateLog`, then merged into the in-memory log (slices de-duplicated, maps merged, tool counts summed).
-5. The merged log is persisted to `StateLogPath` (default `.agent_statelog.json`).
+5. `TurnCount` is stamped from the atomic counter (always, even when no LLM delta was returned), then the merged log is persisted to `StateLogPath` (default `.agent_statelog.json`). This ensures `TurnCount` is always accurate and up-to-date regardless of whether an LLM extraction ran.
 6. On the next `PassSummarizeMiddle` run, `renderForPrompt()` prepends the log as a Markdown block above the prose summary, ensuring the model always receives durable facts even after heavy compression.
+
+`TurnCount` is consumed by the curator pre-flight gate to decide whether a session is substantive enough to warrant a full curation run (see [skills.md — Pre-flight gate](skills.md#lifecycle)).
 
 ---
 

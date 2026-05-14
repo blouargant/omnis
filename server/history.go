@@ -24,8 +24,9 @@ type ConversationTurn struct {
 // ConversationFile is the on-disk format for a session's history.
 // Legacy files used a plain JSON array; those are read transparently.
 type ConversationFile struct {
-	Title string             `json:"title,omitempty"`
-	Turns []ConversationTurn `json:"turns"`
+	Title     string             `json:"title,omitempty"`
+	Harvested bool               `json:"harvested,omitempty"`
+	Turns     []ConversationTurn `json:"turns"`
 }
 
 func conversationPath(sessionID string) string {
@@ -84,6 +85,18 @@ func appendConversationTurn(sessionID, userText, assistantText string) error {
 		AssistantText: assistantText,
 		At:            time.Now(),
 	})
+	f.Harvested = false // new activity resets the harvest flag
+	return saveConversationFile(sessionID, f)
+}
+
+// setConversationHarvested persists the Harvested flag to disk without
+// touching the conversation turns. Called by the idle harvester.
+func setConversationHarvested(sessionID string, v bool) error {
+	f, err := loadConversationFile(sessionID)
+	if err != nil || f == nil {
+		f = &ConversationFile{}
+	}
+	f.Harvested = v
 	return saveConversationFile(sessionID, f)
 }
 
@@ -144,6 +157,7 @@ func loadPersistedSessions() []*SessionMeta {
 		out = append(out, &SessionMeta{
 			ID:         id,
 			Title:      f.Title,
+			Harvested:  f.Harvested,
 			UserID:     defaultUserID,
 			CreatedAt:  f.Turns[0].At,
 			LastUsedAt: f.Turns[len(f.Turns)-1].At,

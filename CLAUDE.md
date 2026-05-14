@@ -48,7 +48,7 @@ main.go / server/
             ├── leader              ← coordinator (fs tools + planning + mailbox)
             │     ├── investigator  ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │     └── summariser    ← condenses bulk output
-            └── curator             ← post-session soft-skill distiller (background, EventSessionEnd)
+            └── curator             ← post-session soft-skill distiller (EventSessionEnd / EventCurateNow / idle harvester)
 ```
 
 Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the leader (not via `transfer_to_agent`), so control always returns to the leader after a sub-agent call. Only one sub-agent runs at a time (enforced by `newNonConcurrentTool`).
@@ -102,6 +102,9 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 | `YOKE_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
 | `YOKE_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
 | `YOKE_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
+| `YOKE_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
+| `YOKE_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |
+| `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
 | `YOKE_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `logs/` and `logs/uploads/` (default `1h`; `0` disables) |
@@ -112,10 +115,11 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `logs/`:
 
 - `agent_tasks_<u>_<ts>.json` — task graph
-- `agent_todo_<u>_<ts>.json` — todo plan  
+- `agent_todo_<u>_<ts>.json` — todo plan
 - `agent_memory_<u>_<ts>.md` — compressed session memory
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
+- `conversation_<id>.json` — Web UI turn history + title + `Harvested` flag (server only)
 
 ### Adding a new sub-agent
 

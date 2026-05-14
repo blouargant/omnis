@@ -2,10 +2,11 @@
 //
 // On EventSessionEnd (real session shutdown — emitted once by the TUI on
 // quit, or by the launcher entry point — NOT the per-turn EventRunEnd),
+// or on EventCurateNow (explicit trigger from /learn-now or idle scanner),
 // we spawn the curator agent in a goroutine with a 2-minute timeout.
 // The curator reads the per-session audit and state log files (written
-// by the compress plugin) and decides whether to create or update one
-// soft-skill. Failures are logged and swallowed: curation must never
+// by the compress plugin) and decides whether to create, update, or delete
+// soft-skills. Failures are logged and swallowed: curation must never
 // break the user-facing session.
 package agent
 
@@ -36,12 +37,38 @@ var (
 	curatorRunning = map[string]bool{}
 )
 
+// CuratorGateConfig holds the quick pre-flight thresholds evaluated before
+// spinning up the curator LLM. All fields default to sensible values when zero.
+type CuratorGateConfig struct {
+	// MinTurns is the minimum number of model responses a session must have
+	// before automatic (non-forced) curation is considered. Default: 3.
+	MinTurns int
+	// MinSubAgentCalls is the minimum total sub-agent invocations the session
+	// must contain before automatic curation is considered — unless the session
+	// already has at least one recorded decision. Default: 2.
+	MinSubAgentCalls int
+}
+
+func (c CuratorGateConfig) minTurns() int {
+	if c.MinTurns > 0 {
+		return c.MinTurns
+	}
+	return 3
+}
+
+func (c CuratorGateConfig) minSubAgentCalls() int {
+	if c.MinSubAgentCalls > 0 {
+		return c.MinSubAgentCalls
+	}
+	return 2
+}
+
 // registerCuratorHook subscribes a handler to EventSessionEnd that fires
 // the curator agent in a detached goroutine. It is intentionally lazy:
 // the curator agent + runner are built on-demand inside the goroutine so
 // (a) startup cost is paid only when the hook actually fires and (b) a
 // curator construction error never aborts the main agent boot.
-func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir string, sessionSuffix func(u, s string) string) {
+func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir string, agentNames []string, gate CuratorGateConfig, sessionSuffix func(u, s string) string) {
 	handler := func(_ string, payload map[string]any) {
 		userID, _ := payload["user_id"].(string)
 		sessionID, _ := payload["session_id"].(string)
@@ -76,10 +103,10 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				return
 			}
 
-			// Skip if the state log is still effectively empty unless the
-			// session was explicitly marked for curation (curate_session
-			// tool or /learn shortcut).
-			if !forced && !stateLogHasSignal(statePath) {
+			// Quick pre-flight: avoid spinning up the curator LLM for
+			// sessions that are too shallow to have learnable procedures.
+			// Forced sessions (/learn) bypass all threshold checks.
+			if !curatorGate(statePath, forced, agentNames, gate) {
 				return
 			}
 
@@ -90,6 +117,7 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 				Model:         llm,
 				SoftSkillsDir: softDir,
 				SkillsDir:     skillsDir,
+				AgentNames:    agentNames,
 			})
 			if err != nil {
 				log.Printf("curator: build failed for session %s: %v", key, err)
@@ -98,6 +126,7 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 			if _, err := softskills.Curate(ctx, r, softskills.CurateInputs{
 				AuditPath:    auditPath,
 				StateLogPath: statePath,
+				AgentNames:   agentNames,
 			}); err != nil {
 				log.Printf("curator: run failed for session %s: %v", key, err)
 				return
@@ -113,25 +142,46 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// stateLogHasSignal returns true when the persisted state log contains
-// at least one decision or one file fact — i.e. the session has produced
-// material worth distilling into a soft-skill. A bare goal/open_issues
-// pair is not enough: those can be parroted from the very first user
-// prompt, well before the agent has done useful work.
-func stateLogHasSignal(path string) bool {
-	if path == "" {
+// curatorGate is the quick pre-flight check executed before the curator LLM
+// is spun up. It reads the statelog once and applies cheap threshold checks
+// so shallow or trivial sessions are rejected without any model call.
+//
+// Order of checks (cheapest → most discriminating):
+//  1. forced (session marked via /learn) → always proceed.
+//  2. Statelog unreadable or empty → skip.
+//  3. TurnCount < MinTurns → skip (session too short).
+//  4. len(Decisions) >= 1 → proceed (explicit decision recorded).
+//  5. sub-agent call count >= MinSubAgentCalls → proceed (real delegation).
+//  6. else → skip (shallow Q&A session).
+func curatorGate(statePath string, forced bool, agentNames []string, cfg CuratorGateConfig) bool {
+	if forced {
+		return true
+	}
+	if statePath == "" {
 		return false
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(statePath)
 	if err != nil {
 		return false
 	}
 	var sl struct {
-		Decisions []string          `json:"decisions"`
-		Files     map[string]string `json:"files"`
+		Decisions  []string       `json:"decisions"`
+		Files      map[string]string `json:"files"`
+		Tools      map[string]int `json:"tools"`
+		TurnCount  int            `json:"turn_count"`
 	}
 	if err := json.Unmarshal(data, &sl); err != nil {
 		return false
 	}
-	return len(sl.Decisions) > 0 || len(sl.Files) > 0
+	if sl.TurnCount < cfg.minTurns() {
+		return false
+	}
+	if len(sl.Decisions) > 0 {
+		return true
+	}
+	subAgentCalls := 0
+	for _, name := range agentNames {
+		subAgentCalls += sl.Tools[name]
+	}
+	return subAgentCalls >= cfg.minSubAgentCalls()
 }

@@ -45,9 +45,14 @@ const trivialDiffMaxRatio = 0.03
 // and so tests on platforms without flock still get serialization.
 var indexMu sync.Mutex
 
-// WriteTools returns the three write-side tools the curator mounts.
+// WriteTools returns the five write-side tools the curator mounts.
 // `root` MUST be the absolute (or working-directory-relative) softskills
 // directory; all writes are confined inside it.
+//
+// Each tool accepts an optional `agent` parameter (lowercase-with-dashes agent
+// name). When set, the skill is written to `<root>/<agent>/<skill>/SKILL.md`
+// and its INDEX.md lives at `<root>/<agent>/INDEX.md`. When omitted the
+// leader's root directory is used (`<root>/<skill>/SKILL.md`).
 func WriteTools(root string) []tool.Tool {
 	if root == "" {
 		root = DefaultDir
@@ -55,17 +60,45 @@ func WriteTools(root string) []tool.Tool {
 	w := &writer{root: root}
 	return []tool.Tool{
 		mustTool("softskill_create",
-			"Create a new soft-skill at softskills/<name>/SKILL.md. Refuses if the skill already exists. "+
-				"Arguments: `name` (string, required, lowercase-with-dashes), `content` (string, required, full SKILL.md including YAML frontmatter).",
+			"Create a new soft-skill. Refuses if the skill already exists.\n"+
+				"Arguments:\n"+
+				"  `agent`   (string, optional) — target agent name (e.g. \"investigator\"). Omit for leader/global skills.\n"+
+				"  `name`    (string, required) — lowercase-with-dashes skill name.\n"+
+				"  `content` (string, required) — full SKILL.md including YAML frontmatter.\n"+
+				"Path: softskills/<name>/SKILL.md (no agent) or softskills/<agent>/<name>/SKILL.md (with agent).",
 			w.create),
 		mustTool("softskill_update",
-			"Update an existing soft-skill. Refuses when the change is trivial (whitespace-only or below 3% diff). "+
-				"Arguments: `name` (string, required), `content` (string, required, full SKILL.md), `reason` (string, required, ≥20 chars explaining what genuinely improved).",
+			"Update an existing soft-skill. Refuses when the change is trivial (whitespace-only or below 3% diff).\n"+
+				"Arguments:\n"+
+				"  `agent`   (string, optional) — target agent name. Must match the directory the skill was created in.\n"+
+				"  `name`    (string, required) — skill name.\n"+
+				"  `content` (string, required) — full SKILL.md.\n"+
+				"  `reason`  (string, required, ≥20 chars) — what genuinely improved.",
 			w.update),
+		mustTool("softskill_delete",
+			"Delete an existing soft-skill directory (SKILL.md + directory). "+
+				"Requires a substantive reason. Does NOT remove the INDEX.md entry — call softskill_index_remove for that.\n"+
+				"Arguments:\n"+
+				"  `agent`  (string, optional) — target agent name. Must match the directory the skill lives in.\n"+
+				"  `name`   (string, required) — skill name.\n"+
+				"  `reason` (string, required, ≥20 chars) — why the skill is obsolete or superseded.",
+			w.delete),
 		mustTool("softskill_index_append",
-			"Append a category line to softskills/INDEX.md under the matching ### <category> heading. Creates the section if it does not exist. Idempotent: a duplicate skill name in the same section is rejected.\n"+
-				"Arguments: `category` (string, required), `name` (string, required), `summary` (string, required, one-line description).",
+			"Append an entry to the INDEX.md of the target agent (or the root INDEX.md when no agent is given). "+
+				"Creates the category section if it does not exist. Idempotent: a duplicate skill name is rejected.\n"+
+				"Arguments:\n"+
+				"  `agent`    (string, optional) — target agent name.\n"+
+				"  `category` (string, required) — category heading.\n"+
+				"  `name`     (string, required) — skill name.\n"+
+				"  `summary`  (string, required) — one-line description.",
 			w.appendIndex),
+		mustTool("softskill_index_remove",
+			"Remove a skill entry from INDEX.md. Call this after softskill_delete to keep the index consistent. "+
+				"No-op if the entry is not found.\n"+
+				"Arguments:\n"+
+				"  `agent` (string, optional) — target agent name.\n"+
+				"  `name`  (string, required) — skill name to remove.",
+			w.removeIndex),
 	}
 }
 
@@ -73,9 +106,27 @@ type writer struct {
 	root string
 }
 
+// agentRoot returns the effective directory root for agent (empty = leader/global).
+// The returned path is guaranteed to stay inside w.root.
+func (w *writer) agentRoot(agent string) (string, error) {
+	if agent == "" {
+		return w.root, nil
+	}
+	if err := validateName(agent); err != nil {
+		return "", fmt.Errorf("invalid agent name: %w", err)
+	}
+	dir := filepath.Join(w.root, agent)
+	// ensureInside expects a file path, so we check with a dummy leaf.
+	if err := w.ensureInside(filepath.Join(dir, "x")); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
 // ── softskill_create ─────────────────────────────────────────────────────
 
 type createIn struct {
+	Agent   string `json:"agent"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
 }
@@ -84,7 +135,7 @@ type createOut struct {
 }
 
 func (w *writer) create(_ tool.Context, in createIn) (createOut, error) {
-	skillDir, target, err := w.skillPath(in.Name)
+	skillDir, target, err := w.skillPath(in.Agent, in.Name)
 	if err != nil {
 		return createOut{Result: "Error: " + err.Error()}, nil
 	}
@@ -106,6 +157,7 @@ func (w *writer) create(_ tool.Context, in createIn) (createOut, error) {
 // ── softskill_update ─────────────────────────────────────────────────────
 
 type updateIn struct {
+	Agent   string `json:"agent"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	Reason  string `json:"reason"`
@@ -118,7 +170,7 @@ func (w *writer) update(_ tool.Context, in updateIn) (updateOut, error) {
 	if len(strings.TrimSpace(in.Reason)) < minReasonLen {
 		return updateOut{Result: fmt.Sprintf("Error: `reason` must be at least %d non-whitespace chars explaining the genuine improvement", minReasonLen)}, nil
 	}
-	_, target, err := w.skillPath(in.Name)
+	_, target, err := w.skillPath(in.Agent, in.Name)
 	if err != nil {
 		return updateOut{Result: "Error: " + err.Error()}, nil
 	}
@@ -141,9 +193,104 @@ func (w *writer) update(_ tool.Context, in updateIn) (updateOut, error) {
 	return updateOut{Result: fmt.Sprintf("updated %s (%d bytes; reason: %s)", target, len(in.Content), strings.TrimSpace(in.Reason))}, nil
 }
 
+// ── softskill_delete ─────────────────────────────────────────────────────
+
+type deleteIn struct {
+	Agent  string `json:"agent"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+type deleteOut struct {
+	Result string `json:"result"`
+}
+
+func (w *writer) delete(_ tool.Context, in deleteIn) (deleteOut, error) {
+	if len(strings.TrimSpace(in.Reason)) < minReasonLen {
+		return deleteOut{Result: fmt.Sprintf("Error: `reason` must be at least %d non-whitespace chars explaining why the skill is obsolete", minReasonLen)}, nil
+	}
+	skillDir, target, err := w.skillPath(in.Agent, in.Name)
+	if err != nil {
+		return deleteOut{Result: "Error: " + err.Error()}, nil
+	}
+	if _, err := os.Stat(target); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return deleteOut{Result: fmt.Sprintf("Error: soft-skill %q does not exist at %s", in.Name, target)}, nil
+		}
+		return deleteOut{Result: fmt.Sprintf("Error stating %s: %v", target, err)}, nil
+	}
+	if err := os.RemoveAll(skillDir); err != nil {
+		return deleteOut{Result: fmt.Sprintf("Error deleting %s: %v", skillDir, err)}, nil
+	}
+	return deleteOut{Result: fmt.Sprintf("deleted %s (reason: %s)", skillDir, strings.TrimSpace(in.Reason))}, nil
+}
+
+// ── softskill_index_remove ───────────────────────────────────────────────
+
+type removeIndexIn struct {
+	Agent string `json:"agent"`
+	Name  string `json:"name"`
+}
+type removeIndexOut struct {
+	Result string `json:"result"`
+}
+
+func (w *writer) removeIndex(_ tool.Context, in removeIndexIn) (removeIndexOut, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return removeIndexOut{Result: "Error: name is required"}, nil
+	}
+	if err := validateName(name); err != nil {
+		return removeIndexOut{Result: "Error: " + err.Error()}, nil
+	}
+	indexRoot, err := w.agentRoot(in.Agent)
+	if err != nil {
+		return removeIndexOut{Result: "Error: " + err.Error()}, nil
+	}
+	indexPath := filepath.Join(indexRoot, indexFileName)
+	if err := w.ensureInside(indexPath); err != nil {
+		return removeIndexOut{Result: "Error: " + err.Error()}, nil
+	}
+
+	indexMu.Lock()
+	defer indexMu.Unlock()
+
+	f, err := os.OpenFile(indexPath, os.O_RDWR, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return removeIndexOut{Result: fmt.Sprintf("skill %q not found in index (file does not exist)", name)}, nil
+		}
+		return removeIndexOut{Result: fmt.Sprintf("Error opening %s: %v", indexPath, err)}, nil
+	}
+	defer func() { _ = f.Close() }()
+	if err := flockExclusive(f); err != nil {
+		return removeIndexOut{Result: fmt.Sprintf("Error locking %s: %v", indexPath, err)}, nil
+	}
+	defer func() { _ = flockUnlock(f) }()
+
+	body, err := readAll(f)
+	if err != nil {
+		return removeIndexOut{Result: fmt.Sprintf("Error reading %s: %v", indexPath, err)}, nil
+	}
+	updated, msg := removeIndexEntry(body, name)
+	if updated == body {
+		return removeIndexOut{Result: msg}, nil
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return removeIndexOut{Result: fmt.Sprintf("Error seek: %v", err)}, nil
+	}
+	if err := f.Truncate(0); err != nil {
+		return removeIndexOut{Result: fmt.Sprintf("Error truncate: %v", err)}, nil
+	}
+	if _, err := f.Write([]byte(updated)); err != nil {
+		return removeIndexOut{Result: fmt.Sprintf("Error write: %v", err)}, nil
+	}
+	return removeIndexOut{Result: msg}, nil
+}
+
 // ── softskill_index_append ───────────────────────────────────────────────
 
 type indexIn struct {
+	Agent    string `json:"agent"`
 	Category string `json:"category"`
 	Name     string `json:"name"`
 	Summary  string `json:"summary"`
@@ -165,7 +312,11 @@ func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
 	if err := validateName(cat); err != nil {
 		return indexOut{Result: "Error: invalid category: " + err.Error()}, nil
 	}
-	indexPath := filepath.Join(w.root, indexFileName)
+	indexRoot, err := w.agentRoot(in.Agent)
+	if err != nil {
+		return indexOut{Result: "Error: " + err.Error()}, nil
+	}
+	indexPath := filepath.Join(indexRoot, indexFileName)
 	if err := w.ensureInside(indexPath); err != nil {
 		return indexOut{Result: "Error: " + err.Error()}, nil
 	}
@@ -173,7 +324,7 @@ func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
 	indexMu.Lock()
 	defer indexMu.Unlock()
 
-	if err := os.MkdirAll(w.root, 0o755); err != nil {
+	if err := os.MkdirAll(indexRoot, 0o755); err != nil {
 		return indexOut{Result: fmt.Sprintf("Error creating root: %v", err)}, nil
 	}
 	f, err := os.OpenFile(indexPath, os.O_RDWR|os.O_CREATE, 0o644)
@@ -211,13 +362,17 @@ func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-// skillPath returns (skillDir, skillFile) for `name` and confirms both
-// stay strictly inside the curator's root.
-func (w *writer) skillPath(name string) (string, string, error) {
+// skillPath returns (skillDir, skillFile) for the given agent and skill name,
+// confirming both stay strictly inside the curator's root.
+func (w *writer) skillPath(agent, name string) (string, string, error) {
 	if err := validateName(name); err != nil {
 		return "", "", err
 	}
-	skillDir := filepath.Join(w.root, name)
+	root, err := w.agentRoot(agent)
+	if err != nil {
+		return "", "", err
+	}
+	skillDir := filepath.Join(root, name)
 	target := filepath.Join(skillDir, "SKILL.md")
 	if err := w.ensureInside(target); err != nil {
 		return "", "", err
@@ -399,6 +554,26 @@ func insertIndexEntry(body, category, name, summary string) (string, string, err
 	updatedSection := trimmed + "\n" + entry + "\n"
 	body = body[:sectionStart] + updatedSection + rest[end:]
 	return body, fmt.Sprintf("appended skill %q under category %q", name, category), nil
+}
+
+// removeIndexEntry removes the `- **<name>** — ...` line for the given skill
+// from the index body. Returns the (possibly unchanged) body and a message.
+func removeIndexEntry(body, name string) (string, string) {
+	needle := fmt.Sprintf("- **%s**", name)
+	lines := strings.Split(body, "\n")
+	out := make([]string, 0, len(lines))
+	removed := false
+	for _, line := range lines {
+		if !removed && strings.Contains(line, needle) {
+			removed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !removed {
+		return body, fmt.Sprintf("skill %q not found in index (no change)", name)
+	}
+	return strings.Join(out, "\n"), fmt.Sprintf("removed skill %q from index", name)
 }
 
 func readAll(f *os.File) (string, error) {

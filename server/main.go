@@ -103,6 +103,12 @@ func run() error {
 		unregister:   result.UnregisterSession,
 	}, gcInterval)
 
+	startIdleCurator(rootCtx, IdleCuratorConfig{
+		Registry:    registry,
+		Bus:         result.EventBus,
+		IdleTimeout: result.CuratorIdleTimeout,
+	})
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 	pushMgr := newPushManager(runGuard, pushEvents, result.WatchMailbox)

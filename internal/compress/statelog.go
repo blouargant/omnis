@@ -24,6 +24,9 @@ type StateLog struct {
 	OpenIssues []string          `json:"open_issues,omitempty"`
 	Files      map[string]string `json:"files,omitempty"`
 	Tools      map[string]int    `json:"tools,omitempty"`
+	// TurnCount is the total number of model responses in this session.
+	// Set directly by the compress plugin; never extracted by the LLM.
+	TurnCount int `json:"turn_count,omitempty"`
 }
 
 // merge folds `other` into the receiver. Slices are de-duplicated; map
@@ -52,6 +55,10 @@ func (s *StateLog) merge(other *StateLog) {
 		for k, v := range other.Tools {
 			s.Tools[k] += v
 		}
+	}
+	// TurnCount is set externally (never extracted by the LLM delta); take the max.
+	if other.TurnCount > s.TurnCount {
+		s.TurnCount = other.TurnCount
 	}
 }
 

@@ -23,7 +23,7 @@ func TestBuildCuratePromptIncludesPaths(t *testing.T) {
 		StateLogPath:   state,
 		AuthoredSkills: []string{"review: …", "agent-builder: …"},
 	})
-	for _, want := range []string{audit, state, "review:", "list_softskills"} {
+	for _, want := range []string{audit, state, "review:", "run_glob"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q\n----\n%s", want, got)
 		}
