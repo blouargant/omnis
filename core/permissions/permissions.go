@@ -34,8 +34,8 @@ const (
 // Rule is one entry in the YAML config. It may be written as a bare string
 // (just the pattern) or as a mapping {pattern, reason}.
 type Rule struct {
-	Pattern string `yaml:"pattern"`
-	Reason  string `yaml:"reason"`
+	Pattern string         `yaml:"pattern" json:"pattern"`
+	Reason  string         `yaml:"reason"  json:"reason,omitempty"`
 	re      *regexp.Regexp
 }
 
@@ -57,9 +57,34 @@ func (r *Rule) UnmarshalYAML(node *yaml.Node) error {
 
 // Rules is the parsed permissions config.
 type Rules struct {
-	AlwaysDeny  []Rule `yaml:"always_deny"`
-	AlwaysAllow []Rule `yaml:"always_allow"`
-	AskUser     []Rule `yaml:"ask_user"`
+	AlwaysDeny  []Rule `yaml:"always_deny"  json:"always_deny"`
+	AlwaysAllow []Rule `yaml:"always_allow" json:"always_allow"`
+	AskUser     []Rule `yaml:"ask_user"     json:"ask_user"`
+}
+
+// HasRules reports whether any tier contains at least one rule.
+func (r *Rules) HasRules() bool {
+	return len(r.AlwaysDeny) > 0 || len(r.AlwaysAllow) > 0 || len(r.AskUser) > 0
+}
+
+// Merge returns a new Rules combining base with each overlay appended in order.
+// Base rules are evaluated first within each tier; overlay rules follow.
+// The compiled regexps from each source are preserved.
+func Merge(base *Rules, overlays ...*Rules) *Rules {
+	merged := &Rules{
+		AlwaysDeny:  make([]Rule, len(base.AlwaysDeny)),
+		AlwaysAllow: make([]Rule, len(base.AlwaysAllow)),
+		AskUser:     make([]Rule, len(base.AskUser)),
+	}
+	copy(merged.AlwaysDeny, base.AlwaysDeny)
+	copy(merged.AlwaysAllow, base.AlwaysAllow)
+	copy(merged.AskUser, base.AskUser)
+	for _, o := range overlays {
+		merged.AlwaysDeny = append(merged.AlwaysDeny, o.AlwaysDeny...)
+		merged.AlwaysAllow = append(merged.AlwaysAllow, o.AlwaysAllow...)
+		merged.AskUser = append(merged.AskUser, o.AskUser...)
+	}
+	return merged
 }
 
 // Load reads and compiles a YAML rules file. Missing file yields an empty
@@ -146,6 +171,13 @@ func NewPlugin(name, configPath string, asker Asker) (*plugin.Plugin, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewPluginFromRules(name, rules, asker)
+}
+
+// NewPluginFromRules returns an ADK plugin from a pre-loaded (and possibly
+// merged) Rules set. Use this instead of NewPlugin when rules come from
+// multiple sources (e.g. base config + skill overlays).
+func NewPluginFromRules(name string, rules *Rules, asker Asker) (*plugin.Plugin, error) {
 	if asker == nil {
 		asker = StdinAsker{}
 	}

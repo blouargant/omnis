@@ -540,6 +540,58 @@
 .rule-row select:focus,
 .rule-row input:focus { outline: none; border-color: var(--accent); }
 
+/* Skill-contributed permissions (read-only) */
+.skill-perm-card { margin-bottom: 0.75rem; }
+.skill-perm-name { font-size: 0.9rem; }
+.skill-perm-badge {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  background: var(--accent-subtle, color-mix(in srgb, var(--accent) 12%, transparent));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  font-weight: 500;
+}
+.skill-perm-rules { display: flex; flex-direction: column; gap: 0.3rem; }
+.skill-perm-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.skill-perm-tier-badge {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--mono, monospace);
+  white-space: nowrap;
+  text-align: center;
+}
+.skill-perm-row:has(.skill-perm-tier-badge:first-child) .skill-perm-tier-badge {
+  background: var(--surface2, var(--surface));
+  color: var(--text-muted, var(--text));
+  border: 1px solid var(--border);
+}
+.rule-pattern-ro {
+  font-family: var(--mono, monospace);
+  font-size: 0.82rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--surface2, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rule-reason-ro {
+  font-size: 0.8rem;
+  color: var(--text-muted, var(--text));
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* MCP key/value lists */
 .kv-list { margin-top: 0.6rem; }
 .kv-list-header {
@@ -1754,6 +1806,11 @@
   align-items: center;
   gap: 0.6rem;
 }
+.agent-detail-title-right {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
 .agent-detail-name {
   font-size: 1rem;
   font-weight: 700;
@@ -1953,6 +2010,24 @@
   box-sizing: border-box;
 }
 .agent-instr-textarea:focus { outline: none; border-color: var(--accent); }
+.agent-instr-textarea:disabled,
+.agent-builtin-readonly {
+  opacity: 0.75;
+  cursor: not-allowed;
+  background: var(--bg-raised);
+}
+.agent-builtin-tag {
+  margin-left: 0.5rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  background: rgba(78,201,78,0.12);
+  color: #4ec94e;
+  border: 1px solid rgba(78,201,78,0.25);
+  vertical-align: middle;
+}
 
 /* Advanced paths */
 .agent-advanced {

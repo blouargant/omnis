@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/permissions"
 )
 
 // configFiles holds the absolute filesystem paths of the YAML files that are
@@ -243,6 +244,81 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		}
 		restart.trigger()
 		c.JSON(http.StatusAccepted, gin.H{"status": "restarting"})
+	})
+
+	// GET /config/skill-permissions — read-only view of permissions contributed
+	// by skills that are linked into any agent's skills directory. Used by the
+	// Web UI to display skill-sourced rules alongside the editable base config.
+	rg.GET("/config/skill-permissions", func(c *gin.Context) {
+		type ruleDTO struct {
+			Pattern string `json:"pattern"`
+			Reason  string `json:"reason,omitempty"`
+		}
+		type contribution struct {
+			Skill       string    `json:"skill"`
+			AlwaysDeny  []ruleDTO `json:"always_deny"`
+			AlwaysAllow []ruleDTO `json:"always_allow"`
+			AskUser     []ruleDTO `json:"ask_user"`
+		}
+		toDTO := func(rs []permissions.Rule) []ruleDTO {
+			out := make([]ruleDTO, len(rs))
+			for i, r := range rs {
+				out[i] = ruleDTO{Pattern: r.Pattern, Reason: r.Reason}
+			}
+			return out
+		}
+
+		settings, err := agent.ResolveRuntimeSettings(agent.Options{
+			ConfigPath:       files.Agent,
+			ConfigPathStrict: true,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		seen := map[string]bool{}
+		var contributions []contribution
+		for _, agentCfg := range settings.Agents {
+			dir := agentCfg.SkillsDir
+			if dir == "" {
+				dir = settings.SkillsDir
+			}
+			if dir == "" {
+				continue
+			}
+			absDir, _ := filepath.Abs(dir)
+			entries, err := os.ReadDir(absDir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				permPath := filepath.Join(absDir, e.Name(), "permissions.yaml")
+				key := permPath
+				if real, err := filepath.EvalSymlinks(permPath); err == nil {
+					key = real
+				}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				r, err := permissions.Load(permPath)
+				if err != nil || !r.HasRules() {
+					continue
+				}
+				contributions = append(contributions, contribution{
+					Skill:       e.Name(),
+					AlwaysDeny:  toDTO(r.AlwaysDeny),
+					AlwaysAllow: toDTO(r.AlwaysAllow),
+					AskUser:     toDTO(r.AskUser),
+				})
+			}
+		}
+
+		if contributions == nil {
+			contributions = []contribution{}
+		}
+		c.JSON(http.StatusOK, gin.H{"contributions": contributions})
 	})
 
 	// Parsed JSON view: lets the browser render structured forms without

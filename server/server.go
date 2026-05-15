@@ -404,6 +404,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	registerConfigRoutes(auth, d.ConfigFiles, d.Restart)
 	registerPreferencesRoutes(auth, newPreferencesStore(d.ConfigFiles))
 	registerProviderModelsRoute(auth)
+	registerAgentMetaRoutes(auth)
 	registerSkillsRoutes(auth.Group("/skills"), d.SkillsDeps)
 
 	auth.POST("/sessions/:id/curate", func(c *gin.Context) {

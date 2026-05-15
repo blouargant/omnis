@@ -432,6 +432,28 @@
     state.parsed[id] = { data, mtime: j.mtime, dirty: false, value: deepClone(data) };
   }
 
+  // loadBuiltinAgents fetches the embedded default description + system
+  // instruction for each built-in agent (leader, investigator, web_agent,
+  // summariser, curator). Cached for the lifetime of the page. Failures
+  // degrade to "no built-in metadata" — the UI then treats every agent as
+  // user-configured.
+  async function loadBuiltinAgents() {
+    if (state.builtinAgents) return;
+    state.builtinAgents = {};
+    state.builtinNames = new Set();
+    try {
+      const r = await fetch("/api/agent/builtin-defaults", { headers: authHeaders() });
+      if (!r.ok) return;
+      const j = await r.json();
+      state.builtinAgents = j.agents || {};
+      state.builtinNames = new Set(j.names || Object.keys(state.builtinAgents));
+    } catch { /* network error — fall back to no built-ins */ }
+  }
+
+  function isBuiltinAgent(name) {
+    return !!(state.builtinNames && state.builtinNames.has(name));
+  }
+
   async function errText(r) {
     try { const j = await r.json(); return j.error || `HTTP ${r.status}`; }
     catch { return `HTTP ${r.status}`; }
@@ -463,7 +485,7 @@
         renderRaw(id);
       } else {
         if (!state.parsed[id]) await loadParsed(id);
-        renderForm(id);
+        await renderForm(id);
       }
     } catch (e) {
       bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
@@ -560,7 +582,8 @@
   }
 
   // ── agent.yaml form ──
-  function renderAgentForm() {
+  async function renderAgentForm() {
+    await loadBuiltinAgents();
     const id = "agent";
     const d = state.parsed[id].value;
     if (!d.models || typeof d.models !== "object") d.models = {};
@@ -1116,6 +1139,8 @@
     if (!a) { detailPanel.innerHTML = ""; return; }
 
     const isLeader = a.name === "leader";
+    const isBuiltin = isBuiltinAgent(a.name);
+    const builtinDefaults = (state.builtinAgents && state.builtinAgents[a.name]) || null;
     const onChange = () => markFormDirty("agent");
 
     detailPanel.innerHTML = "";
@@ -1129,13 +1154,16 @@
         <h2 class="agent-detail-name">${escHtml(a.name || "(unnamed)")}</h2>
         <span class="agent-live-badge">LIVE</span>
       </div>
-      <label class="agent-active-toggle-wrap">
-        <span class="agent-active-toggle-label">Active State</span>
-        <span class="agent-toggle-switch">
-          <input type="checkbox" class="agent-toggle-input" ${isEnabled ? "checked" : ""} ${isLeader ? "disabled" : ""}>
-          <span class="agent-toggle-slider"></span>
-        </span>
-      </label>
+      <div class="agent-detail-title-right">
+        <label class="agent-active-toggle-wrap">
+          <span class="agent-active-toggle-label">Active State</span>
+          <span class="agent-toggle-switch">
+            <input type="checkbox" class="agent-toggle-input" ${isEnabled ? "checked" : ""} ${isLeader ? "disabled" : ""}>
+            <span class="agent-toggle-slider"></span>
+          </span>
+        </label>
+        ${isBuiltin ? "" : `<button type="button" class="model-remove-link agent-remove-link">⏷ REMOVE</button>`}
+      </div>
     `;
     titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
       a.enabled = e.target.checked;
@@ -1144,6 +1172,14 @@
       if (dot) { dot.className = "agent-fleet-dot " + (a.enabled ? "dot-live" : "dot-off"); }
       onChange();
     });
+    if (!isBuiltin) {
+      titleBar.querySelector(".agent-remove-link").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
+        d.agents.splice(idx, 1);
+        if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = Math.max(0, d.agents.length - 1);
+        markFormDirty("agent"); renderAgentAgents(d);
+      });
+    }
     detailPanel.appendChild(titleBar);
 
     const body = document.createElement("div");
@@ -1335,11 +1371,23 @@
     const descLbl = document.createElement("label");
     descLbl.className = "agent-instr-label";
     descLbl.textContent = "Public Description";
+    if (isBuiltin) {
+      const tag = document.createElement("span");
+      tag.className = "agent-builtin-tag";
+      tag.textContent = "BUILT-IN";
+      descLbl.appendChild(tag);
+    }
     const descInp = document.createElement("input");
     descInp.type = "text"; descInp.className = "agent-gen-input";
     descInp.placeholder = "Explain what this agent does in one sentence…";
-    descInp.value = a.description || "";
-    descInp.addEventListener("input", () => { a.description = descInp.value; onChange(); });
+    const descVal = isBuiltin && builtinDefaults ? (builtinDefaults.description || "") : (a.description || "");
+    descInp.value = descVal;
+    if (isBuiltin) {
+      descInp.disabled = true;
+      descInp.classList.add("agent-builtin-readonly");
+    } else {
+      descInp.addEventListener("input", () => { a.description = descInp.value; onChange(); });
+    }
     descF.appendChild(descLbl);
     descF.appendChild(descInp);
     instrBody.appendChild(descF);
@@ -1352,20 +1400,31 @@
     const sysLbl = document.createElement("label");
     sysLbl.className = "agent-instr-label";
     sysLbl.textContent = "System Instructions";
+    if (isBuiltin) {
+      const tag = document.createElement("span");
+      tag.className = "agent-builtin-tag";
+      tag.textContent = "BUILT-IN";
+      sysLbl.appendChild(tag);
+    }
     const sysCount = document.createElement("span");
     sysCount.className = "agent-instr-count";
-    const instrVal = a.instruction || "";
+    const instrVal = isBuiltin && builtinDefaults ? (builtinDefaults.instruction || "") : (a.instruction || "");
     sysCount.textContent = Math.round(instrVal.length / 4) + " tokens used";
     sysTop.appendChild(sysLbl);
     sysTop.appendChild(sysCount);
     sysF.appendChild(sysTop);
     const ta = document.createElement("textarea");
     ta.className = "agent-instr-textarea"; ta.rows = 8; ta.value = instrVal;
-    ta.addEventListener("input", () => {
-      a.instruction = ta.value;
-      sysCount.textContent = Math.round(ta.value.length / 4) + " tokens used";
-      onChange();
-    });
+    if (isBuiltin) {
+      ta.disabled = true;
+      ta.classList.add("agent-builtin-readonly");
+    } else {
+      ta.addEventListener("input", () => {
+        a.instruction = ta.value;
+        sysCount.textContent = Math.round(ta.value.length / 4) + " tokens used";
+        onChange();
+      });
+    }
     sysF.appendChild(ta);
     instrBody.appendChild(sysF);
 
@@ -1408,8 +1467,6 @@
       const dnBtn = document.createElement("button");
       dnBtn.type = "button"; dnBtn.className = "down-btn"; dnBtn.textContent = "▼ Move down";
       if (!downOk) dnBtn.disabled = true;
-      const delBtn = document.createElement("button");
-      delBtn.type = "button"; delBtn.className = "del-btn"; delBtn.textContent = "Remove agent";
       upBtn.addEventListener("click", () => {
         [d.agents[idx - 1], d.agents[idx]] = [d.agents[idx], d.agents[idx - 1]];
         state.activeAgentIdx = idx - 1; markFormDirty("agent"); renderAgentAgents(d);
@@ -1418,13 +1475,7 @@
         [d.agents[idx + 1], d.agents[idx]] = [d.agents[idx], d.agents[idx + 1]];
         state.activeAgentIdx = idx + 1; markFormDirty("agent"); renderAgentAgents(d);
       });
-      delBtn.addEventListener("click", async () => {
-        if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
-        d.agents.splice(idx, 1);
-        if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = Math.max(0, d.agents.length - 1);
-        markFormDirty("agent"); renderAgentAgents(d);
-      });
-      acts.appendChild(upBtn); acts.appendChild(dnBtn); acts.appendChild(delBtn);
+      acts.appendChild(upBtn); acts.appendChild(dnBtn);
       body.appendChild(acts);
     }
 
@@ -1448,6 +1499,10 @@
             </div>
           </section>
         `).join("")}
+        <section class="form-section" id="skill-perms-section" style="display:none">
+          <h3>From skills</h3>
+          <div id="skill-perms-list"></div>
+        </section>
       </div>
     `;
     bodyEl.querySelectorAll(".add-btn").forEach(btn => {
@@ -1460,6 +1515,50 @@
     });
     for (const k of ["always_deny", "always_allow", "ask_user"]) renderPermRule(d, k);
     updateFooter();
+    renderSkillPermissions();
+  }
+
+  function renderSkillPermissions() {
+    fetch("/api/config/skill-permissions", { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.contributions || !data.contributions.length) return;
+        const section = bodyEl.querySelector("#skill-perms-section");
+        const list = bodyEl.querySelector("#skill-perms-list");
+        if (!section || !list) return;
+        const tiers = ["always_deny", "always_allow", "ask_user"];
+        data.contributions.forEach(contrib => {
+          const hasRules = tiers.some(t => contrib[t] && contrib[t].length > 0);
+          if (!hasRules) return;
+          const card = document.createElement("div");
+          card.className = "form-card skill-perm-card";
+          const tiersHtml = tiers.map(tier => {
+            const rules = contrib[tier] || [];
+            if (!rules.length) return "";
+            const rows = rules.map(r => {
+              const pat = typeof r === "string" ? r : (r.pattern || "");
+              const reason = typeof r === "object" ? (r.reason || "") : "";
+              return `<div class="rule-row skill-perm-row">
+                <span class="skill-perm-tier-badge">${tier}</span>
+                <code class="rule-pattern-ro">${escHtml(pat)}</code>
+                ${reason ? `<span class="rule-reason-ro">${escHtml(reason)}</span>` : ""}
+              </div>`;
+            }).join("");
+            return rows;
+          }).join("");
+          card.innerHTML = `
+            <div class="form-card-header">
+              <strong class="skill-perm-name">${escHtml(contrib.skill)}</strong>
+              <span class="skill-perm-badge">skill</span>
+            </div>
+            <div class="skill-perm-rules">${tiersHtml}</div>
+          `;
+          list.appendChild(card);
+        });
+        const hasAny = list.children.length > 0;
+        if (hasAny) section.style.display = "";
+      })
+      .catch(() => {});
   }
 
   function renderPermRule(d, key) {

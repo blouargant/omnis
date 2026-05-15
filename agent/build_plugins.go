@@ -59,7 +59,7 @@ func buildPlugins(
 	if eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging}); err == nil {
 		plugins = append(plugins, eventsPlugin)
 	}
-	if perms, err := permissions.NewPlugin("perms", runtime.PermissionsConfigPath, permissions.StdinAsker{}); err == nil {
+	if perms, err := buildPermissionsPlugin(runtime); err == nil {
 		plugins = append(plugins, perms)
 	}
 	if _, cp, err := cache.Plugin("cache"); err == nil {
@@ -85,4 +85,51 @@ func buildPlugins(
 		// a custom agent (see examples/s06_compress for the pattern).
 	}
 	return plugins, nil
+}
+
+// buildPermissionsPlugin loads the base permissions config, then scans every
+// agent's skills directory for per-skill permissions.yaml overlays and merges
+// them together. Skill rules are appended after base rules so the base config
+// always takes precedence within each tier.
+func buildPermissionsPlugin(runtime RuntimeSettings) (*plugin.Plugin, error) {
+	base, err := permissions.Load(runtime.PermissionsConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := map[string]bool{}
+	var overlays []*permissions.Rules
+	for _, agentCfg := range runtime.Agents {
+		dir := agentCfg.SkillsDir
+		if dir == "" {
+			dir = runtime.SkillsDir
+		}
+		if dir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			permPath := filepath.Join(dir, e.Name(), "permissions.yaml")
+			// Resolve symlinks so the same registry skill linked from multiple
+			// agents is only loaded once.
+			key := permPath
+			if real, err := filepath.EvalSymlinks(permPath); err == nil {
+				key = real
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			r, err := permissions.Load(permPath)
+			if err == nil && r.HasRules() {
+				overlays = append(overlays, r)
+			}
+		}
+	}
+
+	merged := permissions.Merge(base, overlays...)
+	return permissions.NewPluginFromRules("perms", merged, permissions.StdinAsker{})
 }

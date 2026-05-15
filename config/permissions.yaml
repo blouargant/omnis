@@ -31,9 +31,6 @@ always_allow:
   # build / test loops
   - "^go (build|test|vet|fmt)"
   - "^npm (test|run build)"
-  # kubernetes read-only
-  - "^kubectl (get|describe|logs|top|explain) "
-  - "^kubectl config (current-context|get-contexts|view)"
   # docker read-only
   - "^docker (ps|images|logs|inspect) "
 
@@ -41,7 +38,6 @@ ask_user:
   - "^rm "
   - "^git push"
   - "^sudo "
-  - "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)"
   - "^docker (run|rm|rmi|exec)"
   - "^terraform (apply|destroy)"
   - "^helm (install|upgrade|uninstall)"
