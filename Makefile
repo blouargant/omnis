@@ -5,6 +5,7 @@ BIN_DIR     := bin
 DIST_DIR    := dist
 EXAMPLES_DIR := examples
 ROOT_BIN    := yoke
+SERVER_BIN  := yoke-server
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -55,10 +56,13 @@ env-tests: ## Source .env and run LLM tests
 	@set -a; . ./.env; set +a; $(GO) test ./core/llm
 
 .PHONY: all
-all: build ## Alias for `build` (root binary + server + examples)
+all: build ## Alias for `build` (root binary + server)
 
 .PHONY: build
-build: build-root build-server $(addprefix build-example-,$(CMDS)) ## Build the root binary, HTTP server and all examples for the host platform
+build: build-root build-server ## Build the production binaries (root yoke + HTTP server) for the host platform
+
+.PHONY: examples
+examples: $(addprefix build-example-,$(CMDS)) ## Build all examples (opt-in; not part of the default build target)
 
 .PHONY: build-root
 build-root: ## Build the root yoke binary
@@ -66,9 +70,9 @@ build-root: ## Build the root yoke binary
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(ROOT_BIN) .
 
 .PHONY: build-server
-build-server: ## Build the HTTP API server (server/)
+build-server: ## Build the HTTP API server (bin/yoke-server)
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/server ./server
+	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(SERVER_BIN) ./server
 
 .PHONY: run-server
 run-server: ## Run the HTTP API server (requires YOKE_SERVER_TOKEN)

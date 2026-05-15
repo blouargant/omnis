@@ -1,19 +1,19 @@
-// yoke — the all-in-one harness binary. Wires every component
-// together and hands control to ADK's full launcher (interactive console
-// + web).
+// yoke — the all-in-one harness binary.
 //
-// Run modes:
+// Usage:
 //
-//	go run . [flags] console      # interactive REPL
-//	go run . [flags] web webui    # local web UI
-//	go run . --tui                # custom tview chat UI
+//	yoke [flags] [prompt...]    # CLI mode (REPL when stdin is a TTY,
+//	                            # one-shot when a prompt arg or piped input
+//	                            # is provided)
+//	yoke [flags] run [prompt]   # explicit CLI form
+//	yoke [flags] tui            # tview chat UI
+//	yoke [flags] curate ...     # one-shot soft-skill curator
+//	yoke version                # print version information
 //
-// Flags:
+// The HTTP API server lives in the separate `yoke-server` binary (see
+// ./server). The 3-mode contract is intentional: command line, TUI, server.
 //
-//	-s, --skills <dir>   Directory to load skills from (default "skills")
-//	-d, --debug          Log full conversation/event payloads
-//	    --tui            Launch the tview chat interface instead of the
-//	                     ADK launcher.
+// See `yoke --help` for the full flag reference.
 package main
 
 import (
@@ -25,22 +25,27 @@ import (
 	"strconv"
 	"strings"
 
-	"google.golang.org/adk/cmd/launcher"
-	"google.golang.org/adk/cmd/launcher/full"
 	"google.golang.org/adk/runner"
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/cli"
 	"github.com/blouargant/yoke/internal/tui"
 )
 
-// options holds the CLI flags consumed by this binary before the launcher
-// subcommand (console / web ...) is dispatched.
+// Build metadata, populated via -ldflags in the Makefile:
+//
+//	-X main.version=... -X main.commit=... -X main.date=...
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+// options holds CLI flags consumed before the subcommand keyword.
 type options struct {
 	skillsDir     string
 	softSkillsDir string
-	tui           bool
 	appName       string
 	configPath    string
 	modelProvider string
@@ -51,16 +56,13 @@ type options struct {
 	debug         bool
 }
 
-// parseFlags extracts our own flags from args, returning the parsed
-// options and the remaining args to forward to the ADK launcher.
-func parseFlags(args []string) (options, []string, error) {
-	opts := options{}
-
+// newFlagSet wires the global yoke flags onto opts and returns the
+// flag.FlagSet so callers can either Parse() or print usage.
+func newFlagSet(opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("yoke", flag.ContinueOnError)
 	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
 	fs.StringVar(&opts.skillsDir, "s", opts.skillsDir, "Directory to load skills from (shorthand)")
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
-	fs.BoolVar(&opts.tui, "tui", false, "Launch the tview chat interface (ignores launcher subcommand)")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
 	fs.StringVar(&opts.configPath, "config", "", "Path to runtime YAML config file (default: config/agent.yaml)")
 	fs.StringVar(&opts.modelProvider, "provider", "", "Global model provider override")
@@ -70,16 +72,36 @@ func parseFlags(args []string) (options, []string, error) {
 	fs.StringVar(&opts.curatorRaw, "curator-enabled", "", "Enable/disable auto-curator hook (true/false)")
 	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
 	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: yoke [flags] <launcher-command> [launcher-args]\n\nFlags:\n")
-		fs.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nLauncher commands: console, web webui, ...\n")
-	}
+	fs.Usage = func() { printUsage(fs) }
+	return fs
+}
 
+// parseFlags extracts our own flags from args and returns the remainder
+// (intended for subcommand dispatch).
+func parseFlags(args []string) (options, []string, error) {
+	opts := options{}
+	fs := newFlagSet(&opts)
 	if err := fs.Parse(args); err != nil {
 		return opts, nil, err
 	}
 	return opts, fs.Args(), nil
+}
+
+func printUsage(fs *flag.FlagSet) {
+	fmt.Fprintf(os.Stderr, `yoke — single-binary harness for the agent toolkit.
+
+Usage:
+  yoke [flags] [prompt...]      run a one-shot turn (or REPL if stdin is a TTY)
+  yoke [flags] run [prompt]     same as above; the explicit form
+  yoke [flags] tui              launch the interactive TUI
+  yoke [flags] curate ...       run the soft-skill curator one-shot
+  yoke version                  print version information
+  yoke help                     show this help
+
+Flags (must appear before any subcommand or prompt):
+`)
+	fs.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "\nThe HTTP API server is a separate binary: yoke-server (see ./server).\n")
 }
 
 func main() {
@@ -94,21 +116,102 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, opts options, launcherArgs []string) error {
-	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
+// run dispatches to the correct subcommand based on the first remaining
+// argument. When no subcommand keyword is present, the remaining args are
+// joined as a one-shot prompt for the CLI; an empty arg list yields a REPL
+// (if stdin is a TTY) or a one-shot reading piped stdin.
+func run(ctx context.Context, opts options, args []string) error {
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "version", "--version", "-v":
+			fmt.Printf("yoke %s (commit %s, built %s)\n", version, commit, date)
+			return nil
+		case "help", "--help", "-h":
+			var dummy options
+			printUsage(newFlagSet(&dummy))
+			return nil
+		case "curate":
+			return runCurate(ctx, opts, args[1:])
+		case "tui":
+			return runTUI(ctx, opts)
+		case "run":
+			return runCLI(ctx, opts, args[1:])
+		}
+	}
+	return runCLI(ctx, opts, args)
+}
+
+// runCLI builds the agent and hands off to internal/cli. When promptArgs is
+// non-empty they are joined as the one-shot prompt; otherwise the CLI
+// auto-detects between REPL (TTY) and stdin-piped one-shot.
+func runCLI(ctx context.Context, opts options, promptArgs []string) error {
+	result, err := buildAgent(ctx, opts)
 	if err != nil {
 		return err
 	}
-
-	// `curate` is a special pre-launcher subcommand that runs the
-	// soft-skills curator one-shot against an existing session's audit
-	// and statelog files. Useful for replaying curation manually.
-	if len(launcherArgs) > 0 && launcherArgs[0] == "curate" {
-		return runCurate(ctx, opts, launcherArgs[1:])
+	r, err := runner.New(result.RunnerConfig)
+	if err != nil {
+		return fmt.Errorf("cli runner: %w", err)
 	}
 
-	// Create the fully configured agent using the agent package
-	result, err := agent.NewAgent(ctx, agent.Options{
+	prompt := strings.TrimSpace(strings.Join(promptArgs, " "))
+
+	if result.EventBus != nil {
+		result.EventBus.Emit(events.EventSessionStart, map[string]any{})
+		defer result.EventBus.Emit(events.EventSessionEnd, map[string]any{})
+	}
+
+	return cli.Run(ctx, cli.Config{
+		Runner:          r,
+		Bus:             result.EventBus,
+		AskUserRegistry: result.AskUserRegistry,
+		AppName:         result.RunnerConfig.AppName,
+		Prompt:          prompt,
+	})
+}
+
+// runTUI mirrors the legacy `--tui` flag: launches the tview chat UI.
+func runTUI(ctx context.Context, opts options) error {
+	result, err := buildAgent(ctx, opts)
+	if err != nil {
+		return err
+	}
+	r, err := runner.New(result.RunnerConfig)
+	if err != nil {
+		return fmt.Errorf("tui runner: %w", err)
+	}
+	subAgentNames := make([]string, 0, len(result.SubAgents))
+	for name := range result.SubAgents {
+		subAgentNames = append(subAgentNames, name)
+	}
+	sort.Strings(subAgentNames)
+
+	if result.EventBus != nil {
+		result.EventBus.Emit(events.EventSessionStart, map[string]any{})
+		defer result.EventBus.Emit(events.EventSessionEnd, map[string]any{})
+	}
+
+	return tui.Run(ctx, tui.Config{
+		Runner:                            r,
+		Bus:                               result.EventBus,
+		AskUserRegistry:                   result.AskUserRegistry,
+		AppName:                           result.RunnerConfig.AppName,
+		SubAgentNames:                     subAgentNames,
+		InputTokenPricePerMillion:         result.LeaderInputTokenPricePerMillion,
+		OutputTokenPricePerMillion:        result.LeaderOutputTokenPricePerMillion,
+		CachedInputTokenPricePerMillion:   result.LeaderCachedInputTokenPricePerMillion,
+		CacheCreationTokenPricePerMillion: result.LeaderCacheCreationTokenPricePerMillion,
+	})
+}
+
+// buildAgent assembles the lead agent from the user-supplied options.
+// Shared between CLI, TUI, and curate subcommands.
+func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
+	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
+	if err != nil {
+		return nil, err
+	}
+	return agent.NewAgent(ctx, agent.Options{
 		SkillsDir:        opts.skillsDir,
 		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
@@ -121,58 +224,6 @@ func run(ctx context.Context, opts options, launcherArgs []string) error {
 		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	})
-	if err != nil {
-		return err
-	}
-
-	if opts.tui {
-		r, err := runner.New(result.RunnerConfig)
-		if err != nil {
-			return fmt.Errorf("tui runner: %w", err)
-		}
-		subAgentNames := make([]string, 0, len(result.SubAgents))
-		for name := range result.SubAgents {
-			subAgentNames = append(subAgentNames, name)
-		}
-		sort.Strings(subAgentNames)
-		return tui.Run(ctx, tui.Config{
-			Runner:                            r,
-			Bus:                               result.EventBus,
-			AskUserRegistry:                   result.AskUserRegistry,
-			AppName:                           result.RunnerConfig.AppName,
-			SubAgentNames:                     subAgentNames,
-			InputTokenPricePerMillion:         result.LeaderInputTokenPricePerMillion,
-			OutputTokenPricePerMillion:        result.LeaderOutputTokenPricePerMillion,
-			CachedInputTokenPricePerMillion:   result.LeaderCachedInputTokenPricePerMillion,
-			CacheCreationTokenPricePerMillion: result.LeaderCacheCreationTokenPricePerMillion,
-		})
-	}
-
-	// Console / ADK launcher mode: stdin-based ask_user surface.
-	if result.AskUserRegistry != nil {
-		askuser.InstallStdinAsker(result.AskUserRegistry)
-	}
-
-	args := launcherArgs
-	if len(args) == 0 {
-		args = []string{"console"}
-	}
-
-	cfg := &launcher.Config{
-		SessionService: result.RunnerConfig.SessionService,
-		AgentLoader:    result.AgentLoader,
-		PluginConfig:   result.RunnerConfig.PluginConfig,
-	}
-	// Emit the real session lifecycle events around the launcher so
-	// subscribers (notably the soft-skills curator) fire once on shutdown
-	// rather than on every per-turn run_end. The launcher creates the
-	// session at runtime so we don't know user_id / session_id upfront;
-	// the curator hook tolerates empty IDs by skipping.
-	if result.EventBus != nil {
-		result.EventBus.Emit(events.EventSessionStart, map[string]any{})
-		defer result.EventBus.Emit(events.EventSessionEnd, map[string]any{})
-	}
-	return full.NewLauncher().Execute(ctx, cfg, args)
 }
 
 func parseOptionalBool(raw string) (*bool, error) {

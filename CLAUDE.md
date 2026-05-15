@@ -5,10 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Build
-make build              # root binary + all examples (host platform)
+# Build (production binaries only)
+make build              # bin/yoke + bin/yoke-server (host platform)
 make build-root         # bin/yoke only
-make build-server       # bin/server (HTTP API)
+make build-server       # bin/yoke-server (HTTP API)
+make examples          # opt-in: build all examples under bin/
 make release            # cross-platform binaries → dist/
 
 # Test
@@ -21,15 +22,19 @@ make fmt                # go fmt ./...
 make vet                # go vet ./...
 make tidy               # go mod tidy
 
-# Run
-go run . console                        # interactive REPL
-go run . web webui                      # local ADK web UI
-go run . --tui                          # tview chat UI
-go run . -d console                     # debug: log full payloads
-make run-server                         # HTTP API (requires YOKE_SERVER_TOKEN)
-go run . curate <audit.md> <state.json> # manual soft-skill curation
+# Run — three usage modes
+go run .                                # CLI: REPL when TTY, one-shot when piped
+go run . "explain main.go"              # CLI one-shot with prompt argument
+echo "summarize repo" | go run .        # CLI one-shot reading stdin
+go run . tui                            # TUI: tview chat interface
+make run-server                         # Server: HTTP API + web UI (needs YOKE_SERVER_TOKEN)
 
-# Examples
+# Auxiliary subcommands
+go run . -d                             # debug: log full payloads (any mode)
+go run . curate --user u --session s    # manual soft-skill curation
+go run . version                        # version info
+
+# Examples (opt-in; not part of `make build`)
 make build-example-s03_todo    # build a single example
 go run ./examples/s05_skills   # run an example directly
 ```

@@ -37,13 +37,17 @@ small in-tree adapter (no extra SDKs).
 export YOKE_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
 
-# Interactive REPL
-go run . console
+# Interactive REPL (auto-detected when stdin is a TTY)
+go run .
 
-# Local ADK web UI
-go run . web webui
+# One-shot prompt
+go run . "summarize the architecture of this repo"
+echo "explain main.go" | go run .
 
-# Custom HTTP server + chat UI (see "Running the web server" below)
+# Built-in TUI (tview chat interface)
+go run . tui
+
+# HTTP server + web chat UI (separate binary; see "Running the server")
 export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
 make run-server   # http://localhost:8080
 ```
@@ -110,45 +114,63 @@ See [docs/providers.md](docs/providers.md) for details.
 
 ---
 
-## Running the all-in-one binary
+## Running the binary
 
-[main.go](main.go) is the reference launcher; it wires
-every component together and hands control to ADK's `full` launcher.
+`yoke` supports exactly three usage modes:
 
-```bash
-go run . console     # ADK interactive REPL (default if no command)
-go run . web webui   # ADK web UI
-go run . --tui       # built-in tview chat UI
-```
+| Mode    | Invocation                            | When to use                                    |
+|---------|---------------------------------------|------------------------------------------------|
+| CLI     | `yoke [prompt…]`, `yoke run [prompt]` | REPL when stdin is a TTY; one-shot when a prompt arg or piped input is given. Best for scripting, quick questions, CI. |
+| TUI     | `yoke tui`                            | Interactive tview interface with live trace pane, streaming markdown and slash-command shortcuts. Best for sustained terminal sessions. |
+| Server  | `yoke-server` (separate binary)       | HTTP + SSE API plus the [web/](web/) chat UI. Best for multi-user, remote access, or integrations. See [Running the server](#running-the-server). |
+
+Plus one auxiliary subcommand:
+
+- `yoke curate …` — replay the soft-skills curator one-shot against an existing session's audit + statelog files.
+- `yoke version` / `yoke help` — version info and usage reference.
 
 ### Command-line flags
 
-| Flag                | Default    | Effect                                                                 |
-|---------------------|------------|------------------------------------------------------------------------|
-| `-s`, `--skills DIR`| `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.          |
-| `-d`, `--debug`     | _off_      | Write full conversation/event payloads to the run's event log instead of partial event summaries. Debug logs can contain prompts, tool outputs, conversation history and secrets already present in context. |
-| `--tui`             | _off_      | Launch the built-in [tview](https://github.com/rivo/tview) chat UI instead of an ADK launcher subcommand. Trace pane on the left, streaming chat + input box on the right. Keys: `Enter` send, `Ctrl-L` clear, `Ctrl-C` / `Esc` quit. |
+| Flag                  | Default    | Effect                                                                  |
+|-----------------------|------------|-------------------------------------------------------------------------|
+| `-s`, `--skills DIR`  | `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.           |
+| `--softskills DIR`    | `softskills` | Directory of curator-generated soft-skills.                           |
+| `--config PATH`       | `config/agent.yaml` | Runtime YAML config path. Error out if the explicit path is missing. |
+| `--provider NAME`     | _(yaml)_   | Global model provider override (e.g. `anthropic`).                      |
+| `--model NAME`        | _(yaml)_   | Global model override.                                                  |
+| `--base-url URL`      | _(yaml)_   | API endpoint override.                                                  |
+| `--api-key KEY`       | _(yaml/env)_| API-key override.                                                      |
+| `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
+| `--name NAME`         | `yoke`     | Application name (used in runner + session metadata).                   |
+| `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log. Logs can contain prompts, tool outputs and secrets already present in context. |
 
-Flags must come **before** any launcher subcommand:
+Flags must come **before** the subcommand or prompt:
 
 ```bash
-go run . --skills ./my-skills console
-go run . -s ./reviewer-skills --tui
+go run . --skills ./my-skills tui
+go run . -d "what does main.go do?"
 ```
 
 See [docs/configuration.md](docs/configuration.md#command-line-flags) for the full reference.
 
-There are also 23 single-component demos under `examples/sNN_*/` that mirror
-the article's phases. See [docs/examples-catalog.md](docs/examples-catalog.md).
+There are single-component demos under `examples/sNN_*/` that mirror the
+article's phases — not part of the production build, but useful for
+learning each component in isolation:
+
+```bash
+make examples            # opt-in: builds all demos
+go run ./examples/s05_skills
+```
+
+See [docs/examples-catalog.md](docs/examples-catalog.md).
 
 ---
 
-## Running the web server
+## Running the server
 
 The repository ships a standalone HTTP server in [server/](server/) that
 exposes the lead agent over a JSON+SSE API and serves the vanilla-JS chat
-UI in [web/](web/). Unlike `go run . web webui` (which launches ADK's
-generic web UI), this is the **custom chat UI** with prompt-history,
+UI in [web/](web/). This is the **custom chat UI** with prompt-history,
 mailbox push, file attachments and the debug overlay described above.
 
 A bearer token is mandatory — the server refuses to start without one:
@@ -182,15 +204,17 @@ Then open <http://localhost:8080> and paste the token when prompted.
 For production-ish use, build once and run the resulting binary:
 
 ```bash
-make clean all                           # → bin/yoke, bin/server, bin/<examples>
-./bin/server
+make clean all                           # → bin/yoke, bin/yoke-server
+./bin/yoke-server
 ```
 
 `make clean all` removes `bin/` and `dist/` then rebuilds the root
-binary, the **server** binary and every example. Run `bin/server` from
-the repository root so it can find the default `web/` and `config/`
-directories — or set `YOKE_WEB_DIR` / `YOKE_CONFIG_PATH` to point
-at absolute paths if you copy the binary elsewhere.
+binary (`yoke`) and the **`yoke-server`** binary. Examples are no
+longer part of the default build — run `make examples` to build them
+on demand. Run `bin/yoke-server` from the repository root so it can
+find the default `web/` and `config/` directories — or set
+`YOKE_WEB_DIR` / `YOKE_CONFIG_PATH` to point at absolute paths if you
+copy the binary elsewhere.
 
 > Enable the debug overlay in the browser by appending `?debug=1` to the
 > URL (or `localStorage.agent_toolkit_debug = "1"`). The overlay reports
@@ -229,7 +253,7 @@ servers:
 The `skills/k8s-triage/SKILL.md` is already shipped as an example. Run:
 
 ```bash
-go run . console
+go run .
 > diagnose why pods in namespace payments are crash-looping
 ```
 
@@ -245,9 +269,11 @@ See [docs/specialising.md](docs/specialising.md) for the full recipe.
 
 ```
 yoke/
-├── cmd/
-│   ├── full/                    # all-in-one launcher (REPL + web)
-│   └── sNN_*/                   # 23 single-component demos (one per article phase)
+├── main.go                      # root binary entry point: CLI / TUI / curate dispatch
+├── curate.go                    # `yoke curate` one-shot subcommand
+├── server/                      # separate binary: HTTP + SSE API + web UI
+├── web/                         # vanilla-JS chat UI assets served by server/
+├── agent/                       # NewAgent() — single wiring entry point
 ├── core/
 │   ├── agentkit/                # central agent constructor + system prompt
 │   ├── llm/                     # multi-provider model dispatcher
@@ -256,6 +282,8 @@ yoke/
 │   ├── events/                  # plugin-friendly event bus + file logger
 │   └── stream/                  # streaming helpers
 ├── internal/
+│   ├── cli/                     # stdio REPL + one-shot frontend
+│   ├── tui/                     # tview chat frontend
 │   ├── todo/                    # TodoWrite tools + store
 │   ├── tasks/                   # durable task graph
 │   ├── bg/                      # background command queue
@@ -264,9 +292,12 @@ yoke/
 │   ├── compress/                # context compression plugin
 │   ├── cache/                   # prompt-cache stats plugin
 │   ├── skills/                  # skill loader (skilltoolset wrapper)
+│   ├── softskills/              # curator-distilled procedures
 │   └── mcp/                     # MCP config loader
+├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
-├── config/                      # permissions.yaml, mcp_config.yaml
+├── softskills/                  # curator output
+├── config/                      # agent.yaml, permissions.yaml, mcp_config.yaml
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation
 ```
