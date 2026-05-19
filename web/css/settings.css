@@ -1018,6 +1018,24 @@
 }
 .app-dialog-actions .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
+/* Registry toggle row (label left, checkbox right) */
+.registry-dialog-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+.registry-dialog-toggle span { flex: 1; }
+.registry-dialog-toggle input[type="checkbox"] {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* Registry multi-field dialog */
 .registry-dialog { min-width: 420px; max-width: 520px; }
 .registry-dialog-form { display: flex; flex-direction: column; gap: 0.75rem; }

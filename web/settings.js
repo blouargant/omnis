@@ -4688,9 +4688,9 @@
           <p class="registry-dialog-hint">
             Files will be written to <code>$YOKE_HOME/registry/agents/${escHtml(agentInfo.name)}/</code>.
           </p>
-          <label class="registry-dialog-field" style="flex-direction:row;align-items:center;gap:8px;">
-            <input type="checkbox" id="agent-install-enable" checked />
+          <label class="registry-dialog-toggle" for="agent-install-enable">
             <span>Enable in <code>config/agents.json</code> after install</span>
+            <input type="checkbox" id="agent-install-enable" checked />
           </label>
           <p class="registry-dialog-hint">
             Adds the agent's name to the enabled list so the next reload wires it in.
@@ -4770,16 +4770,16 @@
       box.appendChild(ta);
 
       const enableRow = document.createElement("label");
-      enableRow.className = "registry-dialog-field";
-      enableRow.style.cssText = "flex-direction:row;align-items:center;gap:8px;margin-top:8px;";
+      enableRow.className = "registry-dialog-toggle";
+      enableRow.style.marginTop = "8px";
       const enableCheck = document.createElement("input");
       enableCheck.type = "checkbox";
       enableCheck.id = "agent-import-enable";
       enableCheck.checked = true;
       const enableLabel = document.createElement("span");
       enableLabel.innerHTML = "Enable in <code>config/agents.json</code> after import";
-      enableRow.appendChild(enableCheck);
       enableRow.appendChild(enableLabel);
+      enableRow.appendChild(enableCheck);
       box.appendChild(enableRow);
 
       const actions = document.createElement("div");
