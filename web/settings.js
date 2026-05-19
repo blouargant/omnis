@@ -151,10 +151,16 @@
     { id: "globals", label: "Global Environment" },
   ];
 
+  const SKILLS_SUBTABS = [
+    { id: "installed", label: "Installed" },
+    { id: "remotes",   label: "Remotes"   },
+  ];
+
   const state = {
     activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "agents", // only used when activeFile === 'agent'
+    activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
     activeAgentIdx: 0,            // selected agent in the fleet list
     activeSquadIdx: 0,            // selected squad in the squads list
     raw: {}, // id → { content, mtime, dirty, value }
@@ -3671,11 +3677,42 @@
       return;
     }
 
-    bodyEl.innerHTML = `<div class="settings-form"><div class="skills-subtab-body"></div></div>`;
-    await renderSkillsRegistryTab(bodyEl.querySelector(".skills-subtab-body"));
+    const sub = state.activeSkillsSubtab;
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <div class="settings-subtabs" role="tablist">
+          ${SKILLS_SUBTABS.map(t => `
+            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
+          `).join("")}
+        </div>
+        <div class="settings-subtab-body"></div>
+      </div>
+    `;
+
+    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
+      b.addEventListener("click", () => {
+        if (state.activeSkillsSubtab === b.dataset.subtab) {
+          if (b.dataset.subtab === "remotes" && state.skills.browsingRemote) {
+            state.skills.browsingRemote = null;
+            state.skills.viewingRemote = null;
+            renderSkills();
+          }
+          return;
+        }
+        state.activeSkillsSubtab = b.dataset.subtab;
+        renderSkills();
+      });
+    });
+
+    const host = bodyEl.querySelector(".settings-subtab-body");
+    if (sub === "remotes") {
+      await renderRemoteRegistriesSection(host);
+    } else {
+      await renderSkillsInstalledTab(host);
+    }
   }
 
-  async function renderSkillsRegistryTab(host) {
+  async function renderSkillsInstalledTab(host) {
     host.innerHTML = `<p class="settings-loading">Loading registry…</p>`;
     let skills;
     try {
@@ -3700,7 +3737,6 @@
     `;
 
     renderSkillCards(host.querySelector("#skills-list"), skills);
-    await renderRemoteRegistriesSection(host);
 
     host.querySelector("#skill-new").addEventListener("click", async () => {
       const name = await appPrompt("Skill name (lowercase, hyphens ok):", "my-skill");

@@ -70,8 +70,7 @@
         "investigator",
         "web_agent",
         "summariser",
-        "image_generator",
-        "skill_editor"
+        "image_generator"
       ]
     },
     {

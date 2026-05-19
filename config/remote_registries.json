@@ -1,19 +1,19 @@
 [
   {
-    "id": "dd19df2a",
-    "name": "mattpocock",
-    "url": "https://github.com/mattpocock/skills/tree/main/skills"
-  },
-  {
     "id": "b7e3f921",
-    "name": "Skillsregistry",
+    "name": "Yoke Skills",
     "url": "https://github.com/blouargant/yoke-registry/tree/main/skills",
     "kind": "skills"
   },
   {
     "id": "c4d8a056",
-    "name": "yoke-registry-agents",
+    "name": "Yoke Agents",
     "url": "https://github.com/blouargant/yoke-registry/tree/main/agents",
     "kind": "agents"
+  },
+  {
+    "id": "dd19df2a",
+    "name": "mattpocock",
+    "url": "https://github.com/mattpocock/skills/tree/main/skills"
   }
 ]

@@ -11,7 +11,8 @@
   "name": "skill_editor",
   "provider": "openai_compat",
   "skills": [
-    "ask-user"
+    "ask-user",
+    "skill-creator"
   ],
   "softskills_dir": "",
   "tools": [
