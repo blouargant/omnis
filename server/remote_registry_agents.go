@@ -201,8 +201,8 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 	}
 }
 
-// registerAgentsRoutes mounts the /api/agents/* routes (currently just the
-// remote-registry subtree). Called from server.go alongside registerSkillsRoutes.
+// registerAgentsRoutes mounts the /api/agents/* routes. Called from server.go
+// alongside registerSkillsRoutes.
 func registerAgentsRoutes(rg *gin.RouterGroup) {
 	deps := resolveAgentsRoutesDeps()
 	registerRemoteAgentRegistryRoutes(
@@ -213,4 +213,5 @@ func registerAgentsRoutes(rg *gin.RouterGroup) {
 		deps.AgentsConfigRead,
 		deps.AgentsConfigWrite,
 	)
+	registerImportAgentRoute(rg)
 }

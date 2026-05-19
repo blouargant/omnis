@@ -1070,6 +1070,7 @@
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
               <span class="agent-fleet-title">ACTIVE FLEET</span>
+              <button type="button" class="agent-fleet-import" id="import-agent" title="Import Claude Code agent (.md / .json)">&#8595;</button>
               <button type="button" class="agent-fleet-add" id="add-agent" title="Add agent">+</button>
             </div>
             <div class="agent-fleet-list" id="agent-fleet-list"></div>
@@ -1082,6 +1083,22 @@
         state.activeAgentIdx = d.agents.length - 1;
         markFormDirty(id);
         renderAgentAgents(d);
+      });
+      bodyEl.querySelector("#import-agent").addEventListener("click", async () => {
+        const result = await importAgentDialog();
+        if (!result) return;
+        try {
+          const res = await skillsPost("/agents/import", { content: result.content, enable: result.enable });
+          const names = (res.agents || []).map(a => a.name).join(", ");
+          const anyEnabled = (res.agents || []).some(a => a.enabled);
+          if (anyEnabled) {
+            setStatus(`Imported: ${names}. Reload to activate.`, "success");
+          } else {
+            setStatus(`Imported: ${names}.`, "success");
+          }
+        } catch (e) {
+          setStatus("Import failed: " + e.message, "error");
+        }
       });
       renderAgentAgents(d);
     }
@@ -4699,6 +4716,100 @@
         if (e.key === "Escape") { e.stopPropagation(); close(null); }
         if (e.key === "Enter")  { e.stopPropagation(); box.querySelector("#agent-install-ok").click(); }
       });
+    });
+  }
+
+  // importAgentDialog shows a paste/file-upload dialog for importing a Claude
+  // Code sub-agent (.md or .json). Resolves to {content, enable} or null.
+  function importAgentDialog() {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "app-dialog-overlay";
+
+      const box = document.createElement("div");
+      box.className = "app-dialog mcp-import-dialog";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+
+      const titleEl = document.createElement("p");
+      titleEl.className = "app-dialog-msg";
+      titleEl.textContent = "Import Claude Code Agent";
+      box.appendChild(titleEl);
+
+      const hint = document.createElement("p");
+      hint.className = "settings-hint";
+      hint.style.margin = "0 0 6px";
+      hint.innerHTML = "Paste a <code>.md</code> (YAML frontmatter) or <code>.json</code> agent definition, or load a file.";
+      box.appendChild(hint);
+
+      const fileRow = document.createElement("div");
+      fileRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px;";
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".md,.json,text/plain,application/json";
+      fileInput.style.display = "none";
+      const browseBtn = document.createElement("button");
+      browseBtn.type = "button";
+      browseBtn.textContent = "Browse…";
+      browseBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", () => {
+        const f = fileInput.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = e => { ta.value = e.target.result; ta.focus(); };
+        reader.readAsText(f);
+      });
+      fileRow.appendChild(browseBtn);
+      fileRow.appendChild(fileInput);
+      box.appendChild(fileRow);
+
+      const ta = document.createElement("textarea");
+      ta.className = "mcp-import-textarea";
+      ta.spellcheck = false;
+      ta.placeholder = `---\nname: my-agent\ndescription: What this agent does\ntools: Read, Grep, Bash\nmodel: sonnet\n---\n\nSystem prompt here…`;
+      box.appendChild(ta);
+
+      const enableRow = document.createElement("label");
+      enableRow.className = "registry-dialog-field";
+      enableRow.style.cssText = "flex-direction:row;align-items:center;gap:8px;margin-top:8px;";
+      const enableCheck = document.createElement("input");
+      enableCheck.type = "checkbox";
+      enableCheck.id = "agent-import-enable";
+      enableCheck.checked = true;
+      const enableLabel = document.createElement("span");
+      enableLabel.innerHTML = "Enable in <code>config/agents.json</code> after import";
+      enableRow.appendChild(enableCheck);
+      enableRow.appendChild(enableLabel);
+      box.appendChild(enableRow);
+
+      const actions = document.createElement("div");
+      actions.className = "app-dialog-actions";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "btn-primary";
+      okBtn.textContent = "Import";
+
+      const close = result => { overlay.remove(); resolve(result); };
+      cancelBtn.addEventListener("click", () => close(null));
+      okBtn.addEventListener("click", () => {
+        const v = ta.value.trim();
+        if (!v) return;
+        close({ content: v, enable: enableCheck.checked });
+      });
+      overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
+      box.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); close(null); }
+      });
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      ta.focus();
     });
   }
 

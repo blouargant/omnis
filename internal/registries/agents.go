@@ -6,12 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/blouargant/yoke/internal/claudeformat"
 )
 
 // AgentManifestFile is the filename that marks an agent directory in a
 // remote registry. Each agent lives in its own subdirectory with this file
 // plus optional instruction.md and supporting resources.
 const AgentManifestFile = "agent.json"
+
+// FormatClaude is the Format value set on AgentInfo entries that originate
+// from Claude Code markdown files rather than native yoke agent.json files.
+const FormatClaude = "claude"
 
 // agentManifest is the minimal subset of registry/agents/<name>/agent.json
 // that the browser needs to surface description / builtin / tags.
@@ -68,9 +74,10 @@ func ListInstalledAgents(agentsRegistryDir string) ([]InstalledAgent, error) {
 	return out, nil
 }
 
-// BrowseAgents discovers all agent.json files in a remote registry. Each
-// returned AgentInfo is annotated with Installed=true when a directory of
-// the same name already exists under agentsRegistryDir.
+// BrowseAgents discovers all agent.json and Claude Code .md files in a remote
+// registry. Each returned AgentInfo is annotated with Installed=true when an
+// agent of the same name already exists under agentsRegistryDir.
+// AgentInfo.Format is set to FormatClaude for .md entries.
 func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, error) {
 	entries, err := ref.TreeEntries(token)
 	if err != nil {
@@ -79,58 +86,96 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 
 	var agents []AgentInfo
 	suffix := "/" + AgentManifestFile
+
 	for _, e := range entries {
 		if e.Path == "__truncated__" {
 			agents = append(agents, AgentInfo{Name: "__truncated__", DirPath: "__truncated__"})
 			continue
 		}
-		if e.Type != "blob" || !strings.HasSuffix(e.Path, suffix) {
-			continue
-		}
-		dirPath := strings.TrimSuffix(e.Path, suffix)
-		if dirPath == "" {
+		if e.Type != "blob" {
 			continue
 		}
 
-		slash := strings.LastIndex(dirPath, "/")
-		var group, leafDir string
-		if slash >= 0 {
-			group, leafDir = dirPath[:slash], dirPath[slash+1:]
-		} else {
-			leafDir = dirPath
-		}
-
-		ag := AgentInfo{
-			Name:    leafDir,
-			DirPath: dirPath,
-			Group:   group,
-		}
-
-		if agentsRegistryDir != "" {
-			if _, err := os.Stat(filepath.Join(agentsRegistryDir, leafDir, AgentManifestFile)); err == nil {
-				ag.Installed = true
+		// --- native yoke format: .../agent.json ---
+		if strings.HasSuffix(e.Path, suffix) {
+			dirPath := strings.TrimSuffix(e.Path, suffix)
+			if dirPath == "" {
+				continue
 			}
-		}
+			slash := strings.LastIndex(dirPath, "/")
+			var group, leafDir string
+			if slash >= 0 {
+				group, leafDir = dirPath[:slash], dirPath[slash+1:]
+			} else {
+				leafDir = dirPath
+			}
 
-		rawBody, status, err := ref.RawFile(e.Path, token)
-		if err == nil && status == 200 {
-			var m agentManifest
-			if err := json.Unmarshal(rawBody, &m); err == nil {
-				if m.Name != "" {
-					ag.Name = m.Name
-					if agentsRegistryDir != "" {
-						if _, err := os.Stat(filepath.Join(agentsRegistryDir, m.Name, AgentManifestFile)); err == nil {
-							ag.Installed = true
+			ag := AgentInfo{Name: leafDir, DirPath: dirPath, Group: group}
+			if agentsRegistryDir != "" {
+				if _, err := os.Stat(filepath.Join(agentsRegistryDir, leafDir, AgentManifestFile)); err == nil {
+					ag.Installed = true
+				}
+			}
+			rawBody, status, err := ref.RawFile(e.Path, token)
+			if err == nil && status == 200 {
+				var m agentManifest
+				if err := json.Unmarshal(rawBody, &m); err == nil {
+					if m.Name != "" {
+						ag.Name = m.Name
+						if agentsRegistryDir != "" {
+							if _, err := os.Stat(filepath.Join(agentsRegistryDir, m.Name, AgentManifestFile)); err == nil {
+								ag.Installed = true
+							}
 						}
 					}
+					ag.Description = m.Description
+					ag.Builtin = m.Builtin
+					ag.Tags = m.Tags
 				}
-				ag.Description = m.Description
-				ag.Builtin = m.Builtin
-				ag.Tags = m.Tags
 			}
+			agents = append(agents, ag)
+			continue
 		}
 
-		agents = append(agents, ag)
+		// --- Claude Code markdown format: <name>.md (not instruction.md) ---
+		if strings.HasSuffix(e.Path, ".md") && !strings.HasSuffix(e.Path, "/instruction.md") &&
+			e.Path != "instruction.md" {
+			// Only fetch the file if the name (without .md) looks like a valid agent name.
+			base := filepath.Base(e.Path)
+			nameCandidate := strings.TrimSuffix(base, ".md")
+			if !SkillNameRe.MatchString(nameCandidate) {
+				continue
+			}
+
+			rawBody, status, err := ref.RawFile(e.Path, token)
+			if err != nil || status != 200 {
+				continue
+			}
+			def, err := claudeformat.ParseMarkdown(rawBody)
+			if err != nil {
+				continue
+			}
+
+			slash := strings.LastIndex(e.Path, "/")
+			var group string
+			if slash >= 0 {
+				group = e.Path[:slash]
+			}
+
+			ag := AgentInfo{
+				Name:        def.Name,
+				DirPath:     e.Path, // single-file path (ends with .md)
+				Group:       group,
+				Description: def.Description,
+				Format:      FormatClaude,
+			}
+			if agentsRegistryDir != "" {
+				if _, err := os.Stat(filepath.Join(agentsRegistryDir, def.Name, AgentManifestFile)); err == nil {
+					ag.Installed = true
+				}
+			}
+			agents = append(agents, ag)
+		}
 	}
 
 	if agents == nil {
@@ -151,12 +196,53 @@ func FetchAgentJSON(ref RepoRef, token, dirPath string) ([]byte, error) {
 	return rawBody, nil
 }
 
-// InstallAgent downloads the files of a remote agent at dirPath (relative to
-// the registry root) and writes them under agentsRegistryDir/<agentName>.
-// The agent name is taken from the agent.json `name` field when present,
-// otherwise from the leaf of dirPath. Subdirectories are preserved.
+// InstallAgent downloads and installs a remote agent. dirPath is relative to
+// the registry root. Two cases are handled:
+//
+//   - Native yoke format: dirPath is a directory containing agent.json (and
+//     optionally instruction.md and other files). All files are written under
+//     agentsRegistryDir/<agentName>/.
+//
+//   - Claude Code markdown format: dirPath ends with ".md". The single file
+//     is fetched, parsed, and converted to agent.json + instruction.md.
+//
 // Returns the resolved agent name.
 func InstallAgent(ref RepoRef, token, dirPath, agentsRegistryDir string) (string, error) {
+	if strings.HasSuffix(dirPath, ".md") {
+		return installClaudeFormatAgent(ref, token, dirPath, agentsRegistryDir)
+	}
+	return installNativeAgent(ref, token, dirPath, agentsRegistryDir)
+}
+
+// installClaudeFormatAgent installs a single Claude Code markdown file.
+func installClaudeFormatAgent(ref RepoRef, token, filePath, agentsRegistryDir string) (string, error) {
+	rawBody, status, err := ref.RawFile(filePath, token)
+	if err != nil {
+		return "", fmt.Errorf("download %s: %w", filePath, err)
+	}
+	if status != 200 {
+		return "", fmt.Errorf("download %s: HTTP %d", filePath, status)
+	}
+	if int64(len(rawBody)) > MaxFileSize {
+		return "", fmt.Errorf("file %s exceeds per-file size limit", filePath)
+	}
+
+	def, err := claudeformat.ParseMarkdown(rawBody)
+	if err != nil {
+		return "", fmt.Errorf("parse Claude Code agent: %w", err)
+	}
+	if !SkillNameRe.MatchString(def.Name) {
+		return "", fmt.Errorf("agent name %q is not valid", def.Name)
+	}
+
+	if err := claudeformat.InstallAgent(def, agentsRegistryDir); err != nil {
+		return "", err
+	}
+	return def.Name, nil
+}
+
+// installNativeAgent installs a directory-based yoke-native agent.
+func installNativeAgent(ref RepoRef, token, dirPath, agentsRegistryDir string) (string, error) {
 	entries, err := ref.TreeEntries(token)
 	if err != nil {
 		return "", err
@@ -186,7 +272,6 @@ func InstallAgent(ref RepoRef, token, dirPath, agentsRegistryDir string) (string
 		break
 	}
 
-	// Reuse the skill name validation regex: same kebab/snake-case rules apply.
 	if !SkillNameRe.MatchString(agentName) {
 		return "", fmt.Errorf("agent name %q is not valid", agentName)
 	}

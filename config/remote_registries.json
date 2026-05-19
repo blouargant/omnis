@@ -3,5 +3,17 @@
     "id": "dd19df2a",
     "name": "mattpocock",
     "url": "https://github.com/mattpocock/skills/tree/main/skills"
+  },
+  {
+    "id": "b7e3f921",
+    "name": "Skillsregistry",
+    "url": "https://github.com/blouargant/yoke-registry/tree/main/skills",
+    "kind": "skills"
+  },
+  {
+    "id": "c4d8a056",
+    "name": "yoke-registry-agents",
+    "url": "https://github.com/blouargant/yoke-registry/tree/main/agents",
+    "kind": "agents"
   }
 ]

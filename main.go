@@ -18,9 +18,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,7 +32,10 @@ import (
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/claudeformat"
 	"github.com/blouargant/yoke/internal/cli"
+	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/registries"
 	"github.com/blouargant/yoke/internal/tui"
 )
 
@@ -92,6 +98,7 @@ Usage:
   yoke [flags] run [prompt]     same as above; the explicit form
   yoke [flags] tui              launch the interactive TUI
   yoke [flags] curate ...       run the soft-skill curator one-shot
+  yoke import-agent <file|-|URL> import a Claude Code sub-agent (.md or .json)
   yoke version                  print version information
   yoke help                     show this help
 
@@ -136,6 +143,8 @@ func run(ctx context.Context, opts options, args []string) error {
 			return runTUI(ctx, opts)
 		case "run":
 			return runCLI(ctx, opts, args[1:])
+		case "import-agent":
+			return runImportAgent(args[1:])
 		}
 	}
 	return runCLI(ctx, opts, args)
@@ -223,6 +232,103 @@ func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
 		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	})
+}
+
+// runImportAgent parses a Claude Code sub-agent file (markdown or JSON) and
+// installs it into the local agents registry. Pass "-" to read from stdin.
+//
+// Usage: yoke import-agent [--enable] <file.md|file.json|->
+func runImportAgent(args []string) error {
+	fs := flag.NewFlagSet("import-agent", flag.ContinueOnError)
+	enable := fs.Bool("enable", false, "Add the imported agent(s) to config/agents.json so they load on next run")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: yoke import-agent [--enable] <file.md|file.json|->\n\nReads a Claude Code sub-agent definition and installs it into the local\nagents registry ($YOKE_HOME/registry/agents/<name>/).\n\nFlags:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return fmt.Errorf("file argument is required (use - for stdin)")
+	}
+
+	var content []byte
+	src := fs.Arg(0)
+	if src == "-" {
+		var err error
+		content, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+	} else {
+		var err error
+		content, err = os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", src, err)
+		}
+	}
+
+	defs, err := claudeformat.Parse(content)
+	if err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+
+	agentsRegistryDir := paths.AgentsRegistryWriteDir()
+	for _, def := range defs {
+		if !registries.SkillNameRe.MatchString(def.Name) {
+			return fmt.Errorf("agent name %q is not valid (must be lowercase kebab-case)", def.Name)
+		}
+		if err := claudeformat.InstallAgent(def, agentsRegistryDir); err != nil {
+			return fmt.Errorf("install %s: %w", def.Name, err)
+		}
+		fmt.Printf("installed agent %q → %s/%s/\n", def.Name, agentsRegistryDir, def.Name)
+
+		if *enable {
+			configRead := paths.FindConfig("agents.json")
+			configWrite := filepath.Join(paths.ConfigWriteDir(), "agents.json")
+			if err := appendAgentNameToConfig(configRead, configWrite, def.Name); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not enable %q in agents.json: %v\n", def.Name, err)
+			} else {
+				fmt.Printf("enabled agent %q in %s\n", def.Name, configWrite)
+			}
+		}
+	}
+	return nil
+}
+
+// appendAgentNameToConfig appends name to the agents list in the JSON config
+// at readPath and writes the result to writePath.
+func appendAgentNameToConfig(readPath, writePath, name string) error {
+	data, err := os.ReadFile(readPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var cfg map[string]any
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return err
+		}
+	}
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	rawAgents, _ := cfg["agents"].([]any)
+	for _, item := range rawAgents {
+		if s, ok := item.(string); ok && strings.EqualFold(strings.TrimSpace(s), name) {
+			return nil // already present
+		}
+	}
+	cfg["agents"] = append(rawAgents, name)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(writePath, out, 0o644)
 }
 
 func parseOptionalBool(raw string) (*bool, error) {

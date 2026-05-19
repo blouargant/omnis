@@ -2095,18 +2095,20 @@
 .agent-fleet-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
 }
 .agent-fleet-title {
+  flex: 1;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--text-muted);
 }
-.agent-fleet-add {
+.agent-fleet-add,
+.agent-fleet-import {
   width: 22px; height: 22px;
   border-radius: 4px;
   background: var(--bg);
@@ -2118,6 +2120,8 @@
   display: flex; align-items: center; justify-content: center;
 }
 .agent-fleet-add:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.agent-fleet-import { font-size: 0.95rem; }
+.agent-fleet-import:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .agent-fleet-list { flex: 1; overflow-y: auto; }
 
