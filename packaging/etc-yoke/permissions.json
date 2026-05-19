@@ -1,0 +1,37 @@
+{
+  "always_deny": [
+    "rm -rf /",
+    "mkfs",
+    "dd if=.* of=/dev/",
+    ":(){.*};:",
+    {
+      "pattern": "^(write|revert) .*\"path\":\"/var/lib/yoke/softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    },
+    {
+      "pattern": "^bash .*(>|>>|tee|rm|mv|cp) .*/var/lib/yoke/softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    }
+  ],
+  "always_allow": [
+    "^ls( |$)",
+    "^cat ",
+    "^pwd$",
+    "^echo ",
+    "^head ",
+    "^tail ",
+    "^grep ",
+    "^find .* -name",
+    "^go (build|test|vet|fmt)",
+    "^npm (test|run build)",
+    "^docker (ps|images|logs|inspect) "
+  ],
+  "ask_user": [
+    "^rm ",
+    "^git push",
+    "^sudo ",
+    "^docker (run|rm|rmi|exec)",
+    "^terraform (apply|destroy)",
+    "^helm (install|upgrade|uninstall)"
+  ]
+}

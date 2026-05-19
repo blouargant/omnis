@@ -58,7 +58,7 @@ func ConfigureBashOutputFilter(cfg BashOutputFilterConfig) error {
 	}
 	rulesDir := strings.TrimSpace(cfg.FiltersDir)
 	if rulesDir == "" {
-		rulesDir = filter.DefaultRulesDir
+		rulesDir = filter.DefaultRulesDir()
 	}
 	filters, err := filter.LoadDir(rulesDir)
 	if err != nil {

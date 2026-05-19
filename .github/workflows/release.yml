@@ -1,0 +1,129 @@
+# Release workflow — fires on every annotated/lightweight tag matching
+# `v*` and produces .deb / .rpm / tarball artifacts via goreleaser.
+#
+# Tag → branch policy (enforced by the `validate` job):
+#
+#   vA.B.C        stable          — tagged commit must be reachable from main
+#   vA.B.C-rcN    release cand.   — tagged commit must be reachable from validation
+#   vA.B.C-betaN  beta            — tagged commit must be reachable from develop
+#
+# The hyphen before rc/beta is required: it makes the tag valid semver
+# (1.2.3-rc1), which is what goreleaser's parser expects. Goreleaser's
+# `prerelease: auto` then flags rc/beta tags as GitHub pre-releases.
+#
+# Any other tag pattern is rejected by the trigger filter.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta[0-9]+'
+
+permissions:
+  contents: write   # required to create / edit the GitHub Release
+
+jobs:
+  validate:
+    name: Validate tag → branch policy
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.classify.outputs.kind }}
+      version: ${{ steps.classify.outputs.version }}
+    steps:
+      - name: Checkout (full history, all branches)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # We need every branch ref locally to run `git merge-base
+          # --is-ancestor`, so disable the shallow / single-branch default.
+
+      - name: Classify the tag
+        id: classify
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          echo "tag=${tag}"
+
+          if   [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            kind=stable
+            required_branch=main
+          elif [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
+            kind=rc
+            required_branch=validation
+          elif [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta[0-9]+$ ]]; then
+            kind=beta
+            required_branch=develop
+          else
+            echo "::error::Tag '${tag}' does not match vA.B.C, vA.B.C-rcN, or vA.B.C-betaN."
+            exit 1
+          fi
+
+          echo "kind=${kind}"             >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}"         >> "$GITHUB_OUTPUT"
+          echo "required_branch=${required_branch}" >> "$GITHUB_ENV"
+
+      - name: Verify tagged commit is on the required branch
+        run: |
+          set -euo pipefail
+          branch="${required_branch}"
+          ref="refs/remotes/origin/${branch}"
+
+          if ! git show-ref --verify --quiet "${ref}"; then
+            echo "::error::Branch '${branch}' does not exist on origin — cannot validate tag ancestry."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "${ref}"; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' points at commit ${GITHUB_SHA}, which is not reachable from origin/${branch}."
+            echo "::error::Policy: stable tags must live on main, rc tags on validation, beta tags on develop."
+            exit 1
+          fi
+
+          echo "OK: ${GITHUB_REF_NAME} (${GITHUB_SHA:0:7}) is reachable from origin/${branch}."
+
+  release:
+    name: Build & publish (${{ needs.validate.outputs.kind }})
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate goreleaser config
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: check
+
+      - name: Run goreleaser (build + publish)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Release ${GITHUB_REF_NAME}"
+            echo ""
+            echo "- Kind: **${{ needs.validate.outputs.kind }}**"
+            echo "- Version: \`${{ needs.validate.outputs.version }}\`"
+            echo "- Commit: \`${GITHUB_SHA:0:12}\`"
+            echo ""
+            echo "Artifacts published to the GitHub Release page."
+          } >> "$GITHUB_STEP_SUMMARY"

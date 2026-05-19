@@ -8,12 +8,17 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-const uploadsBaseDir = "logs/uploads"
+// uploadsBaseDir returns the per-user uploads directory
+// ($YOKE_HOME/logs/uploads). Resolved at each call so tests can redirect
+// via t.Setenv("YOKE_HOME", ...).
+func uploadsBaseDir() string { return paths.UploadsDir() }
 
 func sessionUploadDir(sessionID string) string {
-	return filepath.Join(uploadsBaseDir, sessionID)
+	return filepath.Join(uploadsBaseDir(), sessionID)
 }
 
 func handleFileUpload(d serverDeps) gin.HandlerFunc {

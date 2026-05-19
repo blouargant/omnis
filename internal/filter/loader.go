@@ -5,16 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-// DefaultRulesDir is the repository-local rules directory used by tools.
-const DefaultRulesDir = "config/filters"
+// DefaultRulesDir returns the rules directory used by tools. Resolved
+// through the same 3-layer config search as other config files
+// ($YOKE_HOME/config/filters → ./config/filters → /etc/yoke/filters),
+// so a packaged install and a developer checkout both work.
+func DefaultRulesDir() string { return paths.FindConfigDir("filters") }
 
-func isYAMLFile(name string) bool {
-	return strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
+func isJSONFile(name string) bool {
+	return strings.HasSuffix(name, ".json")
 }
 
-// LoadDir loads all YAML filters from dir. Missing directories return no filters.
+// LoadDir loads all JSON filters from dir. Missing directories return no filters.
 func LoadDir(dir string) ([]Filter, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -26,7 +31,7 @@ func LoadDir(dir string) ([]Filter, error) {
 
 	var filters []Filter
 	for _, entry := range entries {
-		if entry.IsDir() || !isYAMLFile(entry.Name()) {
+		if entry.IsDir() || !isJSONFile(entry.Name()) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))

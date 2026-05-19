@@ -1,0 +1,71 @@
+{
+  "name": "tsc",
+  "version": 3,
+  "description": "Condensed tsc output: type errors and summary",
+  "match": {
+    "command": "tsc",
+    "exclude_flags": [
+      "--version",
+      "-V"
+    ]
+  },
+  "streams": [
+    "stdout",
+    "stderr"
+  ],
+  "pipeline": [
+    {
+      "action": "strip_ansi"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "^\\s*$"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "^\\d+\\s+\\S"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "^\\s+~"
+    },
+    {
+      "action": "keep_lines",
+      "pattern": "(error TS\\d+|warning TS\\d+|Found \\d+ error)"
+    },
+    {
+      "action": "compact_path"
+    },
+    {
+      "action": "truncate_lines",
+      "max": 120
+    },
+    {
+      "action": "head",
+      "n": 40,
+      "overflow_msg": "... more errors truncated"
+    },
+    {
+      "action": "on_empty",
+      "message": "ok (no type errors)"
+    }
+  ],
+  "on_error": "passthrough",
+  "tests": [
+    {
+      "name": "no errors",
+      "input": "",
+      "expected": "ok (no type errors)\n"
+    },
+    {
+      "name": "pretty format errors with context",
+      "input": "src/index.ts:3:1 - error TS2304: Cannot find name 'foo'.\n\n3 foo = 1;\n  ~~~\n\nsrc/utils.ts:10:5 - error TS2322: Type 'string' is not assignable to type 'number'.\n\n10   const x: number = \"hello\";\n     ~\n\nFound 2 errors in 2 files.\n",
+      "expected": "index.ts:3:1 - error TS2304: Cannot find name 'foo'.\nutils.ts:10:5 - error TS2322: Type 'string' is not assignable to type 'number'.\nFound 2 errors in 2 files.\n"
+    },
+    {
+      "name": "classic format errors",
+      "input": "src/index.ts(3,1): error TS2304: Cannot find name 'foo'.\nsrc/utils.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\nFound 2 errors in 2 files.\n",
+      "expected": "index.ts(3,1): error TS2304: Cannot find name 'foo'.\nutils.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\nFound 2 errors in 2 files.\n"
+    }
+  ]
+}

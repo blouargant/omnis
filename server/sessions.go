@@ -19,6 +19,10 @@ type SessionMeta struct {
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at"`
 	Turns      int       `json:"turns"`
+	// Squad is the agent squad this session uses. Chosen at session
+	// creation and persisted in the conversation file. Empty means the
+	// default squad (back-compat for pre-squad conversation files).
+	Squad string `json:"squad,omitempty"`
 	// Harvested is set by the idle harvester after it fires curator evaluation
 	// for this session. A harvested session is skipped by the idle scanner until
 	// new activity (Touch) clears the flag. The flag is persisted in the
@@ -41,7 +45,7 @@ func newRegistry() *registry {
 	return r
 }
 
-func (r *registry) New() *SessionMeta {
+func (r *registry) New(squad string) *SessionMeta {
 	now := time.Now()
 	r.mu.Lock()
 	m := &SessionMeta{
@@ -49,6 +53,7 @@ func (r *registry) New() *SessionMeta {
 		UserID:     defaultUserID,
 		CreatedAt:  now,
 		LastUsedAt: now,
+		Squad:      squad,
 	}
 	r.items[m.ID] = m
 	r.mu.Unlock()

@@ -7,17 +7,16 @@ import (
 
 func TestApplyForCommandMatchesAndFilters(t *testing.T) {
 	dir := t.TempDir()
-	rules := `
-name: "printf-head"
-version: 1
-match:
-  command: "printf"
-pipeline:
-  - action: "head"
-    n: 1
-on_error: "passthrough"
-`
-	path := filepath.Join(dir, "printf.yaml")
+	rules := `{
+  "name": "printf-head",
+  "version": 1,
+  "match": {"command": "printf"},
+  "pipeline": [
+    {"action": "head", "n": 1}
+  ],
+  "on_error": "passthrough"
+}`
+	path := filepath.Join(dir, "printf.json")
 	if err := writeFile(path, []byte(rules)); err != nil {
 		t.Fatalf("write rules: %v", err)
 	}

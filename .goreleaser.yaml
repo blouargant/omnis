@@ -1,0 +1,209 @@
+version: 2
+
+project_name: yoke
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: yoke
+    binary: yoke
+    main: .
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    # Windows is intentionally omitted: core/tools/bash.go uses Unix-only
+    # syscalls (syscall.Setpgid / syscall.Kill). Add platform-guarded
+    # variants of that file before re-enabling `windows` here.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: yoke-server
+    binary: yoke-server
+    main: ./server
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    # Windows is intentionally omitted: core/tools/bash.go uses Unix-only
+    # syscalls (syscall.Setpgid / syscall.Kill). Add platform-guarded
+    # variants of that file before re-enabling `windows` here.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    ids:
+      - yoke
+      - yoke-server
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - src: packaging/etc-yoke/agent.json
+        dst: config/agent.json
+      - src: packaging/etc-yoke/mcp_config.json
+        dst: config/mcp_config.json
+      - src: packaging/etc-yoke/permissions.json
+        dst: config/permissions.json
+      - src: packaging/etc-yoke/preferences.json
+        dst: config/preferences.json
+      - src: packaging/etc-yoke/remote_registries.json
+        dst: config/remote_registries.json
+      - src: config/filters/*.json
+        dst: config/filters
+      - src: registry/skills
+        dst: registry/skills
+      - src: web
+        dst: web
+
+nfpms:
+  - id: linux-packages
+    package_name: yoke
+    ids:
+      - yoke
+      - yoke-server
+    file_name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else }}{{ .Arch }}{{ end }}
+    vendor: Bertrand Louargant
+    homepage: https://github.com/blouargant/yoke
+    maintainer: Bertrand Louargant <blouargant@chapsvision.fr>
+    description: |-
+      Yoke - multi-agent harness providing a CLI/TUI/REPL (yoke) and an
+      HTTP API + Web UI server (yoke-server). The same binary becomes a
+      code reviewer, Kubernetes triage assistant, or DBA helper purely by
+      mounting different tools, skills, and MCP servers.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    rpm:
+      group: Applications/System
+
+    contents:
+      # Editable configuration (preserved on upgrade).
+      - src: packaging/etc-yoke/agent.json
+        dst: /etc/yoke/agent.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: packaging/etc-yoke/mcp_config.json
+        dst: /etc/yoke/mcp_config.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: packaging/etc-yoke/permissions.json
+        dst: /etc/yoke/permissions.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: packaging/etc-yoke/preferences.json
+        dst: /etc/yoke/preferences.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: packaging/etc-yoke/remote_registries.json
+        dst: /etc/yoke/remote_registries.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: config/filters/*.json
+        dst: /etc/yoke/filters/
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+
+      # Login-shell env defaults (YOKE_CONFIG_PATH, YOKE_WEB_DIR).
+      - src: packaging/profile.d/yoke.sh
+        dst: /etc/profile.d/yoke.sh
+        file_info:
+          mode: 0644
+
+      # Bundled skill playbooks and Web UI assets (read-only).
+      # `type: tree` preserves the directory structure under src.
+      # Bundled skill playbooks (read-only).
+      - src: registry/skills
+        dst: /usr/share/yoke/registry/skills
+        type: tree
+      - src: web
+        dst: /usr/share/yoke/web
+        type: tree
+
+      # Mutable curator output — owned by root but world-writable so any
+      # local user running `yoke` can let the curator persist soft-skills.
+      - dst: /var/lib/yoke/softskills
+        type: dir
+        file_info:
+          mode: 0777
+
+      # Documentation.
+      - src: LICENSE
+        dst: /usr/share/doc/yoke/LICENSE
+        file_info:
+          mode: 0644
+      - src: README.md
+        dst: /usr/share/doc/yoke/README.md
+        file_info:
+          mode: 0644
+
+    overrides:
+      rpm:
+        dependencies: []
+        recommends: []
+      deb:
+        dependencies: []
+        recommends: []
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  # Stable tags (vA.B.C) publish as a normal GitHub release; rc/beta tags
+  # (vA.B.C-rcN, vA.B.C-betaN) are valid semver pre-releases, so
+  # `prerelease: auto` flips the GitHub pre-release flag automatically.
+  draft: false
+  prerelease: auto

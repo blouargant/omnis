@@ -4,10 +4,10 @@ import "testing"
 
 func TestStripANSI(t *testing.T) {
 	cases := map[string]string{
-		"plain":              "plain",
-		"\x1b[31mred\x1b[0m": "red",
+		"plain":               "plain",
+		"\x1b[31mred\x1b[0m":  "red",
 		"a\x1b[1;32mb\x1b[mc": "abc",
-		"":                   "",
+		"":                    "",
 	}
 	for in, want := range cases {
 		if got := StripANSI(in); got != want {
@@ -18,13 +18,13 @@ func TestStripANSI(t *testing.T) {
 
 func TestCompactPath(t *testing.T) {
 	cases := map[string]string{
-		"src/foo/bar.go":      "foo/bar.go",
-		"lib/baz":             "baz",
-		"internal/x/y":        "x/y",
-		"pkg/p":               "p",
-		"vendor/v/v.go":       "v/v.go",
-		"cmd/main.go":         "cmd/main.go", // no known prefix
-		"":                    "",
+		"src/foo/bar.go": "foo/bar.go",
+		"lib/baz":        "baz",
+		"internal/x/y":   "x/y",
+		"pkg/p":          "p",
+		"vendor/v/v.go":  "v/v.go",
+		"cmd/main.go":    "cmd/main.go", // no known prefix
+		"":               "",
 	}
 	for in, want := range cases {
 		if got := CompactPath(in); got != want {

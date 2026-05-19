@@ -1,0 +1,18 @@
+{
+  "allow_file_attachments": false,
+  "api_key": "OPENAI_API_KEY",
+  "base_url": "OPENAI_BASE_URL",
+  "builtin": false,
+  "description": "Browses configured remote skill registries to find existing skills on demand. Can fetch a SKILL.md for inspection, install a skill into the local registry, and link it to a target agent.",
+  "enabled": true,
+  "leader": false,
+  "model": "test",
+  "model_ref": "hosted",
+  "name": "skills_crawler",
+  "provider": "openai_compat",
+  "skills": null,
+  "softskills_dir": "",
+  "tools": [
+    "registries"
+  ]
+}

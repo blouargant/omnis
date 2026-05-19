@@ -1,4 +1,4 @@
-// Component s01 — "the loop" (article Phase 1 / s01).
+// Component s01 — "the loop".
 // We ask the question; ADK runs the model→tool→model loop until the
 // agent stops requesting tool calls. No tools are added so the loop
 // simply terminates after one model turn.

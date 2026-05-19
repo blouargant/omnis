@@ -15,7 +15,7 @@ func NewSerpAPITools(apiKey string) []tool.Tool {
 		return nil
 	}
 	return []tool.Tool{
-		mustTool("web_search",
+		mustTool("WebSearch",
 			"Search the web using SerpAPI (Google) and return a list of results. "+
 				"Arguments: `query` (string, required) — the search query; "+
 				"`max_results` (int, optional, default 5, max 10) — number of results to return.",

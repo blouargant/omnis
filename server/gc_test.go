@@ -7,21 +7,16 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-// gcTestEnv chdirs into a temp directory so the GC sees an isolated filesystem.
-// Returns a cleanup that restores the previous cwd.
+// gcTestEnv points $YOKE_HOME at a fresh temp directory so logsDir(),
+// uploadsBaseDir() and paths.MailboxesDir() all return paths under it
+// for the duration of the test.
 func gcTestEnv(t *testing.T) string {
 	t.Helper()
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
 	dir := t.TempDir()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prev) })
+	t.Setenv("YOKE_HOME", dir)
 	return dir
 }
 
@@ -45,25 +40,25 @@ func TestRunGC_RemovesOrphansKeepsActiveAndGlobals(t *testing.T) {
 	deadSuffix := agent.SessionSuffix(defaultUserID, "dead-fox")
 
 	// Active session files — must survive.
-	mustWriteFile(t, filepath.Join(logsDir, "conversation_alive-cat.json"), `{"turns":[]}`)
-	mustWriteFile(t, filepath.Join(logsDir, "agent_tasks_"+aliveSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_todo_"+aliveSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_memory_"+aliveSuffix+".md"), "memory")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_statelog_"+aliveSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(uploadsBaseDir, "alive-cat", "doc.txt"), "hi")
-	mustWriteFile(t, filepath.Join(".mailboxes", aliveSuffix+":peer.jsonl"), "")
+	mustWriteFile(t, filepath.Join(logsDir(), "conversation_alive-cat.json"), `{"turns":[]}`)
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_tasks_"+aliveSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_todo_"+aliveSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_memory_"+aliveSuffix+".md"), "memory")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_statelog_"+aliveSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(uploadsBaseDir(), "alive-cat", "doc.txt"), "hi")
+	mustWriteFile(t, filepath.Join(paths.MailboxesDir(), aliveSuffix+":peer.jsonl"), "")
 
 	// Orphan session files — must go.
-	mustWriteFile(t, filepath.Join(logsDir, "conversation_dead-fox.json"), `{"turns":[]}`)
-	mustWriteFile(t, filepath.Join(logsDir, "agent_tasks_"+deadSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_todo_"+deadSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_memory_"+deadSuffix+".md"), "memory")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_statelog_"+deadSuffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(uploadsBaseDir, "dead-fox", "doc.txt"), "bye")
-	mustWriteFile(t, filepath.Join(".mailboxes", deadSuffix+":peer.jsonl"), "")
+	mustWriteFile(t, filepath.Join(logsDir(), "conversation_dead-fox.json"), `{"turns":[]}`)
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_tasks_"+deadSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_todo_"+deadSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_memory_"+deadSuffix+".md"), "memory")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_statelog_"+deadSuffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(uploadsBaseDir(), "dead-fox", "doc.txt"), "bye")
+	mustWriteFile(t, filepath.Join(paths.MailboxesDir(), deadSuffix+":peer.jsonl"), "")
 
 	// Global event log — must survive (not session-scoped).
-	mustWriteFile(t, filepath.Join(logsDir, "agent_events_20260511_120000.log"), "event")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_events_20260511_120000.log"), "event")
 
 	stats := runGC(reg, gcDeps{})
 
@@ -84,14 +79,14 @@ func TestRunGC_RemovesOrphansKeepsActiveAndGlobals(t *testing.T) {
 	}
 
 	mustExist := []string{
-		filepath.Join(logsDir, "conversation_alive-cat.json"),
-		filepath.Join(logsDir, "agent_tasks_"+aliveSuffix+".json"),
-		filepath.Join(logsDir, "agent_todo_"+aliveSuffix+".json"),
-		filepath.Join(logsDir, "agent_memory_"+aliveSuffix+".md"),
-		filepath.Join(logsDir, "agent_statelog_"+aliveSuffix+".json"),
-		filepath.Join(uploadsBaseDir, "alive-cat", "doc.txt"),
-		filepath.Join(".mailboxes", aliveSuffix+":peer.jsonl"),
-		filepath.Join(logsDir, "agent_events_20260511_120000.log"),
+		filepath.Join(logsDir(), "conversation_alive-cat.json"),
+		filepath.Join(logsDir(), "agent_tasks_"+aliveSuffix+".json"),
+		filepath.Join(logsDir(), "agent_todo_"+aliveSuffix+".json"),
+		filepath.Join(logsDir(), "agent_memory_"+aliveSuffix+".md"),
+		filepath.Join(logsDir(), "agent_statelog_"+aliveSuffix+".json"),
+		filepath.Join(uploadsBaseDir(), "alive-cat", "doc.txt"),
+		filepath.Join(paths.MailboxesDir(), aliveSuffix+":peer.jsonl"),
+		filepath.Join(logsDir(), "agent_events_20260511_120000.log"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {
@@ -100,13 +95,13 @@ func TestRunGC_RemovesOrphansKeepsActiveAndGlobals(t *testing.T) {
 	}
 
 	mustNotExist := []string{
-		filepath.Join(logsDir, "conversation_dead-fox.json"),
-		filepath.Join(logsDir, "agent_tasks_"+deadSuffix+".json"),
-		filepath.Join(logsDir, "agent_todo_"+deadSuffix+".json"),
-		filepath.Join(logsDir, "agent_memory_"+deadSuffix+".md"),
-		filepath.Join(logsDir, "agent_statelog_"+deadSuffix+".json"),
-		filepath.Join(uploadsBaseDir, "dead-fox"),
-		filepath.Join(".mailboxes", deadSuffix+":peer.jsonl"),
+		filepath.Join(logsDir(), "conversation_dead-fox.json"),
+		filepath.Join(logsDir(), "agent_tasks_"+deadSuffix+".json"),
+		filepath.Join(logsDir(), "agent_todo_"+deadSuffix+".json"),
+		filepath.Join(logsDir(), "agent_memory_"+deadSuffix+".md"),
+		filepath.Join(logsDir(), "agent_statelog_"+deadSuffix+".json"),
+		filepath.Join(uploadsBaseDir(), "dead-fox"),
+		filepath.Join(paths.MailboxesDir(), deadSuffix+":peer.jsonl"),
 	}
 	for _, p := range mustNotExist {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -131,11 +126,11 @@ func TestRunGC_RenamedSessionFilesSurvive(t *testing.T) {
 	}}
 	suffix := agent.SessionSuffix(defaultUserID, "happy-newt")
 
-	mustWriteFile(t, filepath.Join(logsDir, "conversation_happy-newt.json"), `{"title":"Q3 incident triage","turns":[]}`)
-	mustWriteFile(t, filepath.Join(logsDir, "agent_tasks_"+suffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(logsDir, "agent_statelog_"+suffix+".json"), "{}")
-	mustWriteFile(t, filepath.Join(uploadsBaseDir, "happy-newt", "screenshot.png"), "png")
-	mustWriteFile(t, filepath.Join(".mailboxes", suffix+":leader.jsonl"), "")
+	mustWriteFile(t, filepath.Join(logsDir(), "conversation_happy-newt.json"), `{"title":"Q3 incident triage","turns":[]}`)
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_tasks_"+suffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(logsDir(), "agent_statelog_"+suffix+".json"), "{}")
+	mustWriteFile(t, filepath.Join(uploadsBaseDir(), "happy-newt", "screenshot.png"), "png")
+	mustWriteFile(t, filepath.Join(paths.MailboxesDir(), suffix+":leader.jsonl"), "")
 
 	stats := runGC(reg, gcDeps{})
 
@@ -143,11 +138,11 @@ func TestRunGC_RenamedSessionFilesSurvive(t *testing.T) {
 		t.Fatalf("renamed session should not lose any files; got %+v", stats)
 	}
 	mustExist := []string{
-		filepath.Join(logsDir, "conversation_happy-newt.json"),
-		filepath.Join(logsDir, "agent_tasks_"+suffix+".json"),
-		filepath.Join(logsDir, "agent_statelog_"+suffix+".json"),
-		filepath.Join(uploadsBaseDir, "happy-newt", "screenshot.png"),
-		filepath.Join(".mailboxes", suffix+":leader.jsonl"),
+		filepath.Join(logsDir(), "conversation_happy-newt.json"),
+		filepath.Join(logsDir(), "agent_tasks_"+suffix+".json"),
+		filepath.Join(logsDir(), "agent_statelog_"+suffix+".json"),
+		filepath.Join(uploadsBaseDir(), "happy-newt", "screenshot.png"),
+		filepath.Join(paths.MailboxesDir(), suffix+":leader.jsonl"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {

@@ -1,0 +1,35 @@
+[data-theme="github-light"] {
+  --bg: #ffffff;
+  --bg-panel: #f6f8fa;
+  --bg-raised: #eaeef2;
+  --bg-raised-hover: #d0d7de;
+  --bg-active: #ddf4ff;
+  --bg-input: #ffffff;
+  --border: #d0d7de;
+  --border-strong: #afb8c1;
+  --text: #24292f;
+  --text-strong: #1f2328;
+  --text-muted: #6e7781;
+  --text-faint: #8c959f;
+  --accent: #0969da;
+  --accent-hover: #218bff;
+  --accent-strong: #0969da;
+  --accent-bg-soft: rgba(9, 105, 218, 0.12);
+  --accent-border-soft: rgba(9, 105, 218, 0.4);
+  --accent-hover-bg: #ddf4ff;
+  --scroll-thumb: #d0d7de;
+  --scroll-thumb-hover: #afb8c1;
+  --bubble-user-bg: #eaeef2;
+  --bubble-user-border: #d0d7de;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --danger-fg: #b31d28;
+  --danger-bg: rgba(179, 29, 40, 0.08);
+  --danger-border: rgba(179, 29, 40, 0.30);
+  --danger-bg-hover: rgba(179, 29, 40, 0.15);
+  --danger-bg-soft: rgba(179, 29, 40, 0.08);
+  --warn-fg: #7c5100;
+  --warn-bg: rgba(124, 81, 0, 0.08);
+  --warn-border: rgba(124, 81, 0, 0.28);
+  --warn-action-bg: rgba(124, 81, 0, 0.14);
+  --warn-action-hover: rgba(124, 81, 0, 0.24);
+}

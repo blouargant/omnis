@@ -17,12 +17,12 @@ func TestBusEmitAndPanicIsolation(t *testing.T) {
 		panic("boom")
 	}).On(EventBeforeTool, func(_ string, payload map[string]any) {
 		called++
-		if payload["tool"] != "bash" {
+		if payload["tool"] != "Bash" {
 			t.Fatalf("payload = %+v", payload)
 		}
 	})
 
-	b.Emit(EventBeforeTool, map[string]any{"tool": "bash"})
+	b.Emit(EventBeforeTool, map[string]any{"tool": "Bash"})
 	if called != 1 {
 		t.Fatalf("called = %d, want 1", called)
 	}
@@ -59,7 +59,7 @@ func TestFileLoggerWithOptionsFullPayload(t *testing.T) {
 	t.Cleanup(func() { _ = closeFn() })
 
 	h(EventAfterTool, map[string]any{
-		"tool":     "read",
+		"tool":     "Read",
 		"duration": "10ms",
 		"input":    map[string]any{"path": "README.md"},
 		"output":   map[string]any{"text": "ok"},
@@ -83,8 +83,8 @@ func TestFileLoggerWithOptionsFullPayload(t *testing.T) {
 	if record.Event != EventAfterTool {
 		t.Fatalf("event = %q, want %q", record.Event, EventAfterTool)
 	}
-	if got := record.Payload["tool"]; got != "read" {
-		t.Fatalf("payload.tool = %v, want read", got)
+	if got := record.Payload["tool"]; got != "Read" {
+		t.Fatalf("payload.tool = %v, want Read", got)
 	}
 	input, ok := record.Payload["input"].(map[string]any)
 	if !ok {
@@ -136,20 +136,20 @@ func TestFileLoggerAndCounter(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	h(EventAfterTool, map[string]any{"tool": "read", "duration": "10ms"})
+	h(EventAfterTool, map[string]any{"tool": "Read", "duration": "10ms"})
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if got := string(data); !strings.Contains(got, "after_tool") || !strings.Contains(got, "tool=read") {
+	if got := string(data); !strings.Contains(got, "after_tool") || !strings.Contains(got, "tool=Read") {
 		t.Fatalf("log contents = %q", got)
 	}
 
 	counter, handler := NewCounter()
-	handler(EventAfterTool, map[string]any{"tool": "read"})
+	handler(EventAfterTool, map[string]any{"tool": "Read"})
 	handler(EventSessionStart, nil)
 	summary := counter.Summary()
-	if !strings.Contains(summary, "tool:read = 1") || !strings.Contains(summary, "session_start = 1") {
+	if !strings.Contains(summary, "tool:Read = 1") || !strings.Contains(summary, "session_start = 1") {
 		t.Fatalf("Summary() = %q", summary)
 	}
 }

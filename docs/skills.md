@@ -100,7 +100,7 @@ reasoning when one matches.
   beats "look at how the pods are doing".
 - **Cite tools by name.** If a step needs the `bash` tool or the
   `kubernetes/get_pods` MCP tool, name it explicitly.
-- **Encode safety inline.** Don't rely on `permissions.yaml` alone;
+- **Encode safety inline.** Don't rely on `permissions.json` alone;
   state the destructive verbs in the Hard rules section so the model
   can self-restrict before even calling the tool.
 - **Test the trigger.** Run the root binary and ask a typical question; see
@@ -132,7 +132,7 @@ appends a short SKILL.md plus an INDEX.md entry.
 | Format              | `<name>/SKILL.md` w/ frontmatter | Same                                  |
 | Loaded by lead via  | `list_skills` / `load_skill`     | `list_softskills` / `load_softskill`  |
 | Mutated by lead     | No                               | No (write/delete tools mounted on curator only) |
-| Permissions         | n/a                              | `softskills/` writes denied to lead in `config/permissions.yaml` |
+| Permissions         | n/a                              | `softskills/` writes denied to lead in `config/permissions.json` |
 
 ### Lifecycle
 
@@ -215,7 +215,7 @@ Two reasons:
    step that benefits from a fresh context window.
 2. **Safety**: the write-side tools (`softskill_create`, `softskill_update`,
    `softskill_index_append`) live on the curator only, and
-   `config/permissions.yaml` denies generic `write` / `bash` paths under
+   `config/permissions.json` denies generic `write` / `bash` paths under
    `softskills/`. The library cannot be corrupted by a confused lead.
 
 ### Memory of loaded soft-skills within a session

@@ -10,7 +10,11 @@ import (
 
 // authMiddleware enforces a fixed bearer token on every protected route.
 // Constant-time comparison guards against trivial timing leaks.
+// When token is empty, all requests are allowed through (unauthenticated mode).
 func authMiddleware(token string) gin.HandlerFunc {
+	if token == "" {
+		return func(c *gin.Context) { c.Next() }
+	}
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		const prefix = "Bearer "

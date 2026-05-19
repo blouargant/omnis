@@ -18,6 +18,22 @@ func newAuthRouter(token string) *gin.Engine {
 	return r
 }
 
+func TestAuthMiddlewareNoToken(t *testing.T) {
+	// When no token is configured every request must pass through.
+	r := newAuthRouter("")
+	for _, header := range []string{"", "Bearer whatever", "Basic abc"} {
+		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("header=%q: got %d want 200", header, w.Code)
+		}
+	}
+}
+
 func TestAuthMiddleware(t *testing.T) {
 	const token = "s3cret"
 

@@ -180,15 +180,15 @@ func newChatTextView(changed func()) *tview.TextView {
 
 // Config bundles everything the TUI needs to run.
 type Config struct {
-	Runner                            *runner.Runner
-	Bus                               *events.Bus // optional; if non-nil, trace pane subscribes
-	AskUserRegistry                   *askuser.Registry // optional; if non-nil, renders ask_user modals
-	UserID                            string
-	SessionID                         string
-	AppName                           string // shown in title bar
-	SubAgentNames                     []string
-	InputTokenPricePerMillion         float64
-	OutputTokenPricePerMillion        float64
+	Runner                     *runner.Runner
+	Bus                        *events.Bus       // optional; if non-nil, trace pane subscribes
+	AskUserRegistry            *askuser.Registry // optional; if non-nil, renders ask_user modals
+	UserID                     string
+	SessionID                  string
+	AppName                    string // shown in title bar
+	SubAgentNames              []string
+	InputTokenPricePerMillion  float64
+	OutputTokenPricePerMillion float64
 	// CachedInputTokenPricePerMillion is applied to prompt tokens served
 	// from the provider's prompt cache. Defaults to
 	// InputTokenPricePerMillion (i.e. no discount) when zero.
@@ -248,9 +248,13 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Slash-command autocomplete: suggest matching commands when the
 	// user starts typing "/".
-	slashCommands := []string{"/help", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status"}
+	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status"}
 	slashCommandsDisplay := []string{
 		"/help",
+		"/compress",
+		"/create-skill",
+		"/create-skill <name>",
+		"/update-skill <name>",
 		"/learn",
 		"/learn-now",
 		"/learn-now <reason>",
@@ -600,6 +604,8 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// busy flag prevents overlapping submissions.
 	busy := false
+	// send is declared before handleShortcut so the shortcut handler can call it.
+	var send func(string)
 	handleShortcut := func(raw string) {
 		line := strings.TrimSpace(raw)
 		fields := strings.Fields(line)
@@ -608,6 +614,40 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		cmd := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
 		switch cmd {
+		case "create-skill":
+			name := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if name == "" {
+				appendChat("\n[::b]assistant[-]\n")
+				appendChat("[yellow]Usage:[-] /create-skill <name>\n")
+				appendChat("  Example: /create-skill k8s-triage\n")
+				return
+			}
+			go send(fmt.Sprintf(
+				"Create a new skill called %q. Load the skill-creator skill and guide me through defining it interactively.",
+				name,
+			))
+		case "update-skill":
+			name := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if name == "" {
+				appendChat("\n[::b]assistant[-]\n")
+				appendChat("[yellow]Usage:[-] /update-skill <name>\n")
+				return
+			}
+			go send(fmt.Sprintf(
+				"Update the skill %q. Load the skill-creator skill and help me revise it.",
+				name,
+			))
+		case "compress":
+			appendChat("\n[::b]assistant[-]\n")
+			if cfg.Bus == nil {
+				appendChat("[yellow]Context compression unavailable:[-] event bus not configured.\n")
+				return
+			}
+			go cfg.Bus.Emit(events.EventCompressNow, map[string]any{
+				"user_id":    cfg.UserID,
+				"session_id": cfg.SessionID,
+			})
+			appendChat("[green]Context compression triggered.[-] It will run before the next model call.\n")
 		case "learn":
 			reason := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
 			if reason == "" {
@@ -655,7 +695,10 @@ func Run(ctx context.Context, cfg Config) error {
 		case "help":
 			appendChat("\n[::b]assistant[-]\n")
 			appendChat("Available shortcuts:\n")
-			appendChat("  [aqua]/learn [reason][-]      Mark this session for soft-skill curation.\n")
+			appendChat("  [aqua]/compress[-]              Trigger context compression before the next model call.\n")
+			appendChat("  [aqua]/create-skill <name>[-]   Create a new skill playbook with agent guidance.\n")
+			appendChat("  [aqua]/update-skill <name>[-]   Update an existing skill playbook with agent guidance.\n")
+			appendChat("  [aqua]/learn [reason][-]        Mark this session for soft-skill curation.\n")
 			appendChat("  [aqua]/learn-now [reason][-]  Mark and trigger soft-skill curation immediately.\n")
 			appendChat("  [aqua]/status[-]              Show current session and curation status.\n")
 			appendChat("  [aqua]/help[-]                Show this help.\n")
@@ -665,7 +708,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	send := func(prompt string) {
+	send = func(prompt string) {
 		prompt = sanitizeInputText(prompt)
 		if strings.TrimSpace(prompt) == "" {
 			return

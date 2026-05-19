@@ -28,6 +28,22 @@ func (g *sessionRunGuard) acquire(sessionID string) (release func()) {
 	return func() { <-sem }
 }
 
+// tryAcquire attempts to acquire the per-session guard without blocking.
+// Returns (release, true) on success; (no-op, false) when another goroutine
+// already holds the guard for this session — callers should skip and try
+// again later instead of blocking. Used by the idle-rebind scanner to avoid
+// tearing down an Instance that is mid-stream.
+func (g *sessionRunGuard) tryAcquire(sessionID string) (release func(), ok bool) {
+	v, _ := g.m.LoadOrStore(sessionID, make(chan struct{}, 1))
+	sem := v.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, true
+	default:
+		return func() {}, false
+	}
+}
+
 // sessionPushBroadcaster holds per-session channels that fire whenever a
 // background turn completes for that session (used by the /events SSE endpoint).
 type sessionPushBroadcaster struct {
@@ -73,11 +89,11 @@ func (b *sessionPushBroadcaster) notify(sessionID string) {
 // the leader mailbox. When a cross-session message arrives it injects a
 // synthetic runner turn so the agent can process and reply to it.
 type pushManager struct {
-	guard    *sessionRunGuard
-	bcast    *sessionPushBroadcaster
-	mu       sync.Mutex
-	cancels  map[string]context.CancelFunc
-	watchFn  func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
+	guard   *sessionRunGuard
+	bcast   *sessionPushBroadcaster
+	mu      sync.Mutex
+	cancels map[string]context.CancelFunc
+	watchFn func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
 }
 
 func newPushManager(
@@ -135,7 +151,19 @@ func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, user
 		return // session deleted while waiting for the lock
 	}
 
-	seq := d.Runner.Run(
+	// Resolve the session's squad inside its pinned generation. Fall back
+	// to the default squad when the recorded squad is no longer present
+	// (e.g. it was renamed/removed by a later config edit).
+	meta, ok := d.Registry.Get(sessionID)
+	if !ok {
+		return
+	}
+	sq := d.Manager.LookupSquad(sessionID, meta.Squad)
+	if sq == nil || sq.Runner == nil {
+		return
+	}
+
+	seq := sq.Runner.Run(
 		ctx, userID, sessionID,
 		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
 		adkagent.RunConfig{},

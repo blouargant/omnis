@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/blouargant/yoke/internal/paths"
 )
 
 // preferences holds user-visible UI preferences that should survive server
@@ -25,9 +27,11 @@ type preferencesStore struct {
 	mu   sync.Mutex
 }
 
-func newPreferencesStore(files configFiles) *preferencesStore {
-	dir := filepath.Dir(files.Agent)
-	return &preferencesStore{path: filepath.Join(dir, "preferences.json")}
+func newPreferencesStore(_ configFiles) *preferencesStore {
+	// User preferences are mutable state; always anchor them under the
+	// write root ($YOKE_HOME/config), never alongside a lower-precedence
+	// agent.yaml read from ./config or /etc/yoke.
+	return &preferencesStore{path: filepath.Join(paths.ConfigWriteDir(), "preferences.json")}
 }
 
 func (s *preferencesStore) load() preferences {

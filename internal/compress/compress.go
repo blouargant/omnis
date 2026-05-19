@@ -146,8 +146,8 @@ type sessionState struct {
 	lastTokenCount   atomic.Int64
 	forceCompact     atomic.Bool
 	totalTurns       atomic.Int64 // monotonically incremented in afterModel; stamped into StateLog
-	recentUserTurns  []string // last few user prompts; used by task-switch sniffer
-	recentModelTurns []string // last few model responses (text + tool calls); used by state-log extractor
+	recentUserTurns  []string     // last few user prompts; used by task-switch sniffer
+	recentModelTurns []string     // last few model responses (text + tool calls); used by state-log extractor
 	sumCache         *summaryCache
 	stateLog         stateLogState
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,48 +15,45 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 	t.Setenv("YOKE_API_KEY", "env-global-key")
 	t.Setenv("YOKE_CURATOR_ENABLED", "true")
 	t.Setenv("CURATOR_KEY_ENV", "resolved-curator-key")
+	t.Setenv("JSON_KEY_ENV", "resolved-json-key")
 
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "agent.yaml")
-	mustWrite(t, cfgPath, []byte(`
-skills_dir: yaml-skills
-softskills_dir: yaml-soft
-app_name: yaml-app
-mcp_config_path: yaml-mcp.yaml
-permissions_config_path: yaml-perms.yaml
-models:
-  leader-default:
-    provider: anthropic
-    model: yaml-default-model
-    base_url: https://yaml-base/v1
-    api_key: YAML_KEY_ENV
-    context_length: 200000
-    input_token_price_per_million: 3
-    output_token_price_per_million: 15
-  curator-fast:
-    model: role-curator-model
-    api_key: CURATOR_KEY_ENV
-    context_length: 128000
-agents:
-  - name: leader
-    model_ref: leader-default
-  - name: curator
-    model_ref: curator-fast
-    enabled: false
-  - name: investigator
-    model_ref: leader-default
-    provider: openai
-    model: role-investigator-model
-    enabled: false
-    mailbox: false
-`))
-	t.Setenv("YAML_KEY_ENV", "resolved-yaml-key")
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "leader-default"},
+		{Name: "curator", ModelRef: "curator-fast", Enabled: ptrBool(false)},
+		{Name: "investigator", ModelRef: "leader-default", Provider: "openai", Model: "role-investigator-model", Enabled: ptrBool(false)},
+	})
+
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{
+  "skills_dir": "json-skills",
+  "softskills_dir": "json-soft",
+  "app_name": "json-app",
+  "mcp_config_path": "json-mcp.json",
+  "permissions_config_path": "json-perms.json",
+  "models": {
+    "leader-default": {
+      "provider": "anthropic",
+      "model": "json-default-model",
+      "base_url": "https://json-base/v1",
+      "api_key": "JSON_KEY_ENV",
+      "context_length": 200000,
+      "input_token_price_per_million": 3,
+      "output_token_price_per_million": 15
+    },
+    "curator-fast": {
+      "model": "role-curator-model",
+      "api_key": "CURATOR_KEY_ENV",
+      "context_length": 128000
+    }
+  },
+  "agents": ["leader", "curator", "investigator"]
+}`))
 
 	curatorEnabled := false
 	runtime, err := ResolveRuntimeSettings(Options{
 		ConfigPath:       cfgPath,
 		ConfigPathStrict: true,
-		SkillsDir:        "cli-skills",
 		AppName:          "cli-app",
 		ModelProvider:    "openai",
 		ModelName:        "cli-model",
@@ -67,20 +65,17 @@ agents:
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
 
-	if got := runtime.SkillsDir; got != "cli-skills" {
-		t.Fatalf("SkillsDir = %q, want cli-skills", got)
-	}
-	if got := runtime.SoftSkillsDir; got != "yaml-soft" {
-		t.Fatalf("SoftSkillsDir = %q, want yaml-soft", got)
+	if got := runtime.SoftSkillsDir; got != "json-soft" {
+		t.Fatalf("SoftSkillsDir = %q, want json-soft", got)
 	}
 	if got := runtime.AppName; got != "cli-app" {
 		t.Fatalf("AppName = %q, want cli-app", got)
 	}
-	if got := runtime.MCPConfigPath; got != "yaml-mcp.yaml" {
-		t.Fatalf("MCPConfigPath = %q, want yaml-mcp.yaml", got)
+	if got := runtime.MCPConfigPath; got != "json-mcp.json" {
+		t.Fatalf("MCPConfigPath = %q, want json-mcp.json", got)
 	}
-	if got := runtime.PermissionsConfigPath; got != "yaml-perms.yaml" {
-		t.Fatalf("PermissionsConfigPath = %q, want yaml-perms.yaml", got)
+	if got := runtime.PermissionsConfigPath; got != "json-perms.json" {
+		t.Fatalf("PermissionsConfigPath = %q, want json-perms.json", got)
 	}
 
 	leader, ok := runtime.AgentConfig("leader")
@@ -136,8 +131,8 @@ agents:
 	if inv.Enabled {
 		t.Fatal("investigator.Enabled = true, want false")
 	}
-	if inv.Mailbox {
-		t.Fatal("investigator.Mailbox = true, want false")
+	if inv.Leader {
+		t.Fatal("investigator.Leader = true, want false")
 	}
 	if inv.Provider != "openai" || inv.Model != "role-investigator-model" {
 		t.Fatalf("investigator = %#v, want provider=openai model=role-investigator-model", inv)
@@ -145,19 +140,18 @@ agents:
 }
 
 func TestResolveRuntimeSettingsAPIKeyLiteralWhenEnvMissing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-agents:
-  - name: leader
-    model_ref: default
-    provider: openai_compat
-    model: test-model
-    api_key: sk-literal
-models:
-  default:
-    provider: openai_compat
-    model: fallback
-`))
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", APIKey: "sk-literal"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "models": {
+    "default": {"provider": "openai_compat", "model": "fallback"}
+  }
+}`))
 
 	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err != nil {
@@ -173,19 +167,18 @@ models:
 }
 
 func TestResolveRuntimeSettingsBaseURLFromEnv(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-agents:
-  - name: leader
-    model_ref: default
-    provider: openai_compat
-    model: test-model
-    base_url: BASE_URL_ENV
-models:
-  default:
-    provider: openai_compat
-    model: fallback
-`))
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", BaseURL: "BASE_URL_ENV"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "models": {
+    "default": {"provider": "openai_compat", "model": "fallback"}
+  }
+}`))
 	t.Setenv("BASE_URL_ENV", "https://resolved-base-url/v1")
 
 	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
@@ -202,19 +195,18 @@ models:
 }
 
 func TestResolveRuntimeSettingsBaseURLLiteralWhenEnvMissing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-agents:
-  - name: leader
-    model_ref: default
-    provider: openai_compat
-    model: test-model
-    base_url: https://literal-base-url/v1
-models:
-  default:
-    provider: openai_compat
-    model: fallback
-`))
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", BaseURL: "https://literal-base-url/v1"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "models": {
+    "default": {"provider": "openai_compat", "model": "fallback"}
+  }
+}`))
 
 	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err != nil {
@@ -230,12 +222,12 @@ models:
 }
 
 func TestResolveRuntimeSettingsUnknownModelRef(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-agents:
-  - name: leader
-    model_ref: does-not-exist
-`))
+	path := filepath.Join(t.TempDir(), "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": [
+    {"name": "leader", "model_ref": "does-not-exist"}
+  ]
+}`))
 
 	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err == nil {
@@ -247,16 +239,18 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	t.Setenv("YOKE_PROVIDER", "")
 	t.Setenv("YOKE_MODEL", "")
 	t.Setenv("YOKE_CURATOR_ENABLED", "")
+	// Pin path roots so assertions are stable regardless of the host's
+	// real $HOME or ./config layout.
+	home := t.TempDir()
+	t.Setenv("YOKE_HOME", home)
+	t.Setenv("YOKE_CONFIG_DIRS", filepath.Join(home, "config"))
 
 	runtime, err := ResolveRuntimeSettings(Options{})
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
-	if got := runtime.SkillsDir; got != "skills" {
-		t.Fatalf("SkillsDir = %q, want skills", got)
-	}
-	if got := runtime.SoftSkillsDir; got != "softskills" {
-		t.Fatalf("SoftSkillsDir = %q, want softskills", got)
+	if got, want := runtime.SoftSkillsDir, filepath.Join(home, "softskills"); got != want {
+		t.Fatalf("SoftSkillsDir = %q, want %q", got, want)
 	}
 	if got := runtime.AppName; got != "yoke" {
 		t.Fatalf("AppName = %q, want yoke", got)
@@ -264,8 +258,8 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if runtime.BashOutputFilterEnabled {
 		t.Fatal("BashOutputFilterEnabled = true, want false")
 	}
-	if got := runtime.BashOutputFiltersDir; got != "config/filters" {
-		t.Fatalf("BashOutputFiltersDir = %q, want config/filters", got)
+	if got, want := runtime.BashOutputFiltersDir, filepath.Join(home, "config", "filters"); got != want {
+		t.Fatalf("BashOutputFiltersDir = %q, want %q", got, want)
 	}
 	if _, ok := runtime.AgentConfig("leader"); !ok {
 		t.Fatal("default leader config missing")
@@ -279,16 +273,18 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	}
 }
 
-func TestResolveRuntimeSettingsBashOutputFilterFromYAML(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-token_optimization: true
-bash_output_filters_dir: config/custom-filters
-agents:
-  - name: leader
-    provider: openai_compat
-    model: test
-`))
+func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", Provider: "openai_compat", Model: "test"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "token_optimization": true,
+  "bash_output_filters_dir": "config/custom-filters",
+  "agents": ["leader"]
+}`))
 
 	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err != nil {
@@ -303,19 +299,22 @@ agents:
 }
 
 func TestResolveRuntimeSettingsStrictMissingConfig(t *testing.T) {
-	_, err := ResolveRuntimeSettings(Options{ConfigPath: "does-not-exist.yaml", ConfigPathStrict: true})
+	_, err := ResolveRuntimeSettings(Options{ConfigPath: "does-not-exist.json", ConfigPathStrict: true})
 	if err == nil {
 		t.Fatal("ResolveRuntimeSettings() error = nil, want error for missing config")
 	}
 }
 
 func TestResolveRuntimeSettingsRequiresLeader(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	mustWrite(t, path, []byte(`
-agents:
-  - name: investigator
-    provider: openai
-`))
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "investigator", Provider: "openai"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["investigator"]
+}`))
 
 	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
 	if err == nil {
@@ -324,14 +323,49 @@ agents:
 }
 
 func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
+	// Set up a temp registry with instruction files.
+	dir := t.TempDir()
+	t.Setenv("YOKE_HOME", dir)
+	registryDir := filepath.Join(dir, "registry", "agents")
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", registryDir, err)
+	}
+
+	// Copy instruction files from the real registry.
+	for _, name := range []string{"leader", "investigator", "summariser"} {
+		srcPath := filepath.Join("..", "registry", "agents", name, "instruction.md")
+		content, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatalf("reading %s: %v", srcPath, err)
+		}
+		dstDir := filepath.Join(registryDir, name)
+		if err := os.MkdirAll(dstDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dstDir, err)
+		}
+		dstPath := filepath.Join(dstDir, "instruction.md")
+		if err := os.WriteFile(dstPath, content, 0o644); err != nil {
+			t.Fatalf("writing %s: %v", dstPath, err)
+		}
+	}
+
+	// Copy default instruction.
+	defaultSrcPath := filepath.Join("..", "registry", "agents", "default.md")
+	defaultContent, err := os.ReadFile(defaultSrcPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", defaultSrcPath, err)
+	}
+	defaultDstPath := filepath.Join(registryDir, "default.md")
+	if err := os.WriteFile(defaultDstPath, defaultContent, 0o644); err != nil {
+		t.Fatalf("writing %s: %v", defaultDstPath, err)
+	}
+
+	// Now run the tests with instructions available.
 	tests := []struct {
-		name        string
-		instruction string
-		want        []string
+		name string
+		want []string
 	}{
 		{
-			name:        "leader",
-			instruction: defaultAgentInstruction("leader"),
+			name: "leader",
 			want: []string{
 				"focused evidence questions to the 'investigator' sub-agent",
 				"compact cited findings",
@@ -341,8 +375,7 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 			},
 		},
 		{
-			name:        "investigator",
-			instruction: defaultAgentInstruction("investigator"),
+			name: "investigator",
 			want: []string{
 				"compact evidence brief",
 				"exact sources",
@@ -352,8 +385,7 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 			},
 		},
 		{
-			name:        "summariser",
-			instruction: defaultAgentInstruction("summariser"),
+			name: "summariser",
 			want: []string{
 				"Preserve source anchors",
 				"file paths",
@@ -366,9 +398,10 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			instruction := defaultAgentInstruction(tt.name)
 			for _, want := range tt.want {
-				if !strings.Contains(tt.instruction, want) {
-					t.Fatalf("defaultAgentInstruction(%q) missing %q\n%s", tt.name, want, tt.instruction)
+				if !strings.Contains(instruction, want) {
+					t.Fatalf("defaultAgentInstruction(%q) missing %q\n%s", tt.name, want, instruction)
 				}
 			}
 		})
@@ -377,11 +410,11 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 
 func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
-		{Name: "leader", Enabled: true},
-		{Name: "investigator", Enabled: true, Mailbox: true, Tools: []string{"fs", "skills"}},
-		{Name: "summariser", Enabled: true, Mailbox: true, Tools: []string{}},
+		{Name: "leader", Enabled: true, Leader: true},
+		{Name: "investigator", Enabled: true, Tools: []string{"fs", "Skill"}},
+		{Name: "summariser", Enabled: true, Tools: []string{}},
 		{Name: "curator", Enabled: true},
-	}, RuntimeSettings{SkillsDir: t.TempDir()})
+	}, RuntimeSettings{})
 
 	want := []string{
 		"**investigator**",
@@ -407,5 +440,49 @@ func mustWrite(t *testing.T, path string, b []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// ptrBool is a helper to create a pointer to a boolean value for test struct initialization.
+func ptrBool(b bool) *bool {
+	return &b
+}
+
+// setupAgentsRegistry creates the registry/agents directory structure for tests.
+// It writes each agent definition to registry/agents/{name}/agent.json and
+// sets YOKE_HOME to the base directory so paths.AgentsRegistryDir() resolves correctly.
+func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
+	t.Helper()
+	t.Setenv("YOKE_HOME", baseDir)
+	registryDir := filepath.Join(baseDir, "registry", "agents")
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", registryDir, err)
+	}
+
+	for _, a := range agents {
+		name := strings.ToLower(strings.TrimSpace(a.Name))
+		if name == "" {
+			continue
+		}
+		agentDir := filepath.Join(registryDir, name)
+		if err := os.MkdirAll(agentDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", agentDir, err)
+		}
+
+		agentPath := filepath.Join(agentDir, "agent.json")
+		b, _ := json.Marshal(a)
+		mustWrite(t, agentPath, b)
+
+		// Copy instruction file if it exists in the real registry.
+		srcInstructionPath := filepath.Join("..", "registry", "agents", name, "instruction.md")
+		if content, err := os.ReadFile(srcInstructionPath); err == nil {
+			dstInstructionPath := filepath.Join(agentDir, "instruction.md")
+			mustWrite(t, dstInstructionPath, content)
+		}
+	}
+
+	// Also copy the default instruction if it exists.
+	if content, err := os.ReadFile(filepath.Join("..", "registry", "agents", "default.md")); err == nil {
+		mustWrite(t, filepath.Join(registryDir, "default.md"), content)
 	}
 }

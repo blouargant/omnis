@@ -56,7 +56,7 @@ var indexMu sync.Mutex
 // leader's root directory is used (`<root>/<skill>/SKILL.md`).
 func WriteTools(root string) []tool.Tool {
 	if root == "" {
-		root = DefaultDir
+		root = DefaultDir()
 	}
 	w := &writer{root: root}
 	return []tool.Tool{

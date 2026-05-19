@@ -1,18 +1,22 @@
-// Package skills wraps ADK's skilltoolset with a directory-based source
-// (Phase 2 / s05). Each skill lives in `<dir>/<name>/SKILL.md` with YAML
-// front matter describing what it does and a body of instructions.
+// Package skills wraps ADK's skilltoolset with a registry-based source.
+// Each skill lives in `<registryDir>/<name>/SKILL.md` with YAML front matter.
+// Agents specify which skills they need by name; only those are exposed.
 package skills
 
 import (
 	"context"
-	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"path"
+	"strings"
+	"time"
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
 
-	"github.com/blouargant/yoke/internal/fsutil"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
 // LoaderProtocol is prepended to any agent instruction whose tools include
@@ -30,22 +34,7 @@ MANDATORY SKILL DISCOVERY — this rule is non-negotiable and overrides every ot
 - Skipping skill discovery is a protocol violation. If you find yourself reaching for bash/kubectl/mcp before list_skills, stop and call list_skills first.
 `
 
-// Toolset returns an ADK tool.Toolset reading skills from `dir`.
-// `dir` is created if missing so demos still work.
-func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
-	if dir == "" {
-		dir = "skills"
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("skills dir: %w", err)
-	}
-	src := skill.NewFileSystemSource(fsutil.NewSymlinkDirFS(dir))
-	// NOTE: the default system instruction shipped by ADK v1.2 tells the
-	// model to call `load_skill` with `skill_name="..."`, but the tool's
-	// JSON schema actually requires `name`. That mismatch produces noisy
-	// `tool_error` entries in the event log on every first attempt. We
-	// override the instruction with one that matches the real schema.
-	const skillInstruction = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
+const skillInstruction = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
 
 Skills are folders of instructions and resources that extend your capabilities for specialized tasks. Each skill folder contains:
 - **SKILL.md** (required): The main instruction file with skill metadata and detailed markdown instructions.
@@ -60,6 +49,23 @@ This is very important:
 3. Once you have read the instructions, follow them exactly as documented before replying to the user. If the instructions list multiple steps, complete all of them in order.
 4. The ` + "`load_skill_resource`" + ` tool is for viewing files within a skill's directory (e.g., ` + "`references/*`, `assets/*`, `scripts/*`" + `). Do NOT use other tools to access these files.
 `
+
+// Toolset returns an ADK tool.Toolset that exposes skills from the shared
+// registry (paths.SkillsRegistryDir()). When skillNames is nil or empty, all
+// installed skills are visible. When non-empty, only the named skills are
+// exposed to the agent.
+func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
+	registryDir := paths.SkillsRegistryDir()
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		return nil, err
+	}
+	base := os.DirFS(registryDir)
+	var src skill.Source
+	if len(skillNames) == 0 {
+		src = skill.NewFileSystemSource(base)
+	} else {
+		src = skill.NewFileSystemSource(newFilteredSkillsFS(base, skillNames))
+	}
 	ts, err := skilltoolset.New(ctx, skilltoolset.Config{
 		Source:            src,
 		SystemInstruction: skillInstruction,
@@ -69,3 +75,90 @@ This is very important:
 	}
 	return ts, nil
 }
+
+// ── filteredSkillsFS ──────────────────────────────────────────────────────
+
+// filteredSkillsFS wraps a base fs.FS and only exposes specific top-level
+// skill directories. The root listing is restricted to the named skills;
+// reads within allowed skill directories pass through unchanged.
+type filteredSkillsFS struct {
+	base    fs.FS
+	allowed map[string]bool
+}
+
+func newFilteredSkillsFS(base fs.FS, skillNames []string) fs.FS {
+	allowed := make(map[string]bool, len(skillNames))
+	for _, n := range skillNames {
+		n = strings.TrimSpace(n)
+		if n != "" {
+			allowed[n] = true
+		}
+	}
+	return filteredSkillsFS{base: base, allowed: allowed}
+}
+
+func (f filteredSkillsFS) Open(name string) (fs.File, error) {
+	clean := path.Clean(name)
+	if clean == "." {
+		return &filteredRootDir{base: f.base, allowed: f.allowed}, nil
+	}
+	// Only allow access inside a permitted top-level directory.
+	top := clean
+	if i := strings.IndexByte(clean, '/'); i >= 0 {
+		top = clean[:i]
+	}
+	if !f.allowed[top] {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	return f.base.Open(name)
+}
+
+// filteredRootDir is the virtual root returned by filteredSkillsFS.Open(".").
+type filteredRootDir struct {
+	base    fs.FS
+	allowed map[string]bool
+	entries []fs.DirEntry
+	pos     int
+	loaded  bool
+}
+
+func (d *filteredRootDir) Stat() (fs.FileInfo, error) { return syntheticDirInfo("."), nil }
+func (d *filteredRootDir) Read([]byte) (int, error) {
+	return 0, &fs.PathError{Op: "read", Path: ".", Err: fs.ErrInvalid}
+}
+func (d *filteredRootDir) Close() error { return nil }
+
+func (d *filteredRootDir) ReadDir(n int) ([]fs.DirEntry, error) {
+	if !d.loaded {
+		all, _ := fs.ReadDir(d.base, ".")
+		for _, e := range all {
+			if e.IsDir() && d.allowed[e.Name()] {
+				d.entries = append(d.entries, e)
+			}
+		}
+		d.loaded = true
+	}
+	if n <= 0 {
+		return d.entries[d.pos:], nil
+	}
+	if d.pos >= len(d.entries) {
+		return nil, io.EOF
+	}
+	end := d.pos + n
+	if end > len(d.entries) {
+		end = len(d.entries)
+	}
+	res := d.entries[d.pos:end]
+	d.pos = end
+	return res, nil
+}
+
+// syntheticDirInfo is a minimal fs.FileInfo for virtual directories.
+type syntheticDirInfo string
+
+func (fi syntheticDirInfo) Name() string       { return string(fi) }
+func (fi syntheticDirInfo) Size() int64        { return 0 }
+func (fi syntheticDirInfo) Mode() fs.FileMode  { return fs.ModeDir | 0o555 }
+func (fi syntheticDirInfo) ModTime() time.Time { return time.Time{} }
+func (fi syntheticDirInfo) IsDir() bool        { return true }
+func (fi syntheticDirInfo) Sys() any           { return nil }

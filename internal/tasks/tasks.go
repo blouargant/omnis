@@ -383,7 +383,7 @@ type updateOut struct {
 // concurrent sessions get isolated task graphs automatically.
 func (g *Graph) Tools() []tool.Tool {
 	c, _ := functiontool.New(functiontool.Config{
-		Name: "task_create",
+		Name: "TaskCreate",
 		Description: "Create a task in the durable task graph. " +
 			"Arguments: " +
 			"`description` (string, required); " +
@@ -422,7 +422,7 @@ func (g *Graph) Tools() []tool.Tool {
 		return nextOut{Task: string(b)}, nil
 	})
 	u, _ := functiontool.New(functiontool.Config{
-		Name:        "task_update",
+		Name:        "TaskUpdate",
 		Description: "Update a task's status (pending|in_progress|done|failed) and optional result string.",
 	}, func(ctx tool.Context, in updateIn) (updateOut, error) {
 		s, err := g.UpdateAt(g.resolvePath(ctx), in.ID, in.Status, in.Result)

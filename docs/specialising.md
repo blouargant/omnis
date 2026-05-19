@@ -5,8 +5,8 @@ its domain.** Specialisation is always one of three things, in
 combination:
 
 1. A new **skill** under `skills/<name>/SKILL.md`.
-2. A new **MCP server** in `config/mcp_config.yaml`.
-3. New **permission rules** in `config/permissions.yaml`.
+2. A new **MCP server** in `config/mcp_config.json`.
+3. New **permission rules** in `config/permissions.json`.
 
 That is the entire contract.
 
@@ -50,26 +50,33 @@ description: Short, action-oriented sentence. Use whenever the user mentions <tr
 
 Two options, freely combinable:
 
-**Option A — MCP server.** Edit `config/mcp_config.yaml`:
+**Option A — MCP server.** Edit `config/mcp_config.json`:
 
-```yaml
-servers:
-  - name: kubernetes
-    command: npx
-    args: ["-y", "mcp-server-kubernetes"]
-    env:
-      KUBECONFIG: /home/you/.kube/config
+```json
+{
+  "servers": [
+    {
+      "name": "kubernetes",
+      "command": "npx",
+      "args": ["-y", "mcp-server-kubernetes"],
+      "env": {"KUBECONFIG": "/home/you/.kube/config"}
+    }
+  ]
+}
 ```
 
 **Option B — Bash + permissions.** Just rely on the built-in `bash`
-tool plus an entry in `config/permissions.yaml`:
+tool plus an entry in `config/permissions.json`:
 
-```yaml
-always_allow:
-  - "^kubectl (get|describe|logs|top|explain) "
-
-ask_user:
-  - "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)"
+```json
+{
+  "always_allow": [
+    "^kubectl (get|describe|logs|top|explain) "
+  ],
+  "ask_user": [
+    "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)"
+  ]
+}
 ```
 
 Read-only verbs auto-allowed; mutating verbs gated; destructive ones
@@ -99,15 +106,21 @@ diagnostician with no Go change.
 
 ## Worked example: PostgreSQL DBA
 
-```yaml
-# config/mcp_config.yaml
-servers:
-  - name: postgres
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-postgres"
-      - "postgresql://reader:pw@localhost/app?sslmode=require"
+```json
+// config/mcp_config.json
+{
+  "servers": [
+    {
+      "name": "postgres",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://reader:pw@localhost/app?sslmode=require"
+      ]
+    }
+  ]
+}
 ```
 
 ```markdown
@@ -135,13 +148,17 @@ Done — same binary, new specialist.
 
 ## Worked example: GitHub issue triager
 
-```yaml
-servers:
-  - name: github
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-github"]
-    env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_…"
+```json
+{
+  "servers": [
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}
+    }
+  ]
+}
 ```
 
 Add `skills/issue-triage/SKILL.md` describing your label taxonomy and
@@ -154,11 +171,26 @@ brand-new **sub-agent**. See [extending.md](extending.md). Even then,
 keep the tool generic — the policy that turns it into a domain skill
 belongs in `skills/`.
 
+## Multiple specialisations in one binary — squads
+
+When a single agent.json needs to support several different *kinds* of
+session (e.g. an interactive triage helper and a focused web-research
+flow), don't fork the binary. Declare each as a **squad** in
+`config/agents.json`: a named group with its own leader and member
+sub-agents picked from the shared `agents:` catalogue. A picker next to
+**New Chat** in the web UI selects which squad each new session uses;
+the recorded squad survives reloads and server restarts. See
+[configuration.md#squads--per-session-agent-groups](configuration.md#squads--per-session-agent-groups)
+and [extending.md#add-a-squad](extending.md#add-a-squad).
+
 ## Anti-patterns
 
 - ❌ Hard-coding domain knowledge into a system prompt or sub-agent
   instruction.
 - ❌ One sub-agent per domain. Use one generic sub-agent + many skills.
-- ❌ Mutating tools without a `permissions.yaml` rule.
+- ❌ Mutating tools without a `permissions.json` rule.
 - ❌ Mounting an MCP server without restricting its surface in
-  `permissions.yaml`.
+  `permissions.json`.
+- ❌ Forking the binary to ship a "research-only" variant. Declare a
+  `research` squad in `agent.json` instead and let users pick it from
+  the new-chat dropdown.

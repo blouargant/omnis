@@ -1,0 +1,25 @@
+[data-theme="one-dark"] {
+  --bg: #282c34;
+  --bg-panel: #21252b;
+  --bg-raised: #2c313a;
+  --bg-raised-hover: #353b45;
+  --bg-active: #2c5680;
+  --bg-input: #1d2025;
+  --border: #3e4451;
+  --border-strong: #5c6370;
+  --text: #abb2bf;
+  --text-strong: #ffffff;
+  --text-muted: #5c6370;
+  --text-faint: #4b5263;
+  --accent: #528bff;
+  --accent-hover: #61afef;
+  --accent-strong: #61afef;
+  --accent-bg-soft: rgba(82, 139, 255, 0.20);
+  --accent-border-soft: rgba(82, 139, 255, 0.45);
+  --accent-hover-bg: #2c5680;
+  --scroll-thumb: #3e4451;
+  --scroll-thumb-hover: #5c6370;
+  --bubble-user-bg: #2c313a;
+  --bubble-user-border: #3e4451;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+}

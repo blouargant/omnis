@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/PuerkitoBio/goquery"
 	"google.golang.org/adk/tool"
 )
 
@@ -29,7 +29,7 @@ type HTMLToMarkdownOut struct {
 
 func NewWebTools() []tool.Tool {
 	return []tool.Tool{
-		mustTool("web_fetch",
+		mustTool("WebFetch",
 			"Fetch a web page and return its content as Markdown. "+
 				"Arguments: `url` (string, required) — the URL to fetch; "+
 				"`selector` (string, optional) — CSS selector to extract a specific page section (e.g. \"main\", \"article\", \"#content\").",

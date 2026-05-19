@@ -1,0 +1,56 @@
+[data-theme="subtile-grey"] {
+  /* Backgrounds */
+  --bg: #f8f9fa; /* Main content area background */
+  --bg-panel: #ffffff; /* Card/Container backgrounds */
+  --bg-raised: #f3f4f5; /* Hover/Secondary backgrounds */
+  --bg-raised-hover: #e9ecef;
+  --bg-active: #e2e6ea;
+  --bg-input: #ffffff;
+  
+  /* Navigation & Headers (Extracted from dark header/sidebar) */
+  --bg-header: #4a5d5e; /* Main top header */
+  --bg-sidebar: #ffffff; /* Left sidebar background */
+  --bg-sidebar-active: #f3f4f5;
+  
+  /* Borders */
+  --border: #dee2e6;
+  --border-strong: #ced4da;
+  
+  /* Typography */
+  --text: #212529;
+  --text-strong: #000000;
+  --text-muted: #6c757d;
+  --text-faint: #adb5bd;
+  --text-on-header: #ffffff;
+  
+  /* Accents & Data Visualization (Extracted from charts/icons) */
+  --accent: #4a5d5e; /* Main brand color */
+  --accent-hover: #3d4d4e;
+  --accent-strong: #2f3b3c;
+  
+  /* Categorical Colors (from status tags/charts) */
+  --blue: #0ea5e9;
+  --green: #10b981;
+  --purple: #8b5cf6;
+  --orange: #f59e0b;
+  --red: #ef4444;
+  
+  /* Soft variants for UI elements */
+  --accent-bg-soft: rgba(74, 93, 94, 0.08);
+  --accent-border-soft: rgba(74, 93, 94, 0.2);
+  
+  /* Components */
+  --scroll-thumb: #ced4da;
+  --scroll-thumb-hover: #adb5bd;
+  --bubble-user-bg: #f3f4f5;
+  --bubble-user-border: #dee2e6;
+  --shadow-bubble: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.04);
+  
+  /* Status/Feedback */
+  --danger-fg: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.08);
+  --danger-border: rgba(239, 68, 68, 0.3);
+  --warn-fg: #f59e0b;
+  --warn-bg: rgba(245, 158, 11, 0.08);
+  --warn-border: rgba(245, 158, 11, 0.28);
+}

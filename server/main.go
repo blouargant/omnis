@@ -3,16 +3,22 @@
 // one ADK runner; concurrent chats are isolated by sessionID through the
 // runner's in-memory session service.
 //
-// Required env:
-//
-//	YOKE_SERVER_TOKEN  Bearer token required on every /api/* call
-//	                      (except /api/health). Server refuses to start if
-//	                      empty (fail-closed).
-//
 // Optional env:
 //
+//	YOKE_SERVER_TOKEN  Bearer token checked on every /api/* call. When
+//	                      empty, token validation is skipped (unauthenticated
+//	                      mode). Set it to require a Bearer token.
+//
+//
 //	YOKE_SERVER_ADDR         Listen address. Default ":8080".
-//	YOKE_CONFIG_PATH         Path to config/agent.yaml (forwarded to agent.NewAgent).
+//	YOKE_HOME                Per-user state root. Default $HOME/.yoke. Every
+//	                            mutable file (logs, uploads, soft-skills,
+//	                            mailboxes, user config overrides) lands here.
+//	YOKE_CONFIG_DIRS         Colon-separated config search chain (high→low
+//	                            precedence). Replaces the default chain of
+//	                            $YOKE_HOME/config : ./config : /etc/yoke.
+//	YOKE_CONFIG_PATH         Explicit path to agent.json (forwarded to
+//	                            agent.NewAgent; bypasses the chain).
 //	YOKE_SKILLS_DIR          Skills directory.
 //	YOKE_SOFTSKILLS_DIR      Soft-skills directory.
 //	YOKE_WEB_DIR             Static UI directory. Default "web".
@@ -38,7 +44,7 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/agentkit"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
 func main() {
@@ -51,7 +57,7 @@ func main() {
 func run() error {
 	token := strings.TrimSpace(os.Getenv("YOKE_SERVER_TOKEN"))
 	if token == "" {
-		return errors.New("YOKE_SERVER_TOKEN is required (server refuses to start unauthenticated)")
+		log.Println("server: YOKE_SERVER_TOKEN not set — running without authentication")
 	}
 
 	addr := envOr("YOKE_SERVER_ADDR", ":8080")
@@ -65,27 +71,37 @@ func run() error {
 	agentOpts := agent.Options{
 		ConfigPath:       os.Getenv("YOKE_CONFIG_PATH"),
 		ConfigPathStrict: os.Getenv("YOKE_CONFIG_PATH") != "",
-		SkillsDir:        os.Getenv("YOKE_SKILLS_DIR"),
 		SoftSkillsDir:    os.Getenv("YOKE_SOFTSKILLS_DIR"),
 		AppName:          envOr("YOKE_APP_NAME", "yoke-server"),
 		DebugLogging:     debug,
 	}
 
-	// Resolve the YAML files exposed by the web UI editor up-front so the
-	// HTTP handlers never derive paths from URL parameters.
+	log.Printf("server: yoke home: %s", paths.Home())
+	log.Printf("server: config search: %v", paths.ConfigSearchDirs())
+
+	// Resolve the JSON config files exposed by the web UI editor up-front
+	// so the HTTP handlers never derive paths from URL parameters.
 	cfgFiles := resolveConfigFiles(agentOpts)
 	skillDeps := resolveSkillsDeps(cfgFiles)
 
 	log.Printf("server: building lead agent...")
-	result, err := agent.NewAgent(rootCtx, agentOpts)
+	infra, err := agent.BuildInfrastructure(rootCtx, agentOpts)
 	if err != nil {
+		return fmt.Errorf("build infrastructure: %w", err)
+	}
+	if agentOpts.Repo == "" {
+		agentOpts.Repo = infra.Repo
+	}
+	if agentOpts.AppName == "" {
+		agentOpts.AppName = infra.AppName
+	}
+	firstInst, err := agent.BuildInstance(rootCtx, infra, agentOpts, 1)
+	if err != nil {
+		infra.Close()
 		return fmt.Errorf("build agent: %w", err)
 	}
-
-	r, err := agentkit.Runner("server", result.Agent, result.Plugins...)
-	if err != nil {
-		return fmt.Errorf("build runner: %w", err)
-	}
+	manager := agent.NewManager(infra, firstInst)
+	defer manager.Close()
 
 	registry := newRegistry()
 
@@ -99,34 +115,49 @@ func run() error {
 		log.Printf("server: garbage collector disabled — running startup sweep only")
 	}
 	startGC(rootCtx, registry, gcDeps{
-		listRegistry: result.ListSessionRegistry,
-		unregister:   result.UnregisterSession,
+		listRegistry: infra.ListSessionRegistry,
+		unregister:   infra.UnregisterSession,
 	}, gcInterval)
 
 	startIdleCurator(rootCtx, IdleCuratorConfig{
 		Registry:    registry,
-		Bus:         result.EventBus,
-		IdleTimeout: result.CuratorIdleTimeout,
+		Bus:         infra.Bus,
+		IdleTimeout: firstInst.CuratorIdleTimeout,
 	})
 
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
-	pushMgr := newPushManager(runGuard, pushEvents, result.WatchMailbox)
+	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox)
+
+	// After a hot-reload, sessions stay pinned to their original generation
+	// until the next turn. The rebind scanner releases the pin of idle
+	// sessions on old generations so those generations can be torn down
+	// promptly (frees MCP subprocesses, plugins, etc.) instead of lingering
+	// for as long as the chat tab is open.
+	startIdleRebind(rootCtx, IdleRebindConfig{
+		Manager:     manager,
+		Registry:    registry,
+		Guard:       runGuard,
+		IdleTimeout: resolveRebindIdle(),
+	})
 
 	// Start watchers for sessions that were persisted from a previous run.
+	// Each persisted session pins to the current (only) generation so it
+	// keeps using the same agent across future reloads.
 	for _, meta := range registry.List() {
-		_ = result.RegisterSession(meta.UserID, meta.ID, func() string {
+		_ = infra.RegisterSession(meta.UserID, meta.ID, func() string {
 			if meta.Title != "" {
 				return meta.Title
 			}
 			return meta.ID
 		}())
+		manager.Pin(meta.ID)
 		pushMgr.Watch(rootCtx, serverDeps{
-			Runner:     r,
-			Registry:   registry,
-			RunGuard:   runGuard,
-			PushEvents: pushEvents,
-			WatchMailbox: result.WatchMailbox,
+			Manager:      manager,
+			Registry:     registry,
+			RunGuard:     runGuard,
+			PushEvents:   pushEvents,
+			WatchMailbox: infra.WatchMailbox,
 		}, meta.ID, meta.UserID)
 	}
 
@@ -137,26 +168,26 @@ func run() error {
 	restart := newRestartCoordinator()
 
 	engine := newEngine(serverDeps{
-		Token:                token,
-		Runner:               r,
-		Registry:             registry,
-		WebDir:               webDir,
-		AllowFileAttachments: result.LeaderAllowFileAttachments,
-		EventBus:             result.EventBus,
-		AskUserRegistry:      result.AskUserRegistry,
-		AgentEvents:     newAgentEventBroadcaster(result.EventBus),
-		RegisterSession:     result.RegisterSession,
-		RenameSession:       result.RenameSession,
-		UnregisterSession:   result.UnregisterSession,
-		ListSessionRegistry: result.ListSessionRegistry,
-		WatchMailbox:    result.WatchMailbox,
-		RunGuard:        runGuard,
-		PushMgr:         pushMgr,
-		PushEvents:      pushEvents,
-		rootCtx:         rootCtx,
-		ConfigFiles:     cfgFiles,
-		SkillsDeps:      skillDeps,
-		Restart:         restart,
+		Token:               token,
+		Manager:             manager,
+		Registry:            registry,
+		WebDir:              webDir,
+		EventBus:            infra.Bus,
+		AskUserRegistry:     infra.AskUserRegistry,
+		AgentEvents:         newAgentEventBroadcaster(infra.Bus),
+		RegisterSession:     infra.RegisterSession,
+		RenameSession:       infra.RenameSession,
+		UnregisterSession:   infra.UnregisterSession,
+		ListSessionRegistry: infra.ListSessionRegistry,
+		WatchMailbox:        infra.WatchMailbox,
+		RunGuard:            runGuard,
+		PushMgr:             pushMgr,
+		PushEvents:          pushEvents,
+		AgentOptions:        agentOpts,
+		rootCtx:             rootCtx,
+		ConfigFiles:         cfgFiles,
+		SkillsDeps:          skillDeps,
+		Restart:             restart,
 	})
 
 	srv := &http.Server{

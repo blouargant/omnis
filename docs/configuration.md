@@ -6,50 +6,151 @@ Precedence for overlapping values is:
 
 1. CLI flags
 2. Environment variables
-3. YAML config
+3. JSON config
 4. Built-in defaults
 
-## `config/agent.yaml`
+## `config/agents.json`
 
-Unified runtime config for app settings, reusable model profiles, and
-agent wiring.
+Top-level runtime config: app settings, reusable model profiles, the
+list of enabled agent names, and squad composition. Per-agent details
+live in their own files under `registry/agents/<name>/` — see
+[Agent registry](#agent-registry) below.
 
-```yaml
-skills_dir: skills
-softskills_dir: softskills
-app_name: yoke
-token_optimization: false
-bash_output_filters_dir: config/filters
-mcp_config_path: config/mcp_config.yaml
-permissions_config_path: config/permissions.yaml
+```json
+{
+  "skills_dir": "skills",
+  "softskills_dir": "softskills",
+  "app_name": "yoke",
+  "token_optimization": false,
+  "bash_output_filters_dir": "config/filters",
+  "mcp_config_path": "config/mcp_config.json",
+  "permissions_config_path": "config/permissions.json",
 
-models:
-  default:
-    provider: openai_compat
-    model: gpt-4o-mini
-    base_url: http://localhost:11434/v1
-    api_key: OPENAI_API_KEY
-    context_length: 128000
-    input_token_price_per_million: 0.15
-    output_token_price_per_million: 0.6
-  premium:
-    provider: anthropic
-    model: claude-sonnet-4-5
-    api_key: ANTHROPIC_API_KEY
-    context_length: 200000
-    input_token_price_per_million: 3
-    output_token_price_per_million: 15
+  "models": {
+    "default": {
+      "provider": "openai_compat",
+      "model": "gpt-4o-mini",
+      "base_url": "http://localhost:11434/v1",
+      "api_key": "OPENAI_API_KEY",
+      "context_length": 128000,
+      "input_token_price_per_million": 0.15,
+      "output_token_price_per_million": 0.6
+    },
+    "premium": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "api_key": "ANTHROPIC_API_KEY",
+      "context_length": 200000,
+      "input_token_price_per_million": 3,
+      "output_token_price_per_million": 15
+    }
+  },
 
-agents:
-  - name: leader
-    model_ref: default
-  - name: investigator
-    model_ref: premium
-    tools: [fs, mcp]
-  - name: curator
-    model_ref: default
-    enabled: true
+  "agents": ["leader", "investigator", "web_agent", "summariser", "curator"],
+
+  "squads": [
+    {
+      "name": "default",
+      "description": "General-purpose squad with the full team.",
+      "leader": "leader",
+      "members": ["investigator", "web_agent", "summariser"]
+    },
+    {
+      "name": "research",
+      "description": "Web research focus.",
+      "leader": "leader",
+      "members": ["web_agent", "summariser"]
+    }
+  ]
+}
 ```
+
+The `agents` field is a list of agent *names*. Each name must
+correspond to a directory under `registry/agents/<name>/` containing
+the agent's definition. The resolver loads each agent from its own
+file at startup.
+
+### Agent registry
+
+Agents live in `registry/agents/<name>/`:
+
+```
+registry/agents/
+├── leader/
+│   ├── agent.json
+│   └── instruction.md
+├── investigator/
+│   ├── agent.json
+│   └── instruction.md
+├── skill_editor/
+│   ├── agent.json
+│   └── instruction.md
+└── default.md          # fallback system instruction
+```
+
+Each `agent.json` is a single `AgentEntry`:
+
+```json
+{
+  "name": "investigator",
+  "description": "Read-only evidence gatherer.",
+  "enabled": true,
+  "builtin": false,
+  "model_ref": "premium",
+  "tools": ["fs", "mcp"]
+}
+```
+
+Common fields:
+
+| Field | Purpose |
+|---|---|
+| `name` | Agent identifier (must match directory name). |
+| `description` | Short summary shown in the UI and exposed to the leader as the sub-agent tool description. |
+| `enabled` | When `false`, the agent is excluded from squads and the leader's tool list. |
+| `leader` | When `true`, this agent can be selected as a squad leader. |
+| `builtin` | When `true`, marks the agent as shipped with yoke. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `skills_crawler`, `summariser`, `curator`. |
+| `model_ref` | References a key in `models` for provider/model/base_url/api_key. |
+| `tools` | List of tool group names mounted on this agent (`fs`, `mcp`, `web`, `skills`, `softskills`, `calc`, `registries`, ...). |
+| `skills_dir` | Optional per-agent skills directory (overrides the global one). |
+
+`instruction.md` is the agent's system prompt. If the file is missing,
+the agent falls back to `registry/agents/default.md`.
+
+The registry directory uses the same 3-layer lookup as `config/`:
+`$HOME/.yoke/registry/agents`, `./registry/agents`, then
+`/etc/yoke/registry/agents`. First existing directory wins.
+
+The web UI Settings → Agent panel exposes both files: agent fields in
+the form, instruction text in the **Instruction Set** block. Saving
+writes `agent.json` and `instruction.md` separately.
+
+### Squads — per-session agent groups
+
+A **squad** is a named group `{ name, leader, members[] }` composed from
+the `agents:` catalogue above. Each chat session selects one squad at
+creation; the runtime resolves a separate leader + sub-agent tree per
+squad and binds the session to that tree for the duration of the
+conversation. Squads only *reference* agents — skills, tools and MCP
+servers stay attached to the agent definitions, so two squads sharing a
+member also share its wiring (and the MCP pool dedups any subprocess
+backing it).
+
+Rules enforced at resolution time:
+
+- A squad named `default` is always present. When `squads:` is missing
+  or contains only non-default entries, the resolver synthesises a
+  `default` from the enabled agents (everything except `curator`).
+- `leader` and every `members[i]` must reference an enabled agent.
+- `curator` cannot be a squad member — it stays a single process-wide
+  hook listening across all squads.
+- Squad names are case-insensitive and must be unique within the file.
+
+The web UI exposes a **Squads** sub-tab in Settings → Agent (leader
+dropdown, member checkboxes, description, add/delete). A picker next to
+the New Chat button selects which squad each new session uses; the
+choice is persisted on the session and survives server restarts. Hot
+reload picks up squad edits without a process restart.
 
 ### Models and references
 
@@ -68,10 +169,10 @@ inline for backward compatibility.
 ### Bash output filtering
 
 The `bash` tool can optionally post-process command output using declarative
-YAML pipelines imported from the snip filter format.
+JSON pipelines imported from the snip filter format.
 
 - `token_optimization` (bool): global opt-in toggle.
-- `bash_output_filters_dir` (string): directory containing `.yaml`/`.yml`
+- `bash_output_filters_dir` (string): directory containing `.json`
   filter rules.
 
 When disabled (default), `bash` output is unchanged. When enabled, matching
@@ -85,12 +186,12 @@ For `base_url` and `api_key`, the values can be either:
 - the value itself (literal), or
 - an environment variable name.
 
-When loading YAML, if `base_url` or `api_key` matches an existing env var name, the
-env var value is used.
+When loading the config, if `base_url` or `api_key` matches an existing env
+var name, the env var value is used.
 
 ### CLI and env overrides
 
-- `--config` selects a runtime YAML file (default: `config/agent.yaml`).
+- `--config` selects a runtime JSON file (default: `config/agents.json`).
 - `--provider`, `--model`, `--base-url`, and `--api-key` override
   the leader agent model selection globally.
 - `--curator-enabled` (`true` or `false`) overrides the `curator`
@@ -114,7 +215,7 @@ env var value is used.
   **Harvested** and skipped by all subsequent scans until the user sends
   a new message — no repeated evaluations of long-idle sessions.
 
-## `config/permissions.yaml`
+## `config/permissions.json`
 
 The harness's safety envelope. Patterns are Go [`regexp`] strings
 matched against the **bash command string** that is about to run (and,
@@ -131,38 +232,44 @@ The file has three lists, evaluated **top to bottom**:
 Anything matched by **none** of the three falls through to **ask**
 (safe default).
 
+Each rule is either a JSON string (the bare regex pattern) or an object
+`{"pattern": "...", "reason": "..."}`.
+
 ### Default rules shipped
 
-```yaml
-always_deny:
-  - "rm -rf /"
-  - "mkfs"
-  - "dd if=.* of=/dev/"
-  - ":(){.*};:"          # fork bomb
-
-always_allow:
-  - "^ls( |$)"
-  - "^cat "
-  - "^pwd$"
-  - "^echo "
-  - "^head "
-  - "^tail "
-  - "^grep "
-  - "^find .* -name"
-  - "^go (build|test|vet|fmt)"
-  - "^npm (test|run build)"
-  - "^kubectl (get|describe|logs|top|explain) "
-  - "^kubectl config (current-context|get-contexts|view)"
-  - "^docker (ps|images|logs|inspect) "
-
-ask_user:
-  - "^rm "
-  - "^git push"
-  - "^sudo "
-  - "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)"
-  - "^docker (run|rm|rmi|exec)"
-  - "^terraform (apply|destroy)"
-  - "^helm (install|upgrade|uninstall)"
+```json
+{
+  "always_deny": [
+    "rm -rf /",
+    "mkfs",
+    "dd if=.* of=/dev/",
+    ":(){.*};:"
+  ],
+  "always_allow": [
+    "^ls( |$)",
+    "^cat ",
+    "^pwd$",
+    "^echo ",
+    "^head ",
+    "^tail ",
+    "^grep ",
+    "^find .* -name",
+    "^go (build|test|vet|fmt)",
+    "^npm (test|run build)",
+    "^kubectl (get|describe|logs|top|explain) ",
+    "^kubectl config (current-context|get-contexts|view)",
+    "^docker (ps|images|logs|inspect) "
+  ],
+  "ask_user": [
+    "^rm ",
+    "^git push",
+    "^sudo ",
+    "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)",
+    "^docker (run|rm|rmi|exec)",
+    "^terraform (apply|destroy)",
+    "^helm (install|upgrade|uninstall)"
+  ]
+}
 ```
 
 ### Adding a domain
@@ -170,13 +277,17 @@ ask_user:
 When you specialise the agent, add a matching rule pair (read-only
 auto-allow + mutating ask):
 
-```yaml
-always_allow:
-  - "^psql -c \"select"             # read-only Postgres
-  - "^aws s3 ls"
-ask_user:
-  - "^psql -c \"(insert|update|delete|alter|drop)"
-  - "^aws s3 (rm|cp|mv|sync) "
+```json
+{
+  "always_allow": [
+    "^psql -c \"select",
+    "^aws s3 ls"
+  ],
+  "ask_user": [
+    "^psql -c \"(insert|update|delete|alter|drop)",
+    "^aws s3 (rm|cp|mv|sync) "
+  ]
+}
 ```
 
 ### Asker
@@ -187,36 +298,42 @@ UI (web modal, Slack DM, etc.).
 
 ---
 
-## `config/mcp_config.yaml`
+## `config/mcp_config.json`
 
 Wires external [Model Context Protocol] servers as ADK toolsets. Each
 entry spawns a child process and exposes its tools to the agent.
 
-```yaml
-servers:
-  - name: filesystem
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-    env: {}
-
-  - name: kubernetes
-    command: npx
-    args: ["-y", "mcp-server-kubernetes"]
-    env:
-      KUBECONFIG: /home/you/.kube/config
-
-  - name: postgres
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-postgres"
-      - "postgresql://reader:pw@localhost/app"
-
-  - name: github
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-github"]
-    env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_…"
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    {
+      "name": "kubernetes",
+      "command": "npx",
+      "args": ["-y", "mcp-server-kubernetes"],
+      "env": {"KUBECONFIG": "/home/you/.kube/config"}
+    },
+    {
+      "name": "postgres",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://reader:pw@localhost/app"
+      ]
+    },
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}
+    }
+  ]
+}
 ```
 
 ### Fields
@@ -238,7 +355,7 @@ servers:
 ### Security
 
 Treat MCP servers as **untrusted code paths**: they receive arguments
-from the LLM. Always pair an MCP server with `permissions.yaml` rules
+from the LLM. Always pair an MCP server with `permissions.json` rules
 gating its mutating verbs. The OOTB defaults already gate `kubectl
 apply/delete`, `helm install`, `terraform apply`, etc.
 
@@ -358,7 +475,7 @@ yoke [flags] [<launcher-command> [launcher-args]]
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
 | `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
 | `--name NAME`       | `yoke` | Application name used by the runner/UI. |
-| `--config FILE`     | `config/agent.yaml` | Runtime YAML config file path. |
+| `--config FILE`     | `config/agents.json` | Runtime JSON config file path. |
 | `--provider NAME`   | from config/env/defaults | Global model provider override. |
 | `--model NAME`      | from config/env/defaults | Global model id override. |
 | `--base-url URL`    | from config/env/defaults | Global model base URL override. |

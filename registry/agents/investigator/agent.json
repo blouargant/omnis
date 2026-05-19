@@ -1,0 +1,32 @@
+{
+  "allow_file_attachments": true,
+  "api_key": "OPENAI_API_KEY",
+  "base_url": "OPENAI_BASE_URL",
+  "builtin": false,
+  "description": "Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings.",
+  "enabled": true,
+  "leader": false,
+  "model": "test",
+  "model_ref": "hosted",
+  "name": "investigator",
+  "provider": "openai_compat",
+  "skills": [
+    "k8s-log-investigation",
+    "k8s-triage"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "allow_file_attachments": false,
+  "api_key": "OPENAI_API_KEY",
+  "base_url": "OPENAI_BASE_URL",
+  "builtin": false,
+  "description": "Authors and edits Agent Skills (SKILL.md files under $HOME/.yoke/skills) following the agentskills.io specification. Use when the user asks to create, scaffold, refine, or update a skill, or to look up an existing public skill to adopt.",
+  "enabled": true,
+  "leader": true,
+  "model": "claude-sonnet-4-6",
+  "model_ref": "premium",
+  "name": "skill_editor",
+  "provider": "openai_compat",
+  "skills": [
+    "ask-user"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime"
+  ]
+}

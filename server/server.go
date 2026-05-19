@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"google.golang.org/adk/runner"
 
 	toolkitagent "github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
@@ -31,8 +30,11 @@ type renameRequest struct {
 }
 
 type serverDeps struct {
-	Token       string
-	Runner      *runner.Runner
+	Token string
+	// Manager owns the live agent generations. Look up the runner per
+	// session via Manager.Lookup(sessionID).Runner so each session uses
+	// the agent build it was pinned to.
+	Manager     *toolkitagent.Manager
 	Registry    *registry
 	WebDir      string
 	AgentEvents *agentEventBroadcaster
@@ -49,7 +51,7 @@ type serverDeps struct {
 	// (display-name → mailbox-address). Used by the GC to detect orphan
 	// entries left behind by interrupted session deletions.
 	ListSessionRegistry func() map[string]string
-	// WatchMailbox is forwarded from AgentResult to wire up per-session push.
+	// WatchMailbox is forwarded from the infrastructure to wire up per-session push.
 	WatchMailbox func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
 	// RunGuard serialises runner calls per session (shared with pushManager).
 	RunGuard *sessionRunGuard
@@ -59,9 +61,6 @@ type serverDeps struct {
 	PushEvents *sessionPushBroadcaster
 	// rootCtx is the server's root context; used to scope watcher goroutines.
 	rootCtx context.Context
-	// AllowFileAttachments controls whether user-attached files are embedded
-	// inline in the LLM message (true) or injected as tool-accessible paths (false).
-	AllowFileAttachments bool
 	// AskUserRegistry receives ask_user tool questions and delivers answers.
 	AskUserRegistry *askuser.Registry
 	// ConfigFiles holds the absolute paths of the YAML files editable from
@@ -69,6 +68,10 @@ type serverDeps struct {
 	ConfigFiles configFiles
 	// SkillsDeps holds the registry and config paths for skills management.
 	SkillsDeps skillsDeps
+	// AgentOptions are the Options used to build the current agent
+	// generation; carried so the hot-reload endpoint can rebuild against the
+	// same provider/skills/MCP paths.
+	AgentOptions toolkitagent.Options
 	// Restart triggers an in-place self re-exec of the server process.
 	Restart *restartCoordinator
 }
@@ -182,9 +185,46 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.JSON(http.StatusOK, stats)
 	})
 	auth.POST("/sessions", func(c *gin.Context) {
-		meta := d.Registry.New()
+		// Body is optional: clients that don't care about squads can POST
+		// with no body or `{}` and get the default squad.
+		var body struct {
+			Squad string `json:"squad"`
+			Title string `json:"title"`
+		}
+		_ = c.ShouldBindJSON(&body)
+		squad := strings.ToLower(strings.TrimSpace(body.Squad))
+		if squad == "" {
+			squad = toolkitagent.DefaultSquadName
+		}
+		// Reject unknown squad names so the client sees the misconfiguration
+		// immediately rather than silently falling back to default later.
+		if d.Manager != nil && !d.Manager.HasSquad(squad) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("unknown squad %q", squad),
+			})
+			return
+		}
+		meta := d.Registry.New(squad)
+		if title := strings.TrimSpace(body.Title); title != "" {
+			d.Registry.SetTitle(meta.ID, title)
+		}
+		// Persist the squad immediately so a server restart before the
+		// first turn still sees the right squad on the session.
+		_ = setConversationSquad(meta.ID, squad)
+		if title := strings.TrimSpace(body.Title); title != "" {
+			_ = setConversationTitle(meta.ID, title)
+		}
 		if d.RegisterSession != nil {
-			_ = d.RegisterSession(defaultUserID, meta.ID, meta.ID)
+			name := meta.ID
+			if meta.Title != "" {
+				name = meta.Title
+			}
+			_ = d.RegisterSession(defaultUserID, meta.ID, name)
+		}
+		// Pin the new session to the current agent generation so it stays
+		// on that generation even if a reload happens mid-conversation.
+		if d.Manager != nil {
+			d.Manager.Pin(meta.ID)
 		}
 		if d.PushMgr != nil {
 			d.PushMgr.Watch(d.rootCtx, d, meta.ID, defaultUserID)
@@ -192,6 +232,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.JSON(http.StatusCreated, gin.H{
 			"session_id": meta.ID,
 			"created_at": meta.CreatedAt,
+			"squad":      meta.Squad,
 		})
 	})
 	auth.GET("/sessions", func(c *gin.Context) {
@@ -222,6 +263,11 @@ func newEngine(d serverDeps) *gin.Engine {
 		deleteSessionUploads(id)
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
+		}
+		// Release the agent generation pin so an old (draining) generation
+		// can be torn down when its last session finishes.
+		if d.Manager != nil {
+			d.Manager.Release(id)
 		}
 		c.Status(http.StatusNoContent)
 	})
@@ -380,6 +426,7 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.POST("/sessions/:id/files", handleFileUpload(d))
+	auth.GET("/sessions/:id/media", handleMedia(d))
 	auth.POST("/sessions/:id/ask-user/:qid", handleAskUserResponse(d))
 
 	root, _ := os.Getwd()
@@ -401,11 +448,13 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"message": "compression queued for next turn"})
 	})
 
-	registerConfigRoutes(auth, d.ConfigFiles, d.Restart)
+	registerConfigRoutes(auth, d.ConfigFiles, d.Restart, d.Manager, d.AgentOptions)
 	registerPreferencesRoutes(auth, newPreferencesStore(d.ConfigFiles))
+	registerUserCommandsRoutes(auth, newUserCommandsStore())
 	registerProviderModelsRoute(auth)
 	registerAgentMetaRoutes(auth)
 	registerSkillsRoutes(auth.Group("/skills"), d.SkillsDeps)
+	registerAgentsRoutes(auth.Group("/agents"))
 
 	auth.POST("/sessions/:id/curate", func(c *gin.Context) {
 		id := c.Param("id")
@@ -515,4 +564,3 @@ func requestLogger() gin.HandlerFunc {
 			time.Since(start).Truncate(time.Millisecond).String() + "\n"))
 	}
 }
-

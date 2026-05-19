@@ -105,6 +105,9 @@ const els = {
   sidebarResize: document.getElementById("sidebar-resize"),
   sidebarToggle: document.getElementById("sidebar-toggle"),
   newChat:       document.getElementById("new-chat"),
+  newChatWrap:   document.getElementById("new-chat-wrap"),
+  squadToggle:   document.getElementById("squad-toggle"),
+  squadMenu:     document.getElementById("squad-menu"),
   list:          document.getElementById("session-list"),
   promptHeader:  document.getElementById("prompt-header"),
   transcript:    document.getElementById("transcript"),
@@ -141,6 +144,23 @@ const els = {
   ctxBrowserCount:    document.getElementById("ctx-browser-count"),
   ctxBrowserCancel:   document.getElementById("ctx-browser-cancel"),
   ctxBrowserAdd:      document.getElementById("ctx-browser-add"),
+  userCmdOverlay:     document.getElementById("user-cmd-modal-overlay"),
+  userCmdTitle:      document.getElementById("user-cmd-modal-title"),
+  userCmdClose:      document.getElementById("user-cmd-modal-close"),
+  userCmdCancel:     document.getElementById("user-cmd-modal-cancel"),
+  userCmdSave:       document.getElementById("user-cmd-modal-save"),
+  userCmdName:       document.getElementById("user-cmd-name"),
+  userCmdDesc:       document.getElementById("user-cmd-desc"),
+  userCmdArgs:       document.getElementById("user-cmd-args"),
+  userCmdPrompt:     document.getElementById("user-cmd-prompt"),
+  userCmdError:      document.getElementById("user-cmd-error"),
+  skillNameOverlay:  document.getElementById("skill-name-modal-overlay"),
+  skillNameTitle:    document.getElementById("skill-name-modal-title"),
+  skillNameClose:    document.getElementById("skill-name-modal-close"),
+  skillNameCancel:   document.getElementById("skill-name-modal-cancel"),
+  skillNameStart:    document.getElementById("skill-name-modal-start"),
+  skillNameInput:    document.getElementById("skill-name-input"),
+  skillNameError:    document.getElementById("skill-name-modal-error"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -392,6 +412,7 @@ function setStatus(s) {
 }
 
 function authHeaders(extra = {}) {
+  if (!token) return { ...extra };
   return { ...extra, "Authorization": `Bearer ${token}` };
 }
 
@@ -549,6 +570,97 @@ function renderMarkdown(el, text) {
   el.classList.add("rendered");
   if (el._stream) el._stream = null;
   if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
+  rewriteLocalImages(el);
+}
+
+// ─── Local image rendering ───────────────────────────────────────────────────
+// The agent may reference image files generated on disk (e.g. by the
+// image_generator sub-agent or an MCP tool). Markdown like `![](path)` parses
+// to <img src="path">, but the browser can't load that path directly: the
+// server enforces auth and the path may live in /tmp. We rewrite each local
+// <img> to a blob URL by fetching the bytes through the authenticated
+// /api/sessions/<id>/media endpoint, so the token never leaks into URLs.
+
+const mediaBlobCache = new Map(); // key = sessionId|path → object URL
+
+function isRemoteOrInlineSrc(src) {
+  return /^(https?:|data:|blob:|\/api\/|\/assets\/)/i.test(src);
+}
+
+async function fetchMediaBlobURL(sessionId, path) {
+  const key = sessionId + "|" + path;
+  if (mediaBlobCache.has(key)) return mediaBlobCache.get(key);
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/media?path=${encodeURIComponent(path)}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try { const j = await res.json(); if (j && j.error) detail = j.error; } catch (_) {}
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const objURL = URL.createObjectURL(blob);
+  mediaBlobCache.set(key, objURL);
+  return objURL;
+}
+
+function rewriteLocalImages(rootEl) {
+  if (!rootEl || !activeSessionId) return;
+  const sessionId = activeSessionId;
+  const imgs = rootEl.querySelectorAll("img");
+  imgs.forEach(img => {
+    let src = img.getAttribute("src") || "";
+    if (!src || isRemoteOrInlineSrc(src)) return;
+    src = src.replace(/^file:\/\//, "");
+    img.classList.add("local-media");
+    fetchMediaBlobURL(sessionId, src).then(url => {
+      img.src = url;
+    }).catch(err => {
+      img.classList.add("local-media-error");
+      const msg = String(err && err.message ? err.message : err);
+      img.replaceWith(Object.assign(document.createElement("span"), {
+        className: "local-media-error-msg",
+        textContent: `[image unavailable: ${src} — ${msg}]`,
+      }));
+    });
+  });
+}
+
+// Heuristic extractor: returns local-filesystem paths referenced anywhere in
+// a tool-result payload, restricted to known image extensions. Used to surface
+// thumbnails directly in the tool-result chip even when the leader hasn't yet
+// included markdown image syntax in its reply.
+//
+// Two extraction modes per visited string:
+//   1. The whole string IS a path (no whitespace, ends in image extension).
+//      e.g. response.image_path = "/tmp/yoke-images/abc.png".
+//   2. The string is a sentence that EMBEDS a path. We pull each substring
+//      that starts with "/" (or a Windows drive) and ends in an image
+//      extension. e.g. "Generated image saved to /tmp/yoke-images/abc.png".
+function collectImagePathsFromResponse(response) {
+  if (!response || typeof response !== "object") return [];
+  const found = new Set();
+  // Bare-path: the entire string is the path.
+  const isBarePath = s => /^[^\s'"<>()\[\]]+\.(png|jpe?g|gif|webp)(\?[^\s]*)?$/i.test(s);
+  // Embedded-path: extract paths that begin at "/" (POSIX) or "X:\" (Windows).
+  const embeddedRe = /(?:[A-Za-z]:[\\/]|\/)[^\s'"<>()\[\]]+\.(?:png|jpe?g|gif|webp)(?:\?[^\s'"<>()\[\]]*)?/gi;
+  const visit = node => {
+    if (!node) return;
+    if (typeof node === "string") {
+      if (isBarePath(node)) {
+        found.add(node);
+      } else {
+        const matches = node.match(embeddedRe);
+        if (matches) matches.forEach(m => found.add(m));
+      }
+      return;
+    }
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    if (typeof node === "object") {
+      for (const v of Object.values(node)) visit(v);
+    }
+  };
+  visit(response);
+  return Array.from(found);
 }
 
 // ─── Incremental markdown streaming ──────────────────────────────────────────
@@ -603,6 +715,7 @@ function streamMdFlushBlock(bubble, text) {
   const t0 = AgentDebug.enabled ? performance.now() : 0;
   const wrap = document.createElement("div");
   wrap.innerHTML = marked.parse(text);
+  rewriteLocalImages(wrap);
   while (wrap.firstChild) bubble.insertBefore(wrap.firstChild, s.tailEl);
   if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
 }
@@ -1044,12 +1157,22 @@ function renderAskUserWidget(sessionId, q) {
       return { selected: sel, text: textArea ? textArea.value.trim() : "", cancelled: false };
     };
   } else {
-    // text
-    const textArea = document.createElement("textarea");
-    textArea.className = "ask-user-text-input";
-    textArea.placeholder = "Your answer…";
-    card.appendChild(textArea);
-    getAnswer = () => ({ selected: [], text: textArea.value.trim(), cancelled: false });
+    // text — a password-typed question gets a single-line masked
+    // input; everything else gets the regular multi-line textarea so
+    // longer free-form answers stay comfortable.
+    let inputEl;
+    if (q.password) {
+      inputEl = document.createElement("input");
+      inputEl.type = "password";
+      inputEl.autocomplete = "off";
+      inputEl.spellcheck = false;
+    } else {
+      inputEl = document.createElement("textarea");
+    }
+    inputEl.className = "ask-user-text-input";
+    inputEl.placeholder = "Your answer…";
+    card.appendChild(inputEl);
+    getAnswer = () => ({ selected: [], text: inputEl.value.trim(), cancelled: false });
   }
 
   const actions = document.createElement("div");
@@ -1078,14 +1201,18 @@ function renderAskUserWidget(sessionId, q) {
     // Replace interactive content with a summary.
     while (card.lastChild) card.removeChild(card.lastChild);
     const icon = answer.cancelled ? "✗" : "✓";
+    // For password questions the entered value is a secret — never echo
+    // it back to the transcript. We still show that an answer was given
+    // so the conversation history stays coherent.
+    const maskText = t => q.password && t ? "••••••••" : t;
     let summary;
     if (answer.cancelled) {
       summary = "skipped";
     } else if (answer.selected && answer.selected.length) {
       summary = answer.selected.join(", ");
-      if (answer.text) summary += " — " + answer.text;
+      if (answer.text) summary += " — " + maskText(answer.text);
     } else {
-      summary = answer.text || "(empty)";
+      summary = maskText(answer.text) || "(empty)";
     }
     const resolved = document.createElement("div");
     resolved.className = "ask-user-resolved-text";
@@ -1248,16 +1375,31 @@ function resolveToolCall(block, response) {
        <pre class="tool-pre tool-error">${escHtml(text)}</pre>`
     : `<div class="tool-section-label label-out">OUT</div>
        <pre class="tool-pre output">${escHtml(text)}</pre>`;
+
+  // If the tool returned references to image files (image_generator,
+  // MCP image tools, etc.), render thumbnails alongside the textual output.
+  if (!isError) {
+    const imagePaths = collectImagePathsFromResponse(response);
+    if (imagePaths.length > 0) {
+      const gallery = document.createElement("div");
+      gallery.className = "tool-image-gallery";
+      imagePaths.forEach(p => {
+        const img = document.createElement("img");
+        img.setAttribute("src", p);
+        img.alt = p;
+        img.loading = "lazy";
+        gallery.appendChild(img);
+      });
+      outDiv.appendChild(gallery);
+      rewriteLocalImages(gallery);
+    }
+  }
   slot.replaceWith(outDiv);
 }
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
 async function apiFetch(path, opts = {}) {
-  if (!token) {
-    promptForToken();
-    throw new Error("token required");
-  }
   const headers = authHeaders(opts.headers || {});
   if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { ...opts, headers });
@@ -1293,10 +1435,17 @@ function renderSessions(sessions) {
     const displayName = s.title || s.id;
 
     if (sessionSending.has(s.id)) li.classList.add("session-busy");
+    // Show a squad badge only when the session uses a non-default squad,
+    // so single-squad / default setups stay visually quiet.
+    const showBadge = s.squad && s.squad !== defaultSquadName;
+    const badgeHtml = showBadge
+      ? `<span class="session-squad-badge" title="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
+      : "";
     li.innerHTML = `
       <div class="session-name-row">
         <span class="session-busy-dot"></span>
         <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+        ${badgeHtml}
       </div>
       <div class="session-bottom-row">
         <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
@@ -1471,15 +1620,139 @@ async function selectSession(id) {
   }
 }
 
+// ─── Squads ──────────────────────────────────────────────────────────────────
+// Squads group agents into named profiles (leader + members). The picker
+// next to the New Chat button selects which squad each new session uses;
+// the existing session's squad is recorded on the session itself and
+// surfaced as a small badge on the sidebar entry. The picker hides itself
+// when only the default squad is available so the UI stays empty for
+// single-squad setups.
+
+const SQUAD_PREF_KEY = "agent_toolkit_squad";
+let availableSquads = [];          // [{name, description, leader, members, ...}]
+let defaultSquadName = "default";
+let selectedSquadName = "";
+
+async function loadSquads() {
+  try {
+    const res = await apiFetch("/api/squads");
+    if (!res.ok) return;
+    const data = await res.json();
+    availableSquads = Array.isArray(data.squads) ? data.squads : [];
+    defaultSquadName = data.default || "default";
+    const saved = localStorage.getItem(SQUAD_PREF_KEY);
+    selectedSquadName = (saved && availableSquads.some(s => s.name === saved))
+      ? saved
+      : defaultSquadName;
+    renderSquadMenu();
+    updateNewChatSubLabel();
+  } catch (e) {
+    // Non-fatal: an offline /api/squads just means the menu stays hidden
+    // and new chats fall back to the server's default squad.
+    console.error("failed to load squads:", e);
+  }
+}
+
+// Show the selected squad as a subtitle under "New Chat" whenever the
+// user has picked something other than the default. Keeps the primary
+// affordance ("New Chat") readable while making the active squad
+// visible at a glance.
+function updateNewChatSubLabel() {
+  const sub = els.newChat && els.newChat.querySelector(".new-chat-sub");
+  if (!sub) return;
+  if (selectedSquadName && selectedSquadName !== defaultSquadName) {
+    sub.textContent = selectedSquadName;
+    sub.hidden = false;
+  } else {
+    sub.textContent = "";
+    sub.hidden = true;
+  }
+}
+
+// SVG icon for a squad menu row. Kept generic (a small "team" glyph) so
+// the menu stays consistent regardless of how the user names squads.
+function squadIconSVG() {
+  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+}
+
+function renderSquadMenu() {
+  const menu = els.squadMenu;
+  const toggle = els.squadToggle;
+  if (!menu || !toggle) return;
+  menu.innerHTML = "";
+  if (availableSquads.length <= 1) {
+    toggle.hidden = true;
+    menu.hidden = true;
+    return;
+  }
+  toggle.hidden = false;
+  for (const sq of availableSquads) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "squad-menu-item" + (sq.name === selectedSquadName ? " selected" : "");
+    btn.dataset.squad = sq.name;
+    btn.setAttribute("role", "menuitem");
+    btn.title = sq.description || `${sq.leader} + ${(sq.members || []).join(", ")}`;
+    btn.innerHTML = squadIconSVG();
+    const label = document.createElement("span");
+    label.className = "squad-menu-label";
+    label.textContent = sq.name;
+    btn.appendChild(label);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectSquad(sq.name);
+      closeSquadMenu();
+    });
+    menu.appendChild(btn);
+  }
+}
+
+function selectSquad(name) {
+  if (!availableSquads.some(s => s.name === name)) return;
+  selectedSquadName = name;
+  localStorage.setItem(SQUAD_PREF_KEY, name);
+  // Update the .selected state without re-rendering the whole menu.
+  for (const item of els.squadMenu.querySelectorAll(".squad-menu-item")) {
+    item.classList.toggle("selected", item.dataset.squad === name);
+  }
+  updateNewChatSubLabel();
+}
+
+function openSquadMenu() {
+  if (els.squadToggle.hidden) return;
+  els.squadMenu.hidden = false;
+  els.squadToggle.setAttribute("aria-expanded", "true");
+}
+
+function closeSquadMenu() {
+  els.squadMenu.hidden = true;
+  els.squadToggle.setAttribute("aria-expanded", "false");
+}
+
+function currentSquadChoice() {
+  return selectedSquadName || defaultSquadName;
+}
+
 async function newChat() {
   // Leave the settings panel if it's open so the new chat is visible.
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   // Drop the outgoing session's push subscription before switching.
   if (activeSessionId) unsubscribeSessionEvents(activeSessionId);
+  const squad = currentSquadChoice();
   try {
-    const res = await apiFetch("/api/sessions", { method: "POST" });
+    const res = await apiFetch("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ squad }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.error("new chat failed:", errBody.error || res.statusText);
+      return;
+    }
     const data = await res.json();
     activeSessionId = data.session_id;
+    // Persist the choice so the same squad is preselected next time.
+    if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
     clearPinnedPrompt();
     mountSession(activeSessionId);
     applySessionUI(activeSessionId);
@@ -1833,23 +2106,82 @@ async function sendMessage() {
 
 // ─── Slash commands ───────────────────────────────────────────────────────────
 
-const SLASH_COMMANDS = [
-  { cmd: "/help",      args: "",         desc: "Show available commands" },
-  { cmd: "/learn",     args: "[reason]", desc: "Mark session for soft-skill curation (runs on session end)" },
-  { cmd: "/learn-now", args: "[reason]", desc: "Immediately run soft-skill curation and show result" },
-  { cmd: "/status",    args: "",         desc: "Show current session info" },
+// Built-in commands are handled directly in handleSlashCommand below.
+// User commands are loaded lazily from /api/user-commands and live in
+// userSlashCommands. They expand to a prompt template that is then sent
+// to the agent as a normal message (see invokeUserCommand).
+const BUILTIN_SLASH_COMMANDS = [
+  { cmd: "/help",          args: "",       desc: "Show available commands", builtin: true },
+  { cmd: "/compress",      args: "",       desc: "Trigger context compression before the next model call", builtin: true },
+  { cmd: "/create-skill",  args: "[name]", desc: "Create a new skill playbook with agent guidance", builtin: true },
+  { cmd: "/update-skill",  args: "<name>", desc: "Update an existing skill playbook with agent guidance", builtin: true },
+  { cmd: "/learn",         args: "[reason]", desc: "Mark session for soft-skill curation (runs on session end)", builtin: true },
+  { cmd: "/learn-now",     args: "[reason]", desc: "Immediately run soft-skill curation and show result", builtin: true },
+  { cmd: "/status",        args: "",       desc: "Show current session info", builtin: true },
 ];
+const BUILTIN_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.cmd.slice(1)));
+
+let userSlashCommands = []; // { name, description, args, prompt }
+let userCommandsLoaded = false;
+let userCommandsListeners = [];
+
+async function loadUserCommands() {
+  try {
+    const r = await apiFetch("/api/user-commands");
+    if (!r.ok) { userSlashCommands = []; return; }
+    const j = await r.json();
+    userSlashCommands = Array.isArray(j.commands) ? j.commands : [];
+  } catch (_) {
+    userSlashCommands = [];
+  } finally {
+    userCommandsLoaded = true;
+    userCommandsListeners.forEach(fn => { try { fn(userSlashCommands); } catch (_) {} });
+  }
+}
+
+function getUserCommands() { return userSlashCommands.slice(); }
+function onUserCommandsChanged(fn) { userCommandsListeners.push(fn); }
+
+function userCommandAsMenuEntry(uc) {
+  return {
+    cmd: "/" + uc.name,
+    args: uc.args || "",
+    desc: uc.description || "",
+    builtin: false,
+  };
+}
+
+function getAllSlashEntries() {
+  return BUILTIN_SLASH_COMMANDS.concat(userSlashCommands.map(userCommandAsMenuEntry));
+}
 
 let slashMenuFocusIdx = -1;
 
 function renderSlashMenu(prefix) {
   const p = prefix.toLowerCase();
-  const matches = p === "/" ? SLASH_COMMANDS : SLASH_COMMANDS.filter(c => c.cmd.startsWith(p));
-  if (matches.length === 0) { hideSlashMenu(); return; }
+  const all = getAllSlashEntries();
+  const matches = p === "/" ? all : all.filter(c => c.cmd.startsWith(p));
   els.slashMenu.innerHTML = "";
+
+  if (matches.length === 0 && p !== "/") {
+    hideSlashMenu();
+    return;
+  }
+
+  // "+ Add command" header row — always present, opens the inline modal.
+  const add = document.createElement("div");
+  add.className = "slash-menu-item slash-menu-add";
+  add.innerHTML = `<span class="slash-menu-add-icon">+</span><span class="slash-menu-add-label">Add command</span>`;
+  add.addEventListener("mousedown", e => {
+    e.preventDefault();
+    hideSlashMenu();
+    openUserCommandModal(null);
+  });
+  els.slashMenu.appendChild(add);
+
   matches.forEach(item => {
     const row = document.createElement("div");
-    row.className = "slash-menu-item";
+    row.className = "slash-menu-item" + (item.builtin ? "" : " is-user");
     row.dataset.value = item.cmd + (item.args ? " " : "");
     row.innerHTML =
       `<span class="slash-menu-cmd">${escHtml(item.cmd)}</span>` +
@@ -1861,6 +2193,7 @@ function renderSlashMenu(prefix) {
     });
     els.slashMenu.appendChild(row);
   });
+
   slashMenuFocusIdx = -1;
   els.slashMenu.removeAttribute("hidden");
   els.slashBtn.classList.add("active");
@@ -1905,6 +2238,21 @@ function appendCommandBubble(text, isError = false) {
   scrollBottom(true);
 }
 
+// Substitute $1..$N positional args and $* (all args joined) in a user
+// command's prompt template. When the template has no placeholders and
+// the user supplied args, the args are appended on a new line so simple
+// shortcuts (`/review` → "Review the diff") still pass extra context.
+function applyUserCommandTemplate(promptTemplate, argText) {
+  const argText_ = argText || "";
+  const args = argText_ ? argText_.split(/\s+/) : [];
+  const hasPlaceholder = /\$\d|\$\*/.test(promptTemplate);
+  let out = promptTemplate
+    .replace(/\$\*/g, argText_)
+    .replace(/\$(\d+)/g, (_, n) => args[parseInt(n, 10) - 1] || "");
+  if (!hasPlaceholder && argText_) out = out + "\n\n" + argText_;
+  return out;
+}
+
 async function handleSlashCommand(raw) {
   const trimmed = raw.trim();
   const spaceIdx = trimmed.indexOf(" ");
@@ -1912,16 +2260,44 @@ async function handleSlashCommand(raw) {
   const argPart = spaceIdx >= 0 ? trimmed.slice(spaceIdx + 1).trim() : "";
   const cmd = cmdPart.slice(1).toLowerCase();
 
+  // User-defined commands take precedence over the unknown-command path.
+  // They cannot shadow built-ins (enforced server-side via reservedNames).
+  if (!BUILTIN_NAMES.has(cmd)) {
+    const uc = userSlashCommands.find(c => c.name.toLowerCase() === cmd);
+    if (uc) {
+      const expanded = applyUserCommandTemplate(uc.prompt, argPart).trim();
+      if (!expanded) {
+        appendCommandBubble(`Command \`/${cmd}\` expanded to an empty prompt.`, true);
+        return;
+      }
+      els.prompt.value = expanded;
+      autoGrowPrompt();
+      await sendMessage();
+      return;
+    }
+  }
+
   switch (cmd) {
-    case "help":
-      appendCommandBubble(
-        "**Available commands**\n\n" +
+    case "help": {
+      let body =
+        "**Built-in commands**\n\n" +
         "- `/help` — Show this help\n" +
+        "- `/compress` — Trigger context compression before the next model call\n" +
+        "- `/create-skill [name]` — Create a new skill playbook with agent guidance\n" +
+        "- `/update-skill <name>` — Update an existing skill playbook with agent guidance\n" +
         "- `/learn [reason]` — Mark session for soft-skill curation (runs on session end)\n" +
         "- `/learn-now [reason]` — Immediately run soft-skill curation and show result\n" +
-        "- `/status` — Show current session info"
-      );
+        "- `/status` — Show current session info";
+      if (userSlashCommands.length) {
+        body += "\n\n**User commands**\n\n" + userSlashCommands.map(c => {
+          const args = c.args ? ` ${c.args}` : "";
+          const desc = c.description ? ` — ${c.description}` : "";
+          return `- \`/${c.name}${args}\`${desc}`;
+        }).join("\n");
+      }
+      appendCommandBubble(body);
       break;
+    }
 
     case "status": {
       const sid = activeSessionId || "none";
@@ -2003,10 +2379,153 @@ async function handleSlashCommand(raw) {
       break;
     }
 
+    case "create-skill": {
+      openSkillNameModal("Create skill", argPart.trim(), (name) => {
+        sendSkillPrompt(
+          `Create a new skill called "${name}". Load the skill-creator skill and guide me through defining it interactively.`
+        );
+      });
+      break;
+    }
+
+    case "update-skill": {
+      openSkillNameModal("Update skill", argPart.trim(), (name) => {
+        sendSkillPrompt(
+          `Update the skill "${name}". Load the skill-creator skill and help me revise it.`
+        );
+      });
+      break;
+    }
+
+    case "compress": {
+      if (!activeSessionId) {
+        appendCommandBubble("No active session — start a chat first.", true);
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/sessions/${activeSessionId}/compact`, {
+          method: "POST",
+        });
+        if (!res.ok) {
+          const d = await res.json();
+          appendCommandBubble(d.error || "compress request failed", true);
+          return;
+        }
+        appendCommandBubble("Context compression queued — runs before the next model call.");
+      } catch (err) {
+        appendCommandBubble(String(err), true);
+      }
+      break;
+    }
+
     default:
       appendCommandBubble(`Unknown command: \`/${cmd}\` — try \`/help\``, true);
   }
 }
+
+// ─── User command modal ─────────────────────────────────────────────────────
+// Inline modal opened from the slash menu's "+ Add command" row and from
+// the Settings → User Commands section (via window.UserCommands.openModal).
+// State tracks which command, if any, is being edited.
+
+let userCmdModalState = { editing: null, onSaved: null };
+
+function openUserCommandModal(existing, opts) {
+  userCmdModalState = { editing: existing || null, onSaved: (opts && opts.onSaved) || null };
+  const isEdit = !!existing;
+  els.userCmdTitle.textContent = isEdit ? "Edit command" : "Add command";
+  els.userCmdName.value = isEdit ? existing.name : "";
+  els.userCmdDesc.value = isEdit ? (existing.description || "") : "";
+  els.userCmdArgs.value = isEdit ? (existing.args || "") : "";
+  els.userCmdPrompt.value = isEdit ? (existing.prompt || "") : "";
+  els.userCmdError.hidden = true;
+  els.userCmdError.textContent = "";
+  els.userCmdOverlay.removeAttribute("hidden");
+  // Focus first empty field for fastest entry.
+  setTimeout(() => {
+    if (!els.userCmdName.value) els.userCmdName.focus();
+    else els.userCmdPrompt.focus();
+  }, 0);
+}
+
+function closeUserCommandModal() {
+  els.userCmdOverlay.setAttribute("hidden", "");
+  userCmdModalState = { editing: null, onSaved: null };
+}
+
+function showUserCmdError(msg) {
+  els.userCmdError.textContent = msg;
+  els.userCmdError.hidden = false;
+}
+
+async function saveUserCommandFromModal() {
+  const name = els.userCmdName.value.trim();
+  const description = els.userCmdDesc.value.trim();
+  const args = els.userCmdArgs.value.trim();
+  const prompt = els.userCmdPrompt.value;
+
+  if (!name) { showUserCmdError("Name is required."); return; }
+  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) {
+    showUserCmdError("Name must be 1–40 chars of letters, digits, '-' or '_'.");
+    return;
+  }
+  if (BUILTIN_NAMES.has(name.toLowerCase())) {
+    showUserCmdError(`/${name} is a built-in command.`);
+    return;
+  }
+  if (!prompt.trim()) { showUserCmdError("Prompt is required."); return; }
+
+  const body = JSON.stringify({ name, description, args, prompt });
+  const original = userCmdModalState.editing && userCmdModalState.editing.name;
+  const url = original
+    ? `/api/user-commands/${encodeURIComponent(original)}`
+    : "/api/user-commands";
+  const method = original ? "PUT" : "POST";
+
+  els.userCmdSave.disabled = true;
+  try {
+    const r = await apiFetch(url, { method, body });
+    if (!r.ok) {
+      let msg = `Save failed (${r.status})`;
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
+      showUserCmdError(msg);
+      return;
+    }
+    const j = await r.json();
+    userSlashCommands = Array.isArray(j.commands) ? j.commands : userSlashCommands;
+    userCommandsListeners.forEach(fn => { try { fn(userSlashCommands); } catch (_) {} });
+    const cb = userCmdModalState.onSaved;
+    closeUserCommandModal();
+    if (cb) try { cb(); } catch (_) {}
+  } catch (err) {
+    showUserCmdError(String(err));
+  } finally {
+    els.userCmdSave.disabled = false;
+  }
+}
+
+async function deleteUserCommand(name) {
+  const r = await apiFetch(`/api/user-commands/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!r.ok) {
+    let msg = `Delete failed (${r.status})`;
+    try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
+    throw new Error(msg);
+  }
+  const j = await r.json();
+  userSlashCommands = Array.isArray(j.commands) ? j.commands : userSlashCommands;
+  userCommandsListeners.forEach(fn => { try { fn(userSlashCommands); } catch (_) {} });
+}
+
+// Expose a tiny façade so settings.js can drive the same modal and CRUD
+// without duplicating fetch logic.
+window.UserCommands = {
+  list: getUserCommands,
+  refresh: loadUserCommands,
+  onChanged: onUserCommandsChanged,
+  openModal: openUserCommandModal,
+  remove: deleteUserCommand,
+  builtins: () => BUILTIN_SLASH_COMMANDS.slice(),
+};
 
 // ─── Context browser ─────────────────────────────────────────────────────────
 
@@ -2093,6 +2612,21 @@ els.transcript.addEventListener("scroll", () => {
   updatePinnedForScroll();
 });
 els.newChat.addEventListener("click", newChat);
+
+// Squad picker dropdown — chevron next to the New Chat button toggles
+// a menu that picks which squad future sessions use. The menu is hidden
+// outright when only the default squad exists.
+els.squadToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (els.squadMenu.hidden) openSquadMenu();
+  else closeSquadMenu();
+});
+els.squadMenu.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("click", () => closeSquadMenu());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !els.squadMenu.hidden) closeSquadMenu();
+});
+
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
 
 // Attach button toggles the popup menu
@@ -2111,6 +2645,85 @@ els.attachComputer.addEventListener("click", () => {
 els.attachContext.addEventListener("click", () => {
   els.attachMenu.setAttribute("hidden", "");
   openCtxBrowser();
+});
+
+// ─── Skill name modal ────────────────────────────────────────────────────────
+// Lightweight single-field modal used by /create-skill and /update-skill.
+// On submit it calls the provided onConfirm(name) callback.
+
+const SKILL_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+let skillNameModalCallback = null;
+
+function openSkillNameModal(title, prefill, onConfirm) {
+  skillNameModalCallback = onConfirm;
+  els.skillNameTitle.textContent = title;
+  els.skillNameInput.value = prefill || "";
+  els.skillNameError.hidden = true;
+  els.skillNameError.textContent = "";
+  els.skillNameOverlay.removeAttribute("hidden");
+  setTimeout(() => els.skillNameInput.focus(), 0);
+}
+
+function closeSkillNameModal() {
+  els.skillNameOverlay.setAttribute("hidden", "");
+  skillNameModalCallback = null;
+}
+
+function confirmSkillNameModal() {
+  const name = els.skillNameInput.value.trim();
+  if (!name) {
+    els.skillNameError.textContent = "Skill name is required.";
+    els.skillNameError.hidden = false;
+    return;
+  }
+  if (!SKILL_NAME_RE.test(name)) {
+    els.skillNameError.textContent = "Name must match: lowercase letters, digits, '-' or '.' (1–63 chars).";
+    els.skillNameError.hidden = false;
+    return;
+  }
+  const cb = skillNameModalCallback;
+  closeSkillNameModal();
+  if (cb) cb(name);
+}
+
+// Sends a pre-crafted prompt to the active session (creating one if needed).
+async function sendSkillPrompt(prompt) {
+  if (!activeSessionId) await newChat();
+  if (!activeSessionId) return;
+  els.prompt.value = prompt;
+  autoGrowPrompt();
+  await sendMessage();
+}
+
+els.skillNameClose.addEventListener("click", closeSkillNameModal);
+els.skillNameCancel.addEventListener("click", closeSkillNameModal);
+els.skillNameStart.addEventListener("click", confirmSkillNameModal);
+els.skillNameOverlay.addEventListener("click", (e) => {
+  if (e.target === els.skillNameOverlay) closeSkillNameModal();
+});
+els.skillNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); confirmSkillNameModal(); }
+  if (e.key === "Escape") { e.preventDefault(); closeSkillNameModal(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (!els.skillNameOverlay.hasAttribute("hidden") && e.key === "Escape") {
+    e.preventDefault();
+    closeSkillNameModal();
+  }
+});
+
+// User command modal handlers
+els.userCmdClose.addEventListener("click", closeUserCommandModal);
+els.userCmdCancel.addEventListener("click", closeUserCommandModal);
+els.userCmdOverlay.addEventListener("click", (e) => {
+  if (e.target === els.userCmdOverlay) closeUserCommandModal();
+});
+els.userCmdSave.addEventListener("click", saveUserCommandFromModal);
+document.addEventListener("keydown", (e) => {
+  if (!els.userCmdOverlay.hasAttribute("hidden") && e.key === "Escape") {
+    e.preventDefault();
+    closeUserCommandModal();
+  }
 });
 
 // Context browser event handlers
@@ -2286,8 +2899,9 @@ els.prompt.addEventListener("keydown", (e) => {
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      if (items.length === 1) {
-        selectSlashCommand(items[0].dataset.value);
+      const selectable = items.filter(it => !it.classList.contains("slash-menu-add"));
+      if (selectable.length === 1) {
+        selectSlashCommand(selectable[0].dataset.value);
       } else if (items.length > 0) {
         slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length;
         updateSlashMenuFocus();
@@ -2296,7 +2910,13 @@ els.prompt.addEventListener("keydown", (e) => {
     }
     if (e.key === "Enter" && slashMenuFocusIdx >= 0) {
       e.preventDefault();
-      selectSlashCommand(items[slashMenuFocusIdx].dataset.value);
+      const focused = items[slashMenuFocusIdx];
+      if (focused.classList.contains("slash-menu-add")) {
+        hideSlashMenu();
+        openUserCommandModal(null);
+      } else {
+        selectSlashCommand(focused.dataset.value);
+      }
       return;
     }
     if (e.key === "Escape") {
@@ -2519,7 +3139,8 @@ els.ctxCompactBtn.addEventListener("click", async (e) => {
     autoGrowPrompt();
   }
   if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
-  if (!token) promptForToken();
+  await loadSquads();
+  loadUserCommands(); // fire-and-forget; menu re-renders when it lands
   await loadSessions();
   // Auto-select the most recent session so the user is never left without an
   // active session. This prevents implicit session creation inside sendMessage()

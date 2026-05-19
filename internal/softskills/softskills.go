@@ -23,10 +23,14 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/blouargant/yoke/internal/fsutil"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-// DefaultDir is the root softskills directory used when none is supplied.
-const DefaultDir = "softskills"
+// DefaultDir returns the root softskills directory used when none is
+// supplied. Always anchored under $YOKE_HOME ($HOME/.yoke by default) so
+// curator-distilled procedures land in a stable, per-user location instead
+// of beside the CWD.
+func DefaultDir() string { return paths.SoftSkillsDir() }
 
 // Renamed tool surface — lets us mount this toolset alongside the authored
 // `skilltoolset.New` (which exposes `list_skills` / `load_skill`) without
@@ -74,7 +78,7 @@ IMPORTANT — do NOT use ` + "`load_skill`" + ` to open names returned by ` + "`
 // `dir` is created if missing.
 func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
 	if dir == "" {
-		dir = DefaultDir
+		dir = DefaultDir()
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("softskills dir: %w", err)

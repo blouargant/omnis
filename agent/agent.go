@@ -16,26 +16,20 @@ import (
 	"time"
 
 	adkagent "google.golang.org/adk/agent"
-	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/yoke/core/agentkit"
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/core/llm"
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/bg"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/registries"
 	"github.com/blouargant/yoke/internal/skills"
 	"github.com/blouargant/yoke/internal/softskills"
-	"github.com/blouargant/yoke/internal/tasks"
-	"github.com/blouargant/yoke/internal/teammates"
-	"github.com/blouargant/yoke/internal/todo"
-	"github.com/blouargant/yoke/internal/worktree"
 )
 
 // AgentResult holds the fully configured agent and its supporting components.
@@ -99,8 +93,6 @@ type AgentResult struct {
 
 // Options allows customizing the agent creation.
 type Options struct {
-	// SkillsDir is the directory to load skills from (default: "skills").
-	SkillsDir string
 	// SoftSkillsDir is the directory to load curator-generated soft-skills
 	// from (default: "softskills"). Created if missing.
 	SoftSkillsDir string
@@ -110,13 +102,13 @@ type Options struct {
 	DisableAutoCurate bool
 	// Repo is the repository root for worktree tools (default: current working directory).
 	Repo string
-	// MCPSConfigPath is the path to the MCP config file (default: "config/mcp_config.yaml").
+	// MCPSConfigPath is the path to the MCP config file (default: "config/mcp_config.json").
 	MCPSConfigPath string
-	// PermissionsConfigPath is the path to the permissions config (default: "config/permissions.yaml").
+	// PermissionsConfigPath is the path to the permissions config (default: "config/permissions.json").
 	PermissionsConfigPath string
 	// AppName is the application name for the runner (default: "yoke").
 	AppName string
-	// ConfigPath is the runtime YAML configuration path (default: "config/agent.yaml").
+	// ConfigPath is the runtime JSON configuration path (default: "config/agents.json").
 	ConfigPath string
 	// ConfigPathStrict returns an error when ConfigPath does not exist.
 	ConfigPathStrict bool
@@ -159,10 +151,10 @@ func defaultAgentDescription(name string) string {
 }
 
 func defaultAgentInstruction(name string) string {
-	if s := readEmbeddedInstruction(name); s != "" {
+	if s := ReadAgentInstruction(name); s != "" {
 		return s
 	}
-	return readEmbeddedInstruction("default")
+	return ReadAgentInstruction("default")
 }
 
 func defaultToolKeys(name string) []string {
@@ -176,20 +168,18 @@ func defaultToolKeys(name string) []string {
 	}
 }
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, mcpToolsets []tool.Toolset) ([]tool.Tool, []tool.Toolset, string) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
 	}
 
-	// Per-agent overrides: if the agent specifies its own skills_dir /
-	// softskills_dir / mcp_config_path, build a dedicated toolset from it
-	// instead of reusing the leader-level one.
-	resolvedSkillTS := skillTS
-	if cfg.SkillsDir != "" && cfg.SkillsDir != runtime.SkillsDir {
-		if ts, err := skills.Toolset(ctx, cfg.SkillsDir); err == nil {
-			resolvedSkillTS = ts
-		}
+	// Build per-agent skills toolset from the agent's explicit skills list.
+	// An empty/nil list means all installed skills in the registry are visible.
+	// Always rebuilt per-agent so each agent sees exactly its declared skills.
+	resolvedSkillTS := skillTS // fallback if Toolset fails
+	if ts, err := skills.Toolset(ctx, cfg.Skills); err == nil {
+		resolvedSkillTS = ts
 	}
 	resolvedSoftSkillTS := softSkillTS
 	agentSoftSkillsDir := cfg.SoftSkillsDir
@@ -201,25 +191,42 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			resolvedSoftSkillTS = sts
 		}
 	}
-	resolvedMCPToolsets := mcpToolsets
-	if cfg.MCPConfigPath != "" && cfg.MCPConfigPath != runtime.MCPConfigPath {
+	// Resolve the candidate MCP handle pool for this agent: by default the
+	// leader's handles, unless the agent points at its own mcp_config.json.
+	// `mcpHandles` (returned) tracks only handles we *acquired* for this
+	// agent, so Instance.Close releases them exactly once.
+	resolvedMCPHandles := leaderMCPHandles
+	var mcpHandles []*mcpcfg.Handle
+	if cfg.MCPConfigPath != "" && cfg.MCPConfigPath != runtime.MCPConfigPath && pool != nil {
 		if mc, err := mcpcfg.Load(cfg.MCPConfigPath); err == nil {
-			if mts, err := mc.Toolsets(); err == nil {
-				resolvedMCPToolsets = mts
+			if _, hs, err := pool.AcquireAll(mc); err == nil {
+				resolvedMCPHandles = hs
+				mcpHandles = hs
 			}
 		}
 	}
 
+	// namedTools allows individual tool names (e.g. "Bash", "Read") to be
+	// listed directly in agent.json alongside group keys. SerpAPI WebSearch
+	// overwrites the DDG version when a key is configured.
+	namedTools := buildNamedToolMap(runtime.SerpAPIKey)
+
 	agentTools := []tool.Tool{}
 	toolsets := []tool.Toolset{}
-	hasSkills, hasSoftSkills := false, false
+	hasSkills, hasSoftSkills, hasRegistries := false, false, false
+	var mountedMCPNames []string
 	for _, key := range keys {
 		switch key {
 		case "fs":
 			agentTools = append(agentTools, fstools.New()...)
 		case "mcp":
-			toolsets = append(toolsets, resolvedMCPToolsets...)
-		case "skills":
+			// Explicit opt-in: only the servers named in cfg.MCPServers
+			// (matched case-insensitively against handle Name) are mounted.
+			for _, h := range filterMCPHandles(resolvedMCPHandles, cfg.MCPServers) {
+				toolsets = append(toolsets, h.Toolset)
+				mountedMCPNames = append(mountedMCPNames, h.Name)
+			}
+		case "Skill":
 			if resolvedSkillTS != nil {
 				toolsets = append(toolsets, resolvedSkillTS)
 				hasSkills = true
@@ -237,6 +244,13 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			agentTools = append(agentTools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
 		case "web":
 			agentTools = append(agentTools, fstools.NewWebTools()...)
+		case "registries":
+			agentTools = append(agentTools, registries.NewTools(buildRegistriesDeps(runtime))...)
+			hasRegistries = true
+		default:
+			if t, ok := namedTools[key]; ok {
+				agentTools = append(agentTools, t)
+			}
 		}
 	}
 	var instructionParts []string
@@ -249,11 +263,45 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	if hasSkills && hasSoftSkills {
 		instructionParts = append(instructionParts, softskills.LoaderRule)
 	}
+	if hasRegistries {
+		instructionParts = append(instructionParts, registries.LoaderProtocol)
+	}
+	if p := mcpcfg.BuildLoaderProtocol(mountedMCPNames); p != "" {
+		instructionParts = append(instructionParts, p)
+	}
 	extraInstruction := ""
 	if len(instructionParts) > 0 {
 		extraInstruction = strings.Join(instructionParts, "\n") + "\n"
 	}
-	return agentTools, toolsets, extraInstruction
+	return agentTools, toolsets, extraInstruction, mcpHandles
+}
+
+// buildRegistriesDeps wires the registries tool group to the live runtime
+// settings. Paths are resolved lazily so a user adding a registry or
+// installing a skill via the Web UI is reflected on the next tool call.
+func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
+	// Snapshot the agent skills lists at build time. A hot-reload rebuilds
+	// the toolset, so in-flight tool calls keep the snapshot they started with.
+	agentSkills := make(map[string][]string, len(runtime.Agents))
+	for _, a := range runtime.Agents {
+		agentSkills[a.Name] = a.Skills
+	}
+	return registries.Deps{
+		RegistryDir: func() string {
+			if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+				return v
+			}
+			return paths.SkillsRegistryDir()
+		},
+		ConfigPath: func() string { return registries.ReadConfigPath() },
+		ListAgentSkills: func() map[string][]string {
+			return agentSkills
+		},
+		AddSkillToAgent: func(agentName, skillName string) error {
+			_, err := registries.AddSkillToAgent(paths.AgentsRegistryDir(), paths.AgentsRegistryWriteDir(), agentName, skillName)
+			return err
+		},
+	}
 }
 
 // skillCatalogEntry is one skill discovered on disk for documentation
@@ -263,31 +311,34 @@ type skillCatalogEntry struct {
 	Description string
 }
 
-// scanSkillCatalog reads `<dir>/<name>/SKILL.md` front matter for each
-// subdirectory and returns a list of {name, description}. It is best-effort:
-// any unreadable / malformed file is skipped silently. It returns nil when
-// the directory does not exist.
-func scanSkillCatalog(dir string) []skillCatalogEntry {
-	if dir == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+// scanSkillCatalog reads SKILL.md front matter for the given skill names from
+// the shared registry. When skillNames is nil/empty, all installed skills are
+// scanned. Results are best-effort: unreadable or malformed entries are skipped.
+func scanSkillCatalog(skillNames []string) []skillCatalogEntry {
+	registryDir := paths.SkillsRegistryDir()
+	var names []string
+	if len(skillNames) == 0 {
+		entries, err := os.ReadDir(registryDir)
+		if err != nil {
+			return nil
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+	} else {
+		names = skillNames
 	}
 	var out []skillCatalogEntry
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir, e.Name(), "SKILL.md")
-		b, err := os.ReadFile(path)
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(registryDir, n, "SKILL.md"))
 		if err != nil {
 			continue
 		}
 		name, desc := parseSkillFrontMatter(b)
 		if name == "" {
-			name = e.Name()
+			name = n
 		}
 		out = append(out, skillCatalogEntry{Name: name, Description: desc})
 	}
@@ -358,12 +409,8 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 
 		// Surface the skill catalog when this sub-agent has access to the
 		// `skills` tool group, so the leader can route by skill ownership.
-		if hasTool(cfg.Tools, "skills") {
-			skillsDir := cfg.SkillsDir
-			if skillsDir == "" {
-				skillsDir = runtime.SkillsDir
-			}
-			catalog := scanSkillCatalog(skillsDir)
+		if hasTool(cfg.Tools, "Skill") {
+			catalog := scanSkillCatalog(cfg.Skills)
 			if len(catalog) > 0 {
 				sb.WriteString("  - Skills available to this agent:\n")
 				for _, sk := range catalog {
@@ -374,12 +421,6 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 					}
 				}
 			}
-		}
-
-		if cfg.Mailbox {
-			sb.WriteString("  - Messaging: This agent has a mailbox and can receive messages via teammate_ask/tell\n")
-		} else {
-			sb.WriteString("  - Messaging: This agent does not have a mailbox (one-way delegation only)\n")
 		}
 
 		sb.WriteString("\n")
@@ -394,9 +435,37 @@ func defaultSubAgentUsageGuidance(name string) string {
 		return "Delegate focused evidence questions here; expect compact cited findings with sources, confidence, and open questions. Do not routinely send these reports to summariser unless they are oversized or poorly structured."
 	case "summariser":
 		return "Send oversized raw output, verbose reports, or user-requested briefs here; expect a lossy structured brief that preserves source anchors when present."
+	case "skills_crawler":
+		return "Delegate when you need to discover, inspect, install, or link a skill from a remote registry. Pass the topic and, when linking is needed, the target agent name."
 	default:
 		return ""
 	}
+}
+
+// buildNamedToolMap returns a flat map of tool-name → tool covering all
+// individually-mountable tools. Callers can list "Bash", "Read", etc. directly
+// in agent.json instead of the "fs" group key. SerpAPI WebSearch overwrites
+// the DDG entry when an API key is available.
+func buildNamedToolMap(serpAPIKey string) map[string]tool.Tool {
+	m := make(map[string]tool.Tool)
+	for _, t := range fstools.New() {
+		m[t.Name()] = t
+	}
+	for _, t := range fstools.NewCalcTools() {
+		m[t.Name()] = t
+	}
+	for _, t := range fstools.NewWebTools() {
+		m[t.Name()] = t
+	}
+	for _, t := range fstools.NewDDGTools() {
+		m[t.Name()] = t
+	}
+	if serpAPIKey != "" {
+		for _, t := range fstools.NewSerpAPITools(serpAPIKey) {
+			m[t.Name()] = t
+		}
+	}
+	return m
 }
 
 func hasTool(tools []string, key string) bool {
@@ -412,286 +481,55 @@ func hasTool(tools []string, key string) bool {
 // by other Go projects. It returns the agent, runner config, and supporting
 // components.
 //
-// The caller is responsible for closing any resources (the function returns
-// a close function if needed).
+// Internally NewAgent is a thin wrapper around BuildInfrastructure +
+// BuildInstance; callers that need to hot-reload the agent (notably the HTTP
+// server) should use the lower-level helpers directly along with Manager.
 func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
-	runtime, err := ResolveRuntimeSettings(opts)
+	infra, err := BuildInfrastructure(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := fstools.ConfigureBashOutputFilter(fstools.BashOutputFilterConfig{
-		Enabled:    runtime.BashOutputFilterEnabled,
-		FiltersDir: runtime.BashOutputFiltersDir,
-	}); err != nil {
-		return nil, fmt.Errorf("bootstrap bash output filter: %w", err)
-	}
-	fstools.SetBashDefaultTimeout(time.Duration(runtime.BashTimeoutSeconds) * time.Second)
-	leaderCfg, ok := runtime.LeaderConfig()
-	if !ok {
-		return nil, fmt.Errorf("runtime config: missing mandatory leader agent")
-	}
-	if runtime.SoftSkillsDir == "" {
-		runtime.SoftSkillsDir = softskills.DefaultDir
-	}
+	// Propagate the resolved repo back into opts so BuildInstance sees the
+	// same value as Infrastructure (worktree tools, etc.).
 	if opts.Repo == "" {
-		repo, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("bootstrap: getwd: %w", err)
-		}
-		opts.Repo = repo
+		opts.Repo = infra.Repo
 	}
-
-	modelForAgent := func(cfg RuntimeAgentConfig) (model.LLM, error) {
-		m, err := llm.NewWithSelection(ctx, selectionFromAgentConfig(cfg))
-		if err != nil {
-			return nil, fmt.Errorf("model agent %q: %w", cfg.Name, err)
-		}
-		return m, nil
+	if opts.AppName == "" {
+		opts.AppName = infra.AppName
 	}
-
-	orchestratorLLM, err := modelForAgent(leaderCfg)
+	inst, err := BuildInstance(ctx, infra, opts, 1)
 	if err != nil {
+		infra.Close()
 		return nil, err
 	}
+	return assembleAgentResult(infra, inst), nil
+}
 
-	// ── Toolsets ─────────────────────────────────────────────────────────
-	// All session-scoped components share the same (userID, sessionID)
-	// → suffix mapping so a given session's task graph, plan, mailbox
-	// and background queue all line up on disk and on the wire.
-	//
-	// When a sessionID is provided (web sessions use petnames such as
-	// "happy-panda") it is used directly so each session gets a stable,
-	// human-readable suffix that survives server restarts.  For sessions
-	// without an ID (CLI / console mode) we fall back to the build
-	// timestamp to preserve the existing isolation behaviour.
-	buildTimestamp := time.Now().Format("20060102_150405")
-	sessionSuffix := func(userID, sessionID string) string {
-		u := sanitizeID(userID)
-		if u == "" {
-			u = "anon"
-		}
-		if s := sanitizeID(sessionID); s != "" {
-			return u + "_" + s
-		}
-		return u + "_" + buildTimestamp
-	}
-
-	// Per-session task graph (logs/agent_tasks_<u>_<s>.json).
-	g := tasks.NewSessionScoped("", func(u, s string) string {
-		return filepath.Join("logs", fmt.Sprintf("agent_tasks_%s.json", sessionSuffix(u, s)))
-	})
-	// Per-session background notification queue.
-	q := bg.NewSessionQueues(32)
-	// Per-session todo plan (logs/agent_todo_<u>_<s>.json).
-	store := todo.NewSessionScoped("", func(u, s string) string {
-		return filepath.Join("logs", fmt.Sprintf("agent_todo_%s.json", sessionSuffix(u, s)))
-	})
-
-	leadTools := []tool.Tool{}
-	leadTools = append(leadTools, fstools.New()...)
-	leadTools = append(leadTools, fstools.NewCalcTools()...)
-	leadTools = append(leadTools, store.Tools()...)
-	leadTools = append(leadTools, g.Tools()...)
-	leadTools = append(leadTools, worktree.Tools(opts.Repo)...)
-	leadTools = append(leadTools, q.Tool())
-	leadTools = append(leadTools, curateSessionTool())
-
-	// ask_user registry — created before the event bus so the notify/cancel
-	// callbacks can reference the bus once it is created below.
-	askUserReg := askuser.NewRegistry()
-
-	skillTS, softSkillTS, mcpToolsets, toolsets := buildLeaderToolsets(ctx, runtime, leaderCfg)
-
-	be, err := teammates.ChooseBackend()
-	if err != nil {
-		return nil, fmt.Errorf("mailbox backend: %w", err)
-	}
-	nameFunc := func(u, s, name string) string {
-		return sessionSuffix(u, s) + ":" + name
-	}
-
-	// Cross-session registry: maps session display names (petnames or
-	// user-assigned titles) to their leader mailbox addresses so that a
-	// leader in one session can address the leader in another by name.
-	reg := teammates.NewSessionRegistry(".mailboxes")
-
-	leadMailbox := teammates.NewAgent("leader", be)
-	// Namespace mailbox names per session so two concurrent sessions
-	// running an agent named "leader" never share an inbox.
-	leadMailbox.NameFunc = nameFunc
-	// Attach the cross-session registry only to the leader so that
-	// intra-session sub-agents (investigator, summariser, …) are not
-	// accidentally exposed as cross-session targets.
-	leadMailbox.Registry = reg
-	leadTools = append(leadTools, leadMailbox.Tools()...)
-
-	// Event bus — created here (rather than later, with the rest of the
-	// plugins) so its per-agent callbacks can be attached directly to each
-	// sub-agent. Sub-agents are wrapped via agenttool, which spawns its
-	// own internal runner that does NOT inherit the toolkit's runner-level
-	// plugins; without these per-agent callbacks the sub-agents' tool and
-	// model activity would never reach the bus (and thus the TUI / logs).
-	bus := events.NewBus()
-
-	// Wire ask_user registry notifications through the event bus so server
-	// and TUI surfaces receive questions and cancellations as bus events.
-	askUserReg.SetNotify(func(q askuser.Question) {
-		bus.Emit(events.EventAskUser, askuser.QuestionToPayload(q))
-	})
-	askUserReg.SetCancel(func(q askuser.Question) {
-		bus.Emit(events.EventAskUserCancel, map[string]any{
-			"question_id": q.ID,
-			"session_id":  q.SessionID,
-		})
-	})
-	leadTools = append(leadTools, fstools.NewAskUserTool(askUserReg))
-
-	subAgentCallbacks := bus.AgentCallbacks(events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
-
-	subAgentMap, subAgents, subAgentLeaderTools, err := buildSubAgents(
-		ctx, runtime, be, nameFunc,
-		skillTS, softSkillTS, mcpToolsets,
-		modelForAgent, subAgentCallbacks,
-	)
-	if err != nil {
-		be.Close()
-		return nil, err
-	}
-	leadTools = append(leadTools, subAgentLeaderTools...)
-
-	leaderDescription := leaderCfg.Description
-	if leaderDescription == "" {
-		leaderDescription = defaultAgentDescription("leader")
-	}
-	leaderInstruction := leaderCfg.Instruction
-	if leaderInstruction == "" {
-		leaderInstruction = defaultAgentInstruction("leader")
-	}
-
-	// Prepend loader rule when both skills and softskills toolsets are mounted.
-	if skillTS != nil && softSkillTS != nil {
-		leaderInstruction = softskills.LoaderRule + leaderInstruction
-	}
-	// Append dynamic sub-agent capabilities to the leader instruction
-	leaderInstruction += buildSubAgentCapabilitiesBlock(runtime.Agents, runtime)
-
-	lead, err := agentkit.New(agentkit.AgentConfig{
-		Name:        "leader",
-		Description: leaderDescription,
-		Model:       orchestratorLLM,
-		Tools:       leadTools,
-		Toolsets:    toolsets,
-		// SubAgents intentionally omitted: passing sub-agents here causes ADK to
-		// inject a transfer_to_agent function that permanently transfers control
-		// (no automatic return). Sub-agents are reached via their agenttool
-		// wrappers already in leadTools, which always return control to the leader.
-		Instruction: leaderInstruction,
-	})
-	if err != nil {
-		be.Close()
-		return nil, err
-	}
-
-	// ── Plugins ──────────────────────────────────────────────────────────
-	// `bus` was created earlier so per-agent callbacks could be attached to
-	// sub-agents at construction time. buildPlugins wires it as a runner-
-	// level plugin so the leader's tool/model activity, plus run start/end,
-	// also flow through it.
-	plugins, err := buildPlugins(runtime, opts, bus, orchestratorLLM, sessionSuffix, buildTimestamp)
-	if err != nil {
-		be.Close()
-		return nil, err
-	}
-
-	// Curator hook: after each session ends, fire-and-forget the curator
-	// agent with the per-session audit + statelog paths. Best-effort —
-	// process exit aborts. To run synchronously, use `yoke curate`.
-	if curatorCfg, ok := runtime.AgentConfig("curator"); ok && curatorCfg.Enabled {
-		curatorLLM, err := modelForAgent(curatorCfg)
-		if err == nil {
-			var subAgentNames []string
-			for _, cfg := range runtime.Agents {
-				if cfg.Name == "leader" || cfg.Name == "curator" || !cfg.Enabled {
-					continue
-				}
-				subAgentNames = append(subAgentNames, cfg.Name)
-			}
-			gate := CuratorGateConfig{
-				MinTurns:         runtime.CuratorMinTurns,
-				MinSubAgentCalls: runtime.CuratorMinSubAgentCalls,
-			}
-			registerCuratorHook(bus, curatorLLM, runtime.SoftSkillsDir, runtime.SkillsDir, subAgentNames, gate, sessionSuffix)
-		}
-	}
-
-	// Create AgentLoader from the agents
-	loader, err := adkagent.NewMultiLoader(lead, subAgents...)
-	if err != nil {
-		be.Close()
-		return nil, err
-	}
-
+// assembleAgentResult bundles the infrastructure and a single instance into
+// the legacy AgentResult shape so existing callers (CLI, TUI, examples) keep
+// working without code changes.
+func assembleAgentResult(infra *Infrastructure, inst *Instance) *AgentResult {
+	leaderCfg := inst.LeaderCfg
 	return &AgentResult{
-		Agent:                                   lead,
-		SubAgents:                               subAgentMap,
-		Plugins:                                 plugins,
-		EventBus:                                bus,
-		AskUserRegistry:                         askUserReg,
+		Agent:                                   inst.Leader,
+		SubAgents:                               inst.SubAgents,
+		Plugins:                                 inst.Plugins,
+		EventBus:                                infra.Bus,
+		AskUserRegistry:                         infra.AskUserRegistry,
 		LeaderInputTokenPricePerMillion:         leaderCfg.InputTokenPricePerMillion,
 		LeaderOutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,
 		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,
 		LeaderCacheCreationTokenPricePerMillion: leaderCfg.CacheCreationTokenPricePerMillion,
-		LeaderAllowFileAttachments:              leaderCfg.AllowFileAttachments,
-		CuratorIdleTimeout:                      runtime.CuratorIdleTimeout,
-		RunnerConfig: runner.Config{
-			AppName:           runtime.AppName,
-			Agent:             lead,
-			SessionService:    session.InMemoryService(),
-			AutoCreateSession: true,
-			PluginConfig:      runner.PluginConfig{Plugins: plugins},
-		},
-		AgentLoader: loader,
-		RegisterSession: func(userID, sessionID, displayName string) error {
-			addr := nameFunc(userID, sessionID, "leader")
-			return reg.Register(displayName, addr)
-		},
-		RenameSession: func(oldName, newName string) error {
-			return reg.Rename(oldName, newName)
-		},
-		UnregisterSession: func(displayName string) error {
-			return reg.Unregister(displayName)
-		},
-		ListSessionRegistry: func() map[string]string {
-			return reg.List()
-		},
-		WatchMailbox: func(ctx context.Context, userID, sessionID string, onMessage func(from, body string)) {
-			addr := nameFunc(userID, sessionID, "leader")
-			go func() {
-				for {
-					m, err := be.Receive(ctx, addr, 2*time.Second)
-					if err != nil {
-						if ctx.Err() != nil {
-							return
-						}
-						continue
-					}
-					if m == nil {
-						continue
-					}
-					// Resolve the sender's mailbox address to a friendly session
-					// name via registry reverse-lookup; fall back to the raw address.
-					from := m.From
-					for name, maddr := range reg.List() {
-						if maddr == m.From {
-							from = name
-							break
-						}
-					}
-					onMessage(from, m.Body)
-				}
-			}()
-		},
-	}, nil
+		LeaderAllowFileAttachments:              inst.LeaderAllowFileAttachments,
+		CuratorIdleTimeout:                      inst.CuratorIdleTimeout,
+		RunnerConfig:                            inst.RunnerConfig,
+		AgentLoader:                             inst.AgentLoader,
+		RegisterSession:                         infra.RegisterSession,
+		RenameSession:                           infra.RenameSession,
+		UnregisterSession:                       infra.UnregisterSession,
+		ListSessionRegistry:                     infra.ListSessionRegistry,
+		WatchMailbox:                            infra.WatchMailbox,
+	}
 }
 
 // sanitizeID strips characters that are unsafe in a filename so user/session

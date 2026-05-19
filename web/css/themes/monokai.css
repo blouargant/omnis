@@ -1,0 +1,25 @@
+[data-theme="monokai"] {
+  --bg: #272822;
+  --bg-panel: #1e1f1c;
+  --bg-raised: #3e3d32;
+  --bg-raised-hover: #49483e;
+  --bg-active: #49483e;
+  --bg-input: #1e1f1c;
+  --border: #3e3d32;
+  --border-strong: #75715e;
+  --text: #f8f8f2;
+  --text-strong: #ffffff;
+  --text-muted: #75715e;
+  --text-faint: #49483e;
+  --accent: #66d9ef;
+  --accent-hover: #a6e22e;
+  --accent-strong: #f92672;
+  --accent-bg-soft: rgba(102, 217, 239, 0.18);
+  --accent-border-soft: rgba(102, 217, 239, 0.45);
+  --accent-hover-bg: #3e3d32;
+  --scroll-thumb: #3e3d32;
+  --scroll-thumb-hover: #75715e;
+  --bubble-user-bg: #1e1f1c;
+  --bubble-user-border: #3e3d32;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+}

@@ -16,15 +16,12 @@ func TestParseFlagsDebugShort(t *testing.T) {
 }
 
 func TestParseFlagsLongFlagsKeepSubcommandArgs(t *testing.T) {
-	opts, args, err := parseFlags([]string{"--debug", "--skills", "custom-skills", "curate", "--user", "u1"})
+	opts, args, err := parseFlags([]string{"--debug", "curate", "--user", "u1"})
 	if err != nil {
 		t.Fatalf("parseFlags() error = %v", err)
 	}
 	if !opts.debug {
 		t.Fatal("debug = false, want true")
-	}
-	if opts.skillsDir != "custom-skills" {
-		t.Fatalf("skillsDir = %q, want custom-skills", opts.skillsDir)
 	}
 	want := []string{"curate", "--user", "u1"}
 	if len(args) != len(want) {

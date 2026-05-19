@@ -124,7 +124,7 @@ func TestPassTruncateToolResults(t *testing.T) {
 	t.Parallel()
 	big := strings.Repeat("x", 5000)
 	contents := []*genai.Content{
-		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "bash", Response: map[string]any{"result": big}}}}},
+		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Bash", Response: map[string]any{"result": big}}}}},
 		{Role: "model", Parts: []*genai.Part{{Text: "ok"}}},
 		{Role: "user", Parts: []*genai.Part{{Text: "next"}}},
 	}
@@ -236,10 +236,10 @@ func TestPipelineEndToEnd(t *testing.T) {
 	bigBlob := strings.Repeat("verbose tool output. ", 200)
 	contents := []*genai.Content{
 		{Role: "user", Parts: []*genai.Part{{Text: "original goal"}}},
-		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "bash", Args: map[string]any{"cmd": "ls"}}}}},
-		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "bash", Response: map[string]any{"result": bigBlob}}}}},
-		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "bash", Args: map[string]any{"cmd": "ls"}}}}},
-		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "bash", Response: map[string]any{"result": bigBlob}}}}},
+		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "Bash", Args: map[string]any{"cmd": "ls"}}}}},
+		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Bash", Response: map[string]any{"result": bigBlob}}}}},
+		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "Bash", Args: map[string]any{"cmd": "ls"}}}}},
+		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Bash", Response: map[string]any{"result": bigBlob}}}}},
 		{Role: "model", Parts: []*genai.Part{{Text: "wrapping up"}}},
 		{Role: "user", Parts: []*genai.Part{{Text: "thanks"}}},
 	}

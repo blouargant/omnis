@@ -55,8 +55,8 @@ func TestSummaryCacheReuse(t *testing.T) {
 		blob := strings.Repeat("verbose tool output. ", 200)
 		return []*genai.Content{
 			{Role: "user", Parts: []*genai.Part{{Text: "original goal"}}},
-			{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "bash", Args: map[string]any{"cmd": "ls"}}}}},
-			{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "bash", Response: map[string]any{"result": blob}}}}},
+			{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "Bash", Args: map[string]any{"cmd": "ls"}}}}},
+			{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Bash", Response: map[string]any{"result": blob}}}}},
 			{Role: "model", Parts: []*genai.Part{{Text: "wrapping up"}}},
 			{Role: "user", Parts: []*genai.Part{{Text: "thanks"}}},
 		}
@@ -104,8 +104,8 @@ func TestEventBusEmitsCompression(t *testing.T) {
 	blob := strings.Repeat("verbose tool output. ", 200)
 	contents := []*genai.Content{
 		{Role: "user", Parts: []*genai.Part{{Text: "original goal"}}},
-		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "bash", Args: map[string]any{"cmd": "ls"}}}}},
-		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "bash", Response: map[string]any{"result": blob}}}}},
+		{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "Bash", Args: map[string]any{"cmd": "ls"}}}}},
+		{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Bash", Response: map[string]any{"result": blob}}}}},
 		{Role: "model", Parts: []*genai.Part{{Text: "wrapping up"}}},
 		{Role: "user", Parts: []*genai.Part{{Text: "thanks"}}},
 	}
@@ -146,7 +146,7 @@ func (j *jsonLLM) GenerateContent(_ context.Context, _ *model.LLMRequest, _ bool
 func TestStateLogExtractAndPersist(t *testing.T) {
 	t.Parallel()
 	logPath := filepath.Join(t.TempDir(), "statelog.json")
-	body := `{"goal":"ship feature X","decisions":["use Go"],"files":{"main.go":"entrypoint"},"tools":{"read":2}}`
+	body := `{"goal":"ship feature X","decisions":["use Go"],"files":{"main.go":"entrypoint"},"tools":{"Read":2}}`
 	llm := &jsonLLM{body: body}
 
 	cfg := Config{

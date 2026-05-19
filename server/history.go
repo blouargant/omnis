@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-const logsDir = "logs"
+// logsDir returns the per-user logs directory ($YOKE_HOME/logs). Resolved
+// at each call so tests can redirect via t.Setenv("YOKE_HOME", ...).
+func logsDir() string { return paths.LogsDir() }
 
 // ConversationTurn is one user→assistant exchange persisted to disk.
 type ConversationTurn struct {
@@ -25,12 +28,13 @@ type ConversationTurn struct {
 // Legacy files used a plain JSON array; those are read transparently.
 type ConversationFile struct {
 	Title     string             `json:"title,omitempty"`
+	Squad     string             `json:"squad,omitempty"`
 	Harvested bool               `json:"harvested,omitempty"`
 	Turns     []ConversationTurn `json:"turns"`
 }
 
 func conversationPath(sessionID string) string {
-	return filepath.Join(logsDir, fmt.Sprintf("conversation_%s.json", sessionID))
+	return filepath.Join(logsDir(), fmt.Sprintf("conversation_%s.json", sessionID))
 }
 
 func loadConversationFile(sessionID string) (*ConversationFile, error) {
@@ -57,7 +61,7 @@ func loadConversationFile(sessionID string) (*ConversationFile, error) {
 }
 
 func saveConversationFile(sessionID string, f *ConversationFile) error {
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
+	if err := os.MkdirAll(logsDir(), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(f, "", "  ")
@@ -100,6 +104,18 @@ func setConversationHarvested(sessionID string, v bool) error {
 	return saveConversationFile(sessionID, f)
 }
 
+// setConversationSquad persists the squad name to disk without touching the
+// conversation turns. Called when a new session is first created so the
+// choice survives a server restart.
+func setConversationSquad(sessionID, squad string) error {
+	f, err := loadConversationFile(sessionID)
+	if err != nil || f == nil {
+		f = &ConversationFile{}
+	}
+	f.Squad = squad
+	return saveConversationFile(sessionID, f)
+}
+
 func setConversationTitle(sessionID, title string) error {
 	f, err := loadConversationFile(sessionID)
 	if err != nil || f == nil {
@@ -127,10 +143,10 @@ func deleteSessionLogs(userID, sessionID string) {
 		fmt.Sprintf("agent_memory_%s.md", suffix),
 		fmt.Sprintf("agent_statelog_%s.json", suffix),
 	} {
-		_ = os.Remove(filepath.Join(logsDir, name))
+		_ = os.Remove(filepath.Join(logsDir(), name))
 	}
-	// Delete per-session mailbox files: .mailboxes/<suffix>:*.jsonl
-	matches, _ := filepath.Glob(filepath.Join(".mailboxes", suffix+":*.jsonl"))
+	// Delete per-session mailbox files: $YOKE_HOME/mailboxes/<suffix>:*.jsonl
+	matches, _ := filepath.Glob(filepath.Join(paths.MailboxesDir(), suffix+":*.jsonl"))
 	for _, f := range matches {
 		_ = os.Remove(f)
 	}
@@ -139,7 +155,7 @@ func deleteSessionLogs(userID, sessionID string) {
 // loadPersistedSessions scans logs/ for conversation_*.json files and returns
 // a SessionMeta for each, so the sidebar populates after a server restart.
 func loadPersistedSessions() []*SessionMeta {
-	entries, err := os.ReadDir(logsDir)
+	entries, err := os.ReadDir(logsDir())
 	if err != nil {
 		return nil
 	}
@@ -157,6 +173,7 @@ func loadPersistedSessions() []*SessionMeta {
 		out = append(out, &SessionMeta{
 			ID:         id,
 			Title:      f.Title,
+			Squad:      f.Squad,
 			Harvested:  f.Harvested,
 			UserID:     defaultUserID,
 			CreatedAt:  f.Turns[0].At,

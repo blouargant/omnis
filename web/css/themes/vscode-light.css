@@ -1,0 +1,35 @@
+[data-theme="vscode-light"] {
+  --bg: #ffffff;
+  --bg-panel: #f3f3f3;
+  --bg-raised: #e8e8e8;
+  --bg-raised-hover: #dcdcdc;
+  --bg-active: #cfe6ff;
+  --bg-input: #ffffff;
+  --border: #e4e4e4;
+  --border-strong: #cccccc;
+  --text: #1e1e1e;
+  --text-strong: #000000;
+  --text-muted: #6e6e6e;
+  --text-faint: #a0a0a0;
+  --accent: #0e639c;
+  --accent-hover: #1177bb;
+  --accent-strong: #007acc;
+  --accent-bg-soft: rgba(14, 99, 156, 0.15);
+  --accent-border-soft: rgba(14, 99, 156, 0.4);
+  --accent-hover-bg: #cfe6ff;
+  --scroll-thumb: #c8c8c8;
+  --scroll-thumb-hover: #a8a8a8;
+  --bubble-user-bg: #e8e8e8;
+  --bubble-user-border: #cccccc;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --danger-fg: #a1260d;
+  --danger-bg: rgba(161, 38, 13, 0.08);
+  --danger-border: rgba(161, 38, 13, 0.30);
+  --danger-bg-hover: rgba(161, 38, 13, 0.15);
+  --danger-bg-soft: rgba(161, 38, 13, 0.08);
+  --warn-fg: #7c5100;
+  --warn-bg: rgba(124, 81, 0, 0.08);
+  --warn-border: rgba(124, 81, 0, 0.28);
+  --warn-action-bg: rgba(124, 81, 0, 0.14);
+  --warn-action-hover: rgba(124, 81, 0, 0.24);
+}

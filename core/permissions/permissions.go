@@ -1,7 +1,7 @@
-// Package permissions implements the article's "YAML rule-based permission
-// governance" (Phase 4 / s15). Three tiers are evaluated in order against
-// every tool call: always_deny → always_allow → ask_user. Anything that
-// matches no rule is implicitly allowed (matching the article).
+// Package permissions implements JSON rule-based permission governance
+// (Phase 4 / s15). Three tiers are evaluated in order against every tool
+// call: always_deny → always_allow → ask_user. Anything that matches no
+// rule is implicitly allowed.
 //
 // The plugin returned by NewPlugin wires this into ADK as a
 // BeforeToolCallback so denial happens before the tool runs.
@@ -14,8 +14,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/plugin"
@@ -31,24 +29,28 @@ const (
 	DecisionAsk
 )
 
-// Rule is one entry in the YAML config. It may be written as a bare string
-// (just the pattern) or as a mapping {pattern, reason}.
+// Rule is one entry in the JSON config. It may be written as a bare string
+// (just the pattern) or as an object {pattern, reason}.
 type Rule struct {
-	Pattern string         `yaml:"pattern" json:"pattern"`
-	Reason  string         `yaml:"reason"  json:"reason,omitempty"`
+	Pattern string `json:"pattern"`
+	Reason  string `json:"reason,omitempty"`
 	re      *regexp.Regexp
 }
 
-// UnmarshalYAML accepts either a plain scalar (the pattern) or a mapping
+// UnmarshalJSON accepts either a JSON string (the pattern) or an object
 // with explicit pattern/reason fields.
-func (r *Rule) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode {
-		r.Pattern = node.Value
+func (r *Rule) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		r.Pattern = s
 		return nil
 	}
 	type raw Rule
 	var tmp raw
-	if err := node.Decode(&tmp); err != nil {
+	if err := json.Unmarshal(data, &tmp); err != nil {
 		return err
 	}
 	*r = Rule(tmp)
@@ -57,9 +59,9 @@ func (r *Rule) UnmarshalYAML(node *yaml.Node) error {
 
 // Rules is the parsed permissions config.
 type Rules struct {
-	AlwaysDeny  []Rule `yaml:"always_deny"  json:"always_deny"`
-	AlwaysAllow []Rule `yaml:"always_allow" json:"always_allow"`
-	AskUser     []Rule `yaml:"ask_user"     json:"ask_user"`
+	AlwaysDeny  []Rule `json:"always_deny"`
+	AlwaysAllow []Rule `json:"always_allow"`
+	AskUser     []Rule `json:"ask_user"`
 }
 
 // HasRules reports whether any tier contains at least one rule.
@@ -87,7 +89,7 @@ func Merge(base *Rules, overlays ...*Rules) *Rules {
 	return merged
 }
 
-// Load reads and compiles a YAML rules file. Missing file yields an empty
+// Load reads and compiles a JSON rules file. Missing file yields an empty
 // rule set (everything allowed).
 func Load(path string) (*Rules, error) {
 	data, err := os.ReadFile(path)
@@ -98,7 +100,7 @@ func Load(path string) (*Rules, error) {
 		return nil, err
 	}
 	var r Rules
-	if err := yaml.Unmarshal(data, &r); err != nil {
+	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if err := r.compile(); err != nil {

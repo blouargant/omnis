@@ -1,0 +1,25 @@
+[data-theme="tokyo-night"] {
+  --bg: #1a1b26;
+  --bg-panel: #16161e;
+  --bg-raised: #1f2335;
+  --bg-raised-hover: #2a2e44;
+  --bg-active: #283457;
+  --bg-input: #16161e;
+  --border: #292e42;
+  --border-strong: #3b4261;
+  --text: #c0caf5;
+  --text-strong: #ffffff;
+  --text-muted: #565f89;
+  --text-faint: #414868;
+  --accent: #7aa2f7;
+  --accent-hover: #bb9af7;
+  --accent-strong: #7dcfff;
+  --accent-bg-soft: rgba(122, 162, 247, 0.20);
+  --accent-border-soft: rgba(122, 162, 247, 0.45);
+  --accent-hover-bg: #283457;
+  --scroll-thumb: #292e42;
+  --scroll-thumb-hover: #3b4261;
+  --bubble-user-bg: #1f2335;
+  --bubble-user-border: #3b4261;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+}

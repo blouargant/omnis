@@ -41,7 +41,7 @@ type askUserOut struct {
 // NewAskUserTool returns the ask_user tool backed by the provided registry.
 // The tool blocks until the user answers (via the web UI, TUI, or console).
 func NewAskUserTool(reg *askuser.Registry) tool.Tool {
-	return mustTool("ask_user",
+	return mustTool("AskUserQuestion",
 		"Present a question to the user and wait for their answer. "+
 			"Use this tool whenever you need the user to make a choice or provide information before proceeding. "+
 			"Arguments: "+
@@ -102,5 +102,3 @@ func validateAskUserIn(in askUserIn) error {
 	}
 	return nil
 }
-
-

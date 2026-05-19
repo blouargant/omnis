@@ -1,0 +1,22 @@
+{
+  "allow_file_attachments": false,
+  "api_key": "OPENAI_API_KEY",
+  "base_url": "OPENAI_BASE_URL",
+  "builtin": false,
+  "description": "Searches the web and fetches page content to answer research questions.",
+  "enabled": true,
+  "leader": false,
+  "model": "gpt-4.1-mini-sweden",
+  "model_ref": "balanced",
+  "name": "web_agent",
+  "provider": "openai_compat",
+  "skills": null,
+  "softskills_dir": "",
+  "tools": [
+    "Skill",
+    "serpapi",
+    "ddg",
+    "web",
+    "softskills"
+  ]
+}

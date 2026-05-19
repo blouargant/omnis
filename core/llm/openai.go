@@ -7,12 +7,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -50,12 +54,17 @@ func (o *openAI) Name() string { return o.model }
 // ── Wire types ───────────────────────────────────────────────────────────
 
 type oaiMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"` // string | nil
-	Name       string         `json:"name,omitempty"`
-	ToolCalls  []oaiToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	_          map[string]any `json:"-"`
+	Role       string        `json:"role"`
+	Content    any           `json:"content,omitempty"` // string | []oaiContentPart | nil
+	Name       string        `json:"name,omitempty"`
+	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	// LiteLLM (and some other OpenAI-compat gateways) emit inline image output
+	// from image-generation models — e.g. gemini-*-image-preview — as a
+	// vendor-extension `images` array alongside a regular string `content`.
+	// Each entry mirrors the user-side image_url shape: a data URL embedding
+	// the base64 bytes. We capture them here and decode in oaiMsgToContent.
+	Images []oaiContentPart `json:"images,omitempty"`
 }
 
 type oaiToolCall struct {
@@ -381,9 +390,47 @@ func (o *openAI) fromResponse(r *oaiResponse) *model.LLMResponse {
 
 func oaiMsgToContent(m oaiMessage) *genai.Content {
 	c := &genai.Content{Role: "model"}
-	if s, ok := m.Content.(string); ok && s != "" {
-		c.Parts = append(c.Parts, &genai.Part{Text: s})
+
+	// Content may be a plain string OR a multimodal array of parts. Image
+	// generation models (e.g. gemini-*-image-preview via LiteLLM) return their
+	// output in the array form, or as a vendor-extension `images` field.
+	switch v := m.Content.(type) {
+	case string:
+		if v != "" {
+			c.Parts = append(c.Parts, &genai.Part{Text: v})
+		}
+	case []any:
+		for _, item := range v {
+			obj, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := obj["type"].(string)
+			switch kind {
+			case "text", "":
+				if s, _ := obj["text"].(string); s != "" {
+					c.Parts = append(c.Parts, &genai.Part{Text: s})
+				}
+			case "image_url":
+				url := imageURLFromMap(obj)
+				if path, hint := saveDataURLImage(url); path != "" {
+					c.Parts = append(c.Parts, &genai.Part{Text: hint})
+				}
+			}
+		}
 	}
+
+	// LiteLLM-style vendor extension carrying generated images.
+	for _, img := range m.Images {
+		url := ""
+		if img.ImageURL != nil {
+			url = img.ImageURL.URL
+		}
+		if path, hint := saveDataURLImage(url); path != "" {
+			c.Parts = append(c.Parts, &genai.Part{Text: hint})
+		}
+	}
+
 	for _, tc := range m.ToolCalls {
 		c.Parts = append(c.Parts, &genai.Part{
 			FunctionCall: &genai.FunctionCall{
@@ -396,23 +443,112 @@ func oaiMsgToContent(m oaiMessage) *genai.Content {
 	return c
 }
 
+// imageURLFromMap returns the `image_url.url` field from a multimodal content
+// part decoded as a generic map (the path json.Unmarshal takes for `any`).
+func imageURLFromMap(obj map[string]any) string {
+	switch u := obj["image_url"].(type) {
+	case string:
+		return u
+	case map[string]any:
+		s, _ := u["url"].(string)
+		return s
+	}
+	return ""
+}
+
+// saveDataURLImage decodes a "data:<mime>;base64,..." URL and writes the bytes
+// to $TMPDIR/yoke-images/<random>.<ext>. It returns the absolute file path and
+// a human-readable line ("Generated image saved to <path>") that callers can
+// embed as a text part so downstream agents — and the Web UI's local-image
+// renderer — can reference the file. Returns ("", "") for unrecognised inputs.
+func saveDataURLImage(dataURL string) (path, hint string) {
+	const prefix = "data:"
+	if !strings.HasPrefix(dataURL, prefix) {
+		return "", ""
+	}
+	commaIdx := strings.Index(dataURL, ",")
+	if commaIdx < 0 {
+		return "", ""
+	}
+	meta := dataURL[len(prefix):commaIdx]
+	payload := dataURL[commaIdx+1:]
+	mime := meta
+	if i := strings.Index(meta, ";"); i >= 0 {
+		mime = meta[:i]
+	}
+	if !strings.HasPrefix(mime, "image/") {
+		return "", ""
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return "", ""
+	}
+	dir := filepath.Join(os.TempDir(), "yoke-images")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", ""
+	}
+	var nonce [8]byte
+	_, _ = rand.Read(nonce[:])
+	ext := extFromMIME(mime)
+	out := filepath.Join(dir, fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), hex.EncodeToString(nonce[:]), ext))
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return "", ""
+	}
+	return out, fmt.Sprintf("Generated image saved to %s", out)
+}
+
+func extFromMIME(mime string) string {
+	switch mime {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".bin"
+	}
+}
+
 // streamSSE drains an SSE stream of oaiChunk events. Text deltas are
 // yielded as Partial:true responses; tool-call argument fragments are
 // accumulated and emitted as a single FunctionCall on completion.
+// Inline image data (array-form content from image-generation models, or the
+// LiteLLM-style `images` vendor extension) is accumulated and decoded to disk
+// at end-of-stream so its file path becomes part of the final response.
 func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error) bool) {
 	type pendingCall struct {
 		id, name string
 		args     strings.Builder
 	}
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// bufio.Reader.ReadString has no fixed line cap (unlike bufio.Scanner),
+	// which matters here: an SSE `data:` line carrying a base64-encoded image
+	// from a generation model routinely exceeds tens of MB.
+	reader := bufio.NewReaderSize(body, 64*1024)
 	pending := map[int]*pendingCall{}
 	var collectedText strings.Builder
+	var imageDataURLs []string
 	var usage *oaiUsage
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			yield(nil, err)
+			return
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
 		if !strings.HasPrefix(line, "data: ") {
+			if err == io.EOF {
+				break
+			}
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
@@ -430,13 +566,44 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 			continue
 		}
 		delta := ch.Choices[0].Delta
-		if s, ok := delta.Content.(string); ok && s != "" {
-			collectedText.WriteString(s)
-			if !yield(&model.LLMResponse{
-				Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: s}}},
-				Partial: true,
-			}, nil) {
-				return
+		switch v := delta.Content.(type) {
+		case string:
+			if v != "" {
+				collectedText.WriteString(v)
+				if !yield(&model.LLMResponse{
+					Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: v}}},
+					Partial: true,
+				}, nil) {
+					return
+				}
+			}
+		case []any:
+			for _, item := range v {
+				obj, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				switch kind, _ := obj["type"].(string); kind {
+				case "text", "":
+					if s, _ := obj["text"].(string); s != "" {
+						collectedText.WriteString(s)
+						if !yield(&model.LLMResponse{
+							Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: s}}},
+							Partial: true,
+						}, nil) {
+							return
+						}
+					}
+				case "image_url":
+					if u := imageURLFromMap(obj); u != "" {
+						imageDataURLs = append(imageDataURLs, u)
+					}
+				}
+			}
+		}
+		for _, img := range delta.Images {
+			if img.ImageURL != nil && img.ImageURL.URL != "" {
+				imageDataURLs = append(imageDataURLs, img.ImageURL.URL)
 			}
 		}
 		for i, tc := range delta.ToolCalls {
@@ -459,10 +626,9 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 				p.args.WriteString(tc.Function.Arguments)
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		yield(nil, err)
-		return
+		if err == io.EOF {
+			break
+		}
 	}
 
 	// Final non-partial event with the accumulated content.
@@ -470,6 +636,11 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 	c := &genai.Content{Role: "model"}
 	if collectedText.Len() > 0 {
 		c.Parts = append(c.Parts, &genai.Part{Text: collectedText.String()})
+	}
+	for _, url := range imageDataURLs {
+		if _, hint := saveDataURLImage(url); hint != "" {
+			c.Parts = append(c.Parts, &genai.Part{Text: hint})
+		}
 	}
 	keys := make([]int, 0, len(pending))
 	for k := range pending {

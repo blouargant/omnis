@@ -11,14 +11,54 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/paths"
 )
+
+// seedConfigFile pins $YOKE_HOME at a fresh temp directory and writes the
+// given config under paths.ConfigWriteDir() so that the editor's read path
+// (FindConfig) and write path (ConfigWriteDir) point at the same file.
+// Returns the file's absolute path.
+func seedConfigFile(t *testing.T, filename, content string) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("YOKE_HOME", home)
+	t.Setenv("YOKE_CONFIG_DIRS", filepath.Join(home, "config"))
+	cfgDir := filepath.Join(home, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", cfgDir, err)
+	}
+	p := filepath.Join(cfgDir, filename)
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// editorFiles returns a configFiles populated from $YOKE_HOME so editor
+// handlers resolve read/write paths under the test's pinned home.
+func editorFiles() configFiles {
+	return configFiles{
+		Agent:       paths.FindConfig("agent.json"),
+		Permissions: paths.FindConfig("permissions.json"),
+		MCP:         paths.FindConfig("mcp_config.json"),
+	}
+}
 
 func newTestEngine(t *testing.T, files configFiles) *gin.Engine {
 	t.Helper()
+	// Belt-and-braces: every test using the config editor gets its own
+	// $YOKE_HOME so a misaligned readPath/writePath (a regression bug)
+	// can never write into the developer's real $HOME/.yoke. seedConfigFile
+	// already does this; this defends every other test path.
+	if os.Getenv("YOKE_HOME") == "" {
+		t.Setenv("YOKE_HOME", t.TempDir())
+	}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api")
-	registerConfigRoutes(rg, files, newRestartCoordinator())
+	registerConfigRoutes(rg, files, newRestartCoordinator(), nil, agent.Options{})
 	return r
 }
 
@@ -50,7 +90,7 @@ func do(t *testing.T, r http.Handler, method, path string, body any) *httptest.R
 }
 
 func TestGetUnknownFile_404(t *testing.T) {
-	r := newTestEngine(t, configFiles{Agent: tmpFile(t, "a.yaml", "x: 1\n")})
+	r := newTestEngine(t, configFiles{Agent: tmpFile(t, "a.json", "{\"x\":1}\n")})
 	w := do(t, r, http.MethodGet, "/api/config/file/bogus", nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", w.Code)
@@ -58,7 +98,7 @@ func TestGetUnknownFile_404(t *testing.T) {
 }
 
 func TestPathTraversalRejected(t *testing.T) {
-	r := newTestEngine(t, configFiles{Agent: tmpFile(t, "a.yaml", "x: 1\n")})
+	r := newTestEngine(t, configFiles{Agent: tmpFile(t, "a.json", "{\"x\":1}\n")})
 	// gin route is /config/file/:name — the slash in `..` would not match
 	// the single-segment param, so we expect a 404 from the router.
 	w := do(t, r, http.MethodGet, "/api/config/file/..%2Fetc%2Fpasswd", nil)
@@ -68,8 +108,8 @@ func TestPathTraversalRejected(t *testing.T) {
 }
 
 func TestRoundTripRaw(t *testing.T) {
-	p := tmpFile(t, "a.yaml", "key: original\n")
-	r := newTestEngine(t, configFiles{Agent: p})
+	p := seedConfigFile(t, "agent.json", "{\"key\":\"original\"}\n")
+	r := newTestEngine(t, editorFiles())
 
 	w := do(t, r, http.MethodGet, "/api/config/file/agent", nil)
 	if w.Code != http.StatusOK {
@@ -84,39 +124,39 @@ func TestRoundTripRaw(t *testing.T) {
 	}
 
 	w = do(t, r, http.MethodPut, "/api/config/file/agent", map[string]any{
-		"content": "key: updated\n",
+		"content": "{\"key\":\"updated\"}\n",
 		"mtime":   got.MTime,
 	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("put: want 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	data, _ := os.ReadFile(p)
-	if string(data) != "key: updated\n" {
+	if string(data) != "{\"key\":\"updated\"}\n" {
 		t.Fatalf("file not updated: %q", data)
 	}
 }
 
-func TestPutInvalidYAML_400(t *testing.T) {
-	p := tmpFile(t, "a.yaml", "key: ok\n")
+func TestPutInvalidJSON_400(t *testing.T) {
+	p := tmpFile(t, "a.json", "{\"key\":\"ok\"}\n")
 	r := newTestEngine(t, configFiles{Agent: p})
 	w := do(t, r, http.MethodPut, "/api/config/file/agent", map[string]any{
-		"content": "key: [unbalanced\n",
+		"content": "{key: unbalanced",
 	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d body=%s", w.Code, w.Body.String())
 	}
 	// Original file must be untouched.
 	data, _ := os.ReadFile(p)
-	if string(data) != "key: ok\n" {
+	if string(data) != "{\"key\":\"ok\"}\n" {
 		t.Fatalf("file should be unchanged, got %q", data)
 	}
 }
 
 func TestPutStaleMTime_409(t *testing.T) {
-	p := tmpFile(t, "a.yaml", "key: original\n")
+	p := tmpFile(t, "a.json", "{\"key\":\"original\"}\n")
 	r := newTestEngine(t, configFiles{Agent: p})
 	w := do(t, r, http.MethodPut, "/api/config/file/agent", map[string]any{
-		"content": "key: new\n",
+		"content": "{\"key\":\"new\"}\n",
 		// epoch time will not match the file's mtime
 		"mtime": "1970-01-01T00:00:00Z",
 	})
@@ -130,10 +170,10 @@ func TestPutMissingFileWithMTime_409(t *testing.T) {
 	// mtime means it thinks it was editing a real file. checkMtime must
 	// reject the write rather than silently creating the file.
 	dir := t.TempDir()
-	missing := filepath.Join(dir, "ghost.yaml")
+	missing := filepath.Join(dir, "ghost.json")
 	r := newTestEngine(t, configFiles{Agent: missing})
 	w := do(t, r, http.MethodPut, "/api/config/file/agent", map[string]any{
-		"content": "key: new\n",
+		"content": "{\"key\":\"new\"}\n",
 		"mtime":   "2025-01-01T00:00:00Z",
 	})
 	if w.Code != http.StatusConflict {
@@ -145,7 +185,7 @@ func TestPutMissingFileWithMTime_409(t *testing.T) {
 }
 
 func TestNoPathLeakInResponses(t *testing.T) {
-	p := tmpFile(t, "a.yaml", "key: v\n")
+	p := tmpFile(t, "a.json", "{\"key\":\"v\"}\n")
 	r := newTestEngine(t, configFiles{Agent: p})
 
 	w := do(t, r, http.MethodGet, "/api/config/file/agent", nil)
@@ -164,11 +204,11 @@ func TestNoPathLeakInResponses(t *testing.T) {
 
 func TestAtomicWritePreservesMode(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "secret.yaml")
-	if err := os.WriteFile(p, []byte("k: 1\n"), 0o600); err != nil {
+	p := filepath.Join(dir, "secret.json")
+	if err := os.WriteFile(p, []byte("{\"k\":1}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicWriteFile(p, []byte("k: 2\n")); err != nil {
+	if err := atomicWriteFile(p, []byte("{\"k\":2}\n")); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(p)
@@ -181,7 +221,7 @@ func TestAtomicWritePreservesMode(t *testing.T) {
 }
 
 func TestDescribeConfigFile_Missing(t *testing.T) {
-	info := describeConfigFile("agent", filepath.Join(t.TempDir(), "nope.yaml"))
+	info := describeConfigFile("agent", filepath.Join(t.TempDir(), "nope.json"))
 	if info.Exists {
 		t.Fatal("Exists must be false for a missing file")
 	}
@@ -194,8 +234,8 @@ func TestDescribeConfigFile_Missing(t *testing.T) {
 }
 
 func TestParsedRoundTrip(t *testing.T) {
-	p := tmpFile(t, "perm.yaml", "always_deny:\n  - rm -rf /\n")
-	r := newTestEngine(t, configFiles{Permissions: p})
+	p := seedConfigFile(t, "permissions.json", "{\"always_deny\":[\"rm -rf /\"]}\n")
+	r := newTestEngine(t, editorFiles())
 
 	w := do(t, r, http.MethodGet, "/api/config/parsed/permissions", nil)
 	if w.Code != http.StatusOK {
@@ -229,7 +269,7 @@ func TestRestartEndpoint(t *testing.T) {
 	r := gin.New()
 	rg := r.Group("/api")
 	restart := newRestartCoordinator()
-	registerConfigRoutes(rg, configFiles{}, restart)
+	registerConfigRoutes(rg, configFiles{}, restart, nil, agent.Options{})
 
 	w := do(t, r, http.MethodPost, "/api/server/restart", nil)
 	if w.Code != http.StatusAccepted {

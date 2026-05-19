@@ -11,10 +11,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/yoke/internal/paths"
 )
 
 // curateMarkerPath is set per-process; the hook reads it. We use an
@@ -36,11 +39,12 @@ func RequestCurateSession(userID, sessionID, reason string) (string, error) {
 	curateRequestMu.Lock()
 	curateRequested[key] = true
 	curateRequestMu.Unlock()
-	path := fmt.Sprintf("logs/agent_curate_%s.txt", key)
+	logsDir := paths.LogsDir()
+	path := filepath.Join(logsDir, fmt.Sprintf("agent_curate_%s.txt", key))
 	if reason == "" {
 		reason = "manual curation request"
 	}
-	if err := os.MkdirAll("logs", 0o755); err != nil {
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(path, []byte(reason+"\n"), 0o644); err != nil {

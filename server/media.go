@@ -6,9 +6,14 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
 	"math"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 // imageMIME returns the MIME type for recognized image extensions, or "" for
@@ -81,4 +86,116 @@ func shrinkIfNeeded(data []byte, mime string) ([]byte, string) {
 	}
 
 	return current, outMime
+}
+
+// maxMediaBytes caps how large an image we are willing to serve back to the
+// browser. Generated images can be larger than the API inlining limit, but a
+// hard ceiling still protects against accidental gigabyte files.
+const maxMediaBytes int64 = 25 * 1024 * 1024 // 25 MB
+
+// handleMedia serves an image file referenced by absolute or relative path
+// (passed as the `path` query parameter) back to the browser. It is the
+// counterpart of the markdown-image rewriting on the client: tool outputs and
+// assistant replies may reference local image files; this endpoint streams
+// those bytes after enforcing two safety rules:
+//
+//  1. The resolved path must live under the server's working directory
+//     (where logs/uploads/<session>/ lives) OR under the OS temp directory.
+//     Any other prefix is rejected as out-of-policy.
+//  2. The file extension must be a recognised image type. Non-image MIME
+//     types are refused; this endpoint is not a generic file server.
+func handleMedia(d serverDeps) gin.HandlerFunc {
+	// Resolve allowed roots once at handler construction; both are absolute
+	// and cleaned so prefix-match below is well-defined.
+	roots := mediaAllowedRoots()
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		if _, ok := d.Registry.Get(id); !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		raw := strings.TrimSpace(c.Query("path"))
+		if raw == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
+			return
+		}
+		// Strip any file:// prefix the model may have included.
+		raw = strings.TrimPrefix(raw, "file://")
+
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+			return
+		}
+		abs = filepath.Clean(abs)
+
+		if !pathUnderAnyRoot(abs, roots) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "path outside allowed roots"})
+			return
+		}
+		mime := imageMIME(abs)
+		if mime == "" {
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "not a recognised image type"})
+			return
+		}
+		f, err := os.Open(abs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "open failed"})
+			return
+		}
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "stat failed"})
+			return
+		}
+		if st.Size() > maxMediaBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file exceeds media size limit"})
+			return
+		}
+		c.Header("Content-Type", mime)
+		c.Header("Cache-Control", "private, max-age=300")
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, f)
+	}
+}
+
+// mediaAllowedRoots returns the absolute, cleaned directories from which the
+// media endpoint will serve files: the server's working directory (which
+// contains logs/uploads/) plus the OS temp directory (where many MCP image
+// generators write their output).
+func mediaAllowedRoots() []string {
+	var roots []string
+	if cwd, err := os.Getwd(); err == nil {
+		if abs, err := filepath.Abs(cwd); err == nil {
+			roots = append(roots, filepath.Clean(abs))
+		}
+	}
+	if tmp := os.TempDir(); tmp != "" {
+		if abs, err := filepath.Abs(tmp); err == nil {
+			roots = append(roots, filepath.Clean(abs))
+		}
+	}
+	return roots
+}
+
+// pathUnderAnyRoot reports whether `abs` resolves to a location inside any of
+// `roots`. Both `abs` and each root are expected to be absolute + cleaned.
+// Comparison is done on path components (not raw string prefix) to avoid
+// false positives like "/tmpfoo" matching "/tmp".
+func pathUnderAnyRoot(abs string, roots []string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, abs)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (!strings.HasPrefix(rel, "..") && !strings.HasPrefix(rel, string(filepath.Separator))) {
+			return true
+		}
+	}
+	return false
 }

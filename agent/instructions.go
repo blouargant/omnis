@@ -1,19 +1,30 @@
 package agent
 
 import (
-	"embed"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/blouargant/yoke/internal/paths"
 )
 
-//go:embed instructions/*.md
-var defaultInstructionsFS embed.FS
+// ReadAgentInstruction returns the trimmed contents of the agent's instruction file
+// from registry/agents/<name>/instruction.md, or falls back to registry/agents/default.md,
+// or "" if neither exist.
+func ReadAgentInstruction(name string) string {
+	agentsDir := paths.AgentsRegistryDir()
 
-// readEmbeddedInstruction returns the trimmed contents of
-// instructions/<name>.md, or "" if the file does not exist.
-func readEmbeddedInstruction(name string) string {
-	b, err := defaultInstructionsFS.ReadFile("instructions/" + name + ".md")
-	if err != nil {
-		return ""
+	// Try agent-specific instruction
+	instructionPath := filepath.Join(agentsDir, name, "instruction.md")
+	if b, err := os.ReadFile(instructionPath); err == nil {
+		return strings.TrimRight(string(b), "\n")
 	}
-	return strings.TrimRight(string(b), "\n")
+
+	// Fall back to default instruction
+	defaultPath := filepath.Join(agentsDir, "default.md")
+	if b, err := os.ReadFile(defaultPath); err == nil {
+		return strings.TrimRight(string(b), "\n")
+	}
+
+	return ""
 }

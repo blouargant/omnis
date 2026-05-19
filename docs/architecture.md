@@ -12,7 +12,16 @@ This document maps the codebase and explains how the pieces interact.
                                         │ wires
                                         ▼
         ┌──────────────────────────────────────────────────────────┐
-        │                       Lead agent                         │
+        │  Instance (one generation)                               │
+        │   ├─ Squad "default"   ← leader + full team              │
+        │   ├─ Squad "research"  ← leader + web_agent + summariser │
+        │   └─ Squad "…"         ← any number, defined in agent.json│
+        │  Each chat session selects one squad at creation         │
+        └─────────────────┬────────────────────────────────────────┘
+                          │ (per-session squad selection)
+                          ▼
+        ┌──────────────────────────────────────────────────────────┐
+        │  Squad's lead agent                                      │
         │  (generic Claude-Code-style coordinator, no domain)      │
         └───────┬──────────┬───────────┬────────────┬──────────────┘
                 │          │           │            │
@@ -77,7 +86,7 @@ Categorisation:
 | `internal/worktree`    | `worktree_create`, `worktree_remove`, `worktree_merge`          | Isolated git scratch space    |
 | `internal/teammates`   | `teammate_ask`, `teammate_tell`, `teammate_inbox`               | Inter-agent mailbox           |
 | `internal/skills`      | `load_skill`, `list_skills`                                     | Lazy skill discovery          |
-| `internal/mcp`         | (loads MCP toolsets from YAML)                                  | External tool servers         |
+| `internal/mcp`         | (loads MCP toolsets from JSON)                                  | External tool servers         |
 
 ### 4. Plugins — `core/events`, `core/permissions`, `internal/cache`, `internal/compress`
 
@@ -93,7 +102,7 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
   and a `usage` map (`prompt_tokens`, `candidates_tokens`,
   `total_tokens`) for per-call telemetry.
 - **permissions** — gates bash and tool calls against
-  `config/permissions.yaml` (allow / deny / ask).
+  `config/permissions.json` (allow / deny / ask).
 - **cache** — surfaces prompt-cache stats per turn.
 - **compress** — when a session's context approaches the model window,
   extracts durable facts to a per-session
@@ -126,27 +135,72 @@ for the full table and wiring snippet.
 
 ### 5. Sub-agents
 
-Two generic sub-agents are wired by default in the root `main.go`:
+Several generic sub-agents are wired by default in the root `main.go`:
 
 - **investigator** — read-only evidence gatherer. Cites every finding
   with a source (file:line, command output, MCP resource id). Never
   modifies state.
 - **summariser** — condenses long content into a one-line headline + ≤7
   bullets + suggested next actions.
+- **web_agent** — web search + page fetch when MCP browsing is enabled.
+- **image_generator** — image generation via the imagegen model profile.
 
-Both are exposed to the lead via `agenttool.New(...)` — the lead calls
-them as tools. Add your own specialist by following [extending.md](extending.md).
+Sub-agents are exposed to the leader via `agenttool.New(...)` wrapped in
+a `newNonConcurrentTool` — the leader calls them as tools and at most
+one sub-agent runs at a time per leader. Add your own specialist by
+following [extending.md](extending.md).
 
-### 6. Specialisation surface
+### 6. Squads
+
+A **squad** is a named group `{ name, leader, members[] }` defined under
+`squads:` in `config/agents.json`. Each squad wires its own leader and
+its own subset of the agent catalogue as that leader's sub-agents.
+
+```
+RuntimeSettings ──► resolveSquadEntries ──► RuntimeSquadConfig[]
+                                                    │
+                                                    ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │ Instance (one generation)                               │
+   │                                                         │
+   │  Squads["default"] ─► SquadInstance{leader, members,    │
+   │                                     runner, plugins}    │
+   │  Squads["research"] ─► SquadInstance{…}                 │
+   │                                                         │
+   └─────────────────────────────────────────────────────────┘
+```
+
+Each chat session selects one squad at creation (the `default` squad
+when none is chosen) and the server resolves
+`Manager.LookupSquad(sessionID, squadName).Runner` on every turn.
+
+Key properties:
+
+- **Squads compose, they don't redefine.** Skills, tools and MCP
+  servers stay on agent definitions; two squads that share a member
+  also share its wiring, and the MCP pool dedups any subprocess.
+- **`default` is always present.** When the user's `squads:` list is
+  empty or omits a `default`, the resolver synthesises one from the
+  enabled agents (excluding the curator).
+- **Curator stays process-wide.** It listens on the shared event bus
+  with the union of every squad's member names — not per-squad — so
+  session-end curation runs at most once per session regardless of
+  which squad it used.
+
+Add a squad by editing `config/agents.json` (or the Squads sub-tab in
+the web UI's Agent settings); see [extending.md](extending.md#adding-a-squad).
+
+### 7. Specialisation surface
 
 Three orthogonal mount points let you retarget the agent without
 recompiling:
 
-| Surface     | Where                          | How it's mounted                                  |
-|-------------|--------------------------------|---------------------------------------------------|
-| Skills      | `skills/<name>/SKILL.md`       | `internal/skills` walks the dir at startup        |
-| MCP servers | `config/mcp_config.yaml`       | `internal/mcp` spawns processes & adapts toolsets |
-| Permissions | `config/permissions.yaml`      | `core/permissions` plugin                         |
+| Surface     | Where                                     | How it's mounted                                  |
+|-------------|-------------------------------------------|---------------------------------------------------|
+| Agents      | `registry/agents/<name>/{agent.json,instruction.md}` | Loaded by `ResolveRuntimeSettings` for each name listed in `config/agents.json` |
+| Skills      | `skills/<name>/SKILL.md`                  | `internal/skills` walks the dir at startup        |
+| MCP servers | `config/mcp_config.json`                  | `internal/mcp` spawns processes & adapts toolsets |
+| Permissions | `config/permissions.json`                 | `core/permissions` plugin                         |
 
 ## Lifecycle of a turn
 

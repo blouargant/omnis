@@ -101,17 +101,16 @@ func TestSetBashDefaultTimeoutZeroCoerced(t *testing.T) {
 
 func TestRunBashOutputFilterOptIn(t *testing.T) {
 	dir := t.TempDir()
-	rules := `
-name: "printf-head"
-version: 1
-match:
-  command: "printf"
-pipeline:
-  - action: "head"
-    n: 1
-on_error: "passthrough"
-`
-	path := filepath.Join(dir, "printf.yaml")
+	rules := `{
+  "name": "printf-head",
+  "version": 1,
+  "match": {"command": "printf"},
+  "pipeline": [
+    {"action": "head", "n": 1}
+  ],
+  "on_error": "passthrough"
+}`
+	path := filepath.Join(dir, "printf.json")
 	if err := os.WriteFile(path, []byte(rules), 0o644); err != nil {
 		t.Fatalf("WriteFile(rules) error = %v", err)
 	}
@@ -146,20 +145,20 @@ on_error: "passthrough"
 
 func TestRunBashOutputFilterInjectsArgs(t *testing.T) {
 	dir := t.TempDir()
-	rules := `
-name: "echo-inject"
-version: 1
-match:
-  command: "echo"
-inject:
-  args: ["world"]
-  skip_if_present: ["world"]
-pipeline:
-  - action: "head"
-    n: 1
-on_error: "passthrough"
-`
-	path := filepath.Join(dir, "echo.yaml")
+	rules := `{
+  "name": "echo-inject",
+  "version": 1,
+  "match": {"command": "echo"},
+  "inject": {
+    "args": ["world"],
+    "skip_if_present": ["world"]
+  },
+  "pipeline": [
+    {"action": "head", "n": 1}
+  ],
+  "on_error": "passthrough"
+}`
+	path := filepath.Join(dir, "echo.json")
 	if err := os.WriteFile(path, []byte(rules), 0o644); err != nil {
 		t.Fatalf("WriteFile(rules) error = %v", err)
 	}

@@ -44,7 +44,6 @@ var (
 
 // options holds CLI flags consumed before the subcommand keyword.
 type options struct {
-	skillsDir     string
 	softSkillsDir string
 	appName       string
 	configPath    string
@@ -60,11 +59,9 @@ type options struct {
 // flag.FlagSet so callers can either Parse() or print usage.
 func newFlagSet(opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("yoke", flag.ContinueOnError)
-	fs.StringVar(&opts.skillsDir, "skills", opts.skillsDir, "Directory to load skills from")
-	fs.StringVar(&opts.skillsDir, "s", opts.skillsDir, "Directory to load skills from (shorthand)")
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
-	fs.StringVar(&opts.configPath, "config", "", "Path to runtime YAML config file (default: config/agent.yaml)")
+	fs.StringVar(&opts.configPath, "config", "", "Path to runtime JSON config file (default: config/agents.json)")
 	fs.StringVar(&opts.modelProvider, "provider", "", "Global model provider override")
 	fs.StringVar(&opts.modelName, "model", "", "Global model override")
 	fs.StringVar(&opts.modelBaseURL, "base-url", "", "Global model base URL override")
@@ -109,6 +106,9 @@ func main() {
 	opts, rest, err := parseFlags(os.Args[1:])
 	if err != nil {
 		os.Exit(2)
+	}
+	if opts.configPath == "" {
+		opts.configPath = strings.TrimSpace(os.Getenv("YOKE_CONFIG_PATH"))
 	}
 	if err := run(ctx, opts, rest); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
@@ -212,7 +212,6 @@ func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
 		return nil, err
 	}
 	return agent.NewAgent(ctx, agent.Options{
-		SkillsDir:        opts.skillsDir,
 		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,

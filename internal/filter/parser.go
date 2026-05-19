@@ -1,15 +1,14 @@
 package filter
 
 import (
+	"encoding/json"
 	"fmt"
-
-	"gopkg.in/yaml.v3"
 )
 
-// ParseFilter parses YAML bytes into a Filter struct.
+// ParseFilter parses JSON bytes into a Filter struct.
 func ParseFilter(data []byte) (*Filter, error) {
 	var f Filter
-	if err := yaml.Unmarshal(data, &f); err != nil {
+	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse filter: %w", err)
 	}
 	if err := ValidateFilter(&f); err != nil {

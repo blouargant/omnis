@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/registries"
 )
 
 const (
@@ -32,24 +35,41 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // skillsDeps holds resolved filesystem paths for skills management.
 type skillsDeps struct {
-	RegistryDir         string // abs path to skills-registry/installed/
-	AgentYAML           string // abs path to agent.yaml (re-read on each request for freshness)
-	RemoteRegistriesCfg string // abs path to config/remote_registries.json
+	RegistryDir              string // abs path to registry/skills/ (read — first-existing-wins)
+	RegistryWriteDir         string // abs path to registry/skills/ write target (always $YOKE_HOME)
+	AgentYAML                string // abs path to agent.json (re-read on each request for freshness)
+	AgentsRegistryReadDir    string // abs path to registry/agents/ (read — first-existing-wins)
+	AgentsRegistryWriteDir   string // abs path to registry/agents/ write target (always $YOKE_HOME)
+	RemoteRegistriesCfgWrite string // abs write target for remote_registries.json ($YOKE_HOME/config)
 }
 
 // resolveSkillsDeps derives skills paths from the already-resolved config files.
+// Read paths use first-existing-wins so a developer checkout stays visible.
+// Write paths always land under $YOKE_HOME — web UI saves never touch the
+// local checkout, mirroring the config write contract.
 func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
-	registryDir := "skills-registry/installed"
+	registryReadDir := paths.SkillsRegistryDir()
+	registryWriteDir := paths.SkillsRegistryWriteDir()
 	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
-		registryDir = v
+		registryReadDir = v
+		registryWriteDir = v
 	}
-	absReg, _ := filepath.Abs(registryDir)
-	cfgDir := filepath.Dir(cfgFiles.Agent)
-	absRemoteCfg, _ := filepath.Abs(filepath.Join(cfgDir, "remote_registries.json"))
+	absReadReg, _ := filepath.Abs(registryReadDir)
+	absWriteReg, _ := filepath.Abs(registryWriteDir)
+	absAgentsRead, _ := filepath.Abs(paths.AgentsRegistryDir())
+	absAgentsWrite, _ := filepath.Abs(paths.AgentsRegistryWriteDir())
+	if v := os.Getenv("YOKE_AGENTS_REGISTRY_DIR"); v != "" {
+		absAgentsRead, _ = filepath.Abs(v)
+		absAgentsWrite = absAgentsRead
+	}
+	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "remote_registries.json"))
 	return skillsDeps{
-		RegistryDir:         absReg,
-		AgentYAML:           cfgFiles.Agent,
-		RemoteRegistriesCfg: absRemoteCfg,
+		RegistryDir:              absReadReg,
+		RegistryWriteDir:         absWriteReg,
+		AgentYAML:                cfgFiles.Agent,
+		AgentsRegistryReadDir:    absAgentsRead,
+		AgentsRegistryWriteDir:   absAgentsWrite,
+		RemoteRegistriesCfgWrite: absRemoteWrite,
 	}
 }
 
@@ -170,46 +190,24 @@ func listRegistrySkills(registryDir string) ([]skillInfo, error) {
 	return out, nil
 }
 
-// listAgentLinks returns (linked, broken) symlink names in agentSkillsDir.
-func listAgentLinks(agentSkillsDir string) (linked, broken []string) {
-	if agentSkillsDir == "" {
-		return []string{}, []string{}
+// agentSkillList returns the agent's declared skills, normalised to a non-nil slice.
+func agentSkillList(a agent.RuntimeAgentConfig) []string {
+	if a.Skills == nil {
+		return []string{}
 	}
-	entries, err := os.ReadDir(agentSkillsDir)
-	if err != nil {
-		return []string{}, []string{}
-	}
-	for _, e := range entries {
-		if e.Type()&os.ModeSymlink == 0 {
-			continue
-		}
-		name := e.Name()
-		target := filepath.Join(agentSkillsDir, name)
-		if _, err := os.Stat(target); err != nil {
-			broken = append(broken, name)
-		} else {
-			linked = append(linked, name)
-		}
-	}
-	if linked == nil {
-		linked = []string{}
-	}
-	if broken == nil {
-		broken = []string{}
-	}
-	return linked, broken
+	return a.Skills
 }
 
-// agentHasSkillsTool reports whether the agent's tools list includes "skills".
+// agentHasSkillsTool reports whether the agent's tools list includes "Skill".
 // For leader, an empty tools list means all tools enabled (including skills).
 func agentHasSkillsTool(a agent.RuntimeAgentConfig) bool {
 	if a.Name == "leader" {
-		return len(a.Tools) == 0 || slices.Contains(a.Tools, "skills")
+		return len(a.Tools) == 0 || slices.Contains(a.Tools, "Skill")
 	}
-	return slices.Contains(a.Tools, "skills")
+	return slices.Contains(a.Tools, "Skill")
 }
 
-// readRuntimeAgents re-reads agent.yaml and returns the resolved agent list.
+// readRuntimeAgents re-reads agent.json and returns the resolved agent list.
 func readRuntimeAgents(agentYAML string) ([]agent.RuntimeAgentConfig, error) {
 	s, err := agent.ResolveRuntimeSettings(agent.Options{
 		ConfigPath:       agentYAML,
@@ -495,16 +493,11 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
-		// Annotate linked_in per skill.
+		// Annotate linked_in per skill using agents' declared skills lists.
 		agents, _ := readRuntimeAgents(deps.AgentYAML)
 		for i, sk := range skills {
 			for _, a := range agents {
-				if a.SkillsDir == "" {
-					continue
-				}
-				dir, _ := filepath.Abs(a.SkillsDir)
-				fi, err := os.Lstat(filepath.Join(dir, sk.Name))
-				if err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				if slices.Contains(a.Skills, sk.Name) {
 					skills[i].LinkedIn = append(skills[i].LinkedIn, a.Name)
 				}
 			}
@@ -545,13 +538,13 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		}
 		defer os.RemoveAll(tmp)
 
-		target := filepath.Join(deps.RegistryDir, name)
+		target := filepath.Join(deps.RegistryWriteDir, name)
 		if _, err := os.Stat(target); err == nil && !overwrite {
 			c.JSON(http.StatusConflict,
 				skillsErr("NAME_TAKEN", fmt.Sprintf("skill %q already exists; add ?overwrite=1 to replace", name)))
 			return
 		}
-		if err := os.MkdirAll(deps.RegistryDir, 0o755); err != nil {
+		if err := os.MkdirAll(deps.RegistryWriteDir, 0o755); err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
@@ -590,16 +583,11 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		if st != nil {
 			mtime = st.ModTime()
 		}
-		// Collect linked agents.
+		// Collect agents that declare this skill.
 		agents, _ := readRuntimeAgents(deps.AgentYAML)
 		var linkedIn []string
 		for _, a := range agents {
-			if a.SkillsDir == "" {
-				continue
-			}
-			dir, _ := filepath.Abs(a.SkillsDir)
-			fi, err := os.Lstat(filepath.Join(dir, name))
-			if err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if slices.Contains(a.Skills, name) {
 				linkedIn = append(linkedIn, a.Name)
 			}
 		}
@@ -634,7 +622,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("NAME_INVALID", "skill name must match ^[a-z0-9][a-z0-9._-]{0,63}$"))
 			return
 		}
-		skillDir := filepath.Join(deps.RegistryDir, name)
+		skillDir := filepath.Join(deps.RegistryWriteDir, name)
 		if _, err := os.Stat(skillDir); err == nil {
 			c.JSON(http.StatusConflict, skillsErr("NAME_TAKEN", fmt.Sprintf("skill %q already exists", name)))
 			return
@@ -669,20 +657,27 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("BAD_REQUEST", "invalid JSON body"))
 			return
 		}
-		skillMD := filepath.Join(deps.RegistryDir, name, "SKILL.md")
-		if _, err := os.Stat(skillMD); os.IsNotExist(err) {
+		// Find skill in read chain (may be in ./registry/skills in a dev checkout).
+		readSkillMD := filepath.Join(deps.RegistryDir, name, "SKILL.md")
+		if _, err := os.Stat(readSkillMD); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "skill not found"))
 			return
 		}
-		if status, body := checkMtime(skillMD, req.MTime); status != 0 {
+		if status, body := checkMtime(readSkillMD, req.MTime); status != 0 {
 			c.JSON(status, body)
 			return
 		}
-		if err := atomicWriteFile(skillMD, []byte(req.Content)); err != nil {
+		// Always write to home-anchored registry (fork-on-first-edit).
+		writeSkillMD := filepath.Join(deps.RegistryWriteDir, name, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(writeSkillMD), 0o755); err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
-		st, _ := os.Stat(skillMD)
+		if err := atomicWriteFile(writeSkillMD, []byte(req.Content)); err != nil {
+			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
+			return
+		}
+		st, _ := os.Stat(writeSkillMD)
 		var mtime time.Time
 		if st != nil {
 			mtime = st.ModTime()
@@ -706,12 +701,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		agents, _ := readRuntimeAgents(deps.AgentYAML)
 		var linkedAgents []string
 		for _, a := range agents {
-			if a.SkillsDir == "" {
-				continue
-			}
-			dir, _ := filepath.Abs(a.SkillsDir)
-			fi, err := os.Lstat(filepath.Join(dir, name))
-			if err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if slices.Contains(a.Skills, name) {
 				linkedAgents = append(linkedAgents, a.Name)
 			}
 		}
@@ -721,19 +711,14 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 				gin.H{"agents": linkedAgents}))
 			return
 		}
-		// Remove links first when force=1.
+		// Remove the skill from each agent's list when force=1.
 		for _, a := range agents {
-			if a.SkillsDir == "" {
-				continue
-			}
-			dir, _ := filepath.Abs(a.SkillsDir)
-			linkPath := filepath.Join(dir, name)
-			fi, err := os.Lstat(linkPath)
-			if err == nil && fi.Mode()&os.ModeSymlink != 0 {
-				_ = os.Remove(linkPath)
+			if slices.Contains(a.Skills, name) {
+				_, _ = registries.RemoveSkillFromAgent(deps.AgentsRegistryReadDir, deps.AgentsRegistryWriteDir, a.Name, name)
 			}
 		}
-		if err := os.RemoveAll(skillDir); err != nil {
+		// Delete from the home-anchored write dir only (never delete from dev checkout).
+		if err := os.RemoveAll(filepath.Join(deps.RegistryWriteDir, name)); err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
@@ -742,7 +727,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 
 	// ── Agent skill assignments ────────────────────────────────────────────
 
-	// GET /agents — list all agents with their linked/broken skills.
+	// GET /agents — list all agents with their declared skills.
 	rg.GET("/agents", func(c *gin.Context) {
 		agents, err := readRuntimeAgents(deps.AgentYAML)
 		if err != nil {
@@ -751,30 +736,21 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		}
 		type agentSkillInfo struct {
 			Name          string   `json:"name"`
-			SkillsDir     string   `json:"skills_dir"`
 			HasSkillsTool bool     `json:"has_skills_tool"`
-			Linked        []string `json:"linked"`
-			Broken        []string `json:"broken"`
+			Skills        []string `json:"skills"`
 		}
 		out := make([]agentSkillInfo, 0, len(agents))
 		for _, a := range agents {
-			var absDir string
-			if a.SkillsDir != "" {
-				absDir, _ = filepath.Abs(a.SkillsDir)
-			}
-			linked, broken := listAgentLinks(absDir)
 			out = append(out, agentSkillInfo{
 				Name:          a.Name,
-				SkillsDir:     absDir,
 				HasSkillsTool: agentHasSkillsTool(a),
-				Linked:        linked,
-				Broken:        broken,
+				Skills:        agentSkillList(a),
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"agents": out})
 	})
 
-	// POST /agents/:agent/skills/:name — create a relative symlink for one skill.
+	// POST /agents/:agent/skills/:name — add a skill to an agent's list.
 	rg.POST("/agents/:agent/skills/:name", func(c *gin.Context) {
 		agentName := c.Param("agent")
 		skillName := c.Param("name")
@@ -782,14 +758,8 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("NAME_INVALID", "invalid skill name"))
 			return
 		}
-		a, err := validatedAgent(deps.AgentYAML, agentName)
-		if err != nil {
+		if _, err := validatedAgent(deps.AgentYAML, agentName); err != nil {
 			c.JSON(http.StatusNotFound, skillsErr("AGENT_NOT_FOUND", err.Error()))
-			return
-		}
-		if a.SkillsDir == "" {
-			c.JSON(http.StatusBadRequest, skillsErr("NO_SKILLS_DIR",
-				fmt.Sprintf("agent %q has no skills_dir configured", agentName)))
 			return
 		}
 		registrySkillDir := filepath.Join(deps.RegistryDir, skillName)
@@ -798,34 +768,14 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 				fmt.Sprintf("skill %q not found in registry", skillName)))
 			return
 		}
-		agentDir, _ := filepath.Abs(a.SkillsDir)
-		if err := os.MkdirAll(agentDir, 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
-			return
-		}
-		linkPath := filepath.Join(agentDir, skillName)
-		if fi, err := os.Lstat(linkPath); err == nil {
-			if fi.Mode()&os.ModeSymlink != 0 {
-				c.Status(http.StatusNoContent) // already linked — idempotent
-				return
-			}
-			c.JSON(http.StatusConflict, skillsErr("PATH_CONFLICT",
-				fmt.Sprintf("%q exists and is not a symlink", linkPath)))
-			return
-		}
-		relTarget, err := filepath.Rel(agentDir, registrySkillDir)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
-			return
-		}
-		if err := os.Symlink(relTarget, linkPath); err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
+		if _, err := registries.AddSkillToAgent(deps.AgentsRegistryReadDir, deps.AgentsRegistryWriteDir, agentName, skillName); err != nil {
+			c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
 			return
 		}
 		c.Status(http.StatusNoContent)
 	})
 
-	// DELETE /agents/:agent/skills/:name — remove a symlink.
+	// DELETE /agents/:agent/skills/:name — remove a skill from an agent's list.
 	rg.DELETE("/agents/:agent/skills/:name", func(c *gin.Context) {
 		agentName := c.Param("agent")
 		skillName := c.Param("name")
@@ -833,40 +783,24 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("NAME_INVALID", "invalid skill name"))
 			return
 		}
-		a, err := validatedAgent(deps.AgentYAML, agentName)
-		if err != nil {
+		if _, err := validatedAgent(deps.AgentYAML, agentName); err != nil {
 			c.JSON(http.StatusNotFound, skillsErr("AGENT_NOT_FOUND", err.Error()))
 			return
 		}
-		if a.SkillsDir == "" {
-			c.JSON(http.StatusBadRequest, skillsErr("NO_SKILLS_DIR", "agent has no skills_dir configured"))
-			return
-		}
-		agentDir, _ := filepath.Abs(a.SkillsDir)
-		linkPath := filepath.Join(agentDir, skillName)
-		fi, err := os.Lstat(linkPath)
-		if os.IsNotExist(err) {
-			c.Status(http.StatusNoContent) // idempotent
-			return
-		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
-			return
-		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			c.JSON(http.StatusConflict, skillsErr("NOT_SYMLINK",
-				"path exists but is not a symlink — refusing to delete"))
-			return
-		}
-		if err := os.Remove(linkPath); err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
+		if _, err := registries.RemoveSkillFromAgent(deps.AgentsRegistryReadDir, deps.AgentsRegistryWriteDir, agentName, skillName); err != nil {
+			c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
 			return
 		}
 		c.Status(http.StatusNoContent)
 	})
 
 	// ── Remote registries ─────────────────────────────────────────────────
-	registerRemoteRegistryRoutes(rg, deps.RemoteRegistriesCfg, deps.RegistryDir)
+	registerRemoteRegistryRoutes(rg, func() string {
+		// Re-resolve every request so a save into $YOKE_HOME on the
+		// previous request is visible immediately, without restart.
+		p, _ := filepath.Abs(paths.FindConfig("remote_registries.json"))
+		return p
+	}, deps.RemoteRegistriesCfgWrite, deps.RegistryDir, deps.RegistryWriteDir)
 
 	// POST /agents/:agent/skills — bulk action: body {"action":"all"} or {"action":"none"}.
 	rg.POST("/agents/:agent/skills", func(c *gin.Context) {
@@ -878,68 +812,59 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("BAD_REQUEST", `body must be {"action":"all"} or {"action":"none"}`))
 			return
 		}
-		a, err := validatedAgent(deps.AgentYAML, agentName)
-		if err != nil {
+		if _, err := validatedAgent(deps.AgentYAML, agentName); err != nil {
 			c.JSON(http.StatusNotFound, skillsErr("AGENT_NOT_FOUND", err.Error()))
 			return
 		}
-		if a.SkillsDir == "" {
-			c.JSON(http.StatusBadRequest, skillsErr("NO_SKILLS_DIR", "agent has no skills_dir configured"))
-			return
-		}
-		agentDir, _ := filepath.Abs(a.SkillsDir)
 
 		if req.Action == "none" {
-			entries, err := os.ReadDir(agentDir)
-			if os.IsNotExist(err) {
-				c.JSON(http.StatusOK, gin.H{"removed": []string{}})
-				return
-			}
+			// Read from read dir; write to home-anchored write dir.
+			readAgentPath := filepath.Join(deps.AgentsRegistryReadDir, agentName, "agent.json")
+			data, err := os.ReadFile(readAgentPath)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
+				c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
 				return
 			}
-			var removed []string
-			for _, e := range entries {
-				if e.Type()&os.ModeSymlink == 0 {
-					continue
-				}
-				if err := os.Remove(filepath.Join(agentDir, e.Name())); err == nil {
-					removed = append(removed, e.Name())
+			var entry map[string]any
+			if err := json.Unmarshal(data, &entry); err != nil {
+				c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
+				return
+			}
+			removed := []string{}
+			if raw, ok := entry["skills"]; ok {
+				if list, ok := raw.([]any); ok {
+					for _, item := range list {
+						if s, ok := item.(string); ok {
+							removed = append(removed, s)
+						}
+					}
 				}
 			}
-			if removed == nil {
-				removed = []string{}
+			entry["skills"] = []string{}
+			out, _ := json.MarshalIndent(entry, "", "  ")
+			out = append(out, '\n')
+			writeAgentPath := filepath.Join(deps.AgentsRegistryWriteDir, agentName, "agent.json")
+			if err := os.MkdirAll(filepath.Dir(writeAgentPath), 0o755); err != nil {
+				c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
+				return
+			}
+			if err := os.WriteFile(writeAgentPath, out, 0o644); err != nil {
+				c.JSON(http.StatusInternalServerError, skillsErr("CONFIG_ERROR", err.Error()))
+				return
 			}
 			c.JSON(http.StatusOK, gin.H{"removed": removed})
 			return
 		}
 
-		// action == "all": link every registry skill.
-		skills, err := listRegistrySkills(deps.RegistryDir)
+		// action == "all": add every registry skill to the agent's list.
+		skillsList, err := listRegistrySkills(deps.RegistryDir)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
-		if err := os.MkdirAll(agentDir, 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
-			return
-		}
 		var linked []string
-		for _, sk := range skills {
-			registrySkillDir := filepath.Join(deps.RegistryDir, sk.Name)
-			linkPath := filepath.Join(agentDir, sk.Name)
-			if fi, err := os.Lstat(linkPath); err == nil {
-				if fi.Mode()&os.ModeSymlink != 0 {
-					linked = append(linked, sk.Name)
-				}
-				continue // skip non-symlinks to avoid clobbering
-			}
-			relTarget, err := filepath.Rel(agentDir, registrySkillDir)
-			if err != nil {
-				continue
-			}
-			if err := os.Symlink(relTarget, linkPath); err == nil {
+		for _, sk := range skillsList {
+			if _, err := registries.AddSkillToAgent(deps.AgentsRegistryReadDir, deps.AgentsRegistryWriteDir, agentName, sk.Name); err == nil {
 				linked = append(linked, sk.Name)
 			}
 		}

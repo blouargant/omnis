@@ -1,0 +1,45 @@
+{
+  "always_deny": [
+    "rm -rf /",
+    "mkfs",
+    "dd if=.* of=/dev/",
+    ":(){.*};:",
+    {
+      "pattern": "^(write|revert) .*\"path\":\"softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    },
+    {
+      "pattern": "^bash .*(>|>>|tee|rm|mv|cp) .*softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    }
+  ],
+  "always_allow": [
+    "^ls( |$)",
+    "^cat ",
+    "^pwd$",
+    "^echo ",
+    "^head ",
+    "^tail ",
+    "^grep ",
+    "^find .* -name",
+    "^go (build|test|vet|fmt)",
+    "^npm (test|run build)",
+    "^docker (ps|images|logs|inspect) "
+  ],
+  "ask_user": [
+    "^rm ",
+    "^git push",
+    "^sudo ",
+    "^docker (run|rm|rmi|exec)",
+    "^terraform (apply|destroy)",
+    "^helm (install|upgrade|uninstall)",
+    {
+      "pattern": "^install_remote_skill ",
+      "reason": "Installing a skill from a remote registry writes to $HOME/.yoke/registry/skills/<name> — confirm the skill name and source before proceeding"
+    },
+    {
+      "pattern": "^link_skill_to_agent ",
+      "reason": "Linking a skill grants an agent new capabilities and persists on disk — confirm which agent should receive the skill"
+    }
+  ]
+}

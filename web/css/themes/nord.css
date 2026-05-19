@@ -1,0 +1,25 @@
+[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-panel: #3b4252;
+  --bg-raised: #434c5e;
+  --bg-raised-hover: #4c566a;
+  --bg-active: #434c5e;
+  --bg-input: #2e3440;
+  --border: #4c566a;
+  --border-strong: #616e88;
+  --text: #d8dee9;
+  --text-strong: #eceff4;
+  --text-muted: #81899c;
+  --text-faint: #4c566a;
+  --accent: #5e81ac;
+  --accent-hover: #81a1c1;
+  --accent-strong: #88c0d0;
+  --accent-bg-soft: rgba(94, 129, 172, 0.25);
+  --accent-border-soft: rgba(94, 129, 172, 0.50);
+  --accent-hover-bg: #434c5e;
+  --scroll-thumb: #4c566a;
+  --scroll-thumb-hover: #616e88;
+  --bubble-user-bg: #3b4252;
+  --bubble-user-border: #4c566a;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+}

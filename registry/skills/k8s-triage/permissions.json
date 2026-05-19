@@ -1,0 +1,12 @@
+{
+  "always_allow": [
+    "^kubectl (get|describe|logs|top|explain) ",
+    "^kubectl config (current-context|get-contexts|view)"
+  ],
+  "ask_user": [
+    {
+      "pattern": "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)",
+      "reason": "destructive kubectl operation"
+    }
+  ]
+}

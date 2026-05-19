@@ -10,7 +10,9 @@ make build              # bin/yoke + bin/yoke-server (host platform)
 make build-root         # bin/yoke only
 make build-server       # bin/yoke-server (HTTP API)
 make examples          # opt-in: build all examples under bin/
-make release            # cross-platform binaries → dist/
+make release            # cross-platform raw binaries → dist/
+make package            # cross-platform + .deb + .rpm + .zip → dist/ (requires goreleaser)
+make package-check      # validate .goreleaser.yaml without building
 
 # Test
 make test               # all unit tests
@@ -35,8 +37,8 @@ go run . curate --user u --session s    # manual soft-skill curation
 go run . version                        # version info
 
 # Examples (opt-in; not part of `make build`)
-make build-example-s03_todo    # build a single example
-go run ./examples/s05_skills   # run an example directly
+make build-example-s11_todo    # build a single example
+go run ./examples/s21_skills   # run an example directly
 ```
 
 ## Architecture
@@ -50,13 +52,33 @@ Built on [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk) for t
 ```
 main.go / server/
     └── agent.NewAgent()            ← single wiring entry point
-            ├── leader              ← coordinator (fs tools + planning + mailbox)
-            │     ├── investigator  ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
-            │     └── summariser    ← condenses bulk output
-            └── curator             ← post-session soft-skill distiller (EventSessionEnd / EventCurateNow / idle harvester)
+            ├── Squads              ← one wired tree per squad in agent.json
+            │    ├── "default"      ← leader + full team (used when a session omits a squad)
+            │    │    ├── leader              ← coordinator (fs tools + planning + mailbox)
+            │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
+            │    │    ├── web_agent           ← web search + fetch
+            │    │    └── summariser          ← condenses bulk output
+            │    └── "research"     ← leader + smaller team, selectable per session
+            │         ├── leader
+            │         ├── web_agent
+            │         └── summariser
+            └── curator             ← process-wide post-session soft-skill distiller (one hook per generation)
 ```
 
-Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the leader (not via `transfer_to_agent`), so control always returns to the leader after a sub-agent call. Only one sub-agent runs at a time (enforced by `newNonConcurrentTool`).
+A **squad** is a named group `{ leader, members[] }` composed from the
+agents defined in `config/agents.json`. Each chat session selects one
+squad at creation (default when none is chosen); the server resolves
+`Instance.Squad(name).Runner` per session, so two sessions running on the
+same generation can use different squads. Squads only *reference* agents
+— skills, tools and MCP servers stay on the agent definitions, so two
+squads that share a member also share that member's wiring (and the MCP
+pool dedups any subprocess backing it).
+
+Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on
+the leader (not via `transfer_to_agent`), so control always returns to
+the leader after a sub-agent call. Only one sub-agent runs at a time
+(enforced by `newNonConcurrentTool`). The curator stays a single
+per-generation hook listening across every squad.
 
 ### Key packages
 
@@ -65,19 +87,19 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 | `agent/` | `NewAgent()` — wires all components; `ResolveRuntimeSettings()` — config precedence |
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
-| `core/tools/` | File-system tools: `read`, `write`, `grep`, `glob`, `revert`, `bash` (with safety floor) |
-| `core/permissions/` | YAML-based permission gating: always_deny → always_allow → ask_user |
+| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor) |
+| `core/permissions/` | JSON-based permission gating: always_deny → always_allow → ask_user |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
 | `internal/bg/` | Background command queue; `bash_background` + `bg_list` tools |
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/inbox` |
-| `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `skills/<name>/SKILL.md`) |
+| `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`) |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
-| `internal/mcp/` | MCP config loader from `config/mcp_config.yaml` |
+| `internal/mcp/` | MCP config loader from `config/mcp_config.json` |
 | `internal/tui/` | tview chat UI (trace pane + streaming chat) |
 | `server/` | HTTP API server with Bearer token auth |
 
@@ -85,18 +107,83 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 
 | File | Purpose |
 |---|---|
-| `config/agent.yaml` | Agent roles, model profiles, paths — main runtime config |
-| `config/mcp_config.yaml` | MCP server definitions (name, command, args, env) |
-| `config/permissions.yaml` | Tool permission rules (always_deny / always_allow / ask_user) |
-| `config/filters/` | Bash output filter patterns (token optimization) |
-| `skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
+| `config/agents.json` | List of enabled agent names, model profiles, squad composition, global paths |
+| `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
+| `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
+| `registry/agents/default.md` | Fallback system instruction for agents without their own |
+| `registry/skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
+| `config/mcp_config.json` | MCP server definitions (name, command, args, env) |
+| `config/permissions.json` | Tool permission rules (always_deny / always_allow / ask_user) |
+| `config/filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
+
+Agent definitions live in `registry/agents/<name>/` directories — mirroring
+the skills layout. `config/agents.json` no longer contains inline agent
+objects; its `agents` field is a list of names that reference the registry:
+
+```json
+{
+  "agents": ["leader", "investigator", "web_agent", "skill_editor", "skills_crawler", "summariser", "curator"],
+  "models": { ... },
+  "squads": [ ... ]
+}
+```
+
+Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
+`"builtin": true` flag marks agents shipped with yoke (leader,
+skill_editor, skills_crawler, summariser, curator); custom agents added
+by the user omit the flag. The web UI groups them under separate
+**Built-in** and **Custom** sections in the agents list.
+
+The registry directory uses the same 3-layer lookup as config files:
+`$HOME/.yoke/registry/agents`, `./registry/agents`, then
+`/etc/yoke/registry/agents` — first existing directory wins.
+
+### Filesystem layout
+
+Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
+
+- **Read root for config**: a 3-layer search chain, high → low precedence.
+  Whichever layer has a given file wins for that whole file (file-level
+  override, not deep merge):
+
+  1. `$HOME/.yoke/config/` — per-user overrides written by the web UI
+  2. `./config/` — developer/local checkout (CWD-relative)
+  3. `/etc/yoke/` — system-wide install
+
+  Override the chain via `YOKE_CONFIG_DIRS` (colon-separated; replaces
+  the chain wholesale).
+
+- **Write root for state**: always `$HOME/.yoke/` (override via `YOKE_HOME`).
+  Every mutable file the agent produces lands here, never beside the
+  CWD where the binary was started:
+
+  ```
+  $HOME/.yoke/
+  ├── config/           # editor writes (preferences.json, user overrides)
+  ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
+  │   │                 #   agent_statelog_*, agent_events_*, conversation_*
+  │   └── uploads/      # web UI file uploads (per-session)
+  ├── mailboxes/        # JSONL inter-agent mailboxes
+  ├── softskills/       # curator-distilled procedures (read AND write)
+  ├── registry/skills/  # web UI installed skills (override via YOKE_SKILLS_REGISTRY_DIR)
+  └── registry/agents/  # web UI installed agents (override via YOKE_AGENTS_REGISTRY_DIR)
+  ```
+
+  The web UI editor reads from the search chain but **always writes to
+  `$HOME/.yoke/config/`** — a first edit on a lower-precedence file forks
+  a per-user override that subsequent reads pick up.
+
+  The skill registry (`registry/skills/`) follows the same 3-layer lookup
+  as agent definitions — first existing directory in
+  `$HOME/.yoke/registry/skills`, `./registry/skills`,
+  `/etc/yoke/registry/skills` wins.
 
 ### Configuration precedence
 
-`defaults → config/agent.yaml → ENV → Options (struct/flags)`
+`defaults → config/agents.json → ENV → Options (struct/flags)`
 
-`api_key` and `base_url` values in YAML are resolved as environment variable names first (if an env var with that name exists and is non-empty, its value is used).
+`api_key` and `base_url` values in the config file are resolved as environment variable names first (if an env var with that name exists and is non-empty, its value is used).
 
 ### Environment variables
 
@@ -112,37 +199,186 @@ Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on the lea
 | `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
 | `YOKE_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
-| `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `logs/` and `logs/uploads/` (default `1h`; `0` disables) |
+| `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
+| `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
+| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `$YOKE_HOME/config:./config:/etc/yoke` |
+| `YOKE_CONFIG_PATH` | Explicit `agent.json` path; bypasses the chain |
+| `YOKE_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$YOKE_HOME/registry/skills`) |
+| `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 
 ### Session isolation
 
-Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `logs/`:
+Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `$YOKE_HOME/logs/`:
 
 - `agent_tasks_<u>_<ts>.json` — task graph
 - `agent_todo_<u>_<ts>.json` — todo plan
 - `agent_memory_<u>_<ts>.md` — compressed session memory
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
-- `conversation_<id>.json` — Web UI turn history + title + `Harvested` flag (server only)
+- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag (server only)
+
+### Hot reload (server mode)
+
+The HTTP server supports rebuilding the agent generation without
+restarting the process. Edits to `config/agents.json`,
+`config/permissions.json`, and `config/mcp_config.json` are picked up by
+`POST /api/config/reload` (or the "Reload" button in the web UI).
+
+The model is a two-layer build split across [agent/infrastructure.go](agent/infrastructure.go),
+[agent/instance.go](agent/instance.go), and [agent/manager.go](agent/manager.go):
+
+- **Infrastructure** is process-wide and survives every reload: mailbox
+  backend, session registry, event bus, ask_user registry, MCP subprocess
+  pool, and the session-scoped state holders (tasks, todo, bg queues).
+- **Instance** is one agent generation: a map of **SquadInstance** entries
+  (leader + sub-agents + plugins + runner per squad) derived from a
+  snapshot of RuntimeSettings. Each reload bumps the generation number
+  and builds a fresh Instance — with every squad rewired — on top of the
+  unchanged Infrastructure. The default squad's leader/runner/plugins
+  are mirrored at the top of Instance so legacy callers (CLI, TUI,
+  examples) keep working unchanged.
+- **Manager** owns the live generations. New sessions pin to the current
+  generation and record their squad on the session; the server resolves
+  `Manager.LookupSquad(sessionID, squadName).Runner` per turn. In-flight
+  sessions stay pinned to their existing generation across reloads, so a
+  streaming turn never observes a swap. An old generation is torn down
+  once its pinned-session refcount drops to zero.
+
+MCP subprocesses are deduplicated by `(command, args, env)` hash via
+[internal/mcp/pool.go](internal/mcp/pool.go): two generations that mount
+the same server share one child process. A reload that only changes one
+server restarts just that server.
+
+`GET /api/config/status` exposes the current generation and per-generation
+refcounts so the web UI can render a "n sessions draining on previous
+version" pill. The "Restart server" button stays available as the escape
+hatch for changes that hot-reload cannot apply (env vars, binary updates).
 
 ### Adding a new sub-agent
 
-1. Add an `AgentEntry` in `config/agent.yaml` with a unique `name`, `tools` list, and optional `model_ref`.
-2. `agent.NewAgent()` auto-discovers it via `runtime.Agents`; no Go code change needed unless you want a custom default instruction (`defaultAgentInstruction`) or tool wiring (`defaultToolKeys`).
+1. Create `registry/agents/<name>/agent.json` with the `AgentEntry` fields
+   (`name`, `description`, `tools`, optional `model_ref`, etc.). Omit the
+   `builtin` flag for user-added agents.
+2. Optionally create `registry/agents/<name>/instruction.md` to provide a
+   custom system instruction. If omitted, the agent falls back to
+   `registry/agents/default.md`.
+3. Add the agent's name to the `agents` list in `config/agents.json`.
+4. Add the new agent's name to the `members` list of every squad that
+   should expose it (omit the entry to keep an agent reserved for one
+   squad). If a squad omits the agent, the squad's leader won't see it
+   as a delegable tool.
+5. `agent.NewAgent()` auto-discovers the agent via `runtime.Agents`; no
+   Go code change needed unless you want custom tool wiring
+   (`defaultToolKeys`).
+
+### Adding a new squad
+
+Squads compose existing agents. Add a `SquadEntry` to the top-level
+`squads:` array in `config/agents.json`:
+
+```json
+{
+  "squads": [
+    {
+      "name": "default",
+      "leader": "leader",
+      "members": ["investigator", "web_agent", "summariser"]
+    },
+    {
+      "name": "research",
+      "description": "Web research focus.",
+      "leader": "leader",
+      "members": ["web_agent", "summariser"]
+    }
+  ]
+}
+```
+
+Rules enforced at resolution time:
+
+- A squad named `default` is always present; the resolver synthesises
+  one (from enabled agents) when missing or when the user adds only a
+  non-default squad in the editor.
+- `leader` and every `members[i]` must reference an enabled agent;
+  `curator` cannot be a member (it is process-wide).
+- Duplicate squad names are rejected.
+
+The web UI exposes a Squads sub-tab under Settings → Agent with leader
+dropdown, member checkboxes, and add/delete. Hot-reload picks up squad
+edits without a process restart.
 
 ### Adding a skill
 
-Create `skills/<name>/SKILL.md` with YAML front matter:
-```yaml
----
-name: my-skill
-description: One-line description shown in list_skills output
----
-# Skill content as markdown instructions
+1. Create `registry/skills/<name>/SKILL.md` with YAML front matter:
+   ```yaml
+   ---
+   name: my-skill
+   description: One-line description shown in list_skills output
+   ---
+   # Skill content as markdown instructions
+   ```
+   The directory name must equal the frontmatter `name` field.
+
+2. Add the skill name to the `"skills"` list in each agent's
+   `registry/agents/<name>/agent.json` that should have access to it:
+   ```json
+   { "skills": ["my-skill", "other-skill"] }
+   ```
+   An empty list means no skills; the field is absent for agents that
+   don't expose the `"Skill"` tool at all.
+
+Hot-reload picks up changes to `agent.json` without a process restart.
+The skill files themselves are read on demand at `load_skill` call time.
+
+### Remote registries (skills and agents)
+
+The web UI can browse and install both skills and agents from any GitHub,
+GitLab, or Gitea repository. Both share the same `config/remote_registries.json`
+file (with the same fork-on-first-edit semantics as other config), and
+the same set of provider adapters in [internal/registries/](internal/registries/).
+
+Each entry has a `kind` field: `skills` (default when missing — legacy),
+`agents`, or `both`. The Settings → Skills → Remotes and Settings → Agents
+→ Remotes tabs each list only the registries whose `kind` matches; a `both`
+entry shows up in both. The "Hosts" selector on the add/edit dialog sets
+the kind.
+
+Remote layout — agents:
+
+```
+repo/path/to/agents/
+├── leader/
+│   ├── agent.json        ← required; same shape as registry/agents/<name>/agent.json
+│   └── instruction.md    ← optional
+└── investigator/
+    └── agent.json
 ```
 
-The leader auto-discovers skills at startup; no config change required.
+Remote layout — skills: one `SKILL.md` per subdirectory.
+
+```
+repo/path/to/skills/
+├── my-skill/
+│   └── SKILL.md
+└── other-skill/
+    └── SKILL.md
+```
+
+The browse view discovers either `agent.json` or `SKILL.md` files
+recursively under the registry URL's `tree` path. The install button
+downloads every file in the matched directory into
+`$YOKE_HOME/registry/agents/<name>/` (agents) or
+`$YOKE_HOME/registry/skills/<name>/` (skills). After installing a skill,
+add its name to the target agent's `"skills"` list in `agent.json` —
+either via the web UI Skills tab or by editing the file directly.
+
+The agent install dialog also exposes an "Enable in config/agents.json"
+checkbox — when checked the installed agent's name is appended to the
+runtime config's `agents` list so the next hot-reload wires it in.
+
+Use `YOKE_AGENTS_REGISTRY_DIR` or `YOKE_SKILLS_REGISTRY_DIR` to redirect
+either install location independently of `YOKE_HOME`.
 
 ### Web UI debug mode
 

@@ -127,6 +127,101 @@ func TestRunWriteCreatesParentDirs(t *testing.T) {
 	}
 }
 
+func TestRunEditBasic(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "edit.txt")
+	if err := os.WriteFile(path, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "world", NewString: "yoke"})
+	if err != nil {
+		t.Fatalf("RunEdit() error = %v", err)
+	}
+	if !strings.Contains(msg, "1 replacement") {
+		t.Fatalf("RunEdit() = %q", msg)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "hello yoke\n" {
+		t.Fatalf("file after edit = %q", string(data))
+	}
+}
+
+func TestRunEditNotFound(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "edit.txt")
+	if err := os.WriteFile(path, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "absent", NewString: "x"})
+	if err != nil {
+		t.Fatalf("RunEdit() error = %v", err)
+	}
+	if !strings.Contains(msg, "not found") {
+		t.Fatalf("RunEdit(not found) = %q", msg)
+	}
+}
+
+func TestRunEditAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "edit.txt")
+	if err := os.WriteFile(path, []byte("foo foo\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "foo", NewString: "bar"})
+	if err != nil {
+		t.Fatalf("RunEdit() error = %v", err)
+	}
+	if !strings.Contains(msg, "appears 2 times") {
+		t.Fatalf("RunEdit(ambiguous) = %q", msg)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "foo foo\n" {
+		t.Fatalf("file should be unchanged after ambiguous edit, got %q", string(data))
+	}
+}
+
+func TestRunEditReplaceAll(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "edit.txt")
+	if err := os.WriteFile(path, []byte("foo foo\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "foo", NewString: "bar", ReplaceAll: true})
+	if err != nil {
+		t.Fatalf("RunEdit() error = %v", err)
+	}
+	if !strings.Contains(msg, "2 replacement") {
+		t.Fatalf("RunEdit(replace_all) = %q", msg)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "bar bar\n" {
+		t.Fatalf("file after replace_all = %q", string(data))
+	}
+}
+
+func TestRunEditRevertable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "edit.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, _ = RunEdit(context.Background(), EditIn{Path: path, OldString: "original", NewString: "changed"})
+	_, _ = RunRevert(context.Background(), RevertIn{Path: path})
+
+	data, _ := os.ReadFile(path)
+	if string(data) != "original\n" {
+		t.Fatalf("file after revert = %q, want original", string(data))
+	}
+}
+
 func TestRunRevertNoSnapshot(t *testing.T) {
 	t.Parallel()
 

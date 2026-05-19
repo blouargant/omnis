@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/paths"
 )
 
 // defaultGCInterval is the period between sweeps when YOKE_SERVER_GC_INTERVAL
@@ -20,12 +21,12 @@ const defaultGCInterval = time.Hour
 // gcStats summarises what a single sweep removed. Reported via the admin
 // endpoint and logged after every periodic sweep.
 type gcStats struct {
-	Conversations    int      `json:"conversations"`
-	AgentFiles       int      `json:"agent_files"`
-	Uploads          int      `json:"uploads"`
-	Mailboxes        int      `json:"mailboxes"`
-	RegistryEntries  int      `json:"registry_entries"`
-	Errors           []string `json:"errors,omitempty"`
+	Conversations   int      `json:"conversations"`
+	AgentFiles      int      `json:"agent_files"`
+	Uploads         int      `json:"uploads"`
+	Mailboxes       int      `json:"mailboxes"`
+	RegistryEntries int      `json:"registry_entries"`
+	Errors          []string `json:"errors,omitempty"`
 }
 
 func (s gcStats) total() int {
@@ -106,10 +107,10 @@ func runGC(reg *registry, deps gcDeps) gcStats {
 }
 
 func sweepLogsDir(stats gcStats, activeIDs, activeSuffixes map[string]struct{}) gcStats {
-	entries, err := os.ReadDir(logsDir)
+	entries, err := os.ReadDir(logsDir())
 	if err != nil {
 		if !os.IsNotExist(err) {
-			stats.Errors = append(stats.Errors, fmt.Sprintf("read %s: %v", logsDir, err))
+			stats.Errors = append(stats.Errors, fmt.Sprintf("read %s: %v", logsDir(), err))
 		}
 		return stats
 	}
@@ -118,7 +119,7 @@ func sweepLogsDir(stats gcStats, activeIDs, activeSuffixes map[string]struct{}) 
 			continue
 		}
 		name := e.Name()
-		full := filepath.Join(logsDir, name)
+		full := filepath.Join(logsDir(), name)
 
 		if strings.HasPrefix(name, "conversation_") && strings.HasSuffix(name, ".json") {
 			id := strings.TrimSuffix(strings.TrimPrefix(name, "conversation_"), ".json")
@@ -154,10 +155,10 @@ func sweepLogsDir(stats gcStats, activeIDs, activeSuffixes map[string]struct{}) 
 }
 
 func sweepUploadsDir(stats gcStats, activeIDs map[string]struct{}) gcStats {
-	entries, err := os.ReadDir(uploadsBaseDir)
+	entries, err := os.ReadDir(uploadsBaseDir())
 	if err != nil {
 		if !os.IsNotExist(err) {
-			stats.Errors = append(stats.Errors, fmt.Sprintf("read %s: %v", uploadsBaseDir, err))
+			stats.Errors = append(stats.Errors, fmt.Sprintf("read %s: %v", uploadsBaseDir(), err))
 		}
 		return stats
 	}
@@ -169,7 +170,7 @@ func sweepUploadsDir(stats gcStats, activeIDs map[string]struct{}) gcStats {
 		if _, ok := activeIDs[id]; ok {
 			continue
 		}
-		path := filepath.Join(uploadsBaseDir, id)
+		path := filepath.Join(uploadsBaseDir(), id)
 		if err := os.RemoveAll(path); err != nil {
 			stats.Errors = append(stats.Errors, fmt.Sprintf("remove %s: %v", path, err))
 			continue
@@ -180,7 +181,7 @@ func sweepUploadsDir(stats gcStats, activeIDs map[string]struct{}) gcStats {
 }
 
 func sweepMailboxesDir(stats gcStats, activeSuffixes map[string]struct{}) gcStats {
-	const mailboxesDir = ".mailboxes"
+	mailboxesDir := paths.MailboxesDir()
 	entries, err := os.ReadDir(mailboxesDir)
 	if err != nil {
 		if !os.IsNotExist(err) {

@@ -1,8 +1,9 @@
 # Single-component demo catalog
 
 The `examples/sNN_*` binaries each isolate one component of the harness.
-They mirror the phases of the original article so you can run, read or
-modify components in isolation. Run any of them with:
+They are ordered from the simplest (a bare loop, single tool) to the
+most complex (multi-agent / distributed / end-to-end). Run any of them
+with:
 
 ```bash
 go run ./examples/sNN_<name> "<your prompt>"
@@ -20,59 +21,70 @@ go run ./examples/sNN_<name> "<your prompt>"
 > concurrent `(user, session)` pairs stay isolated — see
 > [configuration.md#session-isolation](configuration.md#session-isolation).
 
-## Phase 1 — Loop & basic tools
+## Tier 1 — Single-tool basics
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s01 | `examples/s01_loop`        | The bare model→tool→model loop. No tools attached.           |
-| s02 | `examples/s02_tools`       | The full file/shell tool kit (`bash`, `read`, `write`, `grep`, `glob`, `revert`). |
-| s03 | `examples/s03_todo`        | TodoWrite planning tools.                                    |
-| s04 | `examples/s04_subagents`   | A sub-agent (`summariser`) wrapped as a tool via `agenttool`.|
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s01 | `examples/s01_loop`          | The bare model→tool→model loop. No tools attached.                                  |
+| s02 | `examples/s02_calc`          | The `calculate` tool — offload arithmetic from the model.                           |
+| s03 | `examples/s03_mime`          | The `mime` tool — magic-byte detection vs. filename extension mismatch.             |
+| s04 | `examples/s04_stream`        | Streaming text output to stdout.                                                    |
+| s05 | `examples/s05_tools`         | The full file/shell tool kit (`bash`, `read`, `write`, `grep`, `glob`, `revert`).   |
+| s06 | `examples/s06_revert`        | The `revert` tool walking back a write.                                             |
+| s07 | `examples/s07_web_search`    | `web_search` (DuckDuckGo or SerpAPI) + `web_fetch`.                                 |
 
-## Phase 2 — Skills & memory
+## Tier 2 — Tool-ecosystem extensions
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s05 | `examples/s05_skills`      | Lazy skill loading from `./skills/`.                         |
-| s06 | `examples/s06_compress`    | Context-compression plugin with a tiny threshold for visibility. |
-| s07 | `examples/s07_tasks`       | Durable task graph (`task_create` / `_update` / `_list`).    |
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s08 | `examples/s08_ask_user`      | The interactive `ask_user` tool wired to stdin.                                     |
+| s09 | `examples/s09_output_filters`| Bash output filters (`config/filters/*.json`) condensing noisy commands.            |
+| s10 | `examples/s10_mcp`           | MCP toolsets loaded from JSON.                                                      |
 
-## Phase 3 — Long-running work & teamwork
+## Tier 3 — Session state
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s08 | `examples/s08_bg`          | Background commands with notifications (`bash_background`).  |
-| s09 | `examples/s09_mailbox`     | Persistent teammate mailbox (in-memory backend).             |
-| s10 | `examples/s10_fsm`         | The teammate FSM communication protocol exposed end-to-end.  |
-| s11 | `examples/s11_self_assign` | An autonomous worker goroutine claims and completes tasks.   |
-| s12 | `examples/s12_worktree`    | Git worktree isolation tools.                                |
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s11 | `examples/s11_todo`          | TodoWrite planning tools.                                                           |
+| s12 | `examples/s12_tasks`         | Durable task graph (`task_create` / `_update` / `_list`).                           |
+| s13 | `examples/s13_bg`            | Background commands with notifications (`bash_background`).                         |
+| s14 | `examples/s14_cache`         | Prompt-cache stats plugin.                                                          |
+| s15 | `examples/s15_parallel`      | Several tool calls dispatched in one model turn.                                    |
+| s16 | `examples/s16_resume`        | Resuming a session across two runs.                                                 |
+| s17 | `examples/s17_interrupt`     | `Ctrl-C` cancels the run cleanly via `context.Cancel`.                              |
 
-## Phase 4 — Streaming, governance, observability
+## Tier 4 — Cross-cutting plugins
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s13 | `examples/s13_stream`      | Streaming text output to stdout.                             |
-| s14 | `examples/s14_revert`      | The `revert` tool walking back a write.                      |
-| s15 | `examples/s15_permissions` | YAML-driven permission gating (`config/permissions.yaml`).   |
-| s16 | `examples/s16_events`      | Event bus + file logger plugin.                              |
-| s17 | `examples/s17_resume`      | Resuming a session across two runs.                          |
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s18 | `examples/s18_events`        | Event bus + file logger plugin.                                                     |
+| s19 | `examples/s19_permissions`   | JSON-driven permission gating (`config/permissions.json`).                          |
+| s20 | `examples/s20_compress`      | Context-compression plugin with a tiny threshold for visibility.                    |
 
-## Phase 5 — Performance & external tools
+## Tier 5 — Specialisation & multi-agent
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s18 | `examples/s18_parallel`    | Several tool calls dispatched in one model turn.             |
-| s19 | `examples/s19_interrupt`   | `Ctrl-C` cancels the run cleanly via `context.Cancel`.       |
-| s20 | `examples/s20_cache`       | Prompt-cache stats plugin.                                   |
-| s21 | `examples/s21_mcp`         | MCP toolsets loaded from YAML.                               |
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s21 | `examples/s21_skills`        | Lazy skill loading from `./skills/`.                                                |
+| s22 | `examples/s22_subagents`     | A sub-agent (`summariser`) wrapped as a tool via `agenttool`.                       |
+| s23 | `examples/s23_softskills`    | Soft-skills curator distilling a synthetic session into reusable procedures.        |
 
-## Phase 6 — Production extras
+## Tier 6 — Multi-process & distributed
 
-| #   | Binary                | What it shows                                                |
-|-----|-----------------------|--------------------------------------------------------------|
-| s22 | `examples/s22_redis`       | Redis-backed teammate mailbox (`REDIS_URL` required).        |
-| s23 | `examples/s23_conflicts`   | Programmatic creation of conflicting worktrees → merge abort with conflict list. |
-| s24 | `examples/s24_k8s_context_e2e` | Real-world Kubernetes context-compression validation with pass/fail checks. |
+| #   | Binary                       | What it shows                                                                       |
+|-----|------------------------------|-------------------------------------------------------------------------------------|
+| s24 | `examples/s24_worktree`      | Git worktree isolation tools.                                                       |
+| s25 | `examples/s25_conflicts`     | Programmatic creation of conflicting worktrees → merge abort with conflict list.    |
+| s26 | `examples/s26_mailbox`       | Persistent teammate mailbox (in-memory backend).                                    |
+| s27 | `examples/s27_fsm`           | The teammate FSM communication protocol exposed end-to-end.                         |
+| s28 | `examples/s28_self_assign`   | An autonomous worker goroutine claims and completes tasks.                          |
+| s29 | `examples/s29_redis`         | Redis-backed teammate mailbox (`REDIS_URL` required).                               |
+
+## Tier 7 — End-to-end
+
+| #   | Binary                           | What it shows                                                                   |
+|-----|----------------------------------|---------------------------------------------------------------------------------|
+| s30 | `examples/s30_k8s_context_e2e`   | Real-world Kubernetes context-compression validation with pass/fail checks.     |
 
 ## Full launcher
 

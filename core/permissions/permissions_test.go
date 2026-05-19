@@ -9,14 +9,14 @@ import (
 func TestLoadMissingRulesReturnsEmptySet(t *testing.T) {
 	t.Parallel()
 
-	rules, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	rules, err := Load(filepath.Join(t.TempDir(), "missing.json"))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if rules == nil {
 		t.Fatal("Load() returned nil rules")
 	}
-	if decision, _ := rules.Check("bash", "ls"); decision != DecisionAllow {
+	if decision, _ := rules.Check("Bash", "ls"); decision != DecisionAllow {
 		t.Fatalf("Check() = %v, want allow", decision)
 	}
 }
@@ -24,8 +24,16 @@ func TestLoadMissingRulesReturnsEmptySet(t *testing.T) {
 func TestRulesCheckHonorsDenyAllowAndAsk(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "permissions.yaml")
-	content := "always_deny:\n  - pattern: rm\\s+-rf\n    reason: destructive\nalways_allow:\n  - ls\nask_user:\n  - pattern: kubectl\n    reason: cluster access\n"
+	path := filepath.Join(t.TempDir(), "permissions.json")
+	content := `{
+  "always_deny": [
+    {"pattern": "rm\\s+-rf", "reason": "destructive"}
+  ],
+  "always_allow": ["ls"],
+  "ask_user": [
+    {"pattern": "kubectl", "reason": "cluster access"}
+  ]
+}`
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -35,13 +43,13 @@ func TestRulesCheckHonorsDenyAllowAndAsk(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if decision, reason := rules.Check("bash", `{"command":"rm -rf /tmp/demo"}`); decision != DecisionDeny || reason != "destructive" {
+	if decision, reason := rules.Check("Bash", `{"command":"rm -rf /tmp/demo"}`); decision != DecisionDeny || reason != "destructive" {
 		t.Fatalf("deny Check() = (%v, %q)", decision, reason)
 	}
-	if decision, _ := rules.Check("bash", `{"command":"ls -la"}`); decision != DecisionAllow {
+	if decision, _ := rules.Check("Bash", `{"command":"ls -la"}`); decision != DecisionAllow {
 		t.Fatalf("allow Check() = %v", decision)
 	}
-	if decision, reason := rules.Check("bash", `{"command":"kubectl get pods"}`); decision != DecisionAsk || reason != "cluster access" {
+	if decision, reason := rules.Check("Bash", `{"command":"kubectl get pods"}`); decision != DecisionAsk || reason != "cluster access" {
 		t.Fatalf("ask Check() = (%v, %q)", decision, reason)
 	}
 }

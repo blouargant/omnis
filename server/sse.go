@@ -68,11 +68,22 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			defer release()
 		}
 
+		// Pin (if not already) to the current generation and resolve the
+		// session's squad inside it. A reload between turns leaves the
+		// session attached to its existing generation so a streaming turn
+		// never observes a swap.
+		sq := d.Manager.LookupSquad(meta.ID, meta.Squad)
+		if sq == nil || sq.Runner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent generation not available"})
+			return
+		}
+		allowFileAttachments := sq.LeaderAllowFileAttachments
+
 		parts := []*genai.Part{{Text: req.Prompt}}
 		var toolPaths []string
 		for _, fp := range req.Files {
 			mime := imageMIME(fp)
-			if d.AllowFileAttachments && mime != "" {
+			if allowFileAttachments && mime != "" {
 				data, err := os.ReadFile(fp)
 				if err != nil {
 					log.Printf("server: skipping unreadable file %q: %v", fp, err)
@@ -94,7 +105,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			parts[0] = &genai.Part{Text: req.Prompt + note}
 		}
 
-		seq := d.Runner.Run(ctx, meta.UserID, meta.ID,
+		seq := sq.Runner.Run(ctx, meta.UserID, meta.ID,
 			&genai.Content{Role: "user", Parts: parts},
 			agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
 

@@ -1,0 +1,25 @@
+[data-theme="gruvbox-dark"] {
+  --bg: #282828;
+  --bg-panel: #1d2021;
+  --bg-raised: #3c3836;
+  --bg-raised-hover: #504945;
+  --bg-active: #504945;
+  --bg-input: #1d2021;
+  --border: #3c3836;
+  --border-strong: #665c54;
+  --text: #ebdbb2;
+  --text-strong: #fbf1c7;
+  --text-muted: #a89984;
+  --text-faint: #665c54;
+  --accent: #fe8019;
+  --accent-hover: #fabd2f;
+  --accent-strong: #fb4934;
+  --accent-bg-soft: rgba(254, 128, 25, 0.18);
+  --accent-border-soft: rgba(254, 128, 25, 0.40);
+  --accent-hover-bg: #3c3836;
+  --scroll-thumb: #504945;
+  --scroll-thumb-hover: #665c54;
+  --bubble-user-bg: #1d2021;
+  --bubble-user-border: #3c3836;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+}

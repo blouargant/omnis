@@ -51,7 +51,7 @@ Then register it in the root `main.go`:
 leadTools = append(leadTools, mytool.New())
 ```
 
-If the tool is mutating, **also add a `permissions.yaml` rule** so the
+If the tool is mutating, **also add a `permissions.json` rule** so the
 gating plugin can prompt the user.
 
 ## Add a new plugin
@@ -103,31 +103,108 @@ you can attribute token spend to each agent.
 
 ## Add a new sub-agent
 
-Sub-agents are constructed with `agentkit.New` like the lead is. Keep
-their **instruction domain-neutral** — describe their *role* (e.g.
-"validate inputs", "estimate cost") not their *domain*. Domain belongs
-in skills.
+Most of the time you don't write any Go code. Agents live as files
+under `registry/agents/<name>/` — one directory per agent, mirroring
+the skills layout. Keep the per-agent instruction **domain-neutral** —
+describe the *role* (e.g. "validate inputs", "estimate cost") not the
+*domain*. Domain belongs in skills.
 
-```go
-critic, err := agentkit.New(agentkit.AgentConfig{
-    Name:        "critic",
-    Description: "Pokes holes in a proposed plan.",
-    Model:       llm,
-    Instruction: "You are an adversarial reviewer. For each step in the proposed plan, list the most likely failure mode in one sentence. Cite evidence when possible.",
-})
+Three steps:
+
+**1.** Create the agent directory with its definition:
+
+```bash
+mkdir -p registry/agents/critic
 ```
 
-Expose it to the lead as a tool:
+`registry/agents/critic/agent.json`:
 
-```go
-leadTools = append(leadTools, agenttool.New(critic, &agenttool.Config{}))
+```json
+{
+  "name": "critic",
+  "description": "Pokes holes in a proposed plan.",
+  "model_ref": "default",
+  "tools": ["fs"]
+}
 ```
 
-Add it to the multi-loader so the launcher can address it:
+**2.** Optionally add a system prompt at
+`registry/agents/critic/instruction.md`. If omitted, the agent falls
+back to `registry/agents/default.md`.
 
-```go
-loader, err := adkagent.NewMultiLoader(lead, investigator, summariser, critic)
+```markdown
+You are an adversarial reviewer. For each step in the proposed plan,
+list the most likely failure mode in one sentence. Cite evidence when
+possible.
 ```
+
+**3.** Register the agent by adding its name to the `agents` list in
+`config/agents.json`:
+
+```json
+{
+  "agents": ["leader", "investigator", "critic"]
+}
+```
+
+Then add it to the `members:` list of every squad that should be able
+to delegate to it (see "Add a squad" below). If no squad includes the
+new agent, no session will see it — that's how you keep an agent
+reserved for a specific squad.
+
+Built-in vs custom: the agents shipped with yoke (`leader`,
+`skill_editor`, `skills_crawler`, `summariser`, `curator`) carry
+`"builtin": true` in their `agent.json`. The web UI displays them under
+a **Built-in Agents** section, separated from user-added **Custom
+Agents**. Leave the flag out for your own agents.
+
+For programmatic embedders (CLI / examples / TUI) the same registry is
+consumed when `agent.NewAgent()` runs; the lower-level constructor
+`agentkit.New(...)` is still available if you want to wire a sub-agent
+outside the file pipeline.
+
+## Add a squad
+
+A **squad** is the named group of agents `{ leader, members[] }` a chat
+session uses. Declare squads under the top-level `squads:` array in
+`config/agents.json`:
+
+```json
+{
+  "agents": ["leader", "investigator", "critic", "summariser"],
+  "squads": [
+    {
+      "name": "default",
+      "description": "General-purpose squad.",
+      "leader": "leader",
+      "members": ["investigator", "summariser"]
+    },
+    {
+      "name": "review",
+      "description": "Plan review with an adversarial reviewer.",
+      "leader": "leader",
+      "members": ["critic", "summariser"]
+    }
+  ]
+}
+```
+
+Rules:
+
+- `default` is always required and is auto-synthesised when omitted.
+- `leader` and every member must reference an enabled agent in `agents:`.
+- The squad's `leader` must point to an agent marked `"leader": true`. The
+  agent literally named `leader` is auto-flagged; mark any other coordinator
+  with `"leader": true` to make it eligible as a squad lead.
+- `curator` cannot be a member — it stays process-wide.
+
+Each squad becomes a separate wired tree inside the current generation
+(leader + sub-agents + runner + plugins). New chat sessions pick a
+squad through the picker next to the **New Chat** button in the web UI
+(or via `POST /api/sessions` with `{"squad": "review"}` on the API). In
+the web UI's Settings → Agent panel, the **Squads** sub-tab provides a
+structured editor with leader dropdown, member checkboxes, and
+add/delete; saving triggers a hot reload.
 
 ## Add a new LLM provider
 
@@ -146,7 +223,7 @@ each, no third-party SDK.
 ## Conventions
 
 - **Stay domain-neutral** in the harness. Domains live in `skills/`,
-  `config/mcp_config.yaml` and `config/permissions.yaml`.
+  `config/mcp_config.json` and `config/permissions.json`.
 - **One package per component.** Mirror the existing `core/` and
   `internal/` layout.
 - **Expose tools through `tool.Tool`**, never as bare Go functions

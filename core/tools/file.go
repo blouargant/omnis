@@ -86,6 +86,55 @@ func RunWrite(_ context.Context, in WriteIn) (string, error) {
 	return fmt.Sprintf("wrote %s (%d bytes; snapshot saved - call revert to undo)", in.Path, len(in.Content)), nil
 }
 
+type EditIn struct {
+	Path       string `json:"file_path"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
+}
+type EditOut struct {
+	Result string `json:"result"`
+}
+
+// RunEdit replaces the first (or all) occurrence of OldString with NewString
+// in the named file, snapshotting the previous content so RunRevert can undo.
+// Returns an error message if OldString is not found or (when ReplaceAll is
+// false) appears more than once — the caller must be explicit.
+func RunEdit(_ context.Context, in EditIn) (string, error) {
+	data, err := os.ReadFile(in.Path)
+	if err != nil {
+		return fmt.Sprintf("Error reading %s: %v", in.Path, err), nil
+	}
+	content := string(data)
+	count := strings.Count(content, in.OldString)
+	if count == 0 {
+		return fmt.Sprintf("Error: old_string not found in %s", in.Path), nil
+	}
+	if !in.ReplaceAll && count > 1 {
+		return fmt.Sprintf("Error: old_string appears %d times in %s — set replace_all:true or provide more context to make it unique", count, in.Path), nil
+	}
+
+	snapMu.Lock()
+	s := content
+	snapshots[in.Path] = &s
+	snapMu.Unlock()
+
+	var updated string
+	if in.ReplaceAll {
+		updated = strings.ReplaceAll(content, in.OldString, in.NewString)
+	} else {
+		updated = strings.Replace(content, in.OldString, in.NewString, 1)
+	}
+	if err := os.WriteFile(in.Path, []byte(updated), 0o644); err != nil {
+		return fmt.Sprintf("Error writing %s: %v", in.Path, err), nil
+	}
+	n := count
+	if !in.ReplaceAll {
+		n = 1
+	}
+	return fmt.Sprintf("edited %s (%d replacement(s); snapshot saved - call revert to undo)", in.Path, n), nil
+}
+
 type RevertIn struct {
 	Path string `json:"file_path"`
 }

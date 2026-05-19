@@ -15,8 +15,20 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="/assets/styles.css" />
-  <link rel="stylesheet" href="/assets/settings.css" />
+  <link rel="stylesheet" href="/assets/css/styles.css?v=4" />
+  <link rel="stylesheet" href="/assets/css/settings.css?v=4" />
+  <link rel="stylesheet" href="/assets/css/themes/github-dark.css" />
+  <link rel="stylesheet" href="/assets/css/themes/one-dark.css" />
+  <link rel="stylesheet" href="/assets/css/themes/vscode-light.css" />
+  <link rel="stylesheet" href="/assets/css/themes/github-light.css" />
+  <link rel="stylesheet" href="/assets/css/themes/dracula.css" />
+  <link rel="stylesheet" href="/assets/css/themes/nord.css" />
+  <link rel="stylesheet" href="/assets/css/themes/tokyo-night.css" />
+  <link rel="stylesheet" href="/assets/css/themes/solarized-dark.css" />
+  <link rel="stylesheet" href="/assets/css/themes/monokai.css" />
+  <link rel="stylesheet" href="/assets/css/themes/gruvbox-dark.css" />
+  <link rel="stylesheet" href="/assets/css/themes/solarized-light.css" />
+  <link rel="stylesheet" href="/assets/css/themes/subtile-grey.css" />
   <script src="/assets/marked.min.js"></script>
 </head>
 <body>
@@ -24,13 +36,23 @@
     <div id="sidebar-header">
       <span class="app-name">Yoke</span>
       <div class="sidebar-header-btns">
-        <button id="new-chat" type="button" title="New chat">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
         <button id="sidebar-toggle" type="button" title="Hide sidebar">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
       </div>
+    </div>
+    <div id="new-chat-wrap">
+      <button id="new-chat" type="button" title="New chat">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="new-chat-text">
+          <span class="new-chat-label">New Chat</span>
+          <span class="new-chat-sub" hidden></span>
+        </span>
+      </button>
+      <button id="squad-toggle" type="button" title="Choose squad" aria-haspopup="true" aria-expanded="false" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="squad-menu" role="menu" hidden></div>
     </div>
     <div class="sidebar-section-label">Sessions</div>
     <ul id="session-list" aria-label="sessions"></ul>
@@ -143,7 +165,72 @@
     </div>
   </div>
 
+  <div id="user-cmd-modal-overlay" hidden>
+    <div id="user-cmd-modal" role="dialog" aria-modal="true" aria-labelledby="user-cmd-modal-title">
+      <div class="user-cmd-modal-header">
+        <span id="user-cmd-modal-title">Add command</span>
+        <button id="user-cmd-modal-close" type="button" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="user-cmd-modal-body">
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">Name</span>
+          <div class="user-cmd-name-row">
+            <span class="user-cmd-name-prefix">/</span>
+            <input id="user-cmd-name" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="review" />
+          </div>
+          <span class="user-cmd-field-hint">letters, digits, '-' or '_' (1–40 chars)</span>
+        </label>
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">Description</span>
+          <input id="user-cmd-desc" type="text" maxlength="120" autocomplete="off" placeholder="Review the staged changes" />
+        </label>
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">Arguments hint <span class="user-cmd-field-optional">(optional)</span></span>
+          <input id="user-cmd-args" type="text" maxlength="60" autocomplete="off" placeholder="[file]" />
+          <span class="user-cmd-field-hint">shown next to the command name in the slash menu</span>
+        </label>
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">Prompt template</span>
+          <textarea id="user-cmd-prompt" rows="6" spellcheck="false" placeholder="Review the staged changes carefully. Focus on $1 if provided."></textarea>
+          <span class="user-cmd-field-hint">Use <code>$1</code>, <code>$2</code> … for positional args, <code>$*</code> for all args.</span>
+        </label>
+        <div id="user-cmd-error" class="user-cmd-error" hidden></div>
+      </div>
+      <div class="user-cmd-modal-footer">
+        <button id="user-cmd-modal-cancel" type="button">Cancel</button>
+        <button id="user-cmd-modal-save" type="button" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="skill-name-modal-overlay" hidden>
+    <div id="skill-name-modal" role="dialog" aria-modal="true" aria-labelledby="skill-name-modal-title">
+      <div class="user-cmd-modal-header">
+        <span id="skill-name-modal-title">Create skill</span>
+        <button id="skill-name-modal-close" type="button" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="user-cmd-modal-body">
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">Skill name</span>
+          <div class="user-cmd-name-row">
+            <input id="skill-name-input" type="text" maxlength="63" autocomplete="off" spellcheck="false" placeholder="my-skill" />
+          </div>
+          <span class="user-cmd-field-hint">lowercase letters, digits, '-' or '.' (1–63 chars)</span>
+        </label>
+        <div id="skill-name-modal-error" class="user-cmd-error" hidden></div>
+      </div>
+      <div class="user-cmd-modal-footer">
+        <button id="skill-name-modal-cancel" type="button">Cancel</button>
+        <button id="skill-name-modal-start" type="button" class="primary">Start</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/assets/app.js" defer></script>
-  <script src="/assets/settings.js" defer></script>
+  <script src="/assets/settings.js?v=3" defer></script>
 </body>
 </html>

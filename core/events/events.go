@@ -75,34 +75,77 @@ type PluginOptions struct {
 // Bus is a tiny in-process publish/subscribe bus.
 type Bus struct {
 	mu       sync.RWMutex
-	handlers map[string][]Handler
+	nextID   uint64
+	handlers map[string][]handlerEntry
+}
+
+// Subscription is the token returned by Subscribe; call Off to detach the
+// handler. Off is idempotent and safe to call from multiple goroutines.
+type Subscription struct {
+	bus   *Bus
+	event string
+	id    uint64
+}
+
+type handlerEntry struct {
+	id uint64
+	h  Handler
 }
 
 // NewBus returns an empty bus.
-func NewBus() *Bus { return &Bus{handlers: map[string][]Handler{}} }
+func NewBus() *Bus { return &Bus{handlers: map[string][]handlerEntry{}} }
 
-// On registers a handler for an event. Returns the bus for chaining.
+// On registers a handler for an event. Returns the bus for chaining; the
+// handler stays attached for the lifetime of the bus. Use Subscribe when
+// you need to detach the handler later (typical for per-generation hooks
+// that should be unwired on agent reload).
 func (b *Bus) On(event string, h Handler) *Bus {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.handlers[event] = append(b.handlers[event], h)
+	b.Subscribe(event, h)
 	return b
+}
+
+// Subscribe is like On but returns a Subscription whose Off method removes
+// the handler again. Useful for hot-reload paths where each agent generation
+// owns its own set of handlers and must clean them up on teardown.
+func (b *Bus) Subscribe(event string, h Handler) *Subscription {
+	b.mu.Lock()
+	b.nextID++
+	id := b.nextID
+	b.handlers[event] = append(b.handlers[event], handlerEntry{id: id, h: h})
+	b.mu.Unlock()
+	return &Subscription{bus: b, event: event, id: id}
+}
+
+// Off detaches this subscription's handler from the bus. Idempotent.
+func (s *Subscription) Off() {
+	if s == nil || s.bus == nil {
+		return
+	}
+	s.bus.mu.Lock()
+	defer s.bus.mu.Unlock()
+	list := s.bus.handlers[s.event]
+	for i, he := range list {
+		if he.id == s.id {
+			s.bus.handlers[s.event] = append(list[:i], list[i+1:]...)
+			return
+		}
+	}
 }
 
 // Emit fires an event to all registered handlers. Errors inside a handler
 // are isolated.
 func (b *Bus) Emit(event string, payload map[string]any) {
 	b.mu.RLock()
-	hs := append([]Handler(nil), b.handlers[event]...)
+	hs := append([]handlerEntry(nil), b.handlers[event]...)
 	b.mu.RUnlock()
-	for _, h := range hs {
+	for _, he := range hs {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
 					fmt.Fprintf(os.Stderr, "[events] handler panic on %s: %v\n", event, r)
 				}
 			}()
-			h(event, payload)
+			he.h(event, payload)
 		}()
 	}
 }

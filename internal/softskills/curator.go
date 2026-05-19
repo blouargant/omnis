@@ -130,9 +130,6 @@ type CuratorConfig struct {
 	Model model.LLM
 	// SoftSkillsDir defaults to DefaultDir.
 	SoftSkillsDir string
-	// SkillsDir is where authored skills live; used for the redundancy
-	// audit listing the curator embeds in its prompt.
-	SkillsDir string
 	// AgentNames lists all known sub-agent names (excluding leader and
 	// curator). Passed to the curator prompt so it knows which `agent`
 	// values are valid write targets.
@@ -149,7 +146,7 @@ type CuratorConfig struct {
 // Authored skill names are passed in the user prompt by Curate() instead.
 func NewCurator(ctx context.Context, cfg CuratorConfig) (adkagent.Agent, error) {
 	if cfg.SoftSkillsDir == "" {
-		cfg.SoftSkillsDir = DefaultDir
+		cfg.SoftSkillsDir = DefaultDir()
 	}
 	if cfg.Model == nil {
 		return nil, fmt.Errorf("softskills: curator requires Model")

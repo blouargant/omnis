@@ -58,10 +58,15 @@ Out of the box the agent has:
 - Planning (`todo_write`, `task_create`/`task_update`/`task_list`)
 - Background commands queue (`bash_background`)
 - Git worktree isolation (`worktree_create`/`_remove`/`_merge`)
-- Two generic sub-agents (`investigator`, `summariser`) reachable as tools
+- Generic sub-agents (`investigator`, `summariser`, `web_agent`,
+  `image_generator`) reachable as tools — one delegation at a time
+- **Squads**: name groups of `{ leader, members[] }` in
+  `config/agents.json` and pick which one a new chat session uses (default
+  is selected when none is chosen). See
+  [docs/configuration.md#squads--per-session-agent-groups](docs/configuration.md#squads--per-session-agent-groups).
 - Skills auto-loaded from `./skills/`
-- MCP servers loaded from `config/mcp_config.yaml`
-- Permission gating from `config/permissions.yaml`
+- MCP servers loaded from `config/mcp_config.json`
+- Permission gating from `config/permissions.json`
 - Event logging to `.agent_events.log`
 - Per-session state isolation: each `(user, session)` pair gets its own
   task graph (`.agent_tasks_<u>_<s>.json`), todo plan
@@ -135,11 +140,11 @@ Plus one auxiliary subcommand:
 |-----------------------|------------|-------------------------------------------------------------------------|
 | `-s`, `--skills DIR`  | `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.           |
 | `--softskills DIR`    | `softskills` | Directory of curator-generated soft-skills.                           |
-| `--config PATH`       | `config/agent.yaml` | Runtime YAML config path. Error out if the explicit path is missing. |
-| `--provider NAME`     | _(yaml)_   | Global model provider override (e.g. `anthropic`).                      |
-| `--model NAME`        | _(yaml)_   | Global model override.                                                  |
-| `--base-url URL`      | _(yaml)_   | API endpoint override.                                                  |
-| `--api-key KEY`       | _(yaml/env)_| API-key override.                                                      |
+| `--config PATH`       | `config/agents.json` | Runtime JSON config path. Error out if the explicit path is missing. |
+| `--provider NAME`     | _(config)_ | Global model provider override (e.g. `anthropic`).                      |
+| `--model NAME`        | _(config)_ | Global model override.                                                  |
+| `--base-url URL`      | _(config)_ | API endpoint override.                                                  |
+| `--api-key KEY`       | _(config/env)_| API-key override.                                                    |
 | `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
 | `--name NAME`         | `yoke`     | Application name (used in runner + session metadata).                   |
 | `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log. Logs can contain prompts, tool outputs and secrets already present in context. |
@@ -153,16 +158,19 @@ go run . -d "what does main.go do?"
 
 See [docs/configuration.md](docs/configuration.md#command-line-flags) for the full reference.
 
-There are single-component demos under `examples/sNN_*/` that mirror the
-article's phases — not part of the production build, but useful for
-learning each component in isolation:
+There are 30 single-component demos under `examples/sNN_*/`, ordered
+from the simplest (a bare loop) to the most complex (multi-agent and
+distributed). They are not part of the production build, but each one
+exercises one component in isolation:
 
 ```bash
 make examples            # opt-in: builds all demos
-go run ./examples/s05_skills
+go run ./examples/s21_skills
 ```
 
-See [docs/examples-catalog.md](docs/examples-catalog.md).
+See [docs/examples-catalog.md](docs/examples-catalog.md), or open
+[examples/index.ipynb](examples/index.ipynb) for the GoNB-based
+learning path (setup details in [docs/notebooks.md](docs/notebooks.md)).
 
 ---
 
@@ -234,20 +242,25 @@ mount a different combination of:
    - `agent-builder` — checklist for scaffolding a new specialist
    - `pdf` — PDF extraction
    - `k8s-triage` — example domain specialisation (Kubernetes triage)
-2. **MCP servers** (`config/mcp_config.yaml`) — external tool surfaces
+2. **MCP servers** (`config/mcp_config.json`) — external tool surfaces
    (filesystem, Postgres, Kubernetes, GitHub, …).
-3. **Permissions** (`config/permissions.yaml`) — auto-allow read-only
+3. **Permissions** (`config/permissions.json`) — auto-allow read-only
    verbs, gate mutations with `ask_user`, hard-deny destructive ones.
 
 ### Example: turn the harness into a Kubernetes diagnostician
 
-```yaml
-# config/mcp_config.yaml
-servers:
-  - name: kubernetes
-    command: npx
-    args: ["-y", "mcp-server-kubernetes"]
-    env: { KUBECONFIG: /home/you/.kube/config }
+```json
+// config/mcp_config.json
+{
+  "servers": [
+    {
+      "name": "kubernetes",
+      "command": "npx",
+      "args": ["-y", "mcp-server-kubernetes"],
+      "env": {"KUBECONFIG": "/home/you/.kube/config"}
+    }
+  ]
+}
 ```
 
 The `skills/k8s-triage/SKILL.md` is already shipped as an example. Run:
@@ -278,7 +291,7 @@ yoke/
 │   ├── agentkit/                # central agent constructor + system prompt
 │   ├── llm/                     # multi-provider model dispatcher
 │   ├── tools/                   # file / bash / grep / glob / revert
-│   ├── permissions/             # YAML-driven permission plugin
+│   ├── permissions/             # JSON-driven permission plugin
 │   ├── events/                  # plugin-friendly event bus + file logger
 │   └── stream/                  # streaming helpers
 ├── internal/
@@ -297,7 +310,7 @@ yoke/
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
 ├── softskills/                  # curator output
-├── config/                      # agent.yaml, permissions.yaml, mcp_config.yaml
+├── config/                      # agent.json, permissions.json, mcp_config.json
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation
 ```
@@ -314,10 +327,11 @@ yoke/
 | [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
 | [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
-| [docs/configuration.md](docs/configuration.md)| `permissions.yaml` and `mcp_config.yaml` reference|
-| [docs/examples-catalog.md](docs/examples-catalog.md)    | The 23 single-component demo binaries             |
+| [docs/configuration.md](docs/configuration.md)| `permissions.json` and `mcp_config.json` reference|
+| [docs/examples-catalog.md](docs/examples-catalog.md)    | The 30 single-component demo binaries, ordered by complexity |
+| [docs/notebooks.md](docs/notebooks.md)                  | GoNB Jupyter walkthroughs — setup notes; start at [examples/index.ipynb](examples/index.ipynb) |
 | [docs/k8s-context-compression-e2e.md](docs/k8s-context-compression-e2e.md) | Real-world Kubernetes context-compression validation |
-| [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents and plugins          |
+| [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents, squads and plugins  |
 
 ---
 

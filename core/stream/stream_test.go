@@ -45,12 +45,12 @@ func TestPrintRendersToolCallsAndErrors(t *testing.T) {
 	seq := iter.Seq2[*session.Event, error](func(yield func(*session.Event, error) bool) {
 		yield(&session.Event{
 			LLMResponse: model.LLMResponse{
-				Content: &genai.Content{Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "read", Args: map[string]any{"path": "demo.txt"}}}}},
+				Content: &genai.Content{Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "Read", Args: map[string]any{"path": "demo.txt"}}}}},
 			},
 		}, nil)
 		yield(&session.Event{
 			LLMResponse: model.LLMResponse{
-				Content: &genai.Content{Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "read", Response: map[string]any{"content": "ok"}}}}},
+				Content: &genai.Content{Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: "Read", Response: map[string]any{"content": "ok"}}}}},
 			},
 		}, nil)
 		yield(nil, errors.New("stop"))
@@ -62,7 +62,7 @@ func TestPrintRendersToolCallsAndErrors(t *testing.T) {
 		t.Fatalf("Print() error = %v, want stop", err)
 	}
 	got := buf.String()
-	if !bytes.Contains([]byte(got), []byte("[tool_call read")) || !bytes.Contains([]byte(got), []byte("[tool_result read")) {
+	if !bytes.Contains([]byte(got), []byte("[tool_call Read")) || !bytes.Contains([]byte(got), []byte("[tool_result Read")) {
 		t.Fatalf("Print() output = %q", got)
 	}
 }

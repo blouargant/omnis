@@ -23,6 +23,7 @@ import (
 	"google.golang.org/adk/model"
 
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/softskills"
 )
 
@@ -69,7 +70,10 @@ func (c CuratorGateConfig) minSubAgentCalls() int {
 // the curator agent + runner are built on-demand inside the goroutine so
 // (a) startup cost is paid only when the hook actually fires and (b) a
 // curator construction error never aborts the main agent boot.
-func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir string, agentNames []string, gate CuratorGateConfig, sessionSuffix func(u, s string) string) {
+//
+// Returns the bus subscriptions so the calling Instance can detach them
+// on Close (hot-reload).
+func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir string, agentNames []string, gate CuratorGateConfig, sessionSuffix func(u, s string) string) []*events.Subscription {
 	handler := func(_ string, payload map[string]any) {
 		userID, _ := payload["user_id"].(string)
 		sessionID, _ := payload["session_id"].(string)
@@ -78,8 +82,8 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 		}
 		key := sessionSuffix(userID, sessionID)
 		forced := CurateSessionRequested(key)
-		auditPath := filepath.Join("logs", fmt.Sprintf("agent_memory_%s.md", key))
-		statePath := filepath.Join("logs", fmt.Sprintf("agent_statelog_%s.json", key))
+		auditPath := filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_memory_%s.md", key))
+		statePath := filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_statelog_%s.json", key))
 
 		curatorMu.Lock()
 		if curatorRunning[key] {
@@ -143,7 +147,6 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 			r, err := softskills.CuratorRunner(ctx, softskills.CuratorConfig{
 				Model:         llm,
 				SoftSkillsDir: softDir,
-				SkillsDir:     skillsDir,
 				AgentNames:    agentNames,
 			})
 			if err != nil {
@@ -164,8 +167,10 @@ func registerCuratorHook(bus *events.Bus, llm model.LLM, softDir, skillsDir stri
 			emitEnd(summary, false, "", nil)
 		}()
 	}
-	bus.On(events.EventSessionEnd, handler)
-	bus.On(events.EventCurateNow, handler)
+	return []*events.Subscription{
+		bus.Subscribe(events.EventSessionEnd, handler),
+		bus.Subscribe(events.EventCurateNow, handler),
+	}
 }
 
 func fileExists(p string) bool {
@@ -196,10 +201,10 @@ func curatorGate(statePath string, forced bool, agentNames []string, cfg Curator
 		return false
 	}
 	var sl struct {
-		Decisions  []string       `json:"decisions"`
-		Files      map[string]string `json:"files"`
-		Tools      map[string]int `json:"tools"`
-		TurnCount  int            `json:"turn_count"`
+		Decisions []string          `json:"decisions"`
+		Files     map[string]string `json:"files"`
+		Tools     map[string]int    `json:"tools"`
+		TurnCount int               `json:"turn_count"`
 	}
 	if err := json.Unmarshal(data, &sl); err != nil {
 		return false

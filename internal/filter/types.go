@@ -1,25 +1,28 @@
 package filter
 
-import "slices"
+import (
+	"encoding/json"
+	"slices"
+)
 
-// Filter represents a declarative YAML filter for a command.
+// Filter represents a declarative JSON filter for a command.
 type Filter struct {
-	Name        string       `yaml:"name"`
-	Version     int          `yaml:"version"`
-	Description string       `yaml:"description"`
-	Match       Match        `yaml:"match"`
-	Inject      *Inject      `yaml:"inject,omitempty"`
-	Streams     []string     `yaml:"streams,omitempty"` // "stdout", "stderr"; defaults to ["stdout"]
-	Pipeline    Pipeline     `yaml:"pipeline"`
-	OnError     string       `yaml:"on_error"` // "passthrough", "empty", "template"
-	Tests       []FilterTest `yaml:"tests,omitempty"`
+	Name        string       `json:"name"`
+	Version     int          `json:"version"`
+	Description string       `json:"description"`
+	Match       Match        `json:"match"`
+	Inject      *Inject      `json:"inject,omitempty"`
+	Streams     []string     `json:"streams,omitempty"` // "stdout", "stderr"; defaults to ["stdout"]
+	Pipeline    Pipeline     `json:"pipeline"`
+	OnError     string       `json:"on_error"` // "passthrough", "empty", "template"
+	Tests       []FilterTest `json:"tests,omitempty"`
 }
 
 // FilterTest defines an inline test case for a filter.
 type FilterTest struct {
-	Name     string `yaml:"name"`
-	Input    string `yaml:"input"`
-	Expected string `yaml:"expected"`
+	Name     string `json:"name"`
+	Input    string `json:"input"`
+	Expected string `json:"expected"`
 }
 
 // HasStream returns true if the filter includes the given stream name.
@@ -33,23 +36,54 @@ func (f *Filter) HasStream(name string) bool {
 
 // Match defines which command a filter applies to.
 type Match struct {
-	Command      string   `yaml:"command"`
-	Subcommand   string   `yaml:"subcommand,omitempty"`
-	ExcludeFlags []string `yaml:"exclude_flags,omitempty"`
-	RequireFlags []string `yaml:"require_flags,omitempty"`
+	Command      string   `json:"command"`
+	Subcommand   string   `json:"subcommand,omitempty"`
+	ExcludeFlags []string `json:"exclude_flags,omitempty"`
+	RequireFlags []string `json:"require_flags,omitempty"`
 }
 
 // Inject defines args to inject before execution.
 type Inject struct {
-	Args          []string          `yaml:"args,omitempty"`
-	Defaults      map[string]string `yaml:"defaults,omitempty"`
-	SkipIfPresent []string          `yaml:"skip_if_present,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	Defaults      map[string]string `json:"defaults,omitempty"`
+	SkipIfPresent []string          `json:"skip_if_present,omitempty"`
 }
 
-// Action represents a single step in a filter pipeline.
+// Action represents a single step in a filter pipeline. The JSON form is a
+// flat object: the "action" key names the action, and every other key
+// becomes an entry in Params.
 type Action struct {
-	ActionName string         `yaml:"action"`
-	Params     map[string]any `yaml:",inline"`
+	ActionName string
+	Params     map[string]any
+}
+
+// UnmarshalJSON parses a flat object {"action": "...", ...} into an
+// Action, extracting "action" as ActionName and putting the remaining
+// keys in Params.
+func (a *Action) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["action"]; ok {
+		if s, ok := v.(string); ok {
+			a.ActionName = s
+		}
+		delete(raw, "action")
+	}
+	a.Params = raw
+	return nil
+}
+
+// MarshalJSON emits the flat {"action": "...", ...} form so a filter can
+// be round-tripped through the editor without losing parameters.
+func (a Action) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(a.Params)+1)
+	for k, v := range a.Params {
+		out[k] = v
+	}
+	out["action"] = a.ActionName
+	return json.Marshal(out)
 }
 
 // Pipeline is an ordered sequence of actions.

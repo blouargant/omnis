@@ -38,15 +38,19 @@ type Question struct {
 	Kind        Kind     `json:"kind"`
 	Prompt      string   `json:"prompt"`
 	Choices     []string `json:"choices,omitempty"`
-	AllowText   bool     `json:"allow_text,omitempty"`  // for single/multi: also accept free text
-	Default     string   `json:"default,omitempty"`     // suggested default value / choice
+	AllowText   bool     `json:"allow_text,omitempty"`   // for single/multi: also accept free text
+	Default     string   `json:"default,omitempty"`      // suggested default value / choice
 	TimeoutSecs int      `json:"timeout_secs,omitempty"` // 0 → use registry default
+	// Password, when true, hints to surfaces that they should render
+	// the input as a masked field (e.g. <input type="password"> in the
+	// web UI). Only meaningful for KindText.
+	Password bool `json:"password,omitempty"`
 }
 
 // Answer is the user's response to a question.
 type Answer struct {
-	Selected  []string `json:"selected,omitempty"` // for single/multi/confirm
-	Text      string   `json:"text,omitempty"`     // for text or allow_text
+	Selected  []string `json:"selected,omitempty"`  // for single/multi/confirm
+	Text      string   `json:"text,omitempty"`      // for text or allow_text
 	Cancelled bool     `json:"cancelled,omitempty"` // user dismissed / timed out
 }
 
@@ -61,9 +65,9 @@ const DefaultTimeout = 5 * time.Minute
 
 // pending holds a question that is waiting for an answer.
 type pending struct {
-	q      Question
-	ch     chan Answer // buffer 1; closed on resolution
-	once   sync.Once  // ensures ch is closed exactly once
+	q    Question
+	ch   chan Answer // buffer 1; closed on resolution
+	once sync.Once   // ensures ch is closed exactly once
 }
 
 // Registry is a per-session-scoped concurrent map from questionID → pending.
@@ -258,6 +262,9 @@ func QuestionToPayload(q Question) map[string]any {
 	}
 	if q.TimeoutSecs > 0 {
 		p["timeout_secs"] = q.TimeoutSecs
+	}
+	if q.Password {
+		p["password"] = true
 	}
 	return p
 }
