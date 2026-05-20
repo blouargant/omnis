@@ -55,6 +55,18 @@ unit-tests: test ## Run unit tests
 env-tests: ## Source .env and run LLM tests
 	@set -a; . ./.env; set +a; $(GO) test ./core/llm
 
+# Default A2A endpoint used by a2a-smoke. Override per-invocation, e.g.:
+#   make a2a-smoke A2A_URL=http://localhost:9091/ A2A_TOKEN=secret
+A2A_URL ?= http://127.0.0.1:8091/
+
+.PHONY: a2a-smoke
+a2a-smoke: ## Validate A2A protocol + client wiring against a live endpoint (A2A_URL=, A2A_TOKEN=)
+	@echo "== 1/2 protocol smoke (curl tasks/send) =="
+	@A2A_URL='$(A2A_URL)' A2A_TOKEN='$(A2A_TOKEN)' scripts/a2a_smoke.sh
+	@echo "== 2/2 client live test (a2a.SendTask) =="
+	@YOKE_A2A_TEST_URL='$(A2A_URL)' YOKE_A2A_TEST_TOKEN='$(A2A_TOKEN)' \
+		$(GO) test -tags integration -count=1 -v -run TestLive ./internal/a2a
+
 .PHONY: all
 all: build ## Alias for `build` (root binary + server)
 

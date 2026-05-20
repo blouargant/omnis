@@ -124,6 +124,7 @@
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
+  const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
   const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries"];
   const TOOL_DESCRIPTIONS = {
     Bash:       "Run shell commands in the working directory.",
@@ -177,6 +178,7 @@
     activeMCPSubtab: "servers",    // only used when activeFile === 'mcp'
     activeA2ASubtab: "agents",     // only used when activeFile === 'a2a'
     activeAgentIdx: 0,            // selected agent in the fleet list
+    activeAgentInitialized: false, // true once localStorage restore has been attempted
     activeSquadIdx: 0,            // selected squad in the squads list
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
@@ -302,6 +304,12 @@
       }
       if (restartBtn) restartBtn.disabled = !!on;
     };
+
+    if (hasAnyUnsaved()) {
+      if (!await appConfirm("You have unsaved changes. Save them before reloading?")) return;
+      await saveActive();
+      if (hasUnsavedActive()) return;
+    }
 
     setLoading(true);
     setStatus("Reloading agent…");
@@ -605,6 +613,12 @@
     }
     const p = state.parsed[state.activeFile];
     return p && p.dirty;
+  }
+
+  function hasAnyUnsaved() {
+    for (const id of Object.keys(state.raw)) if (state.raw[id].dirty) return true;
+    for (const id of Object.keys(state.parsed)) if (state.parsed[id].dirty) return true;
+    return false;
   }
 
   // True for menu entries with no server-side JSON — these hide the
@@ -1811,8 +1825,20 @@
       return;
     }
 
+    if (!state.activeAgentInitialized) {
+      state.activeAgentInitialized = true;
+      const savedName = localStorage.getItem(ACTIVE_AGENT_KEY);
+      if (savedName) {
+        const idx = d.agents.findIndex(a => a.name === savedName);
+        if (idx >= 0) state.activeAgentIdx = idx;
+      }
+    }
+
     if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = d.agents.length - 1;
     if (state.activeAgentIdx < 0) state.activeAgentIdx = 0;
+
+    const activeName = d.agents[state.activeAgentIdx]?.name;
+    if (activeName) localStorage.setItem(ACTIVE_AGENT_KEY, activeName);
 
     // Fleet list
     fleetList.innerHTML = "";
@@ -3799,8 +3825,7 @@
       return;
     }
 
-    if (!Array.isArray(agent.a2a_agents)) agent.a2a_agents = [];
-    const selected = new Set(agent.a2a_agents);
+    const selected = new Set(Array.isArray(agent.a2a_agents) ? agent.a2a_agents : []);
 
     const a2aIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 8v4m0 4h.01"/></svg>`;
 

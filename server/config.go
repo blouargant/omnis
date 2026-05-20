@@ -229,6 +229,11 @@ func checkMtime(path string, want *time.Time) (int, gin.H) {
 	st, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// A zero want means the file didn't exist when the UI loaded it.
+			// If it still doesn't exist, this is a valid first write.
+			if want.IsZero() {
+				return 0, nil
+			}
 			return http.StatusConflict, gin.H{
 				"error": "file no longer exists on disk",
 			}

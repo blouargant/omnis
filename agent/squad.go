@@ -25,6 +25,7 @@ import (
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/core/llm"
 	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/yoke/internal/a2a"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/softskills"
 	"github.com/blouargant/yoke/internal/teammates"
@@ -125,6 +126,20 @@ func buildSquadInstance(
 	leadMailbox.Registry = infra.Registry
 	leadTools = append(leadTools, leadMailbox.Tools()...)
 
+	// Mount remote A2A peers the leader can reach. A2AAgents names entries
+	// from a2a_config.json; unknown names are silently skipped so a
+	// misconfigured leader still boots. Instruction text describing each
+	// peer is assembled into leaderInstruction below.
+	var a2aPeers []a2a.Agent
+	if len(leaderCfg.A2AAgents) > 0 && runtime.A2AConfigPath != "" {
+		if a2aCfg, err := a2a.Load(runtime.A2AConfigPath); err == nil {
+			a2aPeers = selectA2AAgents(a2aCfg, leaderCfg.A2AAgents)
+			if a2aTools := a2a.NewTools(a2aPeers); len(a2aTools) > 0 {
+				leadTools = append(leadTools, a2aTools...)
+			}
+		}
+	}
+
 	subAgentCallbacks := infra.Bus.AgentCallbacks(events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
 
 	// Resolve the member agent configs (preserving the order declared in the
@@ -182,6 +197,9 @@ func buildSquadInstance(
 	// agent in the catalogue — so two squads can specialise the same
 	// agent.json by exposing different subsets.
 	leaderInstruction += buildSubAgentCapabilitiesBlock(memberCfgs, runtime)
+	if len(a2aPeers) > 0 {
+		leaderInstruction += buildA2AInstruction(a2aPeers)
+	}
 
 	lead, err := agentkit.New(agentkit.AgentConfig{
 		Name:        leaderCfg.Name,

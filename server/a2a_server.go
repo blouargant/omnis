@@ -240,7 +240,9 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
+	parentCtx := r.Context()
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	rec := s.newRecord(p.ID, p.SessionID, p.Message, cancel)
 
 	rec.mu.Lock()
@@ -249,11 +251,10 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 	rec.mu.Unlock()
 
 	responseText, runErr := s.runAgent(ctx, rec.adkSessionID(), p.ID, a2aMessageText(p.Message))
-	cancel()
 
 	rec.mu.Lock()
 	switch {
-	case ctx.Err() != nil:
+	case parentCtx.Err() != nil:
 		rec.task.Status.State = a2aStateCanceled
 	case runErr != nil:
 		rec.task.Status.State = a2aStateFailed

@@ -763,6 +763,7 @@ function streamMdAdvance(bubble, fullText) {
 }
 
 function streamMdFinalize(bubble, fullText) {
+  bubble._rawText = fullText;
   if (!bubble._stream) {
     renderMarkdown(bubble, fullText);
     return;
@@ -950,7 +951,21 @@ function appendAssistantBubble(container) {
   row.className = "msg-row assistant";
   const bubble = document.createElement("div");
   bubble.className = "bubble-assistant";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "copy-msg-btn";
+  copyBtn.title = "Copy message";
+  copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  copyBtn.addEventListener("click", () => {
+    const text = bubble._rawText || bubble.textContent || "";
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.classList.add("copied");
+      setTimeout(() => copyBtn.classList.remove("copied"), 1500);
+    }).catch(() => {});
+  });
+
   row.appendChild(bubble);
+  row.appendChild(copyBtn);
   (container || els.transcript).appendChild(row);
   scrollBottom();
   return bubble;

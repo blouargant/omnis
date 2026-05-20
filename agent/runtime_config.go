@@ -157,7 +157,10 @@ type RuntimeSettings struct {
 	BashTimeoutSeconds      int
 	MCPConfigPath           string
 	PermissionsConfigPath   string
-	SerpAPIKey              string
+	// A2AConfigPath is the resolved path to a2a_config.json, defining remote
+	// A2A agent endpoints that any agent's `a2a_agents` list can reference.
+	A2AConfigPath string
+	SerpAPIKey    string
 	Models                  map[string]RuntimeModelConfig
 	Agents                  []RuntimeAgentConfig
 	// Squads is the normalised list of named agent groups. Always contains
@@ -501,6 +504,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		Instruction:                       strings.TrimSpace(in.Instruction),
 		Enabled:                           in.Enabled,
 		Leader:                            in.Leader,
+		BuiltIn:                           in.BuiltIn,
 		AllowFileAttachments:              in.AllowFileAttachments,
 		Tools:                             normalizeTools(in.Tools),
 		Skills:                            normalizeNames(in.Skills),
@@ -508,6 +512,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		MCPConfigPath:                     strings.TrimSpace(in.MCPConfigPath),
 		MCPServers:                        normalizeNames(in.MCPServers),
 		PermissionsConfigPath:             strings.TrimSpace(in.PermissionsConfigPath),
+		A2AAgents:                         normalizeNames(in.A2AAgents),
 	}
 }
 
@@ -651,6 +656,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		BashTimeoutSeconds:      120,
 		MCPConfigPath:           paths.FindConfig("mcp_config.json"),
 		PermissionsConfigPath:   paths.FindConfig("permissions.json"),
+		A2AConfigPath:           paths.FindConfig("a2a_config.json"),
 		Models:                  map[string]RuntimeModelConfig{},
 		Agents:                  defaultAgents(),
 	}

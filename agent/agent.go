@@ -24,6 +24,7 @@ import (
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/core/llm"
 	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/yoke/internal/a2a"
 	"github.com/blouargant/yoke/internal/askuser"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/paths"
@@ -269,6 +270,20 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	if p := mcpcfg.BuildLoaderProtocol(mountedMCPNames); p != "" {
 		instructionParts = append(instructionParts, p)
 	}
+
+	// Mount remote A2A peers selected by cfg.A2AAgents. The config file is
+	// optional; a missing file or unknown name is a silent no-op (already
+	// surfaced by the editor before the agent is built).
+	if len(cfg.A2AAgents) > 0 && runtime.A2AConfigPath != "" {
+		if a2aCfg, err := a2a.Load(runtime.A2AConfigPath); err == nil {
+			selected := selectA2AAgents(a2aCfg, cfg.A2AAgents)
+			if a2aTools := a2a.NewTools(selected); len(a2aTools) > 0 {
+				agentTools = append(agentTools, a2aTools...)
+				instructionParts = append(instructionParts, buildA2AInstruction(selected))
+			}
+		}
+	}
+
 	extraInstruction := ""
 	if len(instructionParts) > 0 {
 		extraInstruction = strings.Join(instructionParts, "\n") + "\n"
@@ -473,6 +488,51 @@ func buildNamedToolMap(serpAPIKey string) map[string]tool.Tool {
 		}
 	}
 	return m
+}
+
+// selectA2AAgents returns the subset of agents defined in cfg whose names
+// appear in want, preserving the order of want and silently skipping names
+// not present in the config.
+func selectA2AAgents(cfg *a2a.Config, want []string) []a2a.Agent {
+	if cfg == nil || len(want) == 0 {
+		return nil
+	}
+	out := make([]a2a.Agent, 0, len(want))
+	for _, name := range want {
+		key := strings.TrimSpace(name)
+		if key == "" {
+			continue
+		}
+		if agent, ok := cfg.Agents[key]; ok {
+			agent.Name = key
+			out = append(out, agent)
+		}
+	}
+	return out
+}
+
+// buildA2AInstruction documents the mounted A2A tools so the agent's model
+// knows which `a2a_*` tool to call for what, and — critically — does NOT
+// confuse them with teammate_* (which is for in-process session mailboxes,
+// a different protocol entirely).
+func buildA2AInstruction(agents []a2a.Agent) string {
+	var sb strings.Builder
+	sb.WriteString("\n# Remote A2A Agents\n\n")
+	sb.WriteString("The following remote agents are reachable over the Agent-to-Agent (A2A) JSON-RPC protocol. Each is mounted as a separate tool whose name starts with `a2a_`. Call the relevant `a2a_*` tool with a single `prompt` argument describing the task; it returns the remote agent's full text response.\n\n")
+	sb.WriteString("IMPORTANT — routing rules:\n")
+	sb.WriteString("- To talk to a remote A2A agent listed below, you MUST call its `a2a_*` tool. Do NOT use `teammate_tell`, `teammate_ask`, or any other mailbox tool for these — those are for in-process session mailboxes between yoke sub-agents in this same process, which is a completely different protocol.\n")
+	sb.WriteString("- When the user names one of the agents below (e.g. \"ask the X agent\", \"have new-agent do Y\", \"say hello to the a2a agent foo\"), route to its `a2a_*` tool.\n")
+	sb.WriteString("- The tool returns the remote agent's reply as text. Surface that reply to the user; do not paraphrase unless asked.\n\n")
+	sb.WriteString("Available peers:\n")
+	for _, a := range agents {
+		desc := strings.TrimSpace(a.Description)
+		if desc == "" {
+			desc = "no description"
+		}
+		fmt.Fprintf(&sb, "- tool `%s%s` → remote agent %q at %s — %s\n",
+			a2a.ToolPrefix, a2a.SanitizeToolName(a.Name), a.Name, a.URL, desc)
+	}
+	return sb.String()
 }
 
 func hasTool(tools []string, key string) bool {
