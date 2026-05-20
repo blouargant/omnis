@@ -77,6 +77,8 @@ archives:
         dst: config/preferences.json
       - src: packaging/etc-yoke/remote_registries.json
         dst: config/remote_registries.json
+      - src: packaging/etc-yoke/server.yaml
+        dst: config/server.yaml
       - src: config/filters/*.json
         dst: config/filters
       - src: registry/skills
@@ -137,6 +139,11 @@ nfpms:
           mode: 0644
       - src: packaging/etc-yoke/remote_registries.json
         dst: /etc/yoke/remote_registries.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: packaging/etc-yoke/server.yaml
+        dst: /etc/yoke/server.yaml
         type: "config|noreplace"
         file_info:
           mode: 0644

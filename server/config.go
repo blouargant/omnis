@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/blouargant/yoke/agent"
@@ -19,24 +21,28 @@ import (
 	"github.com/blouargant/yoke/internal/paths"
 )
 
-// ServerConfig holds the server-specific settings loaded from config/server.json.
+// ServerConfig holds the server-specific settings loaded from config/server.yaml.
 // Fields mirror the YOKE_SERVER_* environment variables; env vars take precedence.
 type ServerConfig struct {
 	// Addr is the full listen address, e.g. ":8080" or "localhost:9000".
 	// Ignored when Port is set and Addr is empty.
-	Addr string `json:"addr,omitempty"`
+	Addr string `yaml:"addr,omitempty" json:"addr,omitempty"`
 	// Port is a convenience shorthand when only the port differs from the default.
 	// Used only when Addr is empty; resolves to ":<port>".
-	Port int `json:"port,omitempty"`
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// Token is the Bearer token required on every /api/* call.
 	// Leave empty to run without authentication.
-	Token string `json:"token,omitempty"`
+	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+	// A2AEnabled controls whether the A2A protocol server starts alongside the web server.
+	A2AEnabled bool `yaml:"a2a_enabled,omitempty" json:"a2a_enabled,omitempty"`
+	// A2APort is the port the A2A server listens on (default 8081).
+	A2APort int `yaml:"a2a_port,omitempty" json:"a2a_port,omitempty"`
 }
 
-// loadServerConfig reads config/server.json from the config search chain.
+// loadServerConfig reads config/server.yaml from the config search chain.
 // Missing file or parse errors are non-fatal — defaults apply.
 func loadServerConfig() ServerConfig {
-	p := paths.FindConfig("server.json")
+	p := paths.FindConfig("server.yaml")
 	if p == "" {
 		return ServerConfig{}
 	}
@@ -45,8 +51,8 @@ func loadServerConfig() ServerConfig {
 		return ServerConfig{}
 	}
 	var cfg ServerConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Printf("server: warning: failed to parse server.json: %v", err)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		log.Printf("server: warning: failed to parse server.yaml: %v", err)
 		return ServerConfig{}
 	}
 	return cfg

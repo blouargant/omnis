@@ -220,6 +220,19 @@ func run() error {
 		close(errCh)
 	}()
 
+	if serverCfg.A2AEnabled {
+		a2aPort := serverCfg.A2APort
+		if a2aPort <= 0 {
+			a2aPort = 8081
+		}
+		a2aSrv := newA2AServer(manager, token)
+		go func() {
+			if err := a2aSrv.serve(rootCtx, fmt.Sprintf(":%d", a2aPort)); err != nil {
+				log.Printf("a2a: server error: %v", err)
+			}
+		}()
+	}
+
 	var restartRequested bool
 	select {
 	case <-rootCtx.Done():
