@@ -55,12 +55,26 @@ func main() {
 }
 
 func run() error {
+	serverCfg := loadServerConfig()
+
 	token := strings.TrimSpace(os.Getenv("YOKE_SERVER_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(serverCfg.Token)
+	}
 	if token == "" {
 		log.Println("server: YOKE_SERVER_TOKEN not set — running without authentication")
 	}
 
-	addr := envOr("YOKE_SERVER_ADDR", ":8080")
+	var addr string
+	if v := os.Getenv("YOKE_SERVER_ADDR"); v != "" {
+		addr = v
+	} else if serverCfg.Addr != "" {
+		addr = serverCfg.Addr
+	} else if serverCfg.Port > 0 {
+		addr = fmt.Sprintf(":%d", serverCfg.Port)
+	} else {
+		addr = ":8080"
+	}
 	webDir := envOr("YOKE_WEB_DIR", "web")
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

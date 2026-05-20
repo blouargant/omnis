@@ -19,6 +19,39 @@ import (
 	"github.com/blouargant/yoke/internal/paths"
 )
 
+// ServerConfig holds the server-specific settings loaded from config/server.json.
+// Fields mirror the YOKE_SERVER_* environment variables; env vars take precedence.
+type ServerConfig struct {
+	// Addr is the full listen address, e.g. ":8080" or "localhost:9000".
+	// Ignored when Port is set and Addr is empty.
+	Addr string `json:"addr,omitempty"`
+	// Port is a convenience shorthand when only the port differs from the default.
+	// Used only when Addr is empty; resolves to ":<port>".
+	Port int `json:"port,omitempty"`
+	// Token is the Bearer token required on every /api/* call.
+	// Leave empty to run without authentication.
+	Token string `json:"token,omitempty"`
+}
+
+// loadServerConfig reads config/server.json from the config search chain.
+// Missing file or parse errors are non-fatal — defaults apply.
+func loadServerConfig() ServerConfig {
+	p := paths.FindConfig("server.json")
+	if p == "" {
+		return ServerConfig{}
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ServerConfig{}
+	}
+	var cfg ServerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Printf("server: warning: failed to parse server.json: %v", err)
+		return ServerConfig{}
+	}
+	return cfg
+}
+
 // configFiles holds the absolute filesystem paths of the JSON files that are
 // editable from the web UI. Paths are resolved once at server startup from the
 // same precedence used by agent.NewAgent and never come from the HTTP client.

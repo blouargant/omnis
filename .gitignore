@@ -40,3 +40,4 @@ logs/
 .tokensave
 test.txt
 tmp/
+config/server.json
