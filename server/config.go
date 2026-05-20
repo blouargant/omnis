@@ -37,6 +37,9 @@ type ServerConfig struct {
 	A2AEnabled bool `yaml:"a2a_enabled,omitempty" json:"a2a_enabled,omitempty"`
 	// A2APort is the port the A2A server listens on (default 8081).
 	A2APort int `yaml:"a2a_port,omitempty" json:"a2a_port,omitempty"`
+	// WebDir is the directory containing the static web UI files.
+	// Overridden by YOKE_WEB_DIR. Defaults to "web" (relative to CWD).
+	WebDir string `yaml:"web_dir,omitempty" json:"web_dir,omitempty"`
 }
 
 // loadServerConfig reads config/server.yaml from the config search chain.

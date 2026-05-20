@@ -13,3 +13,7 @@ token: ""
 # When enabled, a second listener starts on a2a_port.
 a2a_enabled: false
 a2a_port: 8081
+
+# Directory containing the static web UI files (HTML, CSS, JS).
+# Override with YOKE_WEB_DIR environment variable.
+web_dir: /usr/share/yoke/web

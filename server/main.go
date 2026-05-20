@@ -75,7 +75,10 @@ func run() error {
 	} else {
 		addr = ":8080"
 	}
-	webDir := envOr("YOKE_WEB_DIR", "web")
+	webDir := envOr("YOKE_WEB_DIR", serverCfg.WebDir)
+	if webDir == "" {
+		webDir = "web"
+	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
