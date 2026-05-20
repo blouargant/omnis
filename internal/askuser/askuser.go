@@ -175,19 +175,33 @@ func (r *Registry) Ask(ctx context.Context, sessionID string, q Question) (Answe
 // Resolve provides the user's answer for a pending question. Returns
 // ErrUnknownQuestion if the question_id is not known, ErrAlreadyResolved if
 // it was already answered.
+//
+// If sessionID has no record of questionID, Resolve falls back to a
+// global lookup by questionID across every session. This handles
+// questions whose owning session does not match the UI session that
+// surfaces them — notably MCP input prompts, which are registered from
+// inside a sub-agent runner (or at pool-acquisition time) with a
+// session context that does not carry the user-facing session ID, yet
+// must be answerable from whichever active session the user is in.
+// Question IDs are UUIDs so the fallback cannot mis-route.
 func (r *Registry) Resolve(sessionID, questionID string, ans Answer) error {
 	r.mu.Lock()
-	sm := r.sessions[sessionID]
-	if sm == nil {
-		r.mu.Unlock()
-		return fmt.Errorf("%w: session %q", ErrUnknownQuestion, sessionID)
+	if sm := r.sessions[sessionID]; sm != nil {
+		if p, ok := sm[questionID]; ok {
+			r.mu.Unlock()
+			return r.resolveInternal(sessionID, questionID, ans, p)
+		}
 	}
-	p, ok := sm[questionID]
+	// Cross-session fallback: the question was registered under a
+	// different session id than the UI's. Locate it by UUID.
+	for sid, sm := range r.sessions {
+		if p, ok := sm[questionID]; ok {
+			r.mu.Unlock()
+			return r.resolveInternal(sid, questionID, ans, p)
+		}
+	}
 	r.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("%w: %q", ErrUnknownQuestion, questionID)
-	}
-	return r.resolveInternal(sessionID, questionID, ans, p)
+	return fmt.Errorf("%w: %q", ErrUnknownQuestion, questionID)
 }
 
 func (r *Registry) resolveInternal(sessionID, questionID string, ans Answer, p *pending) error {

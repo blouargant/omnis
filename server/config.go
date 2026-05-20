@@ -98,10 +98,15 @@ var configFileNames = map[string]string{
 // precedence used by agent.NewAgent (defaults → JSON → ENV → Options) so
 // the editor always targets the file actually loaded by the running agent.
 func resolveConfigFiles(opts agent.Options) configFiles {
+	// MCP is intentionally left empty here: path("mcp") re-runs FindConfig on
+	// every request so a newly-installed server written to $YOKE_HOME/config is
+	// visible immediately. We only cache an explicit override (CLI flag, env var,
+	// or mcp_config_path in agents.json) detected by comparing against the startup
+	// FindConfig result — if they differ, the operator pinned a custom path.
+	findConfigMCP := paths.FindConfig("mcp_config.json")
 	out := configFiles{
 		Agent:       firstNonEmpty(opts.ConfigPath, paths.FindConfig("agents.json")),
 		Permissions: firstNonEmpty(opts.PermissionsConfigPath, paths.FindConfig("permissions.json")),
-		MCP:         firstNonEmpty(opts.MCPSConfigPath, paths.FindConfig("mcp_config.json")),
 		A2A:         paths.FindConfig("a2a_config.json"),
 	}
 	settings, err := agent.ResolveRuntimeSettings(opts)
@@ -112,8 +117,10 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 		if strings.TrimSpace(settings.PermissionsConfigPath) != "" {
 			out.Permissions = settings.PermissionsConfigPath
 		}
-		if strings.TrimSpace(settings.MCPConfigPath) != "" {
-			out.MCP = settings.MCPConfigPath
+		// Only cache the MCP path when it is an explicit override, not the FindConfig
+		// default. When empty, path("mcp") falls through to paths.FindConfig each time.
+		if v := strings.TrimSpace(settings.MCPConfigPath); v != "" && v != findConfigMCP {
+			out.MCP = v
 		}
 	}
 	if abs, err := filepath.Abs(out.Agent); err == nil {
@@ -122,8 +129,10 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	if abs, err := filepath.Abs(out.Permissions); err == nil {
 		out.Permissions = abs
 	}
-	if abs, err := filepath.Abs(out.MCP); err == nil {
-		out.MCP = abs
+	if out.MCP != "" {
+		if abs, err := filepath.Abs(out.MCP); err == nil {
+			out.MCP = abs
+		}
 	}
 	return out
 }
@@ -575,6 +584,10 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							"skills":                 a.Skills,
 							"softskills_dir":         a.SoftSkillsDir,
 							"allow_file_attachments": a.AllowFileAttachments,
+							"mcp_config_path":        a.MCPConfigPath,
+							"mcp_servers":            a.MCPServers,
+							"permissions_config_path": a.PermissionsConfigPath,
+							"a2a_agents":             a.A2AAgents,
 							"instruction":            agent.ReadAgentInstruction(a.Name),
 						})
 					}
@@ -664,7 +677,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								k == "builtin" || k == "model_ref" || k == "provider" || k == "model" || k == "base_url" ||
 								k == "api_key" || k == "tools" || k == "skills" || k == "softskills_dir" ||
 								k == "allow_file_attachments" || k == "mcp_config_path" || k == "mcp_servers" ||
-								k == "permissions_config_path" {
+								k == "permissions_config_path" || k == "a2a_agents" {
 								if k != "instruction" { // instruction is saved separately
 									cleanAgent[k] = v
 								}

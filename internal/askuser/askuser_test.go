@@ -66,6 +66,30 @@ func TestResolveUnknownQuestion(t *testing.T) {
 	}
 }
 
+func TestResolveCrossSessionFallback(t *testing.T) {
+	// Question is registered under "owner" (e.g. an empty or sub-agent
+	// session id used by an MCP input resolver) but the UI POSTs the
+	// answer under the user-facing session "ui-session". Resolve must
+	// still find and answer the question by UUID.
+	var registry *askuser.Registry
+	registry = askuser.NewRegistry(askuser.WithNotify(func(q askuser.Question) {
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			if err := registry.Resolve("ui-session", q.ID, askuser.Answer{Text: "hunter2"}); err != nil {
+				t.Errorf("cross-session resolve failed: %v", err)
+			}
+		}()
+	}))
+	ans, err := registry.Ask(context.Background(), "owner",
+		askuser.Question{Kind: askuser.KindText, Prompt: "secret?", Password: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ans.Cancelled || ans.Text != "hunter2" {
+		t.Fatalf("expected text=hunter2, got %+v", ans)
+	}
+}
+
 func TestDoubleResolveIsIdempotent(t *testing.T) {
 	var registry *askuser.Registry
 	registry = askuser.NewRegistry(askuser.WithNotify(func(q askuser.Question) {

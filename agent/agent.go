@@ -390,7 +390,7 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 
 	var sb strings.Builder
 	sb.WriteString("\n\n# Available Sub-Agents\n\n")
-	sb.WriteString("The following sub-agents are mounted as tools. Invoke them by name — they return their findings to you automatically. Call at most one sub-agent at a time; wait for its findings before deciding whether another sub-agent call is needed. When a sub-agent owns a skill that matches the user's request, delegate to that sub-agent and explicitly tell it which skill to load (e.g. \"use the k8s-triage skill\"). Never use transfer_to_agent — it permanently hands off control.\n\n")
+	sb.WriteString("The following sub-agents are mounted as tools. Invoke them by name — they return their findings to you automatically. Call at most one sub-agent at a time; wait for its findings before deciding whether another sub-agent call is needed. When a sub-agent owns a skill that matches the user's request, delegate to that sub-agent and explicitly tell it which skill to load (e.g. \"use the k8s-triage skill\"). The same applies to mounted MCP servers: when a sub-agent has an MCP server whose name or domain matches the user's request (e.g. a `github` server for repo/issue/PR questions), delegate to that sub-agent and explicitly tell it to use that server — do not try the task with bash first. Never use transfer_to_agent — it permanently hands off control.\n\n")
 
 	for _, cfg := range enabled {
 		desc := cfg.Description
@@ -405,6 +405,13 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 
 		if len(cfg.Tools) > 0 {
 			sb.WriteString(fmt.Sprintf("  - Tools: %s\n", strings.Join(cfg.Tools, ", ")))
+		}
+
+		// Surface mounted MCP servers so the leader can route by domain
+		// (e.g. a `github` server → route GitHub-related asks to this agent
+		// with an explicit instruction to use that server's tools).
+		if hasTool(cfg.Tools, "mcp") && len(cfg.MCPServers) > 0 {
+			sb.WriteString(fmt.Sprintf("  - MCP servers: %s\n", strings.Join(cfg.MCPServers, ", ")))
 		}
 
 		// Surface the skill catalog when this sub-agent has access to the

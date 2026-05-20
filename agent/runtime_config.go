@@ -126,6 +126,8 @@ type RuntimeAgentConfig struct {
 	// means the agent gets NO MCP servers — opt-in is explicit.
 	MCPServers            []string
 	PermissionsConfigPath string
+	// A2AAgents is the per-agent list of A2A agent names this agent can reach.
+	A2AAgents             []string
 }
 
 // RuntimeSquadConfig is one normalized squad: a named group composed of an
@@ -364,6 +366,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			MCPConfigPath:                     strings.TrimSpace(e.MCPConfigPath),
 			MCPServers:                        normalizeNames(e.MCPServers),
 			PermissionsConfigPath:             strings.TrimSpace(e.PermissionsConfigPath),
+			A2AAgents:                         normalizeNames(e.A2AAgents),
 		})
 	}
 	return out, nil
@@ -785,10 +788,14 @@ func resolveBaseURLReference(v string) string {
 	if v == "" {
 		return ""
 	}
-	if resolved := os.Getenv(v); resolved != "" {
-		return resolved
+	// If the value looks like a URL already, use it directly.
+	// Env var names never contain "://" so this safely distinguishes literals
+	// from references — avoiding the trap of returning the raw name as a URL
+	// when the env var is unset (which would produce "OPENAI_BASE_URL/chat/completions").
+	if strings.Contains(v, "://") {
+		return v
 	}
-	return v
+	return os.Getenv(v)
 }
 
 func parseBoolEnv(name string) (bool, bool) {

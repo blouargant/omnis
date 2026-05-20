@@ -39,3 +39,4 @@ logs/
 /server/server
 .tokensave
 test.txt
+tmp/

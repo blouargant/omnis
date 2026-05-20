@@ -345,6 +345,11 @@
         setTimeout(() => onEnd(), 400);
       }
       refreshGenerationPill();
+      // Invalidate the cached MCP config so switching to the Servers subtab
+      // re-fetches the freshly-reloaded data. Re-render immediately if the
+      // user is already viewing the MCP settings.
+      delete state.parsed["mcp"];
+      if (state.activeFile === "mcp") renderBody();
     } catch (e) {
       setLoading(false);
       if (textEl) {
@@ -2376,6 +2381,13 @@
   // resolved interactively at first connect by the backend.
   function renderMCPForm() {
     const id = "mcp";
+    if (!state.parsed[id]) {
+      bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+      loadParsed(id).then(() => renderMCPForm()).catch(e => {
+        bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      });
+      return;
+    }
     const d = state.parsed[id].value;
     // Normalise legacy / partial shapes so the renderers can assume the
     // fields exist.
@@ -5364,6 +5376,7 @@
                 setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
                 showBanner();
                 delete remoteMCPCache[id];
+                delete state.parsed["mcp"];
               } catch (e) {
                 btn.disabled = false;
                 btn.textContent = "Install";
@@ -5452,6 +5465,7 @@
           setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
           showBanner();
           delete remoteMCPCache[id];
+          delete state.parsed["mcp"];
         } catch (e) {
           installBtn.disabled = false;
           installBtn.textContent = "Install";

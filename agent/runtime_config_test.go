@@ -436,6 +436,24 @@ func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 	}
 }
 
+func TestSubAgentCapabilitiesBlockSurfacesMCPServers(t *testing.T) {
+	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
+		{Name: "investigator", Enabled: true, Tools: []string{"Bash", "mcp"}, MCPServers: []string{"github", "kubernetes"}},
+		{Name: "summariser", Enabled: true, Tools: []string{"mcp"}},
+		{Name: "web_agent", Enabled: true, Tools: []string{"Bash"}, MCPServers: []string{"github"}},
+	}, RuntimeSettings{})
+
+	if !strings.Contains(block, "MCP servers: github, kubernetes") {
+		t.Fatalf("expected investigator MCP servers line in block:\n%s", block)
+	}
+	if strings.Contains(block, "**summariser**") && strings.Contains(block[strings.Index(block, "**summariser**"):], "MCP servers:") {
+		t.Fatalf("summariser has no MCPServers configured; line should not appear\n%s", block)
+	}
+	if strings.Contains(block, "**web_agent**") && strings.Contains(block[strings.Index(block, "**web_agent**"):], "MCP servers:") {
+		t.Fatalf("web_agent has no `mcp` tool group; line should not appear\n%s", block)
+	}
+}
+
 func mustWrite(t *testing.T, path string, b []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, b, 0o644); err != nil {
