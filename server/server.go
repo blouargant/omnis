@@ -455,6 +455,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	registerAgentMetaRoutes(auth)
 	registerSkillsRoutes(auth.Group("/skills"), d.SkillsDeps)
 	registerAgentsRoutes(auth.Group("/agents"))
+	registerMCPRoutes(auth.Group("/mcp"))
+	registerA2ARoutes(auth.Group("/a2a"))
 
 	auth.POST("/sessions/:id/curate", func(c *gin.Context) {
 		id := c.Param("id")

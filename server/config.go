@@ -26,6 +26,7 @@ type configFiles struct {
 	Agent       string // config/agents.json
 	Permissions string // config/permissions.json
 	MCP         string // config/mcp_config.json
+	A2A         string // config/a2a_config.json
 }
 
 // path returns the **read** path for a whitelisted name. Resolved at
@@ -60,6 +61,12 @@ func (c configFiles) path(name string) (string, bool) {
 				return c.MCP, true
 			}
 		}
+	case "a2a":
+		if c.A2A != "" {
+			if st, err := os.Stat(c.A2A); err == nil && !st.IsDir() {
+				return c.A2A, true
+			}
+		}
 	}
 	return paths.FindConfig(filename), true
 }
@@ -83,6 +90,7 @@ var configFileNames = map[string]string{
 	"agent":       "agents.json",
 	"permissions": "permissions.json",
 	"mcp":         "mcp_config.json",
+	"a2a":         "a2a_config.json",
 }
 
 // resolveConfigFiles determines the absolute paths of the JSON files that
@@ -94,6 +102,7 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 		Agent:       firstNonEmpty(opts.ConfigPath, paths.FindConfig("agents.json")),
 		Permissions: firstNonEmpty(opts.PermissionsConfigPath, paths.FindConfig("permissions.json")),
 		MCP:         firstNonEmpty(opts.MCPSConfigPath, paths.FindConfig("mcp_config.json")),
+		A2A:         paths.FindConfig("a2a_config.json"),
 	}
 	settings, err := agent.ResolveRuntimeSettings(opts)
 	if err == nil {
@@ -226,10 +235,12 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		agentPath, _ := files.path("agent")
 		permissionsPath, _ := files.path("permissions")
 		mcpPath, _ := files.path("mcp")
+		a2aPath, _ := files.path("a2a")
 		out := []configFileInfo{
 			describeConfigFile("agent", agentPath),
 			describeConfigFile("permissions", permissionsPath),
 			describeConfigFile("mcp", mcpPath),
+			describeConfigFile("a2a", a2aPath),
 		}
 		c.JSON(http.StatusOK, gin.H{"files": out})
 	})

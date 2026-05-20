@@ -43,6 +43,7 @@ type AgentEntry struct {
 	SoftSkillsDir         string   `json:"softskills_dir"`
 	MCPConfigPath         string   `json:"mcp_config_path"`
 	MCPServers            []string `json:"mcp_servers"`
+	A2AAgents             []string `json:"a2a_agents,omitempty"`
 	PermissionsConfigPath string   `json:"permissions_config_path"`
 }
 

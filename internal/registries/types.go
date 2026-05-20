@@ -18,6 +18,8 @@ const (
 	KindSkills = "skills"
 	KindAgents = "agents"
 	KindBoth   = "both"
+	KindMCP    = "mcp"
+	KindA2A    = "a2a"
 )
 
 // Registry is one entry in remote_registries.json.
@@ -26,7 +28,7 @@ type Registry struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
 	Provider string `json:"provider,omitempty"`
-	Kind     string `json:"kind,omitempty"`  // "skills" (default if empty), "agents", or "both"
+	Kind     string `json:"kind,omitempty"`  // "skills" (default if empty), "agents", "both", "mcp", or "a2a"
 	Token    string `json:"token,omitempty"` // PAT; stored server-side, never exposed to the browser.
 }
 
@@ -57,6 +59,27 @@ type SkillInfo struct {
 	Author      string   `json:"author,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Installed   bool     `json:"installed"`
+}
+
+// MCPToolInfo is one MCP server returned when browsing a remote MCP registry.
+type MCPToolInfo struct {
+	Name        string `json:"name"`
+	DirPath     string `json:"dir_path"`
+	Group       string `json:"group,omitempty"`
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"` // "stdio" or "http"
+	HasReadme   bool   `json:"has_readme,omitempty"`
+	Installed   bool   `json:"installed"`
+}
+
+// A2AAgentInfo is one A2A agent returned when browsing a remote A2A registry.
+type A2AAgentInfo struct {
+	Name        string `json:"name"`
+	DirPath     string `json:"dir_path"`
+	Group       string `json:"group,omitempty"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"` // agent card URL if advertised in the manifest
+	Installed   bool   `json:"installed"`
 }
 
 // AgentInfo is one agent returned when browsing a remote registry.

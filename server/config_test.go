@@ -108,7 +108,7 @@ func TestPathTraversalRejected(t *testing.T) {
 }
 
 func TestRoundTripRaw(t *testing.T) {
-	p := seedConfigFile(t, "agent.json", "{\"key\":\"original\"}\n")
+	p := seedConfigFile(t, "agents.json", "{\"key\":\"original\"}\n")
 	r := newTestEngine(t, editorFiles())
 
 	w := do(t, r, http.MethodGet, "/api/config/file/agent", nil)

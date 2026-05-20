@@ -8,6 +8,7 @@
     agent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg>`,
     permissions: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
     mcp: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+    a2a: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
     skills: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
     appearance: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`,
     documentation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
@@ -24,6 +25,7 @@
     { id: "agent",       label: "Agents",      form: "agent" },
     { id: "permissions", label: "Permissions", form: "permissions" },
     { id: "mcp",         label: "MCP",         form: "mcp" },
+    { id: "a2a",         label: "A2A",         form: "a2a" },
   ];
 
   // Sidebar menu entries (JSON configs + client-only views like Appearance).
@@ -36,6 +38,7 @@
     { id: "agent",         label: "Agents",      title: "Agent Configuration",       kind: "json" },
     { id: "permissions",   label: "Permissions", title: "Permissions",               kind: "json" },
     { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "json" },
+    { id: "a2a",           label: "A2A",         title: "A2A Agents",                kind: "json" },
     { id: USER_COMMANDS_ID,label: "Commands",    title: "Slash Commands",            kind: "client" },
     { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
     { id: DOCUMENTATION_ID,label: "Documentation", title: "Documentation",           kind: "client" },
@@ -156,17 +159,31 @@
     { id: "remotes",   label: "Remotes"   },
   ];
 
+  const MCP_SUBTABS = [
+    { id: "servers", label: "Servers" },
+    { id: "remotes", label: "Remotes" },
+  ];
+
+  const A2A_SUBTABS = [
+    { id: "agents",  label: "Agents" },
+    { id: "remotes", label: "Remotes" },
+  ];
+
   const state = {
     activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "agents", // only used when activeFile === 'agent'
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
+    activeMCPSubtab: "servers",    // only used when activeFile === 'mcp'
+    activeA2ASubtab: "agents",     // only used when activeFile === 'a2a'
     activeAgentIdx: 0,            // selected agent in the fleet list
     activeSquadIdx: 0,            // selected squad in the squads list
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
     skills: { editing: null, browsingRemote: null, viewingRemote: null }, // skills panel state
+    mcpRemotes: { browsing: null, viewing: null }, // MCP remotes panel state
+    a2aRemotes: { browsing: null }, // A2A remotes panel state
     docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
   };
 
@@ -552,6 +569,13 @@
       state.skills.browsingRemote = null;
       state.skills.viewingRemote = null;
     }
+    if (id === "mcp") {
+      state.mcpRemotes.browsing = null;
+      state.mcpRemotes.viewing = null;
+    }
+    if (id === "a2a") {
+      state.a2aRemotes.browsing = null;
+    }
     syncActiveHighlight(id);
     renderBody();
   }
@@ -636,6 +660,7 @@
     if (id === "agent") return { models: {}, agents: [] };
     if (id === "permissions") return { always_deny: [], always_allow: [], ask_user: [] };
     if (id === "mcp") return { servers: {}, inputs: [] };
+    if (id === "a2a") return { agents: {}, inputs: [] };
     return {};
   }
 
@@ -648,6 +673,31 @@
   //   { "servers": { <name>: <Server> }, "inputs": [<Input>] }
   function prepareForSave(id, value) {
     const v = deepClone(value);
+    if (id === "a2a") {
+      const agents = (v.agents && typeof v.agents === "object" && !Array.isArray(v.agents)) ? v.agents : {};
+      const cleanAgents = {};
+      Object.entries(agents).forEach(([name, a]) => {
+        if (!name || !a) return;
+        const out = {};
+        if (a.url) out.url = a.url;
+        if (a.description) out.description = a.description;
+        if (a.headers && Object.keys(a.headers).length) out.headers = a.headers;
+        cleanAgents[name] = out;
+      });
+      const cleanInputs = Array.isArray(v.inputs) ? v.inputs.map(inp => {
+        const o = { id: inp.id || "", type: (inp.type || "promptString") };
+        if (inp.description) o.description = inp.description;
+        if (inp.password) o.password = true;
+        if (inp.default) o.default = inp.default;
+        if (o.type === "pickString" && Array.isArray(inp.options) && inp.options.length) {
+          o.options = inp.options.filter(s => s);
+        }
+        return o;
+      }).filter(o => o.id) : [];
+      const out = { agents: cleanAgents };
+      if (cleanInputs.length) out.inputs = cleanInputs;
+      return out;
+    }
     if (id !== "mcp") return v;
     const servers = (v.servers && typeof v.servers === "object" && !Array.isArray(v.servers)) ? v.servers : {};
     const cleanServers = {};
@@ -975,6 +1025,7 @@
     if (id === "agent") return renderAgentForm();
     if (id === "permissions") return renderPermissionsForm();
     if (id === "mcp") return renderMCPForm();
+    if (id === "a2a") return renderA2AForm();
   }
 
   function markFormDirty(id) {
@@ -2050,6 +2101,19 @@
     populateAgentMCPBlock(mcpBody, a, cur.has("mcp"), onChange);
     body.appendChild(mcpSec);
 
+    // ── A2A Agents ──
+    const a2aSec = document.createElement("section");
+    a2aSec.className = "agent-detail-section";
+    const a2aHdr = document.createElement("div");
+    a2aHdr.className = "agent-section-hdr";
+    a2aHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg><h3>A2A Agents</h3>`;
+    a2aSec.appendChild(a2aHdr);
+    const a2aBody = document.createElement("div");
+    a2aBody.className = "skills-agent-body";
+    a2aSec.appendChild(a2aBody);
+    populateAgentA2ABlock(a2aBody, a, onChange);
+    body.appendChild(a2aSec);
+
     // ── Instruction Set ──
     const instrSection = document.createElement("section");
     instrSection.className = "agent-detail-section";
@@ -2317,24 +2381,63 @@
     // fields exist.
     if (!d.servers || typeof d.servers !== "object" || Array.isArray(d.servers)) d.servers = {};
     if (!Array.isArray(d.inputs)) d.inputs = [];
+
+    const sub = state.activeMCPSubtab;
     bodyEl.innerHTML = `
       <div class="settings-form">
-        <div class="mcp-form-toolbar">
-          <button type="button" class="add-btn" id="mcp-import-btn">Import JSON…</button>
-          <span class="settings-hint">Merge servers and inputs from a VS Code or Claude Code <code>mcp.json</code> snippet.</span>
+        <div class="settings-subtabs" role="tablist">
+          ${MCP_SUBTABS.map(t => `
+            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
+          `).join("")}
         </div>
-        <section class="form-section">
-          <h3>Inputs</h3>
-          <p class="settings-hint">Declare values the user is prompted for at first use. Reference them from server fields as <code>\${input:id}</code>.</p>
-          <div id="mcp-inputs"></div>
-        </section>
-        <section class="form-section">
-          <h3>MCP Servers</h3>
-          <div id="mcp-list"></div>
-        </section>
+        <div class="settings-subtab-body"></div>
       </div>
     `;
-    bodyEl.querySelector("#mcp-import-btn").addEventListener("click", () => importMCPJSON(d));
+
+    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
+      b.addEventListener("click", () => {
+        if (state.activeMCPSubtab === b.dataset.subtab) {
+          if (b.dataset.subtab === "remotes" && state.mcpRemotes.browsing) {
+            state.mcpRemotes.browsing = null;
+            state.mcpRemotes.viewing = null;
+            renderMCPForm();
+          }
+          return;
+        }
+        if (b.dataset.subtab === "remotes") {
+          state.mcpRemotes.browsing = null;
+          state.mcpRemotes.viewing = null;
+        }
+        state.activeMCPSubtab = b.dataset.subtab;
+        renderMCPForm();
+      });
+    });
+
+    const host = bodyEl.querySelector(".settings-subtab-body");
+    if (sub === "remotes") {
+      renderMCPRemotesSection(host);
+    } else {
+      renderMCPServersSubtab(host, d);
+    }
+  }
+
+  function renderMCPServersSubtab(host, d) {
+    host.innerHTML = `
+      <div class="mcp-form-toolbar">
+        <button type="button" class="add-btn" id="mcp-import-btn">Import JSON…</button>
+        <span class="settings-hint">Merge servers and inputs from a VS Code or Claude Code <code>mcp.json</code> snippet.</span>
+      </div>
+      <section class="form-section">
+        <h3>Inputs</h3>
+        <p class="settings-hint">Declare values the user is prompted for at first use. Reference them from server fields as <code>\${input:id}</code>.</p>
+        <div id="mcp-inputs"></div>
+      </section>
+      <section class="form-section">
+        <h3>MCP Servers</h3>
+        <div id="mcp-list"></div>
+      </section>
+    `;
+    host.querySelector("#mcp-import-btn").addEventListener("click", () => importMCPJSON(d));
     renderMCPInputs(d);
     renderMCPList(d);
     updateFooter();
@@ -3211,9 +3314,17 @@
       const kindVal = initial.kind || defaultKind;
       const urlPlaceholder = defaultKind === "agents"
         ? "https://github.com/owner/repo/tree/main/agents"
+        : defaultKind === "mcp"
+        ? "https://github.com/owner/repo/tree/main/mcp-servers"
+        : defaultKind === "a2a"
+        ? "https://github.com/owner/repo/tree/main/a2a-agents"
         : "https://github.com/owner/repo/tree/main/skills";
       const namePlaceholder = defaultKind === "agents"
         ? "My agent registry"
+        : defaultKind === "mcp"
+        ? "My MCP registry"
+        : defaultKind === "a2a"
+        ? "My A2A registry"
         : "My skill registry";
       form.innerHTML = `
         <div class="registry-dialog-field">
@@ -3243,7 +3354,9 @@
           <select id="reg-dlg-kind">
             <option value="skills"${kindVal === "skills" ? " selected" : ""}>Skills</option>
             <option value="agents"${kindVal === "agents" ? " selected" : ""}>Agents</option>
-            <option value="both"${kindVal === "both" ? " selected" : ""}>Both</option>
+            <option value="both"${kindVal === "both" ? " selected" : ""}>Both (Skills + Agents)</option>
+            <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>MCP Servers</option>
+            <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>A2A Agents</option>
           </select>
           <span class="registry-dialog-hint">Tab where this registry will appear.</span>
         </div>
@@ -3655,6 +3768,102 @@
       renderAgentMCPBlockContent(container, agent, servers, hasMCPTool, onChange);
     } catch (e) {
       container.innerHTML = `<p class="settings-error">MCP unavailable: ${escHtml(e.message)}</p>`;
+    }
+  }
+
+  // ─── A2A — agent picker (mirrors the MCP picker pattern) ──────────────
+  //
+  // Per-agent A2A selection is stored as `a2a_agents: [name, ...]`
+  // on the agent entry in agent.json. The available agent list comes
+  // from the parsed a2a_config.json (already shared via state.parsed).
+  function renderAgentA2ABlockContent(container, agent, a2aAgents, onChange) {
+    container.innerHTML = "";
+
+    if (!a2aAgents.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "No A2A agents configured. Add some in the A2A tab.";
+      container.appendChild(p);
+      return;
+    }
+
+    if (!Array.isArray(agent.a2a_agents)) agent.a2a_agents = [];
+    const selected = new Set(agent.a2a_agents);
+
+    const a2aIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 8v4m0 4h.01"/></svg>`;
+
+    const grid = document.createElement("div");
+    grid.className = "agent-tools-grid";
+
+    const sorted = [...a2aAgents].sort((a, b) => Number(selected.has(b.name)) - Number(selected.has(a.name)));
+    for (const ag of sorted) {
+      let isOn = selected.has(ag.name);
+      const card = document.createElement("div");
+      card.className = "agent-tool-card" + (isOn ? " tool-on" : "");
+      card.dataset.a2a = ag.name;
+      const desc = ag.description || ag.url || "";
+      card.innerHTML = `
+        <div class="agent-tool-icon">${a2aIcon}</div>
+        <div class="agent-tool-info">
+          <span class="agent-tool-name">${escHtml(ag.name)}</span>
+          <span class="agent-tool-desc">${escHtml(desc)}</span>
+        </div>
+        <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
+      `;
+      card.addEventListener("click", () => {
+        isOn = !isOn;
+        if (isOn) selected.add(ag.name); else selected.delete(ag.name);
+        agent.a2a_agents = a2aAgents.map(x => x.name).filter(n => selected.has(n));
+        card.classList.toggle("tool-on", isOn);
+        card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (isOn ? "pill-on" : "pill-off");
+        onChange();
+      });
+      grid.appendChild(card);
+    }
+    container.appendChild(grid);
+
+    const actions = document.createElement("div");
+    actions.className = "skills-block-actions";
+
+    const enableAll = document.createElement("button");
+    enableAll.type = "button"; enableAll.className = "add-btn"; enableAll.textContent = "Enable all";
+    enableAll.addEventListener("click", () => {
+      agent.a2a_agents = a2aAgents.map(ag => ag.name);
+      onChange();
+      renderAgentA2ABlockContent(container, agent, a2aAgents, onChange);
+    });
+
+    const disableAll = document.createElement("button");
+    disableAll.type = "button"; disableAll.className = "del-btn"; disableAll.textContent = "Disable all";
+    disableAll.addEventListener("click", () => {
+      agent.a2a_agents = [];
+      onChange();
+      renderAgentA2ABlockContent(container, agent, a2aAgents, onChange);
+    });
+
+    actions.appendChild(enableAll);
+    actions.appendChild(disableAll);
+
+    const manageLink = document.createElement("button");
+    manageLink.type = "button"; manageLink.className = "skills-manage-link";
+    manageLink.textContent = "Manage in A2A →";
+    manageLink.addEventListener("click", () => { setActiveFile("a2a"); });
+    actions.appendChild(manageLink);
+
+    container.appendChild(actions);
+  }
+
+  async function populateAgentA2ABlock(container, agent, onChange) {
+    container.innerHTML = `<p class="settings-hint">Loading A2A agents…</p>`;
+    try {
+      if (!state.parsed.a2a) await loadParsed("a2a");
+      const raw = state.parsed.a2a.value.agents;
+      const agents = (raw && typeof raw === "object" && !Array.isArray(raw))
+        ? Object.entries(raw).map(([name, ag]) => ({ name, ...ag })).filter(ag => ag.name)
+        : [];
+      renderAgentA2ABlockContent(container, agent, agents, onChange);
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">A2A unavailable: ${escHtml(e.message)}</p>`;
     }
   }
 
@@ -4933,6 +5142,804 @@
       document.body.appendChild(overlay);
       ta.focus();
     });
+  }
+
+  // ─── MCP — remote registries ──────────────────────────────────────────
+  //
+  // Mirrors the skills/agents "Remote registries" section. Backed by
+  // /api/mcp/remotes/* on the server. The shared remote_registries.json
+  // keeps "kind: mcp" entries visible here only.
+
+  const remoteMCPCache = {}; // keyed by registry ID → { tools, timestamp }
+
+  async function renderMCPRemotesSection(host) {
+    if (state.mcpRemotes.viewing) {
+      await renderMCPRemoteToolView(host);
+      return;
+    }
+    if (state.mcpRemotes.browsing) {
+      await renderMCPRemoteBrowseView(host);
+      return;
+    }
+
+    host.innerHTML = `
+      <section class="form-section">
+        <h3>Remote MCP registries
+          <button type="button" class="add-btn" id="mcp-remote-add">+ Add</button>
+        </h3>
+        <div id="mcp-remote-list"></div>
+      </section>
+    `;
+    const listEl = host.querySelector("#mcp-remote-list");
+    await refreshMCPRemoteList(listEl);
+
+    host.querySelector("#mcp-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({
+        title: "Add MCP Registry",
+        defaultKind: "mcp",
+      });
+      if (!result) return;
+      try {
+        await skillsPost("/mcp/remotes", result);
+        await refreshMCPRemoteList(listEl);
+      } catch (e) {
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
+    });
+  }
+
+  async function refreshMCPRemoteList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/mcp/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote MCP registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install MCP servers.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.mcpRemotes.browsing = { id: r.id, name: r.name, url: r.url };
+        renderMCPForm();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit MCP Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          isEdit: true,
+          defaultKind: "mcp",
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/mcp/remotes/${r.id}`, result);
+          delete remoteMCPCache[r.id];
+          await refreshMCPRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/mcp/remotes/${r.id}`);
+          delete remoteMCPCache[r.id];
+          await refreshMCPRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  async function renderMCPRemoteBrowseView(host) {
+    const { id, name } = state.mcpRemotes.browsing;
+    const cached = remoteMCPCache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registries</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the repository tree for MCP server manifests. This may take a moment.</p>
+          </div>
+        ` : ""}
+        <div id="mcp-remote-browse-content"></div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.mcpRemotes.browsing = null;
+      renderMCPForm();
+    });
+
+    const contentEl = host.querySelector("#mcp-remote-browse-content");
+
+    function populateContent(tools) {
+      contentEl.innerHTML = "";
+
+      const truncated = tools.some(t => t.dir_path === "__truncated__");
+      const realTools = tools.filter(t => t.dir_path !== "__truncated__");
+
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${realTools.length} server${realTools.length !== 1 ? "s" : ""}${truncated ? " (tree truncated — some entries may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!realTools.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No MCP servers found in this registry. Directories must contain a .json manifest file.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const t of realTools) {
+        const g = t.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(t);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1; if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      for (const group of sortedGroups) {
+        if (group) {
+          const gh = document.createElement("div");
+          gh.className = "remote-group-header";
+          gh.textContent = group.replace(/\//g, " › ");
+          contentEl.appendChild(gh);
+        }
+        const grid = document.createElement("div");
+        grid.className = "skill-marketplace-grid";
+
+        for (const tool of grouped.get(group)) {
+          const typeLabel = tool.type
+            ? `<span class="skill-mkt-tag">${escHtml(tool.type)}</span>`
+            : "";
+          const actionHtml = tool.installed
+            ? `<span class="remote-skill-installed-badge">Installed</span>`
+            : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          const card = document.createElement("div");
+          card.className = "skill-mkt-card remote-skill-card";
+          if (tool.has_readme) card.style.cursor = "pointer";
+          card.innerHTML = `
+            <div class="skill-mkt-header">
+              <span class="skill-mkt-filename">${ICONS.mcp}${escHtml(tool.name)}</span>
+              ${actionHtml}
+            </div>
+            <div class="skill-mkt-body">
+              ${tool.description ? `<p class="skill-mkt-desc">${escHtml(tool.description)}</p>` : ""}
+              ${typeLabel ? `<div class="skill-mkt-tags">${typeLabel}</div>` : ""}
+            </div>
+          `;
+          if (tool.has_readme) {
+            card.addEventListener("click", e => {
+              if (e.target.closest(".remote-install-btn")) return;
+              state.mcpRemotes.viewing = { ...state.mcpRemotes.browsing, tool };
+              renderMCPForm();
+            });
+          }
+          const btn = card.querySelector(".remote-install-btn");
+          if (btn) {
+            btn.addEventListener("click", async () => {
+              btn.disabled = true;
+              btn.textContent = "Installing…";
+              try {
+                const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
+                tool.installed = true;
+                btn.replaceWith(Object.assign(document.createElement("span"), {
+                  className: "remote-skill-installed-badge",
+                  textContent: "Installed",
+                }));
+                setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
+                showBanner();
+                delete remoteMCPCache[id];
+              } catch (e) {
+                btn.disabled = false;
+                btn.textContent = "Install";
+                setStatus("Install failed: " + e.message, "error");
+              }
+            });
+          }
+          grid.appendChild(card);
+        }
+        contentEl.appendChild(grid);
+      }
+    }
+
+    if (hasCached) {
+      populateContent(cached.tools);
+    }
+
+    try {
+      const res = await skillsGet(`/mcp/remotes/${id}/browse`);
+      const tools = res.tools || [];
+      remoteMCPCache[id] = { tools, timestamp: Date.now() };
+      host.querySelector(".remote-browse-refresh-badge")?.setAttribute("hidden", "");
+      host.querySelector(".remote-browse-loading")?.remove();
+      populateContent(tools);
+    } catch (e) {
+      if (!hasCached) {
+        contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
+      } else {
+        setStatus("Failed to refresh registry: " + e.message, "error");
+      }
+    }
+  }
+
+  async function renderMCPRemoteToolView(host) {
+    const { id, name, tool } = state.mcpRemotes.viewing;
+
+    host.innerHTML = `
+      <div class="settings-form skill-detail-view">
+        <div class="skill-detail-header">
+          <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
+        </div>
+        <div class="skill-frontmatter-card">
+          <div class="skill-fm-row"><span class="skill-fm-key">name</span><span class="skill-fm-value">${escHtml(tool.name)}</span></div>
+          ${tool.type ? `<div class="skill-fm-row"><span class="skill-fm-key">type</span><span class="skill-fm-value">${escHtml(tool.type)}</span></div>` : ""}
+          ${tool.description ? `<div class="skill-fm-row"><span class="skill-fm-key">description</span><span class="skill-fm-value">${escHtml(tool.description)}</span></div>` : ""}
+        </div>
+        <div class="skill-content-wrap">
+          <div class="skill-md-preview markdown-body" id="mcp-tool-readme"><p class="settings-loading">Loading README…</p></div>
+        </div>
+        <div class="skill-detail-footer">
+          <span></span>
+          <span class="skill-save-status"></span>
+          ${tool.installed
+            ? `<span class="remote-skill-installed-badge">Installed</span>`
+            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+        </div>
+      </div>
+    `;
+
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.mcpRemotes.viewing = null;
+      renderMCPForm();
+    });
+
+    const readmeEl = host.querySelector("#mcp-tool-readme");
+    try {
+      const res = await skillsGet(`/mcp/remotes/${id}/readme/${tool.dir_path}`);
+      if (typeof marked !== "undefined") {
+        readmeEl.innerHTML = marked.parse(res.content);
+      } else {
+        readmeEl.textContent = res.content;
+      }
+    } catch (e) {
+      readmeEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+    }
+
+    const installBtn = host.querySelector(".remote-install-btn");
+    if (installBtn) {
+      installBtn.addEventListener("click", async () => {
+        installBtn.disabled = true;
+        installBtn.textContent = "Installing…";
+        try {
+          const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
+          tool.installed = true;
+          installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+          setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
+          showBanner();
+          delete remoteMCPCache[id];
+        } catch (e) {
+          installBtn.disabled = false;
+          installBtn.textContent = "Install";
+          setStatus("Install failed: " + e.message, "error");
+        }
+      });
+    }
+  }
+
+  // ─── A2A ──────────────────────────────────────────────────────────────
+
+  const remoteA2ACache = {}; // keyed by registry ID → { agents, timestamp }
+
+  function renderA2AForm() {
+    const id = "a2a";
+    const d = state.parsed[id].value;
+    if (!d.agents || typeof d.agents !== "object" || Array.isArray(d.agents)) d.agents = {};
+    if (!Array.isArray(d.inputs)) d.inputs = [];
+
+    const sub = state.activeA2ASubtab;
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <div class="settings-subtabs" role="tablist">
+          ${A2A_SUBTABS.map(t => `
+            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
+          `).join("")}
+        </div>
+        <div class="settings-subtab-body"></div>
+      </div>
+    `;
+
+    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
+      b.addEventListener("click", () => {
+        if (state.activeA2ASubtab === b.dataset.subtab) {
+          if (b.dataset.subtab === "remotes" && state.a2aRemotes.browsing) {
+            state.a2aRemotes.browsing = null;
+            renderA2AForm();
+          }
+          return;
+        }
+        if (b.dataset.subtab === "remotes") {
+          state.a2aRemotes.browsing = null;
+        }
+        state.activeA2ASubtab = b.dataset.subtab;
+        renderA2AForm();
+      });
+    });
+
+    const host = bodyEl.querySelector(".settings-subtab-body");
+    if (sub === "remotes") {
+      renderA2ARemotesSection(host);
+    } else {
+      renderA2AAgentsSubtab(host, d);
+    }
+  }
+
+  function renderA2AAgentsSubtab(host, d) {
+    host.innerHTML = `
+      <section class="form-section">
+        <h3>Inputs</h3>
+        <p class="settings-hint">Declare values the user is prompted for at first use. Reference them from agent fields as <code>\${input:id}</code>.</p>
+        <div id="a2a-inputs"></div>
+      </section>
+      <section class="form-section">
+        <h3>A2A Agents</h3>
+        <p class="settings-hint">Remote agent endpoints reachable via the <a href="https://google.github.io/A2A" target="_blank" rel="noopener">Agent-to-Agent (A2A)</a> protocol.</p>
+        <div id="a2a-list"></div>
+      </section>
+    `;
+    renderA2AInputs(d);
+    renderA2AList(d);
+    updateFooter();
+  }
+
+  function renderA2AInputs(d) {
+    const el = bodyEl.querySelector("#a2a-inputs");
+    if (!el) return;
+    el.innerHTML = "";
+
+    if (!Array.isArray(d.inputs)) d.inputs = [];
+
+    const chips = document.createElement("div");
+    chips.className = "mcp-input-chips";
+
+    d.inputs.forEach((inp, idx) => {
+      if (!inp.type) inp.type = "promptString";
+      if (inp.type === "pickString" && !Array.isArray(inp.options)) inp.options = [];
+
+      const chip = document.createElement("div");
+      chip.className = "mcp-input-chip";
+      chip.dataset.kind = inp.type === "pickString" ? "pick" : (inp.password ? "secret" : "text");
+      chip.tabIndex = 0;
+      chip.setAttribute("role", "button");
+      chip.title = inp.description || inp.id || "";
+
+      const icon = document.createElement("span");
+      icon.className = "mcp-input-chip-icon";
+      icon.innerHTML = inp.type === "pickString"
+        ? LIST_ICON_SVG
+        : (inp.password ? LOCK_ICON_SVG : "");
+      if (icon.innerHTML) chip.appendChild(icon);
+
+      const label = document.createElement("span");
+      label.className = "mcp-input-chip-label";
+      label.textContent = inp.id || "(no id)";
+      chip.appendChild(label);
+
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "mcp-input-chip-close";
+      close.setAttribute("aria-label", "Remove input");
+      close.innerHTML = CLOSE_ICON_SVG;
+      close.addEventListener("click", e => {
+        e.stopPropagation();
+        d.inputs.splice(idx, 1);
+        markFormDirty("a2a");
+        renderA2AInputs(d);
+      });
+      chip.appendChild(close);
+
+      const openEditor = async () => {
+        const result = await appMCPInputDialog(inp, d.inputs.filter((_, i) => i !== idx));
+        if (!result) return;
+        d.inputs[idx] = result;
+        markFormDirty("a2a");
+        renderA2AInputs(d);
+      };
+      chip.addEventListener("click", openEditor);
+      chip.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEditor(); }
+      });
+
+      chips.appendChild(chip);
+    });
+
+    const addChip = document.createElement("button");
+    addChip.type = "button";
+    addChip.className = "mcp-input-chip mcp-input-chip-add";
+    addChip.innerHTML = `<span class="mcp-input-chip-icon">+</span><span class="mcp-input-chip-label">Add input</span>`;
+    addChip.addEventListener("click", async () => {
+      const result = await appMCPInputDialog(
+        { id: "", type: "promptString", description: "" },
+        d.inputs,
+      );
+      if (!result) return;
+      d.inputs.push(result);
+      markFormDirty("a2a");
+      renderA2AInputs(d);
+    });
+    chips.appendChild(addChip);
+
+    el.appendChild(chips);
+
+    if (d.inputs.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "settings-hint";
+      empty.style.marginTop = "0.5rem";
+      empty.textContent = "No inputs declared. Add one if any agent needs a user-supplied value.";
+      el.appendChild(empty);
+    }
+  }
+
+  function renderA2AList(d) {
+    const container = bodyEl.querySelector("#a2a-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const agents = (d.agents && typeof d.agents === "object") ? d.agents : {};
+    const names = Object.keys(agents).sort();
+
+    for (const name of names) {
+      const a = agents[name];
+      const section = document.createElement("div");
+      section.className = "mcp-server-section";
+      section.innerHTML = `
+        <div class="mcp-server-header">
+          <input type="text" class="mcp-server-name" value="${escHtml(name)}" placeholder="agent-name" title="Agent name (key in a2a_config.json)">
+          <button type="button" class="del-btn a2a-agent-del">Remove</button>
+        </div>
+        <div class="mcp-server-fields">
+          <label>URL
+            <input type="text" class="a2a-url" value="${escHtml(a.url || "")}" placeholder="https://agent.example.com">
+          </label>
+          <label>Description
+            <input type="text" class="a2a-description" value="${escHtml(a.description || "")}" placeholder="Optional description">
+          </label>
+        </div>
+        <div class="mcp-server-headers-section">
+          <div class="mcp-headers-label">Headers <button type="button" class="add-btn a2a-header-add">+ Add</button></div>
+          <div class="a2a-headers-list"></div>
+        </div>
+      `;
+      const nameInput = section.querySelector(".mcp-server-name");
+      nameInput.addEventListener("change", () => {
+        const newName = nameInput.value.trim();
+        if (!newName || newName === name) return;
+        if (agents[newName]) { nameInput.value = name; return; }
+        agents[newName] = agents[name];
+        delete agents[name];
+        renderA2AList(d);
+        markFormDirty("a2a");
+      });
+      section.querySelector(".a2a-url").addEventListener("input", e => { agents[name].url = e.target.value; markFormDirty("a2a"); });
+      section.querySelector(".a2a-description").addEventListener("input", e => { agents[name].description = e.target.value; markFormDirty("a2a"); });
+      section.querySelector(".a2a-agent-del").addEventListener("click", () => { delete agents[name]; renderA2AList(d); markFormDirty("a2a"); });
+
+      const headersList = section.querySelector(".a2a-headers-list");
+      const headers = a.headers || {};
+      function rebuildHeaders() {
+        headersList.innerHTML = "";
+        Object.keys(headers).forEach(k => {
+          const row = document.createElement("div");
+          row.className = "mcp-header-row";
+          row.innerHTML = `
+            <input type="text" class="hdr-key" value="${escHtml(k)}" placeholder="Header-Name">
+            <input type="text" class="hdr-val" value="${escHtml(headers[k])}" placeholder="value or \${input:id}">
+            <button type="button" class="del-btn">✕</button>
+          `;
+          row.querySelector(".hdr-key").addEventListener("change", e => {
+            const nk = e.target.value.trim();
+            if (!nk || nk === k) return;
+            headers[nk] = headers[k]; delete headers[k]; rebuildHeaders(); markFormDirty("a2a");
+          });
+          row.querySelector(".hdr-val").addEventListener("input", e => { headers[k] = e.target.value; markFormDirty("a2a"); });
+          row.querySelector(".del-btn").addEventListener("click", () => { delete headers[k]; rebuildHeaders(); markFormDirty("a2a"); });
+          headersList.appendChild(row);
+        });
+        if (!agents[name].headers || !Object.keys(agents[name].headers).length) {
+          agents[name].headers = headers;
+        }
+      }
+      rebuildHeaders();
+      section.querySelector(".a2a-header-add").addEventListener("click", () => {
+        if (!agents[name].headers) agents[name].headers = {};
+        agents[name].headers[""] = "";
+        Object.assign(headers, agents[name].headers);
+        rebuildHeaders();
+        markFormDirty("a2a");
+      });
+      container.appendChild(section);
+    }
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "add-btn";
+    addBtn.textContent = "+ Add agent";
+    addBtn.addEventListener("click", () => {
+      let base = "new-agent", n = 1;
+      while (agents[base]) base = `new-agent-${n++}`;
+      agents[base] = { url: "" };
+      renderA2AList(d);
+      markFormDirty("a2a");
+    });
+    container.appendChild(addBtn);
+  }
+
+  async function renderA2ARemotesSection(host) {
+    if (state.a2aRemotes.browsing) {
+      await renderA2ARemoteBrowseView(host);
+      return;
+    }
+
+    host.innerHTML = `
+      <section class="form-section">
+        <h3>Remote A2A registries
+          <button type="button" class="add-btn" id="a2a-remote-add">+ Add</button>
+        </h3>
+        <div id="a2a-remote-list"></div>
+      </section>
+    `;
+    const listEl = host.querySelector("#a2a-remote-list");
+    await refreshA2ARemoteList(listEl);
+
+    host.querySelector("#a2a-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({
+        title: "Add A2A Registry",
+        defaultKind: "a2a",
+      });
+      if (!result) return;
+      try {
+        await skillsPost("/a2a/remotes", result);
+        await refreshA2ARemoteList(listEl);
+      } catch (e) {
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
+    });
+  }
+
+  async function refreshA2ARemoteList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/a2a/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote A2A registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install A2A agent endpoints.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.a2aRemotes.browsing = { id: r.id, name: r.name, url: r.url };
+        renderA2AForm();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit A2A Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          isEdit: true,
+          defaultKind: "a2a",
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/a2a/remotes/${r.id}`, result);
+          delete remoteA2ACache[r.id];
+          await refreshA2ARemoteList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/a2a/remotes/${r.id}`);
+          delete remoteA2ACache[r.id];
+          await refreshA2ARemoteList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  async function renderA2ARemoteBrowseView(host) {
+    const { id, name } = state.a2aRemotes.browsing;
+    const cached = remoteA2ACache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registries</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the repository tree for a2a.json files. This may take a moment.</p>
+          </div>
+        ` : ""}
+        <div id="a2a-remote-browse-content"></div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.a2aRemotes.browsing = null;
+      renderA2AForm();
+    });
+
+    const contentEl = host.querySelector("#a2a-remote-browse-content");
+
+    function populateContent(agents) {
+      contentEl.innerHTML = "";
+
+      const truncated = agents.some(a => a.dir_path === "__truncated__");
+      const realAgents = agents.filter(a => a.dir_path !== "__truncated__");
+
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${realAgents.length} agent${realAgents.length !== 1 ? "s" : ""}${truncated ? " (tree truncated — some entries may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!realAgents.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No A2A agents found in this registry. Directories must contain an a2a.json file.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const a of realAgents) {
+        const g = a.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(a);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1; if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      for (const group of sortedGroups) {
+        if (group) {
+          const gh = document.createElement("div");
+          gh.className = "remote-browse-group";
+          gh.textContent = group;
+          contentEl.appendChild(gh);
+        }
+        const grid = document.createElement("div");
+        grid.className = "remote-skill-grid";
+
+        for (const agent of grouped.get(group)) {
+          let urlTag = "";
+          if (agent.url) {
+            try { urlTag = `<span class="skill-mkt-tag">${escHtml(new URL(agent.url).hostname)}</span>`; } catch (_) {}
+          }
+          const card = document.createElement("div");
+          card.className = "skill-mkt-card remote-skill-card" + (agent.installed ? " skill-installed" : "");
+          card.innerHTML = `
+            <div class="skill-mkt-card-body">
+              <div class="skill-mkt-name">${escHtml(agent.name)}</div>
+              ${agent.description ? `<div class="skill-mkt-desc">${escHtml(agent.description)}</div>` : ""}
+              ${urlTag ? `<div class="skill-mkt-tags">${urlTag}</div>` : ""}
+            </div>
+            <div class="skill-mkt-card-actions">
+              ${agent.installed
+                ? `<span class="skill-installed-badge">Installed</span>`
+                : `<button type="button" class="add-btn a2a-install-btn" data-dir="${escHtml(agent.dir_path)}">Install</button>`}
+            </div>
+          `;
+          const btn = card.querySelector(".a2a-install-btn");
+          if (btn) {
+            btn.addEventListener("click", async () => {
+              btn.disabled = true;
+              btn.textContent = "Installing…";
+              try {
+                const res = await skillsPost(`/a2a/remotes/${id}/install/${agent.dir_path}`, {});
+                agent.installed = true;
+                card.classList.add("skill-installed");
+                btn.replaceWith(Object.assign(document.createElement("span"), {
+                  className: "skill-installed-badge",
+                  textContent: "Installed",
+                }));
+                setStatus(`A2A agent "${res.name}" added to a2a_config.json. Reload to apply.`, "success");
+                showBanner();
+                delete remoteA2ACache[id];
+              } catch (e) {
+                btn.disabled = false;
+                btn.textContent = "Install";
+                setStatus("Install failed: " + e.message, "error");
+              }
+            });
+          }
+          grid.appendChild(card);
+        }
+        contentEl.appendChild(grid);
+      }
+    }
+
+    if (hasCached) {
+      populateContent(cached.agents);
+    }
+
+    try {
+      const res = await skillsGet(`/a2a/remotes/${id}/browse`);
+      const agents = res.agents || [];
+      remoteA2ACache[id] = { agents, timestamp: Date.now() };
+      host.querySelector(".remote-browse-refresh-badge")?.setAttribute("hidden", "");
+      host.querySelector(".remote-browse-loading")?.remove();
+      populateContent(agents);
+    } catch (e) {
+      if (!hasCached) {
+        contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
+      } else {
+        setStatus("Failed to refresh registry: " + e.message, "error");
+      }
+    }
   }
 
   // ─── Skills — upload helpers ───────────────────────────────────────────
