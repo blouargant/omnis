@@ -11,6 +11,7 @@ agent.NewAgent()                ← single wiring entry point
     ├── Squads                  ← one wired tree per squad in agent.json
     │    ├── "default"          ← leader + full team
     │    │    ├── leader        ← coordinator (fs tools + planning + mailbox)
+    │    │    │    └── a2a_*   ← one tool per peer in a2a_config.json
     │    │    ├── investigator  ← read-only evidence gatherer
     │    │    ├── web_agent     ← web search + page fetch
     │    │    └── summariser    ← condenses bulk output
@@ -91,6 +92,24 @@ modifying the agent itself. Three plugins ship by default:
    should expose it (omit to keep it reserved for a single squad).
 5. `agent.NewAgent()` auto-discovers it via `runtime.Agents`. No Go
    code change is needed unless you want custom tool wiring.
+
+## Connecting A2A peers
+
+Remote [A2A-protocol](https://google.github.io/A2A/) agents are wired via
+`config/a2a_config.json`. Each entry becomes an `a2a_<name>` tool on the
+leader. The leader can:
+
+- Delegate a task to any configured peer with a natural-language `prompt`.
+- Address a specific **squad** on the remote server (via the `squad` arg or
+  the `squad` config default).
+- Route the turn into a **named session** visible in the remote web UI sidebar
+  (via `session_name`); the turn is persisted and open tabs on that session
+  receive a live SSE push.
+- Materialise the named session on the remote if it does not yet exist (set
+  `create: true`).
+
+See [docs/configuration.md](../docs/configuration.md#configa2a_configjson) for
+the full field reference.
 
 ## Adding a squad
 

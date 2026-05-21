@@ -45,6 +45,51 @@ func newRegistry() *registry {
 	return r
 }
 
+// NewWithName creates a session with a caller-supplied name (rather than the
+// auto-generated petname). Returns nil + false when the name collides with
+// an existing session or fails sanitisation. Used by the A2A handler when
+// `metadata.create:true` requests an explicitly-named session.
+func (r *registry) NewWithName(name, squad string) (*SessionMeta, bool) {
+	if !validSessionName(name) {
+		return nil, false
+	}
+	now := time.Now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.items[name]; exists {
+		return nil, false
+	}
+	m := &SessionMeta{
+		ID:         name,
+		UserID:     defaultUserID,
+		CreatedAt:  now,
+		LastUsedAt: now,
+		Squad:      squad,
+	}
+	r.items[m.ID] = m
+	return m, true
+}
+
+// validSessionName is the same character set the petname generator uses
+// (kebab-case lowercase). Constraining the surface here so a remote caller
+// can't accidentally inject path separators or shell-special bytes into a
+// filename downstream (session ID is used as the conversation file name).
+func validSessionName(name string) bool {
+	if name == "" || len(name) > 80 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (r *registry) New(squad string) *SessionMeta {
 	now := time.Now()
 	r.mu.Lock()

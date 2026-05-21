@@ -80,7 +80,10 @@ type sendTaskParams struct {
 // session on the remote (its friendly name in the registry, e.g.
 // "teaching-kite"). Empty means the call is stateless: a fresh throwaway
 // session is created for the duration of the request and discarded.
-func SendTask(ctx context.Context, agent Agent, prompt, squad, sessionName string) (string, error) {
+//
+// `create`, when true and sessionName is non-empty, asks the remote to
+// materialise the session if it does not yet exist. Idempotent.
+func SendTask(ctx context.Context, agent Agent, prompt, squad, sessionName string, create bool) (string, error) {
 	endpoint := strings.TrimRight(agent.URL, "/") + "/"
 	taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
 
@@ -97,6 +100,9 @@ func SendTask(ctx context.Context, agent Agent, prompt, squad, sessionName strin
 	}
 	if s := strings.TrimSpace(sessionName); s != "" {
 		meta["session_name"] = s
+		if create {
+			meta["create"] = true
+		}
 	}
 	if len(meta) > 0 {
 		params.Metadata = meta

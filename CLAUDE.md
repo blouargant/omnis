@@ -18,6 +18,8 @@ make package-check      # validate .goreleaser.yaml without building
 make test               # all unit tests
 make env-tests          # LLM integration tests (requires .env with API keys)
 go test ./core/tools -run TestRunBashSafetyFloorAndOutput   # single test
+go test ./internal/a2a/...                                  # A2A unit tests
+make a2a-smoke A2A_URL=http://127.0.0.1:8091/              # live A2A smoke test
 
 # Code quality
 make fmt                # go fmt ./...
@@ -55,6 +57,7 @@ main.go / server/
             ├── Squads              ← one wired tree per squad in agent.json
             │    ├── "default"      ← leader + full team (used when a session omits a squad)
             │    │    ├── leader              ← coordinator (fs tools + planning + mailbox)
+            │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │    │    ├── web_agent           ← web search + fetch
             │    │    └── summariser          ← condenses bulk output
@@ -100,8 +103,10 @@ per-generation hook listening across every squad.
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader from `config/mcp_config.json` |
+| `internal/a2a/` | A2A protocol client (`client.go`) + ADK tool wiring (`tools.go`); config types in `a2a.go` |
 | `internal/tui/` | tview chat UI (trace pane + streaming chat) |
 | `server/` | HTTP API server with Bearer token auth |
+| `server/a2a_server.go` | Receives inbound A2A `tasks/send` / `tasks/sendSubscribe` calls; routes by squad + session |
 
 ### Configuration files
 
@@ -113,6 +118,7 @@ per-generation hook listening across every squad.
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
 | `registry/skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
 | `config/mcp_config.json` | MCP server definitions (name, command, args, env) |
+| `config/a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
 | `config/permissions.json` | Tool permission rules (always_deny / always_allow / ask_user) |
 | `config/filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
@@ -330,6 +336,71 @@ edits without a process restart.
 
 Hot-reload picks up changes to `agent.json` without a process restart.
 The skill files themselves are read on demand at `load_skill` call time.
+
+### Connecting remote A2A agents (client side)
+
+A2A peers are wired via `config/a2a_config.json` — no Go code required.
+
+1. Add an entry for each remote endpoint:
+   ```json
+   {
+     "agents": {
+       "peer-yoke": {
+         "url": "http://peer-host:8091/",
+         "description": "Secondary yoke server.",
+         "headers": { "Authorization": "Bearer ${input:peer_token}" },
+         "squad": "",
+         "session_name": "",
+         "create": false
+       }
+     },
+     "inputs": [
+       { "id": "peer_token", "type": "promptString", "description": "Peer token", "password": true }
+     ]
+   }
+   ```
+
+2. Add the peer name to `registry/agents/leader/agent.json`:
+   ```json
+   { "a2a_agents": ["peer-yoke"] }
+   ```
+
+3. Hot-reload picks up both files (`POST /api/config/reload`). The leader
+   then sees an `a2a_peer-yoke` tool it can invoke with a `prompt`,
+   optional `squad`, `session_name`, and `create` arguments.
+
+**Session routing** — when `session_name` is set the remote server looks up
+the session by its friendly petname (e.g. `teaching-kite`), runs the turn,
+persists it to the session's conversation file, and fires a `mailbox_push`
+SSE event to any open web UI tab on that session. When `create: true` the
+session is materialised if it does not yet exist (uses the same
+`NewWithName` path as `POST /api/sessions` with a name).
+
+**Tool argument precedence**: per-call `squad`/`session_name`/`create` >
+`a2a_config.json` defaults > remote server's own defaults.
+
+### A2A server (inbound calls)
+
+`server/a2a_server.go` handles inbound `tasks/send` and `tasks/sendSubscribe`
+calls from other A2A agents. Key behaviours:
+
+- **Squad routing**: `metadata.squad` selects which squad the task runs on
+  (falls back to `default`).
+- **Session routing**: `metadata.session_name` routes into an existing named
+  session. `metadata.create: true` auto-creates it if missing.
+- **Ephemeral sessions**: omitting `session_name` creates a throwaway session
+  per task and discards it after the response.
+- **SSE push**: after persisting a turn, `sessionPushBroadcaster.notify`
+  fires a `mailbox_push` event so open web UI tabs refresh live.
+- **RunGuard**: `sessionRunGuard` serialises concurrent turns on the same
+  session (shared with the web UI path — no double-processing).
+- **Session name validation**: names must match `[a-z0-9-]{1,80}` (`validSessionName`).
+
+Enable the A2A server via `server.yaml`:
+```yaml
+a2a_enabled: true
+a2a_port: 8091
+```
 
 ### Remote registries (skills and agents)
 

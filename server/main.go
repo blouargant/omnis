@@ -228,7 +228,15 @@ func run() error {
 		if a2aPort <= 0 {
 			a2aPort = 8081
 		}
-		a2aSrv := newA2AServer(manager, registry, runGuard, token)
+		a2aSrv := newA2AServer(a2aDeps{
+			Manager:         manager,
+			Registry:        registry,
+			RunGuard:        runGuard,
+			PushEvents:      pushEvents,
+			PushMgr:         pushMgr,
+			RegisterSession: infra.RegisterSession,
+			RootCtx:         rootCtx,
+		}, token)
 		go func() {
 			if err := a2aSrv.serve(rootCtx, fmt.Sprintf(":%d", a2aPort)); err != nil {
 				log.Printf("a2a: server error: %v", err)

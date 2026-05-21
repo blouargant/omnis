@@ -14,6 +14,7 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     permissions.yaml
     preferences.json
     remote_registries.json
+    a2a_config.json            remote A2A agent endpoints (empty by default)
     filters/                   bash output filter patterns
 /usr/share/yoke/skills/        bundled skill playbooks (read-only)
 /usr/share/yoke/web/           static UI assets served by yoke-server

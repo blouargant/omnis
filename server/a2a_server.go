@@ -129,23 +129,33 @@ type taskRecord struct {
 	doneCh chan struct{}
 }
 
-// a2aServer is the A2A protocol HTTP server.
-type a2aServer struct {
-	manager  *toolkitagent.Manager
-	registry *registry          // optional: lets A2A address web UI sessions by name
-	runGuard *sessionRunGuard   // optional: serialises with web UI turns on the same session
-	token    string             // optional Bearer token; empty = no auth
-	mu       sync.RWMutex
-	records  map[string]*taskRecord
+// a2aDeps bundles the optional plumbing the A2A server uses when a request
+// targets a real web UI session (vs. an ephemeral one). All fields are
+// optional: when omitted, session-name and auto-create paths simply degrade
+// to clear -32602 errors.
+type a2aDeps struct {
+	Manager         *toolkitagent.Manager
+	Registry        *registry
+	RunGuard        *sessionRunGuard
+	PushEvents      *sessionPushBroadcaster
+	PushMgr         *pushManager
+	RegisterSession func(userID, sessionID, displayName string) error
+	RootCtx         context.Context // used to start pushMgr.Watch for auto-created sessions
 }
 
-func newA2AServer(manager *toolkitagent.Manager, reg *registry, guard *sessionRunGuard, token string) *a2aServer {
+// a2aServer is the A2A protocol HTTP server.
+type a2aServer struct {
+	deps    a2aDeps
+	token   string // optional Bearer token; empty = no auth
+	mu      sync.RWMutex
+	records map[string]*taskRecord
+}
+
+func newA2AServer(deps a2aDeps, token string) *a2aServer {
 	return &a2aServer{
-		manager:  manager,
-		registry: reg,
-		runGuard: guard,
-		token:    token,
-		records:  make(map[string]*taskRecord),
+		deps:    deps,
+		token:   token,
+		records: make(map[string]*taskRecord),
 	}
 }
 
@@ -257,8 +267,8 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 	rec := s.newRecord(p.ID, routing.SessionID, p.Message, cancel)
 
 	// Serialise with any other turn (web UI or A2A) running on this session.
-	if routing.Persistent && s.runGuard != nil {
-		release := s.runGuard.acquire(routing.SessionID)
+	if routing.Persistent && s.deps.RunGuard != nil {
+		release := s.deps.RunGuard.acquire(routing.SessionID)
 		defer release()
 	}
 
@@ -306,17 +316,69 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 	writeRPCOK(w, req.ID, taskCopy)
 }
 
-// persistA2ATurn appends the turn to the conversation file and bumps the
-// session's LastUsedAt, so an A2A turn against a web UI session is visible
-// in the UI on next reload. Errors are logged but never fail the call:
-// persistence is a side effect of the turn, not its purpose.
+// persistA2ATurn appends the turn to the conversation file, bumps the
+// session's LastUsedAt, and pushes a mailbox_push SSE event so any open
+// web UI tab on that session reloads its history live. Errors are logged
+// but never fail the call: persistence is a side effect of the turn, not
+// its purpose.
 func (s *a2aServer) persistA2ATurn(routing *sessionRouting, prompt, response string) {
-	if s.registry != nil {
-		s.registry.Touch(routing.SessionID)
+	if s.deps.Registry != nil {
+		s.deps.Registry.Touch(routing.SessionID)
 	}
 	if err := appendConversationTurn(routing.SessionID, prompt, response); err != nil {
 		log.Printf("a2a: persist turn for session %q: %v", routing.SessionID, err)
 	}
+	if s.deps.PushEvents != nil {
+		s.deps.PushEvents.notify(routing.SessionID)
+	}
+}
+
+// autoCreateSession materialises a new web UI session under the
+// caller-supplied name, mirroring what POST /api/sessions does: register
+// the name in the registry, persist the squad to the conversation file,
+// register the mailbox display name, pin the session to the current
+// generation, and start mailbox watching. Returns a *routingError when
+// the request can't be honoured.
+func (s *a2aServer) autoCreateSession(name, squad string) (*SessionMeta, *routingError) {
+	if s.deps.Registry == nil {
+		return nil, &routingError{"session_name routing not available on this server"}
+	}
+	chosenSquad := squad
+	if chosenSquad == "" {
+		chosenSquad = toolkitagent.DefaultSquadName
+	}
+	if s.deps.Manager != nil && !s.deps.Manager.HasSquad(chosenSquad) {
+		return nil, &routingError{fmt.Sprintf("unknown squad %q", chosenSquad)}
+	}
+	sm, ok := s.deps.Registry.NewWithName(name, chosenSquad)
+	if !ok {
+		// Either the name collides (a concurrent caller created it) or it
+		// fails sanitisation. Recheck collision so the second caller gets a
+		// useful error rather than a generic "invalid name".
+		if existing, found := s.deps.Registry.Get(name); found {
+			return existing, nil
+		}
+		return nil, &routingError{fmt.Sprintf("invalid session name %q", name)}
+	}
+	if err := setConversationSquad(sm.ID, chosenSquad); err != nil {
+		log.Printf("a2a: persist squad for new session %q: %v", sm.ID, err)
+	}
+	if s.deps.RegisterSession != nil {
+		_ = s.deps.RegisterSession(sm.UserID, sm.ID, sm.ID)
+	}
+	if s.deps.Manager != nil {
+		s.deps.Manager.Pin(sm.ID)
+	}
+	if s.deps.PushMgr != nil && s.deps.RootCtx != nil {
+		s.deps.PushMgr.Watch(s.deps.RootCtx, serverDeps{
+			Manager:      s.deps.Manager,
+			Registry:     s.deps.Registry,
+			RunGuard:     s.deps.RunGuard,
+			PushEvents:   s.deps.PushEvents,
+			WatchMailbox: nil,
+		}, sm.ID, sm.UserID)
+	}
+	return sm, nil
 }
 
 // ─── tasks/sendSubscribe (streaming SSE) ─────────────────────────────────────
@@ -351,8 +413,8 @@ func (s *a2aServer) tasksSendSubscribe(w http.ResponseWriter, r *http.Request, r
 
 	rec := s.newRecord(p.ID, routing.SessionID, p.Message, cancel)
 
-	if routing.Persistent && s.runGuard != nil {
-		release := s.runGuard.acquire(routing.SessionID)
+	if routing.Persistent && s.deps.RunGuard != nil {
+		release := s.deps.RunGuard.acquire(routing.SessionID)
 		defer release()
 	}
 
@@ -364,7 +426,7 @@ func (s *a2aServer) tasksSendSubscribe(w http.ResponseWriter, r *http.Request, r
 
 	emitSSE("task_status_update", a2aStatusEvent(p.ID, a2aStateWorking, nil, false))
 
-	sq := s.manager.LookupSquad("", routing.Squad)
+	sq := s.deps.Manager.LookupSquad("", routing.Squad)
 	if sq == nil || sq.Runner == nil {
 		msg := "agent not available"
 		emitSSE("task_status_update", a2aStatusEvent(p.ID, a2aStateFailed, &msg, true))
@@ -525,7 +587,7 @@ func (s *a2aServer) tasksCancel(w http.ResponseWriter, r *http.Request, req rpcR
 // ─── agent runner ─────────────────────────────────────────────────────────────
 
 func (s *a2aServer) runAgent(ctx context.Context, squad, userID, sessionID, taskID, prompt string) (string, error) {
-	sq := s.manager.LookupSquad("", squad)
+	sq := s.deps.Manager.LookupSquad("", squad)
 	if sq == nil || sq.Runner == nil {
 		return "", fmt.Errorf("agent not available")
 	}
@@ -624,6 +686,26 @@ func (s *a2aServer) getRecord(id string) *taskRecord {
 	return s.records[id]
 }
 
+// metaBool pulls a bool-valued key out of the JSON-RPC metadata map.
+// JSON numbers and strings are coerced: 1 / "true" / "1" / "yes" → true.
+func metaBool(meta map[string]any, key string) bool {
+	if meta == nil {
+		return false
+	}
+	switch v := meta[key].(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes", "y":
+			return true
+		}
+	case float64:
+		return v != 0
+	}
+	return false
+}
+
 // metaString pulls a string-valued key out of the JSON-RPC metadata map.
 // Returns "" when missing, not-a-string, or whitespace-only.
 func metaString(meta map[string]any, key string) string {
@@ -668,7 +750,7 @@ func (s *a2aServer) resolveRouting(meta map[string]any, taskID string) (*session
 		squad := wantSquad
 		if squad == "" {
 			squad = toolkitagent.DefaultSquadName
-		} else if s.manager != nil && !s.manager.HasSquad(squad) {
+		} else if s.deps.Manager != nil && !s.deps.Manager.HasSquad(squad) {
 			return nil, &routingError{fmt.Sprintf("unknown squad %q", squad)}
 		}
 		return &sessionRouting{
@@ -679,11 +761,26 @@ func (s *a2aServer) resolveRouting(meta map[string]any, taskID string) (*session
 	}
 
 	// Persistent path: look up the session in the web UI registry.
-	if s.registry == nil {
+	if s.deps.Registry == nil {
 		return nil, &routingError{"session_name routing not available on this server"}
 	}
-	sm, ok := s.registry.Get(wantSession)
+	sm, ok := s.deps.Registry.Get(wantSession)
 	if !ok {
+		// Auto-create when the caller opted in. The squad picked here is
+		// pinned to the new session for life.
+		if metaBool(meta, "create") {
+			created, cerr := s.autoCreateSession(wantSession, wantSquad)
+			if cerr != nil {
+				return nil, cerr
+			}
+			return &sessionRouting{
+				Squad:      created.Squad,
+				UserID:     created.UserID,
+				SessionID:  created.ID,
+				Meta:       created,
+				Persistent: true,
+			}, nil
+		}
 		return nil, &routingError{fmt.Sprintf("unknown session %q", wantSession)}
 	}
 	squad := sm.Squad

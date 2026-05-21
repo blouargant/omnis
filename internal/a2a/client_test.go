@@ -63,7 +63,7 @@ func TestSendTask_CompletedRoundTrip(t *testing.T) {
 		Headers: map[string]string{"Authorization": "Bearer xyz"},
 	}
 
-	got, err := SendTask(context.Background(), agent, "ping", "", "")
+	got, err := SendTask(context.Background(), agent, "ping", "", "", false)
 	if err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestSendTask_FailedStateBecomesError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "")
+	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false)
 	if err == nil {
 		t.Fatal("expected error for failed task, got nil")
 	}
@@ -119,7 +119,7 @@ func TestSendTask_CanceledStateBecomesError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "")
+	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false)
 	if err == nil {
 		t.Fatal("expected error for canceled task, got nil")
 	}
@@ -138,7 +138,7 @@ func TestSendTask_RPCErrorPropagates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "")
+	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false)
 	if err == nil {
 		t.Fatal("expected error for JSON-RPC error response")
 	}
@@ -153,7 +153,7 @@ func TestSendTask_HTTPErrorPropagates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "")
+	_, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false)
 	if err == nil {
 		t.Fatal("expected error for HTTP 401")
 	}
@@ -180,7 +180,7 @@ func TestSendTask_SquadGoesIntoMetadata(t *testing.T) {
 	defer srv.Close()
 
 	// Empty squad → no metadata sent.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", ""); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if gotParams.Metadata != nil {
@@ -188,7 +188,7 @@ func TestSendTask_SquadGoesIntoMetadata(t *testing.T) {
 	}
 
 	// Non-empty squad → metadata["squad"] populated.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "research", ""); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "research", "", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if got := gotParams.Metadata["squad"]; got != "research" {
@@ -196,7 +196,7 @@ func TestSendTask_SquadGoesIntoMetadata(t *testing.T) {
 	}
 
 	// Surrounding whitespace is trimmed.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "  research  ", ""); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "  research  ", "", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if got := gotParams.Metadata["squad"]; got != "research" {
@@ -221,7 +221,7 @@ func TestSendTask_SessionNameGoesIntoMetadata(t *testing.T) {
 	defer srv.Close()
 
 	// session only.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "teaching-kite"); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "teaching-kite", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if got := gotParams.Metadata["session_name"]; got != "teaching-kite" {
@@ -232,7 +232,7 @@ func TestSendTask_SessionNameGoesIntoMetadata(t *testing.T) {
 	}
 
 	// session + squad together.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "research", "teaching-kite"); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "research", "teaching-kite", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if got := gotParams.Metadata["squad"]; got != "research" {
@@ -243,11 +243,57 @@ func TestSendTask_SessionNameGoesIntoMetadata(t *testing.T) {
 	}
 
 	// trimming.
-	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "  teaching-kite  "); err != nil {
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "  teaching-kite  ", false); err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
 	if got := gotParams.Metadata["session_name"]; got != "teaching-kite" {
 		t.Fatalf("session_name trim: got %v", got)
+	}
+}
+
+func TestSendTask_CreateFlagGoesIntoMetadata(t *testing.T) {
+	var gotParams sendTaskParams
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var in rpcRequestIn
+		_ = json.Unmarshal(raw, &in)
+		// Reset Metadata so encoding/json doesn't merge keys from prior calls.
+		gotParams = sendTaskParams{}
+		_ = json.Unmarshal(in.Params, &gotParams)
+		result, _ := json.Marshal(wireTask{
+			ID:        gotParams.ID,
+			Status:    wireStatus{State: "completed"},
+			Artifacts: []wireArtifact{{Parts: []wirePart{{Type: "text", Text: "ok"}}}},
+		})
+		_ = json.NewEncoder(w).Encode(rpcResponse{JSONRPC: "2.0", ID: in.ID, Result: result})
+	}))
+	defer srv.Close()
+
+	// create=true requires session_name to take effect.
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "", true); err != nil {
+		t.Fatalf("SendTask: %v", err)
+	}
+	if _, present := gotParams.Metadata["create"]; present {
+		t.Fatalf("create should be omitted without session_name; got %v", gotParams.Metadata)
+	}
+
+	// session_name + create=true → both go on the wire.
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "new-thread", true); err != nil {
+		t.Fatalf("SendTask: %v", err)
+	}
+	if got := gotParams.Metadata["session_name"]; got != "new-thread" {
+		t.Fatalf("session_name: got %v", got)
+	}
+	if got := gotParams.Metadata["create"]; got != true {
+		t.Fatalf("create: got %v, want true", got)
+	}
+
+	// session_name + create=false → create absent.
+	if _, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "p", "", "existing", false); err != nil {
+		t.Fatalf("SendTask: %v", err)
+	}
+	if _, present := gotParams.Metadata["create"]; present {
+		t.Fatalf("create=false should be omitted; got %v", gotParams.Metadata)
 	}
 }
 
@@ -265,7 +311,7 @@ func TestSendTask_ConcatenatesMultipleArtifactParts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "")
+	got, err := SendTask(context.Background(), Agent{Name: "stub", URL: srv.URL}, "ping", "", "", false)
 	if err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}

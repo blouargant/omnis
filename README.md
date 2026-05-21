@@ -64,6 +64,11 @@ Out of the box the agent has:
   `config/agents.json` and pick which one a new chat session uses (default
   is selected when none is chosen). See
   [docs/configuration.md#squads--per-session-agent-groups](docs/configuration.md#squads--per-session-agent-groups).
+- **A2A peers**: delegate tasks to remote [A2A-protocol](https://google.github.io/A2A/)
+  agents (any yoke server or compatible endpoint) via `config/a2a_config.json`.
+  Each peer appears as an `a2a_<name>` tool on the leader; calls can target a
+  specific remote squad and/or a named web UI session. See
+  [docs/configuration.md#configa2a_configjson](docs/configuration.md#configa2a_configjson).
 - Skills auto-loaded from `./skills/`
 - MCP servers loaded from `config/mcp_config.json`
 - Permission gating from `config/permissions.json`
@@ -306,7 +311,8 @@ yoke/
 │   ├── cache/                   # prompt-cache stats plugin
 │   ├── skills/                  # skill loader (skilltoolset wrapper)
 │   ├── softskills/              # curator-distilled procedures
-│   └── mcp/                     # MCP config loader
+│   ├── mcp/                     # MCP config loader
+│   └── a2a/                     # A2A protocol client + tool wiring
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
 ├── softskills/                  # curator output

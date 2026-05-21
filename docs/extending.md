@@ -206,6 +206,93 @@ the web UI's Settings → Agent panel, the **Squads** sub-tab provides a
 structured editor with leader dropdown, member checkboxes, and
 add/delete; saving triggers a hot reload.
 
+## Connect a remote A2A agent
+
+Yoke implements the [A2A protocol](https://google.github.io/A2A/) on both
+sides — it can receive tasks as a server (`server/a2a_server.go`) and
+delegate tasks to remote A2A endpoints as a client (`internal/a2a/`).
+
+You **don't write Go code** to wire a peer. Add an entry to
+`config/a2a_config.json` and list the peer's name in the leader's
+`a2a_agents` field.
+
+### 1. Create or edit `config/a2a_config.json`
+
+```json
+{
+  "agents": {
+    "peer-yoke": {
+      "url": "http://peer-host:8091/",
+      "description": "Secondary yoke server specialised in database triage.",
+      "headers": { "Authorization": "Bearer ${input:peer_token}" },
+      "squad": "",
+      "session_name": "",
+      "create": false
+    }
+  },
+  "inputs": [
+    {
+      "id": "peer_token",
+      "type": "promptString",
+      "description": "Bearer token for the peer yoke server",
+      "password": true
+    }
+  ]
+}
+```
+
+The map key (`peer-yoke`) becomes the tool name suffix: the leader sees a
+tool called `a2a_peer-yoke`. Use only `[a-zA-Z0-9_-]` characters.
+
+### 2. Add the peer name to `registry/agents/leader/agent.json`
+
+```json
+{
+  "a2a_agents": ["peer-yoke"]
+}
+```
+
+Only agents listed here are exposed on the leader; entries in
+`a2a_config.json` that are not listed in `a2a_agents` are silently ignored.
+
+### 3. Reload or restart
+
+Hot-reload (`POST /api/config/reload` or the Reload button in the web UI)
+picks up both files without a process restart.
+
+### Optional: target a specific squad or session
+
+The tool accepts `squad` and `session_name` arguments the model can fill in
+at call time. You can also bake defaults into the config:
+
+```json
+{
+  "agents": {
+    "peer-yoke": {
+      "url": "http://peer-host:8091/",
+      "squad": "research",
+      "session_name": "teaching-kite",
+      "create": true
+    }
+  }
+}
+```
+
+- `squad` — selects a named squad on the remote (`tasks/send` metadata).
+- `session_name` — routes into a named session visible in the remote web UI
+  sidebar; the turn is persisted and any open tab on that session receives a
+  live SSE push.
+- `create: true` — materialise the named session on the remote if it does
+  not yet exist (idempotent).
+
+Per-call overrides (the tool's `squad` / `session_name` / `create`
+arguments) take precedence over these defaults.
+
+See [docs/configuration.md#configa2a_configjson](configuration.md#configa2a_configjson)
+for the full field reference and smoke-test command.
+
+---
+
 ## Add a new LLM provider
 
 If the provider exposes an OpenAI-compatible API, **don't** add code —

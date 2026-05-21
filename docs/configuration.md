@@ -364,6 +364,90 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 
 ---
 
+---
+
+## `config/a2a_config.json`
+
+Declares remote [A2A-protocol](https://google.github.io/A2A/) endpoints the
+leader can delegate work to. Each entry in `agents` becomes an
+`a2a_<name>` tool on the leader — the model calls it like any other tool and
+receives the remote agent's text reply.
+
+```json
+{
+  "agents": {
+    "peer-yoke": {
+      "url": "http://peer-host:8091/",
+      "description": "Secondary yoke server specialised in database triage.",
+      "headers": { "Authorization": "Bearer ${input:peer_token}" },
+      "squad": "research",
+      "session_name": "",
+      "create": false
+    }
+  },
+  "inputs": [
+    {
+      "id": "peer_token",
+      "type": "promptString",
+      "description": "Bearer token for the peer yoke server",
+      "password": true
+    }
+  ]
+}
+```
+
+### Agent fields
+
+| Field          | Required | Purpose |
+|----------------|----------|---------|
+| `url`          | yes      | Base URL of the remote A2A endpoint. |
+| `description`  | no       | Shown to the model as the tool description. Defaults to "Remote A2A agent." |
+| `headers`      | no       | HTTP headers added to every request (e.g. `Authorization`). Values support `${input:id}` substitution. |
+| `squad`        | no       | Default remote squad to address. Empty means the remote server's own default squad. Overridable per-call via the tool's `squad` argument. |
+| `session_name` | no       | Default friendly name of the remote session to target (the name shown in the remote's web UI sidebar). Empty means the call is stateless. Overridable per-call via `session_name`. |
+| `create`       | no       | When `true` and `session_name` is set, materialise the session on the remote if it does not yet exist. Idempotent. Overridable per-call via `create`. |
+
+### `${input:id}` template syntax
+
+Any string field in an agent entry may contain `${input:id}` placeholders.
+These are resolved from the `inputs` array — interactively prompted (once per
+session, then cached) using the same mechanism as MCP inputs.
+
+### Tool arguments
+
+When the leader invokes an `a2a_<name>` tool it can pass:
+
+| Argument       | Type   | Purpose |
+|----------------|--------|---------|
+| `prompt`       | string | The task to delegate (required). |
+| `squad`        | string | Override the remote squad for this single call. |
+| `session_name` | string | Override the remote session for this single call. |
+| `create`       | bool   | Materialise the named session if missing (only when `session_name` is set). |
+
+Per-call values take precedence over the agent-level config defaults, which
+in turn take precedence over the remote server's own defaults.
+
+### Addressing named sessions
+
+When `session_name` is set, the call is routed to the matching session in the
+remote server's session registry (looked up by the friendly petname visible in
+the web UI sidebar, e.g. `teaching-kite`). The turn is persisted into the
+remote session's conversation file and any open web UI tab on that session
+receives a live `mailbox_push` SSE event.
+
+When `session_name` is empty the call is stateless: the remote server creates
+a fresh ephemeral session for the duration of the request, runs the turn, and
+discards it.
+
+### Smoke test
+
+```bash
+# Start the remote and your local yoke-server, then:
+make a2a-smoke A2A_URL=http://127.0.0.1:8091/
+```
+
+---
+
 ## Other runtime files
 
 All runtime files are created in the working directory of the root

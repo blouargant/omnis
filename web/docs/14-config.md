@@ -12,6 +12,7 @@ single root).
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (falls back to `registry/agents/default.md`). |
 | `config/permissions.json`             | Permission rules. |
 | `config/mcp_config.json`              | MCP server definitions. |
+| `config/a2a_config.json`              | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
 | `config/filters/`                     | Bash output filter patterns (token optimization). |
 | `skills/<name>/SKILL.md`              | Authored skill playbooks. |
 | `softskills/`                         | Curator-distilled procedures. |

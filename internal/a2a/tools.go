@@ -22,10 +22,14 @@ import (
 // `session_name` is optional: when set, the call targets an existing named
 // session on the remote (its friendly name as listed in the remote's web
 // UI sidebar, e.g. "teaching-kite"). When omitted, the call is stateless.
+// `create`, when true and `session_name` is set, materialises the session
+// on the remote if it does not yet exist. Idempotent: an already-existing
+// session is reused.
 type SendIn struct {
 	Prompt      string `json:"prompt"`
 	Squad       string `json:"squad,omitempty"`
 	SessionName string `json:"session_name,omitempty"`
+	Create      bool   `json:"create,omitempty"`
 }
 
 // SendOut is the JSON output returned to the model.
@@ -62,7 +66,8 @@ func NewTools(agents []Agent) []tool.Tool {
 				if session == "" {
 					session = strings.TrimSpace(agent.SessionName)
 				}
-				resp, err := SendTask(context.Background(), agent, in.Prompt, squad, session)
+				create := in.Create || agent.CreateSession
+				resp, err := SendTask(context.Background(), agent, in.Prompt, squad, session, create)
 				if err != nil {
 					return SendOut{}, err
 				}
@@ -90,13 +95,18 @@ func buildToolDescription(a Agent) string {
 	if s := strings.TrimSpace(a.SessionName); s != "" {
 		sessionNote = fmt.Sprintf("the remote named session %q (its friendly name in the remote's web UI sidebar)", s)
 	}
+	createNote := "false (the named session must already exist on the remote — call will -32602 if missing)"
+	if a.CreateSession {
+		createNote = "true (a missing session will be materialised on the remote)"
+	}
 	return fmt.Sprintf(
 		"Delegate a task to the remote A2A agent %q at %s. %s "+
 			"Arguments: `prompt` (string, required) — the full task description to send; "+
 			"`squad` (string, optional) — override the remote squad to address (default: %s); "+
-			"`session_name` (string, optional) — target an existing named session on the remote by its friendly name (e.g. \"teaching-kite\"), so the conversation history is preserved across calls (default: %s). "+
-			"Returns the remote agent's text response. When session_name is set, the turn is persisted into the remote's web UI conversation file.",
-		a.Name, a.URL, purpose, squadNote, sessionNote,
+			"`session_name` (string, optional) — target an existing named session on the remote by its friendly name (e.g. \"teaching-kite\"), so the conversation history is preserved across calls (default: %s); "+
+			"`create` (bool, optional, default %s) — when true together with `session_name`, materialise the session on the remote if it does not yet exist. Session names must be lowercase kebab-case (a-z, 0-9, dashes, up to 80 chars). "+
+			"Returns the remote agent's text response. When session_name is set, the turn is persisted into the remote's web UI conversation file and any open web UI tab on that session receives a live mailbox_push event.",
+		a.Name, a.URL, purpose, squadNote, sessionNote, createNote,
 	)
 }
 

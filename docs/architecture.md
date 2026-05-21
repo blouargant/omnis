@@ -87,6 +87,7 @@ Categorisation:
 | `internal/teammates`   | `teammate_ask`, `teammate_tell`, `teammate_inbox`               | Inter-agent mailbox           |
 | `internal/skills`      | `load_skill`, `list_skills`                                     | Lazy skill discovery          |
 | `internal/mcp`         | (loads MCP toolsets from JSON)                                  | External tool servers         |
+| `internal/a2a`         | `a2a_<name>` (one per configured peer)                          | Remote A2A agent delegation   |
 
 ### 4. Plugins — `core/events`, `core/permissions`, `internal/cache`, `internal/compress`
 
@@ -201,6 +202,7 @@ recompiling:
 | Skills      | `skills/<name>/SKILL.md`                  | `internal/skills` walks the dir at startup        |
 | MCP servers | `config/mcp_config.json`                  | `internal/mcp` spawns processes & adapts toolsets |
 | Permissions | `config/permissions.json`                 | `core/permissions` plugin                         |
+| A2A peers   | `config/a2a_config.json`                  | `internal/a2a.NewTools` adds one `a2a_<name>` tool per entry to the leader |
 
 ## Lifecycle of a turn
 

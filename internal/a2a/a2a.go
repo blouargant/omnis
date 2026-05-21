@@ -43,6 +43,11 @@ type Agent struct {
 	// address. Empty means the call is stateless (ephemeral session on
 	// the remote). The tool's `session_name` argument overrides this.
 	SessionName string `json:"session_name,omitempty"`
+	// CreateSession, when true, asks the remote to materialise the named
+	// session if it does not yet exist. Idempotent: existing sessions are
+	// reused. Only meaningful when SessionName is set or supplied at call
+	// time. The tool's `create` argument can also enable this per-call.
+	CreateSession bool `json:"create,omitempty"`
 }
 
 // Input is one user-supplied value referenced from agent config via

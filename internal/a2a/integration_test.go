@@ -42,7 +42,7 @@ func TestLiveSendTaskRoundTrip(t *testing.T) {
 	defer cancel()
 
 	t.Logf("→ %s tasks/send  prompt=%q", url, prompt)
-	resp, err := SendTask(ctx, agent, prompt)
+	resp, err := SendTask(ctx, agent, prompt, "", "", false)
 	if err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
