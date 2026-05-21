@@ -5661,90 +5661,228 @@
     const agents = (d.agents && typeof d.agents === "object") ? d.agents : {};
     const names = Object.keys(agents).sort();
 
-    for (const name of names) {
+    const grid = document.createElement("div");
+    grid.className = "mcp-cards-grid";
+
+    names.forEach(name => {
       const a = agents[name];
-      const section = document.createElement("div");
-      section.className = "mcp-server-section";
-      section.innerHTML = `
-        <div class="mcp-server-header">
-          <input type="text" class="mcp-server-name" value="${escHtml(name)}" placeholder="agent-name" title="Agent name (key in a2a_config.json)">
-          <button type="button" class="del-btn a2a-agent-del">Remove</button>
+      if (!a.headers || typeof a.headers !== "object") a.headers = {};
+      let currentName = name;
+
+      const card = document.createElement("div");
+      card.className = "mcp-card";
+      card.innerHTML = `
+        <div class="mcp-card-hdr">
+          <div class="mcp-card-title">
+            <span class="model-status-dot dot-active"></span>
+            <strong class="mcp-card-name">${escHtml(currentName || "(unnamed)")}</strong>
+          </div>
+          <button type="button" class="del-btn a2a-remove">Delete</button>
         </div>
-        <div class="mcp-server-fields">
-          <label>URL
-            <input type="text" class="a2a-url" value="${escHtml(a.url || "")}" placeholder="https://agent.example.com">
-          </label>
-          <label>Description
-            <input type="text" class="a2a-description" value="${escHtml(a.description || "")}" placeholder="Optional description">
-          </label>
-        </div>
-        <div class="mcp-server-headers-section">
-          <div class="mcp-headers-label">Headers <button type="button" class="add-btn a2a-header-add">+ Add</button></div>
-          <div class="a2a-headers-list"></div>
-        </div>
+        <div class="mcp-card-body"></div>
       `;
-      const nameInput = section.querySelector(".mcp-server-name");
-      nameInput.addEventListener("change", () => {
-        const newName = nameInput.value.trim();
-        if (!newName || newName === name) return;
-        if (agents[newName]) { nameInput.value = name; return; }
-        agents[newName] = agents[name];
-        delete agents[name];
-        renderA2AList(d);
-        markFormDirty("a2a");
-      });
-      section.querySelector(".a2a-url").addEventListener("input", e => { agents[name].url = e.target.value; markFormDirty("a2a"); });
-      section.querySelector(".a2a-description").addEventListener("input", e => { agents[name].description = e.target.value; markFormDirty("a2a"); });
-      section.querySelector(".a2a-agent-del").addEventListener("click", () => { delete agents[name]; renderA2AList(d); markFormDirty("a2a"); });
+      const body = card.querySelector(".mcp-card-body");
+      const nameEl = card.querySelector(".mcp-card-name");
 
-      const headersList = section.querySelector(".a2a-headers-list");
-      const headers = a.headers || {};
-      function rebuildHeaders() {
-        headersList.innerHTML = "";
-        Object.keys(headers).forEach(k => {
-          const row = document.createElement("div");
-          row.className = "mcp-header-row";
-          row.innerHTML = `
-            <input type="text" class="hdr-key" value="${escHtml(k)}" placeholder="Header-Name">
-            <input type="text" class="hdr-val" value="${escHtml(headers[k])}" placeholder="value or \${input:id}">
-            <button type="button" class="del-btn">✕</button>
-          `;
-          row.querySelector(".hdr-key").addEventListener("change", e => {
-            const nk = e.target.value.trim();
-            if (!nk || nk === k) return;
-            headers[nk] = headers[k]; delete headers[k]; rebuildHeaders(); markFormDirty("a2a");
-          });
-          row.querySelector(".hdr-val").addEventListener("input", e => { headers[k] = e.target.value; markFormDirty("a2a"); });
-          row.querySelector(".del-btn").addEventListener("click", () => { delete headers[k]; rebuildHeaders(); markFormDirty("a2a"); });
-          headersList.appendChild(row);
-        });
-        if (!agents[name].headers || !Object.keys(agents[name].headers).length) {
-          agents[name].headers = headers;
-        }
+      function a2aField(label, val, onCh, opts = {}) {
+        const f = document.createElement("div");
+        f.className = "model-field" + (opts.full ? " model-field-full" : "");
+        const lbl = document.createElement("label");
+        lbl.className = "model-field-label model-field-label--title";
+        lbl.textContent = label;
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "model-field-input";
+        inp.value = val == null ? "" : String(val);
+        if (opts.placeholder) inp.placeholder = opts.placeholder;
+        inp.addEventListener("input", () => onCh(inp.value));
+        f.appendChild(lbl);
+        f.appendChild(inp);
+        return f;
       }
-      rebuildHeaders();
-      section.querySelector(".a2a-header-add").addEventListener("click", () => {
-        if (!agents[name].headers) agents[name].headers = {};
-        agents[name].headers[""] = "";
-        Object.assign(headers, agents[name].headers);
-        rebuildHeaders();
-        markFormDirty("a2a");
-      });
-      container.appendChild(section);
-    }
 
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "add-btn";
-    addBtn.textContent = "+ Add agent";
-    addBtn.addEventListener("click", () => {
-      let base = "new-agent", n = 1;
-      while (agents[base]) base = `new-agent-${n++}`;
-      agents[base] = { url: "" };
-      renderA2AList(d);
-      markFormDirty("a2a");
+      function a2aSection(title) {
+        const sec = document.createElement("section");
+        sec.className = "mcp-section";
+        const h = document.createElement("h4");
+        h.className = "mcp-section-title";
+        h.textContent = title;
+        sec.appendChild(h);
+        return sec;
+      }
+
+      function a2aAddButton(label, onClick) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "mcp-add-full";
+        b.innerHTML = `<span class="mcp-add-full-icon">+</span><span>${escHtml(label)}</span>`;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
+      function a2aTrashBtn(onClick) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "mcp-trash";
+        b.setAttribute("aria-label", "Remove");
+        b.innerHTML = TRASH_ICON_SVG;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
+      // ── General Settings ────────────────────────────────────────────
+      const general = a2aSection("General Settings");
+      const generalGrid = document.createElement("div");
+      generalGrid.className = "model-field-grid";
+      generalGrid.appendChild(a2aField("Name", currentName, v => {
+        const nv = v.trim();
+        nameEl.textContent = nv || "(unnamed)";
+        if (!nv || nv === currentName) return;
+        if (Object.prototype.hasOwnProperty.call(agents, nv)) return;
+        delete agents[currentName];
+        agents[nv] = a;
+        currentName = nv;
+        markFormDirty("a2a");
+      }));
+      general.appendChild(generalGrid);
+
+      // ── Connection ──────────────────────────────────────────────────
+      const conn = a2aSection("Connection");
+      const connGrid = document.createElement("div");
+      connGrid.className = "model-field-grid";
+      connGrid.appendChild(a2aField("URL", a.url, v => { a.url = v; markFormDirty("a2a"); }, {
+        full: true,
+        placeholder: "https://agent.example.com/",
+      }));
+      connGrid.appendChild(a2aField("Description", a.description, v => { a.description = v; markFormDirty("a2a"); }, {
+        full: true,
+        placeholder: "Optional description",
+      }));
+      conn.appendChild(connGrid);
+      body.appendChild(general);
+      body.appendChild(conn);
+
+      // ── Routing ─────────────────────────────────────────────────────
+      const routing = a2aSection("Routing");
+      const routingGrid = document.createElement("div");
+      routingGrid.className = "model-field-grid";
+      routingGrid.appendChild(a2aField("Squad", a.squad, v => { a.squad = v || undefined; markFormDirty("a2a"); }, {
+        placeholder: "default (leave blank)",
+      }));
+      routingGrid.appendChild(a2aField("Session Name", a.session_name, v => { a.session_name = v || undefined; markFormDirty("a2a"); }, {
+        placeholder: "leave blank for ephemeral",
+      }));
+      routing.appendChild(routingGrid);
+
+      const createRow = document.createElement("div");
+      createRow.className = "model-field";
+      const createLabel = document.createElement("label");
+      createLabel.style.cssText = "display:flex;align-items:center;gap:0.5rem;cursor:pointer;";
+      const createChk = document.createElement("input");
+      createChk.type = "checkbox";
+      createChk.checked = !!a.create;
+      createChk.addEventListener("change", () => { a.create = createChk.checked || undefined; markFormDirty("a2a"); });
+      const createSpan = document.createElement("span");
+      createSpan.className = "model-field-label model-field-label--title";
+      createSpan.style.margin = "0";
+      createSpan.textContent = "Create session if missing";
+      createLabel.appendChild(createChk);
+      createLabel.appendChild(createSpan);
+      createRow.appendChild(createLabel);
+      routing.appendChild(createRow);
+      body.appendChild(routing);
+
+      // ── Headers ─────────────────────────────────────────────────────
+      const headersSec = a2aSection("Headers");
+      const headersGrid = document.createElement("div");
+      headersGrid.className = "mcp-kv-grid";
+      const headersHdr = document.createElement("div");
+      headersHdr.className = "mcp-kv-headers";
+      headersHdr.innerHTML = `
+        <span class="model-field-label model-field-label--title">Key</span>
+        <span class="model-field-label model-field-label--title">Value</span>
+        <span></span>
+      `;
+      headersGrid.appendChild(headersHdr);
+      const headersRows = document.createElement("div");
+      headersRows.className = "mcp-kv-rows";
+      headersGrid.appendChild(headersRows);
+      headersSec.appendChild(headersGrid);
+
+      const store = a.headers;
+      const drawHeaders = () => {
+        headersRows.innerHTML = "";
+        Object.entries(store).forEach(([k, v]) => {
+          const r = document.createElement("div");
+          r.className = "mcp-kv-row";
+          r.innerHTML = `
+            <input type="text" class="kv-k" placeholder="Header-Name" value="${escHtml(k)}" />
+            <input type="text" class="kv-v" placeholder="value or Bearer \${input:id}" value="${escHtml(v)}" />
+          `;
+          const kIn = r.querySelector(".kv-k");
+          const vIn = r.querySelector(".kv-v");
+          let oldKey = k;
+          kIn.addEventListener("change", () => {
+            const nk = kIn.value.trim();
+            if (!nk || nk === oldKey) return;
+            const val = store[oldKey];
+            delete store[oldKey];
+            store[nk] = val;
+            oldKey = nk;
+            markFormDirty("a2a");
+          });
+          vIn.addEventListener("input", () => { store[oldKey] = vIn.value; markFormDirty("a2a"); });
+          r.appendChild(a2aTrashBtn(() => { delete store[oldKey]; markFormDirty("a2a"); drawHeaders(); }));
+          headersRows.appendChild(r);
+        });
+      };
+      drawHeaders();
+      headersSec.appendChild(a2aAddButton("Add Header", async () => {
+        let nk = await appPrompt("Header name (e.g. Authorization):");
+        if (!nk) return;
+        nk = nk.trim();
+        if (!nk || nk in store) return;
+        store[nk] = "";
+        markFormDirty("a2a"); drawHeaders();
+      }));
+      body.appendChild(headersSec);
+
+      card.querySelector(".a2a-remove").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove agent "${currentName}"?`)) return;
+        delete agents[currentName];
+        markFormDirty("a2a"); renderA2AList(d);
+      });
+
+      grid.appendChild(card);
     });
-    container.appendChild(addBtn);
+
+    // Empty "Add A2A Agent" card
+    const emptyCard = document.createElement("div");
+    emptyCard.className = "mcp-card mcp-card-empty";
+    const emptyBtn = document.createElement("button");
+    emptyBtn.type = "button";
+    emptyBtn.className = "model-card-empty-btn";
+    emptyBtn.innerHTML = `
+      <span class="model-card-empty-icon">⊕</span>
+      <span class="model-card-empty-label">Add A2A Agent</span>
+      <span class="model-card-empty-sub">Configure a remote Agent-to-Agent endpoint</span>
+    `;
+    emptyBtn.addEventListener("click", () => {
+      let base = "new-agent";
+      let candidate = base;
+      let i = 1;
+      while (Object.prototype.hasOwnProperty.call(agents, candidate)) {
+        i++;
+        candidate = `${base}-${i}`;
+      }
+      agents[candidate] = { url: "", headers: {} };
+      markFormDirty("a2a");
+      renderA2AList(d);
+    });
+    emptyCard.appendChild(emptyBtn);
+    grid.appendChild(emptyCard);
+
+    container.appendChild(grid);
   }
 
   async function renderA2ARemotesSection(host) {
