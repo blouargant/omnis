@@ -109,7 +109,7 @@ Common fields:
 | `description` | Short summary shown in the UI and exposed to the leader as the sub-agent tool description. |
 | `enabled` | When `false`, the agent is excluded from squads and the leader's tool list. |
 | `leader` | When `true`, this agent can be selected as a squad leader. |
-| `builtin` | When `true`, marks the agent as shipped with yoke. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `skills_crawler`, `summariser`, `curator`. |
+| `builtin` | When `true`, marks the agent as shipped with yoke. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `registries_crawler`, `summariser`, `curator`. |
 | `model_ref` | References a key in `models` for provider/model/base_url/api_key. |
 | `tools` | List of tool group names mounted on this agent (`fs`, `mcp`, `web`, `skills`, `softskills`, `calc`, `registries`, ...). |
 | `skills_dir` | Optional per-agent skills directory (overrides the global one). |

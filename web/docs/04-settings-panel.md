@@ -37,7 +37,7 @@ The Agent section has four sub-tabs:
 
 - **Agents** — the fleet (leader + sub-agents). The list is split into
   two sections: **Built-in Agents** (shipped with yoke: `leader`,
-  `skill_editor`, `skills_crawler`, `summariser`, `curator`) and
+  `skill_editor`, `registries_crawler`, `summariser`, `curator`) and
   **Custom Agents** (user-added). Pick the agents the leader can call,
   set per-agent system instructions, tool sets, model references, and
   skill links. Each agent's `agent.json` and `instruction.md` live in

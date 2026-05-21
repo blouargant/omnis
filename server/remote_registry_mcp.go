@@ -17,6 +17,7 @@ import (
 	"github.com/blouargant/yoke/internal/registries"
 )
 
+
 // registerRemoteMCPRegistryRoutes mounts /remotes endpoints scoped to "mcp" kind.
 // Shares the backing remote_registries.json with the skills and agents tabs.
 //
@@ -29,6 +30,8 @@ func registerRemoteMCPRegistryRoutes(
 	writePath string,
 	mcpConfigRead func() string,
 	mcpConfigWrite string,
+	skillsReadDir string,
+	skillsWriteDir string,
 ) {
 	registerRemoteRegistryCRUD(rg, readPath, writePath, registries.KindMCP)
 
@@ -159,7 +162,14 @@ func registerRemoteMCPRegistryRoutes(
 				c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 				return
 			}
-			c.JSON(http.StatusCreated, gin.H{"name": def.Name, "added": added})
+			resp := gin.H{"name": def.Name, "added": added}
+			if len(def.Skills) > 0 {
+				_, warns := tryAutoInstallSkills(def.Skills, skillsReadDir, skillsWriteDir, readPath())
+				if len(warns) > 0 {
+					resp["warnings"] = warns
+				}
+			}
+			c.JSON(http.StatusCreated, resp)
 			return
 		}
 
@@ -269,16 +279,24 @@ func mergeMCPServer(readPath, writePath, serverName string, srv internalmcp.Serv
 
 // mcpRoutesDeps bundles the resolved paths required by the MCP remote-registry routes.
 type mcpRoutesDeps struct {
-	RemoteRegistriesWrite string
-	RemoteRegistriesRead  func() string
-	MCPConfigRead         func() string
-	MCPConfigWrite        string
+	RemoteRegistriesWrite  string
+	RemoteRegistriesRead   func() string
+	MCPConfigRead          func() string
+	MCPConfigWrite         string
+	SkillsRegistryReadDir  string
+	SkillsRegistryWriteDir string
 }
 
 // resolveMCPRoutesDeps derives the dep bundle from standard path conventions.
 func resolveMCPRoutesDeps() mcpRoutesDeps {
 	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), registries.ConfigFileName))
 	absMCPWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "mcp_config.json"))
+	skillsRead, _ := filepath.Abs(paths.SkillsRegistryDir())
+	skillsWrite, _ := filepath.Abs(paths.SkillsRegistryWriteDir())
+	if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+		skillsRead, _ = filepath.Abs(v)
+		skillsWrite = skillsRead
+	}
 	return mcpRoutesDeps{
 		RemoteRegistriesWrite: absRemoteWrite,
 		RemoteRegistriesRead: func() string {
@@ -289,7 +307,9 @@ func resolveMCPRoutesDeps() mcpRoutesDeps {
 			p, _ := filepath.Abs(paths.FindConfig("mcp_config.json"))
 			return p
 		},
-		MCPConfigWrite: absMCPWrite,
+		MCPConfigWrite:         absMCPWrite,
+		SkillsRegistryReadDir:  skillsRead,
+		SkillsRegistryWriteDir: skillsWrite,
 	}
 }
 
@@ -303,5 +323,7 @@ func registerMCPRoutes(rg *gin.RouterGroup) {
 		deps.RemoteRegistriesWrite,
 		deps.MCPConfigRead,
 		deps.MCPConfigWrite,
+		deps.SkillsRegistryReadDir,
+		deps.SkillsRegistryWriteDir,
 	)
 }

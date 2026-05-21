@@ -5,7 +5,7 @@
     "web_agent",
     "image_generator",
     "skill_editor",
-    "skills_crawler",
+    "registries_crawler",
     "summariser",
     "curator"
   ],
@@ -74,21 +74,21 @@
       ]
     },
     {
-      "name": "Research",
-      "description": "Web research focus: leader plus the web agent and summariser.",
-      "leader": "leader",
-      "members": [
-        "web_agent",
-        "summariser"
-      ]
-    },
-    {
       "name": "Skill Editor",
-      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the crawler for sourcing existing skills.",
+      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the registries crawler for sourcing existing skills.",
       "leader": "skill_editor",
       "members": [
         "web_agent",
-        "skills_crawler"
+        "skill_editor",
+        "registries_crawler"
+      ]
+    },
+    {
+      "name": "Registries Crawler",
+      "description": "Focused on crawling remote registries to find, inspect, and install skills on demand. The registries crawler is the sole member and leader of this squad.",
+      "leader": "leader",
+      "members": [
+        "registries_crawler"
       ]
     }
   ],

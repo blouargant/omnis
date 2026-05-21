@@ -129,7 +129,7 @@ objects; its `agents` field is a list of names that reference the registry:
 
 ```json
 {
-  "agents": ["leader", "investigator", "web_agent", "skill_editor", "skills_crawler", "summariser", "curator"],
+  "agents": ["leader", "investigator", "web_agent", "skill_editor", "registries_crawler", "summariser", "curator"],
   "models": { ... },
   "squads": [ ... ]
 }
@@ -137,7 +137,7 @@ objects; its `agents` field is a list of names that reference the registry:
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,
-skill_editor, skills_crawler, summariser, curator); custom agents added
+skill_editor, registries_crawler, summariser, curator); custom agents added
 by the user omit the flag. The web UI groups them under separate
 **Built-in** and **Custom** sections in the agents list.
 

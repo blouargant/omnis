@@ -30,6 +30,9 @@ func registerRemoteAgentRegistryRoutes(
 	agentsRegistryDir string,
 	agentsConfigRead func() string,
 	agentsConfigWrite string,
+	skillsReadDir string,
+	skillsWriteDir string,
+	mcpConfigRead func() string,
 ) {
 	registerRemoteRegistryCRUD(rg, readPath, writePath, registries.KindAgents)
 
@@ -127,18 +130,31 @@ func registerRemoteAgentRegistryRoutes(
 				// UI can show "installed but not enabled" rather than rolling
 				// back the on-disk install.
 				c.JSON(http.StatusOK, gin.H{
-					"name":          agentName,
-					"enabled":       false,
-					"enable_error":  err.Error(),
+					"name":         agentName,
+					"enabled":      false,
+					"enable_error": err.Error(),
 				})
 				return
 			}
 			enabled = added
 		}
-		c.JSON(http.StatusCreated, gin.H{
-			"name":    agentName,
-			"enabled": enabled,
-		})
+
+		// Resolve skill and MCP server dependencies declared in the installed agent.json.
+		var warnings []string
+		skills, mcpServers := parseAgentJSONDeps(filepath.Join(agentsRegistryDir, agentName, "agent.json"))
+		if len(skills) > 0 {
+			_, skillWarns := tryAutoInstallSkills(skills, skillsReadDir, skillsWriteDir, readPath())
+			warnings = append(warnings, skillWarns...)
+		}
+		if len(mcpServers) > 0 {
+			warnings = append(warnings, checkMCPServerDeps(mcpServers, mcpConfigRead())...)
+		}
+
+		resp := gin.H{"name": agentName, "enabled": enabled}
+		if len(warnings) > 0 {
+			resp["warnings"] = warnings
+		}
+		c.JSON(http.StatusCreated, resp)
 	})
 }
 
@@ -213,11 +229,14 @@ func appendAgentToConfig(readPath, writePath, name string) (bool, error) {
 // agentsRoutesDeps bundles the resolved paths required by the agents-side
 // remote registry routes. Built once at server startup.
 type agentsRoutesDeps struct {
-	AgentsRegistryDir       string                // abs $YOKE_HOME/registry/agents (or env-override)
-	RemoteRegistriesWrite   string                // abs $YOKE_HOME/config/remote_registries.json
-	RemoteRegistriesRead    func() string         // re-resolves the 3-layer chain on each request
-	AgentsConfigRead        func() string         // re-resolves config/agents.json read path
-	AgentsConfigWrite       string                // abs $YOKE_HOME/config/agents.json
+	AgentsRegistryDir       string        // abs $YOKE_HOME/registry/agents (or env-override)
+	RemoteRegistriesWrite   string        // abs $YOKE_HOME/config/remote_registries.json
+	RemoteRegistriesRead    func() string // re-resolves the 3-layer chain on each request
+	AgentsConfigRead        func() string // re-resolves config/agents.json read path
+	AgentsConfigWrite       string        // abs $YOKE_HOME/config/agents.json
+	SkillsRegistryReadDir   string        // abs path to skills registry for dependency resolution
+	SkillsRegistryWriteDir  string        // abs write target for auto-installed skills
+	MCPConfigRead           func() string // re-resolves mcp_config.json read path
 }
 
 // resolveAgentsRoutesDeps mirrors resolveSkillsDeps for the agents side.
@@ -230,6 +249,12 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 	absRegistryDir, _ := filepath.Abs(registryDir)
 	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), registries.ConfigFileName))
 	absAgentsWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "agents.json"))
+	skillsRead, _ := filepath.Abs(paths.SkillsRegistryDir())
+	skillsWrite, _ := filepath.Abs(paths.SkillsRegistryWriteDir())
+	if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+		skillsRead, _ = filepath.Abs(v)
+		skillsWrite = skillsRead
+	}
 	return agentsRoutesDeps{
 		AgentsRegistryDir:     absRegistryDir,
 		RemoteRegistriesWrite: absRemoteWrite,
@@ -241,7 +266,13 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 			p, _ := filepath.Abs(paths.FindConfig("agents.json"))
 			return p
 		},
-		AgentsConfigWrite: absAgentsWrite,
+		AgentsConfigWrite:      absAgentsWrite,
+		SkillsRegistryReadDir:  skillsRead,
+		SkillsRegistryWriteDir: skillsWrite,
+		MCPConfigRead: func() string {
+			p, _ := filepath.Abs(paths.FindConfig("mcp_config.json"))
+			return p
+		},
 	}
 }
 
@@ -256,6 +287,9 @@ func registerAgentsRoutes(rg *gin.RouterGroup) {
 		deps.AgentsRegistryDir,
 		deps.AgentsConfigRead,
 		deps.AgentsConfigWrite,
+		deps.SkillsRegistryReadDir,
+		deps.SkillsRegistryWriteDir,
+		deps.MCPConfigRead,
 	)
 	registerImportAgentRoute(rg)
 }

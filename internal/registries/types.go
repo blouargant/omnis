@@ -1,6 +1,6 @@
 // Package registries provides remote skill and agent registry browsing,
 // installation, and per-agent linking. It is shared between the HTTP
-// server's web UI handlers and the in-agent skills_crawler tool group:
+// server's web UI handlers and the in-agent registries_crawler tool group:
 // both surfaces use the same providers (GitHub/GitLab/Gitea), the same
 // remote_registries.json config file, and the same on-disk layout.
 package registries
@@ -20,6 +20,7 @@ const (
 	KindBoth   = "both"
 	KindMCP    = "mcp"
 	KindA2A    = "a2a"
+	KindSquads = "squads"
 )
 
 // Registry is one entry in remote_registries.json.
@@ -70,6 +71,17 @@ type MCPToolInfo struct {
 	Type        string `json:"type,omitempty"` // "stdio" or "http"
 	HasReadme   bool   `json:"has_readme,omitempty"`
 	Installed   bool   `json:"installed"`
+}
+
+// SquadInfo is one squad returned when browsing a remote squad registry.
+type SquadInfo struct {
+	Name        string   `json:"name"`
+	DirPath     string   `json:"dir_path"`
+	Group       string   `json:"group,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Leader      string   `json:"leader,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	Installed   bool     `json:"installed"`
 }
 
 // A2AAgentInfo is one A2A agent returned when browsing a remote A2A registry.

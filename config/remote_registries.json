@@ -12,6 +12,12 @@
     "kind": "agents"
   },
   {
+    "id": "c4d8a059",
+    "name": "Yoke Squads",
+    "url": "https://github.com/blouargant/yoke-registry/tree/main/squads",
+    "kind": "squads"
+  },
+  {
     "id": "c4d8a057",
     "name": "Yoke MCP",
     "url": "https://github.com/blouargant/yoke-registry/tree/main/mcp",

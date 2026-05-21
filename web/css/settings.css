@@ -161,6 +161,7 @@
 }
 .settings-footer .settings-status.success { color: #89d185; }
 .settings-footer .settings-status.error   { color: var(--danger-fg); }
+.settings-footer .settings-status.warning { color: var(--warn-fg); }
 
 .settings-footer button,
 .skill-detail-footer button {
@@ -1205,6 +1206,9 @@
 
 /* Detail view */
 .skill-detail-view {}
+.agent-detail-panel .skill-detail-view {
+  padding: 1rem 1.25rem;
+}
 .skill-detail-header {
   display: flex;
   align-items: center;
@@ -1386,6 +1390,27 @@
 }
 
 /* ── Remote registries ──────────────────────────────────────────────────── */
+
+/* Split-panel list wrapper used in the Registries right panel */
+.remote-kind-list-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.remote-kind-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.75rem 1.25rem 0.5rem;
+  flex: 0 0 auto;
+}
+#agent-remote-list,
+#squad-remote-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1.25rem 1rem;
+}
 
 .remote-reg-row {
   display: flex;

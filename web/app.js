@@ -3155,6 +3155,9 @@ els.ctxCompactBtn.addEventListener("click", async (e) => {
   }
   if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
   await loadSquads();
+  // After a hot-reload from the Settings panel, refresh the squad picker so
+  // newly installed squads show up without a page refresh.
+  window.addEventListener("yoke:config-reloaded", () => { loadSquads(); });
   loadUserCommands(); // fire-and-forget; menu re-renders when it lands
   await loadSessions();
   // Auto-select the most recent session so the user is never left without an

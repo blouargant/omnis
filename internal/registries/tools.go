@@ -26,17 +26,50 @@ type Deps struct {
 	// AddSkillToAgent appends skillName to the named agent's skills list in
 	// its agent.json. Idempotent: no error if already present.
 	AddSkillToAgent func(agentName, skillName string) error
+
+	// AgentsRegistryDir returns the local agents registry directory used to
+	// check which remote agents are already installed (Installed flag in browse).
+	AgentsRegistryDir func() string
+	// InstalledMCPNames returns the set of MCP server names currently present
+	// in mcp_config.json. Used to annotate Installed flag when browsing.
+	InstalledMCPNames func() map[string]bool
+	// InstalledSquadNames returns the set of squad names currently listed in
+	// agents.json. Used to annotate Installed flag when browsing.
+	InstalledSquadNames func() map[string]bool
+	// InstalledA2ANames returns the set of A2A agent names currently in
+	// a2a_config.json. Used to annotate Installed flag when browsing.
+	InstalledA2ANames func() map[string]bool
+
+	// InstallMCP downloads and merges an MCP server into mcp_config.json.
+	// Returns the server name, whether it was newly added, and any error.
+	// When nil, the install tool returns an error in this surface.
+	InstallMCP func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
+
+	// InstallAgent downloads and installs a remote agent. When enable is true
+	// the agent name is appended to agents.json so the next reload wires it in.
+	// When nil, the install tool returns an error in this surface.
+	InstallAgent func(ref RepoRef, token, dirPath string, enable bool) (name string, enabled bool, err error)
+
+	// InstallSquad downloads and merges a remote squad into agents.json.
+	// Returns the squad name, whether it was newly added, and any error.
+	// When nil, the install tool returns an error in this surface.
+	InstallSquad func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
+
+	// InstallA2A downloads and merges a remote A2A agent into a2a_config.json.
+	// Returns the agent name, whether it was newly added, and any error.
+	// When nil, the install tool returns an error in this surface.
+	InstallA2A func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
 }
 
 // LoaderProtocol is prepended to the instruction of any agent that mounts the
 // "registries" tool group. It nudges the model to discover registries before
 // invoking specialised actions.
 const LoaderProtocol = `
-SKILL REGISTRY ACCESS — when looking for an existing skill or extending an agent's capabilities:
+REGISTRY ACCESS — when looking for an existing skill, agent, MCP server, squad, or A2A agent:
 - For skills ALREADY ON DISK: call 'list_installed_skills' to see everything in the local registry and which agents each skill is linked to; use 'get_installed_skill' to read a SKILL.md.
-- For skills NOT YET ON DISK: 'list_registries' enumerates configured remote sources; 'browse_registry' lists each one; 'get_remote_skill' fetches a SKILL.md for inspection.
-- Writing actions: 'install_remote_skill' downloads a remote skill into the local registry. 'link_skill_to_agent' grants an agent access to a locally installed skill.
-- These tools are for stewarding skills on behalf of OTHER agents — never to load or execute skill content yourself.
+- For remote items: 'list_registries' enumerates configured remote sources (each has a 'kind': skills, agents, mcp, squads, a2a, or both); 'browse_registry' lists items of the appropriate kind; 'get_remote_item' fetches raw content for inspection.
+- Writing actions: 'install_remote_skill' downloads a remote skill into the local registry. 'link_skill_to_agent' grants an agent access to a locally installed skill. 'install_remote_item' installs any remote item (skill, agent, MCP server, squad, or A2A agent).
+- These tools are for stewarding registry items on behalf of OTHER agents — never to load or execute skill content yourself.
 `
 
 // ── Input / output types ───────────────────────────────────────────────────
@@ -48,6 +81,7 @@ type registrySummary struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
 	Provider string `json:"provider,omitempty"`
+	Kind     string `json:"kind"`
 }
 
 type listRegistriesOut struct {
@@ -58,8 +92,15 @@ type browseRegistryIn struct {
 	RegistryID string `json:"registry_id"`
 }
 
+// browseRegistryOut is a union type: only the fields matching the registry's
+// Kind are populated. Check the Kind field to know which slice to read.
 type browseRegistryOut struct {
-	Skills []SkillInfo `json:"skills"`
+	Kind   string         `json:"kind"`
+	Skills []SkillInfo    `json:"skills,omitempty"`
+	Agents []AgentInfo    `json:"agents,omitempty"`
+	MCP    []MCPToolInfo  `json:"mcp,omitempty"`
+	Squads []SquadInfo    `json:"squads,omitempty"`
+	A2A    []A2AAgentInfo `json:"a2a,omitempty"`
 }
 
 type getRemoteSkillIn struct {
@@ -71,6 +112,16 @@ type getRemoteSkillOut struct {
 	Content string `json:"content"`
 }
 
+type getRemoteItemIn struct {
+	RegistryID string `json:"registry_id"`
+	DirPath    string `json:"dir_path"`
+}
+
+type getRemoteItemOut struct {
+	Kind    string `json:"kind"`
+	Content string `json:"content"`
+}
+
 type installRemoteSkillIn struct {
 	RegistryID string `json:"registry_id"`
 	DirPath    string `json:"dir_path"`
@@ -78,6 +129,21 @@ type installRemoteSkillIn struct {
 
 type installRemoteSkillOut struct {
 	Name string `json:"name"`
+}
+
+type installRemoteItemIn struct {
+	RegistryID string `json:"registry_id"`
+	DirPath    string `json:"dir_path"`
+	// Enable is only relevant for agent installs: when true the installed agent
+	// name is appended to agents.json so the next hot-reload wires it in.
+	Enable bool `json:"enable,omitempty"`
+}
+
+type installRemoteItemOut struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Added   bool   `json:"added,omitempty"`
+	Enabled bool   `json:"enabled,omitempty"` // agents only
 }
 
 type linkSkillToAgentIn struct {
@@ -111,7 +177,7 @@ type getInstalledOut struct {
 
 // NewTools returns the registries tool set: list_installed_skills,
 // get_installed_skill, list_registries, browse_registry, get_remote_skill,
-// install_remote_skill, link_skill_to_agent.
+// get_remote_item, install_remote_skill, install_remote_item, link_skill_to_agent.
 func NewTools(deps Deps) []tool.Tool {
 	return []tool.Tool{
 		mustTool("list_installed_skills",
@@ -160,8 +226,10 @@ func NewTools(deps Deps) []tool.Tool {
 			}),
 
 		mustTool("list_registries",
-			"List the remote skill registries configured for this installation. "+
-				"Each entry includes an `id` you can pass to browse_registry. No arguments.",
+			"List the remote registries configured for this installation. Each entry "+
+				"includes an `id` you can pass to browse_registry and a `kind` field "+
+				"(skills, agents, mcp, squads, a2a, or both) that tells you what the "+
+				"registry contains. No arguments.",
 			func(_ tool.Context, _ listRegistriesIn) (listRegistriesOut, error) {
 				list, err := LoadRegistries(deps.ConfigPath())
 				if err != nil {
@@ -174,26 +242,111 @@ func NewTools(deps Deps) []tool.Tool {
 						Name:     r.Name,
 						URL:      r.URL,
 						Provider: r.Provider,
+						Kind:     r.NormalizedKind(),
 					})
 				}
 				return listRegistriesOut{Registries: out}, nil
 			}),
 
 		mustTool("browse_registry",
-			"List every skill available in a remote registry. Each result includes its "+
-				"`dir_path` (pass it to get_remote_skill or install_remote_skill), description, "+
-				"author, tags, and whether the skill is already installed locally. "+
+			"List every item available in a remote registry. The response includes a "+
+				"`kind` field and one populated slice: `skills` (kind=skills/both), "+
+				"`agents` (kind=agents/both), `mcp` (kind=mcp), `squads` (kind=squads), "+
+				"or `a2a` (kind=a2a). Each item includes its `dir_path` for use with "+
+				"get_remote_item or install_remote_item, a description, and an `installed` "+
+				"flag. For agents, a `format` field of `\"claude\"` means the agent uses "+
+				"Claude Code markdown format (a single .md file) — this is fully supported "+
+				"and installable, not an error. Agents without a format field use native "+
+				"yoke format (agent.json + optional instruction.md). "+
 				"Arguments: `registry_id` (string, required) — from list_registries.",
 			func(_ tool.Context, in browseRegistryIn) (browseRegistryOut, error) {
-				ref, _, token, err := resolveRef(deps, in.RegistryID)
+				ref, reg, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return browseRegistryOut{}, err
 				}
-				skills, err := BrowseSkills(ref, token, deps.RegistryDir())
-				if err != nil {
-					return browseRegistryOut{}, err
+				kind := reg.NormalizedKind()
+				out := browseRegistryOut{Kind: kind}
+
+				switch kind {
+				case KindBoth:
+					skillsDir := ""
+					if deps.RegistryDir != nil {
+						skillsDir = deps.RegistryDir()
+					}
+					skills, err := BrowseSkills(ref, token, skillsDir)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Skills = skills
+					agentsDir := ""
+					if deps.AgentsRegistryDir != nil {
+						agentsDir = deps.AgentsRegistryDir()
+					}
+					agents, err := BrowseAgents(ref, token, agentsDir)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Agents = agents
+
+				case KindSkills:
+					skillsDir := ""
+					if deps.RegistryDir != nil {
+						skillsDir = deps.RegistryDir()
+					}
+					skills, err := BrowseSkills(ref, token, skillsDir)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Skills = skills
+
+				case KindAgents:
+					agentsDir := ""
+					if deps.AgentsRegistryDir != nil {
+						agentsDir = deps.AgentsRegistryDir()
+					}
+					agents, err := BrowseAgents(ref, token, agentsDir)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Agents = agents
+
+				case KindMCP:
+					installed := map[string]bool{}
+					if deps.InstalledMCPNames != nil {
+						installed = deps.InstalledMCPNames()
+					}
+					tools, err := BrowseMCPTools(ref, token, installed)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.MCP = tools
+
+				case KindSquads:
+					installed := map[string]bool{}
+					if deps.InstalledSquadNames != nil {
+						installed = deps.InstalledSquadNames()
+					}
+					squads, err := BrowseSquads(ref, token, installed)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Squads = squads
+
+				case KindA2A:
+					installed := map[string]bool{}
+					if deps.InstalledA2ANames != nil {
+						installed = deps.InstalledA2ANames()
+					}
+					agents, err := BrowseA2AAgents(ref, token, installed)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.A2A = agents
+
+				default:
+					return browseRegistryOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
-				return browseRegistryOut{Skills: skills}, nil
+				return out, nil
 			}),
 
 		mustTool("get_remote_skill",
@@ -215,6 +368,44 @@ func NewTools(deps Deps) []tool.Tool {
 				return getRemoteSkillOut{Content: string(body)}, nil
 			}),
 
+		mustTool("get_remote_item",
+			"Fetch the raw content of any remote registry item (skill, agent, MCP server, "+
+				"squad, or A2A agent) without installing it. Use this to inspect an item "+
+				"before recommending or installing it. The response includes the `kind` and "+
+				"the raw `content` (SKILL.md, agent.json or agent .md for Claude Code format, "+
+				"mcp.json/mcp.md, squad.json, or a2a.json). For agents with `format: \"claude\"` "+
+				"the content is the raw Claude Code markdown definition. "+
+				"Arguments: `registry_id` (string, required), `dir_path` (string, required) — from browse_registry.",
+			func(_ tool.Context, in getRemoteItemIn) (getRemoteItemOut, error) {
+				ref, reg, token, err := resolveRef(deps, in.RegistryID)
+				if err != nil {
+					return getRemoteItemOut{}, err
+				}
+				if in.DirPath == "" {
+					return getRemoteItemOut{}, fmt.Errorf("dir_path is required")
+				}
+				kind := reg.NormalizedKind()
+				var body []byte
+				switch kind {
+				case KindSkills, KindBoth:
+					body, err = FetchSkillMD(ref, token, in.DirPath)
+				case KindAgents:
+					body, err = FetchAgentJSON(ref, token, in.DirPath)
+				case KindMCP:
+					body, err = FetchMCPManifest(ref, token, in.DirPath)
+				case KindSquads:
+					body, err = FetchSquadJSON(ref, token, in.DirPath)
+				case KindA2A:
+					body, err = FetchA2AAgentJSON(ref, token, in.DirPath)
+				default:
+					return getRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)
+				}
+				if err != nil {
+					return getRemoteItemOut{}, err
+				}
+				return getRemoteItemOut{Kind: kind, Content: string(body)}, nil
+			}),
+
 		mustTool("install_remote_skill",
 			"Download a skill from a remote registry and install it into the local skills registry. "+
 				"The skill becomes available system-wide; use link_skill_to_agent afterwards to grant a specific agent access. "+
@@ -234,9 +425,79 @@ func NewTools(deps Deps) []tool.Tool {
 				return installRemoteSkillOut{Name: name}, nil
 			}),
 
+		mustTool("install_remote_item",
+			"Install any remote registry item: skill, agent, MCP server, squad, or A2A agent. "+
+				"Dispatches based on the registry's kind. For skills, use link_skill_to_agent "+
+				"afterwards to grant a specific agent access. For agents, set `enable: true` to "+
+				"append the agent to agents.json so the next hot-reload wires it in. "+
+				"Arguments: `registry_id` (string, required), `dir_path` (string, required) "+
+				"— from browse_registry; `enable` (bool, optional, agents only).",
+			func(_ tool.Context, in installRemoteItemIn) (installRemoteItemOut, error) {
+				ref, reg, token, err := resolveRef(deps, in.RegistryID)
+				if err != nil {
+					return installRemoteItemOut{}, err
+				}
+				if in.DirPath == "" {
+					return installRemoteItemOut{}, fmt.Errorf("dir_path is required")
+				}
+				kind := reg.NormalizedKind()
+
+				switch kind {
+				case KindSkills, KindBoth:
+					name, err := InstallSkill(ref, token, in.DirPath, deps.RegistryDir())
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindSkills, Added: true}, nil
+
+				case KindAgents:
+					if deps.InstallAgent == nil {
+						return installRemoteItemOut{}, fmt.Errorf("agent install is not available in this surface")
+					}
+					name, enabled, err := deps.InstallAgent(ref, token, in.DirPath, in.Enable)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindAgents, Added: true, Enabled: enabled}, nil
+
+				case KindMCP:
+					if deps.InstallMCP == nil {
+						return installRemoteItemOut{}, fmt.Errorf("MCP install is not available in this surface")
+					}
+					name, added, err := deps.InstallMCP(ref, token, in.DirPath)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindMCP, Added: added}, nil
+
+				case KindSquads:
+					if deps.InstallSquad == nil {
+						return installRemoteItemOut{}, fmt.Errorf("squad install is not available in this surface")
+					}
+					name, added, err := deps.InstallSquad(ref, token, in.DirPath)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindSquads, Added: added}, nil
+
+				case KindA2A:
+					if deps.InstallA2A == nil {
+						return installRemoteItemOut{}, fmt.Errorf("A2A install is not available in this surface")
+					}
+					name, added, err := deps.InstallA2A(ref, token, in.DirPath)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindA2A, Added: added}, nil
+
+				default:
+					return installRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)
+				}
+			}),
+
 		mustTool("link_skill_to_agent",
 			"Add an installed skill to an agent's skills list so the agent can load it. "+
-				"The skill must already be installed locally (see install_remote_skill). "+
+				"The skill must already be installed locally (see install_remote_skill or install_remote_item). "+
 				"Arguments: `agent_name` (string, required), `skill_name` (string, required).",
 			func(_ tool.Context, in linkSkillToAgentIn) (linkSkillToAgentOut, error) {
 				if in.AgentName == "" {

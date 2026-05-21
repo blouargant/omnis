@@ -651,6 +651,21 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						return false
 					})
 					m["agents"] = agents
+
+					// Mirror the agents-side override for squads: use the resolved
+					// settings (3-layer chain) so newly-installed squads under
+					// $YOKE_HOME/config become visible even when the raw parse
+					// above hit a cached lower-precedence file path.
+					squads := make([]any, 0, len(settings.Squads))
+					for _, sq := range settings.Squads {
+						squads = append(squads, map[string]any{
+							"name":        sq.Name,
+							"description": sq.Description,
+							"leader":      sq.Leader,
+							"members":     sq.Members,
+						})
+					}
+					m["squads"] = squads
 				}
 			}
 		}

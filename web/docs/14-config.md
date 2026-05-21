@@ -33,7 +33,7 @@ Each agent's definition lives in its own directory under
 holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
-yoke (`leader`, `skill_editor`, `skills_crawler`, `summariser`,
+yoke (`leader`, `skill_editor`, `registries_crawler`, `summariser`,
 `curator`); the Web UI displays them under a **Built-in Agents**
 section, separate from user-added **Custom Agents**.
 

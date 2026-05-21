@@ -9,6 +9,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -316,7 +317,266 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 			_, err := registries.AddSkillToAgent(paths.AgentsRegistryDir(), paths.AgentsRegistryWriteDir(), agentName, skillName)
 			return err
 		},
+
+		AgentsRegistryDir: func() string {
+			if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+				return v
+			}
+			return paths.AgentsRegistryDir()
+		},
+
+		InstalledMCPNames: func() map[string]bool {
+			cfg, err := mcpcfg.Load(paths.FindConfig("mcp_config.json"))
+			if err != nil {
+				return map[string]bool{}
+			}
+			out := make(map[string]bool, len(cfg.Servers))
+			for _, s := range cfg.ServerList() {
+				out[s.Name] = true
+			}
+			return out
+		},
+
+		InstalledSquadNames: func() map[string]bool {
+			data, err := os.ReadFile(paths.FindConfig("agents.json"))
+			if err != nil {
+				return map[string]bool{}
+			}
+			var cfg map[string]any
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				return map[string]bool{}
+			}
+			rawSquads, _ := cfg["squads"].([]any)
+			out := make(map[string]bool, len(rawSquads))
+			for _, item := range rawSquads {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if name, _ := m["name"].(string); name != "" {
+					out[strings.TrimSpace(name)] = true
+				}
+			}
+			return out
+		},
+
+		InstalledA2ANames: func() map[string]bool {
+			cfg, err := a2a.Load(paths.FindConfig("a2a_config.json"))
+			if err != nil {
+				return map[string]bool{}
+			}
+			out := make(map[string]bool, len(cfg.Agents))
+			for _, ag := range cfg.AgentList() {
+				out[ag.Name] = true
+			}
+			return out
+		},
+
+		InstallMCP: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
+			body, err := registries.FetchMCPManifest(ref, token, dirPath)
+			if err != nil {
+				return "", false, err
+			}
+			// Resolve the server name from manifest "name" field or directory leaf.
+			serverName := dirPath
+			if i := strings.LastIndex(strings.TrimSuffix(dirPath, ".json"), "/"); i >= 0 {
+				serverName = dirPath[i+1:]
+			}
+			serverName = strings.TrimSuffix(serverName, ".json")
+			var nameCheck struct {
+				Name string `json:"name,omitempty"`
+			}
+			if json.Unmarshal(body, &nameCheck) == nil && strings.TrimSpace(nameCheck.Name) != "" {
+				serverName = strings.TrimSpace(nameCheck.Name)
+			}
+			var srv mcpcfg.Server
+			if err := json.Unmarshal(body, &srv); err != nil {
+				return "", false, fmt.Errorf("parse mcp manifest: %w", err)
+			}
+			srv.Name = serverName
+			cfgPath := paths.FindConfig("mcp_config.json")
+			cfg, err := mcpcfg.Load(cfgPath)
+			if err != nil {
+				return "", false, fmt.Errorf("load mcp_config.json: %w", err)
+			}
+			_, already := cfg.Servers[serverName]
+			if cfg.Servers == nil {
+				cfg.Servers = map[string]mcpcfg.Server{}
+			}
+			cfg.Servers[serverName] = srv
+			out, err := json.MarshalIndent(cfg, "", "  ")
+			if err != nil {
+				return "", false, fmt.Errorf("marshal mcp_config.json: %w", err)
+			}
+			writePath := filepath.Join(paths.ConfigWriteDir(), "mcp_config.json")
+			if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+				return "", false, err
+			}
+			return serverName, !already, os.WriteFile(writePath, append(out, '\n'), 0o644)
+		},
+
+		InstallAgent: func(ref registries.RepoRef, token, dirPath string, enable bool) (string, bool, error) {
+			agentsDir := paths.AgentsRegistryWriteDir()
+			if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+				agentsDir = v
+			}
+			if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+				return "", false, err
+			}
+			agentName, err := registries.InstallAgent(ref, token, dirPath, agentsDir)
+			if err != nil {
+				return "", false, err
+			}
+			enabled := false
+			if enable {
+				enabled, _ = appendAgentNameToConfig(paths.FindConfig("agents.json"),
+					filepath.Join(paths.ConfigWriteDir(), "agents.json"), agentName)
+			}
+			return agentName, enabled, nil
+		},
+
+		InstallSquad: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
+			body, err := registries.FetchSquadJSON(ref, token, dirPath)
+			if err != nil {
+				return "", false, err
+			}
+			type squadJSON struct {
+				Name        string   `json:"name"`
+				Description string   `json:"description"`
+				Leader      string   `json:"leader"`
+				Members     []string `json:"members"`
+			}
+			var sq squadJSON
+			if err := json.Unmarshal(body, &sq); err != nil {
+				return "", false, fmt.Errorf("parse squad.json: %w", err)
+			}
+			if sq.Name == "" {
+				sq.Name = dirPath
+				if i := strings.LastIndex(dirPath, "/"); i >= 0 {
+					sq.Name = dirPath[i+1:]
+				}
+			}
+			if sq.Name == "" {
+				return "", false, fmt.Errorf("could not determine squad name")
+			}
+			cfgPath := paths.FindConfig("agents.json")
+			data, _ := os.ReadFile(cfgPath)
+			var cfg map[string]any
+			if len(data) > 0 {
+				if err := json.Unmarshal(data, &cfg); err != nil {
+					return "", false, fmt.Errorf("decode agents.json: %w", err)
+				}
+			}
+			if cfg == nil {
+				cfg = map[string]any{}
+			}
+			entry := map[string]any{
+				"name": sq.Name, "description": sq.Description,
+				"leader": sq.Leader, "members": sq.Members,
+			}
+			rawSquads, _ := cfg["squads"].([]any)
+			added := true
+			for i, item := range rawSquads {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if name, _ := m["name"].(string); strings.EqualFold(strings.TrimSpace(name), sq.Name) {
+					rawSquads[i] = entry
+					added = false
+					break
+				}
+			}
+			if added {
+				rawSquads = append(rawSquads, entry)
+			}
+			cfg["squads"] = rawSquads
+			out, err := json.MarshalIndent(cfg, "", "  ")
+			if err != nil {
+				return "", false, fmt.Errorf("encode agents.json: %w", err)
+			}
+			writePath := filepath.Join(paths.ConfigWriteDir(), "agents.json")
+			if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+				return "", false, err
+			}
+			return sq.Name, added, os.WriteFile(writePath, append(out, '\n'), 0o644)
+		},
+
+		InstallA2A: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
+			body, err := registries.FetchA2AAgentJSON(ref, token, dirPath)
+			if err != nil {
+				return "", false, err
+			}
+			agentName := dirPath
+			if i := strings.LastIndex(dirPath, "/"); i >= 0 {
+				agentName = dirPath[i+1:]
+			}
+			var nameCheck struct {
+				Name string `json:"name,omitempty"`
+			}
+			if json.Unmarshal(body, &nameCheck) == nil && strings.TrimSpace(nameCheck.Name) != "" {
+				agentName = strings.TrimSpace(nameCheck.Name)
+			}
+			var ag a2a.Agent
+			if err := json.Unmarshal(body, &ag); err != nil {
+				return "", false, fmt.Errorf("parse a2a.json: %w", err)
+			}
+			ag.Name = agentName
+			cfgPath := paths.FindConfig("a2a_config.json")
+			cfg, err := a2a.Load(cfgPath)
+			if err != nil {
+				return "", false, fmt.Errorf("load a2a_config.json: %w", err)
+			}
+			_, already := cfg.Agents[agentName]
+			if cfg.Agents == nil {
+				cfg.Agents = map[string]a2a.Agent{}
+			}
+			cfg.Agents[agentName] = ag
+			out, err := json.MarshalIndent(cfg, "", "  ")
+			if err != nil {
+				return "", false, fmt.Errorf("marshal a2a_config.json: %w", err)
+			}
+			writePath := filepath.Join(paths.ConfigWriteDir(), "a2a_config.json")
+			if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+				return "", false, err
+			}
+			return agentName, !already, os.WriteFile(writePath, append(out, '\n'), 0o644)
+		},
 	}
+}
+
+// appendAgentNameToConfig appends name to the `agents` list in agents.json
+// if not already present. Returns (added, error).
+func appendAgentNameToConfig(readPath, writePath, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, fmt.Errorf("agent name is empty")
+	}
+	data, _ := os.ReadFile(readPath)
+	var cfg map[string]any
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return false, fmt.Errorf("decode agents.json: %w", err)
+		}
+	}
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	rawAgents, _ := cfg["agents"].([]any)
+	for _, item := range rawAgents {
+		if s, ok := item.(string); ok && strings.EqualFold(strings.TrimSpace(s), name) {
+			return false, nil
+		}
+	}
+	cfg["agents"] = append(rawAgents, name)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("encode agents.json: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(writePath, append(out, '\n'), 0o644)
 }
 
 // skillCatalogEntry is one skill discovered on disk for documentation
@@ -457,7 +717,7 @@ func defaultSubAgentUsageGuidance(name string) string {
 		return "Delegate focused evidence questions here; expect compact cited findings with sources, confidence, and open questions. Do not routinely send these reports to summariser unless they are oversized or poorly structured."
 	case "summariser":
 		return "Send oversized raw output, verbose reports, or user-requested briefs here; expect a lossy structured brief that preserves source anchors when present."
-	case "skills_crawler":
+	case "registries_crawler":
 		return "Delegate when you need to discover, inspect, install, or link a skill from a remote registry. Pass the topic and, when linking is needed, the target agent name."
 	default:
 		return ""

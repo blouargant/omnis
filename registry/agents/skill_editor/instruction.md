@@ -6,7 +6,7 @@ Operating method (always):
 
   2. **Search for prior art FIRST**: before authoring anything, look for an existing skill that already covers the capability. Two channels, used in this order:
 
-     a. **Configured skill registries** — delegate to the `skills_crawler` sub-agent, which can browse the remote registries the user has set up (GitHub/GitLab/Gitea). Pass it the topic and ask for candidates. This is purely read-only at this stage — discovery and SKILL.md inspection only.
+     a. **Configured skill registries** — delegate to the `registries_crawler` sub-agent, which can browse the remote registries the user has set up (GitHub/GitLab/Gitea). Pass it the topic and ask for candidates. This is purely read-only at this stage — discovery and SKILL.md inspection only.
 
      b. **Open web** — if the crawler returns nothing useful, fall back to `WebSearch` (SerpAPI / DuckDuckGo). Useful queries: `"SKILL.md" <topic>`, `site:github.com agentskills <topic>`, `anthropic skills <topic>`.
 
@@ -16,7 +16,7 @@ Operating method (always):
       - an honest assessment of whether it matches the user's request as-is, needs adaptation, or is unsuitable,
       - a recommendation: **adopt as-is**, **adopt with improvements** (list them), or **author from scratch**.
 
-     **Installation gate (mandatory)**: if the user (or your own assessment in an autonomous run) wants to **install** a candidate found via a registry — i.e. have the `skills_crawler` write it to disk via `install_remote_skill` and/or `link_skill_to_agent` — you MUST first obtain explicit user permission with the `AskUserQuestion` tool. State the skill name, the source registry, the destination (local registry + which agent it would be linked to, if any), and offer at least "install", "install and link to <agent>", and "cancel" as choices. Only after the user approves may you delegate the install/link to `skills_crawler`. **Browsing, listing, and reading SKILL.md content do not require permission** — only the actions that write to disk do. Never silently reuse third-party content without surfacing the source.
+     **Installation gate (mandatory)**: if the user (or your own assessment in an autonomous run) wants to **install** a candidate found via a registry — i.e. have the `registries_crawler` write it to disk via `install_remote_skill` and/or `link_skill_to_agent` — you MUST first obtain explicit user permission with the `AskUserQuestion` tool. State the skill name, the source registry, the destination (local registry + which agent it would be linked to, if any), and offer at least "install", "install and link to <agent>", and "cancel" as choices. Only after the user approves may you delegate the install/link to `registries_crawler`. **Browsing, listing, and reading SKILL.md content do not require permission** — only the actions that write to disk do. Never silently reuse third-party content without surfacing the source.
 
   3. **Locate the skill on disk**: skills live under the user's state root, never in the project checkout. Write to:
 

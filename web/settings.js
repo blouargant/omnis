@@ -186,6 +186,8 @@
     skills: { editing: null, browsingRemote: null, viewingRemote: null }, // skills panel state
     mcpRemotes: { browsing: null, viewing: null }, // MCP remotes panel state
     a2aRemotes: { browsing: null }, // A2A remotes panel state
+    squadRemotes: { browsing: null }, // Squad remotes panel state
+    activeRemoteKind: "agents",       // Selected kind in the Registries left panel
     docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
   };
 
@@ -358,6 +360,9 @@
       // user is already viewing the MCP settings.
       delete state.parsed["mcp"];
       if (state.activeFile === "mcp") renderBody();
+      // Notify the main app shell so it can refresh anything cached from the
+      // server side (squad picker, etc.) without a full page reload.
+      window.dispatchEvent(new CustomEvent("yoke:config-reloaded", { detail: { generation: body.generation } }));
     } catch (e) {
       setLoading(false);
       if (textEl) {
@@ -1077,14 +1082,16 @@
       b.addEventListener("click", () => {
         if (state.activeAgentSubtab === b.dataset.subtab) {
           if (b.dataset.subtab === "remotes" && state.agentRemotes &&
-              (state.agentRemotes.browsing || state.agentRemotes.viewing)) {
+              (state.agentRemotes.browsing || state.agentRemotes.viewing || state.squadRemotes?.browsing)) {
             state.agentRemotes = { browsing: null, viewing: null };
+            state.squadRemotes = { browsing: null };
             renderAgentForm();
           }
           return;
         }
         if (b.dataset.subtab === "remotes") {
           state.agentRemotes = { browsing: null, viewing: null };
+          state.squadRemotes = { browsing: null };
         }
         state.activeAgentSubtab = b.dataset.subtab;
         renderAgentForm();
@@ -1148,8 +1155,7 @@
       });
       renderAgentSquads(d);
     } else if (sub === "remotes") {
-      host.innerHTML = `<div id="agent-remotes-host"></div>`;
-      renderAgentRemotesTab(d, host.querySelector("#agent-remotes-host"));
+      renderAgentRemotesTab(d, host);
     } else {
       host.innerHTML = `
         <div class="agent-split-layout">
@@ -1368,7 +1374,8 @@
       });
     });
     if (!isDefault) {
-      panel.querySelector("#squad-remove").addEventListener("click", () => {
+      panel.querySelector("#squad-remove").addEventListener("click", async () => {
+        if (!await appConfirm(`Delete squad "${sq.name}"?`)) return;
         d.squads.splice(idx, 1);
         state.activeSquadIdx = Math.max(0, idx - 1);
         markFormDirty("agent");
@@ -1845,7 +1852,7 @@
 
     // Separate agents into built-in and custom
     // Check the builtin flag from API, or fall back to known built-in agent names
-    const BUILTIN_AGENT_NAMES = new Set(["leader", "skill_editor", "skills_crawler", "summariser", "curator"]);
+    const BUILTIN_AGENT_NAMES = new Set(["leader", "skill_editor", "registries_crawler", "summariser", "curator"]);
     const isBuiltinByName = (a) => a.builtin === true || BUILTIN_AGENT_NAMES.has(a.name);
     const builtinAgents = d.agents.filter(isBuiltinByName);
     const customAgents = d.agents.filter(a => !isBuiltinByName(a));
@@ -3356,6 +3363,8 @@
         ? "https://github.com/owner/repo/tree/main/mcp-servers"
         : defaultKind === "a2a"
         ? "https://github.com/owner/repo/tree/main/a2a-agents"
+        : defaultKind === "squads"
+        ? "https://github.com/owner/repo/tree/main/squads"
         : "https://github.com/owner/repo/tree/main/skills";
       const namePlaceholder = defaultKind === "agents"
         ? "My agent registry"
@@ -3363,6 +3372,8 @@
         ? "My MCP registry"
         : defaultKind === "a2a"
         ? "My A2A registry"
+        : defaultKind === "squads"
+        ? "My squad registry"
         : "My skill registry";
       form.innerHTML = `
         <div class="registry-dialog-field">
@@ -3395,6 +3406,7 @@
             <option value="both"${kindVal === "both" ? " selected" : ""}>Both (Skills + Agents)</option>
             <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>MCP Servers</option>
             <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>A2A Agents</option>
+            <option value="squads"${kindVal === "squads" ? " selected" : ""}>Squads</option>
           </select>
           <span class="registry-dialog-hint">Tab where this registry will appear.</span>
         </div>
@@ -3590,6 +3602,16 @@
   const skillsPost   = (path, b)  => skillsAPI("POST",   path, b);
   const skillsPut    = (path, b)  => skillsAPI("PUT",    path, b);
   const skillsDel    = path       => skillsAPI("DELETE", path, null);
+
+  // showInstallResult shows a success status and, when the server returned
+  // dependency warnings, appends them as a separate warning message.
+  function showInstallResult(successMsg, warnings) {
+    setStatus(successMsg, "success");
+    if (Array.isArray(warnings) && warnings.length > 0) {
+      // Overwrite with a warning that includes the success summary.
+      setStatus(successMsg + " ⚠ Dependencies: " + warnings.join("; "), "warning");
+    }
+  }
 
   // ─── Skills — shared block renderer ───────────────────────────────────
 
@@ -4654,43 +4676,105 @@
   const remoteAgentsCache = {}; // keyed by registry ID → { agents, timestamp }
 
   // Top-level entry: renders the "Remotes" sub-tab inside the Agents pane.
+  // Shared callback used by browse/detail views to re-render only the right
+  // panel without rebuilding the full split layout. Set by renderAgentRemotesTab.
+  let refreshRemotesRightFn = null;
+
   // host is the container provided by renderAgentForm.
   async function renderAgentRemotesTab(d, host) {
-    // browsingRemote: { id, name, url } | null — when set, we render the
-    //   marketplace grid for that registry inside `host`.
-    // viewingRemote:  { id, name, agent } | null — when set, we render the
-    //   detail view (agent.json preview).
     if (!state.agentRemotes) state.agentRemotes = { browsing: null, viewing: null };
-
-    if (state.agentRemotes.viewing) {
-      await renderAgentRemoteDetailView(host);
-      return;
-    }
-    if (state.agentRemotes.browsing) {
-      await renderAgentRemoteBrowseView(host);
-      return;
-    }
+    if (!state.squadRemotes) state.squadRemotes = { browsing: null };
+    if (!state.activeRemoteKind) state.activeRemoteKind = "agents";
 
     host.innerHTML = `
-      <section class="form-section">
-        <h3>Remote agent registries
-          <button type="button" class="add-btn" id="agent-remote-add">+ Add</button>
-        </h3>
-        <div id="agent-remote-list"></div>
-      </section>
+      <div class="agent-split-layout">
+        <div class="agent-fleet-panel">
+          <div class="agent-fleet-header">
+            <span class="agent-fleet-title">REGISTRIES</span>
+          </div>
+          <div class="agent-fleet-list" id="remotes-kind-list"></div>
+        </div>
+        <div class="agent-detail-panel" id="remotes-right-panel"></div>
+      </div>
     `;
-    const listEl = host.querySelector("#agent-remote-list");
-    await refreshAgentRemoteList(listEl);
 
-    host.querySelector("#agent-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({
-        title: "Add Agent Registry",
-        defaultKind: "agents",
-      });
+    const kindList = host.querySelector("#remotes-kind-list");
+    const rightEl  = host.querySelector("#remotes-right-panel");
+
+    function renderKindNav() {
+      kindList.innerHTML = "";
+      for (const k of [{ id: "agents", label: "Agents" }, { id: "squads", label: "Squads" }]) {
+        const item = document.createElement("div");
+        item.className = "agent-fleet-item" + (state.activeRemoteKind === k.id ? " active" : "");
+        item.innerHTML = `<div class="agent-fleet-item-name">${escHtml(k.label)}</div>`;
+        item.addEventListener("click", () => {
+          if (state.activeRemoteKind === k.id && !state.agentRemotes.browsing && !state.agentRemotes.viewing && !state.squadRemotes.browsing) return;
+          state.activeRemoteKind = k.id;
+          state.agentRemotes = { browsing: null, viewing: null };
+          state.squadRemotes = { browsing: null };
+          renderKindNav();
+          refreshRight();
+        });
+        kindList.appendChild(item);
+      }
+    }
+
+    async function refreshRight() {
+      if (state.activeRemoteKind === "agents") {
+        if (state.agentRemotes.viewing)  { await renderAgentRemoteDetailView(rightEl); return; }
+        if (state.agentRemotes.browsing) { await renderAgentRemoteBrowseView(rightEl); return; }
+        await renderAgentRegistryList(rightEl, refreshRight);
+      } else {
+        if (state.squadRemotes.browsing) { await renderSquadRemoteBrowseView(rightEl); return; }
+        await renderSquadRegistryList(rightEl, refreshRight);
+      }
+    }
+
+    refreshRemotesRightFn = refreshRight;
+    renderKindNav();
+    await refreshRight();
+  }
+
+  async function renderAgentRegistryList(rightEl, onRefresh) {
+    rightEl.innerHTML = `
+      <div class="remote-kind-list-wrap">
+        <div class="remote-kind-list-header">
+          <button type="button" class="add-btn" id="agent-remote-add">+ Add</button>
+        </div>
+        <div id="agent-remote-list"></div>
+      </div>
+    `;
+    const container = rightEl.querySelector("#agent-remote-list");
+    await refreshAgentRemoteList(container);
+    rightEl.querySelector("#agent-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({ title: "Add Agent Registry", defaultKind: "agents" });
       if (!result) return;
       try {
         await skillsPost("/agents/remotes", result);
-        await refreshAgentRemoteList(listEl);
+        if (onRefresh) await onRefresh(); else await refreshAgentRemoteList(container);
+      } catch (e) {
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
+    });
+  }
+
+  async function renderSquadRegistryList(rightEl, onRefresh) {
+    rightEl.innerHTML = `
+      <div class="remote-kind-list-wrap">
+        <div class="remote-kind-list-header">
+          <button type="button" class="add-btn" id="squad-remote-add">+ Add</button>
+        </div>
+        <div id="squad-remote-list"></div>
+      </div>
+    `;
+    const container = rightEl.querySelector("#squad-remote-list");
+    await refreshSquadRemoteList(container);
+    rightEl.querySelector("#squad-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({ title: "Add Squad Registry", defaultKind: "squads" });
+      if (!result) return;
+      try {
+        await skillsPost("/squads-registry/remotes", result);
+        if (onRefresh) await onRefresh(); else await refreshSquadRemoteList(container);
       } catch (e) {
         setStatus("Failed to add registry: " + e.message, "error");
       }
@@ -4730,7 +4814,7 @@
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
         state.agentRemotes.browsing = { id: r.id, name: r.name, url: r.url };
-        renderAgentForm();
+        refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
@@ -4788,7 +4872,7 @@
     `;
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.agentRemotes.browsing = null;
-      renderAgentForm();
+      refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
     });
 
     const contentEl = host.querySelector("#agent-remote-browse-content");
@@ -4863,7 +4947,7 @@
         card.addEventListener("click", e => {
           if (e.target.closest(".remote-install-btn")) return;
           state.agentRemotes.viewing = { ...state.agentRemotes.browsing, agent: a };
-          renderAgentForm();
+          refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
         });
 
         return card;
@@ -4937,7 +5021,7 @@
 
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.agentRemotes.viewing = null;
-      renderAgentForm();
+      refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
     });
 
     const fmCard = host.querySelector("#agent-fm-card");
@@ -5030,8 +5114,9 @@
         const newIdx = newAgents.findIndex(a => a.name === res.name);
         state.activeAgentIdx = newIdx >= 0 ? newIdx : newAgents.length - 1;
         renderAgentForm();
+        showInstallResult(`Agent "${res.name}" installed and enabled.`, res.warnings);
       } else {
-        setStatus(`Agent "${res.name}" installed.`, "success");
+        showInstallResult(`Agent "${res.name}" installed.`, res.warnings);
       }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Install"; }
@@ -5085,6 +5170,229 @@
         if (e.key === "Enter")  { e.stopPropagation(); box.querySelector("#agent-install-ok").click(); }
       });
     });
+  }
+
+  // ─── Squad remote registries ───────────────────────────────────────────
+
+  const remoteSquadsCache = {}; // keyed by registry ID → { squads, timestamp }
+
+  async function refreshSquadRemoteList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/squads-registry/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote squad registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install squads.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.squadRemotes.browsing = { id: r.id, name: r.name, url: r.url };
+        refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit Squad Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          isEdit: true,
+          defaultKind: "squads",
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/squads-registry/remotes/${r.id}`, result);
+          delete remoteSquadsCache[r.id];
+          await refreshSquadRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove squad registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/squads-registry/remotes/${r.id}`);
+          delete remoteSquadsCache[r.id];
+          await refreshSquadRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  async function renderSquadRemoteBrowseView(host) {
+    const { id, name } = state.squadRemotes.browsing;
+    const cached = remoteSquadsCache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registries</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the repository tree for squad.json files.</p>
+          </div>
+        ` : ""}
+        <div id="squad-remote-browse-content"></div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.squadRemotes.browsing = null;
+      refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
+    });
+
+    const contentEl = host.querySelector("#squad-remote-browse-content");
+
+    function populateContent(squads) {
+      contentEl.innerHTML = "";
+
+      const truncated = squads.some(s => s.dir_path === "__truncated__");
+      const real = squads.filter(s => s.dir_path !== "__truncated__");
+
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${real.length} squad${real.length !== 1 ? "s" : ""}${truncated ? " (tree truncated — some squads may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!real.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No squads found in this registry. Directories must contain a squad.json file.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const s of real) {
+        const g = s.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(s);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1; if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      for (const group of sortedGroups) {
+        if (group) {
+          const gh = document.createElement("div");
+          gh.className = "remote-browse-group";
+          gh.textContent = group.replace(/\//g, " › ");
+          contentEl.appendChild(gh);
+        }
+        const grid = document.createElement("div");
+        grid.className = "skill-marketplace-grid";
+
+        for (const sq of grouped.get(group)) {
+          const membersHtml = (sq.members && sq.members.length)
+            ? `<div class="skill-mkt-tags">${sq.members.map(m => `<span class="skill-mkt-tag">${escHtml(m)}</span>`).join("")}</div>`
+            : "";
+          const leaderHtml = sq.leader
+            ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">Leader: ${escHtml(sq.leader)}</span></div>`
+            : "";
+          const card = document.createElement("div");
+          card.className = "skill-mkt-card remote-skill-card" + (sq.installed ? " skill-installed" : "");
+          card.innerHTML = `
+            <div class="skill-mkt-header">
+              <span class="skill-mkt-filename">${escHtml(sq.name)}</span>
+              ${sq.installed
+                ? `<span class="remote-skill-installed-badge">Installed</span>`
+                : `<button type="button" class="add-btn squad-install-btn">Install</button>`}
+            </div>
+            <div class="skill-mkt-body">
+              ${leaderHtml}
+              <p class="skill-mkt-desc">${escHtml(sq.description || "(no description)")}</p>
+              ${membersHtml}
+            </div>
+          `;
+          const btn = card.querySelector(".squad-install-btn");
+          if (btn) {
+            btn.addEventListener("click", e => {
+              e.stopPropagation();
+              doInstallSquad(id, sq, btn);
+            });
+          }
+          grid.appendChild(card);
+        }
+        contentEl.appendChild(grid);
+      }
+    }
+
+    if (hasCached) populateContent(cached.squads);
+
+    let squads;
+    try {
+      const res = await skillsGet(`/squads-registry/remotes/${id}/browse`);
+      squads = res.squads || [];
+    } catch (e) {
+      if (!hasCached) {
+        const loadEl = host.querySelector(".remote-browse-loading");
+        if (loadEl) loadEl.outerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      }
+      const badge = host.querySelector(".remote-browse-refresh-badge");
+      if (badge) badge.hidden = true;
+      return;
+    }
+
+    if (!host.contains(contentEl)) return;
+
+    remoteSquadsCache[id] = { squads, timestamp: Date.now() };
+
+    const loadEl = host.querySelector(".remote-browse-loading");
+    if (loadEl) loadEl.remove();
+    const badge = host.querySelector(".remote-browse-refresh-badge");
+    if (badge) badge.hidden = true;
+
+    populateContent(squads);
+  }
+
+  async function doInstallSquad(registryID, squadInfo, btn) {
+    if (!await appConfirm(`Install squad "${squadInfo.name}"? It will be merged into config/agents.json and available after the next reload.`)) return;
+
+    btn.disabled = true;
+    btn.textContent = "Installing…";
+    try {
+      const res = await skillsPost(`/squads-registry/remotes/${registryID}/install/${squadInfo.dir_path}`, {});
+      squadInfo.installed = true;
+      btn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+      await doReload();
+      // Refresh the in-memory agent config so the new squad is visible when
+      // the user navigates to the squads sub-tab (no forced redirect).
+      await loadParsed("agent");
+      showInstallResult(`Squad "${res.name}" ${res.added ? "added" : "updated"} in config/agents.json.`, res.warnings);
+      delete remoteSquadsCache[registryID];
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "Install";
+      setStatus("Install failed: " + e.message, "error");
+    }
   }
 
   // importAgentDialog shows a paste/file-upload dialog for importing a Claude
@@ -5398,7 +5706,7 @@
                   className: "remote-skill-installed-badge",
                   textContent: "Installed",
                 }));
-                setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
+                showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
                 showBanner();
                 delete remoteMCPCache[id];
                 delete state.parsed["mcp"];
@@ -5487,7 +5795,7 @@
           const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
           tool.installed = true;
           installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
-          setStatus(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, "success");
+          showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
           showBanner();
           delete remoteMCPCache[id];
           delete state.parsed["mcp"];

@@ -184,8 +184,20 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 	return agents, nil
 }
 
-// FetchAgentJSON returns the agent.json content at dirPath inside the registry.
+// FetchAgentJSON returns the agent definition content at dirPath inside the registry.
+// For native yoke format, dirPath is a directory and agent.json is appended.
+// For Claude Code format, dirPath already points to the .md file itself.
 func FetchAgentJSON(ref RepoRef, token, dirPath string) ([]byte, error) {
+	if strings.HasSuffix(dirPath, ".md") {
+		rawBody, status, err := ref.RawFile(dirPath, token)
+		if err != nil {
+			return nil, err
+		}
+		if status != 200 {
+			return nil, fmt.Errorf("HTTP %d fetching %s", status, dirPath)
+		}
+		return rawBody, nil
+	}
 	rawBody, status, err := ref.RawFile(dirPath+"/"+AgentManifestFile, token)
 	if err != nil {
 		return nil, err
