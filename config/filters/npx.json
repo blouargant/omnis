@@ -1,0 +1,31 @@
+{
+  "name": "npx",
+  "version": 2,
+  "description": "Condensed npx output: removes install prompts and noise",
+  "match": {
+    "command": "npx"
+  },
+  "streams": [
+    "stdout",
+    "stderr"
+  ],
+  "pipeline": [
+    {
+      "action": "strip_ansi"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "(^Need to install|^Ok to proceed|^npm warn|^npm notice|^\\s*$)"
+    },
+    {
+      "action": "truncate_lines",
+      "max": 120
+    },
+    {
+      "action": "head",
+      "n": 50,
+      "overflow_msg": "... more output truncated"
+    }
+  ],
+  "on_error": "passthrough"
+}

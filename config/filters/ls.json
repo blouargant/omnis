@@ -1,0 +1,63 @@
+{
+  "name": "ls",
+  "version": 2,
+  "description": "Compact ls output: reformats long listings to date+name+size, removes noise, extension summary",
+  "match": {
+    "command": "ls"
+  },
+  "pipeline": [
+    {
+      "action": "strip_ansi"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "^total\\s"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "(?:^|\\s)\\.\\.?$"
+    },
+    {
+      "action": "replace",
+      "pattern": "^\\S+\\s+\\d+\\s+.*\\s(\\d\\S*)\\s+(\\S+\\s+\\S+\\s+[\\d:]{4,5})\\s+(.+)$",
+      "replacement": "$2  $3  $1"
+    },
+    {
+      "action": "compact_path"
+    },
+    {
+      "action": "truncate_lines",
+      "max": 120
+    },
+    {
+      "action": "head",
+      "n": 300,
+      "overflow_msg": "... +more entries (truncated by snip)"
+    },
+    {
+      "action": "group_by",
+      "pattern": "[^\\s.]\\.([a-zA-Z][a-zA-Z0-9]*)(?:\\s|$)",
+      "format": "{{.Key}}: {{.Count}}",
+      "top": 8,
+      "append": true
+    }
+  ],
+  "on_error": "passthrough",
+  "tests": [
+    {
+      "name": "summary excludes hidden directories and dotfiles without extensions",
+      "input": "total 16\ndrwxr-xr-x  3 user staff   96 Apr 23 14:13 .claude\ndrwxr-xr-x 15 user staff  480 Apr 28 09:19 .git\n-rw-r--r--  1 user staff  171 Apr 23 13:47 .mcp.json\n-rw-r--r--  1 user staff 1234 Apr 28 10:00 README.md\n-rw-r--r--  1 user staff  500 Apr 28 09:19 main.go\n",
+      "expected": "Apr 23 14:13  .claude  96\nApr 28 09:19  .git  480\nApr 23 13:47  .mcp.json  171\nApr 28 10:00  README.md  1234\nApr 28 09:19  main.go  500\njson: 1\nmd: 1\ngo: 1\n"
+    },
+    {
+      "name": "cygwin two-word group is parsed correctly",
+      "input": "total 104617\ndrwxrwx---+  1 jspelletier Domain Users     0 Apr 28 09:19 .\ndrwxrwx---+  1 jspelletier Domain Users     0 Dec 11 10:20 ..\n-rwxrwx---+  1 jspelletier Domain Users   171 Apr 23 13:47 .mcp.json\n-r--r--r--   1 jspelletier Domain Users  1234 Apr 28 10:00 README.md\n",
+      "expected": "Apr 23 13:47  .mcp.json  171\nApr 28 10:00  README.md  1234\njson: 1\nmd: 1\n"
+    },
+    {
+      "name": "cygwin actual user output with ACL+ marker and year column",
+      "input": "total 104617\ndrwxrwx---+  1 jspelletier     Domain Users        0 Apr 28 09:19 .\ndrwxrwx---+  1 jspelletier     Domain Users        0 Dec 11 10:20 ..\n-r-xr-x---+  2 jspelletier     Domain Users     8429 Jan 30  2024 .clang-format\ndrwxrwx---+  1 jspelletier     Domain Users        0 Apr 23 14:13 .claude\n-r-xr-x---+  1 jspelletier     Domain Users     9020 Jul 22  2025 .editorconfig\n-rwxrwx---+  1 jspelletier     Domain Users      171 Apr 23 13:47 .mcp.json\n",
+      "expected": "Jan 30  2024  .clang-format  8429\nApr 23 14:13  .claude  0\nJul 22  2025  .editorconfig  9020\nApr 23 13:47  .mcp.json  171\njson: 1\n"
+    }
+  ]
+}

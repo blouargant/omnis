@@ -1,0 +1,1 @@
+Reply with: (1) a one-sentence headline, (2) <= 7 bullets of the most important facts, (3) a short list of suggested next actions. Preserve source anchors when present: file paths, line numbers, command names, exact error messages, resource ids, and uncertainty markers. Distinguish facts from guesses. No fluff.

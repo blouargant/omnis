@@ -1,0 +1,264 @@
+{
+  "always_deny": [
+    {
+      "pattern": "\\brm\\s+-[rRfF]+\\s+(/|~|\\$HOME)(\\s|\"|$|;|&|\\|)",
+      "reason": "rm -r/-f on /, $HOME, or ~ is catastrophic"
+    },
+    {
+      "pattern": "\\brm\\s+-[rRfF]+\\s+/(etc|usr|bin|sbin|lib|lib64|boot|home|var|opt|sys|proc|dev|root|srv|run)(\\b|/)",
+      "reason": "rm -r/-f on a system directory is catastrophic"
+    },
+    {
+      "pattern": "\\bmkfs(\\.[a-z0-9]+)?\\b",
+      "reason": "creating a filesystem destroys all data on the target device"
+    },
+    {
+      "pattern": "\\bdd\\b[^\"]*\\bof=/dev/(sd[a-z]|hd[a-z]|nvme|mmcblk|loop|disk|sr[0-9]|xvd|vd[a-z])",
+      "reason": "dd to a block device destroys all data on it"
+    },
+    {
+      "pattern": ":\\s*\\(\\s*\\)\\s*\\{[^}]*\\}\\s*;\\s*:",
+      "reason": "fork bomb pattern"
+    },
+    {
+      "pattern": "\\bchattr\\s+\\+i\\b",
+      "reason": "setting the immutable attribute is suspect and rarely intended"
+    },
+    {
+      "pattern": "/etc/(shadow|gshadow|sudoers|sudoers\\.d)\\b",
+      "reason": "system credential files (shadow, gshadow, sudoers) must not be read or modified by the agent"
+    },
+    {
+      "pattern": "(>>?|\\btee\\b|\\bcat\\s+>\\s*)\\s*/etc/(passwd|hosts|fstab|crontab|cron\\.d)\\b",
+      "reason": "modifying system boot/host files is forbidden"
+    },
+    {
+      "pattern": "\\b(curl|wget)\\b[^\"]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "piping a remote payload into a shell is a classic attack vector"
+    },
+    {
+      "pattern": "--no-verify\\b",
+      "reason": "bypassing git hooks is forbidden — fix the failing hook instead"
+    },
+    {
+      "pattern": "--no-gpg-sign\\b|commit\\.gpgsign\\s*=\\s*false",
+      "reason": "bypassing GPG signing is forbidden"
+    },
+    {
+      "pattern": "\\biptables\\s+-F\\b|\\bufw\\s+disable\\b|\\bsystemctl\\s+(stop|disable)\\s+(firewalld|ufw|nftables)\\b",
+      "reason": "disabling the host firewall is forbidden"
+    },
+    {
+      "pattern": "(?i)^(write|edit|revert) .*\"file_path\"\\s*:\\s*\"softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    },
+    {
+      "pattern": "\"command\":\"[^\"]*(>>?|\\btee\\b|\\brm\\b|\\bmv\\b|\\bcp\\b)[^\"]*softskills/",
+      "reason": "softskills/ is curator-managed; use curate_session instead"
+    },
+    {
+      "pattern": "(?i)^(write|edit|revert) .*\"file_path\"\\s*:\\s*\"(/etc/yoke/|/etc/passwd|/etc/shadow|/etc/sudoers)",
+      "reason": "writing to system config from a tool is forbidden — use the web UI editor"
+    },
+    {
+      "pattern": "\\.ssh/(id_(rsa|dsa|ecdsa|ed25519)([^.\\w]|$)|authorized_keys\\b)",
+      "reason": "private SSH keys and authorized_keys must not be read or modified by the agent"
+    },
+    {
+      "pattern": "\\.aws/credentials\\b|\\.aws/config\\b|\\.config/gcloud/[^/]*credentials|\\.azure/credentials\\b",
+      "reason": "cloud provider credential files must not be read or modified by the agent"
+    }
+  ],
+  "always_allow": [
+    {
+      "pattern": "^(teammate_check|teammate_list|list_skills|load_skill|list_softskills|load_softskill|load_softskill_resource|todo_read|todo_write|todo_update|task_list|task_next|TaskCreate|TaskUpdate|compact_now|AskUserQuestion|bg_list)\\b",
+      "reason": "internal coordination / planning tool — never blocks the agent loop"
+    },
+    {
+      "pattern": "^(Read|Grep|Glob|mime)\\b",
+      "reason": "read-only file inspection (always_deny rules above still guard sensitive paths like .ssh/, .aws/, /etc/shadow)"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*ls(\\s|\"|;|\\|)",
+      "reason": "ls is read-only"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*pwd\\s*\"",
+      "reason": "pwd is read-only"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*echo\\b",
+      "reason": "echo is non-destructive (still flagged by softskills/cred-write rules above when piped)"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*(cat|head|tail|wc|file|stat|less|more)\\s",
+      "reason": "common read-only inspection commands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*grep\\b",
+      "reason": "grep is read-only"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*find\\b[^\"]*-name\\b",
+      "reason": "find with -name and no mutating actions"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*go\\s+(build|test|vet|fmt|mod\\s+(tidy|download|verify|graph)|list|env|version|doc)\\b",
+      "reason": "non-destructive go subcommands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*git\\s+(status|log|diff|show|branch|remote|config\\s+--get|ls-files|describe|blame|fetch)\\b",
+      "reason": "read-only git subcommands (fetch downloads but does not mutate the working tree)"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*npm\\s+(test|run\\s+build|run\\s+lint|run\\s+typecheck|ls|view)\\b",
+      "reason": "non-destructive npm subcommands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*docker\\s+(ps|images|logs|inspect|version|info)\\b",
+      "reason": "read-only docker subcommands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*kubectl\\s+(get|describe|logs|top|explain|version|cluster-info|api-resources|api-versions)\\b",
+      "reason": "read-only kubectl subcommands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*kubectl\\s+config\\s+(current-context|get-contexts|view|get-clusters|get-users)\\b",
+      "reason": "read-only kubectl config subcommands"
+    },
+    {
+      "pattern": "\"command\"\\s*:\\s*\"\\s*(make|just)\\s+(test|build|fmt|vet|lint|check|tidy)\\b",
+      "reason": "common non-destructive make/just targets"
+    }
+  ],
+  "ask_user": [
+    {
+      "pattern": "\\brm\\b",
+      "reason": "rm can destroy files irreversibly — confirm the target"
+    },
+    {
+      "pattern": "\\b(mv|cp)\\s+[^\"]*\\s+(/|~|\\$HOME)/",
+      "reason": "moving or copying into an absolute or home path mutates outside the project — confirm"
+    },
+    {
+      "pattern": "\\bchmod\\s+([0-7]{3,4}|[ugoa+=rwxXst-]+)\\b",
+      "reason": "chmod changes file permissions — confirm the target"
+    },
+    {
+      "pattern": "\\bchown\\b",
+      "reason": "chown changes file ownership — confirm the target"
+    },
+    {
+      "pattern": "\\bsudo\\b|\\bdoas\\b|\\bsu\\s+-",
+      "reason": "privilege escalation — confirm before running"
+    },
+    {
+      "pattern": "\\bsystemctl\\s+(start|stop|restart|reload|enable|disable|mask|unmask)\\b",
+      "reason": "systemd unit state change — confirm the target unit"
+    },
+    {
+      "pattern": "\\b(service|launchctl)\\s+",
+      "reason": "service control — confirm the target"
+    },
+    {
+      "pattern": "\\b(kill|pkill|killall)\\b",
+      "reason": "process termination — confirm the target"
+    },
+    {
+      "pattern": "\\b(mount|umount)\\b",
+      "reason": "mounting or unmounting a filesystem affects the whole host — confirm"
+    },
+    {
+      "pattern": "\\b(apt|apt-get|yum|dnf|brew|pacman|zypper|apk)\\s+(install|remove|purge|upgrade|update|add|del|erase)\\b",
+      "reason": "OS package install/remove — confirm before mutating the host"
+    },
+    {
+      "pattern": "\\bpip3?\\s+install\\b|\\bpipx\\s+install\\b|\\buv\\s+(pip\\s+)?install\\b",
+      "reason": "installing a Python package — confirm before adding to the environment"
+    },
+    {
+      "pattern": "\\bnpm\\s+install\\s+(-g|--global)\\b|\\byarn\\s+global\\s+add\\b|\\bpnpm\\s+add\\s+(-g|--global)\\b",
+      "reason": "installing a global node package — confirm"
+    },
+    {
+      "pattern": "\\bcargo\\s+install\\b|\\bgo\\s+install\\b|\\bgem\\s+install\\b",
+      "reason": "installing a binary into the toolchain — confirm"
+    },
+    {
+      "pattern": "\\bcurl\\b[^\"]*\\s(-o|-O|--output)\\b",
+      "reason": "curl downloading to disk — confirm the destination"
+    },
+    {
+      "pattern": "\\bwget\\b",
+      "reason": "wget downloads to disk by default — confirm the destination"
+    },
+    {
+      "pattern": "\\bgit\\s+push\\b",
+      "reason": "git push mutates the remote — confirm branch and remote"
+    },
+    {
+      "pattern": "\\bgit\\s+(reset\\s+--hard|clean\\s+-[fd]+|checkout\\s+--|branch\\s+-D|tag\\s+-d|push\\s+.*--force)",
+      "reason": "destructive git operation — confirm before running"
+    },
+    {
+      "pattern": "\\bgh\\s+(pr|issue)\\s+(merge|close|delete)\\b|\\bgh\\s+release\\s+(create|delete)\\b",
+      "reason": "gh CLI operation that mutates the remote project — confirm"
+    },
+    {
+      "pattern": "\\bdocker\\s+(run|rm|rmi|exec|build|push|stop|kill|prune|system\\s+prune)\\b",
+      "reason": "docker operation with side effects — confirm"
+    },
+    {
+      "pattern": "\\b(docker-compose|docker\\s+compose)\\s+(up|down|restart|rm|build|push)\\b",
+      "reason": "docker-compose lifecycle operation — confirm"
+    },
+    {
+      "pattern": "\\bkubectl\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon|uncordon|create|replace|exec|cp|port-forward)\\b",
+      "reason": "kubectl operation with cluster side effects — confirm"
+    },
+    {
+      "pattern": "\\bhelm\\s+(install|upgrade|uninstall|rollback)\\b",
+      "reason": "helm release change — confirm"
+    },
+    {
+      "pattern": "\\bterraform\\s+(apply|destroy|import|state\\s+(rm|mv))\\b|\\btofu\\s+(apply|destroy|import)\\b",
+      "reason": "infrastructure change — confirm"
+    },
+    {
+      "pattern": "\\b(ansible-playbook|ansible)\\s+",
+      "reason": "ansible execution — confirm target hosts and playbook"
+    },
+    {
+      "pattern": "\\bssh\\s+[^\"]*\\s",
+      "reason": "outbound SSH connection — confirm destination and command"
+    },
+    {
+      "pattern": "\\bnc\\s|\\bncat\\s|\\bsocat\\s",
+      "reason": "raw network tool — confirm intent"
+    },
+    {
+      "pattern": "\\bcd\\s+/",
+      "reason": "Changing directory to an absolute path escapes the project root — confirm the destination"
+    },
+    {
+      "pattern": "\\bcd\\s+~",
+      "reason": "Changing directory into $HOME escapes the project root — confirm the destination"
+    },
+    {
+      "pattern": "\\bcd\\s+\\$",
+      "reason": "Changing directory using a $VAR escapes the project root — confirm the destination"
+    },
+    {
+      "pattern": "\\bpushd\\s+(/|~|\\$)",
+      "reason": "pushd to an absolute, home, or $VAR path escapes the project root — confirm the destination"
+    },
+    {
+      "pattern": "^install_remote_skill ",
+      "reason": "Installing a skill from a remote registry writes to $HOME/.yoke/registry/skills/<name> — confirm the skill name and source before proceeding"
+    },
+    {
+      "pattern": "^link_skill_to_agent ",
+      "reason": "Linking a skill grants an agent new capabilities and persists on disk — confirm which agent should receive the skill"
+    }
+  ]
+}

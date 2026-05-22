@@ -1,0 +1,38 @@
+{
+  "name": "mvn",
+  "version": 1,
+  "description": "Condensed maven output: build result and errors",
+  "match": {
+    "command": "mvn",
+    "exclude_flags": [
+      "--version",
+      "-V"
+    ]
+  },
+  "streams": [
+    "stdout",
+    "stderr"
+  ],
+  "pipeline": [
+    {
+      "action": "strip_ansi"
+    },
+    {
+      "action": "remove_lines",
+      "pattern": "(^\\[INFO\\] Downloading|^\\[INFO\\] Downloaded|^\\[INFO\\] ---|^\\s*$)"
+    },
+    {
+      "action": "keep_lines",
+      "pattern": "(BUILD|FAILURE|ERROR|\\[ERROR\\]|\\[WARNING\\]|Tests run:|Total time:|Reactor Summary)"
+    },
+    {
+      "action": "truncate_lines",
+      "max": 120
+    },
+    {
+      "action": "head",
+      "n": 40
+    }
+  ],
+  "on_error": "passthrough"
+}
