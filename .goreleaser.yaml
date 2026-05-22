@@ -67,20 +67,8 @@ archives:
     files:
       - LICENSE
       - README.md
-      - src: packaging/etc-yoke/agents.json
-        dst: config/agents.json
-      - src: packaging/etc-yoke/mcp_config.json
-        dst: config/mcp_config.json
-      - src: packaging/etc-yoke/permissions.json
-        dst: config/permissions.json
-      - src: packaging/etc-yoke/preferences.json
-        dst: config/preferences.json
-      - src: packaging/etc-yoke/remote_registries.json
-        dst: config/remote_registries.json
-      - src: packaging/etc-yoke/server.yaml
-        dst: config/server.yaml
-      - src: packaging/etc-yoke/a2a_config.json
-        dst: config/a2a_config.json
+      - src: config/*.json
+        dst: config
       - src: config/filters/*.json
         dst: config/filters
       - src: registry/skills
