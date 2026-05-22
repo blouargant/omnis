@@ -17,7 +17,7 @@ func TestDefaultAgentInstructionEmbedded(t *testing.T) {
 
 	// Copy instruction files from the real registry.
 	for _, name := range []string{"leader", "investigator", "summariser"} {
-		srcPath := filepath.Join("..", ".agents", "registry", "agents", name, "instruction.md")
+		srcPath := filepath.Join("..", "registry", "agents", name, "instruction.md")
 		content, err := os.ReadFile(srcPath)
 		if err != nil {
 			t.Fatalf("reading %s: %v", srcPath, err)
@@ -33,7 +33,7 @@ func TestDefaultAgentInstructionEmbedded(t *testing.T) {
 	}
 
 	// Copy default instruction.
-	defaultSrcPath := filepath.Join("..", ".agents", "registry", "agents", "default.md")
+	defaultSrcPath := filepath.Join("..", "registry", "agents", "default.md")
 	defaultContent, err := os.ReadFile(defaultSrcPath)
 	if err != nil {
 		t.Fatalf("reading %s: %v", defaultSrcPath, err)
