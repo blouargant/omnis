@@ -35,20 +35,24 @@ fail with a stale-mtime error — reload the panel and retry.
 
 ## Editing Agents
 
-The Agents section has four sub-tabs:
+The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
+**Models**, and **Global Environment**. See the dedicated
+[Agents Settings](19-agents.md) page for full field-by-field reference.
 
-- **Agents** — the fleet (leader + sub-agents). The list is split into
-  two sections: **Built-in Agents** (shipped with yoke: `leader`,
+Key points:
+
+- **Agents** — fleet list split into **Built-in Agents** (`leader`,
   `skill_editor`, `registries_crawler`, `summariser`, `curator`) and
-  **Custom Agents** (user-added). Pick the agents the leader can call,
-  set per-agent system instructions, tool sets, model references, and
-  skill links. Each agent's `agent.json` and `instruction.md` live in
-  `registry/agents/<name>/`.
-- **Squads** — named groups composed from the Agents list (see below).
-- **Models** — declare the model profiles referenced by the fleet (provider,
-  model ID, base URL, API-key env var, temperature, max-tokens, etc.).
-- **Global Environment** — values shared across the fleet: tracing hints,
-  search-API keys, etc.
+  **Custom Agents**. Each agent's detail panel exposes its tool set,
+  skill/MCP/A2A wiring, system instruction, and model reference.
+- **Squads** — named groups `{ leader, members[] }` (see below).
+- **Remotes** — browse and install agent definitions from remote Git
+  repositories. Switch between Agents and Squads registry views.
+- **Models** — model profiles (provider, model ID, base URL, API key,
+  context length, pricing) referenced by each agent's `model_ref`.
+- **Global Environment** — fleet-wide settings: `softskills_dir`,
+  `token_optimization`, `bash_timeout_seconds`, `serpapi_key`, and
+  path overrides.
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.
