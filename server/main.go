@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -66,14 +67,23 @@ func run() error {
 	}
 
 	var addr string
+	var addrFromEnv bool
 	if v := os.Getenv("YOKE_SERVER_ADDR"); v != "" {
 		addr = v
+		addrFromEnv = true
 	} else if serverCfg.Addr != "" {
 		addr = serverCfg.Addr
 	} else if serverCfg.Port > 0 {
 		addr = fmt.Sprintf(":%d", serverCfg.Port)
 	} else {
 		addr = ":8080"
+	}
+	if serverCfg.PortAutoIncrement && !addrFromEnv {
+		resolved, err := findFreePort(addr)
+		if err != nil {
+			return err
+		}
+		addr = resolved
 	}
 	webDir := envOr("YOKE_WEB_DIR", serverCfg.WebDir)
 	if webDir == "" {
@@ -223,10 +233,28 @@ func run() error {
 		close(errCh)
 	}()
 
+	if serverCfg.OpenBrowser {
+		host, port, err := net.SplitHostPort(addr)
+		if err == nil {
+			if host == "" {
+				host = "localhost"
+			}
+			openBrowser("http://" + net.JoinHostPort(host, port))
+		}
+	}
+
 	if serverCfg.A2AEnabled {
 		a2aPort := serverCfg.A2APort
 		if a2aPort <= 0 {
 			a2aPort = 8081
+		}
+		a2aAddr := fmt.Sprintf(":%d", a2aPort)
+		if serverCfg.PortAutoIncrement {
+			resolved, err := findFreePort(a2aAddr)
+			if err != nil {
+				return err
+			}
+			a2aAddr = resolved
 		}
 		a2aSrv := newA2AServer(a2aDeps{
 			Manager:         manager,
@@ -238,7 +266,7 @@ func run() error {
 			RootCtx:         rootCtx,
 		}, token)
 		go func() {
-			if err := a2aSrv.serve(rootCtx, fmt.Sprintf(":%d", a2aPort)); err != nil {
+			if err := a2aSrv.serve(rootCtx, a2aAddr); err != nil {
 				log.Printf("a2a: server error: %v", err)
 			}
 		}()
@@ -287,4 +315,31 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// findFreePort tries to bind to addr; if the port is in use it increments the
+// port number and retries up to 100 times. Returns the first address that can
+// be bound. The temporary listener is closed immediately after the check.
+func findFreePort(addr string) (string, error) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, nil // not a host:port form — return as-is
+	}
+	basePort, err := strconv.Atoi(portStr)
+	if err != nil {
+		return addr, nil
+	}
+	for i := 0; i < 100; i++ {
+		tryPort := basePort + i
+		tryAddr := net.JoinHostPort(host, strconv.Itoa(tryPort))
+		ln, err := net.Listen("tcp", tryAddr)
+		if err == nil {
+			_ = ln.Close()
+			if i > 0 {
+				log.Printf("server: port %d in use, using %d", basePort, tryPort)
+			}
+			return tryAddr, nil
+		}
+	}
+	return "", fmt.Errorf("no free port in range %d-%d", basePort, basePort+99)
 }

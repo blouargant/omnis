@@ -162,8 +162,11 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	// Static UI (no auth — served at the root).
 	indexPath := filepath.Join(d.WebDir, "index.html")
+	faviconPath := filepath.Join(d.WebDir, "favicon.svg")
 	r.StaticFile("/", indexPath)
 	r.StaticFile("/index.html", indexPath)
+	r.StaticFile("/favicon.svg", faviconPath)
+	r.StaticFile("/favicon.ico", faviconPath)
 	r.Static("/assets", d.WebDir)
 
 	api := r.Group("/api")

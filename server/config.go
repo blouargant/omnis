@@ -37,6 +37,13 @@ type ServerConfig struct {
 	A2AEnabled bool `yaml:"a2a_enabled,omitempty" json:"a2a_enabled,omitempty"`
 	// A2APort is the port the A2A server listens on (default 8081).
 	A2APort int `yaml:"a2a_port,omitempty" json:"a2a_port,omitempty"`
+	// PortAutoIncrement, when true, automatically tries the next port when the
+	// configured port is already in use (up to 100 attempts). Applies to both
+	// the web server port and the A2A port. Ignored when YOKE_SERVER_ADDR is set.
+	PortAutoIncrement bool `yaml:"port_auto_increment,omitempty" json:"port_auto_increment,omitempty"`
+	// OpenBrowser, when true, opens the web UI in the default browser after the
+	// server starts. Silently skipped when no graphical environment is detected.
+	OpenBrowser bool `yaml:"open_browser,omitempty" json:"open_browser,omitempty"`
 	// WebDir is the directory containing the static web UI files.
 	// Overridden by YOKE_WEB_DIR. Defaults to "web" (relative to CWD).
 	WebDir string `yaml:"web_dir,omitempty" json:"web_dir,omitempty"`
