@@ -82,7 +82,7 @@
     { id: "monokai",         label: "Monokai",         tier: "secondary", tone: "Dark",  swatch: ["#272822", "#1e1f1c", "#66d9ef", "#f8f8f2"] },
     { id: "gruvbox-dark",    label: "Gruvbox Dark",    tier: "secondary", tone: "Dark",  swatch: ["#282828", "#1d2021", "#fe8019", "#ebdbb2"] },
     { id: "solarized-light",     label: "Solarized Light", tier: "secondary", tone: "Light", swatch: ["#fdf6e3", "#eee8d5", "#268bd2", "#586e75"] },
-    { id: "subtile-grey", label: "Subtile Grey",      tier: "secondary", tone: "Light", swatch: ["#f8f9fa", "#ffffff", "#4a5d5e", "#212529"] },
+    { id: "subtle-grey", label: "subtle Grey",      tier: "secondary", tone: "Light", swatch: ["#f8f9fa", "#ffffff", "#4a5d5e", "#212529"] },
   ];
   const TIERS = [
     { id: "principal", label: "Principal themes" },

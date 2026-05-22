@@ -48,7 +48,7 @@ on, the server falls back to the `default` squad on that session's
 next turn (and logs a warning).
 
 To define new squads, see the **Squads** sub-tab under
-Settings → Agent.
+Settings → Agents.
 
 ## Session lifecycle and the curator
 

@@ -34,7 +34,7 @@ Different sub-agents can use different models. A common configuration:
   gathering and text condensation.
 - **curator** — runs offline at session end; usually a mid-tier model.
 
-The **Models** sub-tab of the Agent panel exposes every field of the model
+The **Models** sub-tab of the Agents panel exposes every field of the model
 entries with inline validation.
 
 ## Prompt caching
@@ -47,7 +47,7 @@ first turn.
 
 ## Web UI provider-model picker
 
-The **Settings → Agent → Models** form lists known model IDs per provider so
+The **Settings → Agents → Models** form lists known model IDs per provider so
 you can pick from a dropdown instead of typing. The list is fetched from
 `/api/provider-models` on the server, which caches per-provider catalogues for
 a few minutes.

@@ -21,12 +21,13 @@ description: One-line description shown in list_skills output
 
 ## Where skills live
 
-Skills follow the same three-layer lookup as config files. The first directory
-in this list that contains the skill wins:
+Skills are stored in `registry/skills/` directories and follow the same
+three-layer lookup as config files. The first directory in this list that
+contains the skill wins:
 
-1. `$YOKE_HOME/skills/` — per-user, written by the Web UI.
-2. `./skills/` — checked into the repository, developer-local.
-3. `/etc/yoke/skills/` — system-wide install.
+1. `$YOKE_HOME/registry/skills/` — per-user; written by the Web UI.
+2. `./registry/skills/` — checked into the repository, developer-local.
+3. `/etc/yoke/registry/skills/` — system-wide install.
 
 The Web UI **Skills** section writes new and edited skills to
 `$YOKE_HOME/registry/skills/` by default (override with

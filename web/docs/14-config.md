@@ -26,7 +26,7 @@ single root).
 - `squads` — named groups `{ leader, members[] }` composed from
   `agents:` and picked per chat session. A squad named `default` is
   always present; the resolver synthesises one when missing. Edit
-  squads through the **Squads** sub-tab under Settings → Agent.
+  squads through the **Squads** sub-tab under Settings → Agents.
 
 Each agent's definition lives in its own directory under
 `registry/agents/<name>/`, mirroring the skills layout. An `agent.json`
@@ -62,14 +62,16 @@ Everything mutable lands under `$HOME/.yoke/` (override with `YOKE_HOME`):
 
 ```
 $HOME/.yoke/
-├── config/           # editor writes (preferences.json, user overrides)
-├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
-│   │                 #   agent_statelog_*, agent_events_*,
-│   │                 #   conversation_*.json (turns + title + squad + harvested)
-│   └── uploads/      # web UI file uploads (per-session)
-├── mailboxes/        # JSONL inter-agent mailboxes
-├── softskills/       # curator-distilled procedures (read AND write)
-└── registry/skills/  # web UI installed skills
+├── config/              # editor writes (preferences.json, user overrides)
+├── logs/                # agent_tasks_*, agent_todo_*, agent_memory_*,
+│   │                    #   agent_statelog_*, agent_events_*,
+│   │                    #   conversation_*.json (turns + title + squad + harvested)
+│   └── uploads/         # web UI file uploads (per-session)
+├── mailboxes/           # JSONL inter-agent mailboxes
+├── softskills/          # curator-distilled procedures (read AND write)
+└── registry/
+    ├── skills/          # web UI installed skills (override: YOKE_SKILLS_REGISTRY_DIR)
+    └── agents/          # web UI installed agents (override: YOKE_AGENTS_REGISTRY_DIR)
 ```
 
 The Web UI editor reads from the search chain but **always writes to

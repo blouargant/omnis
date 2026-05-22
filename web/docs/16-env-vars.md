@@ -34,12 +34,14 @@ shell before launching `make run-server` (or pass through a `.env` file).
 
 ## Filesystem
 
-| Variable                   | Purpose |
+| Variable                    | Purpose |
 |---|---|
-| `YOKE_HOME`                | Per-user state root. Default `$HOME/.yoke`. |
-| `YOKE_CONFIG_DIRS`         | Colon-separated config search chain, high → low. Replaces the default. |
-| `YOKE_CONFIG_PATH`         | Explicit `agent.json` path; bypasses the chain. |
-| `YOKE_SKILLS_REGISTRY_DIR` | Where the Web UI installs imported skills. Default `$YOKE_HOME/registry/skills`. |
+| `YOKE_HOME`                 | Per-user state root. Default `$HOME/.yoke`. |
+| `YOKE_CONFIG_DIRS`          | Colon-separated config search chain, high → low. Replaces the default. |
+| `YOKE_CONFIG_PATH`          | Explicit `agent.json` path; bypasses the chain. |
+| `YOKE_SKILLS_REGISTRY_DIR`  | Where the Web UI installs imported skills. Default `$YOKE_HOME/registry/skills`. |
+| `YOKE_AGENTS_REGISTRY_DIR`  | Where the Web UI installs imported agents. Default `$YOKE_HOME/registry/agents`. |
+| `YOKE_WEB_DIR`              | Directory containing the static Web UI files. Default `web` (relative to CWD). |
 
 ## Debug
 
