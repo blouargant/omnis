@@ -108,3 +108,41 @@ with its command, args, env vars, and resolved tool list (fetched live).
 
 The MCP subprocess pool deduplicates by `(command, args, env)` hash: two
 agent generations that mount the same server share a single child process.
+
+## Editing A2A
+
+The A2A section manages outbound connections to remote Agent-to-Agent peers.
+It has two sub-tabs:
+
+- **Agents** — list of remote endpoints. Each peer card has four sections:
+  - **General Settings** — peer name (becomes an `a2a_<name>` tool on the leader).
+  - **Connection** — URL and optional description.
+  - **Routing** — default squad, session name, and "create session if missing"
+    checkbox sent with every call (the agent can override per-invocation).
+  - **Headers** — arbitrary HTTP headers; values support `${input:id}` to
+    keep credentials out of the saved config.
+- **Remotes** — browse and install A2A agent definitions from remote
+  repositories (same infrastructure as skill/agent remotes).
+
+**Inputs** in the Agents sub-tab declare named secrets that the Web UI
+prompts for at first use and caches for the session. Reference them from
+header values as `${input:id}`.
+
+After adding a peer here, open the **Agents** section and enable the peer
+under the target agent's **A2A Agents** block so the leader can delegate to it.
+
+## Editing Commands
+
+The Commands section is client-only (no backing config file is loaded from
+the server-side config chain). It shows:
+
+- **Built-in commands** — read-only table of commands shipped with the Web UI
+  (`/help`, `/compress`, `/create-skill`, `/update-skill`, `/status`,
+  `/learn`, `/learn-now`). These names are reserved and cannot be reused.
+- **User commands** — CRUD table of custom slash commands. Each command
+  has a name, optional description, optional args hint, and a prompt
+  template body. Template placeholders: `$1`, `$2`, … for positional
+  arguments; `$*` for all arguments joined together.
+
+User commands are persisted to `$YOKE_HOME/config/user_commands.json` and
+take effect immediately — no reload required.

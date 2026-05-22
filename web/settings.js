@@ -55,6 +55,8 @@
     { id: "architecture",    file: "10-architecture.md",    label: "Architecture",    group: "Core Concepts" },
     { id: "skills-concept",  file: "11-skills.md",          label: "Skills",          group: "Core Concepts" },
     { id: "mcp-concept",     file: "12-mcp.md",             label: "MCP Servers",     group: "Core Concepts" },
+    { id: "a2a",             file: "17-a2a.md",             label: "A2A Agents",          group: "Core Concepts" },
+    { id: "commands",        file: "18-commands.md",        label: "Slash Commands",       group: "Core Concepts" },
     { id: "permissions-concept", file: "13-permissions.md", label: "Permissions",     group: "Core Concepts" },
     { id: "config",          file: "14-config.md",          label: "Configuration & Filesystem", group: "Core Concepts" },
     { id: "providers",       file: "15-providers.md",       label: "Providers & Models", group: "Core Concepts" },
