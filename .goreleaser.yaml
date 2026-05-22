@@ -111,27 +111,27 @@ nfpms:
       # Editable configuration (preserved on upgrade).
       # All config files install under /etc/yoke/registry/ — the system layer
       # of the 3-tier search chain (.agents > $HOME/.yoke > /etc/yoke/registry).
-      - src: packaging/etc-yoke/agents.json
+      - src: config/agents.json
         dst: /etc/yoke/registry/agents.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/mcp_config.json
+      - src: config/mcp_config.json
         dst: /etc/yoke/registry/mcp_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/permissions.json
+      - src: config/permissions.json
         dst: /etc/yoke/registry/permissions.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/preferences.json
+      - src: config/preferences.json
         dst: /etc/yoke/registry/preferences.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/remote_registries.json
+      - src: config/remote_registries.json
         dst: /etc/yoke/registry/remote_registries.json
         type: "config|noreplace"
         file_info:
@@ -141,12 +141,12 @@ nfpms:
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/a2a_config.json
+      - src: config/a2a_config.json
         dst: /etc/yoke/registry/a2a_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/filters/*.json
+      - src: config/filters/*.json
         dst: /etc/yoke/registry/filters/
         type: "config|noreplace"
         file_info:
