@@ -6,7 +6,7 @@ There is no provider-specific SDK in `go.mod` for Anthropic or OpenAI:
 both adapters speak HTTP + SSE directly.
 
 The root binary can also load provider/model settings from
-[`config/agents.json`](configuration.md), via a reusable `models`
+[`agents.json`](configuration.md), via a reusable `models`
 catalog and per-agent `model_ref` selection.
 
 ## Selection
@@ -25,7 +25,7 @@ CLI global overrides:
 - `--base-url <url>`
 - `--api-key <value>`
 
-Precedence is: CLI > env > `config/agents.json` > built-in defaults.
+Precedence is: CLI > env > `agents.json` > built-in defaults.
 
 Per-provider defaults:
 

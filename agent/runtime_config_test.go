@@ -243,7 +243,7 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	// real $HOME or ./config layout.
 	home := t.TempDir()
 	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", filepath.Join(home, "config"))
+	t.Setenv("YOKE_CONFIG_DIRS", home)
 
 	runtime, err := ResolveRuntimeSettings(Options{})
 	if err != nil {
@@ -258,7 +258,7 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if runtime.BashOutputFilterEnabled {
 		t.Fatal("BashOutputFilterEnabled = true, want false")
 	}
-	if got, want := runtime.BashOutputFiltersDir, filepath.Join(home, "config", "filters"); got != want {
+	if got, want := runtime.BashOutputFiltersDir, filepath.Join(home, "filters"); got != want {
 		t.Fatalf("BashOutputFiltersDir = %q, want %q", got, want)
 	}
 	if _, ok := runtime.AgentConfig("leader"); !ok {
@@ -333,7 +333,7 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 
 	// Copy instruction files from the real registry.
 	for _, name := range []string{"leader", "investigator", "summariser"} {
-		srcPath := filepath.Join("..", "registry", "agents", name, "instruction.md")
+		srcPath := filepath.Join("..", ".agents", "registry", "agents", name, "instruction.md")
 		content, err := os.ReadFile(srcPath)
 		if err != nil {
 			t.Fatalf("reading %s: %v", srcPath, err)
@@ -349,7 +349,7 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 	}
 
 	// Copy default instruction.
-	defaultSrcPath := filepath.Join("..", "registry", "agents", "default.md")
+	defaultSrcPath := filepath.Join("..", ".agents", "registry", "agents", "default.md")
 	defaultContent, err := os.ReadFile(defaultSrcPath)
 	if err != nil {
 		t.Fatalf("reading %s: %v", defaultSrcPath, err)
@@ -492,7 +492,7 @@ func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
 		mustWrite(t, agentPath, b)
 
 		// Copy instruction file if it exists in the real registry.
-		srcInstructionPath := filepath.Join("..", "registry", "agents", name, "instruction.md")
+		srcInstructionPath := filepath.Join("..", ".agents", "registry", "agents", name, "instruction.md")
 		if content, err := os.ReadFile(srcInstructionPath); err == nil {
 			dstInstructionPath := filepath.Join(agentDir, "instruction.md")
 			mustWrite(t, dstInstructionPath, content)
@@ -500,7 +500,7 @@ func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
 	}
 
 	// Also copy the default instruction if it exists.
-	if content, err := os.ReadFile(filepath.Join("..", "registry", "agents", "default.md")); err == nil {
+	if content, err := os.ReadFile(filepath.Join("..", ".agents", "registry", "agents", "default.md")); err == nil {
 		mustWrite(t, filepath.Join(registryDir, "default.md"), content)
 	}
 }

@@ -11,14 +11,14 @@
 //   - ConfigSearchDirs(): read-only search chain for configuration files,
 //     in high-to-low precedence:
 //
-//     1. Home()/config       — user overrides written by the web UI
-//     2. ./config            — developer/local checkout (CWD-relative)
-//     3. SystemConfigDir     — /etc/yoke by default; system-wide install
+//     1. .agents            — project-local directory (CWD-relative)
+//     2. Home()             — per-user state root ($HOME/.yoke)
+//     3. SystemRegistryDir  — /etc/yoke/registry by default; system-wide install
 //
 //     The whole chain can be replaced via $YOKE_CONFIG_DIRS (a list using
 //     the OS path-list separator, ":" on Unix). FindConfig returns the
 //     first existing file in the chain, falling back to the write target
-//     under Home()/config when nothing exists yet — so callers can use the
+//     under Home() when nothing exists yet — so callers can use the
 //     returned path both for reading and creating.
 //
 // All resolution is done lazily from the current environment at call time
@@ -35,12 +35,25 @@ import (
 const (
 	envHome       = "YOKE_HOME"
 	envConfigDirs = "YOKE_CONFIG_DIRS"
+
+	// LocalDir is the project-local configuration directory (CWD-relative).
+	// Place agents.json, permissions.json, registry/agents/, etc. here to
+	// scope configuration to a single project checkout.
+	LocalDir = ".agents"
 )
 
-// SystemConfigDir is the lowest-precedence layer of the default config
-// search chain. It's a package-level variable so distribution packagers
-// can override it at build time via -ldflags for non-FHS targets.
+// SystemConfigDir is the lowest-precedence base directory used for system-wide
+// configuration. It's a package-level variable so distribution packagers can
+// override it at build time via -ldflags for non-FHS targets.
 var SystemConfigDir = "/etc/yoke"
+
+// SystemRegistryDir is the lowest-precedence layer of the default config
+// search chain. Derived from SystemConfigDir. It's where system-wide config
+// files (agents.json, permissions.json, …) and registry subdirectories
+// (registry/agents/, registry/skills/) live in a packaged installation.
+func SystemRegistryDir() string {
+	return filepath.Join(SystemConfigDir, "registry")
+}
 
 // Home returns the directory under which all mutable yoke state lives.
 // Lookup order: $YOKE_HOME, then $HOME/.yoke. Falls back to ".yoke"
@@ -59,6 +72,12 @@ func Home() string {
 // ConfigSearchDirs returns the config-file search chain in high-to-low
 // precedence. $YOKE_CONFIG_DIRS, if set, replaces the chain wholesale
 // (entries separated by the OS path-list separator).
+//
+// Default chain:
+//
+//  1. .agents              — project-local (highest priority)
+//  2. $YOKE_HOME           — per-user ($HOME/.yoke)
+//  3. /etc/yoke/registry   — system-wide (lowest priority)
 func ConfigSearchDirs() []string {
 	if v := strings.TrimSpace(os.Getenv(envConfigDirs)); v != "" {
 		parts := strings.Split(v, string(os.PathListSeparator))
@@ -74,16 +93,16 @@ func ConfigSearchDirs() []string {
 		}
 	}
 	return []string{
-		filepath.Join(Home(), "config"),
-		"config",
-		SystemConfigDir,
+		LocalDir,
+		Home(),
+		SystemRegistryDir(),
 	}
 }
 
 // ConfigWriteDir is the single directory to which yoke writes configuration
 // files. The web UI editor, future per-user overrides, anything that
-// persists "user-edited" config goes here. Always Home()/config.
-func ConfigWriteDir() string { return filepath.Join(Home(), "config") }
+// persists "user-edited" config goes here. Always Home() ($YOKE_HOME).
+func ConfigWriteDir() string { return Home() }
 
 // FindConfig resolves a filename against the config search chain and
 // returns the first existing path. When the file exists in none of the
@@ -121,33 +140,34 @@ func LogsDir() string { return filepath.Join(Home(), "logs") }
 func UploadsDir() string { return filepath.Join(LogsDir(), "uploads") }
 
 // MailboxesDir returns Home()/mailboxes — JSONL inter-agent mailbox files.
-// The directory is no longer dot-prefixed because Home() is itself hidden
-// ($HOME/.yoke), so there's no reason to hide a child of an already
-// hidden directory.
 func MailboxesDir() string { return filepath.Join(Home(), "mailboxes") }
 
 // SoftSkillsDir returns Home()/softskills — curator-distilled procedures.
 // Always anchored under Home() (read AND write).
 func SoftSkillsDir() string { return filepath.Join(Home(), "softskills") }
 
-// SkillsDir returns the resolved skills directory. Skills follow the same
-// 3-layer search as config files but rooted at the parent of each layer
-// (i.e. ./skills, Home()/skills, and SystemConfigDir's sibling), falling
-// back to Home()/skills when none exist.
-func SkillsDir() string {
-	for _, p := range skillsSearchDirs() {
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			return p
-		}
+// SkillsAllSearchDirs returns every directory that should be scanned for skill
+// definitions, across all layers and both the hand-crafted (skills/) and
+// registry-installed (registry/skills/) sub-paths. Directories are ordered
+// by descending precedence; callers that deduplicate by skill name should
+// process them in order so the first occurrence wins.
+func SkillsAllSearchDirs() []string {
+	var out []string
+	for _, base := range []string{LocalDir, Home()} {
+		out = append(out,
+			filepath.Join(base, "skills"),
+			filepath.Join(base, "registry/skills"),
+		)
 	}
-	return filepath.Join(Home(), "skills")
+	if SystemConfigDir != "" {
+		out = append(out, filepath.Join(SystemConfigDir, "registry/skills"))
+	}
+	return out
 }
 
 // SkillsRegistryDir returns the resolved registry/skills directory used
-// by the web UI's installer. Same first-existing-wins fallback as
-// SkillsDir so a developer checkout with `./registry/skills`
-// keeps working, while fresh installs default to
-// `$HOME/.yoke/registry/skills`.
+// by the web UI's installer. First-existing-wins across the three layers;
+// defaults to Home()/registry/skills.
 func SkillsRegistryDir() string {
 	for _, p := range skillsRegistrySearchDirs() {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
@@ -158,14 +178,13 @@ func SkillsRegistryDir() string {
 }
 
 // SkillsRegistryWriteDir is the write-target for skills installed or created by
-// the web UI. Always anchored under Home() so saves never land in a local
-// checkout's ./registry/skills directory — mirrors the config write contract.
+// the web UI. Always anchored under Home() so saves never land in .agents/ or
+// /etc/yoke/registry — mirrors the config write contract.
 func SkillsRegistryWriteDir() string { return filepath.Join(Home(), "registry/skills") }
 
 // AgentsRegistryDir returns the resolved registry/agents directory used
-// to load per-agent configuration files. Same first-existing-wins fallback
-// as SkillsRegistryDir: a developer checkout with `./registry/agents`
-// keeps working, while fresh installs default to `$HOME/.yoke/registry/agents`.
+// to load per-agent configuration files. First-existing-wins across the
+// three layers; defaults to Home()/registry/agents.
 func AgentsRegistryDir() string {
 	for _, p := range agentsRegistrySearchDirs() {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
@@ -179,22 +198,10 @@ func AgentsRegistryDir() string {
 // the web UI. Always anchored under Home() — mirrors the config write contract.
 func AgentsRegistryWriteDir() string { return filepath.Join(Home(), "registry/agents") }
 
-func skillsSearchDirs() []string {
-	out := []string{filepath.Join(Home(), "skills"), "skills"}
-	// Add SystemConfigDir's sibling (e.g. /etc/yoke -> /etc/yoke/skills).
-	// /etc is FHS-typical for read-only system data; we keep skills under
-	// the same prefix rather than splitting into /usr/share/yoke to keep
-	// packaging simple.
-	if SystemConfigDir != "" {
-		out = append(out, filepath.Join(SystemConfigDir, "skills"))
-	}
-	return out
-}
-
 func skillsRegistrySearchDirs() []string {
 	out := []string{
+		filepath.Join(LocalDir, "registry/skills"),
 		filepath.Join(Home(), "registry/skills"),
-		filepath.Join("registry/skills"),
 	}
 	if SystemConfigDir != "" {
 		out = append(out, filepath.Join(SystemConfigDir, "registry/skills"))
@@ -210,8 +217,8 @@ func AgentsRegistrySearchDirs() []string { return agentsRegistrySearchDirs() }
 
 func agentsRegistrySearchDirs() []string {
 	out := []string{
+		filepath.Join(LocalDir, "registry/agents"),
 		filepath.Join(Home(), "registry/agents"),
-		filepath.Join("registry/agents"),
 	}
 	if SystemConfigDir != "" {
 		out = append(out, filepath.Join(SystemConfigDir, "registry/agents"))

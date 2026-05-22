@@ -49,6 +49,18 @@ type ServerConfig struct {
 	WebDir string `yaml:"web_dir,omitempty" json:"web_dir,omitempty"`
 }
 
+// agentSourceLayer returns the config-chain layer ("local", "user", or "system")
+// where the named agent's definition file (agent.json) was found.
+func agentSourceLayer(name string) string {
+	for _, dir := range paths.AgentsRegistrySearchDirs() {
+		if _, err := os.Stat(filepath.Join(dir, name, "agent.json")); err == nil {
+			absDir, _ := filepath.Abs(dir)
+			return pathLayer(absDir)
+		}
+	}
+	return ""
+}
+
 // loadServerConfig reads config/server.yaml from the config search chain.
 // Missing file or parse errors are non-fatal — defaults apply.
 func loadServerConfig() ServerConfig {
@@ -545,27 +557,37 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			return
 		}
 
+		// Build a skill-name → first-found-directory map across all search layers.
+		skillDirMap := map[string]string{}
+		for _, d := range paths.SkillsAllSearchDirs() {
+			entries, _ := os.ReadDir(d)
+			for _, e := range entries {
+				if e.IsDir() && skillDirMap[e.Name()] == "" {
+					skillDirMap[e.Name()] = d
+				}
+			}
+		}
+
 		seen := map[string]bool{}
 		var contributions []contribution
-		registryDir := paths.SkillsRegistryDir()
 		for _, agentCfg := range settings.Agents {
 			skillNames := agentCfg.Skills
 			if len(skillNames) == 0 {
-				// No explicit list — scan all installed skills.
-				entries, _ := os.ReadDir(registryDir)
-				for _, e := range entries {
-					if e.IsDir() {
-						skillNames = append(skillNames, e.Name())
-					}
+				// No explicit list — use all discovered skills.
+				for name := range skillDirMap {
+					skillNames = append(skillNames, name)
 				}
 			}
 			for _, skillName := range skillNames {
-				permPath := filepath.Join(registryDir, skillName, "permissions.json")
-				key := permPath
-				if seen[key] {
+				dir, ok := skillDirMap[skillName]
+				if !ok {
 					continue
 				}
-				seen[key] = true
+				permPath := filepath.Join(dir, skillName, "permissions.json")
+				if seen[permPath] {
+					continue
+				}
+				seen[permPath] = true
 				r, err := permissions.Load(permPath)
 				if err != nil || !r.HasRules() {
 					continue
@@ -629,6 +651,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							"enabled":                a.Enabled,
 							"leader":                 a.Leader,
 							"builtin":                a.BuiltIn,
+							"source":                 agentSourceLayer(a.Name),
 							"model_ref":              a.ModelRef,
 							"provider":               a.Provider,
 							"model":                  a.Model,

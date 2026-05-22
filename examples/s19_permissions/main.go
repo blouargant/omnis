@@ -16,7 +16,7 @@ func main() {
 	ctx := context.Background()
 	llm, err := agentkit.NewModel(ctx)
 	must(err)
-	plug, err := permissions.NewPlugin("perms", "config/permissions.yaml", permissions.StdinAsker{})
+	plug, err := permissions.NewPlugin("perms", ".agents/permissions.json", permissions.StdinAsker{})
 	must(err)
 	a, err := agentkit.New(agentkit.AgentConfig{
 		Name:        "s19_permissions",

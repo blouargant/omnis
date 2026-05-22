@@ -35,12 +35,25 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // skillsDeps holds resolved filesystem paths for skills management.
 type skillsDeps struct {
-	RegistryDir              string // abs path to registry/skills/ (read — first-existing-wins)
-	RegistryWriteDir         string // abs path to registry/skills/ write target (always $YOKE_HOME)
-	AgentYAML                string // abs path to agent.json (re-read on each request for freshness)
-	AgentsRegistryReadDir    string // abs path to registry/agents/ (read — first-existing-wins)
-	AgentsRegistryWriteDir   string // abs path to registry/agents/ write target (always $YOKE_HOME)
-	RemoteRegistriesCfgWrite string // abs write target for remote_registries.json ($YOKE_HOME/config)
+	RegistryDir              string   // abs path to first-existing registry/skills/ (legacy single-dir callers)
+	RegistryAllDirs          []string // abs paths of all skill directories to read, in precedence order
+	RegistryWriteDir         string   // abs path to registry/skills/ write target (always $YOKE_HOME)
+	AgentYAML                string   // abs path to agent.json (re-read on each request for freshness)
+	AgentsRegistryReadDir    string   // abs path to registry/agents/ (read — first-existing-wins)
+	AgentsRegistryWriteDir   string   // abs path to registry/agents/ write target (always $YOKE_HOME)
+	RemoteRegistriesCfgWrite string   // abs write target for remote_registries.json
+}
+
+// findSkillDir returns the absolute path of the directory that contains the
+// named skill (i.e. <dir>/<name>/SKILL.md exists), searching RegistryAllDirs
+// in precedence order. Returns "" when the skill is not found.
+func (d skillsDeps) findSkillDir(name string) string {
+	for _, dir := range d.RegistryAllDirs {
+		if _, err := os.Stat(filepath.Join(dir, name, "SKILL.md")); err == nil {
+			return filepath.Join(dir, name)
+		}
+	}
+	return ""
 }
 
 // resolveSkillsDeps derives skills paths from the already-resolved config files.
@@ -48,14 +61,39 @@ type skillsDeps struct {
 // Write paths always land under $YOKE_HOME — web UI saves never touch the
 // local checkout, mirroring the config write contract.
 func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
-	registryReadDir := paths.SkillsRegistryDir()
 	registryWriteDir := paths.SkillsRegistryWriteDir()
 	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
-		registryReadDir = v
 		registryWriteDir = v
 	}
-	absReadReg, _ := filepath.Abs(registryReadDir)
 	absWriteReg, _ := filepath.Abs(registryWriteDir)
+
+	// Build the full ordered list of skill read directories.
+	allDirs := paths.SkillsAllSearchDirs()
+	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
+		// When the env var overrides the registry dir, only that dir is used.
+		absEnv, _ := filepath.Abs(v)
+		allDirs = []string{absEnv}
+	}
+	var absAllDirs []string
+	for _, d := range allDirs {
+		if abs, err := filepath.Abs(d); err == nil {
+			absAllDirs = append(absAllDirs, abs)
+		}
+	}
+
+	// Legacy single-dir field: first directory that exists (for callers that
+	// haven't been updated to multi-dir yet).
+	var absReadReg string
+	for _, d := range absAllDirs {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			absReadReg = d
+			break
+		}
+	}
+	if absReadReg == "" {
+		absReadReg = absWriteReg
+	}
+
 	absAgentsRead, _ := filepath.Abs(paths.AgentsRegistryDir())
 	absAgentsWrite, _ := filepath.Abs(paths.AgentsRegistryWriteDir())
 	if v := os.Getenv("YOKE_AGENTS_REGISTRY_DIR"); v != "" {
@@ -65,6 +103,7 @@ func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
 	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "remote_registries.json"))
 	return skillsDeps{
 		RegistryDir:              absReadReg,
+		RegistryAllDirs:          absAllDirs,
 		RegistryWriteDir:         absWriteReg,
 		AgentYAML:                cfgFiles.Agent,
 		AgentsRegistryReadDir:    absAgentsRead,
@@ -142,47 +181,72 @@ type skillInfo struct {
 	MTime       time.Time              `json:"mtime"`
 	Size        int64                  `json:"size"`
 	LinkedIn    []string               `json:"linked_in"`
+	Source      string                 `json:"source"`
 }
 
-// listRegistrySkills scans registryDir and returns metadata for each skill.
-func listRegistrySkills(registryDir string) ([]skillInfo, error) {
-	entries, err := os.ReadDir(registryDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []skillInfo{}, nil
-		}
-		return nil, err
+// pathLayer returns "local", "user", or "system" based on where dirPath sits
+// in the config search chain. Used to label skills and agents in the web UI.
+func pathLayer(dirPath string) string {
+	absPath, _ := filepath.Abs(dirPath)
+	localAbs, _ := filepath.Abs(paths.LocalDir)
+	homeAbs := paths.Home()
+	if absPath == localAbs || strings.HasPrefix(absPath, localAbs+string(filepath.Separator)) {
+		return "local"
 	}
+	if absPath == homeAbs || strings.HasPrefix(absPath, homeAbs+string(filepath.Separator)) {
+		return "user"
+	}
+	return "system"
+}
+
+// listRegistrySkills scans all dirs in precedence order and returns merged
+// metadata. First occurrence of a skill name wins (matches the config chain).
+func listRegistrySkills(dirs ...string) ([]skillInfo, error) {
+	seen := make(map[string]bool)
 	var out []skillInfo
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		skillMD := filepath.Join(registryDir, name, "SKILL.md")
-		data, err := os.ReadFile(skillMD)
+	for _, registryDir := range dirs {
+		entries, err := os.ReadDir(registryDir)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		st, _ := os.Stat(skillMD)
-		fm, _ := parseSkillFrontmatter(data)
-		displayName := fm.Name
-		if displayName == "" {
-			displayName = name
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if seen[name] {
+				continue
+			}
+			skillMD := filepath.Join(registryDir, name, "SKILL.md")
+			data, err := os.ReadFile(skillMD)
+			if err != nil {
+				continue
+			}
+			seen[name] = true
+			st, _ := os.Stat(skillMD)
+			fm, _ := parseSkillFrontmatter(data)
+			displayName := fm.Name
+			if displayName == "" {
+				displayName = name
+			}
+			info := skillInfo{
+				Name:        displayName,
+				Description: fm.Description,
+				Author:      fm.author(),
+				Tags:        fm.tags(),
+				Metadata:    fm.Metadata,
+				Size:        int64(len(data)),
+				LinkedIn:    []string{},
+				Source:      pathLayer(registryDir),
+			}
+			if st != nil {
+				info.MTime = st.ModTime()
+			}
+			out = append(out, info)
 		}
-		info := skillInfo{
-			Name:        displayName,
-			Description: fm.Description,
-			Author:      fm.author(),
-			Tags:        fm.tags(),
-			Metadata:    fm.Metadata,
-			Size:        int64(len(data)),
-			LinkedIn:    []string{},
-		}
-		if st != nil {
-			info.MTime = st.ModTime()
-		}
-		out = append(out, info)
 	}
 	if out == nil {
 		return []skillInfo{}, nil
@@ -488,7 +552,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 
 	// GET /registry — list all installed skills with linked_in annotation.
 	rg.GET("/registry", func(c *gin.Context) {
-		skills, err := listRegistrySkills(deps.RegistryDir)
+		skills, err := listRegistrySkills(deps.RegistryAllDirs...)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
@@ -567,13 +631,14 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("NAME_INVALID", "invalid skill name"))
 			return
 		}
-		skillMD := filepath.Join(deps.RegistryDir, name, "SKILL.md")
+		skillDir := deps.findSkillDir(name)
+		if skillDir == "" {
+			c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "skill not found"))
+			return
+		}
+		skillMD := filepath.Join(skillDir, "SKILL.md")
 		data, err := os.ReadFile(skillMD)
 		if err != nil {
-			if os.IsNotExist(err) {
-				c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "skill not found"))
-				return
-			}
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
@@ -602,7 +667,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			"metadata":    fm.Metadata,
 			"content":     string(data),
 			"mtime":       mtime,
-			"resources":   collectResources(filepath.Join(deps.RegistryDir, name)),
+			"resources":   collectResources(skillDir),
 			"linked_in":   linkedIn,
 		})
 	})
@@ -657,12 +722,13 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("BAD_REQUEST", "invalid JSON body"))
 			return
 		}
-		// Find skill in read chain (may be in ./registry/skills in a dev checkout).
-		readSkillMD := filepath.Join(deps.RegistryDir, name, "SKILL.md")
-		if _, err := os.Stat(readSkillMD); os.IsNotExist(err) {
+		// Find skill in read chain (may be in .agents/skills/ or registry/skills/).
+		sourceDir := deps.findSkillDir(name)
+		if sourceDir == "" {
 			c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "skill not found"))
 			return
 		}
+		readSkillMD := filepath.Join(sourceDir, "SKILL.md")
 		if status, body := checkMtime(readSkillMD, req.MTime); status != 0 {
 			c.JSON(status, body)
 			return
@@ -692,8 +758,8 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 			c.JSON(http.StatusBadRequest, skillsErr("NAME_INVALID", "invalid skill name"))
 			return
 		}
-		skillDir := filepath.Join(deps.RegistryDir, name)
-		if _, err := os.Stat(skillDir); os.IsNotExist(err) {
+		skillDir := deps.findSkillDir(name)
+		if skillDir == "" {
 			c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "skill not found"))
 			return
 		}
@@ -857,7 +923,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 		}
 
 		// action == "all": add every registry skill to the agent's list.
-		skillsList, err := listRegistrySkills(deps.RegistryDir)
+		skillsList, err := listRegistrySkills(deps.RegistryAllDirs...)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return

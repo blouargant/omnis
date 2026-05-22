@@ -50,16 +50,17 @@ This is very important:
 4. The ` + "`load_skill_resource`" + ` tool is for viewing files within a skill's directory (e.g., ` + "`references/*`, `assets/*`, `scripts/*`" + `). Do NOT use other tools to access these files.
 `
 
-// Toolset returns an ADK tool.Toolset that exposes skills from the shared
-// registry (paths.SkillsRegistryDir()). When skillNames is nil or empty, all
-// installed skills are visible. When non-empty, only the named skills are
-// exposed to the agent.
+// Toolset returns an ADK tool.Toolset that exposes skills merged across all
+// search directories (paths.SkillsAllSearchDirs). When skillNames is nil or
+// empty all discovered skills are visible; when non-empty only the named
+// skills are exposed.
 func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
-	registryDir := paths.SkillsRegistryDir()
-	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+	// Ensure the primary write-target directory exists so the web UI can install
+	// into it even when no skill is present yet.
+	if err := os.MkdirAll(paths.SkillsRegistryWriteDir(), 0o755); err != nil {
 		return nil, err
 	}
-	base := os.DirFS(registryDir)
+	base := newMultiDirSkillsFS(paths.SkillsAllSearchDirs())
 	var src skill.Source
 	if len(skillNames) == 0 {
 		src = skill.NewFileSystemSource(base)
@@ -134,6 +135,92 @@ func (d *filteredRootDir) ReadDir(n int) ([]fs.DirEntry, error) {
 		for _, e := range all {
 			if e.IsDir() && d.allowed[e.Name()] {
 				d.entries = append(d.entries, e)
+			}
+		}
+		d.loaded = true
+	}
+	if n <= 0 {
+		return d.entries[d.pos:], nil
+	}
+	if d.pos >= len(d.entries) {
+		return nil, io.EOF
+	}
+	end := d.pos + n
+	if end > len(d.entries) {
+		end = len(d.entries)
+	}
+	res := d.entries[d.pos:end]
+	d.pos = end
+	return res, nil
+}
+
+// ── multiDirSkillsFS ──────────────────────────────────────────────────────
+
+// multiDirSkillsFS merges several skill directories into a single fs.FS.
+// The first directory (in the slice order) wins for duplicate skill names,
+// matching the high-to-low precedence contract of the config search chain.
+type multiDirSkillsFS struct {
+	bases []fs.FS
+}
+
+// newMultiDirSkillsFS builds an FS from the subset of dirs that actually exist.
+func newMultiDirSkillsFS(dirs []string) fs.FS {
+	var bases []fs.FS
+	for _, d := range dirs {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			bases = append(bases, os.DirFS(d))
+		}
+	}
+	if len(bases) == 0 {
+		return multiDirSkillsFS{bases: nil}
+	}
+	return multiDirSkillsFS{bases: bases}
+}
+
+func (m multiDirSkillsFS) Open(name string) (fs.File, error) {
+	clean := path.Clean(name)
+	if clean == "." {
+		return &multiDirRoot{bases: m.bases}, nil
+	}
+	// Determine the top-level skill directory name so we can route to the
+	// base that actually owns it.
+	top := clean
+	if i := strings.IndexByte(clean, '/'); i >= 0 {
+		top = clean[:i]
+	}
+	for _, base := range m.bases {
+		if _, err := base.Open(top); err == nil {
+			return base.Open(name)
+		}
+	}
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+}
+
+// multiDirRoot is the virtual root directory for multiDirSkillsFS.
+// It lists every skill from all bases, with first-occurrence-wins deduplication.
+type multiDirRoot struct {
+	bases   []fs.FS
+	entries []fs.DirEntry
+	pos     int
+	loaded  bool
+}
+
+func (d *multiDirRoot) Stat() (fs.FileInfo, error) { return syntheticDirInfo("."), nil }
+func (d *multiDirRoot) Read([]byte) (int, error) {
+	return 0, &fs.PathError{Op: "read", Path: ".", Err: fs.ErrInvalid}
+}
+func (d *multiDirRoot) Close() error { return nil }
+
+func (d *multiDirRoot) ReadDir(n int) ([]fs.DirEntry, error) {
+	if !d.loaded {
+		seen := make(map[string]bool)
+		for _, base := range d.bases {
+			all, _ := fs.ReadDir(base, ".")
+			for _, e := range all {
+				if e.IsDir() && !seen[e.Name()] {
+					d.entries = append(d.entries, e)
+					seen[e.Name()] = true
+				}
 			}
 		}
 		d.loaded = true

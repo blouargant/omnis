@@ -29,7 +29,7 @@ the file group above (subject to garbage collection).
 ## Squads — picking a configuration per chat
 
 A **squad** is a named group `{ leader, members[] }` defined in
-`config/agents.json`. Each chat session uses exactly one squad — the one
+`agents.json`. Each chat session uses exactly one squad — the one
 selected when it was created.
 
 The compact picker next to the **New Chat** button selects which squad

@@ -33,14 +33,15 @@ func TestConfigSearchDirsDefault(t *testing.T) {
 	if len(dirs) != 3 {
 		t.Fatalf("ConfigSearchDirs() len = %d, want 3", len(dirs))
 	}
-	if dirs[0] != filepath.Join(tmp, "config") {
-		t.Errorf("first layer = %q, want %q", dirs[0], filepath.Join(tmp, "config"))
+	if dirs[0] != LocalDir {
+		t.Errorf("first layer = %q, want %q", dirs[0], LocalDir)
 	}
-	if dirs[1] != "config" {
-		t.Errorf("second layer = %q, want %q", dirs[1], "config")
+	if dirs[1] != tmp {
+		t.Errorf("second layer = %q, want %q", dirs[1], tmp)
 	}
-	if dirs[2] != SystemConfigDir {
-		t.Errorf("third layer = %q, want %q", dirs[2], SystemConfigDir)
+	wantSystem := filepath.Join(SystemConfigDir, "registry")
+	if dirs[2] != wantSystem {
+		t.Errorf("third layer = %q, want %q", dirs[2], wantSystem)
 	}
 }
 
@@ -58,7 +59,7 @@ func TestFindConfigPrecedence(t *testing.T) {
 	local := t.TempDir()
 	system := t.TempDir()
 	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", filepath.Join(home, "config")+string(os.PathListSeparator)+local+string(os.PathListSeparator)+system)
+	t.Setenv("YOKE_CONFIG_DIRS", local+string(os.PathListSeparator)+home+string(os.PathListSeparator)+system)
 
 	mustWrite := func(dir, name string) string {
 		t.Helper()
@@ -77,14 +78,14 @@ func TestFindConfigPrecedence(t *testing.T) {
 		t.Errorf("only-system: got %q, want %q", got, systemPath)
 	}
 
-	localPath := mustWrite(local, "agent.json")
-	if got := FindConfig("agent.json"); got != localPath {
-		t.Errorf("local-overrides-system: got %q, want %q", got, localPath)
+	homePath := mustWrite(home, "agent.json")
+	if got := FindConfig("agent.json"); got != homePath {
+		t.Errorf("home-overrides-system: got %q, want %q", got, homePath)
 	}
 
-	homePath := mustWrite(filepath.Join(home, "config"), "agent.json")
-	if got := FindConfig("agent.json"); got != homePath {
-		t.Errorf("home-overrides-local: got %q, want %q", got, homePath)
+	localPath := mustWrite(local, "agent.json")
+	if got := FindConfig("agent.json"); got != localPath {
+		t.Errorf("local-overrides-home: got %q, want %q", got, localPath)
 	}
 }
 
@@ -92,9 +93,17 @@ func TestFindConfigMissingReturnsWriteTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("YOKE_HOME", home)
 	t.Setenv("YOKE_CONFIG_DIRS", "")
-	want := filepath.Join(home, "config", "nope.json")
+	want := filepath.Join(home, "nope.json")
 	if got := FindConfig("nope.json"); got != want {
 		t.Fatalf("FindConfig missing: got %q, want %q", got, want)
+	}
+}
+
+func TestConfigWriteDirIsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("YOKE_HOME", home)
+	if got := ConfigWriteDir(); got != home {
+		t.Errorf("ConfigWriteDir() = %q, want %q", got, home)
 	}
 }
 
@@ -108,11 +117,30 @@ func TestStateDirsUnderHome(t *testing.T) {
 		{UploadsDir(), filepath.Join(home, "logs", "uploads")},
 		{MailboxesDir(), filepath.Join(home, "mailboxes")},
 		{SoftSkillsDir(), filepath.Join(home, "softskills")},
-		{ConfigWriteDir(), filepath.Join(home, "config")},
+		{ConfigWriteDir(), home},
 	}
 	for _, c := range cases {
 		if c.name != c.want {
 			t.Errorf("got %q, want %q", c.name, c.want)
 		}
+	}
+}
+
+func TestAgentsRegistrySearchDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("YOKE_HOME", home)
+	dirs := AgentsRegistrySearchDirs()
+	if len(dirs) != 3 {
+		t.Fatalf("AgentsRegistrySearchDirs() len = %d, want 3", len(dirs))
+	}
+	if dirs[0] != filepath.Join(LocalDir, "registry/agents") {
+		t.Errorf("first layer = %q, want %q", dirs[0], filepath.Join(LocalDir, "registry/agents"))
+	}
+	if dirs[1] != filepath.Join(home, "registry/agents") {
+		t.Errorf("second layer = %q, want %q", dirs[1], filepath.Join(home, "registry/agents"))
+	}
+	wantSystem := filepath.Join(SystemConfigDir, "registry/agents")
+	if dirs[2] != wantSystem {
+		t.Errorf("third layer = %q, want %q", dirs[2], wantSystem)
 	}
 }

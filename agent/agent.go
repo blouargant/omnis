@@ -104,13 +104,13 @@ type Options struct {
 	DisableAutoCurate bool
 	// Repo is the repository root for worktree tools (default: current working directory).
 	Repo string
-	// MCPSConfigPath is the path to the MCP config file (default: "config/mcp_config.json").
+	// MCPSConfigPath is the path to the MCP config file (default: resolved from .agents/mcp_config.json or $HOME/.yoke/mcp_config.json).
 	MCPSConfigPath string
-	// PermissionsConfigPath is the path to the permissions config (default: "config/permissions.json").
+	// PermissionsConfigPath is the path to the permissions config (default: resolved from .agents/permissions.json or $HOME/.yoke/permissions.json).
 	PermissionsConfigPath string
 	// AppName is the application name for the runner (default: "yoke").
 	AppName string
-	// ConfigPath is the runtime JSON configuration path (default: "config/agents.json").
+	// ConfigPath is the runtime JSON configuration path (default: resolved from .agents/agents.json or $HOME/.yoke/agents.json).
 	ConfigPath string
 	// ConfigPathStrict returns an error when ConfigPath does not exist.
 	ConfigPathStrict bool

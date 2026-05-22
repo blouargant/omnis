@@ -1,7 +1,7 @@
 # Agents Settings
 
 The **Settings → Agents** panel is the central place for managing the agent
-fleet. Changes are saved to `config/agents.json` (global list, models, squads,
+fleet. Changes are saved to `agents.json` (global list, models, squads,
 globals) and to individual files under `registry/agents/<name>/` (per-agent
 definitions and instructions).
 
@@ -32,7 +32,7 @@ custom agent.
 
 **Importing a Claude Code agent** — click the **↓** button to paste or
 load a `.md` (YAML frontmatter) or `.json` agent definition. The dialog
-offers an "Enable in config/agents.json" checkbox so the imported agent
+offers an "Enable in agents.json" checkbox so the imported agent
 is wired in immediately on the next hot-reload.
 
 ### Agent detail panel
@@ -171,7 +171,7 @@ repo/path/
 
 Installing an agent downloads all files in the matched directory to
 `$YOKE_HOME/registry/agents/<name>/`. The install dialog offers
-**Enable in config/agents.json** to wire the agent in on the next
+**Enable in agents.json** to wire the agent in on the next
 hot-reload.
 
 Configure remote registries under **Settings → Skills → Remotes** — registries
@@ -202,7 +202,7 @@ agent's General Settings.
 ## Global Environment sub-tab
 
 Shared settings that apply across the entire agent fleet. Stored at the
-top level of `config/agents.json`.
+top level of `agents.json`.
 
 ### CORE DIRECTORIES
 
@@ -214,16 +214,16 @@ top level of `config/agents.json`.
 
 | Toggle | Description |
 |---|---|
-| `token_optimization` | Enable bash-output filtering to reduce token usage. Filter patterns are read from `config/filters/`. |
+| `token_optimization` | Enable bash-output filtering to reduce token usage. Filter patterns are read from `.agents/filters/`. |
 
 ### RUNTIME CONFIG
 
 | Field | Description |
 |---|---|
-| `bash_output_filters_dir` | Override the directory containing bash output filter patterns. Default: `config/filters/`. |
+| `bash_output_filters_dir` | Override the directory containing bash output filter patterns. Default: `.agents/filters/`. |
 | `bash_timeout_seconds` | Maximum time in seconds a bash command may run before it is killed. |
-| `mcp_config_path` | Override the default `config/mcp_config.json` path for all agents. |
-| `permissions_config_path` | Override the default `config/permissions.json` path for all agents. |
+| `mcp_config_path` | Override the default `mcp_config.json` path for all agents. |
+| `permissions_config_path` | Override the default `permissions.json` path for all agents. |
 
 ### EXTERNAL API KEYS
 

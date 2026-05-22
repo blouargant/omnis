@@ -24,12 +24,8 @@ func seedConfigFile(t *testing.T, filename, content string) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", filepath.Join(home, "config"))
-	cfgDir := filepath.Join(home, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", cfgDir, err)
-	}
-	p := filepath.Join(cfgDir, filename)
+	t.Setenv("YOKE_CONFIG_DIRS", home)
+	p := filepath.Join(home, filename)
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

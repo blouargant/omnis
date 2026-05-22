@@ -139,7 +139,7 @@ possible.
 ```
 
 **3.** Register the agent by adding its name to the `agents` list in
-`config/agents.json`:
+`agents.json`:
 
 ```json
 {
@@ -167,7 +167,7 @@ outside the file pipeline.
 
 A **squad** is the named group of agents `{ leader, members[] }` a chat
 session uses. Declare squads under the top-level `squads:` array in
-`config/agents.json`:
+`agents.json`:
 
 ```json
 {
@@ -213,10 +213,10 @@ sides — it can receive tasks as a server (`server/a2a_server.go`) and
 delegate tasks to remote A2A endpoints as a client (`internal/a2a/`).
 
 You **don't write Go code** to wire a peer. Add an entry to
-`config/a2a_config.json` and list the peer's name in the leader's
+`a2a_config.json` and list the peer's name in the leader's
 `a2a_agents` field.
 
-### 1. Create or edit `config/a2a_config.json`
+### 1. Create or edit `a2a_config.json`
 
 ```json
 {
@@ -310,7 +310,7 @@ each, no third-party SDK.
 ## Conventions
 
 - **Stay domain-neutral** in the harness. Domains live in `skills/`,
-  `config/mcp_config.json` and `config/permissions.json`.
+  `mcp_config.json` and `permissions.json`.
 - **One package per component.** Mirror the existing `core/` and
   `internal/` layout.
 - **Expose tools through `tool.Tool`**, never as bare Go functions

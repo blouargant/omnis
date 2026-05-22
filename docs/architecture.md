@@ -37,7 +37,7 @@ This document maps the codebase and explains how the pieces interact.
                       └─────────┘
 
         ┌──────────────┐  ┌─────────────────┐  ┌───────────────┐
-        │  skills/*    │  │ config/mcp_*    │  │ permissions   │
+        │  skills/*    │  │ mcp_config.json    │  │ permissions   │
         │ load_skill   │  │ MCP toolsets    │  │ ask / deny    │
         │ (lazy)       │  │ (filesystem,    │  │ (gating       │
         │              │  │  k8s, github…)  │  │  plugin)      │
@@ -103,7 +103,7 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
   and a `usage` map (`prompt_tokens`, `candidates_tokens`,
   `total_tokens`) for per-call telemetry.
 - **permissions** — gates bash and tool calls against
-  `config/permissions.json` (allow / deny / ask).
+  `permissions.json` (allow / deny / ask).
 - **cache** — surfaces prompt-cache stats per turn.
 - **compress** — when a session's context approaches the model window,
   extracts durable facts to a per-session
@@ -154,7 +154,7 @@ following [extending.md](extending.md).
 ### 6. Squads
 
 A **squad** is a named group `{ name, leader, members[] }` defined under
-`squads:` in `config/agents.json`. Each squad wires its own leader and
+`squads:` in `agents.json`. Each squad wires its own leader and
 its own subset of the agent catalogue as that leader's sub-agents.
 
 ```
@@ -188,7 +188,7 @@ Key properties:
   session-end curation runs at most once per session regardless of
   which squad it used.
 
-Add a squad by editing `config/agents.json` (or the Squads sub-tab in
+Add a squad by editing `agents.json` (or the Squads sub-tab in
 the web UI's Agent settings); see [extending.md](extending.md#adding-a-squad).
 
 ### 7. Specialisation surface
@@ -198,11 +198,11 @@ recompiling:
 
 | Surface     | Where                                     | How it's mounted                                  |
 |-------------|-------------------------------------------|---------------------------------------------------|
-| Agents      | `registry/agents/<name>/{agent.json,instruction.md}` | Loaded by `ResolveRuntimeSettings` for each name listed in `config/agents.json` |
+| Agents      | `registry/agents/<name>/{agent.json,instruction.md}` | Loaded by `ResolveRuntimeSettings` for each name listed in `agents.json` |
 | Skills      | `skills/<name>/SKILL.md`                  | `internal/skills` walks the dir at startup        |
-| MCP servers | `config/mcp_config.json`                  | `internal/mcp` spawns processes & adapts toolsets |
-| Permissions | `config/permissions.json`                 | `core/permissions` plugin                         |
-| A2A peers   | `config/a2a_config.json`                  | `internal/a2a.NewTools` adds one `a2a_<name>` tool per entry to the leader |
+| MCP servers | `mcp_config.json`                  | `internal/mcp` spawns processes & adapts toolsets |
+| Permissions | `permissions.json`                 | `core/permissions` plugin                         |
+| A2A peers   | `a2a_config.json`                  | `internal/a2a.NewTools` adds one `a2a_<name>` tool per entry to the leader |
 
 ## Lifecycle of a turn
 

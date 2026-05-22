@@ -1,6 +1,8 @@
 # Configuration reference
 
-All runtime configuration lives in `config/`.
+Runtime configuration is resolved through a **3-layer search chain**:
+`.agents/` (project-local) → `$HOME/.yoke/` (per-user) → `/etc/yoke/registry/` (system).
+Each layer can hold any config file; the first existing file wins (file-level override, not merge).
 
 Precedence for overlapping values is:
 
@@ -9,7 +11,7 @@ Precedence for overlapping values is:
 3. JSON config
 4. Built-in defaults
 
-## `config/agents.json`
+## `agents.json`
 
 Top-level runtime config: app settings, reusable model profiles, the
 list of enabled agent names, and squad composition. Per-agent details
@@ -22,9 +24,9 @@ live in their own files under `registry/agents/<name>/` — see
   "softskills_dir": "softskills",
   "app_name": "yoke",
   "token_optimization": false,
-  "bash_output_filters_dir": "config/filters",
-  "mcp_config_path": "config/mcp_config.json",
-  "permissions_config_path": "config/permissions.json",
+  "bash_output_filters_dir": ".agents/filters",
+  "mcp_config_path": ".agents/mcp_config.json",
+  "permissions_config_path": ".agents/permissions.json",
 
   "models": {
     "default": {
@@ -117,8 +119,8 @@ Common fields:
 `instruction.md` is the agent's system prompt. If the file is missing,
 the agent falls back to `registry/agents/default.md`.
 
-The registry directory uses the same 3-layer lookup as `config/`:
-`$HOME/.yoke/registry/agents`, `./registry/agents`, then
+The registry directory uses the same 3-layer lookup as config files:
+`.agents/registry/agents`, `$HOME/.yoke/registry/agents`, then
 `/etc/yoke/registry/agents`. First existing directory wins.
 
 The web UI Settings → Agent panel exposes both files: agent fields in
@@ -191,7 +193,7 @@ var name, the env var value is used.
 
 ### CLI and env overrides
 
-- `--config` selects a runtime JSON file (default: `config/agents.json`).
+- `--config` selects a runtime JSON file (default: resolved from the search chain — `.agents/agents.json`, then `$HOME/.yoke/agents.json`).
 - `--provider`, `--model`, `--base-url`, and `--api-key` override
   the leader agent model selection globally.
 - `--curator-enabled` (`true` or `false`) overrides the `curator`
@@ -215,7 +217,7 @@ var name, the env var value is used.
   **Harvested** and skipped by all subsequent scans until the user sends
   a new message — no repeated evaluations of long-idle sessions.
 
-## `config/permissions.json`
+## `permissions.json`
 
 The harness's safety envelope. Patterns are Go [`regexp`] strings
 matched against the **bash command string** that is about to run (and,
@@ -298,7 +300,7 @@ UI (web modal, Slack DM, etc.).
 
 ---
 
-## `config/mcp_config.json`
+## `mcp_config.json`
 
 Wires external [Model Context Protocol] servers as ADK toolsets. Each
 entry spawns a child process and exposes its tools to the agent.
@@ -366,7 +368,7 @@ apply/delete`, `helm install`, `terraform apply`, etc.
 
 ---
 
-## `config/a2a_config.json`
+## `a2a_config.json`
 
 Declares remote [A2A-protocol](https://google.github.io/A2A/) endpoints the
 leader can delegate work to. Each entry in `agents` becomes an
@@ -559,12 +561,12 @@ yoke [flags] [<launcher-command> [launcher-args]]
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
 | `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
 | `--name NAME`       | `yoke` | Application name used by the runner/UI. |
-| `--config FILE`     | `config/agents.json` | Runtime JSON config file path. |
-| `--provider NAME`   | from config/env/defaults | Global model provider override. |
-| `--model NAME`      | from config/env/defaults | Global model id override. |
-| `--base-url URL`    | from config/env/defaults | Global model base URL override. |
-| `--api-key VALUE`   | from config/env/defaults | Global model API key override. |
-| `--curator-enabled BOOL` | from config/env/defaults | Enable/disable the auto-curator hook (`true`/`false`). |
+| `--config FILE`     | resolved from `.agents/agents.json` or `$HOME/.yoke/agents.json` | Runtime JSON config file path. |
+| `--provider NAME`   | from agents.json/env/defaults | Global model provider override. |
+| `--model NAME`      | from agents.json/env/defaults | Global model id override. |
+| `--base-url URL`    | from agents.json/env/defaults | Global model base URL override. |
+| `--api-key VALUE`   | from agents.json/env/defaults | Global model API key override. |
+| `--curator-enabled BOOL` | from agents.json/env/defaults | Enable/disable the auto-curator hook (`true`/`false`). |
 | `-d`, `--debug`     | _off_ | Write full conversation/event payloads to the run's event log instead of partial event summaries. Debug logs can contain prompts, tool outputs, conversation history and secrets already present in context. |
 | `--tui`             | _off_    | Launch the built-in [tview](https://github.com/rivo/tview) chat UI (`internal/tui`) instead of the ADK launcher. The launcher subcommand, if any, is ignored. |
 

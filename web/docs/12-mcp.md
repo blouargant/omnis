@@ -7,7 +7,7 @@ function calls.
 
 ## Configuring servers
 
-Servers are defined in `config/mcp_config.json`:
+Servers are defined in `mcp_config.json`:
 
 ```json
 {

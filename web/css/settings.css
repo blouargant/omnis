@@ -2254,6 +2254,25 @@
   border: 1px solid rgba(78,201,78,0.3);
 }
 
+/* Source-layer badges: shown on skills and agents to indicate where they live
+   in the config search chain (.agents/ = local, $HOME/.yoke/ = user, /etc/yoke = system) */
+.source-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  line-height: 1.6;
+}
+.source-badge-local {
+  background: rgba(99, 179, 237, 0.15);
+  color: #63b3ed;
+  border: 1px solid rgba(99, 179, 237, 0.3);
+}
+
 /* Active-state toggle switch */
 .agent-active-toggle-wrap {
   display: flex;

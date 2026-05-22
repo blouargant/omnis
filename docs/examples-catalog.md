@@ -38,7 +38,7 @@ go run ./examples/sNN_<name> "<your prompt>"
 | #   | Binary                       | What it shows                                                                       |
 |-----|------------------------------|-------------------------------------------------------------------------------------|
 | s08 | `examples/s08_ask_user`      | The interactive `ask_user` tool wired to stdin.                                     |
-| s09 | `examples/s09_output_filters`| Bash output filters (`config/filters/*.json`) condensing noisy commands.            |
+| s09 | `examples/s09_output_filters`| Bash output filters (`.agents/filters/*.json`) condensing noisy commands.            |
 | s10 | `examples/s10_mcp`           | MCP toolsets loaded from JSON.                                                      |
 
 ## Tier 3 — Session state
@@ -58,7 +58,7 @@ go run ./examples/sNN_<name> "<your prompt>"
 | #   | Binary                       | What it shows                                                                       |
 |-----|------------------------------|-------------------------------------------------------------------------------------|
 | s18 | `examples/s18_events`        | Event bus + file logger plugin.                                                     |
-| s19 | `examples/s19_permissions`   | JSON-driven permission gating (`config/permissions.json`).                          |
+| s19 | `examples/s19_permissions`   | JSON-driven permission gating (`.agents/permissions.json`).                          |
 | s20 | `examples/s20_compress`      | Context-compression plugin with a tiny threshold for visibility.                    |
 
 ## Tier 5 — Specialisation & multi-agent
@@ -90,7 +90,7 @@ go run ./examples/sNN_<name> "<your prompt>"
 
 | Binary       | What it does                                                                    |
 |--------------|---------------------------------------------------------------------------------|
-| `./` (root `main.go`) | Wires every component together. Run with `go run . console` (ADK REPL), `go run . web webui` (ADK web UI), or `go run . --tui` (built-in tview chat). Specialise it via `skills/` + `config/`. |
+| `./` (root `main.go`) | Wires every component together. Run with `go run . console` (ADK REPL), `go run . web webui` (ADK web UI), or `go run . --tui` (built-in tview chat). Specialise it via `.agents/`. |
 
 ### Root-binary flags
 

@@ -72,7 +72,7 @@ func locateFiltersDir() string {
 		}
 		dir = filepath.Dir(dir)
 	}
-	return "config/filters"
+	return ".agents/filters"
 }
 
 func must(err error) {

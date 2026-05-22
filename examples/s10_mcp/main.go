@@ -15,7 +15,7 @@ func main() {
 	ctx := context.Background()
 	llm, err := agentkit.NewModel(ctx)
 	must(err)
-	cfg, err := mcpcfg.Load("config/mcp_config.yaml")
+	cfg, err := mcpcfg.Load(".agents/mcp_config.json")
 	must(err)
 	tsets, err := cfg.Toolsets()
 	must(err)

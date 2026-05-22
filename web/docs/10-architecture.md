@@ -20,7 +20,7 @@ agent.NewAgent()                ← single wiring entry point
 ```
 
 A **squad** is a named group `{ leader, members[] }` declared in
-`config/agents.json`. Each squad becomes its own wired tree inside the
+`agents.json`. Each squad becomes its own wired tree inside the
 current generation; a chat session selects which squad to use when it
 is created (the `default` squad when nothing is picked) and the server
 resolves `Instance.Squad(name).Runner` per session. Two sessions on
@@ -87,7 +87,7 @@ modifying the agent itself. Three plugins ship by default:
 2. Optionally add `registry/agents/<name>/instruction.md` for the
    agent's system prompt. If missing, it falls back to
    `registry/agents/default.md`.
-3. Add the agent's name to the `agents:` list in `config/agents.json`.
+3. Add the agent's name to the `agents:` list in `agents.json`.
 4. Add the agent's name to the `members:` list of every squad that
    should expose it (omit to keep it reserved for a single squad).
 5. `agent.NewAgent()` auto-discovers it via `runtime.Agents`. No Go
@@ -96,7 +96,7 @@ modifying the agent itself. Three plugins ship by default:
 ## Connecting A2A peers
 
 Remote [A2A-protocol](https://google.github.io/A2A/) agents are wired via
-`config/a2a_config.json`. Each entry becomes an `a2a_<name>` tool on the
+`a2a_config.json`. Each entry becomes an `a2a_<name>` tool on the
 leader. The leader can:
 
 - Delegate a task to any configured peer with a natural-language `prompt`.
@@ -114,7 +114,7 @@ the full field reference.
 ## Adding a squad
 
 Squads compose existing agents — they don't redefine them. Edit
-`config/agents.json` (or use the **Squads** sub-tab under Settings →
+`agents.json` (or use the **Squads** sub-tab under Settings →
 Agent) to declare a new squad:
 
 ```json

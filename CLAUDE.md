@@ -69,7 +69,7 @@ main.go / server/
 ```
 
 A **squad** is a named group `{ leader, members[] }` composed from the
-agents defined in `config/agents.json`. Each chat session selects one
+agents defined in `agents.json`. Each chat session selects one
 squad at creation (default when none is chosen); the server resolves
 `Instance.Squad(name).Runner` per session, so two sessions running on the
 same generation can use different squads. Squads only *reference* agents
@@ -102,7 +102,7 @@ per-generation hook listening across every squad.
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`) |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
-| `internal/mcp/` | MCP config loader from `config/mcp_config.json` |
+| `internal/mcp/` | MCP config loader (path resolved from search chain) |
 | `internal/a2a/` | A2A protocol client (`client.go`) + ADK tool wiring (`tools.go`); config types in `a2a.go` |
 | `internal/tui/` | tview chat UI (trace pane + streaming chat) |
 | `server/` | HTTP API server with Bearer token auth |
@@ -110,21 +110,24 @@ per-generation hook listening across every squad.
 
 ### Configuration files
 
+Config files are resolved through a **3-layer search chain** (high → low precedence):
+`.agents/` (project-local) → `$HOME/.yoke/` (per-user) → `/etc/yoke/registry/` (system).
+
 | File | Purpose |
 |---|---|
-| `config/agents.json` | List of enabled agent names, model profiles, squad composition, global paths |
+| `agents.json` | List of enabled agent names, model profiles, squad composition, global paths |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
 | `registry/skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
-| `config/mcp_config.json` | MCP server definitions (name, command, args, env) |
-| `config/a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
-| `config/permissions.json` | Tool permission rules (always_deny / always_allow / ask_user) |
-| `config/filters/` | Bash output filter patterns (token optimization, JSON files) |
+| `mcp_config.json` | MCP server definitions (name, command, args, env) |
+| `a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
+| `permissions.json` | Tool permission rules (always_deny / always_allow / ask_user) |
+| `filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
 
 Agent definitions live in `registry/agents/<name>/` directories — mirroring
-the skills layout. `config/agents.json` no longer contains inline agent
+the skills layout. `agents.json` no longer contains inline agent
 objects; its `agents` field is a list of names that reference the registry:
 
 ```json
@@ -142,7 +145,7 @@ by the user omit the flag. The web UI groups them under separate
 **Built-in** and **Custom** sections in the agents list.
 
 The registry directory uses the same 3-layer lookup as config files:
-`$HOME/.yoke/registry/agents`, `./registry/agents`, then
+`.agents/registry/agents`, `$HOME/.yoke/registry/agents`, then
 `/etc/yoke/registry/agents` — first existing directory wins.
 
 ### Filesystem layout
@@ -153,9 +156,9 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   Whichever layer has a given file wins for that whole file (file-level
   override, not deep merge):
 
-  1. `$HOME/.yoke/config/` — per-user overrides written by the web UI
-  2. `./config/` — developer/local checkout (CWD-relative)
-  3. `/etc/yoke/` — system-wide install
+  1. `.agents/` — project-local directory (CWD-relative, highest priority)
+  2. `$HOME/.yoke/` — per-user state root
+  3. `/etc/yoke/registry/` — system-wide install (lowest priority)
 
   Override the chain via `YOKE_CONFIG_DIRS` (colon-separated; replaces
   the chain wholesale).
@@ -166,28 +169,30 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 
   ```
   $HOME/.yoke/
-  ├── config/           # editor writes (preferences.json, user overrides)
+  ├── agents.json       # editor writes — user config overrides
+  ├── permissions.json  # editor writes — user permission overrides
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
   ├── mailboxes/        # JSONL inter-agent mailboxes
   ├── softskills/       # curator-distilled procedures (read AND write)
-  ├── registry/skills/  # web UI installed skills (override via YOKE_SKILLS_REGISTRY_DIR)
-  └── registry/agents/  # web UI installed agents (override via YOKE_AGENTS_REGISTRY_DIR)
+  └── registry/
+      ├── skills/       # web UI installed skills (override via YOKE_SKILLS_REGISTRY_DIR)
+      └── agents/       # web UI installed agents (override via YOKE_AGENTS_REGISTRY_DIR)
   ```
 
   The web UI editor reads from the search chain but **always writes to
-  `$HOME/.yoke/config/`** — a first edit on a lower-precedence file forks
-  a per-user override that subsequent reads pick up.
+  `$HOME/.yoke/`** — a first edit on a lower-precedence file forks a
+  per-user override that subsequent reads pick up.
 
   The skill registry (`registry/skills/`) follows the same 3-layer lookup
   as agent definitions — first existing directory in
-  `$HOME/.yoke/registry/skills`, `./registry/skills`,
+  `.agents/registry/skills`, `$HOME/.yoke/registry/skills`,
   `/etc/yoke/registry/skills` wins.
 
 ### Configuration precedence
 
-`defaults → config/agents.json → ENV → Options (struct/flags)`
+`defaults → agents.json → ENV → Options (struct/flags)`
 
 `api_key` and `base_url` values in the config file are resolved as environment variable names first (if an env var with that name exists and is non-empty, its value is used).
 
@@ -207,8 +212,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
 | `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
-| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `$YOKE_HOME/config:./config:/etc/yoke` |
-| `YOKE_CONFIG_PATH` | Explicit `agent.json` path; bypasses the chain |
+| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke/registry` |
+| `YOKE_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
 | `YOKE_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$YOKE_HOME/registry/skills`) |
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
@@ -227,8 +232,8 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 ### Hot reload (server mode)
 
 The HTTP server supports rebuilding the agent generation without
-restarting the process. Edits to `config/agents.json`,
-`config/permissions.json`, and `config/mcp_config.json` are picked up by
+restarting the process. Edits to `agents.json`, `permissions.json`, and
+`mcp_config.json` (from any layer of the search chain) are picked up by
 `POST /api/config/reload` (or the "Reload" button in the web UI).
 
 The model is a two-layer build split across [agent/infrastructure.go](agent/infrastructure.go),
@@ -263,13 +268,14 @@ hatch for changes that hot-reload cannot apply (env vars, binary updates).
 
 ### Adding a new sub-agent
 
-1. Create `registry/agents/<name>/agent.json` with the `AgentEntry` fields
+1. Create `.agents/registry/agents/<name>/agent.json` with the `AgentEntry` fields
    (`name`, `description`, `tools`, optional `model_ref`, etc.). Omit the
-   `builtin` flag for user-added agents.
+   `builtin` flag for user-added agents. (Use `$HOME/.yoke/registry/agents/<name>/`
+   for user-global agents that don't belong to a specific project.)
 2. Optionally create `registry/agents/<name>/instruction.md` to provide a
    custom system instruction. If omitted, the agent falls back to
    `registry/agents/default.md`.
-3. Add the agent's name to the `agents` list in `config/agents.json`.
+3. Add the agent's name to the `agents` list in `agents.json` (from the active search-chain layer).
 4. Add the new agent's name to the `members` list of every squad that
    should expose it (omit the entry to keep an agent reserved for one
    squad). If a squad omits the agent, the squad's leader won't see it
@@ -281,7 +287,7 @@ hatch for changes that hot-reload cannot apply (env vars, binary updates).
 ### Adding a new squad
 
 Squads compose existing agents. Add a `SquadEntry` to the top-level
-`squads:` array in `config/agents.json`:
+`squads:` array in `agents.json`:
 
 ```json
 {
@@ -339,7 +345,7 @@ The skill files themselves are read on demand at `load_skill` call time.
 
 ### Connecting remote A2A agents (client side)
 
-A2A peers are wired via `config/a2a_config.json` — no Go code required.
+A2A peers are wired via `a2a_config.json` (resolved from the config search chain) — no Go code required.
 
 1. Add an entry for each remote endpoint:
    ```json
@@ -405,8 +411,8 @@ a2a_port: 8091
 ### Remote registries (skills and agents)
 
 The web UI can browse and install both skills and agents from any GitHub,
-GitLab, or Gitea repository. Both share the same `config/remote_registries.json`
-file (with the same fork-on-first-edit semantics as other config), and
+GitLab, or Gitea repository. Both share the same `remote_registries.json`
+file (resolved from the config search chain; with the same fork-on-first-edit semantics as other config), and
 the same set of provider adapters in [internal/registries/](internal/registries/).
 
 Each entry has a `kind` field: `skills` (default when missing — legacy),
@@ -444,7 +450,7 @@ downloads every file in the matched directory into
 add its name to the target agent's `"skills"` list in `agent.json` —
 either via the web UI Skills tab or by editing the file directly.
 
-The agent install dialog also exposes an "Enable in config/agents.json"
+The agent install dialog also exposes an "Enable in agents.json"
 checkbox — when checked the installed agent's name is appended to the
 runtime config's `agents` list so the next hot-reload wires it in.
 

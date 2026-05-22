@@ -25,8 +25,8 @@ Skills are stored in `registry/skills/` directories and follow the same
 three-layer lookup as config files. The first directory in this list that
 contains the skill wins:
 
-1. `$YOKE_HOME/registry/skills/` — per-user; written by the Web UI.
-2. `./registry/skills/` — checked into the repository, developer-local.
+1. `.agents/registry/skills/` — project-local (highest priority).
+2. `$YOKE_HOME/registry/skills/` — per-user; written by the Web UI.
 3. `/etc/yoke/registry/skills/` — system-wide install.
 
 The Web UI **Skills** section writes new and edited skills to

@@ -67,14 +67,16 @@ archives:
     files:
       - LICENSE
       - README.md
-      - src: config/*.json
-        dst: config
-      - src: config/filters/*.json
-        dst: config/filters
-      - src: registry/skills
-        dst: registry/skills
-      - src: registry/agents
-        dst: registry/agents
+      - src: .agents/*.json
+        dst: .agents
+      - src: .agents/server.yaml
+        dst: .agents
+      - src: .agents/filters/*.json
+        dst: .agents/filters
+      - src: .agents/registry/skills
+        dst: .agents/registry/skills
+      - src: .agents/registry/agents
+        dst: .agents/registry/agents
       - src: web
         dst: web
 
@@ -109,43 +111,45 @@ nfpms:
 
     contents:
       # Editable configuration (preserved on upgrade).
-      - src: config/agents.json
-        dst: /etc/yoke/agents.json
+      # All config files install under /etc/yoke/registry/ — the system layer
+      # of the 3-tier search chain (.agents > $HOME/.yoke > /etc/yoke/registry).
+      - src: packaging/etc-yoke/agents.json
+        dst: /etc/yoke/registry/agents.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/mcp_config.json
-        dst: /etc/yoke/mcp_config.json
+      - src: packaging/etc-yoke/mcp_config.json
+        dst: /etc/yoke/registry/mcp_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/permissions.json
-        dst: /etc/yoke/permissions.json
+      - src: packaging/etc-yoke/permissions.json
+        dst: /etc/yoke/registry/permissions.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/preferences.json
-        dst: /etc/yoke/preferences.json
+      - src: packaging/etc-yoke/preferences.json
+        dst: /etc/yoke/registry/preferences.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/remote_registries.json
-        dst: /etc/yoke/remote_registries.json
+      - src: packaging/etc-yoke/remote_registries.json
+        dst: /etc/yoke/registry/remote_registries.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: packaging/etc-yoke/server.yaml
-        dst: /etc/yoke/server.yaml
+        dst: /etc/yoke/registry/server.yaml
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/a2a_config.json
-        dst: /etc/yoke/a2a_config.json
+      - src: packaging/etc-yoke/a2a_config.json
+        dst: /etc/yoke/registry/a2a_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: config/filters/*.json
-        dst: /etc/yoke/filters/
+      - src: packaging/etc-yoke/filters/*.json
+        dst: /etc/yoke/registry/filters/
         type: "config|noreplace"
         file_info:
           mode: 0644
@@ -158,11 +162,11 @@ nfpms:
 
       # Bundled agent definitions, skill playbooks and Web UI assets (read-only).
       # `type: tree` preserves the directory structure under src.
-      - src: registry/agents
+      - src: .agents/registry/agents
         dst: /etc/yoke/registry/agents
         type: tree
-      - src: registry/skills
-        dst: /usr/share/yoke/registry/skills
+      - src: .agents/registry/skills
+        dst: /etc/yoke/registry/skills
         type: tree
       - src: web
         dst: /usr/share/yoke/web

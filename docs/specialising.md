@@ -5,8 +5,8 @@ its domain.** Specialisation is always one of three things, in
 combination:
 
 1. A new **skill** under `skills/<name>/SKILL.md`.
-2. A new **MCP server** in `config/mcp_config.json`.
-3. New **permission rules** in `config/permissions.json`.
+2. A new **MCP server** in `mcp_config.json`.
+3. New **permission rules** in `permissions.json`.
 
 That is the entire contract.
 
@@ -50,7 +50,7 @@ description: Short, action-oriented sentence. Use whenever the user mentions <tr
 
 Two options, freely combinable:
 
-**Option A — MCP server.** Edit `config/mcp_config.json`:
+**Option A — MCP server.** Edit `mcp_config.json`:
 
 ```json
 {
@@ -66,7 +66,7 @@ Two options, freely combinable:
 ```
 
 **Option B — Bash + permissions.** Just rely on the built-in `bash`
-tool plus an entry in `config/permissions.json`:
+tool plus an entry in `permissions.json`:
 
 ```json
 {
@@ -107,7 +107,7 @@ diagnostician with no Go change.
 ## Worked example: PostgreSQL DBA
 
 ```json
-// config/mcp_config.json
+// mcp_config.json
 {
   "servers": [
     {
@@ -176,7 +176,7 @@ belongs in `skills/`.
 When a single agent.json needs to support several different *kinds* of
 session (e.g. an interactive triage helper and a focused web-research
 flow), don't fork the binary. Declare each as a **squad** in
-`config/agents.json`: a named group with its own leader and member
+`agents.json`: a named group with its own leader and member
 sub-agents picked from the shared `agents:` catalogue. A picker next to
 **New Chat** in the web UI selects which squad each new session uses;
 the recorded squad survives reloads and server restarts. See

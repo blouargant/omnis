@@ -5,19 +5,19 @@ single root).
 
 ## Config files
 
-| File                                  | Purpose |
+| File                                          | Purpose |
 |---|---|
-| `config/agents.json`                  | Global settings, model profiles, **squad composition**, list of enabled agent names. |
-| `registry/agents/<name>/agent.json`   | Per-agent definition (model_ref, tools, builtin flag, etc.). |
-| `registry/agents/<name>/instruction.md` | Per-agent system instruction (falls back to `registry/agents/default.md`). |
-| `config/permissions.json`             | Permission rules. |
-| `config/mcp_config.json`              | MCP server definitions. |
-| `config/a2a_config.json`              | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
-| `config/filters/`                     | Bash output filter patterns (token optimization). |
-| `skills/<name>/SKILL.md`              | Authored skill playbooks. |
-| `softskills/`                         | Curator-distilled procedures. |
+| `agents.json`                                 | Global settings, model profiles, **squad composition**, list of enabled agent names. |
+| `registry/agents/<name>/agent.json`           | Per-agent definition (model_ref, tools, builtin flag, etc.). |
+| `registry/agents/<name>/instruction.md`       | Per-agent system instruction (falls back to `registry/agents/default.md`). |
+| `permissions.json`                            | Permission rules. |
+| `mcp_config.json`                             | MCP server definitions. |
+| `a2a_config.json`                             | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
+| `filters/`                                    | Bash output filter patterns (token optimization). |
+| `registry/skills/<name>/SKILL.md`             | Authored skill playbooks. |
+| `softskills/`                                 | Curator-distilled procedures. |
 
-`config/agents.json` carries three top-level lists:
+`agents.json` carries three top-level lists:
 
 - `models` — reusable model profiles referenced by each agent's
   `model_ref`.
@@ -37,32 +37,36 @@ yoke (`leader`, `skill_editor`, `registries_crawler`, `summariser`,
 `curator`); the Web UI displays them under a **Built-in Agents**
 section, separate from user-added **Custom Agents**.
 
-The registry directory follows the same three-layer lookup as `config/`:
-`$HOME/.yoke/registry/agents`, `./registry/agents`, then
+The registry directory follows the same three-layer lookup described below:
+`.agents/registry/agents`, `$HOME/.yoke/registry/agents`, then
 `/etc/yoke/registry/agents`.
 
 ## Read root (config search chain)
 
-The config directory is resolved through a three-layer chain, high → low
+Config files are resolved through a **three-layer chain**, high → low
 precedence. **Whichever layer has a given file wins for that whole file** —
 this is a file-level override, not a deep merge.
 
-1. `$HOME/.yoke/config/` — per-user overrides written by the Web UI.
-2. `./config/` — developer/local checkout (CWD-relative).
-3. `/etc/yoke/` — system-wide install.
+1. `.agents/` — project-local directory (CWD-relative, highest priority).
+2. `$HOME/.yoke/` — per-user state root.
+3. `/etc/yoke/registry/` — system-wide install (lowest priority).
 
 Override the chain wholesale with `YOKE_CONFIG_DIRS` (colon-separated). Use
-`YOKE_CONFIG_PATH` to bypass the chain entirely for `agent.json`.
+`YOKE_CONFIG_PATH` to bypass the chain entirely for `agents.json`.
 
-Skills follow the same three-layer lookup against `skills/` directories.
+Skills follow the same three-layer lookup against `registry/skills/` subdirectories.
 
 ## Write root (state)
 
-Everything mutable lands under `$HOME/.yoke/` (override with `YOKE_HOME`):
+Everything mutable lands under `$HOME/.yoke/` (override with `YOKE_HOME`).
+Config files written by the Web UI editor also land here — a first edit on a
+lower-precedence file forks a per-user override that subsequent reads pick up:
 
 ```
 $HOME/.yoke/
-├── config/              # editor writes (preferences.json, user overrides)
+├── agents.json          # editor writes — user overrides of agents/models/squads
+├── permissions.json     # editor writes — user permission overrides
+├── mcp_config.json      # editor writes — user MCP server overrides
 ├── logs/                # agent_tasks_*, agent_todo_*, agent_memory_*,
 │   │                    #   agent_statelog_*, agent_events_*,
 │   │                    #   conversation_*.json (turns + title + squad + harvested)
@@ -74,15 +78,10 @@ $HOME/.yoke/
     └── agents/          # web UI installed agents (override: YOKE_AGENTS_REGISTRY_DIR)
 ```
 
-The Web UI editor reads from the search chain but **always writes to
-`$HOME/.yoke/config/`** — a first edit on a lower-precedence file forks a
-per-user override that subsequent reads pick up. Editing the same file in
-`./config/` directly is still valid for developers working from a checkout.
-
 ## Precedence
 
 ```
-defaults → config/agents.json → ENV → Options (struct/flags)
+defaults → agents.json → ENV → Options (struct/flags)
 ```
 
 `api_key` and `base_url` values in the config file are resolved as

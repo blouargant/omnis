@@ -1874,10 +1874,13 @@
         const item = document.createElement("div");
         const originalIdx = d.agents.indexOf(a);
         item.className = "agent-fleet-item" + (originalIdx === state.activeAgentIdx ? " active" : "");
+        const agentSourceBadge = a.source === "local"
+          ? `<span class="source-badge source-badge-local">local</span>`
+          : "";
         item.innerHTML = `
           <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
           <div class="agent-fleet-info">
-            <span class="agent-fleet-name">${escHtml(a.name || "(unnamed)")}</span>
+            <span class="agent-fleet-name">${escHtml(a.name || "(unnamed)")} ${agentSourceBadge}</span>
             <span class="agent-fleet-model">${escHtml(a.model_ref || "")}</span>
           </div>
         `;
@@ -1910,9 +1913,13 @@
     const titleBar = document.createElement("div");
     titleBar.className = "agent-detail-titlebar";
     const isEnabled = isLeader ? true : a.enabled !== false;
+    const detailSourceBadge = a.source === "local"
+      ? `<span class="source-badge source-badge-local">local</span>`
+      : "";
     titleBar.innerHTML = `
       <div class="agent-detail-title-left">
         <h2 class="agent-detail-name">${escHtml(a.name || "(unnamed)")}</h2>
+        ${detailSourceBadge}
         <span class="agent-live-badge">LIVE</span>
       </div>
       <div class="agent-detail-title-right">
@@ -4055,10 +4062,14 @@
       const linkedStr = sk.linked_in && sk.linked_in.length
         ? `<span class="skill-mkt-linked">Used by: ${escHtml(sk.linked_in.join(", "))}</span>`
         : `<span class="skill-mkt-unlinked">Not linked</span>`;
+      const sourceHtml = sk.source === "local"
+        ? `<span class="source-badge source-badge-local">local</span>`
+        : "";
 
       card.innerHTML = `
         <div class="skill-mkt-header">
           <span class="skill-mkt-filename">${ICONS.skills}${escHtml(sk.name)}</span>
+          ${sourceHtml}
         </div>
         <div class="skill-mkt-body">
           ${authorHtml}

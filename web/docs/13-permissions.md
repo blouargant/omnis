@@ -2,7 +2,7 @@
 
 Every tool call the agent makes — file edit, shell command, MCP invocation —
 is filtered through the permissions engine. The engine reads
-`config/permissions.json` and applies rules in three tiers, **stopping at the
+`permissions.json` and applies rules in three tiers, **stopping at the
 first match**:
 
 1. **always_deny** — the call is rejected, the agent receives an error, no

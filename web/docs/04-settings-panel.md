@@ -11,10 +11,10 @@ file on disk or to a client-only view:
 | Section        | Backing file                  | Purpose |
 |---|---|---|
 | **Skills**     | `registry/skills/`             | Manage authored playbooks the agent can load on demand. |
-| **Agents**     | `config/agents.json` + `registry/agents/` | Roles, model profiles, tool wiring, global env. Per-agent details live in `registry/agents/<name>/`. |
-| **Permissions**| `config/permissions.json`     | What the agent may run without asking. |
-| **MCP**        | `config/mcp_config.json`      | External tool servers (Model Context Protocol). |
-| **A2A**        | `config/a2a_config.json`      | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader. |
+| **Agents**     | `agents.json` + `registry/agents/` | Roles, model profiles, tool wiring, global env. Per-agent details live in `registry/agents/<name>/`. |
+| **Permissions**| `permissions.json`     | What the agent may run without asking. |
+| **MCP**        | `mcp_config.json`      | External tool servers (Model Context Protocol). |
+| **A2A**        | `a2a_config.json`      | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader. |
 | **Commands**   | (client only)                 | Custom slash command templates that expand to a prompt. |
 | **Appearance** | (client only)                 | Theme picker. |
 | **Documentation** | (client only)              | This page. |
@@ -148,5 +148,5 @@ the server-side config chain). It shows:
   template body. Template placeholders: `$1`, `$2`, … for positional
   arguments; `$*` for all arguments joined together.
 
-User commands are persisted to `$YOKE_HOME/config/user_commands.json` and
+User commands are persisted to `$YOKE_HOME/user_commands.json` and
 take effect immediately — no reload required.
