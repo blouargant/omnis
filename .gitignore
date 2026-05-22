@@ -40,4 +40,5 @@ logs/
 .tokensave
 test.txt
 tmp/
-config/server.yaml
+packaging/etc-yoke/filters
+packaging/etc-yoke/*.json
