@@ -9,14 +9,16 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
 /usr/bin/yoke                  CLI / REPL / TUI binary
 /usr/bin/yoke-server           HTTP API + Web UI binary
 /etc/yoke/                     editable configuration (config(noreplace))
-    agent.yaml
-    mcp_config.yaml
-    permissions.yaml
-    preferences.json
-    remote_registries.json
+    agents.json                agent list + model profiles + squad layout
+    mcp_config.json            MCP server definitions
+    permissions.json           tool permission rules
+    preferences.json           UI preferences
+    remote_registries.json     remote skill/agent registry endpoints
     a2a_config.json            remote A2A agent endpoints (empty by default)
+    server.yaml                server listen address, token, A2A settings
     filters/                   bash output filter patterns
-/usr/share/yoke/skills/        bundled skill playbooks (read-only)
+    registry/agents/           built-in agent definitions (read-only)
+/usr/share/yoke/registry/skills/  bundled skill playbooks (read-only)
 /usr/share/yoke/web/           static UI assets served by yoke-server
 /var/lib/yoke/softskills/      curator-managed soft-skill library (mutable)
 /etc/profile.d/yoke.sh         exports YOKE_CONFIG_PATH and YOKE_WEB_DIR
@@ -32,7 +34,7 @@ Windows variant, flip the `goos` lists in `.goreleaser.yaml` back on and a
 ## What lives where in this directory
 
 - `etc-yoke/` — the contents of `/etc/yoke/` on a packaged install. The
-  `agent.yaml` here is a copy of the one in `config/` with every path
+  `agents.json` here mirrors `config/agents.json` with every relative path
   rewritten to its FHS location.
 - `profile.d/yoke.sh` — sourced by login shells; tells both binaries where
   to find the system-wide config and web assets.

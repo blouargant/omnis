@@ -67,8 +67,8 @@ archives:
     files:
       - LICENSE
       - README.md
-      - src: packaging/etc-yoke/agent.json
-        dst: config/agent.json
+      - src: packaging/etc-yoke/agents.json
+        dst: config/agents.json
       - src: packaging/etc-yoke/mcp_config.json
         dst: config/mcp_config.json
       - src: packaging/etc-yoke/permissions.json
@@ -85,6 +85,8 @@ archives:
         dst: config/filters
       - src: registry/skills
         dst: registry/skills
+      - src: registry/agents
+        dst: registry/agents
       - src: web
         dst: web
 
@@ -119,8 +121,8 @@ nfpms:
 
     contents:
       # Editable configuration (preserved on upgrade).
-      - src: packaging/etc-yoke/agent.json
-        dst: /etc/yoke/agent.json
+      - src: packaging/etc-yoke/agents.json
+        dst: /etc/yoke/agents.json
         type: "config|noreplace"
         file_info:
           mode: 0644
@@ -166,9 +168,11 @@ nfpms:
         file_info:
           mode: 0644
 
-      # Bundled skill playbooks and Web UI assets (read-only).
+      # Bundled agent definitions, skill playbooks and Web UI assets (read-only).
       # `type: tree` preserves the directory structure under src.
-      # Bundled skill playbooks (read-only).
+      - src: registry/agents
+        dst: /etc/yoke/registry/agents
+        type: tree
       - src: registry/skills
         dst: /usr/share/yoke/registry/skills
         type: tree

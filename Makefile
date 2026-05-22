@@ -112,7 +112,8 @@ GORELEASER ?= goreleaser
 
 .PHONY: package
 package: clean ## Build .deb + .rpm + .zip (Windows) + tar.gz archives via goreleaser into dist/
-	cp -f config/permissions.json packaging/etc-yoke/permissions.json
+	cp -f config/*.json packaging/etc-yoke/
+	cp -a config/filters packaging/etc-yoke/ 2>/dev/null || true
 	@command -v $(GORELEASER) >/dev/null 2>&1 || { \
 		echo "goreleaser not found. Install: https://goreleaser.com/install/"; \
 		echo "  (e.g. go install github.com/goreleaser/goreleaser/v2@latest)"; \
