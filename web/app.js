@@ -589,12 +589,17 @@ function isRemoteOrInlineSrc(src) {
 
 async function fetchMediaBlobURL(sessionId, path) {
   const key = sessionId + "|" + path;
-  if (mediaBlobCache.has(key)) return mediaBlobCache.get(key);
+  if (mediaBlobCache.has(key)) {
+    const cached = mediaBlobCache.get(key);
+    if (cached === null) throw new Error("not available");
+    return cached;
+  }
   const url = `/api/sessions/${encodeURIComponent(sessionId)}/media?path=${encodeURIComponent(path)}`;
   const res = await apiFetch(url);
   if (!res.ok) {
     let detail = `${res.status}`;
     try { const j = await res.json(); if (j && j.error) detail = j.error; } catch (_) {}
+    mediaBlobCache.set(key, null); // cache failures to avoid repeated requests
     throw new Error(detail);
   }
   const blob = await res.blob();
