@@ -33,6 +33,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -57,6 +58,10 @@ func main() {
 }
 
 func run() error {
+	var noBrowser bool
+	flag.BoolVar(&noBrowser, "no-browser", false, "disable automatic browser launch at startup")
+	flag.Parse()
+
 	serverCfg := loadServerConfig()
 
 	token := strings.TrimSpace(os.Getenv("YOKE_SERVER_TOKEN"))
@@ -234,7 +239,7 @@ func run() error {
 		close(errCh)
 	}()
 
-	if serverCfg.OpenBrowser {
+	if serverCfg.OpenBrowser && !noBrowser {
 		host, port, err := net.SplitHostPort(addr)
 		if err == nil {
 			if host == "" {
