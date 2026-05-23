@@ -1,4 +1,4 @@
-package main
+package sessions
 
 import (
 	"bytes"
@@ -9,8 +9,8 @@ import (
 )
 
 // TestConversationSquadRoundTrip exercises the on-disk persistence of the
-// per-session squad: writing it via setConversationSquad and reading it
-// back through loadPersistedSessions (the path that rebuilds the session
+// per-session squad: writing it via SetConversationSquad and reading it
+// back through LoadPersistedSessions (the path that rebuilds the session
 // list after a server restart).
 func TestConversationSquadRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
@@ -23,16 +23,16 @@ func TestConversationSquadRoundTrip(t *testing.T) {
 	const sid = "sess-test"
 
 	// Step 1: record the squad and a couple of turns.
-	if err := setConversationSquad(sid, "research"); err != nil {
-		t.Fatalf("setConversationSquad: %v", err)
+	if err := SetConversationSquad(sid, "research"); err != nil {
+		t.Fatalf("SetConversationSquad: %v", err)
 	}
-	if err := appendConversationTurn(sid, "hi", "hello"); err != nil {
-		t.Fatalf("appendConversationTurn: %v", err)
+	if err := AppendConversationTurn(sid, "hi", "hello"); err != nil {
+		t.Fatalf("AppendConversationTurn: %v", err)
 	}
 
-	// Step 2: read it back through loadPersistedSessions (which is what
+	// Step 2: read it back through LoadPersistedSessions (which is what
 	// the server uses on startup to rebuild the in-memory registry).
-	got := loadPersistedSessions()
+	got := LoadPersistedSessions()
 	var meta *SessionMeta
 	for _, m := range got {
 		if m.ID == sid {
@@ -41,7 +41,7 @@ func TestConversationSquadRoundTrip(t *testing.T) {
 		}
 	}
 	if meta == nil {
-		t.Fatalf("session %q missing from loadPersistedSessions(): %+v", sid, got)
+		t.Fatalf("session %q missing from LoadPersistedSessions(): %+v", sid, got)
 	}
 	if meta.Squad != "research" {
 		t.Fatalf("Squad = %q, want %q", meta.Squad, "research")
@@ -54,7 +54,7 @@ func TestConversationSquadRoundTrip(t *testing.T) {
 	if err := os.WriteFile(legacy, []byte(body), 0o644); err != nil {
 		t.Fatalf("write legacy: %v", err)
 	}
-	got = loadPersistedSessions()
+	got = LoadPersistedSessions()
 	var legacyMeta *SessionMeta
 	for _, m := range got {
 		if m.ID == "legacy" {

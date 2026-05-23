@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // minCheckInterval caps how frequently the idle scanner runs, regardless of
@@ -32,7 +33,7 @@ const minCheckInterval = 30 * time.Second
 
 // IdleCuratorConfig configures the idle session scanner.
 type IdleCuratorConfig struct {
-	Registry      *registry
+	Registry      *sessions.Registry
 	Bus           *events.Bus
 	IdleTimeout   time.Duration // 0 = disabled
 	CheckInterval time.Duration // 0 = auto (IdleTimeout/3, capped at 5min)

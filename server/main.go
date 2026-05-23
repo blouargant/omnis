@@ -46,6 +46,7 @@ import (
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 func main() {
@@ -130,7 +131,7 @@ func run() error {
 	manager := agent.NewManager(infra, firstInst)
 	defer manager.Close()
 
-	registry := newRegistry()
+	registry := sessions.NewRegistry()
 
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous

@@ -10,6 +10,8 @@ import (
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
+
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // sessionRunGuard ensures at most one runner.Run call is in flight per session.
@@ -191,7 +193,7 @@ func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, user
 
 	reply := strings.TrimSpace(buf.String())
 	if reply != "" {
-		if err := appendConversationTurn(sessionID, prompt, reply); err != nil {
+		if err := sessions.AppendConversationTurn(sessionID, prompt, reply); err != nil {
 			log.Printf("mailbox push: persist failed for %s: %v", sessionID, err)
 		}
 		d.Registry.Touch(sessionID)

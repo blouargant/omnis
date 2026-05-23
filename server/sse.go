@@ -16,6 +16,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // messageRequest is the JSON body expected by POST /api/sessions/:id/messages.
@@ -112,7 +113,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		d.Registry.Touch(meta.ID)
 		assistantText := streamEvents(ctx, c.Writer, seq, subCh)
 		if ctx.Err() == nil && strings.TrimSpace(assistantText) != "" {
-			if err := appendConversationTurn(meta.ID, req.Prompt, assistantText); err != nil {
+			if err := sessions.AppendConversationTurn(meta.ID, req.Prompt, assistantText); err != nil {
 				log.Printf("server: failed to persist turn: %v", err)
 			}
 		}

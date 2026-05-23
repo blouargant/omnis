@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 const defaultRebindIdleTimeout = 5 * time.Second
@@ -28,7 +29,7 @@ const defaultRebindIdleTimeout = 5 * time.Second
 // IdleRebindConfig wires the scanner to its dependencies.
 type IdleRebindConfig struct {
 	Manager     *agent.Manager
-	Registry    *registry
+	Registry    *sessions.Registry
 	Guard       *sessionRunGuard
 	IdleTimeout time.Duration // 0 disables
 }

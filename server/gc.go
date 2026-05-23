@@ -11,7 +11,12 @@ import (
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/sessions"
 )
+
+// logsDir returns the per-user logs directory ($YOKE_HOME/logs). Resolved
+// at each call so tests can redirect via t.Setenv("YOKE_HOME", ...).
+func logsDir() string { return paths.LogsDir() }
 
 // defaultGCInterval is the period between sweeps when YOKE_SERVER_GC_INTERVAL
 // is unset. Sweeps are cheap (a few stat calls per file in logs/) so an hourly
@@ -67,7 +72,7 @@ type activeSession struct {
 	suffix string
 }
 
-func activeFromRegistry(reg *registry) (ids map[string]struct{}, suffixes map[string]struct{}) {
+func activeFromRegistry(reg *sessions.Registry) (ids map[string]struct{}, suffixes map[string]struct{}) {
 	ids = make(map[string]struct{})
 	suffixes = make(map[string]struct{})
 	for _, m := range reg.List() {
@@ -95,7 +100,7 @@ var agentLogPrefixes = []struct {
 // shared across all sessions). When deps.listRegistry is set, stale entries
 // in the cross-session mailbox registry (.mailboxes/sessions.json) are
 // pruned too.
-func runGC(reg *registry, deps gcDeps) gcStats {
+func runGC(reg *sessions.Registry, deps gcDeps) gcStats {
 	var stats gcStats
 	activeIDs, activeSuffixes := activeFromRegistry(reg)
 
@@ -219,7 +224,7 @@ func sweepMailboxesDir(stats gcStats, activeSuffixes map[string]struct{}) gcStat
 // startGC runs an initial sweep, then schedules periodic sweeps every
 // `interval` until ctx is done. Safe to call with a zero interval — it
 // performs the initial sweep and returns without starting a ticker.
-func startGC(ctx context.Context, reg *registry, deps gcDeps, interval time.Duration) {
+func startGC(ctx context.Context, reg *sessions.Registry, deps gcDeps, interval time.Duration) {
 	s := runGC(reg, deps)
 	logGCStats("startup", s)
 	if interval <= 0 {

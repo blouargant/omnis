@@ -1,4 +1,4 @@
-package main
+package sessions
 
 import (
 	"encoding/json"
@@ -33,12 +33,16 @@ type ConversationFile struct {
 	Turns     []ConversationTurn `json:"turns"`
 }
 
-func conversationPath(sessionID string) string {
+// ConversationPath returns the on-disk path for a session's conversation file.
+func ConversationPath(sessionID string) string {
 	return filepath.Join(logsDir(), fmt.Sprintf("conversation_%s.json", sessionID))
 }
 
-func loadConversationFile(sessionID string) (*ConversationFile, error) {
-	data, err := os.ReadFile(conversationPath(sessionID))
+// LoadConversationFile reads a session's conversation file, transparently
+// migrating legacy plain-array files into the current envelope shape.
+// A missing file is not an error and returns an empty ConversationFile.
+func LoadConversationFile(sessionID string) (*ConversationFile, error) {
+	data, err := os.ReadFile(ConversationPath(sessionID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &ConversationFile{}, nil
@@ -60,7 +64,8 @@ func loadConversationFile(sessionID string) (*ConversationFile, error) {
 	return &f, nil
 }
 
-func saveConversationFile(sessionID string, f *ConversationFile) error {
+// SaveConversationFile writes f to disk under the session's conversation path.
+func SaveConversationFile(sessionID string, f *ConversationFile) error {
 	if err := os.MkdirAll(logsDir(), 0755); err != nil {
 		return err
 	}
@@ -68,19 +73,22 @@ func saveConversationFile(sessionID string, f *ConversationFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(conversationPath(sessionID), data, 0644)
+	return os.WriteFile(ConversationPath(sessionID), data, 0644)
 }
 
-func loadConversationTurns(sessionID string) ([]ConversationTurn, error) {
-	f, err := loadConversationFile(sessionID)
+// LoadConversationTurns returns just the turn list for a session.
+func LoadConversationTurns(sessionID string) ([]ConversationTurn, error) {
+	f, err := LoadConversationFile(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	return f.Turns, nil
 }
 
-func appendConversationTurn(sessionID, userText, assistantText string) error {
-	f, err := loadConversationFile(sessionID)
+// AppendConversationTurn appends one user→assistant exchange and clears
+// the Harvested flag so a fresh idle scan re-evaluates the session.
+func AppendConversationTurn(sessionID, userText, assistantText string) error {
+	f, err := LoadConversationFile(sessionID)
 	if err != nil || f == nil {
 		f = &ConversationFile{}
 	}
@@ -90,52 +98,55 @@ func appendConversationTurn(sessionID, userText, assistantText string) error {
 		At:            time.Now(),
 	})
 	f.Harvested = false // new activity resets the harvest flag
-	return saveConversationFile(sessionID, f)
+	return SaveConversationFile(sessionID, f)
 }
 
-// setConversationHarvested persists the Harvested flag to disk without
+// SetConversationHarvested persists the Harvested flag to disk without
 // touching the conversation turns. Called by the idle harvester.
-func setConversationHarvested(sessionID string, v bool) error {
-	f, err := loadConversationFile(sessionID)
+func SetConversationHarvested(sessionID string, v bool) error {
+	f, err := LoadConversationFile(sessionID)
 	if err != nil || f == nil {
 		f = &ConversationFile{}
 	}
 	f.Harvested = v
-	return saveConversationFile(sessionID, f)
+	return SaveConversationFile(sessionID, f)
 }
 
-// setConversationSquad persists the squad name to disk without touching the
+// SetConversationSquad persists the squad name to disk without touching the
 // conversation turns. Called when a new session is first created so the
 // choice survives a server restart.
-func setConversationSquad(sessionID, squad string) error {
-	f, err := loadConversationFile(sessionID)
+func SetConversationSquad(sessionID, squad string) error {
+	f, err := LoadConversationFile(sessionID)
 	if err != nil || f == nil {
 		f = &ConversationFile{}
 	}
 	f.Squad = squad
-	return saveConversationFile(sessionID, f)
+	return SaveConversationFile(sessionID, f)
 }
 
-func setConversationTitle(sessionID, title string) error {
-	f, err := loadConversationFile(sessionID)
+// SetConversationTitle persists the session title without touching turns.
+func SetConversationTitle(sessionID, title string) error {
+	f, err := LoadConversationFile(sessionID)
 	if err != nil || f == nil {
 		f = &ConversationFile{}
 	}
 	f.Title = title
-	return saveConversationFile(sessionID, f)
+	return SaveConversationFile(sessionID, f)
 }
 
-func deleteConversationFile(sessionID string) {
-	if err := os.Remove(conversationPath(sessionID)); err != nil && !os.IsNotExist(err) {
+// DeleteConversationFile removes the on-disk file for a session.
+// A missing file is not an error.
+func DeleteConversationFile(sessionID string) {
+	if err := os.Remove(ConversationPath(sessionID)); err != nil && !os.IsNotExist(err) {
 		log.Printf("history: failed to delete conversation %s: %v", sessionID, err)
 	}
 }
 
-// deleteSessionLogs removes all per-session log files produced by the agent
+// DeleteSessionLogs removes all per-session log files produced by the agent
 // runtime: tasks, todo, memory, statelog, and mailbox JSONL files. The
-// conversation file is deleted separately by deleteConversationFile via
-// registry.Delete.
-func deleteSessionLogs(userID, sessionID string) {
+// conversation file is deleted separately by DeleteConversationFile via
+// Registry.Delete.
+func DeleteSessionLogs(userID, sessionID string) {
 	suffix := agent.SessionSuffix(userID, sessionID)
 	for _, name := range []string{
 		fmt.Sprintf("agent_tasks_%s.json", suffix),
@@ -152,9 +163,9 @@ func deleteSessionLogs(userID, sessionID string) {
 	}
 }
 
-// loadPersistedSessions scans logs/ for conversation_*.json files and returns
-// a SessionMeta for each, so the sidebar populates after a server restart.
-func loadPersistedSessions() []*SessionMeta {
+// LoadPersistedSessions scans logs/ for conversation_*.json files and returns
+// a SessionMeta for each, so the sidebar populates after a process restart.
+func LoadPersistedSessions() []*SessionMeta {
 	entries, err := os.ReadDir(logsDir())
 	if err != nil {
 		return nil
@@ -166,7 +177,7 @@ func loadPersistedSessions() []*SessionMeta {
 			continue
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, "conversation_"), ".json")
-		f, err := loadConversationFile(id)
+		f, err := LoadConversationFile(id)
 		if err != nil || f == nil || len(f.Turns) == 0 {
 			continue
 		}
@@ -175,7 +186,7 @@ func loadPersistedSessions() []*SessionMeta {
 			Title:      f.Title,
 			Squad:      f.Squad,
 			Harvested:  f.Harvested,
-			UserID:     defaultUserID,
+			UserID:     DefaultUserID,
 			CreatedAt:  f.Turns[0].At,
 			LastUsedAt: f.Turns[len(f.Turns)-1].At,
 			Turns:      len(f.Turns),

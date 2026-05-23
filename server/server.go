@@ -19,6 +19,7 @@ import (
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/askuser"
 	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // curateSSETimeout is how long the /curate SSE stream waits for curator_end
@@ -35,7 +36,7 @@ type serverDeps struct {
 	// session via Manager.Lookup(sessionID).Runner so each session uses
 	// the agent build it was pinned to.
 	Manager     *toolkitagent.Manager
-	Registry    *registry
+	Registry    *sessions.Registry
 	WebDir      string
 	AgentEvents *agentEventBroadcaster
 	// EventBus is the agent event bus, used to emit curate-now events.
@@ -213,16 +214,16 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		// Persist the squad immediately so a server restart before the
 		// first turn still sees the right squad on the session.
-		_ = setConversationSquad(meta.ID, squad)
+		_ = sessions.SetConversationSquad(meta.ID, squad)
 		if title := strings.TrimSpace(body.Title); title != "" {
-			_ = setConversationTitle(meta.ID, title)
+			_ = sessions.SetConversationTitle(meta.ID, title)
 		}
 		if d.RegisterSession != nil {
 			name := meta.ID
 			if meta.Title != "" {
 				name = meta.Title
 			}
-			_ = d.RegisterSession(defaultUserID, meta.ID, name)
+			_ = d.RegisterSession(sessions.DefaultUserID, meta.ID, name)
 		}
 		// Pin the new session to the current agent generation so it stays
 		// on that generation even if a reload happens mid-conversation.
@@ -230,7 +231,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			d.Manager.Pin(meta.ID)
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, meta.ID, defaultUserID)
+			d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.DefaultUserID)
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"session_id": meta.ID,
@@ -246,7 +247,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Capture metadata before deleting: display name for the teammate
 		// registry and userID for log file paths.
 		var displayName string
-		userID := defaultUserID
+		userID := sessions.DefaultUserID
 		if meta, ok := d.Registry.Get(id); ok {
 			userID = meta.UserID
 			if meta.Title != "" {
@@ -262,7 +263,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.UnregisterSession != nil && displayName != "" {
 			_ = d.UnregisterSession(displayName)
 		}
-		deleteSessionLogs(userID, id)
+		sessions.DeleteSessionLogs(userID, id)
 		deleteSessionUploads(id)
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
@@ -357,7 +358,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		if err := setConversationTitle(id, title); err != nil {
+		if err := sessions.SetConversationTitle(id, title); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -381,13 +382,13 @@ func newEngine(d serverDeps) *gin.Engine {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		turns, err := loadConversationTurns(id)
+		turns, err := sessions.LoadConversationTurns(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if turns == nil {
-			turns = []ConversationTurn{}
+			turns = []sessions.ConversationTurn{}
 		}
 		c.JSON(http.StatusOK, gin.H{"turns": turns})
 	})
@@ -397,7 +398,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		turns, err := loadConversationTurns(id)
+		turns, err := sessions.LoadConversationTurns(id)
 		if err != nil || len(turns) == 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"tokens_used": 0, "prompt_total": 0, "output_total": 0,

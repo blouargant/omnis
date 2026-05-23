@@ -6,27 +6,28 @@ import (
 	"time"
 
 	toolkitagent "github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // stubA2AServer builds an a2aServer wired to a real in-memory registry but
 // with no manager (squad validation is skipped when manager is nil).
 func stubA2AServer(t *testing.T) *a2aServer {
 	t.Helper()
-	reg := &registry{items: make(map[string]*SessionMeta)}
-	reg.items["teaching-kite"] = &SessionMeta{
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{
 		ID:         "teaching-kite",
-		UserID:     defaultUserID,
+		UserID:     sessions.DefaultUserID,
 		Squad:      "research",
 		CreatedAt:  time.Now(),
 		LastUsedAt: time.Now(),
-	}
-	reg.items["plain-fox"] = &SessionMeta{
+	})
+	reg.Add(&sessions.SessionMeta{
 		ID:         "plain-fox",
-		UserID:     defaultUserID,
+		UserID:     sessions.DefaultUserID,
 		Squad:      "", // unset → server treats as default
 		CreatedAt:  time.Now(),
 		LastUsedAt: time.Now(),
-	}
+	})
 	return newA2AServer(a2aDeps{Registry: reg}, "")
 }
 
@@ -42,8 +43,8 @@ func TestResolveRouting_EphemeralWhenNoSessionName(t *testing.T) {
 	if got.SessionID != "task-123" {
 		t.Fatalf("SessionID: got %q, want task-123", got.SessionID)
 	}
-	if got.UserID != defaultUserID {
-		t.Fatalf("UserID: got %q, want %q", got.UserID, defaultUserID)
+	if got.UserID != sessions.DefaultUserID {
+		t.Fatalf("UserID: got %q, want %q", got.UserID, sessions.DefaultUserID)
 	}
 	if got.Squad != toolkitagent.DefaultSquadName {
 		t.Fatalf("Squad: got %q, want %q", got.Squad, toolkitagent.DefaultSquadName)
@@ -73,7 +74,7 @@ func TestResolveRouting_KnownSessionUsesRegistryMeta(t *testing.T) {
 	if got.SessionID != "teaching-kite" {
 		t.Fatalf("SessionID: got %q", got.SessionID)
 	}
-	if got.UserID != defaultUserID {
+	if got.UserID != sessions.DefaultUserID {
 		t.Fatalf("UserID: got %q", got.UserID)
 	}
 	if got.Squad != "research" {
@@ -226,9 +227,8 @@ func TestPersistA2ATurn_PushesSSE(t *testing.T) {
 	t.Setenv("YOKE_HOME", t.TempDir())
 
 	bcast := newSessionPushBroadcaster()
-	reg := &registry{items: map[string]*SessionMeta{
-		"watcher-bird": {ID: "watcher-bird", UserID: defaultUserID, CreatedAt: time.Now()},
-	}}
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{ID: "watcher-bird", UserID: sessions.DefaultUserID, CreatedAt: time.Now()})
 	s := newA2AServer(a2aDeps{Registry: reg, PushEvents: bcast}, "")
 
 	ch := bcast.subscribe("watcher-bird")
@@ -257,8 +257,8 @@ func TestValidSessionName(t *testing.T) {
 		strings.Repeat("a", 81): false,
 	}
 	for name, want := range cases {
-		if got := validSessionName(name); got != want {
-			t.Errorf("validSessionName(%q) = %v, want %v", name, got, want)
+		if got := sessions.ValidName(name); got != want {
+			t.Errorf("ValidName(%q) = %v, want %v", name, got, want)
 		}
 	}
 }

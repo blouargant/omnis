@@ -21,6 +21,7 @@ import (
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // ─── A2A protocol types ───────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ type taskRecord struct {
 // to clear -32602 errors.
 type a2aDeps struct {
 	Manager         *toolkitagent.Manager
-	Registry        *registry
+	Registry        *sessions.Registry
 	RunGuard        *sessionRunGuard
 	PushEvents      *sessionPushBroadcaster
 	PushMgr         *pushManager
@@ -325,7 +326,7 @@ func (s *a2aServer) persistA2ATurn(routing *sessionRouting, prompt, response str
 	if s.deps.Registry != nil {
 		s.deps.Registry.Touch(routing.SessionID)
 	}
-	if err := appendConversationTurn(routing.SessionID, prompt, response); err != nil {
+	if err := sessions.AppendConversationTurn(routing.SessionID, prompt, response); err != nil {
 		log.Printf("a2a: persist turn for session %q: %v", routing.SessionID, err)
 	}
 	if s.deps.PushEvents != nil {
@@ -339,7 +340,7 @@ func (s *a2aServer) persistA2ATurn(routing *sessionRouting, prompt, response str
 // register the mailbox display name, pin the session to the current
 // generation, and start mailbox watching. Returns a *routingError when
 // the request can't be honoured.
-func (s *a2aServer) autoCreateSession(name, squad string) (*SessionMeta, *routingError) {
+func (s *a2aServer) autoCreateSession(name, squad string) (*sessions.SessionMeta, *routingError) {
 	if s.deps.Registry == nil {
 		return nil, &routingError{"session_name routing not available on this server"}
 	}
@@ -360,7 +361,7 @@ func (s *a2aServer) autoCreateSession(name, squad string) (*SessionMeta, *routin
 		}
 		return nil, &routingError{fmt.Sprintf("invalid session name %q", name)}
 	}
-	if err := setConversationSquad(sm.ID, chosenSquad); err != nil {
+	if err := sessions.SetConversationSquad(sm.ID, chosenSquad); err != nil {
 		log.Printf("a2a: persist squad for new session %q: %v", sm.ID, err)
 	}
 	if s.deps.RegisterSession != nil {
@@ -727,7 +728,7 @@ type sessionRouting struct {
 	Squad      string
 	UserID     string
 	SessionID  string
-	Meta       *SessionMeta // non-nil when targeting a registered session
+	Meta       *sessions.SessionMeta // non-nil when targeting a registered session
 	Persistent bool         // true when the call should persist + lock
 }
 
@@ -755,7 +756,7 @@ func (s *a2aServer) resolveRouting(meta map[string]any, taskID string) (*session
 		}
 		return &sessionRouting{
 			Squad:     squad,
-			UserID:    defaultUserID,
+			UserID:    sessions.DefaultUserID,
 			SessionID: taskID,
 		}, nil
 	}

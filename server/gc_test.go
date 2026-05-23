@@ -8,6 +8,7 @@ import (
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/yoke/internal/sessions"
 )
 
 // gcTestEnv points $YOKE_HOME at a fresh temp directory so logsDir(),
@@ -33,11 +34,10 @@ func mustWriteFile(t *testing.T, path, body string) {
 func TestRunGC_RemovesOrphansKeepsActiveAndGlobals(t *testing.T) {
 	gcTestEnv(t)
 
-	reg := &registry{items: map[string]*SessionMeta{
-		"alive-cat": {ID: "alive-cat", UserID: defaultUserID, CreatedAt: time.Now()},
-	}}
-	aliveSuffix := agent.SessionSuffix(defaultUserID, "alive-cat")
-	deadSuffix := agent.SessionSuffix(defaultUserID, "dead-fox")
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{ID: "alive-cat", UserID: sessions.DefaultUserID, CreatedAt: time.Now()})
+	aliveSuffix := agent.SessionSuffix(sessions.DefaultUserID, "alive-cat")
+	deadSuffix := agent.SessionSuffix(sessions.DefaultUserID, "dead-fox")
 
 	// Active session files — must survive.
 	mustWriteFile(t, filepath.Join(logsDir(), "conversation_alive-cat.json"), `{"turns":[]}`)
@@ -117,14 +117,13 @@ func TestRunGC_RenamedSessionFilesSurvive(t *testing.T) {
 	// display title was changed.
 	gcTestEnv(t)
 
-	reg := &registry{items: map[string]*SessionMeta{
-		"happy-newt": {
-			ID:     "happy-newt",
-			UserID: defaultUserID,
-			Title:  "Q3 incident triage", // user-assigned title after rename
-		},
-	}}
-	suffix := agent.SessionSuffix(defaultUserID, "happy-newt")
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{
+		ID:     "happy-newt",
+		UserID: sessions.DefaultUserID,
+		Title:  "Q3 incident triage", // user-assigned title after rename
+	})
+	suffix := agent.SessionSuffix(sessions.DefaultUserID, "happy-newt")
 
 	mustWriteFile(t, filepath.Join(logsDir(), "conversation_happy-newt.json"), `{"title":"Q3 incident triage","turns":[]}`)
 	mustWriteFile(t, filepath.Join(logsDir(), "agent_tasks_"+suffix+".json"), "{}")
@@ -153,7 +152,7 @@ func TestRunGC_RenamedSessionFilesSurvive(t *testing.T) {
 
 func TestRunGC_MissingDirsAreNotErrors(t *testing.T) {
 	gcTestEnv(t)
-	reg := &registry{items: map[string]*SessionMeta{}}
+	reg := sessions.NewEmptyRegistry()
 	stats := runGC(reg, gcDeps{})
 	if len(stats.Errors) != 0 {
 		t.Errorf("expected no errors when logs/ is absent, got %v", stats.Errors)
@@ -166,11 +165,10 @@ func TestRunGC_MissingDirsAreNotErrors(t *testing.T) {
 func TestRunGC_PrunesStaleMailboxRegistryEntries(t *testing.T) {
 	gcTestEnv(t)
 
-	reg := &registry{items: map[string]*SessionMeta{
-		"alive-cat": {ID: "alive-cat", UserID: defaultUserID, Title: "Live triage"},
-	}}
-	aliveSuffix := agent.SessionSuffix(defaultUserID, "alive-cat")
-	deadSuffix := agent.SessionSuffix(defaultUserID, "dead-fox")
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{ID: "alive-cat", UserID: sessions.DefaultUserID, Title: "Live triage"})
+	aliveSuffix := agent.SessionSuffix(sessions.DefaultUserID, "alive-cat")
+	deadSuffix := agent.SessionSuffix(sessions.DefaultUserID, "dead-fox")
 
 	// Simulated cross-session registry state: one live, one orphan, one
 	// renamed (live ID, but display name differs from petname), and one

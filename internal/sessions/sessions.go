@@ -1,4 +1,9 @@
-package main
+// Package sessions owns the multi-session metadata registry and the
+// per-session conversation files on disk. Both the HTTP server and the
+// embedded TUI consume the same types here so chat history, squad
+// routing, and the idle-curator harvest flag stay consistent across
+// surfaces.
+package sessions
 
 import (
 	"log"
@@ -9,9 +14,15 @@ import (
 	petname "github.com/dustinkirkland/golang-petname"
 )
 
-// SessionMeta is what we know about a chat session at the HTTP layer. ADK's
-// in-memory session service holds the actual conversation history; here we
-// only track lifecycle metadata for listing in the UI.
+// DefaultUserID is the user ID used when a caller (web UI, TUI, A2A)
+// does not supply one. The value is part of the on-disk session naming
+// scheme, so do not change it without a migration.
+const DefaultUserID = "web-user"
+
+// SessionMeta is what we know about a chat session at the
+// orchestrator layer. The actual conversation history lives in the
+// per-session ConversationFile; this struct only tracks lifecycle
+// metadata for listing in the UI.
 type SessionMeta struct {
 	ID         string    `json:"id"`
 	Title      string    `json:"title,omitempty"`
@@ -30,27 +41,49 @@ type SessionMeta struct {
 	Harvested bool `json:"harvested,omitempty"`
 }
 
-const defaultUserID = "web-user"
-
-type registry struct {
+// Registry is the in-memory session index. It is safe for concurrent
+// use and is the single source of truth for "which sessions exist
+// right now".
+type Registry struct {
 	mu    sync.RWMutex
 	items map[string]*SessionMeta
 }
 
-func newRegistry() *registry {
-	r := &registry{items: make(map[string]*SessionMeta)}
-	for _, m := range loadPersistedSessions() {
+// NewRegistry returns a Registry seeded from the on-disk conversation
+// files so the sidebar repopulates after a process restart.
+func NewRegistry() *Registry {
+	r := &Registry{items: make(map[string]*SessionMeta)}
+	for _, m := range LoadPersistedSessions() {
 		r.items[m.ID] = m
 	}
 	return r
+}
+
+// NewEmptyRegistry returns a Registry with no entries and skips the
+// disk scan. Intended for tests that want to seed the registry
+// directly via Add.
+func NewEmptyRegistry() *Registry {
+	return &Registry{items: make(map[string]*SessionMeta)}
+}
+
+// Add inserts m into the registry, overwriting any existing entry
+// with the same ID. Intended for tests and for restoring sessions
+// during startup outside of NewRegistry.
+func (r *Registry) Add(m *SessionMeta) {
+	if m == nil || m.ID == "" {
+		return
+	}
+	r.mu.Lock()
+	r.items[m.ID] = m
+	r.mu.Unlock()
 }
 
 // NewWithName creates a session with a caller-supplied name (rather than the
 // auto-generated petname). Returns nil + false when the name collides with
 // an existing session or fails sanitisation. Used by the A2A handler when
 // `metadata.create:true` requests an explicitly-named session.
-func (r *registry) NewWithName(name, squad string) (*SessionMeta, bool) {
-	if !validSessionName(name) {
+func (r *Registry) NewWithName(name, squad string) (*SessionMeta, bool) {
+	if !ValidName(name) {
 		return nil, false
 	}
 	now := time.Now()
@@ -61,7 +94,7 @@ func (r *registry) NewWithName(name, squad string) (*SessionMeta, bool) {
 	}
 	m := &SessionMeta{
 		ID:         name,
-		UserID:     defaultUserID,
+		UserID:     DefaultUserID,
 		CreatedAt:  now,
 		LastUsedAt: now,
 		Squad:      squad,
@@ -70,11 +103,12 @@ func (r *registry) NewWithName(name, squad string) (*SessionMeta, bool) {
 	return m, true
 }
 
-// validSessionName is the same character set the petname generator uses
-// (kebab-case lowercase). Constraining the surface here so a remote caller
-// can't accidentally inject path separators or shell-special bytes into a
-// filename downstream (session ID is used as the conversation file name).
-func validSessionName(name string) bool {
+// ValidName accepts the character set the petname generator uses
+// (kebab-case lowercase). Constraining the surface here so a remote
+// caller can't accidentally inject path separators or shell-special
+// bytes into a filename downstream (session ID is used as the
+// conversation file name).
+func ValidName(name string) bool {
 	if name == "" || len(name) > 80 {
 		return false
 	}
@@ -90,12 +124,13 @@ func validSessionName(name string) bool {
 	return true
 }
 
-func (r *registry) New(squad string) *SessionMeta {
+// New creates a session with an auto-generated petname ID.
+func (r *Registry) New(squad string) *SessionMeta {
 	now := time.Now()
 	r.mu.Lock()
 	m := &SessionMeta{
 		ID:         r.uniqueName(),
-		UserID:     defaultUserID,
+		UserID:     DefaultUserID,
 		CreatedAt:  now,
 		LastUsedAt: now,
 		Squad:      squad,
@@ -107,7 +142,7 @@ func (r *registry) New(squad string) *SessionMeta {
 
 // uniqueName generates a human-readable adjective-noun name that does not
 // collide with any session already in the registry. Must be called with r.mu held.
-func (r *registry) uniqueName() string {
+func (r *Registry) uniqueName() string {
 	for {
 		name := petname.Generate(2, "-")
 		if _, exists := r.items[name]; !exists {
@@ -116,7 +151,8 @@ func (r *registry) uniqueName() string {
 	}
 }
 
-func (r *registry) Get(id string) (*SessionMeta, bool) {
+// Get returns the metadata for sessionID, if present.
+func (r *Registry) Get(id string) (*SessionMeta, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m, ok := r.items[id]
@@ -126,8 +162,8 @@ func (r *registry) Get(id string) (*SessionMeta, bool) {
 // Touch marks a session as used and increments the turn counter.
 // It also clears the Harvested flag so the idle harvester will re-evaluate
 // the session after enough new activity accumulates. The on-disk flag is
-// cleared by the next appendConversationTurn call.
-func (r *registry) Touch(id string) {
+// cleared by the next AppendConversationTurn call.
+func (r *Registry) Touch(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if m, ok := r.items[id]; ok {
@@ -140,31 +176,35 @@ func (r *registry) Touch(id string) {
 // MarkHarvested flags a session so the idle harvester skips it until new
 // activity arrives. The flag is persisted to disk asynchronously so it
 // survives server restarts.
-func (r *registry) MarkHarvested(id string) {
+func (r *Registry) MarkHarvested(id string) {
 	r.mu.Lock()
 	if m, ok := r.items[id]; ok {
 		m.Harvested = true
 	}
 	r.mu.Unlock()
 	go func() {
-		if err := setConversationHarvested(id, true); err != nil {
+		if err := SetConversationHarvested(id, true); err != nil {
 			log.Printf("harvester: failed to persist harvested flag for session %s: %v", id, err)
 		}
 	}()
 }
 
-func (r *registry) Delete(id string) bool {
+// Delete removes the session and its conversation file. Returns true
+// when a session was found and removed.
+func (r *Registry) Delete(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[id]; !ok {
 		return false
 	}
 	delete(r.items, id)
-	deleteConversationFile(id)
+	DeleteConversationFile(id)
 	return true
 }
 
-func (r *registry) SetTitle(id, title string) bool {
+// SetTitle updates the in-memory title. The caller is responsible for
+// persisting the change via SetConversationTitle.
+func (r *Registry) SetTitle(id, title string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m, ok := r.items[id]
@@ -175,7 +215,8 @@ func (r *registry) SetTitle(id, title string) bool {
 	return true
 }
 
-func (r *registry) List() []*SessionMeta {
+// List returns all sessions sorted by creation time, newest first.
+func (r *Registry) List() []*SessionMeta {
 	r.mu.RLock()
 	out := make([]*SessionMeta, 0, len(r.items))
 	for _, m := range r.items {
