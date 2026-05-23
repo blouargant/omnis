@@ -201,26 +201,32 @@ func streamEvents(
 		switch be.Event {
 		case events.EventBeforeTool:
 			args, _ := p["input"].(map[string]any)
+			callID, _ := p["call_id"].(string)
 			emit("agent_tool_call", map[string]any{
-				"agent": agentName,
-				"name":  toolName,
-				"args":  args,
+				"agent":   agentName,
+				"name":    toolName,
+				"args":    args,
+				"call_id": callID,
 			})
 		case events.EventAfterTool:
 			resp, _ := p["output"].(map[string]any)
 			dur, _ := p["duration"].(time.Duration)
+			callID, _ := p["call_id"].(string)
 			emit("agent_tool_result", map[string]any{
 				"agent":       agentName,
 				"name":        toolName,
 				"response":    resp,
 				"duration_ms": dur.Milliseconds(),
+				"call_id":     callID,
 			})
 		case events.EventToolError:
 			errMsg, _ := p["error"].(string)
+			callID, _ := p["call_id"].(string)
 			emit("agent_tool_error", map[string]any{
-				"agent": agentName,
-				"name":  toolName,
-				"error": errMsg,
+				"agent":   agentName,
+				"name":    toolName,
+				"error":   errMsg,
+				"call_id": callID,
 			})
 		case events.EventCompressionSkipped:
 			tokens, _ := p["tokens"].(int)
@@ -324,8 +330,9 @@ func streamEvents(
 				}
 				if p.FunctionCall != nil {
 					emit("tool_call", map[string]any{
-						"name": p.FunctionCall.Name,
-						"args": p.FunctionCall.Args,
+						"name":    p.FunctionCall.Name,
+						"args":    p.FunctionCall.Args,
+						"call_id": p.FunctionCall.ID,
 					})
 					sawPartialText = false
 				}
@@ -333,6 +340,7 @@ func streamEvents(
 					emit("tool_result", map[string]any{
 						"name":     p.FunctionResponse.Name,
 						"response": p.FunctionResponse.Response,
+						"call_id":  p.FunctionResponse.ID,
 					})
 					sawPartialText = false
 				}

@@ -614,19 +614,27 @@ type skillCatalogEntry struct {
 	Description string
 }
 
-// scanSkillCatalog reads SKILL.md front matter for the given skill names from
-// the shared registry. When skillNames is nil/empty, all installed skills are
-// scanned. Results are best-effort: unreadable or malformed entries are skipped.
+// scanSkillCatalog reads SKILL.md front matter for the given skill names,
+// merging entries across every layer of the skills search chain
+// (paths.SkillsAllSearchDirs). When skillNames is nil/empty, all skills
+// discovered across layers are scanned. First-wins per name, matching the
+// runtime loader's precedence. Results are best-effort: unreadable or
+// malformed entries are skipped.
 func scanSkillCatalog(skillNames []string) []skillCatalogEntry {
-	registryDir := paths.SkillsRegistryDir()
+	searchDirs := paths.SkillsAllSearchDirs()
 	var names []string
 	if len(skillNames) == 0 {
-		entries, err := os.ReadDir(registryDir)
-		if err != nil {
-			return nil
-		}
-		for _, e := range entries {
-			if e.IsDir() {
+		seen := map[string]bool{}
+		for _, dir := range searchDirs {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !e.IsDir() || seen[e.Name()] {
+					continue
+				}
+				seen[e.Name()] = true
 				names = append(names, e.Name())
 			}
 		}
@@ -635,15 +643,18 @@ func scanSkillCatalog(skillNames []string) []skillCatalogEntry {
 	}
 	var out []skillCatalogEntry
 	for _, n := range names {
-		b, err := os.ReadFile(filepath.Join(registryDir, n, "SKILL.md"))
-		if err != nil {
-			continue
+		for _, dir := range searchDirs {
+			b, err := os.ReadFile(filepath.Join(dir, n, "SKILL.md"))
+			if err != nil {
+				continue
+			}
+			name, desc := parseSkillFrontMatter(b)
+			if name == "" {
+				name = n
+			}
+			out = append(out, skillCatalogEntry{Name: name, Description: desc})
+			break
 		}
-		name, desc := parseSkillFrontMatter(b)
-		if name == "" {
-			name = n
-		}
-		out = append(out, skillCatalogEntry{Name: name, Description: desc})
 	}
 	return out
 }

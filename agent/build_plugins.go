@@ -117,28 +117,43 @@ func buildPlugins(
 // the polling loop on generation teardown.
 func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus) (*plugin.Plugin, error) {
 	// Skill overlays (in-memory; do not need to be polled).
-	registryDir := paths.SkillsRegistryDir()
-	seen := map[string]bool{}
+	// Merge across every layer of the skills search chain so overlays from
+	// /etc/yoke or .agents/ are not dropped when $HOME/.yoke/registry/skills
+	// happens to exist (even empty). First-wins per skill name matches the
+	// runtime loader's precedence.
+	searchDirs := paths.SkillsAllSearchDirs()
+	seenSkill := map[string]bool{}
+	seenPerm := map[string]bool{}
 	var skillOverlays []*permissions.Rules
 	for _, agentCfg := range runtime.Agents {
 		skillNames := agentCfg.Skills
 		if len(skillNames) == 0 {
-			entries, _ := os.ReadDir(registryDir)
-			for _, e := range entries {
-				if e.IsDir() {
+			for _, dir := range searchDirs {
+				entries, _ := os.ReadDir(dir)
+				for _, e := range entries {
+					if !e.IsDir() || seenSkill[e.Name()] {
+						continue
+					}
+					seenSkill[e.Name()] = true
 					skillNames = append(skillNames, e.Name())
 				}
 			}
 		}
 		for _, skillName := range skillNames {
-			permPath := filepath.Join(registryDir, skillName, "permissions.json")
-			if seen[permPath] {
-				continue
-			}
-			seen[permPath] = true
-			r, lerr := permissions.Load(permPath)
-			if lerr == nil && r.HasRules() {
-				skillOverlays = append(skillOverlays, r)
+			for _, dir := range searchDirs {
+				permPath := filepath.Join(dir, skillName, "permissions.json")
+				if seenPerm[permPath] {
+					break
+				}
+				if _, err := os.Stat(permPath); err != nil {
+					continue
+				}
+				seenPerm[permPath] = true
+				r, lerr := permissions.Load(permPath)
+				if lerr == nil && r.HasRules() {
+					skillOverlays = append(skillOverlays, r)
+				}
+				break
 			}
 		}
 	}

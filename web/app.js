@@ -1965,12 +1965,23 @@ async function sendMessage() {
     segHadToken = false;
   }
 
-  // FIFO queue pairing tool_call blocks with their tool_result.
+  // Pending tool_call blocks awaiting their tool_result. Each entry is
+  // { id, block }. When events carry a call_id we match by it; otherwise we
+  // fall back to FIFO order (oldest pending entry first).
   const pendingTools = [];
   // Track the currently active outer block so nested sub-agent events can be
-  // appended inside it, plus a FIFO queue for the nested blocks themselves.
+  // appended inside it, plus a list for the nested blocks themselves.
   let activeOuterBlock = null;
   const innerPending = [];
+
+  const takePending = (queue, callID) => {
+    if (callID) {
+      const idx = queue.findIndex(e => e.id === callID);
+      if (idx >= 0) return queue.splice(idx, 1)[0].block;
+    }
+    const head = queue.shift();
+    return head ? head.block : null;
+  };
 
   const ctrl = new AbortController();
   sessionAbortCtrls.set(sessionId, ctrl);
@@ -2026,7 +2037,7 @@ async function sendMessage() {
           // Seal the preceding text segment before showing the tool.
           finalizeSegment();
           const block = appendToolCall(data.name, data.args, container);
-          pendingTools.push(block);
+          pendingTools.push({ id: data.call_id || "", block });
           activeOuterBlock = block;
           innerPending.length = 0;
           setSessionStatus(sessionId, `running ${data.name}…`);
@@ -2034,7 +2045,7 @@ async function sendMessage() {
         }
 
         case "tool_result": {
-          const block = pendingTools.shift();
+          const block = takePending(pendingTools, data.call_id);
           if (block) resolveToolCall(block, data.response);
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
@@ -2044,19 +2055,19 @@ async function sendMessage() {
         case "agent_tool_call": {
           if (activeOuterBlock) {
             const inner = appendNestedToolCall(activeOuterBlock, data.name, data.args);
-            innerPending.push(inner);
+            innerPending.push({ id: data.call_id || "", block: inner });
           }
           break;
         }
 
         case "agent_tool_result": {
-          const inner = innerPending.shift();
+          const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, data.response);
           break;
         }
 
         case "agent_tool_error": {
-          const inner = innerPending.shift();
+          const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, { error: data.error });
           break;
         }

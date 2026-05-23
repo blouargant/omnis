@@ -181,9 +181,10 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Store(scopedToolKey(agentName, t, args), time.Now())
 		b.Emit(EventBeforeTool, map[string]any{
-			"agent": agentName,
-			"tool":  t.Name(),
-			"input": args,
+			"agent":   agentName,
+			"tool":    t.Name(),
+			"input":   args,
+			"call_id": tctx.FunctionCallID(),
 		})
 		return nil, nil
 	}
@@ -199,6 +200,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 			"input":    args,
 			"output":   result,
 			"duration": elapsed,
+			"call_id":  tctx.FunctionCallID(),
 		})
 		return nil, nil
 	}
@@ -206,10 +208,11 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Delete(scopedToolKey(agentName, t, args))
 		b.Emit(EventToolError, map[string]any{
-			"agent": agentName,
-			"tool":  t.Name(),
-			"input": args,
-			"error": err.Error(),
+			"agent":   agentName,
+			"tool":    t.Name(),
+			"input":   args,
+			"error":   err.Error(),
+			"call_id": tctx.FunctionCallID(),
 		})
 		return nil, nil
 	}
