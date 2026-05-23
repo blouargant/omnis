@@ -16,7 +16,9 @@
 //     dotless alias. When both exist, `.agents/` wins; the alias is
 //     included in the chain right after.
 //     2. Home()             — per-user state root ($HOME/.yoke)
-//     3. SystemRegistryDir  — /etc/yoke/registry by default; system-wide install
+//     3. SystemConfigDir    — /etc/yoke by default; system-wide install.
+//     Agent/skill registries live under `registry/agents` and
+//     `registry/skills` in every layer.
 //
 //     The whole chain can be replaced via $YOKE_CONFIG_DIRS (a list using
 //     the OS path-list separator, ":" on Unix). FindConfig returns the
@@ -51,17 +53,14 @@ const (
 )
 
 // SystemConfigDir is the lowest-precedence base directory used for system-wide
-// configuration. It's a package-level variable so distribution packagers can
-// override it at build time via -ldflags for non-FHS targets.
+// configuration AND the lowest-precedence layer of the default config search
+// chain. Config files (agents.json, permissions.json, server.yaml, …) and the
+// filters/ directory live directly under SystemConfigDir; the agent and skill
+// registries live under SystemConfigDir/registry/agents and
+// SystemConfigDir/registry/skills respectively. It's a package-level variable
+// so distribution packagers can override it at build time via -ldflags for
+// non-FHS targets.
 var SystemConfigDir = "/etc/yoke"
-
-// SystemRegistryDir is the lowest-precedence layer of the default config
-// search chain. Derived from SystemConfigDir. It's where system-wide config
-// files (agents.json, permissions.json, …) and registry subdirectories
-// (registry/agents/, registry/skills/) live in a packaged installation.
-func SystemRegistryDir() string {
-	return filepath.Join(SystemConfigDir, "registry")
-}
 
 // LocalDirNames returns the candidate local-dir names in precedence order.
 // `.agents/` (canonical) comes before `agents/` (alias).
@@ -110,7 +109,7 @@ func Home() string {
 //
 //  1. .agents (and `agents/` when it exists) — project-local (highest priority)
 //  2. $YOKE_HOME                              — per-user ($HOME/.yoke)
-//  3. /etc/yoke/registry                      — system-wide (lowest priority)
+//  3. /etc/yoke                               — system-wide (lowest priority)
 func ConfigSearchDirs() []string {
 	if v := strings.TrimSpace(os.Getenv(envConfigDirs)); v != "" {
 		parts := strings.Split(v, string(os.PathListSeparator))
@@ -126,7 +125,7 @@ func ConfigSearchDirs() []string {
 		}
 	}
 	out := append([]string(nil), LocalDirs()...)
-	out = append(out, Home(), SystemRegistryDir())
+	out = append(out, Home(), SystemConfigDir)
 	return out
 }
 

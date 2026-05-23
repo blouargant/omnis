@@ -18,7 +18,7 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     server.yaml                server listen address, token, A2A settings
     filters/                   bash output filter patterns
     registry/agents/           built-in agent definitions (read-only)
-/usr/share/yoke/registry/skills/  bundled skill playbooks (read-only)
+    registry/skills/           bundled skill playbooks (read-only)
 /usr/share/yoke/web/           static UI assets served by yoke-server
 /var/lib/yoke/softskills/      curator-managed soft-skill library (mutable)
 /etc/profile.d/yoke.sh         exports YOKE_CONFIG_PATH and YOKE_WEB_DIR

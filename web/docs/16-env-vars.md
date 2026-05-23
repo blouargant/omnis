@@ -37,7 +37,7 @@ shell before launching `make run-server` (or pass through a `.env` file).
 | Variable                    | Purpose |
 |---|---|
 | `YOKE_HOME`                 | Per-user state root. Default `$HOME/.yoke`. |
-| `YOKE_CONFIG_DIRS`          | Colon-separated config search chain, high → low. Replaces the default (`.agents:$HOME/.yoke:/etc/yoke/registry`). |
+| `YOKE_CONFIG_DIRS`          | Colon-separated config search chain, high → low. Replaces the default (`.agents:$HOME/.yoke:/etc/yoke`). |
 | `YOKE_CONFIG_PATH`          | Explicit `agents.json` path; bypasses the chain. |
 | `YOKE_SKILLS_REGISTRY_DIR`  | Where the Web UI installs imported skills. Default `$YOKE_HOME/registry/skills`. |
 | `YOKE_AGENTS_REGISTRY_DIR`  | Where the Web UI installs imported agents. Default `$YOKE_HOME/registry/agents`. |

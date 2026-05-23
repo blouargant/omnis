@@ -71,8 +71,12 @@
   ],
   "always_allow": [
     {
-      "pattern": "^(teammate_check|teammate_list|list_skills|load_skill|list_softskills|load_softskill|load_softskill_resource|todo_read|todo_write|todo_update|task_list|task_next|TaskCreate|TaskUpdate|compact_now|AskUserQuestion|bg_list)\\b",
+      "pattern": "^(teammate_check|teammate_list|teammate_ask|teammate_tell|list_skills|load_skill|list_softskills|load_softskill|load_softskill_resource|todo_read|todo_write|todo_update|task_list|task_next|TaskCreate|TaskUpdate|compact_now|AskUserQuestion|bg_list|curate_session)\\b",
       "reason": "internal coordination / planning tool — never blocks the agent loop"
+    },
+    {
+      "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|registries_crawler)\\b",
+      "reason": "sub-agent delegation — the leader always controls the outcome; no direct side-effects"
     },
     {
       "pattern": "^(Read|Grep|Glob|mime)\\b",

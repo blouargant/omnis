@@ -436,6 +436,28 @@ func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 	}
 }
 
+func TestSubAgentCapabilitiesBlockIncludesBriefingGuidance(t *testing.T) {
+	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
+		{Name: "investigator", Enabled: true, Tools: []string{"fs"}},
+	}, RuntimeSettings{})
+
+	want := []string{
+		"Briefing a sub-agent",
+		"fresh session",
+		"ONLY the `request` string",
+		"file paths it should read",
+		"prior findings",
+		"20-line rule",
+		"scratch file",
+		"$YOKE_HOME/logs/brief_",
+	}
+	for _, s := range want {
+		if !strings.Contains(block, s) {
+			t.Fatalf("capabilities block missing briefing guidance %q\n%s", s, block)
+		}
+	}
+}
+
 func TestSubAgentCapabilitiesBlockSurfacesMCPServers(t *testing.T) {
 	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
 		{Name: "investigator", Enabled: true, Tools: []string{"Bash", "mcp"}, MCPServers: []string{"github", "kubernetes"}},

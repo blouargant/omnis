@@ -10,7 +10,6 @@
     "curator"
   ],
   "app_name": "yoke",
-  "bash_output_filters_dir": "config/filters",
   "bash_timeout_seconds": 120,
   "models": {
     "balanced": {
@@ -59,8 +58,6 @@
       "provider": "openai_compat"
     }
   },
-  "permissions_config_path": "config/permissions.json",
-  "softskills_dir": "softskills",
   "squads": [
     {
       "name": "Default",

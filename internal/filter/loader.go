@@ -11,8 +11,8 @@ import (
 
 // DefaultRulesDir returns the rules directory used by tools. Resolved
 // through the same 3-layer config search as other config files
-// ($YOKE_HOME/config/filters → ./config/filters → /etc/yoke/filters),
-// so a packaged install and a developer checkout both work.
+// (.agents/filters → $YOKE_HOME/filters → /etc/yoke/filters), so a
+// packaged install and a developer checkout both work.
 func DefaultRulesDir() string { return paths.FindConfigDir("filters") }
 
 func isJSONFile(name string) bool {

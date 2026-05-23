@@ -3,7 +3,8 @@
 Runtime configuration is resolved through a **3-layer search chain**:
 `.agents/` (or `agents/` as a dotless alias; both participate when both
 exist, `.agents/` first) → `$HOME/.yoke/` (per-user) →
-`/etc/yoke/registry/` (system).
+`/etc/yoke/` (system). Agent and skill registries live one level deeper
+inside each layer, at `registry/agents/` and `registry/skills/`.
 Each layer can hold any config file; the first existing file wins (file-level
 override, not merge). User-edited config is **layer-aware** on save: edits to
 a file that lives in (or whose content references resources from) the local

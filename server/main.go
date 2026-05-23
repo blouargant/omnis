@@ -16,7 +16,7 @@
 //	                            mailboxes, user config overrides) lands here.
 //	YOKE_CONFIG_DIRS         Colon-separated config search chain (high→low
 //	                            precedence). Replaces the default chain of
-//	                            $YOKE_HOME/config : ./config : /etc/yoke.
+//	                            .agents : $YOKE_HOME : /etc/yoke.
 //	YOKE_CONFIG_PATH         Explicit path to agent.json (forwarded to
 //	                            agent.NewAgent; bypasses the chain).
 //	YOKE_SKILLS_DIR          Skills directory.

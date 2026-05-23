@@ -51,7 +51,9 @@ this is a file-level override, not a deep merge.
    directories (CWD-relative, highest priority). Both are accepted; when
    both exist, `.agents/` wins and `agents/` is searched immediately after.
 2. `$HOME/.yoke/` — per-user state root.
-3. `/etc/yoke/registry/` — system-wide install (lowest priority).
+3. `/etc/yoke/` — system-wide install (lowest priority). Agent and skill
+   registries live one level deeper, at `/etc/yoke/registry/agents` and
+   `/etc/yoke/registry/skills`.
 
 Override the chain wholesale with `YOKE_CONFIG_DIRS` (colon-separated). Use
 `YOKE_CONFIG_PATH` to bypass the chain entirely for `agents.json`.

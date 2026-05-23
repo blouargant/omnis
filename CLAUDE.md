@@ -111,7 +111,7 @@ per-generation hook listening across every squad.
 ### Configuration files
 
 Config files are resolved through a **3-layer search chain** (high → low precedence):
-`.agents/` (or `agents/` as a dotless alias; both participate when both exist, `.agents/` first) → `$HOME/.yoke/` (per-user) → `/etc/yoke/registry/` (system).
+`.agents/` (or `agents/` as a dotless alias; both participate when both exist, `.agents/` first) → `$HOME/.yoke/` (per-user) → `/etc/yoke/` (system). Agent and skill registries live under `registry/agents/` and `registry/skills/` inside whichever layer you're targeting.
 
 | File | Purpose |
 |---|---|
@@ -147,7 +147,9 @@ by the user omit the flag. The web UI groups them under separate
 The registry directory uses the same 3-layer lookup as config files:
 `.agents/registry/agents` (and `agents/registry/agents` when that alias dir
 exists), `$HOME/.yoke/registry/agents`, then `/etc/yoke/registry/agents` —
-first existing directory wins.
+first existing directory wins. (The registry subdirs sit one level below
+their layer's config files: e.g. system has `/etc/yoke/agents.json` next
+to `/etc/yoke/registry/agents/`.)
 
 ### Filesystem layout
 
@@ -161,7 +163,10 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
      directories (CWD-relative, highest priority). Both are accepted; when
      both exist, `.agents/` wins and `agents/` is searched right after.
   2. `$HOME/.yoke/` — per-user state root
-  3. `/etc/yoke/registry/` — system-wide install (lowest priority)
+  3. `/etc/yoke/` — system-wide install (lowest priority). Agent/skill
+     registries live at `/etc/yoke/registry/agents` and
+     `/etc/yoke/registry/skills`; every other config file is directly
+     under `/etc/yoke/`.
 
   Override the chain via `YOKE_CONFIG_DIRS` (colon-separated; replaces
   the chain wholesale).
@@ -201,7 +206,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   The skill registry (`registry/skills/`) follows the same lookup as
   agent definitions: `.agents/registry/skills` (and `agents/registry/skills`
   when present), `$HOME/.yoke/registry/skills`, `/etc/yoke/registry/skills`
-  — first existing directory wins.
+  — first existing directory wins. (The `registry/` sub-tree is the only
+  thing that lives one level deeper than its layer's config files.)
 
 ### Configuration precedence
 
@@ -225,7 +231,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
 | `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
-| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke/registry` |
+| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke` |
 | `YOKE_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
 | `YOKE_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$YOKE_HOME/registry/skills`) |
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |

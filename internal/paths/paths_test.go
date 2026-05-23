@@ -39,9 +39,8 @@ func TestConfigSearchDirsDefault(t *testing.T) {
 	if dirs[1] != tmp {
 		t.Errorf("second layer = %q, want %q", dirs[1], tmp)
 	}
-	wantSystem := filepath.Join(SystemConfigDir, "registry")
-	if dirs[2] != wantSystem {
-		t.Errorf("third layer = %q, want %q", dirs[2], wantSystem)
+	if dirs[2] != SystemConfigDir {
+		t.Errorf("third layer = %q, want %q", dirs[2], SystemConfigDir)
 	}
 }
 
@@ -239,8 +238,8 @@ func TestConfigSearchDirsIncludesBothLocalDirs(t *testing.T) {
 	if dirs[2] != home {
 		t.Errorf("user layer = %q, want %q", dirs[2], home)
 	}
-	if dirs[3] != filepath.Join(SystemConfigDir, "registry") {
-		t.Errorf("system layer = %q, want %q", dirs[3], filepath.Join(SystemConfigDir, "registry"))
+	if dirs[3] != SystemConfigDir {
+		t.Errorf("system layer = %q, want %q", dirs[3], SystemConfigDir)
 	}
 }
 
@@ -294,7 +293,7 @@ func TestLayerClassifiesPaths(t *testing.T) {
 	if got := Layer(filepath.Join(home, "agents.json")); got != "user" {
 		t.Errorf("home path: got %q, want user", got)
 	}
-	if got := Layer("/etc/yoke/registry/agents.json"); got != "system" {
+	if got := Layer("/etc/yoke/agents.json"); got != "system" {
 		t.Errorf("system path: got %q, want system", got)
 	}
 }
