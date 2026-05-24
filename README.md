@@ -30,6 +30,8 @@ code changes required to retarget the agent at a new domain.
 A simple chat session with the web UI — streaming responses, session
 history, and file attachments.
 
+<video src="docs/screencasts/chat.mp4" width="320" height="240" controls></video>
+
 [▶ Watch: Chat demo](docs/screencasts/chat.mp4)
 
 ---
