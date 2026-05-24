@@ -110,7 +110,8 @@ See [Choosing an LLM provider](#choosing-an-llm-provider) for all options.
 **Web UI** — set a bearer token and launch the server:
 
 ```bash
-export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
+# OPTIONAL: create a auth token to access the Web UI
+# export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
 yoke-server                             # → http://localhost:8080
 ```
 
