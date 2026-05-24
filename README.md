@@ -1,95 +1,125 @@
 # yoke
 
-A **generic, vendor-neutral agent harness** built in Go, inspired by the
-methodology proven by Anthropic's **Claude Code**. The harness encodes a
-*method*; specialisation comes from what you mount.
+A **generic, vendor-neutral AI agent harness** — turn any LLM into a
+specialist assistant by mounting tools, skills, and MCP servers. No
+code changes required to retarget the agent at a new domain.
 
-> **Design contract** — the agent's effective capability on any given run
-> equals the union of the **tools**, **skills** and **MCP servers**
-> currently mounted. The same binary becomes a code reviewer, a
-> Kubernetes triage assistant, a DBA helper or a release engineer purely
-> by changing what is mounted. **No code change is required to retarget
-> the agent at a new domain.**
-
-Built on top of [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk)
-for the agent loop, session, plugins and runner, with first-class
-support for Anthropic, OpenAI and any OpenAI-compatible endpoint via a
-small in-tree adapter (no extra SDKs).
+> **Design contract** — the agent's effective capability equals the union
+> of the **tools**, **skills**, and **MCP servers** currently mounted.
+> The same binary becomes a code reviewer, a Kubernetes triage assistant,
+> a DBA helper, or a release engineer purely by changing what is mounted.
 
 ---
 
 ## Table of contents
 
-1. [Quick start](#quick-start)
-2. [Installation](#installation)
+1. [Screencasts](#screencasts)
+2. [Quick start](#quick-start)
 3. [Choosing an LLM provider](#choosing-an-llm-provider)
-4. [Running the all-in-one binary](#running-the-all-in-one-binary)
+4. [Running the server](#running-the-server)
 5. [Specialising the agent](#specialising-the-agent)
-6. [Project layout](#project-layout)
-7. [Documentation](#documentation)
+6. [Documentation](#documentation)
+7. [For developers](#for-developers)
+
+---
+
+## Screencasts
+
+### Chat
+
+A simple chat session with the web UI — streaming responses, session
+history, and file attachments.
+
+<video src="docs/screencasts/chat.mp4" controls width="720"></video>
+
+---
+
+### Teammate — cross-session communication
+
+Two sessions talking to each other via the built-in mailbox: one session
+delegates a sub-task and the other picks it up, processes it, and sends
+the result back.
+
+<video src="docs/screencasts/teammate.mp4" controls width="720"></video>
+
+---
+
+### Registries crawler — discovering skills and agents
+
+Using the dedicated **registries_crawler** squad to browse remote GitHub
+or Gitea registries for community skills and agents, then installing them
+directly from the web UI.
+
+<video src="docs/screencasts/registries_crawler.mp4" controls width="720"></video>
+
+---
+
+### Settings panels
+
+A tour of the Settings area: agent configuration, model profiles, squad
+composition, MCP server wiring, and permission rules — all editable
+without touching a config file.
+
+<video src="docs/screencasts/settings.mp4" controls width="720"></video>
+
+---
+
+### Themes
+
+How to switch the web UI theme and persist the choice across sessions.
+
+<video src="docs/screencasts/themes.mp4" controls width="720"></video>
 
 ---
 
 ## Quick start
 
+### 1. Install
+
+Download the package for your platform from the [Releases](https://github.com/blouargant/yoke/releases) page and install it:
+
 ```bash
-# Pick your provider + key (default provider is openai_compat)
-export YOKE_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=sk-ant-…
+# Debian / Ubuntu
+sudo dpkg -i yoke_*_linux_amd64.deb
 
-# Interactive REPL (auto-detected when stdin is a TTY)
-go run .
+# Red Hat / Fedora / SUSE
+sudo rpm -i yoke_*_linux_amd64.rpm
 
-# One-shot prompt
-go run . "summarize the architecture of this repo"
-echo "explain main.go" | go run .
-
-# Built-in TUI (tview chat interface)
-go run . tui
-
-# HTTP server + web chat UI (separate binary; see "Running the server")
-export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
-make run-server   # http://localhost:8080
+# Any Linux (tarball)
+tar xzf yoke_*_linux_amd64.tar.gz -C /usr/local/bin yoke yoke-server
 ```
 
-Out of the box the agent has:
+The package installs two binaries:
+- **`yoke-server`** — HTTP API + web chat UI
+- **`yoke`** — CLI / REPL / TUI
 
-- File tools (`read`, `write`, `grep`, `glob`, `revert`, `bash`)
-- Planning (`todo_write`, `task_create`/`task_update`/`task_list`)
-- Background commands queue (`bash_background`)
-- Git worktree isolation (`worktree_create`/`_remove`/`_merge`)
-- Generic sub-agents (`investigator`, `summariser`, `web_agent`,
-  `image_generator`) reachable as tools — one delegation at a time
-- **Squads**: name groups of `{ leader, members[] }` in
-  `config/agents.json` and pick which one a new chat session uses (default
-  is selected when none is chosen). See
-  [docs/configuration.md#squads--per-session-agent-groups](docs/configuration.md#squads--per-session-agent-groups).
-- **A2A peers**: delegate tasks to remote [A2A-protocol](https://google.github.io/A2A/)
-  agents (any yoke server or compatible endpoint) via `config/a2a_config.json`.
-  Each peer appears as an `a2a_<name>` tool on the leader; calls can target a
-  specific remote squad and/or a named web UI session. See
-  [docs/configuration.md#configa2a_configjson](docs/configuration.md#configa2a_configjson).
-- Skills auto-loaded from `./skills/`
-- MCP servers loaded from `config/mcp_config.json`
-- Permission gating from `config/permissions.json`
-- Event logging to `.agent_events.log`
-- Per-session state isolation: each `(user, session)` pair gets its own
-  task graph (`.agent_tasks_<u>_<s>.json`), todo plan
-  (`.agent_todo_<u>_<s>.json`), compressed memory
-  (`.agent_memory_<u>_<s>.md`), background-notification queue and
-  mailbox namespace — concurrent sessions never share state. See
-  [docs/configuration.md#session-isolation](docs/configuration.md#session-isolation).
+### 2. Configure your LLM provider
 
----
-
-## Installation
-
-Requires Go ≥ 1.25.
+Edit `/etc/yoke/agents.json` (or set environment variables) to point at
+your provider. The fastest path is a couple of env vars:
 
 ```bash
-git clone https://github.com/blouargant/yoke
-cd yoke
-go build ./...
+export YOKE_PROVIDER=anthropic          # or gemini, openai, openai_compat
+export ANTHROPIC_API_KEY=sk-ant-…
+```
+
+See [Choosing an LLM provider](#choosing-an-llm-provider) for all options.
+
+### 3. Start
+
+**Web UI** — set a bearer token and launch the server:
+
+```bash
+export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
+yoke-server                             # → http://localhost:8080
+```
+
+Open <http://localhost:8080>, paste the token when prompted, and start chatting.
+
+**Terminal UI** — no token required:
+
+```bash
+yoke tui
 ```
 
 ---
@@ -124,115 +154,29 @@ See [docs/providers.md](docs/providers.md) for details.
 
 ---
 
-## Running the binary
-
-`yoke` supports exactly three usage modes:
-
-| Mode    | Invocation                            | When to use                                    |
-|---------|---------------------------------------|------------------------------------------------|
-| CLI     | `yoke [prompt…]`, `yoke run [prompt]` | REPL when stdin is a TTY; one-shot when a prompt arg or piped input is given. Best for scripting, quick questions, CI. |
-| TUI     | `yoke tui`                            | Interactive tview interface with live trace pane, streaming markdown and slash-command shortcuts. Best for sustained terminal sessions. |
-| Server  | `yoke-server` (separate binary)       | HTTP + SSE API plus the [web/](web/) chat UI. Best for multi-user, remote access, or integrations. See [Running the server](#running-the-server). |
-
-Plus one auxiliary subcommand:
-
-- `yoke curate …` — replay the soft-skills curator one-shot against an existing session's audit + statelog files.
-- `yoke version` / `yoke help` — version info and usage reference.
-
-### Command-line flags
-
-| Flag                  | Default    | Effect                                                                  |
-|-----------------------|------------|-------------------------------------------------------------------------|
-| `-s`, `--skills DIR`  | `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.           |
-| `--softskills DIR`    | `softskills` | Directory of curator-generated soft-skills.                           |
-| `--config PATH`       | `config/agents.json` | Runtime JSON config path. Error out if the explicit path is missing. |
-| `--provider NAME`     | _(config)_ | Global model provider override (e.g. `anthropic`).                      |
-| `--model NAME`        | _(config)_ | Global model override.                                                  |
-| `--base-url URL`      | _(config)_ | API endpoint override.                                                  |
-| `--api-key KEY`       | _(config/env)_| API-key override.                                                    |
-| `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
-| `--name NAME`         | `yoke`     | Application name (used in runner + session metadata).                   |
-| `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log. Logs can contain prompts, tool outputs and secrets already present in context. |
-
-Flags must come **before** the subcommand or prompt:
-
-```bash
-go run . --skills ./my-skills tui
-go run . -d "what does main.go do?"
-```
-
-See [docs/configuration.md](docs/configuration.md#command-line-flags) for the full reference.
-
-There are 30 single-component demos under `examples/sNN_*/`, ordered
-from the simplest (a bare loop) to the most complex (multi-agent and
-distributed). They are not part of the production build, but each one
-exercises one component in isolation:
-
-```bash
-make examples            # opt-in: builds all demos
-go run ./examples/s21_skills
-```
-
-See [docs/examples-catalog.md](docs/examples-catalog.md), or open
-[examples/index.ipynb](examples/index.ipynb) for the GoNB-based
-learning path (setup details in [docs/notebooks.md](docs/notebooks.md)).
-
----
-
 ## Running the server
 
-The repository ships a standalone HTTP server in [server/](server/) that
-exposes the lead agent over a JSON+SSE API and serves the vanilla-JS chat
-UI in [web/](web/). This is the **custom chat UI** with prompt-history,
-mailbox push, file attachments and the debug overlay described above.
+The web UI server exposes the agent over a JSON+SSE API and serves the
+chat interface from `/usr/share/yoke/web/` (set automatically by the
+package via `/etc/profile.d/yoke.sh`).
 
-A bearer token is mandatory — the server refuses to start without one:
+A bearer token is mandatory. Set it in `/etc/yoke/server.yaml`:
+
+```yaml
+# /etc/yoke/server.yaml
+token: "<your-token-here>"
+```
+
+Or pass it as an environment variable:
 
 ```bash
 export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
-export ANTHROPIC_API_KEY=sk-ant-…        # or any other provider key
+yoke-server
 ```
 
-Optional env vars: `YOKE_SERVER_ADDR` (default `:8080`),
-`YOKE_WEB_DIR` (default `web`), `YOKE_CONFIG_PATH`,
-`YOKE_SKILLS_DIR`, `YOKE_SOFTSKILLS_DIR`, `YOKE_DEBUG`. See
-[server/main.go](server/main.go) for the full list.
-
-### Dev mode (no build step)
-
-Fast iteration — rebuilds on every invocation, picks up Go source changes
-immediately, and serves `web/` from the working tree so front-end edits
-are live-reload on browser refresh:
-
-```bash
-make run-server                          # equivalent to `go run ./server`
-# or directly:
-go run ./server
-```
-
-Then open <http://localhost:8080> and paste the token when prompted.
-
-### Compiled binary
-
-For production-ish use, build once and run the resulting binary:
-
-```bash
-make clean all                           # → bin/yoke, bin/yoke-server
-./bin/yoke-server
-```
-
-`make clean all` removes `bin/` and `dist/` then rebuilds the root
-binary (`yoke`) and the **`yoke-server`** binary. Examples are no
-longer part of the default build — run `make examples` to build them
-on demand. Run `bin/yoke-server` from the repository root so it can
-find the default `web/` and `config/` directories — or set
-`YOKE_WEB_DIR` / `YOKE_CONFIG_PATH` to point at absolute paths if you
-copy the binary elsewhere.
-
-> Enable the debug overlay in the browser by appending `?debug=1` to the
-> URL (or `localStorage.agent_toolkit_debug = "1"`). The overlay reports
-> live per-turn client + server streaming metrics — see the CLAUDE.md
-> "Web UI debug mode" section for the field reference.
+The server listens on `:8080` by default. Override with
+`YOKE_SERVER_ADDR` or the `addr` key in `server.yaml`. See
+[docs/configuration.md](docs/configuration.md) for the full reference.
 
 ---
 
@@ -268,22 +212,135 @@ mount a different combination of:
 }
 ```
 
-The `skills/k8s-triage/SKILL.md` is already shipped as an example. Run:
+The `skills/k8s-triage/SKILL.md` is already shipped as an example. Ask
+the agent:
 
-```bash
-go run .
+```
 > diagnose why pods in namespace payments are crash-looping
 ```
 
-The lead agent will discover the new MCP tools, match the user's
-question to the `k8s-triage` skill, and follow its procedure (confirm
-context → snapshot state → classify failure → propose one dry-run fix).
+The agent will discover the new MCP tools, match the question to the
+`k8s-triage` skill, and follow its procedure (confirm context → snapshot
+state → classify failure → propose one dry-run fix).
 
 See [docs/specialising.md](docs/specialising.md) for the full recipe.
 
 ---
 
-## Project layout
+## Documentation
+
+| File                                          | Topic                                             |
+|-----------------------------------------------|---------------------------------------------------|
+| [docs/architecture.md](docs/architecture.md)  | Component map, data flow, plugin lifecycle        |
+| [docs/methodology.md](docs/methodology.md)    | The Claude Code 7-step operating method           |
+| [docs/context-management.md](docs/context-management.md) | How context compression works + session decision log |
+| [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
+| [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
+| [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
+| [docs/configuration.md](docs/configuration.md)| Full configuration reference                      |
+| [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents, squads and plugins  |
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+## Acknowledgements
+
+- The article *"Building Claude Code with Harness Engineering"* by
+  [Level Up Coding](https://levelup.gitconnected.com/building-claude-code-with-harness-engineering-d2e8c0da85f0)
+- [Anthropic Claude Code](https://www.anthropic.com/) for the
+  methodology this harness encodes.
+- [Google ADK for Go](https://pkg.go.dev/google.golang.org/adk) for the
+  underlying agent loop.
+
+---
+
+## For developers
+
+This section covers building from source, the CLI/TUI modes, the
+project layout, and the examples catalog.
+
+### Installation
+
+Requires Go ≥ 1.25.
+
+```bash
+git clone https://github.com/blouargant/yoke
+cd yoke
+go build ./...
+```
+
+### Usage modes
+
+| Mode    | Invocation                            | When to use                                    |
+|---------|---------------------------------------|------------------------------------------------|
+| CLI     | `yoke [prompt…]`, `yoke run [prompt]` | REPL when stdin is a TTY; one-shot when piped or given a prompt arg. Best for scripting, CI, quick questions. |
+| TUI     | `yoke tui`                            | Interactive tview interface with live trace pane and streaming markdown. Best for sustained terminal sessions. |
+| Server  | `yoke-server` (separate binary)       | HTTP + SSE API plus the web chat UI. Best for multi-user or remote access. |
+
+CLI quick start:
+
+```bash
+export YOKE_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-…
+
+go run .                                   # interactive REPL
+go run . "summarize the architecture"      # one-shot
+echo "explain main.go" | go run .          # piped one-shot
+go run . tui                               # TUI
+```
+
+### Command-line flags
+
+| Flag                  | Default    | Effect                                                                  |
+|-----------------------|------------|-------------------------------------------------------------------------|
+| `-s`, `--skills DIR`  | `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.           |
+| `--softskills DIR`    | `softskills` | Directory of curator-generated soft-skills.                           |
+| `--config PATH`       | `config/agents.json` | Runtime JSON config path.                                     |
+| `--provider NAME`     | _(config)_ | Global model provider override (e.g. `anthropic`).                      |
+| `--model NAME`        | _(config)_ | Global model override.                                                  |
+| `--base-url URL`      | _(config)_ | API endpoint override.                                                  |
+| `--api-key KEY`       | _(config/env)_| API-key override.                                                    |
+| `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
+| `--name NAME`         | `yoke`     | Application name (used in runner + session metadata).                   |
+| `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log.               |
+
+Flags must come **before** the subcommand or prompt:
+
+```bash
+go run . --skills ./my-skills tui
+go run . -d "what does main.go do?"
+```
+
+### Build commands
+
+```bash
+make build              # bin/yoke + bin/yoke-server (host platform)
+make examples           # opt-in: build all examples under bin/
+make release            # cross-platform raw binaries → dist/
+make fmt && make vet    # code quality
+make test               # unit tests
+make env-tests          # LLM integration tests (requires .env with API keys)
+```
+
+### Examples
+
+There are 30 single-component demos under `examples/sNN_*/`, ordered
+from the simplest (a bare loop) to the most complex (multi-agent and
+distributed):
+
+```bash
+make examples                  # opt-in build
+go run ./examples/s21_skills   # run one directly
+```
+
+See [docs/examples-catalog.md](docs/examples-catalog.md), or open
+[examples/index.ipynb](examples/index.ipynb) for the GoNB-based
+learning path (setup in [docs/notebooks.md](docs/notebooks.md)).
+
+### Project layout
 
 ```
 yoke/
@@ -316,40 +373,7 @@ yoke/
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
 ├── softskills/                  # curator output
-├── config/                      # agent.json, permissions.json, mcp_config.json
+├── config/                      # agents.json, permissions.json, mcp_config.json
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation
 ```
-
----
-
-## Documentation
-
-| File                                          | Topic                                             |
-|-----------------------------------------------|---------------------------------------------------|
-| [docs/architecture.md](docs/architecture.md)  | Component map, data flow, plugin lifecycle        |
-| [docs/methodology.md](docs/methodology.md)    | The Claude Code 7-step operating method           |
-| [docs/context-management.md](docs/context-management.md) | How context compression works + session decision log |
-| [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
-| [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
-| [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
-| [docs/configuration.md](docs/configuration.md)| `permissions.json` and `mcp_config.json` reference|
-| [docs/examples-catalog.md](docs/examples-catalog.md)    | The 30 single-component demo binaries, ordered by complexity |
-| [docs/notebooks.md](docs/notebooks.md)                  | GoNB Jupyter walkthroughs — setup notes; start at [examples/index.ipynb](examples/index.ipynb) |
-| [docs/k8s-context-compression-e2e.md](docs/k8s-context-compression-e2e.md) | Real-world Kubernetes context-compression validation |
-| [docs/extending.md](docs/extending.md)        | Adding new tools, sub-agents, squads and plugins  |
-
----
-
-## License
-
-Released under the [MIT License](LICENSE).
-
-## Acknowledgements
-
-- The article *"Building Claude Code with Harness Engineering"* by
-  [Level Up Coding](https://levelup.gitconnected.com/building-claude-code-with-harness-engineering-d2e8c0da85f0)
-- [Anthropic Claude Code](https://www.anthropic.com/) for the
-  methodology this harness encodes.
-- [Google ADK for Go](https://pkg.go.dev/google.golang.org/adk) for the
-  underlying agent loop.
