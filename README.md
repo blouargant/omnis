@@ -30,7 +30,7 @@ code changes required to retarget the agent at a new domain.
 A simple chat session with the web UI — streaming responses, session
 history, and file attachments.
 
-<video src="docs/screencasts/chat.mp4" controls width="720"></video>
+[▶ Watch: Chat demo](docs/screencasts/chat.mp4)
 
 ---
 
@@ -40,7 +40,7 @@ Two sessions talking to each other via the built-in mailbox: one session
 delegates a sub-task and the other picks it up, processes it, and sends
 the result back.
 
-<video src="docs/screencasts/teammate.mp4" controls width="720"></video>
+[▶ Watch: Teammate demo](docs/screencasts/teammate.mp4)
 
 ---
 
@@ -50,7 +50,7 @@ Using the dedicated **registries_crawler** squad to browse remote GitHub
 or Gitea registries for community skills and agents, then installing them
 directly from the web UI.
 
-<video src="docs/screencasts/registries_crawler.mp4" controls width="720"></video>
+[▶ Watch: Registries crawler demo](docs/screencasts/registries_crawler.mp4)
 
 ---
 
@@ -60,7 +60,7 @@ A tour of the Settings area: agent configuration, model profiles, squad
 composition, MCP server wiring, and permission rules — all editable
 without touching a config file.
 
-<video src="docs/screencasts/settings.mp4" controls width="720"></video>
+[▶ Watch: Settings demo](docs/screencasts/settings.mp4)
 
 ---
 
@@ -68,7 +68,7 @@ without touching a config file.
 
 How to switch the web UI theme and persist the choice across sessions.
 
-<video src="docs/screencasts/themes.mp4" controls width="720"></video>
+[▶ Watch: Themes demo](docs/screencasts/themes.mp4)
 
 ---
 
