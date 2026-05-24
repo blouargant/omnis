@@ -18,3 +18,9 @@ a2a_port: 8090
 # Relative paths are resolved from the current working directory.
 # Override with YOKE_WEB_DIR environment variable.
 # web_dir: ""
+
+# Optional URL path prefix under which the web UI and all API routes are served.
+# Useful when the server sits behind a reverse proxy that strips a prefix.
+# Example: base_path: /my-company/myself
+# Override with YOKE_SERVER_BASE_PATH environment variable.
+# base_path: ""

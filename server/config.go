@@ -47,6 +47,11 @@ type ServerConfig struct {
 	// WebDir is the directory containing the static web UI files.
 	// Overridden by YOKE_WEB_DIR. Defaults to "web" (relative to CWD).
 	WebDir string `yaml:"web_dir,omitempty" json:"web_dir,omitempty"`
+	// BasePath is an optional URL path prefix under which the web UI and all
+	// API routes are served, e.g. "/my-company/myself". A leading slash is
+	// added automatically if omitted; a trailing slash is trimmed.
+	// Leave empty to serve from the root (default).
+	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty"`
 }
 
 // agentSourceLayer returns the config-chain layer ("local", "user", or "system")

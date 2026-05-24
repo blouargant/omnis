@@ -95,6 +95,7 @@ func run() error {
 	if webDir == "" {
 		webDir = "web"
 	}
+	basePath := normalizeBasePath(envOr("YOKE_SERVER_BASE_PATH", serverCfg.BasePath))
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -205,6 +206,7 @@ func run() error {
 		Manager:             manager,
 		Registry:            registry,
 		WebDir:              webDir,
+		BasePath:            basePath,
 		EventBus:            infra.Bus,
 		AskUserRegistry:     infra.AskUserRegistry,
 		AgentEvents:         newAgentEventBroadcaster(infra.Bus),
@@ -245,7 +247,7 @@ func run() error {
 			if host == "" {
 				host = "localhost"
 			}
-			openBrowser("http://" + net.JoinHostPort(host, port))
+			openBrowser("http://" + net.JoinHostPort(host, port) + basePath)
 		}
 	}
 
@@ -321,6 +323,20 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// normalizeBasePath ensures the path starts with "/" and has no trailing
+// slash. An empty or root-only input returns "" so the server registers
+// routes at the root (Gin treats an empty group prefix as "/").
+func normalizeBasePath(p string) string {
+	p = strings.TrimRight(strings.TrimSpace(p), "/")
+	if p == "" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
 }
 
 // findFreePort tries to bind to addr; if the port is in use it increments the

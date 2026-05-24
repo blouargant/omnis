@@ -75,6 +75,10 @@ type serverDeps struct {
 	AgentOptions toolkitagent.Options
 	// Restart triggers an in-place self re-exec of the server process.
 	Restart *restartCoordinator
+	// BasePath is the URL prefix under which all routes (UI and API) are
+	// served. Empty means root. Always starts with "/" and has no trailing
+	// slash when non-empty.
+	BasePath string
 }
 
 // agentBusEvent is a single event from the shared event bus forwarded to an
@@ -161,16 +165,22 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.Next()
 	})
 
-	// Static UI (no auth — served at the root).
+	// base is the router group that all routes (UI and API) are registered
+	// under. When BasePath is empty every route sits at the root; otherwise
+	// they all live under e.g. "/my-company/myself".
+	base := r.Group(d.BasePath)
+
+	// Static UI (no auth — served at the root of the base path).
 	indexPath := filepath.Join(d.WebDir, "index.html")
 	faviconPath := filepath.Join(d.WebDir, "favicon.svg")
-	r.StaticFile("/", indexPath)
-	r.StaticFile("/index.html", indexPath)
-	r.StaticFile("/favicon.svg", faviconPath)
-	r.StaticFile("/favicon.ico", faviconPath)
-	r.Static("/assets", d.WebDir)
+	indexHandler := serveIndex(indexPath, d.BasePath)
+	base.GET("/", indexHandler)
+	base.GET("/index.html", indexHandler)
+	base.StaticFile("/favicon.svg", faviconPath)
+	base.StaticFile("/favicon.ico", faviconPath)
+	base.Static("/assets", d.WebDir)
 
-	api := r.Group("/api")
+	api := base.Group("/api")
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -569,5 +579,40 @@ func requestLogger() gin.HandlerFunc {
 			c.Request.Method + " " + path + " " +
 			strconv.Itoa(c.Writer.Status()) + " " +
 			time.Since(start).Truncate(time.Millisecond).String() + "\n"))
+	}
+}
+
+// serveIndex returns a handler that serves index.html with a <base> tag and
+// window.BASE_PATH injected so the web UI works correctly under a sub-path.
+// The injection is a simple string insertion; the file is read once on the
+// first request and then served from the cached bytes.
+func serveIndex(indexPath, basePath string) gin.HandlerFunc {
+	baseHref := basePath + "/"
+	if basePath == "" {
+		baseHref = "/"
+	}
+	injection := "<base href=\"" + baseHref + "\" />\n  " +
+		"<script>window.BASE_PATH = \"" + basePath + "\";</script>"
+
+	var once sync.Once
+	var cached []byte
+	var cacheErr error
+
+	load := func() {
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			cacheErr = err
+			return
+		}
+		cached = []byte(strings.Replace(string(data), "<meta charset", injection+"\n  <meta charset", 1))
+	}
+
+	return func(c *gin.Context) {
+		once.Do(load)
+		if cacheErr != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", cached)
 	}
 }

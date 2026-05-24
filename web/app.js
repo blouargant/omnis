@@ -1426,7 +1426,7 @@ function resolveToolCall(block, response) {
 async function apiFetch(path, opts = {}) {
   const headers = authHeaders(opts.headers || {});
   if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch((window.BASE_PATH || "") + path, { ...opts, headers });
   if (res.status === 401) { promptForToken(); throw new Error("unauthorized"); }
   return res;
 }

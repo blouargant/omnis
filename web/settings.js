@@ -3,6 +3,7 @@
 // Exposes Settings.open() / Settings.close() / Settings.isOpen().
 
 (function () {
+const BASE_PATH = window.BASE_PATH || "";
   // Small inline SVG icons rendered next to each entry in the sidebar menu.
   const ICONS = {
     agent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg>`,
@@ -103,7 +104,7 @@
     // Persist to the server so the choice survives restarts. Skipped when
     // applying a value that just came from the server.
     if (!opts || opts.persist !== false) {
-      fetch("/api/preferences", {
+      fetch(BASE_PATH + "/api/preferences", {
         method: "PUT",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ theme: id }),
@@ -115,7 +116,7 @@
   // cache (which the inline <head> script applied synchronously).
   async function syncThemeFromServer() {
     try {
-      const r = await fetch("/api/preferences", { headers: authHeaders() });
+      const r = await fetch(BASE_PATH + "/api/preferences", { headers: authHeaders() });
       if (!r.ok) return;
       const p = await r.json();
       const serverTheme = (p && typeof p.theme === "string") ? p.theme : "";
@@ -319,7 +320,7 @@
     setLoading(true);
     setStatus("Reloading agent…");
     try {
-      const r = await fetch("/api/config/reload", { method: "POST", headers: authHeaders() });
+      const r = await fetch(BASE_PATH + "/api/config/reload", { method: "POST", headers: authHeaders() });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${r.status}`);
@@ -382,7 +383,7 @@
   let generationPollHandle = null;
   async function refreshGenerationPill() {
     try {
-      const r = await fetch("/api/config/status", { headers: authHeaders() });
+      const r = await fetch(BASE_PATH + "/api/config/status", { headers: authHeaders() });
       if (!r.ok) return;
       const body = await r.json();
       let pill = document.getElementById("generation-pill");
@@ -415,7 +416,7 @@
     setStatus("Restarting…");
     showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
     try {
-      const r = await fetch("/api/server/restart", { method: "POST", headers: authHeaders() });
+      const r = await fetch(BASE_PATH + "/api/server/restart", { method: "POST", headers: authHeaders() });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${r.status}`);
@@ -430,7 +431,7 @@
       const start = Date.now();
       const tick = async () => {
         try {
-          const h = await fetch("/api/health");
+          const h = await fetch(BASE_PATH + "/api/health");
           if (h.ok) { window.location.reload(); return; }
         } catch (_) { /* not yet up */ }
         if (Date.now() - start > 30000) {
@@ -642,14 +643,14 @@
 
   // ─── Loading ───────────────────────────────────────────────────────────
   async function loadRaw(id) {
-    const r = await fetch(`/api/config/file/${id}`, { headers: authHeaders() });
+    const r = await fetch(BASE_PATH + `/api/config/file/${id}`, { headers: authHeaders() });
     if (!r.ok) throw new Error(await errText(r));
     const j = await r.json();
     state.raw[id] = { content: j.content || "", mtime: j.mtime, dirty: false, value: j.content || "" };
   }
 
   async function loadParsed(id) {
-    const r = await fetch(`/api/config/parsed/${id}`, { headers: authHeaders() });
+    const r = await fetch(BASE_PATH + `/api/config/parsed/${id}`, { headers: authHeaders() });
     if (!r.ok) throw new Error(await errText(r));
     const j = await r.json();
     const data = j.data == null ? defaultDataFor(id) : j.data;
@@ -666,7 +667,7 @@
     state.builtinAgents = {};
     state.builtinNames = new Set();
     try {
-      const r = await fetch("/api/agent/builtin-defaults", { headers: authHeaders() });
+      const r = await fetch(BASE_PATH + "/api/agent/builtin-defaults", { headers: authHeaders() });
       if (!r.ok) return;
       const j = await r.json();
       state.builtinAgents = j.agents || {};
@@ -996,7 +997,7 @@
     let text = state.docs.cache[page.id];
     if (text == null) {
       try {
-        const r = await fetch(`/assets/docs/${page.file}`, { headers: authHeaders() });
+        const r = await fetch(BASE_PATH + `/assets/docs/${page.file}`, { headers: authHeaders() });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         text = await r.text();
         state.docs.cache[page.id] = text;
@@ -1765,7 +1766,7 @@
         const params = new URLSearchParams({ provider });
         if (m.api_key) params.set("api_key", m.api_key);
         if (m.base_url) params.set("base_url", m.base_url);
-        const r = await fetch(`/api/providers/models?${params}`, { headers: authHeaders() });
+        const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || r.statusText);
         allModels = j.models || [];
@@ -2327,7 +2328,7 @@
   }
 
   function renderSkillPermissions() {
-    fetch("/api/config/skill-permissions", { headers: authHeaders() })
+    fetch(BASE_PATH + "/api/config/skill-permissions", { headers: authHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data || !data.contributions || !data.contributions.length) return;
@@ -3601,7 +3602,7 @@
   async function skillsAPI(method, path, body) {
     const opts = { method, headers: authHeaders(body != null ? { "Content-Type": "application/json" } : {}) };
     if (body != null) opts.body = JSON.stringify(body);
-    const r = await fetch(`/api${path}`, opts);
+    const r = await fetch(BASE_PATH + `/api${path}`, opts);
     if (r.status === 204) return null;
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new SkillsAPIError(j.code || "HTTP_ERROR", j.error || `HTTP ${r.status}`, j.details);
@@ -6487,7 +6488,7 @@
     try {
       if (state.activeView === "raw") {
         const s = state.raw[id];
-        const r = await fetch(`/api/config/file/${id}`, {
+        const r = await fetch(BASE_PATH + `/api/config/file/${id}`, {
           method: "PUT",
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ content: s.value, mtime: s.mtime }),
@@ -6499,7 +6500,7 @@
         delete state.parsed[id];
       } else {
         const p = state.parsed[id];
-        const r = await fetch(`/api/config/parsed/${id}`, {
+        const r = await fetch(BASE_PATH + `/api/config/parsed/${id}`, {
           method: "PUT",
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ data: prepareForSave(id, p.value), mtime: p.mtime }),
