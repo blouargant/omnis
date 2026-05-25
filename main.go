@@ -54,10 +54,6 @@ type options struct {
 	softSkillsDir string
 	appName       string
 	configPath    string
-	modelProvider string
-	modelName     string
-	modelBaseURL  string
-	modelAPIKey   string
 	curatorRaw    string
 	debug         bool
 }
@@ -69,10 +65,6 @@ func newFlagSet(opts *options) *flag.FlagSet {
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
 	fs.StringVar(&opts.configPath, "config", "", "Path to runtime JSON config file (default: config/agents.json)")
-	fs.StringVar(&opts.modelProvider, "provider", "", "Global model provider override")
-	fs.StringVar(&opts.modelName, "model", "", "Global model override")
-	fs.StringVar(&opts.modelBaseURL, "base-url", "", "Global model base URL override")
-	fs.StringVar(&opts.modelAPIKey, "api-key", "", "Global model API key override")
 	fs.StringVar(&opts.curatorRaw, "curator-enabled", "", "Enable/disable auto-curator hook (true/false)")
 	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
 	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
@@ -194,10 +186,6 @@ func runTUI(ctx context.Context, opts options) error {
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		ModelProvider:    opts.modelProvider,
-		ModelName:        opts.modelName,
-		ModelBaseURL:     opts.modelBaseURL,
-		ModelAPIKey:      opts.modelAPIKey,
 		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	}
@@ -263,10 +251,6 @@ func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		ModelProvider:    opts.modelProvider,
-		ModelName:        opts.modelName,
-		ModelBaseURL:     opts.modelBaseURL,
-		ModelAPIKey:      opts.modelAPIKey,
 		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	})

@@ -114,14 +114,6 @@ type Options struct {
 	ConfigPath string
 	// ConfigPathStrict returns an error when ConfigPath does not exist.
 	ConfigPathStrict bool
-	// ModelProvider overrides the global model provider for all roles not explicitly configured.
-	ModelProvider string
-	// ModelName overrides the global model for all roles not explicitly configured.
-	ModelName string
-	// ModelBaseURL overrides the global model base URL for all roles not explicitly configured.
-	ModelBaseURL string
-	// ModelAPIKey overrides the global model API key for all roles not explicitly configured.
-	ModelAPIKey string
 	// CuratorEnabled explicitly enables/disables curator auto-run.
 	CuratorEnabled *bool
 	// DebugLogging enables full event payload logging, including model requests.

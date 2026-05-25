@@ -24,14 +24,14 @@ type SquadEntry struct {
 	Members     []string `json:"members"`
 }
 
-// AgentEntry describes one agent in the JSON runtime config.
+// AgentEntry describes one agent in the JSON runtime config. Model selection
+// is owned exclusively by models.json — an agent picks a model via ModelRef
+// and inherits provider/base_url/api_key/context_length/prices from there.
+// Older agent.json files may still carry provider/model/base_url/api_key
+// fields; Go's JSON decoder silently drops them.
 type AgentEntry struct {
 	Name                  string   `json:"name"`
 	ModelRef              string   `json:"model_ref"`
-	Provider              string   `json:"provider"`
-	Model                 string   `json:"model"`
-	BaseURL               string   `json:"base_url"`
-	APIKey                string   `json:"api_key"`
 	Description           string   `json:"description"`
 	Instruction           string   `json:"instruction"`
 	Enabled               *bool    `json:"enabled"`
@@ -408,10 +408,10 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 		out = append(out, RuntimeAgentConfig{
 			Name:                              name,
 			ModelRef:                          modelRef,
-			Provider:                          firstNonEmpty(strings.TrimSpace(e.Provider), refModel.Provider),
-			Model:                             firstNonEmpty(strings.TrimSpace(e.Model), refModel.Model),
-			BaseURL:                           resolveBaseURLReference(firstNonEmpty(strings.TrimSpace(e.BaseURL), refModel.BaseURL)),
-			APIKey:                            resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(e.APIKey), refModel.APIKey)),
+			Provider:                          refModel.Provider,
+			Model:                             refModel.Model,
+			BaseURL:                           refModel.BaseURL,
+			APIKey:                            refModel.APIKey,
 			ContextLength:                     refModel.ContextLength,
 			InputTokenPricePerMillion:         refModel.InputTokenPricePerMillion,
 			OutputTokenPricePerMillion:        refModel.OutputTokenPricePerMillion,
@@ -491,17 +491,6 @@ func withInheritedModels(agents []RuntimeAgentConfig) ([]RuntimeAgentConfig, err
 	return out, nil
 }
 
-func mergeAgentByName(agents []RuntimeAgentConfig, name string, f func(RuntimeAgentConfig) RuntimeAgentConfig) []RuntimeAgentConfig {
-	needle := strings.ToLower(strings.TrimSpace(name))
-	for i := range agents {
-		if agents[i].Name == needle {
-			agents[i] = f(agents[i])
-			return agents
-		}
-	}
-	return agents
-}
-
 func applyCuratorEnabledOverride(agents []RuntimeAgentConfig, enabled bool) []RuntimeAgentConfig {
 	for i := range agents {
 		if agents[i].Name == "curator" {
@@ -511,32 +500,6 @@ func applyCuratorEnabledOverride(agents []RuntimeAgentConfig, enabled bool) []Ru
 	}
 	agents = append(agents, RuntimeAgentConfig{Name: "curator", Enabled: enabled})
 	return agents
-}
-
-func applyLeaderSelectionOverride(agents []RuntimeAgentConfig, provider, model, baseURL, apiKey string) []RuntimeAgentConfig {
-	return mergeAgentByName(agents, "leader", func(a RuntimeAgentConfig) RuntimeAgentConfig {
-		if strings.TrimSpace(provider) != "" {
-			a.Provider = strings.TrimSpace(provider)
-		}
-		if strings.TrimSpace(model) != "" {
-			a.Model = strings.TrimSpace(model)
-		}
-		if strings.TrimSpace(baseURL) != "" {
-			a.BaseURL = strings.TrimSpace(baseURL)
-		}
-		if strings.TrimSpace(apiKey) != "" {
-			a.APIKey = strings.TrimSpace(apiKey)
-		}
-		return a
-	})
-}
-
-func applyLeaderModelEnv(agents []RuntimeAgentConfig) []RuntimeAgentConfig {
-	provider := strings.TrimSpace(os.Getenv("YOKE_PROVIDER"))
-	model := strings.TrimSpace(os.Getenv("YOKE_MODEL"))
-	baseURL := strings.TrimSpace(os.Getenv("YOKE_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("YOKE_API_KEY"))
-	return applyLeaderSelectionOverride(agents, provider, model, baseURL, apiKey)
 }
 
 func mapAgentEntries(entries []RuntimeAgentConfig, fn func(RuntimeAgentConfig) RuntimeAgentConfig) []RuntimeAgentConfig {
@@ -553,8 +516,8 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		ModelRef:                          strings.ToLower(strings.TrimSpace(in.ModelRef)),
 		Provider:                          strings.TrimSpace(in.Provider),
 		Model:                             strings.TrimSpace(in.Model),
-		BaseURL:                           resolveBaseURLReference(strings.TrimSpace(in.BaseURL)),
-		APIKey:                            resolveAPIKeyReference(strings.TrimSpace(in.APIKey)),
+		BaseURL:                           strings.TrimSpace(in.BaseURL),
+		APIKey:                            strings.TrimSpace(in.APIKey),
 		ContextLength:                     in.ContextLength,
 		InputTokenPricePerMillion:         in.InputTokenPricePerMillion,
 		OutputTokenPricePerMillion:        in.OutputTokenPricePerMillion,
@@ -834,7 +797,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 
 	// ENV
-	out.Agents = applyLeaderModelEnv(out.Agents)
 	if v, ok := parseBoolEnv("YOKE_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
 	}
@@ -863,7 +825,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(opts.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(opts.PermissionsConfigPath)
 	}
-	out.Agents = applyLeaderSelectionOverride(out.Agents, opts.ModelProvider, opts.ModelName, opts.ModelBaseURL, opts.ModelAPIKey)
 	if opts.CuratorEnabled != nil {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, *opts.CuratorEnabled)
 	} else if opts.DisableAutoCurate {

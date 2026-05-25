@@ -34,10 +34,6 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		ModelProvider:    opts.modelProvider,
-		ModelName:        opts.modelName,
-		ModelBaseURL:     opts.modelBaseURL,
-		ModelAPIKey:      opts.modelAPIKey,
 		CuratorEnabled:   curatorEnabled,
 	})
 	if err != nil {

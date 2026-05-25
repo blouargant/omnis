@@ -346,10 +346,6 @@ func (s *settingsView) editAgentEntryForm() {
 	form.AddInputField("name", entry.Name, 40, nil, func(v string) { entry.Name = v })
 	form.AddInputField("description", entry.Description, 60, nil, func(v string) { entry.Description = v })
 	form.AddInputField("model_ref", entry.ModelRef, 30, nil, func(v string) { entry.ModelRef = v })
-	form.AddInputField("provider", entry.Provider, 20, nil, func(v string) { entry.Provider = v })
-	form.AddInputField("model", entry.Model, 40, nil, func(v string) { entry.Model = v })
-	form.AddInputField("base_url", entry.BaseURL, 40, nil, func(v string) { entry.BaseURL = v })
-	form.AddInputField("api_key (env name)", entry.APIKey, 30, nil, func(v string) { entry.APIKey = v })
 	form.AddInputField("tools (comma-separated)", strings.Join(entry.Tools, ", "), 60, nil, func(v string) {
 		entry.Tools = parseCSV(v)
 	})

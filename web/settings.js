@@ -368,11 +368,15 @@ const BASE_PATH = window.BASE_PATH || "";
         setTimeout(() => onEnd(), 400);
       }
       refreshGenerationPill();
-      // Invalidate the cached MCP config so switching to the Servers subtab
-      // re-fetches the freshly-reloaded data. Re-render immediately if the
-      // user is already viewing the MCP settings.
-      delete state.parsed["mcp"];
-      if (state.activeFile === "mcp") renderBody();
+      // Invalidate every parsed-config cache so the next render re-fetches
+      // the on-disk state the runtime just reloaded. Without this, an
+      // editor panel keeps its in-memory copy and the user may see the
+      // pre-save value of fields that weren't directly touched (e.g. the
+      // providers URL after a Save+Reload). Unsaved changes were already
+      // either persisted or discarded by the hasAnyUnsaved check above.
+      for (const k of Object.keys(state.parsed)) delete state.parsed[k];
+      for (const k of Object.keys(state.raw)) delete state.raw[k];
+      if (state.activeFile) renderBody();
       // Notify the main app shell so it can refresh anything cached from the
       // server side (squad picker, etc.) without a full page reload.
       window.dispatchEvent(new CustomEvent("yoke:config-reloaded", { detail: { generation: body.generation } }));

@@ -9,10 +9,6 @@ import (
 )
 
 func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
-	t.Setenv("YOKE_PROVIDER", "openai_compat")
-	t.Setenv("YOKE_MODEL", "env-model")
-	t.Setenv("YOKE_BASE_URL", "https://env-base/v1")
-	t.Setenv("YOKE_API_KEY", "env-global-key")
 	t.Setenv("YOKE_CURATOR_ENABLED", "true")
 	t.Setenv("CURATOR_KEY_ENV", "resolved-curator-key")
 	t.Setenv("JSON_KEY_ENV", "resolved-json-key")
@@ -21,7 +17,7 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 	setupAgentsRegistry(t, dir, []AgentEntry{
 		{Name: "leader", ModelRef: "leader-default"},
 		{Name: "curator", ModelRef: "curator-fast", Enabled: ptrBool(false)},
-		{Name: "investigator", ModelRef: "leader-default", Provider: "openai", Model: "role-investigator-model", Enabled: ptrBool(false)},
+		{Name: "investigator", Enabled: ptrBool(false)},
 	})
 
 	cfgPath := filepath.Join(dir, "agent.json")
@@ -45,6 +41,7 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
       "output_token_price_per_million": 15
     },
     "curator-fast": {
+      "provider": "openai",
       "model": "role-curator-model",
       "api_key": "CURATOR_KEY_ENV",
       "context_length": 128000
@@ -57,10 +54,6 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 		ConfigPath:       cfgPath,
 		ConfigPathStrict: true,
 		AppName:          "cli-app",
-		ModelProvider:    "openai",
-		ModelName:        "cli-model",
-		ModelBaseURL:     "https://cli-base/v1",
-		ModelAPIKey:      "cli-api-key",
 		CuratorEnabled:   &curatorEnabled,
 	})
 	if err != nil {
@@ -84,17 +77,17 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 	if !ok {
 		t.Fatal("leader config missing")
 	}
-	if got := leader.Provider; got != "openai" {
-		t.Fatalf("leader.Provider = %q, want openai", got)
+	if got := leader.Provider; got != "anthropic" {
+		t.Fatalf("leader.Provider = %q, want anthropic", got)
 	}
-	if got := leader.Model; got != "cli-model" {
-		t.Fatalf("leader.Model = %q, want cli-model", got)
+	if got := leader.Model; got != "json-default-model" {
+		t.Fatalf("leader.Model = %q, want json-default-model", got)
 	}
-	if got := leader.BaseURL; got != "https://cli-base/v1" {
-		t.Fatalf("leader.BaseURL = %q, want https://cli-base/v1", got)
+	if got := leader.BaseURL; got != "https://json-base/v1" {
+		t.Fatalf("leader.BaseURL = %q, want https://json-base/v1", got)
 	}
-	if got := leader.APIKey; got != "cli-api-key" {
-		t.Fatalf("leader.APIKey = %q, want cli-api-key", got)
+	if got := leader.APIKey; got != "resolved-json-key" {
+		t.Fatalf("leader.APIKey = %q, want resolved-json-key", got)
 	}
 	if got := leader.ContextLength; got != 200000 {
 		t.Fatalf("leader.ContextLength = %d, want 200000", got)
@@ -136,15 +129,16 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 	if inv.Leader {
 		t.Fatal("investigator.Leader = true, want false")
 	}
-	if inv.Provider != "openai" || inv.Model != "role-investigator-model" {
-		t.Fatalf("investigator = %#v, want provider=openai model=role-investigator-model", inv)
+	// No model_ref of its own — inherits the leader's resolved model fields.
+	if inv.Provider != "anthropic" || inv.Model != "json-default-model" {
+		t.Fatalf("investigator = %#v, want inherited provider=anthropic model=json-default-model", inv)
 	}
 }
 
-func TestResolveRuntimeSettingsAPIKeyLiteralWhenEnvMissing(t *testing.T) {
+func TestResolveRuntimeSettingsBaseURLFromProviderEnv(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", APIKey: "sk-literal"},
+		{Name: "leader", ModelRef: "default"},
 	})
 
 	path := filepath.Join(dir, "agent.json")
@@ -152,37 +146,11 @@ func TestResolveRuntimeSettingsAPIKeyLiteralWhenEnvMissing(t *testing.T) {
   "agents": ["leader"]
 }`))
 	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "providers": {
+    "compat": {"kind": "openai_compat", "base_url": "BASE_URL_ENV"}
+  },
   "models": {
-    "default": {"provider": "openai_compat", "model": "fallback"}
-  }
-}`))
-
-	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
-	if err != nil {
-		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
-	}
-	leader, ok := runtime.AgentConfig("leader")
-	if !ok {
-		t.Fatal("leader config missing")
-	}
-	if got := leader.APIKey; got != "sk-literal" {
-		t.Fatalf("leader.APIKey = %q, want sk-literal", got)
-	}
-}
-
-func TestResolveRuntimeSettingsBaseURLFromEnv(t *testing.T) {
-	dir := t.TempDir()
-	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", BaseURL: "BASE_URL_ENV"},
-	})
-
-	path := filepath.Join(dir, "agent.json")
-	mustWrite(t, path, []byte(`{
-  "agents": ["leader"]
-}`))
-	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
-  "models": {
-    "default": {"provider": "openai_compat", "model": "fallback"}
+    "default": {"provider_ref": "compat", "model": "fallback"}
   }
 }`))
 	t.Setenv("BASE_URL_ENV", "https://resolved-base-url/v1")
@@ -200,39 +168,10 @@ func TestResolveRuntimeSettingsBaseURLFromEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRuntimeSettingsBaseURLLiteralWhenEnvMissing(t *testing.T) {
-	dir := t.TempDir()
-	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "leader", ModelRef: "default", Provider: "openai_compat", Model: "test-model", BaseURL: "https://literal-base-url/v1"},
-	})
-
-	path := filepath.Join(dir, "agent.json")
-	mustWrite(t, path, []byte(`{
-  "agents": ["leader"]
-}`))
-	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
-  "models": {
-    "default": {"provider": "openai_compat", "model": "fallback"}
-  }
-}`))
-
-	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
-	if err != nil {
-		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
-	}
-	leader, ok := runtime.AgentConfig("leader")
-	if !ok {
-		t.Fatal("leader config missing")
-	}
-	if got := leader.BaseURL; got != "https://literal-base-url/v1" {
-		t.Fatalf("leader.BaseURL = %q, want https://literal-base-url/v1", got)
-	}
-}
-
 func TestResolveRuntimeSettingsRejectsLegacyModelsInAgentsJSON(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "leader", Provider: "openai_compat", Model: "test-model"},
+		{Name: "leader"},
 	})
 
 	path := filepath.Join(dir, "agent.json")
@@ -335,8 +274,6 @@ func TestResolveRuntimeSettingsUnknownModelRef(t *testing.T) {
 }
 
 func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
-	t.Setenv("YOKE_PROVIDER", "")
-	t.Setenv("YOKE_MODEL", "")
 	t.Setenv("YOKE_CURATOR_ENABLED", "")
 	// Pin path roots so assertions are stable regardless of the host's
 	// real $HOME or ./config layout.
@@ -375,7 +312,7 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "leader", Provider: "openai_compat", Model: "test"},
+		{Name: "leader"},
 	})
 
 	path := filepath.Join(dir, "agent.json")
@@ -407,7 +344,7 @@ func TestResolveRuntimeSettingsStrictMissingConfig(t *testing.T) {
 func TestResolveRuntimeSettingsRequiresLeader(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
-		{Name: "investigator", Provider: "openai"},
+		{Name: "investigator"},
 	})
 
 	path := filepath.Join(dir, "agent.json")

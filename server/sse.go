@@ -69,10 +69,14 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			defer release()
 		}
 
-		// Pin (if not already) to the current generation and resolve the
-		// session's squad inside it. A reload between turns leaves the
-		// session attached to its existing generation so a streaming turn
-		// never observes a swap.
+		// We hold the run-guard, so no other turn is in flight for this
+		// session. Migrate the pin to the current agent generation so a
+		// reload that happened between turns takes effect immediately
+		// (otherwise the session would stay on its old generation until the
+		// idle-rebind scanner releases it, which can be many seconds).
+		d.Manager.MigrateToCurrent(meta.ID)
+
+		// Resolve the session's squad inside the (now-current) generation.
 		sq := d.Manager.LookupSquad(meta.ID, meta.Squad)
 		if sq == nil || sq.Runner == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent generation not available"})

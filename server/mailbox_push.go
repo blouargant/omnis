@@ -160,6 +160,10 @@ func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, user
 	if !ok {
 		return
 	}
+	// We hold the run-guard for this session, so any hot-reload that
+	// happened between turns can now be applied: migrate the pin to the
+	// current generation before resolving the squad.
+	d.Manager.MigrateToCurrent(sessionID)
 	sq := d.Manager.LookupSquad(sessionID, meta.Squad)
 	if sq == nil || sq.Runner == nil {
 		return

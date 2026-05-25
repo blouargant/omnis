@@ -1,15 +1,11 @@
 {
   "allow_file_attachments": false,
-  "api_key": "OPENAI_API_KEY",
-  "base_url": "OPENAI_BASE_URL",
   "builtin": false,
   "description": "Generic coordinator agent.",
   "enabled": true,
   "leader": true,
-  "model": "claude-sonnet-4-6",
   "model_ref": "premium",
   "name": "leader",
-  "provider": "openai_compat",
   "skills": [
     "ask-user",
     "pdf",

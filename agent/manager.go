@@ -191,6 +191,43 @@ func (m *Manager) Lookup(sessionID string) *Instance {
 	return m.Pin(sessionID)
 }
 
+// MigrateToCurrent re-pins sessionID to the current generation when it is
+// pinned to an older one and returns the resulting Instance. Safe to call
+// at a turn boundary (caller should hold the session's run-guard). The old
+// generation's refcount is decremented and the generation torn down if it
+// reaches zero. When the session is already pinned to current — or not
+// pinned at all — this is a no-op that returns the current Instance.
+func (m *Manager) MigrateToCurrent(sessionID string) *Instance {
+	if sessionID == "" {
+		return m.Current()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur := m.instances[m.currentGen]
+	if cur == nil {
+		return nil
+	}
+	oldGen, pinned := m.sessionGen[sessionID]
+	if !pinned {
+		m.sessionGen[sessionID] = m.currentGen
+		cur.refcount++
+		return cur.inst
+	}
+	if oldGen == m.currentGen {
+		return cur.inst
+	}
+	m.sessionGen[sessionID] = m.currentGen
+	cur.refcount++
+	if oldMI := m.instances[oldGen]; oldMI != nil {
+		oldMI.refcount--
+		if oldMI.refcount <= 0 && oldGen != m.currentGen {
+			delete(m.instances, oldGen)
+			_ = oldMI.inst.Close()
+		}
+	}
+	return cur.inst
+}
+
 // PinnedGeneration returns the generation a session is pinned to, or 0 when
 // the session is not currently pinned.
 func (m *Manager) PinnedGeneration(sessionID string) int {

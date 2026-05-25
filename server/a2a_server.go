@@ -271,6 +271,11 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 	if routing.Persistent && s.deps.RunGuard != nil {
 		release := s.deps.RunGuard.acquire(routing.SessionID)
 		defer release()
+		// Apply any pending hot-reload to this session before we start the
+		// turn (we hold the run-guard, so no other turn is mid-flight).
+		if s.deps.Manager != nil {
+			s.deps.Manager.MigrateToCurrent(routing.SessionID)
+		}
 	}
 
 	rec.mu.Lock()
@@ -417,6 +422,9 @@ func (s *a2aServer) tasksSendSubscribe(w http.ResponseWriter, r *http.Request, r
 	if routing.Persistent && s.deps.RunGuard != nil {
 		release := s.deps.RunGuard.acquire(routing.SessionID)
 		defer release()
+		if s.deps.Manager != nil {
+			s.deps.Manager.MigrateToCurrent(routing.SessionID)
+		}
 	}
 
 	emitSSE := func(event string, data any) {

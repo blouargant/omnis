@@ -183,47 +183,45 @@ var configFileNames = map[string]string{
 // precedence used by agent.NewAgent (defaults → JSON → ENV → Options) so
 // the editor always targets the file actually loaded by the running agent.
 func resolveConfigFiles(opts agent.Options) configFiles {
-	// MCP is intentionally left empty here: path("mcp") re-runs FindConfig on
-	// every request so a newly-installed server written to $YOKE_HOME/config is
-	// visible immediately. We only cache an explicit override (CLI flag, env var,
-	// or mcp_config_path in agents.json) detected by comparing against the startup
-	// FindConfig result — if they differ, the operator pinned a custom path.
+	// Every field is cached only when it is an explicit operator override
+	// (CLI flag, env var, or per-file path in agents.json) — detected by
+	// comparing the resolved path against the startup FindConfig default.
+	// When empty, path() falls through to paths.FindConfig at request time
+	// so a fork into $YOKE_HOME on first Save (e.g. when ~/.yoke/models.json
+	// did not exist at startup) becomes visible without restart.
+	findConfigAgent := paths.FindConfig("agents.json")
+	findConfigModels := paths.FindConfig("models.json")
+	findConfigPermissions := paths.FindConfig("permissions.json")
 	findConfigMCP := paths.FindConfig("mcp_config.json")
-	out := configFiles{
-		Agent:       firstNonEmpty(opts.ConfigPath, paths.FindConfig("agents.json")),
-		Models:      paths.FindConfig("models.json"),
-		Permissions: firstNonEmpty(opts.PermissionsConfigPath, paths.FindConfig("permissions.json")),
-		A2A:         paths.FindConfig("a2a_config.json"),
+
+	out := configFiles{}
+	if v := strings.TrimSpace(opts.ConfigPath); v != "" && v != findConfigAgent {
+		out.Agent = v
+	}
+	if v := strings.TrimSpace(opts.PermissionsConfigPath); v != "" && v != findConfigPermissions {
+		out.Permissions = v
 	}
 	settings, err := agent.ResolveRuntimeSettings(opts)
 	if err == nil {
-		if strings.TrimSpace(settings.ConfigPath) != "" {
-			out.Agent = settings.ConfigPath
+		if v := strings.TrimSpace(settings.ConfigPath); v != "" && v != findConfigAgent {
+			out.Agent = v
 		}
-		if strings.TrimSpace(settings.ModelsConfigPath) != "" {
-			out.Models = settings.ModelsConfigPath
+		if v := strings.TrimSpace(settings.ModelsConfigPath); v != "" && v != findConfigModels {
+			out.Models = v
 		}
-		if strings.TrimSpace(settings.PermissionsConfigPath) != "" {
-			out.Permissions = settings.PermissionsConfigPath
+		if v := strings.TrimSpace(settings.PermissionsConfigPath); v != "" && v != findConfigPermissions {
+			out.Permissions = v
 		}
-		// Only cache the MCP path when it is an explicit override, not the FindConfig
-		// default. When empty, path("mcp") falls through to paths.FindConfig each time.
 		if v := strings.TrimSpace(settings.MCPConfigPath); v != "" && v != findConfigMCP {
 			out.MCP = v
 		}
 	}
-	if abs, err := filepath.Abs(out.Agent); err == nil {
-		out.Agent = abs
-	}
-	if abs, err := filepath.Abs(out.Models); err == nil {
-		out.Models = abs
-	}
-	if abs, err := filepath.Abs(out.Permissions); err == nil {
-		out.Permissions = abs
-	}
-	if out.MCP != "" {
-		if abs, err := filepath.Abs(out.MCP); err == nil {
-			out.MCP = abs
+	for _, p := range []*string{&out.Agent, &out.Models, &out.Permissions, &out.MCP, &out.A2A} {
+		if *p == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(*p); err == nil {
+			*p = abs
 		}
 	}
 	return out
@@ -698,11 +696,8 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							"builtin":                 a.BuiltIn,
 							"source":                  agentSourceLayer(a.Name),
 							"model_ref":               a.ModelRef,
-							"provider":                a.Provider,
 							"model":                   a.Model,
 							"recommended_model":       recommendedModel,
-							"base_url":                a.BaseURL,
-							"api_key":                 a.APIKey,
 							"tools":                   a.Tools,
 							"skills":                  a.Skills,
 							"softskills_dir":          a.SoftSkillsDir,

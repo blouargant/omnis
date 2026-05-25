@@ -1,6 +1,6 @@
 {
   "providers": {
-    "openai-sweden": {
+    "openai-compat": {
       "kind": "openai_compat",
       "base_url": "OPENAI_BASE_URL",
       "api_key": "OPENAI_API_KEY"
@@ -8,35 +8,35 @@
   },
   "models": {
     "balanced": {
-      "provider_ref": "openai-sweden",
+      "provider_ref": "openai-compat",
       "model": "gpt-4.1-mini-sweden",
       "context_length": 128000,
       "input_token_price_per_million": 0.42,
       "output_token_price_per_million": 1.68
     },
     "hosted": {
-      "provider_ref": "openai-sweden",
+      "provider_ref": "openai-compat",
       "model": "test",
       "context_length": 128000,
       "input_token_price_per_million": 0.6,
       "output_token_price_per_million": 3.6
     },
     "imagegen": {
-      "provider_ref": "openai-sweden",
+      "provider_ref": "openai-compat",
       "model": "gemini-3-pro-image-preview",
       "context_length": 65536,
       "input_token_price_per_million": 2.1,
       "output_token_price_per_million": 12.6
     },
     "premium": {
-      "provider_ref": "openai-sweden",
+      "provider_ref": "openai-compat",
       "model": "claude-sonnet-4-6",
       "context_length": 200000,
       "input_token_price_per_million": 5,
       "output_token_price_per_million": 26
     },
     "simple": {
-      "provider_ref": "openai-sweden",
+      "provider_ref": "openai-compat",
       "model": "gpt-4o-mini-sweden",
       "context_length": 128000,
       "input_token_price_per_million": 0.17,

@@ -1,15 +1,11 @@
 {
   "allow_file_attachments": false,
-  "api_key": "OPENAI_API_KEY",
-  "base_url": "OPENAI_BASE_URL",
   "builtin": false,
   "description": "Condenses long content into a structured brief.",
   "enabled": true,
   "leader": false,
-  "model": "gpt-4.1-mini-sweden",
   "model_ref": "balanced",
   "name": "summariser",
-  "provider": "openai_compat",
   "skills": null,
   "softskills_dir": "",
   "tools": null

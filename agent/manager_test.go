@@ -100,6 +100,55 @@ func TestManagerPinToFailsForRetiredGeneration(t *testing.T) {
 	}
 }
 
+func TestManagerMigrateToCurrentRebindsAndTearsDownOldGen(t *testing.T) {
+	inst1 := newTestInstance(1)
+	m := NewManager(nil, inst1)
+	m.Pin("sess-a")
+
+	// Simulate Reload manually: install gen 2 and promote it.
+	inst2 := newTestInstance(2)
+	m.mu.Lock()
+	m.instances[2] = &managedInstance{inst: inst2}
+	m.currentGen = 2
+	m.mu.Unlock()
+
+	got := m.MigrateToCurrent("sess-a")
+	if got != inst2 {
+		t.Fatal("MigrateToCurrent returned wrong instance")
+	}
+	if gen := m.PinnedGeneration("sess-a"); gen != 2 {
+		t.Fatalf("pin after migrate = %d, want 2", gen)
+	}
+	if _, ok := m.instances[1]; ok {
+		t.Fatal("gen 1 not torn down after last session migrated")
+	}
+}
+
+func TestManagerMigrateToCurrentNoOpWhenAlreadyCurrent(t *testing.T) {
+	inst1 := newTestInstance(1)
+	m := NewManager(nil, inst1)
+	m.Pin("sess-a")
+
+	if got := m.MigrateToCurrent("sess-a"); got != inst1 {
+		t.Fatal("MigrateToCurrent returned wrong instance")
+	}
+	if gens := m.Generations(); gens[1] != 1 {
+		t.Fatalf("refcount after no-op migrate = %d, want 1", gens[1])
+	}
+}
+
+func TestManagerMigrateToCurrentPinsUnpinnedSession(t *testing.T) {
+	inst1 := newTestInstance(1)
+	m := NewManager(nil, inst1)
+
+	if got := m.MigrateToCurrent("sess-new"); got != inst1 {
+		t.Fatal("MigrateToCurrent returned wrong instance for unpinned session")
+	}
+	if gen := m.PinnedGeneration("sess-new"); gen != 1 {
+		t.Fatalf("auto-pin failed: gen = %d, want 1", gen)
+	}
+}
+
 func TestManagerReleaseKeepsCurrentGeneration(t *testing.T) {
 	inst1 := newTestInstance(1)
 	m := NewManager(nil, inst1)
