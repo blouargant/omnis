@@ -104,6 +104,13 @@ type AgentInfo struct {
 	Tags        []string `json:"tags,omitempty"`
 	Installed   bool     `json:"installed"`
 	Format      string   `json:"format,omitempty"` // "claude" for Claude Code .md format; empty for native yoke format
+	// Tools/Model/Skills/MCPServers surface the same hints the agent's
+	// definition declares (agent.json or frontmatter), so the browse cards
+	// can show them next to the description before install.
+	Tools      []string `json:"tools,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	MCPServers []string `json:"mcp_servers,omitempty"`
 }
 
 // RepoRef is the provider-agnostic interface that browse/install use.

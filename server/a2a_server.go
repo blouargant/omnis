@@ -729,7 +729,7 @@ type sessionRouting struct {
 	UserID     string
 	SessionID  string
 	Meta       *sessions.SessionMeta // non-nil when targeting a registered session
-	Persistent bool         // true when the call should persist + lock
+	Persistent bool                  // true when the call should persist + lock
 }
 
 // routingError is a typed rejection that the caller maps to a -32602.

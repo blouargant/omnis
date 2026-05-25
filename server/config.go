@@ -677,7 +677,19 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 				if m, ok := parsed.(map[string]any); ok {
 					// Build agent objects from resolved configs
 					agents := make([]any, 0, len(settings.Agents))
+					// Resolve frontmatter once per agent so we can surface
+					// recommended_model when the agent ships a "model:" hint
+					// (e.g. `model: sonnet`) that the user's models.json
+					// catalogue does not provide.
+					modelCatalog := settings.Models
 					for _, a := range settings.Agents {
+						fm := agent.ReadAgentInstructionFrontmatter(a.Name)
+						var recommendedModel string
+						if fm.Model != "" {
+							if _, ok := modelCatalog[strings.ToLower(fm.Model)]; !ok {
+								recommendedModel = fm.Model
+							}
+						}
 						agents = append(agents, map[string]any{
 							"name":                    a.Name,
 							"description":             a.Description,
@@ -688,6 +700,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							"model_ref":               a.ModelRef,
 							"provider":                a.Provider,
 							"model":                   a.Model,
+							"recommended_model":       recommendedModel,
 							"base_url":                a.BaseURL,
 							"api_key":                 a.APIKey,
 							"tools":                   a.Tools,

@@ -684,24 +684,61 @@ func ensureDefaultSquad(squads []RuntimeSquadConfig, agents []RuntimeAgentConfig
 // one of the layers.
 func loadAgentFromRegistry(name string, registryDirs []string) (AgentEntry, error) {
 	for _, dir := range registryDirs {
-		p := filepath.Join(dir, name, "agent.json")
-		b, err := os.ReadFile(p)
-		if os.IsNotExist(err) {
+		agentDir := filepath.Join(dir, name)
+		jsonBytes, jsonErr := os.ReadFile(filepath.Join(agentDir, "agent.json"))
+		instrBytes, instrErr := os.ReadFile(filepath.Join(agentDir, "instruction.md"))
+
+		// Nothing usable in this layer — try the next one.
+		if (jsonErr != nil && os.IsNotExist(jsonErr)) && (instrErr != nil && os.IsNotExist(instrErr)) {
 			continue
 		}
-		if err != nil {
-			return AgentEntry{}, fmt.Errorf("agent registry %q: %w", p, err)
+		if jsonErr != nil && !os.IsNotExist(jsonErr) {
+			return AgentEntry{}, fmt.Errorf("agent registry %q: %w", filepath.Join(agentDir, "agent.json"), jsonErr)
 		}
+
 		var e AgentEntry
-		if err := json.Unmarshal(b, &e); err != nil {
-			return AgentEntry{}, fmt.Errorf("agent registry %q: decode json: %w", p, err)
+		if jsonErr == nil {
+			if err := json.Unmarshal(jsonBytes, &e); err != nil {
+				return AgentEntry{}, fmt.Errorf("agent registry %q: decode json: %w", filepath.Join(agentDir, "agent.json"), err)
+			}
 		}
 		if e.Name == "" {
 			e.Name = name
 		}
+		// Frontmatter in instruction.md acts as an override layer on top of
+		// agent.json so a Claude Code–style markdown agent stays portable:
+		// drop a single .md file into the registry and the model/tools/skills
+		// hints in the frontmatter drive the runtime config.
+		if instrErr == nil {
+			if fm, _ := ParseInstructionMarkdown(instrBytes); fm.HasAny() {
+				applyInstructionFrontmatter(&e, fm)
+			}
+		}
 		return e, nil
 	}
 	return AgentEntry{}, fmt.Errorf("agent %q not found in any registry directory", name)
+}
+
+// applyInstructionFrontmatter overlays frontmatter values onto an AgentEntry.
+// The model field is intentionally treated as a recommendation only — the
+// frontmatter never silently rewires which provider/model the runtime targets.
+// The Web UI surfaces unresolved recommendations via a separate channel.
+func applyInstructionFrontmatter(e *AgentEntry, fm InstructionFrontmatter) {
+	if fm.Name != "" {
+		e.Name = fm.Name
+	}
+	if fm.Description != "" {
+		e.Description = fm.Description
+	}
+	if len(fm.Tools) > 0 {
+		e.Tools = fm.Tools
+	}
+	if len(fm.Skills) > 0 {
+		e.Skills = fm.Skills
+	}
+	if len(fm.MCPServers) > 0 {
+		e.MCPServers = fm.MCPServers
+	}
 }
 
 // ResolveRuntimeSettings loads and merges runtime settings using precedence:

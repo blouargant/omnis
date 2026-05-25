@@ -1992,6 +1992,29 @@ const BASE_PATH = window.BASE_PATH || "";
     serpapi: "SerpAPI", web: "Browser Tool", registries: "Skill Registries",
   };
 
+  // updateFleetModelLine syncs the model display under a fleet-list item with
+  // the agent's current model_ref / recommended_model. Handles three states:
+  // a resolved model_ref, a recommended (angle-bracketed) fallback, or empty.
+  function updateFleetModelLine(fleetItem, a) {
+    const info = fleetItem.querySelector(".agent-fleet-info");
+    if (!info) return;
+    let modelEl = info.querySelector(".agent-fleet-model");
+    const desired = a.model_ref
+      ? { text: a.model_ref, recommended: false }
+      : (a.recommended_model ? { text: `<${a.recommended_model}>`, recommended: true } : null);
+    if (!desired) {
+      if (modelEl) modelEl.remove();
+      return;
+    }
+    if (!modelEl) {
+      modelEl = document.createElement("span");
+      modelEl.className = "agent-fleet-model";
+      info.appendChild(modelEl);
+    }
+    modelEl.textContent = desired.text;
+    modelEl.classList.toggle("agent-fleet-model-recommended", desired.recommended);
+  }
+
   function renderAgentAgents(d) {
     const fleetList = bodyEl.querySelector("#agent-fleet-list");
     const detailPanel = bodyEl.querySelector("#agent-detail-panel");
@@ -2045,11 +2068,19 @@ const BASE_PATH = window.BASE_PATH || "";
         const agentSourceBadge = a.source === "local"
           ? `<span class="source-badge source-badge-local">local</span>`
           : "";
+        let modelHtml = "";
+        if (a.model_ref) {
+          modelHtml = `<span class="agent-fleet-model">${escHtml(a.model_ref)}</span>`;
+        } else if (a.recommended_model) {
+          // Frontmatter declared a model the local catalog doesn't ship —
+          // render it greyed in angle brackets to flag the recommendation.
+          modelHtml = `<span class="agent-fleet-model agent-fleet-model-recommended">&lt;${escHtml(a.recommended_model)}&gt;</span>`;
+        }
         item.innerHTML = `
           <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
           <div class="agent-fleet-info">
             <span class="agent-fleet-name">${escHtml(a.name || "(unnamed)")} ${agentSourceBadge}</span>
-            <span class="agent-fleet-model">${escHtml(a.model_ref || "")}</span>
+            ${modelHtml}
           </div>
         `;
         item.addEventListener("click", () => { state.activeAgentIdx = originalIdx; renderAgentAgents(d); });
@@ -2172,11 +2203,21 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       sel.addEventListener("change", () => {
         a.model_ref = sel.value;
-        const modelEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-model");
-        if (modelEl) modelEl.textContent = a.model_ref || "";
+        const fleetItem = bodyEl.querySelectorAll(".agent-fleet-item")[idx];
+        if (fleetItem) updateFleetModelLine(fleetItem, a);
         onChange();
       });
       f.appendChild(sel);
+
+      // Surface a frontmatter "model:" hint that the local catalog can't
+      // resolve as a recommended model in angle brackets.
+      if (a.recommended_model) {
+        const hint = document.createElement("span");
+        hint.className = "agent-model-recommendation";
+        hint.textContent = `<${a.recommended_model}>`;
+        hint.title = "Recommended by the agent's instruction.md frontmatter (no matching entry in models.json).";
+        f.appendChild(hint);
+      }
     }));
 
     genSection.appendChild(genGrid);
@@ -4267,12 +4308,15 @@ const BASE_PATH = window.BASE_PATH || "";
     const idx = rest.indexOf("\n---");
     if (idx < 0) return {};
     const result = {};
+    const lines = rest.slice(0, idx).split("\n");
     let section = null;
-    for (const line of rest.slice(0, idx).split("\n")) {
-      if (!line.trim()) continue;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) { i++; continue; }
       const indented = line.startsWith("  ") || line.startsWith("\t");
       const col = line.indexOf(":");
-      if (col < 0) continue;
+      if (col < 0) { i++; continue; }
       const key = line.slice(0, col).trim();
       const val = line.slice(col + 1).trim();
       if (indented && section) {
@@ -4281,9 +4325,28 @@ const BASE_PATH = window.BASE_PATH || "";
         } else {
           result[section][key] = val;
         }
+        i++;
       } else if (!indented) {
-        if (val === "") { section = key; result[key] = {}; }
-        else { section = null; result[key] = val; }
+        if (val === ">" || val === "|") {
+          let multi = "";
+          i++;
+          while (i < lines.length && (lines[i].startsWith("  ") || lines[i] === "")) {
+            multi += lines[i].trim() + " ";
+            i++;
+          }
+          section = null;
+          result[key] = multi.trim();
+        } else if (val === "") {
+          section = key;
+          result[key] = {};
+          i++;
+        } else {
+          section = null;
+          result[key] = val;
+          i++;
+        }
+      } else {
+        i++;
       }
     }
     return result;
@@ -4598,6 +4661,57 @@ const BASE_PATH = window.BASE_PATH || "";
   const remoteSkillsCache = {}; // keyed by registry ID → { skills, timestamp }
   const REMOTE_CACHE_TTL = 90 * 60 * 1000; // 90 minutes
 
+  // Renders the grouped grid for any remote-browse view. Each non-empty
+  // group is wrapped in a foldable section with an item count on the right.
+  // When the view has many sections (>= COLLAPSE_GROUPS_THRESHOLD) or many
+  // total items (>= COLLAPSE_ITEMS_THRESHOLD), groups start collapsed so
+  // users can scan the section list before drilling in.
+  const COLLAPSE_GROUPS_THRESHOLD = 3;
+  const COLLAPSE_ITEMS_THRESHOLD = 20;
+
+  function renderGroupedRemoteList({ contentEl, sortedGroups, grouped, gridClass = "skill-marketplace-grid", buildCard }) {
+    const totalItems = sortedGroups.reduce((n, g) => n + grouped.get(g).length, 0);
+    const namedGroups = sortedGroups.filter(g => g !== "").length;
+    const startCollapsed = namedGroups >= COLLAPSE_GROUPS_THRESHOLD || totalItems >= COLLAPSE_ITEMS_THRESHOLD;
+
+    for (const group of sortedGroups) {
+      const items = grouped.get(group);
+      if (!group) {
+        const grid = document.createElement("div");
+        grid.className = gridClass;
+        for (const it of items) grid.appendChild(buildCard(it));
+        contentEl.appendChild(grid);
+        continue;
+      }
+
+      const section = document.createElement("section");
+      section.className = "remote-group-section" + (startCollapsed ? " collapsed" : "");
+
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "remote-group-header foldable";
+      header.setAttribute("aria-expanded", startCollapsed ? "false" : "true");
+      header.innerHTML = `
+        <span class="remote-group-caret" aria-hidden="true">▾</span>
+        <span class="remote-group-label">${escHtml(group.replace(/\//g, " › "))}</span>
+        <span class="remote-group-count">${items.length}</span>
+      `;
+
+      const grid = document.createElement("div");
+      grid.className = gridClass + " remote-group-body";
+      for (const it of items) grid.appendChild(buildCard(it));
+
+      header.addEventListener("click", () => {
+        const collapsed = section.classList.toggle("collapsed");
+        header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      });
+
+      section.appendChild(header);
+      section.appendChild(grid);
+      contentEl.appendChild(section);
+    }
+  }
+
   async function renderRemoteBrowseView() {
     const { id, name } = state.skills.browsingRemote;
     const cached = remoteSkillsCache[id];
@@ -4713,19 +4827,12 @@ const BASE_PATH = window.BASE_PATH || "";
         return card;
       }
 
-      for (const group of sortedGroups) {
-        const groupSkills = grouped.get(group);
-        if (group) {
-          const groupHdr = document.createElement("div");
-          groupHdr.className = "remote-group-header";
-          groupHdr.textContent = group.replace(/\//g, " › ");
-          contentEl.appendChild(groupHdr);
-        }
-        const grid = document.createElement("div");
-        grid.className = "skill-marketplace-grid";
-        for (const sk of groupSkills) grid.appendChild(buildSkillCard(sk));
-        contentEl.appendChild(grid);
-      }
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        buildCard: buildSkillCard,
+      });
     }
 
     // Show cached data immediately while the fresh fetch runs in the background.
@@ -5034,6 +5141,25 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
+  // remoteAgentMetaRowsHtml renders tools / skills / mcp_servers / model
+  // declared in the agent's manifest as small chip rows beneath the
+  // description. Each row is omitted when its list is empty.
+  function remoteAgentMetaRowsHtml(a) {
+    function chipRow(label, items, extraClass = "") {
+      if (!Array.isArray(items) || !items.length) return "";
+      const chips = items.map(t => `<span class="remote-agent-chip ${extraClass}">${escHtml(String(t))}</span>`).join("");
+      return `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">${escHtml(label)}</span><span class="remote-agent-meta-chips">${chips}</span></div>`;
+    }
+    let html = "";
+    html += chipRow("tools", a.tools);
+    html += chipRow("skills", a.skills);
+    html += chipRow("mcp", a.mcp_servers, "remote-agent-chip-mcp");
+    if (a.model) {
+      html += `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">model</span><span class="remote-agent-meta-chips"><span class="remote-agent-chip remote-agent-chip-model">${escHtml(String(a.model))}</span></span></div>`;
+    }
+    return html;
+  }
+
   async function renderAgentRemoteBrowseView(host) {
     const { id, name } = state.agentRemotes.browsing;
     const cached = remoteAgentsCache[id];
@@ -5108,6 +5234,7 @@ const BASE_PATH = window.BASE_PATH || "";
         const actionHtml = a.installed
           ? `<span class="remote-skill-installed-badge">Installed</span>`
           : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+        const metaRows = remoteAgentMetaRowsHtml(a);
 
         card.innerHTML = `
           <div class="skill-mkt-header">
@@ -5117,6 +5244,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <div class="skill-mkt-body">
             ${builtinHtml}
             <p class="skill-mkt-desc">${escHtml(a.description || "(no description)")}</p>
+            ${metaRows}
             ${tagsHtml}
           </div>
         `;
@@ -5137,19 +5265,12 @@ const BASE_PATH = window.BASE_PATH || "";
         return card;
       }
 
-      for (const group of sortedGroups) {
-        const groupAgents = grouped.get(group);
-        if (group) {
-          const groupHdr = document.createElement("div");
-          groupHdr.className = "remote-group-header";
-          groupHdr.textContent = group.replace(/\//g, " › ");
-          contentEl.appendChild(groupHdr);
-        }
-        const grid = document.createElement("div");
-        grid.className = "skill-marketplace-grid";
-        for (const a of groupAgents) grid.appendChild(buildAgentCard(a));
-        contentEl.appendChild(grid);
-      }
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        buildCard: buildAgentCard,
+      });
     }
 
     if (hasCached) populateContent(cached.agents);
@@ -5224,19 +5345,37 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const isMarkdown = agent.format === "claude" || agent.dir_path.endsWith(".md");
 
+    function fmScalarRow(key, val) {
+      return `<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(key)}</span><span class="skill-fm-value">${escHtml(String(val))}</span></div>`;
+    }
+    function fmTagRow(key, items) {
+      const tags = items.map(t => `<span class="skill-mkt-tag">${escHtml(String(t))}</span>`).join("");
+      return `<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(key)}</span><span class="skill-fm-value skill-fm-tags">${tags}</span></div>`;
+    }
+    // fmToList accepts either an array, a comma-separated string ("Read, Write"),
+    // or a single scalar and normalises everything to a trimmed []string. This
+    // matters for Claude Code–style frontmatter where `tools:` is typically a
+    // comma list, while `skills:`/`mcpServers:` are usually YAML sequences.
+    function fmToList(val) {
+      if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+      if (typeof val === "string") {
+        return val.split(",").map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    }
+
     if (isMarkdown) {
       // Claude Code markdown format: parse YAML frontmatter for the card,
       // render the body as markdown.
       const fm = parseAgentFrontmatter(content);
       if (fm) {
         const rows = [];
-        if (fm.name) rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">name</span><span class="skill-fm-value">${escHtml(fm.name)}</span></div>`);
-        if (fm.description) rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">description</span><span class="skill-fm-value">${escHtml(fm.description)}</span></div>`);
-        for (const listKey of ["skills", "mcpServers"]) {
-          if (Array.isArray(fm[listKey]) && fm[listKey].length) {
-            const tags = fm[listKey].map(t => `<span class="skill-mkt-tag">${escHtml(t)}</span>`).join("");
-            rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(listKey)}</span><span class="skill-fm-value skill-fm-tags">${tags}</span></div>`);
-          }
+        if (fm.name) rows.push(fmScalarRow("name", fm.name));
+        if (fm.description) rows.push(fmScalarRow("description", fm.description));
+        if (fm.model) rows.push(fmScalarRow("model", fm.model));
+        for (const listKey of ["tools", "skills", "mcpServers"]) {
+          const items = fmToList(fm[listKey]);
+          if (items.length) rows.push(fmTagRow(listKey, items));
         }
         fmCard.innerHTML = rows.join("") || "";
       } else {
@@ -5249,14 +5388,13 @@ const BASE_PATH = window.BASE_PATH || "";
       try { parsed = JSON.parse(content); } catch (_) { parsed = null; }
       if (parsed && typeof parsed === "object") {
         const rows = [];
-        const keys = ["name", "description", "model_ref", "builtin", "leader"];
-        for (const k of keys) {
+        for (const k of ["name", "description", "model_ref", "model", "builtin", "leader"]) {
           if (parsed[k] === undefined) continue;
-          rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(k)}</span><span class="skill-fm-value">${escHtml(String(parsed[k]))}</span></div>`);
+          rows.push(fmScalarRow(k, parsed[k]));
         }
-        if (Array.isArray(parsed.tools) && parsed.tools.length) {
-          const tags = parsed.tools.map(t => `<span class="skill-mkt-tag">${escHtml(String(t))}</span>`).join("");
-          rows.push(`<div class="skill-fm-row"><span class="skill-fm-key">tools</span><span class="skill-fm-value skill-fm-tags">${tags}</span></div>`);
+        for (const [label, jsonKey] of [["tools", "tools"], ["skills", "skills"], ["mcp_servers", "mcp_servers"]]) {
+          const items = fmToList(parsed[jsonKey]);
+          if (items.length) rows.push(fmTagRow(label, items));
         }
         fmCard.innerHTML = rows.join("") || "";
       } else {
@@ -5484,49 +5622,44 @@ const BASE_PATH = window.BASE_PATH || "";
         return a.localeCompare(b);
       });
 
-      for (const group of sortedGroups) {
-        if (group) {
-          const gh = document.createElement("div");
-          gh.className = "remote-browse-group";
-          gh.textContent = group.replace(/\//g, " › ");
-          contentEl.appendChild(gh);
+      function buildSquadCard(sq) {
+        const membersHtml = (sq.members && sq.members.length)
+          ? `<div class="skill-mkt-tags">${sq.members.map(m => `<span class="skill-mkt-tag">${escHtml(m)}</span>`).join("")}</div>`
+          : "";
+        const leaderHtml = sq.leader
+          ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">Leader: ${escHtml(sq.leader)}</span></div>`
+          : "";
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card" + (sq.installed ? " skill-installed" : "");
+        card.innerHTML = `
+          <div class="skill-mkt-header">
+            <span class="skill-mkt-filename">${escHtml(sq.name)}</span>
+            ${sq.installed
+              ? `<span class="remote-skill-installed-badge">Installed</span>`
+              : `<button type="button" class="add-btn squad-install-btn">Install</button>`}
+          </div>
+          <div class="skill-mkt-body">
+            ${leaderHtml}
+            <p class="skill-mkt-desc">${escHtml(sq.description || "(no description)")}</p>
+            ${membersHtml}
+          </div>
+        `;
+        const btn = card.querySelector(".squad-install-btn");
+        if (btn) {
+          btn.addEventListener("click", e => {
+            e.stopPropagation();
+            doInstallSquad(id, sq, btn);
+          });
         }
-        const grid = document.createElement("div");
-        grid.className = "skill-marketplace-grid";
-
-        for (const sq of grouped.get(group)) {
-          const membersHtml = (sq.members && sq.members.length)
-            ? `<div class="skill-mkt-tags">${sq.members.map(m => `<span class="skill-mkt-tag">${escHtml(m)}</span>`).join("")}</div>`
-            : "";
-          const leaderHtml = sq.leader
-            ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">Leader: ${escHtml(sq.leader)}</span></div>`
-            : "";
-          const card = document.createElement("div");
-          card.className = "skill-mkt-card remote-skill-card" + (sq.installed ? " skill-installed" : "");
-          card.innerHTML = `
-            <div class="skill-mkt-header">
-              <span class="skill-mkt-filename">${escHtml(sq.name)}</span>
-              ${sq.installed
-                ? `<span class="remote-skill-installed-badge">Installed</span>`
-                : `<button type="button" class="add-btn squad-install-btn">Install</button>`}
-            </div>
-            <div class="skill-mkt-body">
-              ${leaderHtml}
-              <p class="skill-mkt-desc">${escHtml(sq.description || "(no description)")}</p>
-              ${membersHtml}
-            </div>
-          `;
-          const btn = card.querySelector(".squad-install-btn");
-          if (btn) {
-            btn.addEventListener("click", e => {
-              e.stopPropagation();
-              doInstallSquad(id, sq, btn);
-            });
-          }
-          grid.appendChild(card);
-        }
-        contentEl.appendChild(grid);
+        return card;
       }
+
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        buildCard: buildSquadCard,
+      });
     }
 
     if (hasCached) populateContent(cached.squads);
@@ -5841,70 +5974,65 @@ const BASE_PATH = window.BASE_PATH || "";
         return a.localeCompare(b);
       });
 
-      for (const group of sortedGroups) {
-        if (group) {
-          const gh = document.createElement("div");
-          gh.className = "remote-group-header";
-          gh.textContent = group.replace(/\//g, " › ");
-          contentEl.appendChild(gh);
+      function buildMCPCard(tool) {
+        const typeLabel = tool.type
+          ? `<span class="skill-mkt-tag">${escHtml(tool.type)}</span>`
+          : "";
+        const actionHtml = tool.installed
+          ? `<span class="remote-skill-installed-badge">Installed</span>`
+          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card";
+        if (tool.has_readme) card.style.cursor = "pointer";
+        card.innerHTML = `
+          <div class="skill-mkt-header">
+            <span class="skill-mkt-filename">${ICONS.mcp}${escHtml(tool.name)}</span>
+            ${actionHtml}
+          </div>
+          <div class="skill-mkt-body">
+            ${tool.description ? `<p class="skill-mkt-desc">${escHtml(tool.description)}</p>` : ""}
+            ${typeLabel ? `<div class="skill-mkt-tags">${typeLabel}</div>` : ""}
+          </div>
+        `;
+        if (tool.has_readme) {
+          card.addEventListener("click", e => {
+            if (e.target.closest(".remote-install-btn")) return;
+            state.mcpRemotes.viewing = { ...state.mcpRemotes.browsing, tool };
+            renderMCPForm();
+          });
         }
-        const grid = document.createElement("div");
-        grid.className = "skill-marketplace-grid";
-
-        for (const tool of grouped.get(group)) {
-          const typeLabel = tool.type
-            ? `<span class="skill-mkt-tag">${escHtml(tool.type)}</span>`
-            : "";
-          const actionHtml = tool.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
-          const card = document.createElement("div");
-          card.className = "skill-mkt-card remote-skill-card";
-          if (tool.has_readme) card.style.cursor = "pointer";
-          card.innerHTML = `
-            <div class="skill-mkt-header">
-              <span class="skill-mkt-filename">${ICONS.mcp}${escHtml(tool.name)}</span>
-              ${actionHtml}
-            </div>
-            <div class="skill-mkt-body">
-              ${tool.description ? `<p class="skill-mkt-desc">${escHtml(tool.description)}</p>` : ""}
-              ${typeLabel ? `<div class="skill-mkt-tags">${typeLabel}</div>` : ""}
-            </div>
-          `;
-          if (tool.has_readme) {
-            card.addEventListener("click", e => {
-              if (e.target.closest(".remote-install-btn")) return;
-              state.mcpRemotes.viewing = { ...state.mcpRemotes.browsing, tool };
-              renderMCPForm();
-            });
-          }
-          const btn = card.querySelector(".remote-install-btn");
-          if (btn) {
-            btn.addEventListener("click", async () => {
-              btn.disabled = true;
-              btn.textContent = "Installing…";
-              try {
-                const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
-                tool.installed = true;
-                btn.replaceWith(Object.assign(document.createElement("span"), {
-                  className: "remote-skill-installed-badge",
-                  textContent: "Installed",
-                }));
-                showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
-                showBanner();
-                delete remoteMCPCache[id];
-                delete state.parsed["mcp"];
-              } catch (e) {
-                btn.disabled = false;
-                btn.textContent = "Install";
-                setStatus("Install failed: " + e.message, "error");
-              }
-            });
-          }
-          grid.appendChild(card);
+        const btn = card.querySelector(".remote-install-btn");
+        if (btn) {
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            btn.textContent = "Installing…";
+            try {
+              const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
+              tool.installed = true;
+              btn.replaceWith(Object.assign(document.createElement("span"), {
+                className: "remote-skill-installed-badge",
+                textContent: "Installed",
+              }));
+              showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
+              showBanner();
+              delete remoteMCPCache[id];
+              delete state.parsed["mcp"];
+            } catch (e) {
+              btn.disabled = false;
+              btn.textContent = "Install";
+              setStatus("Install failed: " + e.message, "error");
+            }
+          });
         }
-        contentEl.appendChild(grid);
+        return card;
       }
+
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        buildCard: buildMCPCard,
+      });
     }
 
     if (hasCached) {
@@ -6533,62 +6661,58 @@ const BASE_PATH = window.BASE_PATH || "";
         return a.localeCompare(b);
       });
 
-      for (const group of sortedGroups) {
-        if (group) {
-          const gh = document.createElement("div");
-          gh.className = "remote-browse-group";
-          gh.textContent = group;
-          contentEl.appendChild(gh);
+      function buildA2ACard(agent) {
+        let urlTag = "";
+        if (agent.url) {
+          try { urlTag = `<span class="skill-mkt-tag">${escHtml(new URL(agent.url).hostname)}</span>`; } catch (_) {}
         }
-        const grid = document.createElement("div");
-        grid.className = "remote-skill-grid";
-
-        for (const agent of grouped.get(group)) {
-          let urlTag = "";
-          if (agent.url) {
-            try { urlTag = `<span class="skill-mkt-tag">${escHtml(new URL(agent.url).hostname)}</span>`; } catch (_) {}
-          }
-          const card = document.createElement("div");
-          card.className = "skill-mkt-card remote-skill-card" + (agent.installed ? " skill-installed" : "");
-          card.innerHTML = `
-            <div class="skill-mkt-card-body">
-              <div class="skill-mkt-name">${escHtml(agent.name)}</div>
-              ${agent.description ? `<div class="skill-mkt-desc">${escHtml(agent.description)}</div>` : ""}
-              ${urlTag ? `<div class="skill-mkt-tags">${urlTag}</div>` : ""}
-            </div>
-            <div class="skill-mkt-card-actions">
-              ${agent.installed
-                ? `<span class="skill-installed-badge">Installed</span>`
-                : `<button type="button" class="add-btn a2a-install-btn" data-dir="${escHtml(agent.dir_path)}">Install</button>`}
-            </div>
-          `;
-          const btn = card.querySelector(".a2a-install-btn");
-          if (btn) {
-            btn.addEventListener("click", async () => {
-              btn.disabled = true;
-              btn.textContent = "Installing…";
-              try {
-                const res = await skillsPost(`/a2a/remotes/${id}/install/${agent.dir_path}`, {});
-                agent.installed = true;
-                card.classList.add("skill-installed");
-                btn.replaceWith(Object.assign(document.createElement("span"), {
-                  className: "skill-installed-badge",
-                  textContent: "Installed",
-                }));
-                setStatus(`A2A agent "${res.name}" added to a2a_config.json. Reload to apply.`, "success");
-                showBanner();
-                delete remoteA2ACache[id];
-              } catch (e) {
-                btn.disabled = false;
-                btn.textContent = "Install";
-                setStatus("Install failed: " + e.message, "error");
-              }
-            });
-          }
-          grid.appendChild(card);
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card" + (agent.installed ? " skill-installed" : "");
+        card.innerHTML = `
+          <div class="skill-mkt-card-body">
+            <div class="skill-mkt-name">${escHtml(agent.name)}</div>
+            ${agent.description ? `<div class="skill-mkt-desc">${escHtml(agent.description)}</div>` : ""}
+            ${urlTag ? `<div class="skill-mkt-tags">${urlTag}</div>` : ""}
+          </div>
+          <div class="skill-mkt-card-actions">
+            ${agent.installed
+              ? `<span class="skill-installed-badge">Installed</span>`
+              : `<button type="button" class="add-btn a2a-install-btn" data-dir="${escHtml(agent.dir_path)}">Install</button>`}
+          </div>
+        `;
+        const btn = card.querySelector(".a2a-install-btn");
+        if (btn) {
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            btn.textContent = "Installing…";
+            try {
+              const res = await skillsPost(`/a2a/remotes/${id}/install/${agent.dir_path}`, {});
+              agent.installed = true;
+              card.classList.add("skill-installed");
+              btn.replaceWith(Object.assign(document.createElement("span"), {
+                className: "skill-installed-badge",
+                textContent: "Installed",
+              }));
+              setStatus(`A2A agent "${res.name}" added to a2a_config.json. Reload to apply.`, "success");
+              showBanner();
+              delete remoteA2ACache[id];
+            } catch (e) {
+              btn.disabled = false;
+              btn.textContent = "Install";
+              setStatus("Install failed: " + e.message, "error");
+            }
+          });
         }
-        contentEl.appendChild(grid);
+        return card;
       }
+
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        gridClass: "remote-skill-grid",
+        buildCard: buildA2ACard,
+      });
     }
 
     if (hasCached) {

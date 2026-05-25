@@ -1178,6 +1178,49 @@
   color: var(--text-muted);
 }
 
+/* Remote agent card meta rows: tools / skills / mcp / model declared in
+   the agent's manifest. Each row is "label: <chips>" laid out compactly so
+   several rows still fit alongside the description. */
+.remote-agent-meta-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.remote-agent-meta-label {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-top: 0.1rem;
+}
+.remote-agent-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.remote-agent-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.remote-agent-chip-mcp {
+  border-style: dashed;
+}
+.remote-agent-chip-model {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
 /* Card footer */
 .skill-mkt-footer {
   display: flex;
@@ -1542,6 +1585,66 @@
 }
 .remote-group-header:first-child {
   margin-top: 0;
+}
+
+/* Foldable remote-browse sections */
+.remote-group-section {
+  margin: 1.1rem 0 0;
+}
+.remote-group-section:first-child {
+  margin-top: 0;
+}
+.remote-group-section + .remote-group-section {
+  margin-top: 0.4rem;
+}
+.remote-group-header.foldable {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0 0 0.45rem;
+  padding: 0.4rem 0.2rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.remote-group-header.foldable:hover {
+  color: var(--text);
+}
+.remote-group-caret {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.remote-group-section.collapsed .remote-group-caret {
+  transform: rotate(-90deg);
+}
+.remote-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.remote-group-count {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.remote-group-section.collapsed .remote-group-body {
+  display: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2227,6 +2330,19 @@
 .agent-fleet-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .agent-fleet-name { font-size: 0.85rem; font-weight: 600; color: var(--text); }
 .agent-fleet-model { font-size: 0.75rem; color: var(--text-muted); }
+.agent-fleet-model-recommended {
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-style: italic;
+}
+.agent-model-recommendation {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.65;
+  font-style: italic;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
 
 /* Detail panel (right) */
 .agent-detail-panel {

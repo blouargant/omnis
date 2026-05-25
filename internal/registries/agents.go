@@ -20,12 +20,16 @@ const AgentManifestFile = "agent.json"
 const FormatClaude = "claude"
 
 // agentManifest is the minimal subset of registry/agents/<name>/agent.json
-// that the browser needs to surface description / builtin / tags.
+// that the browser needs to surface in the remote-listing cards.
 type agentManifest struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Builtin     bool     `json:"builtin"`
 	Tags        []string `json:"tags"`
+	Tools       []string `json:"tools"`
+	Model       string   `json:"model"`
+	Skills      []string `json:"skills"`
+	MCPServers  []string `json:"mcp_servers"`
 }
 
 // InstalledAgent is one agent currently present in the local agents registry.
@@ -131,6 +135,10 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 					ag.Description = m.Description
 					ag.Builtin = m.Builtin
 					ag.Tags = m.Tags
+					ag.Tools = m.Tools
+					ag.Model = m.Model
+					ag.Skills = m.Skills
+					ag.MCPServers = m.MCPServers
 				}
 			}
 			agents = append(agents, ag)
@@ -168,6 +176,10 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 				Group:       group,
 				Description: def.Description,
 				Format:      FormatClaude,
+				Tools:       def.Tools,
+				Model:       def.Model,
+				Skills:      def.Skills,
+				MCPServers:  def.MCPServers,
 			}
 			if agentsRegistryDir != "" {
 				if _, err := os.Stat(filepath.Join(agentsRegistryDir, def.Name, AgentManifestFile)); err == nil {
