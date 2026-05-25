@@ -1810,7 +1810,6 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-panel);
-  overflow: hidden;
 }
 
 .model-card-hdr {
@@ -1820,6 +1819,7 @@
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
+  border-radius: 8px 8px 0 0;
 }
 .model-card-title {
   display: flex;

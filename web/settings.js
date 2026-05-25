@@ -1920,14 +1920,17 @@ const BASE_PATH = window.BASE_PATH || "";
     fetchBtn.addEventListener("click", async () => {
       const providerRef = (m.provider_ref || "").trim();
       let params;
+      let sourceLabel;
       if (providerRef && typeof resolveProvider === "function") {
         params = new URLSearchParams({ provider_ref: providerRef });
+        sourceLabel = providerRef;
       } else {
         const provider = (m.provider || "").trim();
         if (!provider) { setStatus("Set a provider first."); return; }
         params = new URLSearchParams({ provider });
         if (m.api_key) params.set("api_key", m.api_key);
         if (m.base_url) params.set("base_url", m.base_url);
+        sourceLabel = provider;
       }
       fetchBtn.disabled = true;
       fetchBtn.textContent = "…";
@@ -1936,12 +1939,14 @@ const BASE_PATH = window.BASE_PATH || "";
         const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || r.statusText);
-        allModels = j.models || [];
+        allModels = (j.models || []).slice().sort((a, b) =>
+          (a.id || "").localeCompare(b.id || "", undefined, { sensitivity: "base" })
+        );
         // Show all models unfiltered; typing will narrow the list.
         panel.hidden = false;
         renderList("");
         input.focus();
-        setStatus(`Loaded ${allModels.length} model(s) from ${provider}.`);
+        setStatus(`Loaded ${allModels.length} model(s) from ${sourceLabel}.`);
       } catch (e) {
         // Show error inside the panel so it's visible even if the status bar is offscreen.
         allModels = [];
