@@ -11,53 +11,6 @@
   ],
   "app_name": "yoke",
   "bash_timeout_seconds": 120,
-  "models": {
-    "balanced": {
-      "api_key": "OPENAI_API_KEY",
-      "base_url": "OPENAI_BASE_URL",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.42,
-      "model": "gpt-4.1-mini-sweden",
-      "output_token_price_per_million": 1.68,
-      "provider": "openai_compat"
-    },
-    "hosted": {
-      "api_key": "OPENAI_API_KEY",
-      "base_url": "OPENAI_BASE_URL",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.6,
-      "model": "test",
-      "output_token_price_per_million": 3.6,
-      "provider": "openai_compat"
-    },
-    "imagegen": {
-      "api_key": "OPENAI_API_KEY",
-      "base_url": "OPENAI_BASE_URL",
-      "context_length": 65536,
-      "input_token_price_per_million": 2.1,
-      "model": "gemini-3-pro-image-preview",
-      "output_token_price_per_million": 12.6,
-      "provider": "openai_compat"
-    },
-    "premium": {
-      "api_key": "OPENAI_API_KEY",
-      "base_url": "OPENAI_BASE_URL",
-      "context_length": 200000,
-      "input_token_price_per_million": 5,
-      "model": "claude-sonnet-4-6",
-      "output_token_price_per_million": 26,
-      "provider": "openai_compat"
-    },
-    "simple": {
-      "api_key": "OPENAI_API_KEY",
-      "base_url": "OPENAI_BASE_URL",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.17,
-      "model": "gpt-4o-mini-sweden",
-      "output_token_price_per_million": 0.69,
-      "provider": "openai_compat"
-    }
-  },
   "squads": [
     {
       "name": "Default",

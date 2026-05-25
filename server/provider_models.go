@@ -10,33 +10,65 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blouargant/yoke/agent"
 	"github.com/gin-gonic/gin"
 )
 
 // providerModelInfo is a single model entry returned to the browser.
+// Pricing / context fields are optional and forwarded only when the upstream
+// provider exposes them. Today no supported provider returns these via the
+// list-models endpoint, but the shape is fixed so the UI can prefill on the
+// day they do (or when a future provider adapter inlines a static price book).
 type providerModelInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name,omitempty"`
+	ID                         string  `json:"id"`
+	DisplayName                string  `json:"display_name,omitempty"`
+	ContextLength              int     `json:"context_length,omitempty"`
+	InputTokenPricePerMillion  float64 `json:"input_token_price_per_million,omitempty"`
+	OutputTokenPricePerMillion float64 `json:"output_token_price_per_million,omitempty"`
 }
 
 // registerProviderModelsRoute mounts GET /providers/models on the given router group.
-// Query params: provider (required), api_key (optional), base_url (optional for openai_compat).
-// api_key and base_url are resolved as env-var names first, matching the agent config convention.
+// Query params:
+//   - provider_ref: resolves credentials from models.json (preferred — no secrets cross the wire).
+//   - provider, api_key, base_url: explicit overrides, used when no provider_ref is set or when
+//     test-driving a new provider before it is saved. api_key and base_url are resolved as
+//     env-var names first, matching the agent config convention.
 func registerProviderModelsRoute(rg *gin.RouterGroup) {
 	rg.GET("/providers/models", func(c *gin.Context) {
-		provider := strings.TrimSpace(c.Query("provider"))
-		if provider == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "provider query param is required"})
-			return
-		}
+		var (
+			providerKind string
+			apiKey       string
+			baseURL      string
+		)
 
-		apiKey := resolveEnvRef(c.Query("api_key"))
-		baseURL := resolveEnvRef(c.Query("base_url"))
+		if ref := strings.TrimSpace(c.Query("provider_ref")); ref != "" {
+			settings, err := agent.ResolveRuntimeSettings(agent.Options{})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("resolve runtime settings: %v", err)})
+				return
+			}
+			p, ok := settings.Providers[strings.ToLower(ref)]
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("unknown provider_ref %q", ref)})
+				return
+			}
+			providerKind = p.Kind
+			apiKey = p.APIKey
+			baseURL = p.BaseURL
+		} else {
+			providerKind = strings.TrimSpace(c.Query("provider"))
+			if providerKind == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "provider or provider_ref query param is required"})
+				return
+			}
+			apiKey = resolveEnvRef(c.Query("api_key"))
+			baseURL = resolveEnvRef(c.Query("base_url"))
+		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 		defer cancel()
 
-		models, err := fetchProviderModels(ctx, provider, apiKey, baseURL)
+		models, err := fetchProviderModels(ctx, providerKind, apiKey, baseURL)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return

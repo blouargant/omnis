@@ -1754,6 +1754,26 @@
 }
 .model-remove-link:hover { opacity: 1; background: var(--danger-bg-soft); }
 
+.model-test-link {
+  font-size: 0.75rem;
+  color: var(--accent-fg, var(--fg));
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  margin-right: 0.25rem;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.model-test-link:hover {
+  opacity: 1;
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+}
+.model-test-link:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
+
 .model-card-body { padding: 0.85rem; }
 
 .model-field-grid {

@@ -179,23 +179,42 @@ marked `kind: agents` or `kind: both` appear here.
 
 ---
 
-## Models sub-tab
+## Models settings (top-level section)
 
-Declares the model profiles that agents reference via `model_ref`. Each
-profile is a card with the following fields:
+Models and the providers they connect through have their own settings
+section — **Settings → Models**, listed right after **Agents**. The data
+lives in `models.json` (separate from `agents.json`) and is picked up by
+the same `POST /api/config/reload` flow.
+
+### Providers sub-tab
+
+A **provider** groups credentials and an endpoint so multiple models can
+share them. Each provider card has:
 
 | Field | Description |
 |---|---|
-| **Provider** | One of `anthropic`, `openai`, `gemini`, `openai_compat`. |
-| **Model** | Provider-specific model ID (e.g. `claude-opus-4-7`). Combobox with known IDs fetched from `/api/provider-models`. |
-| **Base URL** | API endpoint. Leave blank for the provider default. Resolved as an env-var name first. |
+| **Kind** | One of `anthropic`, `openai`, `gemini`, `openai_compat`. Picks the upstream API shape. |
+| **Base URL** | API endpoint. Resolved as an env-var name first (the literal `OPENAI_BASE_URL` becomes the value of the `OPENAI_BASE_URL` env var when one is set). |
 | **API Key** | Credential. Shown masked; eye button to reveal. Resolved as an env-var name first. |
-| **Context Length** | Maximum context window for this model (tokens). |
-| **Input / Cached Input / Output token price per million** | Cost tracking fields. Optional. |
 
-Click **⊕ Add model** at the end of the card grid to create a new profile.
-Profile names are case-insensitive keys referenced by `model_ref` in each
-agent's General Settings.
+A **⟳ Test** button on each card calls
+`GET /api/providers/models?provider=<kind>&…` to confirm the credentials
+reach the upstream API.
+
+### Models sub-tab
+
+Each model is a card that references a provider via `provider_ref`. Adding
+a model requires at least one provider to exist.
+
+| Field | Description |
+|---|---|
+| **Provider** | Dropdown sourced from the Providers sub-tab. Inherits `kind` (as `provider`), `base_url`, `api_key`. |
+| **Model** | Provider-specific model ID. The ⟳ button calls `/api/providers/models?provider_ref=<name>` — credentials never cross the wire — and lists the available models. Picking one prefills any `context_length` / pricing the provider returns. |
+| **Context Length** | Maximum context window for this model (tokens). |
+| **Input / Cached Input / Output token price per million** | Cost-tracking fields. Optional. |
+
+Profile names are case-insensitive keys; agents reference them via
+`model_ref` in their General Settings.
 
 ---
 

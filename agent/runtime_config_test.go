@@ -31,6 +31,9 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
   "app_name": "json-app",
   "mcp_config_path": "json-mcp.json",
   "permissions_config_path": "json-perms.json",
+  "agents": ["leader", "curator", "investigator"]
+}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
   "models": {
     "leader-default": {
       "provider": "anthropic",
@@ -46,8 +49,7 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
       "api_key": "CURATOR_KEY_ENV",
       "context_length": 128000
     }
-  },
-  "agents": ["leader", "curator", "investigator"]
+  }
 }`))
 
 	curatorEnabled := false
@@ -147,7 +149,9 @@ func TestResolveRuntimeSettingsAPIKeyLiteralWhenEnvMissing(t *testing.T) {
 
 	path := filepath.Join(dir, "agent.json")
 	mustWrite(t, path, []byte(`{
-  "agents": ["leader"],
+  "agents": ["leader"]
+}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
   "models": {
     "default": {"provider": "openai_compat", "model": "fallback"}
   }
@@ -174,7 +178,9 @@ func TestResolveRuntimeSettingsBaseURLFromEnv(t *testing.T) {
 
 	path := filepath.Join(dir, "agent.json")
 	mustWrite(t, path, []byte(`{
-  "agents": ["leader"],
+  "agents": ["leader"]
+}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
   "models": {
     "default": {"provider": "openai_compat", "model": "fallback"}
   }
@@ -202,7 +208,9 @@ func TestResolveRuntimeSettingsBaseURLLiteralWhenEnvMissing(t *testing.T) {
 
 	path := filepath.Join(dir, "agent.json")
 	mustWrite(t, path, []byte(`{
-  "agents": ["leader"],
+  "agents": ["leader"]
+}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
   "models": {
     "default": {"provider": "openai_compat", "model": "fallback"}
   }
@@ -218,6 +226,97 @@ func TestResolveRuntimeSettingsBaseURLLiteralWhenEnvMissing(t *testing.T) {
 	}
 	if got := leader.BaseURL; got != "https://literal-base-url/v1" {
 		t.Fatalf("leader.BaseURL = %q, want https://literal-base-url/v1", got)
+	}
+}
+
+func TestResolveRuntimeSettingsRejectsLegacyModelsInAgentsJSON(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", Provider: "openai_compat", Model: "test-model"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "models": {
+    "default": {"provider": "openai_compat", "model": "fallback"}
+  }
+}`))
+
+	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err == nil {
+		t.Fatal("ResolveRuntimeSettings() error = nil, want hard-break error for legacy models in agents.json")
+	}
+	if !strings.Contains(err.Error(), "models.json") {
+		t.Fatalf("error %q should mention models.json migration path", err)
+	}
+}
+
+func TestResolveRuntimeSettingsProviderRefInheritance(t *testing.T) {
+	t.Setenv("PROVIDER_KEY_ENV", "resolved-provider-key")
+
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "anth"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"]
+}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "providers": {
+    "anthropic-prod": {
+      "kind": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "PROVIDER_KEY_ENV"
+    }
+  },
+  "models": {
+    "anth": {
+      "provider_ref": "anthropic-prod",
+      "model": "claude-sonnet-4-6",
+      "context_length": 200000
+    }
+  }
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	leader, ok := runtime.AgentConfig("leader")
+	if !ok {
+		t.Fatal("leader config missing")
+	}
+	if got := leader.Provider; got != "anthropic" {
+		t.Fatalf("leader.Provider = %q, want anthropic (inherited from provider kind)", got)
+	}
+	if got := leader.BaseURL; got != "https://api.anthropic.com" {
+		t.Fatalf("leader.BaseURL = %q, want https://api.anthropic.com", got)
+	}
+	if got := leader.APIKey; got != "resolved-provider-key" {
+		t.Fatalf("leader.APIKey = %q, want resolved-provider-key", got)
+	}
+}
+
+func TestResolveRuntimeSettingsUnknownProviderRef(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "broken"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{"agents": ["leader"]}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "models": {
+    "broken": {"provider_ref": "missing", "model": "x"}
+  }
+}`))
+
+	_, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err == nil {
+		t.Fatal("ResolveRuntimeSettings() error = nil, want unknown provider_ref error")
 	}
 }
 

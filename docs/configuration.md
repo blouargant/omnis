@@ -20,10 +20,11 @@ Precedence for overlapping values is:
 
 ## `agents.json`
 
-Top-level runtime config: app settings, reusable model profiles, the
-list of enabled agent names, and squad composition. Per-agent details
-live in their own files under `registry/agents/<name>/` — see
-[Agent registry](#agent-registry) below.
+Top-level runtime config: app settings, the list of enabled agent names,
+and squad composition. Model profiles live in their own `models.json`
+file (see [Models and references](#models-and-references) below).
+Per-agent details live in `registry/agents/<name>/` — see
+[Agent registry](#agent-registry).
 
 ```json
 {
@@ -34,26 +35,6 @@ live in their own files under `registry/agents/<name>/` — see
   "bash_output_filters_dir": ".agents/filters",
   "mcp_config_path": ".agents/mcp_config.json",
   "permissions_config_path": ".agents/permissions.json",
-
-  "models": {
-    "default": {
-      "provider": "openai_compat",
-      "model": "gpt-4o-mini",
-      "base_url": "http://localhost:11434/v1",
-      "api_key": "OPENAI_API_KEY",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.15,
-      "output_token_price_per_million": 0.6
-    },
-    "premium": {
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-5",
-      "api_key": "ANTHROPIC_API_KEY",
-      "context_length": 200000,
-      "input_token_price_per_million": 3,
-      "output_token_price_per_million": 15
-    }
-  },
 
   "agents": ["leader", "investigator", "web_agent", "summariser", "curator"],
 
@@ -73,6 +54,11 @@ live in their own files under `registry/agents/<name>/` — see
   ]
 }
 ```
+
+> **Migrating from older versions:** configurations that still declare a
+> top-level `"models": { … }` block inside `agents.json` are rejected at
+> startup with a clear error. Move the block to `models.json` as
+> documented below.
 
 The `agents` field is a list of agent *names*. Each name must
 correspond to a directory under `registry/agents/<name>/` containing
@@ -164,17 +150,64 @@ reload picks up squad edits without a process restart.
 
 ### Models and references
 
-`models` is a reusable catalog of model profiles. Each profile supports:
+Model profiles live in their own `models.json` file, resolved through the
+same 3-layer search chain as the other config files (`.agents/`,
+`$YOKE_HOME`, `/etc/yoke`). The file has two top-level sections:
 
-- `provider`, `model`, `base_url`, `api_key`
-- `context_length`
-- `input_token_price_per_million`
-- `output_token_price_per_million`
+```json
+{
+  "providers": {
+    "openai-prod": {
+      "kind": "openai_compat",
+      "base_url": "OPENAI_BASE_URL",
+      "api_key":  "OPENAI_API_KEY"
+    },
+    "anthropic-prod": {
+      "kind": "anthropic",
+      "api_key": "ANTHROPIC_API_KEY"
+    }
+  },
+  "models": {
+    "default": {
+      "provider_ref": "openai-prod",
+      "model": "gpt-4o-mini",
+      "context_length": 128000,
+      "input_token_price_per_million": 0.15,
+      "output_token_price_per_million": 0.6
+    },
+    "premium": {
+      "provider_ref": "anthropic-prod",
+      "model": "claude-sonnet-4-6",
+      "context_length": 200000,
+      "input_token_price_per_million": 3,
+      "output_token_price_per_million": 15
+    }
+  }
+}
+```
 
-Agents select one profile using `model_ref`.
+A **provider** groups credentials and an endpoint:
 
-If an agent omits `model_ref`, it can still specify `provider` / `model`
-inline for backward compatibility.
+- `kind` — one of `anthropic`, `openai`, `openai_compat`, `gemini`.
+- `base_url`, `api_key` — endpoint and credential, resolved as env-var
+  names first.
+
+A **model** profile supports:
+
+- `provider_ref` — name of a provider whose `kind`, `base_url`, and
+  `api_key` are inherited.
+- Inline `provider`, `model`, `base_url`, `api_key` — override the
+  inherited values when set.
+- `context_length`, `input_token_price_per_million`,
+  `cached_input_token_price_per_million`,
+  `output_token_price_per_million`.
+
+Agents reference a model by name via `model_ref` in their
+`registry/agents/<name>/agent.json`. If an agent omits `model_ref`, it
+can still specify `provider` / `model` inline.
+
+If a non-leader agent omits model connection fields, they inherit from
+the leader.
 
 ### Bash output filtering
 
@@ -187,9 +220,6 @@ JSON pipelines imported from the snip filter format.
 
 When disabled (default), `bash` output is unchanged. When enabled, matching
 commands are filtered before the tool's normal truncation step.
-
-If a non-leader agent omits model connection fields, they inherit from
-the leader.
 
 For `base_url` and `api_key`, the values can be either:
 

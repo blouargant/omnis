@@ -47,8 +47,20 @@ type AgentEntry struct {
 	PermissionsConfigPath string   `json:"permissions_config_path"`
 }
 
-// ModelEntry describes one reusable model profile in JSON runtime config.
+// ProviderEntry describes one reusable provider profile in models.json.
+// A provider groups credentials and an endpoint so multiple models can share
+// them via `provider_ref` on a ModelEntry.
+type ProviderEntry struct {
+	Kind    string `json:"kind"`
+	BaseURL string `json:"base_url"`
+	APIKey  string `json:"api_key"`
+}
+
+// ModelEntry describes one reusable model profile in models.json.
+// Most fields are inherited from the referenced provider when set; explicit
+// fields override the provider's defaults.
 type ModelEntry struct {
+	ProviderRef                string  `json:"provider_ref"`
 	Provider                   string  `json:"provider"`
 	Model                      string  `json:"model"`
 	BaseURL                    string  `json:"base_url"`
@@ -68,18 +80,35 @@ type ModelEntry struct {
 	CacheCreationTokenPricePerMillion float64 `json:"cache_creation_token_price_per_million"`
 }
 
+// modelsConfigFile is the on-disk shape of models.json.
+type modelsConfigFile struct {
+	Providers map[string]ProviderEntry `json:"providers"`
+	Models    map[string]ModelEntry    `json:"models"`
+}
+
 type runtimeConfigFile struct {
-	SoftSkillsDir         string                `json:"softskills_dir"`
-	AppName               string                `json:"app_name"`
-	TokenOptimization     bool                  `json:"token_optimization"`
-	BashOutputFiltersDir  string                `json:"bash_output_filters_dir"`
-	BashTimeoutSeconds    int                   `json:"bash_timeout_seconds"`
-	MCPConfigPath         string                `json:"mcp_config_path"`
-	PermissionsConfigPath string                `json:"permissions_config_path"`
-	SerpAPIKey            string                `json:"serpapi_key"`
-	Models                map[string]ModelEntry `json:"models"`
-	Agents                []string              `json:"agents"`
-	Squads                []SquadEntry          `json:"squads"`
+	SoftSkillsDir         string       `json:"softskills_dir"`
+	AppName               string       `json:"app_name"`
+	TokenOptimization     bool         `json:"token_optimization"`
+	BashOutputFiltersDir  string       `json:"bash_output_filters_dir"`
+	BashTimeoutSeconds    int          `json:"bash_timeout_seconds"`
+	MCPConfigPath         string       `json:"mcp_config_path"`
+	PermissionsConfigPath string       `json:"permissions_config_path"`
+	SerpAPIKey            string       `json:"serpapi_key"`
+	Agents                []string     `json:"agents"`
+	Squads                []SquadEntry `json:"squads"`
+	// Models is no longer a supported field in agents.json. It is detected
+	// here only to produce a clear migration error. Move the block to
+	// models.json (see RuntimeSettings.ModelsConfigPath).
+	LegacyModels json.RawMessage `json:"models,omitempty"`
+}
+
+// RuntimeProviderConfig is one normalized provider profile.
+type RuntimeProviderConfig struct {
+	Name    string
+	Kind    string
+	BaseURL string
+	APIKey  string
 }
 
 // RuntimeModelConfig is one normalized model profile.
@@ -150,6 +179,8 @@ const DefaultSquadName = "default"
 // resolution: defaults -> JSON -> ENV -> Options.
 type RuntimeSettings struct {
 	ConfigPath              string
+	ModelsConfigPath        string
+	Providers               map[string]RuntimeProviderConfig
 	SoftSkillsDir           string
 	AppName                 string
 	BashOutputFilterEnabled bool
@@ -279,9 +310,29 @@ func defaultAgents() []RuntimeAgentConfig {
 	}
 }
 
-func normalizeModelCatalog(models map[string]ModelEntry) map[string]RuntimeModelConfig {
+func normalizeProviderCatalog(providers map[string]ProviderEntry) map[string]RuntimeProviderConfig {
+	if len(providers) == 0 {
+		return map[string]RuntimeProviderConfig{}
+	}
+	out := make(map[string]RuntimeProviderConfig, len(providers))
+	for rawName, p := range providers {
+		name := strings.ToLower(strings.TrimSpace(rawName))
+		if name == "" {
+			continue
+		}
+		out[name] = RuntimeProviderConfig{
+			Name:    name,
+			Kind:    strings.TrimSpace(p.Kind),
+			BaseURL: resolveBaseURLReference(strings.TrimSpace(p.BaseURL)),
+			APIKey:  resolveAPIKeyReference(strings.TrimSpace(p.APIKey)),
+		}
+	}
+	return out
+}
+
+func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]RuntimeProviderConfig) (map[string]RuntimeModelConfig, error) {
 	if len(models) == 0 {
-		return map[string]RuntimeModelConfig{}
+		return map[string]RuntimeModelConfig{}, nil
 	}
 	out := make(map[string]RuntimeModelConfig, len(models))
 	for rawName, m := range models {
@@ -289,12 +340,21 @@ func normalizeModelCatalog(models map[string]ModelEntry) map[string]RuntimeModel
 		if name == "" {
 			continue
 		}
+		providerRef := strings.ToLower(strings.TrimSpace(m.ProviderRef))
+		var refProvider RuntimeProviderConfig
+		if providerRef != "" {
+			p, ok := providers[providerRef]
+			if !ok {
+				return nil, fmt.Errorf("models config: model %q references unknown provider_ref %q", name, providerRef)
+			}
+			refProvider = p
+		}
 		out[name] = RuntimeModelConfig{
 			Name:                              name,
-			Provider:                          strings.TrimSpace(m.Provider),
+			Provider:                          firstNonEmpty(strings.TrimSpace(m.Provider), refProvider.Kind),
 			Model:                             strings.TrimSpace(m.Model),
-			BaseURL:                           resolveBaseURLReference(strings.TrimSpace(m.BaseURL)),
-			APIKey:                            resolveAPIKeyReference(strings.TrimSpace(m.APIKey)),
+			BaseURL:                           resolveBaseURLReference(firstNonEmpty(strings.TrimSpace(m.BaseURL), refProvider.BaseURL)),
+			APIKey:                            resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(m.APIKey), refProvider.APIKey)),
 			ContextLength:                     m.ContextLength,
 			InputTokenPricePerMillion:         m.InputTokenPricePerMillion,
 			OutputTokenPricePerMillion:        m.OutputTokenPricePerMillion,
@@ -302,7 +362,7 @@ func normalizeModelCatalog(models map[string]ModelEntry) map[string]RuntimeModel
 			CacheCreationTokenPricePerMillion: m.CacheCreationTokenPricePerMillion,
 		}
 	}
-	return out
+	return out, nil
 }
 
 func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeModelConfig) ([]RuntimeAgentConfig, error) {
@@ -649,6 +709,7 @@ func loadAgentFromRegistry(name string, registryDirs []string) (AgentEntry, erro
 func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out := RuntimeSettings{
 		ConfigPath:              paths.FindConfig("agents.json"),
+		ModelsConfigPath:        paths.FindConfig("models.json"),
 		SoftSkillsDir:           paths.SoftSkillsDir(),
 		AppName:                 "yoke",
 		BashOutputFilterEnabled: false,
@@ -657,6 +718,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		MCPConfigPath:           paths.FindConfig("mcp_config.json"),
 		PermissionsConfigPath:   paths.FindConfig("permissions.json"),
 		A2AConfigPath:           paths.FindConfig("a2a_config.json"),
+		Providers:               map[string]RuntimeProviderConfig{},
 		Models:                  map[string]RuntimeModelConfig{},
 		Agents:                  defaultAgents(),
 	}
@@ -672,6 +734,27 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		} else {
 			return RuntimeSettings{}, err
 		}
+	}
+
+	// Hard break on the legacy in-line models block. Direct the user to
+	// the new models.json file rather than silently honouring stale config.
+	if len(cfg.LegacyModels) > 0 && string(cfg.LegacyModels) != "null" {
+		return RuntimeSettings{}, fmt.Errorf("runtime config %q: \"models\" must be defined in models.json (move the block to %s and remove it from agents.json)", out.ConfigPath, out.ModelsConfigPath)
+	}
+
+	// Load models.json (providers + models). Missing file is always fine:
+	// the catalogue is auto-discovered, and agents without a resolvable
+	// model_ref simply fall back to inline or leader-inherited fields.
+	modelsCfg := modelsConfigFile{}
+	if loaded, mErr := loadModelsConfig(out.ModelsConfigPath); mErr == nil {
+		modelsCfg = loaded
+	} else if !errors.Is(mErr, os.ErrNotExist) {
+		return RuntimeSettings{}, mErr
+	}
+	out.Providers = normalizeProviderCatalog(modelsCfg.Providers)
+	out.Models, err = normalizeModelCatalog(modelsCfg.Models, out.Providers)
+	if err != nil {
+		return RuntimeSettings{}, err
 	}
 
 	// File
@@ -696,9 +779,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
 		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))
-	}
-	if len(cfg.Models) > 0 {
-		out.Models = normalizeModelCatalog(cfg.Models)
 	}
 	if len(cfg.Agents) > 0 {
 		agentsRegistryDirs := paths.AgentsRegistrySearchDirs()
@@ -774,6 +854,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
+	out.ModelsConfigPath = filepath.Clean(out.ModelsConfigPath)
 	return out, nil
 }
 
@@ -824,6 +905,18 @@ func loadRuntimeConfig(path string) (runtimeConfigFile, error) {
 	var cfg runtimeConfigFile
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return runtimeConfigFile{}, fmt.Errorf("runtime config %q: decode json: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func loadModelsConfig(path string) (modelsConfigFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return modelsConfigFile{}, fmt.Errorf("models config %q: %w", path, err)
+	}
+	var cfg modelsConfigFile
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return modelsConfigFile{}, fmt.Errorf("models config %q: decode json: %w", path, err)
 	}
 	return cfg, nil
 }

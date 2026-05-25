@@ -12,18 +12,28 @@ calls to one of four backends:
 
 ## Selecting a model
 
-Models are declared in `agent.json` under `models[]` and referenced by name
-from each `agent[].model_ref`. A model entry carries:
+Models live in their own `models.json` file (separate from `agents.json`)
+with two top-level sections:
 
-- `provider` — one of the four above.
-- `model` — the provider-specific model ID (e.g. `claude-opus-4-7`).
-- `base_url` / `api_key` — endpoint and credential. Resolved as env-var names
-  first (see Configuration).
-- `temperature`, `max_tokens`, optional `thinking` budget, etc.
+- `providers` — credentials + endpoint for each upstream API. A provider
+  picks a `kind` (the four above), a `base_url`, and an `api_key`.
+- `models` — model profiles. Each one points at a provider via
+  `provider_ref` and inherits its credentials. Optional inline
+  `provider` / `base_url` / `api_key` fields still override the inherited
+  values when set.
 
-Override at runtime with `YOKE_PROVIDER`, `YOKE_MODEL`, `YOKE_BASE_URL`,
-`YOKE_API_KEY`. The provider-specific env vars `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GOOGLE_API_KEY` are also recognised.
+Each agent references a model by its profile name via `model_ref` in
+`registry/agents/<name>/agent.json`.
+
+`base_url` and `api_key` are resolved as env-var names first (see
+Configuration). Override leader credentials at runtime with
+`YOKE_PROVIDER`, `YOKE_MODEL`, `YOKE_BASE_URL`, `YOKE_API_KEY`. The
+provider-specific env vars `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GOOGLE_API_KEY` are also recognised.
+
+A startup-time check rejects configs that still declare `models` inline
+in `agents.json` — move the block to `models.json` (the loader points at
+the expected path in the error message).
 
 ## Per-agent models
 
@@ -34,8 +44,9 @@ Different sub-agents can use different models. A common configuration:
   gathering and text condensation.
 - **curator** — runs offline at session end; usually a mid-tier model.
 
-The **Models** sub-tab of the Agents panel exposes every field of the model
-entries with inline validation.
+The **Models** section in Settings (right after Agents) exposes every
+field with inline validation. It has two sub-tabs — Providers and Models
+— so credentials can be defined once and shared across model entries.
 
 ## Prompt caching
 
@@ -47,7 +58,10 @@ first turn.
 
 ## Web UI provider-model picker
 
-The **Settings → Agents → Models** form lists known model IDs per provider so
-you can pick from a dropdown instead of typing. The list is fetched from
-`/api/provider-models` on the server, which caches per-provider catalogues for
-a few minutes.
+The **Settings → Models → Models** sub-tab lists known model IDs per provider
+so you can pick from a dropdown instead of typing. The ⟳ button calls
+`/api/providers/models?provider_ref=<name>` on the server, which resolves the
+provider's credentials and base URL from `models.json` before contacting the
+upstream API — secrets never cross the wire to the browser. If the provider
+returns context-length or pricing alongside each model, those fields are
+auto-filled on the model entry.

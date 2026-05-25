@@ -115,7 +115,8 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 
 | File | Purpose |
 |---|---|
-| `agents.json` | List of enabled agent names, model profiles, squad composition, global paths |
+| `agents.json` | List of enabled agent names, squad composition, global paths |
+| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref` |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
@@ -133,10 +134,39 @@ objects; its `agents` field is a list of names that reference the registry:
 ```json
 {
   "agents": ["leader", "investigator", "web_agent", "skill_editor", "registries_crawler", "summariser", "curator"],
-  "models": { ... },
   "squads": [ ... ]
 }
 ```
+
+The `models` block lives in its own `models.json` file alongside `agents.json`.
+A startup-time check rejects configs that still declare `models` inline in
+`agents.json` — move the block to `models.json` (the loader points at the
+expected path in the error message). The file holds two top-level sections:
+
+```json
+{
+  "providers": {
+    "openai-prod": {
+      "kind": "openai_compat",
+      "base_url": "OPENAI_BASE_URL",
+      "api_key":  "OPENAI_API_KEY"
+    }
+  },
+  "models": {
+    "premium": {
+      "provider_ref": "openai-prod",
+      "model": "claude-sonnet-4-6",
+      "context_length": 200000,
+      "input_token_price_per_million": 5,
+      "output_token_price_per_million": 26
+    }
+  }
+}
+```
+
+A model's `provider_ref` inherits `kind` (as `provider`), `base_url`, and
+`api_key` from the referenced provider; inline `provider`/`base_url`/`api_key`
+on a model still override the inherited values when set.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,
@@ -251,9 +281,10 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 ### Hot reload (server mode)
 
 The HTTP server supports rebuilding the agent generation without
-restarting the process. Edits to `agents.json`, `permissions.json`, and
-`mcp_config.json` (from any layer of the search chain) are picked up by
-`POST /api/config/reload` (or the "Reload" button in the web UI).
+restarting the process. Edits to `agents.json`, `models.json`,
+`permissions.json`, and `mcp_config.json` (from any layer of the search
+chain) are picked up by `POST /api/config/reload` (or the "Reload" button
+in the web UI).
 
 The model is a two-layer build split across [agent/infrastructure.go](agent/infrastructure.go),
 [agent/instance.go](agent/instance.go), and [agent/manager.go](agent/manager.go):

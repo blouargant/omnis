@@ -85,6 +85,7 @@ func loadServerConfig() ServerConfig {
 // same precedence used by agent.NewAgent and never come from the HTTP client.
 type configFiles struct {
 	Agent       string // config/agents.json
+	Models      string // config/models.json
 	Permissions string // config/permissions.json
 	MCP         string // config/mcp_config.json
 	A2A         string // config/a2a_config.json
@@ -108,6 +109,12 @@ func (c configFiles) path(name string) (string, bool) {
 		if c.Agent != "" {
 			if st, err := os.Stat(c.Agent); err == nil && !st.IsDir() {
 				return c.Agent, true
+			}
+		}
+	case "models":
+		if c.Models != "" {
+			if st, err := os.Stat(c.Models); err == nil && !st.IsDir() {
+				return c.Models, true
 			}
 		}
 	case "permissions":
@@ -165,6 +172,7 @@ func (c configFiles) writePathFor(name string, body []byte) (string, bool) {
 // underlying JSON filenames. Used by both path() and writePath().
 var configFileNames = map[string]string{
 	"agent":       "agents.json",
+	"models":      "models.json",
 	"permissions": "permissions.json",
 	"mcp":         "mcp_config.json",
 	"a2a":         "a2a_config.json",
@@ -183,6 +191,7 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	findConfigMCP := paths.FindConfig("mcp_config.json")
 	out := configFiles{
 		Agent:       firstNonEmpty(opts.ConfigPath, paths.FindConfig("agents.json")),
+		Models:      paths.FindConfig("models.json"),
 		Permissions: firstNonEmpty(opts.PermissionsConfigPath, paths.FindConfig("permissions.json")),
 		A2A:         paths.FindConfig("a2a_config.json"),
 	}
@@ -190,6 +199,9 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	if err == nil {
 		if strings.TrimSpace(settings.ConfigPath) != "" {
 			out.Agent = settings.ConfigPath
+		}
+		if strings.TrimSpace(settings.ModelsConfigPath) != "" {
+			out.Models = settings.ModelsConfigPath
 		}
 		if strings.TrimSpace(settings.PermissionsConfigPath) != "" {
 			out.Permissions = settings.PermissionsConfigPath
@@ -202,6 +214,9 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	}
 	if abs, err := filepath.Abs(out.Agent); err == nil {
 		out.Agent = abs
+	}
+	if abs, err := filepath.Abs(out.Models); err == nil {
+		out.Models = abs
 	}
 	if abs, err := filepath.Abs(out.Permissions); err == nil {
 		out.Permissions = abs
@@ -324,11 +339,13 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		// under $YOKE_HOME/config, the listing reflects it without a
 		// server restart.
 		agentPath, _ := files.path("agent")
+		modelsPath, _ := files.path("models")
 		permissionsPath, _ := files.path("permissions")
 		mcpPath, _ := files.path("mcp")
 		a2aPath, _ := files.path("a2a")
 		out := []configFileInfo{
 			describeConfigFile("agent", agentPath),
+			describeConfigFile("models", modelsPath),
 			describeConfigFile("permissions", permissionsPath),
 			describeConfigFile("mcp", mcpPath),
 			describeConfigFile("a2a", a2aPath),

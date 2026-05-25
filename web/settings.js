@@ -7,6 +7,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Small inline SVG icons rendered next to each entry in the sidebar menu.
   const ICONS = {
     agent: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg>`,
+    models: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M4.22 4.22l2.12 2.12"/><path d="M17.66 17.66l2.12 2.12"/><path d="M2 12h3"/><path d="M19 12h3"/><path d="M4.22 19.78l2.12-2.12"/><path d="M17.66 6.34l2.12-2.12"/></svg>`,
     permissions: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
     mcp: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
     a2a: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
@@ -24,6 +25,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Server-backed JSON configs. Each id matches /api/config/{parsed,file}/<id>.
   const FILES = [
     { id: "agent",       label: "Agents",      form: "agent" },
+    { id: "models",      label: "Models",      form: "models" },
     { id: "permissions", label: "Permissions", form: "permissions" },
     { id: "mcp",         label: "MCP",         form: "mcp" },
     { id: "a2a",         label: "A2A",         form: "a2a" },
@@ -37,6 +39,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const MENU_ITEMS = [
     { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "agent",         label: "Agents",      title: "Agent Configuration",       kind: "json" },
+    { id: "models",        label: "Models",      title: "Models & Providers",        kind: "json" },
     { id: "permissions",   label: "Permissions", title: "Permissions",               kind: "json" },
     { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "json" },
     { id: "a2a",           label: "A2A",         title: "A2A Agents",                kind: "json" },
@@ -155,8 +158,12 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "agents",  label: "Agents"  },
     { id: "squads",  label: "Squads"  },
     { id: "remotes", label: "Remotes" },
-    { id: "models",  label: "Models"  },
     { id: "globals", label: "Global Environment" },
+  ];
+
+  const MODELS_SUBTABS = [
+    { id: "providers", label: "Providers" },
+    { id: "models",    label: "Models"    },
   ];
 
   const SKILLS_SUBTABS = [
@@ -178,6 +185,8 @@ const BASE_PATH = window.BASE_PATH || "";
     activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "agents", // only used when activeFile === 'agent'
+    activeModelsSubtab: "models", // only used when activeFile === 'models'
+    activeProviderName: null,     // selected provider in the Providers sub-tab
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
     activeMCPSubtab: "servers",    // only used when activeFile === 'mcp'
     activeA2ASubtab: "agents",     // only used when activeFile === 'a2a'
@@ -685,7 +694,8 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   function defaultDataFor(id) {
-    if (id === "agent") return { models: {}, agents: [] };
+    if (id === "agent") return { agents: [] };
+    if (id === "models") return { providers: {}, models: {} };
     if (id === "permissions") return { always_deny: [], always_allow: [], ask_user: [] };
     if (id === "mcp") return { servers: {}, inputs: [] };
     if (id === "a2a") return { agents: {}, inputs: [] };
@@ -1051,6 +1061,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // ─── Form rendering (per file) ─────────────────────────────────────────
   function renderForm(id) {
     if (id === "agent") return renderAgentForm();
+    if (id === "models") return renderModelsForm();
     if (id === "permissions") return renderPermissionsForm();
     if (id === "mcp") return renderMCPForm();
     if (id === "a2a") return renderA2AForm();
@@ -1066,9 +1077,15 @@ const BASE_PATH = window.BASE_PATH || "";
     await loadBuiltinAgents();
     const id = "agent";
     const d = state.parsed[id].value;
-    if (!d.models || typeof d.models !== "object") d.models = {};
     if (!Array.isArray(d.agents)) d.agents = [];
     if (!Array.isArray(d.squads)) d.squads = [];
+    // Models now live in models.json; ensure the parsed cache is warm so
+    // the agent's "Model Reference" dropdown sees the catalogue without a
+    // race against its own render.
+    if (!state.parsed.models) {
+      try { await loadParsed("models"); }
+      catch { /* missing models.json is fine — dropdown shows (none) */ }
+    }
 
     const sub = state.activeAgentSubtab;
     bodyEl.innerHTML = `
@@ -1106,27 +1123,6 @@ const BASE_PATH = window.BASE_PATH || "";
     if (sub === "globals") {
       host.innerHTML = `<div id="agent-globals-host" class="env-sections"></div>`;
       renderAgentGlobals(d);
-    } else if (sub === "models") {
-      host.innerHTML = `
-        <div class="model-panel-header">
-          <div>
-            <h2 class="model-panel-title">Configured Models</h2>
-            <p class="model-panel-desc">Define the language models available for orchestration. These endpoints will be used by your agents based on their assigned capabilities.</p>
-          </div>
-          <button type="button" class="add-btn model-add-btn" id="add-model">+ Add model</button>
-        </div>
-        <div id="agent-models"></div>
-      `;
-      bodyEl.querySelector("#add-model").addEventListener("click", async () => {
-        let name = await appPrompt("New model name:");
-        if (!name) return;
-        name = name.trim().toLowerCase();
-        if (!name || d.models[name]) return;
-        d.models[name] = { provider: "", model: "", base_url: "", api_key: "" };
-        markFormDirty(id);
-        renderAgentModels(d);
-      });
-      renderAgentModels(d);
     } else if (sub === "squads") {
       // Surface a synthesised `default` squad in the editor whenever it is
       // missing, so users see what the server already provides as fallback
@@ -1524,160 +1520,322 @@ const BASE_PATH = window.BASE_PATH || "";
     }));
   }
 
-  function renderAgentModels(d) {
-    const el = bodyEl.querySelector("#agent-models");
-    el.innerHTML = "";
-    const names = Object.keys(d.models);
+  // renderModelsForm — top-level Models & Providers editor backed by models.json.
+  // Providers hold credentials + endpoint; Models reference a provider via
+  // provider_ref, with optional per-model overrides (kept off the UI for clarity).
+  async function renderModelsForm() {
+    const id = "models";
+    const d = state.parsed[id].value;
+    if (!d.providers || typeof d.providers !== "object") d.providers = {};
+    if (!d.models || typeof d.models !== "object") d.models = {};
 
+    const sub = state.activeModelsSubtab;
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <div class="settings-subtabs" role="tablist">
+          ${MODELS_SUBTABS.map(t => `
+            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
+          `).join("")}
+        </div>
+        <div class="settings-subtab-body"></div>
+      </div>
+    `;
+    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
+      b.addEventListener("click", () => {
+        if (state.activeModelsSubtab === b.dataset.subtab) return;
+        state.activeModelsSubtab = b.dataset.subtab;
+        renderModelsForm();
+      });
+    });
+
+    const host = bodyEl.querySelector(".settings-subtab-body");
+    if (sub === "providers") renderProvidersPanel(d, host);
+    else renderModelsPanel(d, host);
+    updateFooter();
+  }
+
+  function renderProvidersPanel(d, host) {
+    host.innerHTML = `
+      <div class="model-panel-header">
+        <div>
+          <h2 class="model-panel-title">Configured Providers</h2>
+          <p class="model-panel-desc">A provider groups a kind (anthropic, openai, openai_compat, gemini) with a base URL and API key. Models reference a provider and inherit its credentials.</p>
+        </div>
+        <button type="button" class="add-btn model-add-btn" id="add-provider">+ Add provider</button>
+      </div>
+      <div id="providers-grid"></div>
+    `;
+    host.querySelector("#add-provider").addEventListener("click", async () => {
+      let name = await appPrompt("New provider name:");
+      if (!name) return;
+      name = name.trim().toLowerCase();
+      if (!name || d.providers[name]) return;
+      d.providers[name] = { kind: "openai_compat", base_url: "", api_key: "" };
+      state.activeProviderName = name;
+      markFormDirty("models");
+      renderProvidersPanel(d, host);
+    });
+    renderProviderCards(d, host.querySelector("#providers-grid"));
+  }
+
+  function renderProviderCards(d, el) {
+    el.innerHTML = "";
     const grid = document.createElement("div");
     grid.className = "model-cards-grid";
+    const names = Object.keys(d.providers);
 
-    names.forEach((name, i) => {
-      const m = d.models[name] || {};
-      const onChange = () => markFormDirty("agent");
-      const isActive = true;
-
+    names.forEach(name => {
+      const p = d.providers[name] || {};
+      const onChange = () => markFormDirty("models");
       const card = document.createElement("div");
       card.className = "model-card";
       card.innerHTML = `
         <div class="model-card-hdr">
           <div class="model-card-title">
-            <span class="model-status-dot ${isActive ? "dot-active" : "dot-standby"}"></span>
+            <span class="model-status-dot dot-active"></span>
             <strong>${escHtml(name.toUpperCase())}</strong>
-            <span class="model-status-badge ${isActive ? "badge-active" : "badge-standby"}">${isActive ? "ACTIVE" : "STANDBY"}</span>
+          </div>
+          <div>
+            <button type="button" class="model-test-link" title="Fetch model list from this provider">⟳ TEST</button>
+            <button type="button" class="model-remove-link">⏷ REMOVE</button>
+          </div>
+        </div>
+        <div class="model-card-body"></div>
+      `;
+      const body = card.querySelector(".model-card-body");
+      const fg = document.createElement("div");
+      fg.className = "model-field-grid";
+
+      // KIND (select)
+      const kindF = document.createElement("div");
+      kindF.className = "model-field";
+      const kindLbl = document.createElement("label");
+      kindLbl.className = "model-field-label";
+      kindLbl.textContent = "KIND";
+      const kindSel = document.createElement("select");
+      kindSel.className = "model-field-input";
+      ["anthropic", "openai", "openai_compat", "gemini"].forEach(k => {
+        const opt = document.createElement("option");
+        opt.value = k; opt.textContent = k;
+        if ((p.kind || "openai_compat") === k) opt.selected = true;
+        kindSel.appendChild(opt);
+      });
+      kindSel.addEventListener("change", () => { p.kind = kindSel.value; onChange(); });
+      kindF.appendChild(kindLbl); kindF.appendChild(kindSel);
+      fg.appendChild(kindF);
+
+      // BASE URL
+      const urlF = textField("base_url", p.base_url, v => { p.base_url = v; onChange(); });
+      urlF.classList.add("model-field-full");
+      fg.appendChild(urlF);
+
+      // API KEY
+      fg.appendChild(secretField("api_key", p.api_key, v => { p.api_key = v; onChange(); }));
+
+      body.appendChild(fg);
+
+      card.querySelector(".model-remove-link").addEventListener("click", async () => {
+        const refs = Object.entries(d.models || {}).filter(([, m]) => (m.provider_ref || "").toLowerCase() === name).map(([n]) => n);
+        const msg = refs.length
+          ? `Remove provider "${name}"?\n\nThese models reference it and will lose their credentials: ${refs.join(", ")}`
+          : `Remove provider "${name}"?`;
+        if (!await appConfirm(msg)) return;
+        delete d.providers[name];
+        markFormDirty("models");
+        renderProviderCards(d, el);
+      });
+      card.querySelector(".model-test-link").addEventListener("click", async () => {
+        try {
+          const params = new URLSearchParams({ provider: p.kind || "openai_compat" });
+          if (p.api_key) params.set("api_key", p.api_key);
+          if (p.base_url) params.set("base_url", p.base_url);
+          setStatus(`Testing ${name}…`);
+          const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || r.statusText);
+          setStatus(`${name}: ${j.models?.length || 0} models reachable.`, "success");
+        } catch (e) {
+          setStatus(`${name}: ${e.message}`, "error");
+        }
+      });
+      grid.appendChild(card);
+    });
+    el.appendChild(grid);
+  }
+
+  function renderModelsPanel(d, host) {
+    host.innerHTML = `
+      <div class="model-panel-header">
+        <div>
+          <h2 class="model-panel-title">Configured Models</h2>
+          <p class="model-panel-desc">Each model references a provider for credentials and endpoint. Use the ⟳ button to populate the model list from the provider.</p>
+        </div>
+        <button type="button" class="add-btn model-add-btn" id="add-model">+ Add model</button>
+      </div>
+      <div id="models-grid"></div>
+    `;
+    host.querySelector("#add-model").addEventListener("click", async () => {
+      const providerNames = Object.keys(d.providers || {});
+      if (!providerNames.length) {
+        setStatus("Add a provider first (Providers tab).", "error");
+        return;
+      }
+      let name = await appPrompt("New model name:");
+      if (!name) return;
+      name = name.trim().toLowerCase();
+      if (!name || d.models[name]) return;
+      d.models[name] = { provider_ref: providerNames[0], model: "" };
+      markFormDirty("models");
+      renderModelCards(d, host.querySelector("#models-grid"));
+    });
+    renderModelCards(d, host.querySelector("#models-grid"));
+  }
+
+  function renderModelCards(d, el) {
+    el.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "model-cards-grid";
+    const providerNames = Object.keys(d.providers || {});
+
+    Object.keys(d.models).forEach(name => {
+      const m = d.models[name] || {};
+      const onChange = () => markFormDirty("models");
+      const card = document.createElement("div");
+      card.className = "model-card";
+      card.innerHTML = `
+        <div class="model-card-hdr">
+          <div class="model-card-title">
+            <span class="model-status-dot dot-active"></span>
+            <strong>${escHtml(name.toUpperCase())}</strong>
+            <span class="model-status-badge badge-active">ACTIVE</span>
           </div>
           <button type="button" class="model-remove-link">⏷ REMOVE</button>
         </div>
         <div class="model-card-body"></div>
       `;
       const body = card.querySelector(".model-card-body");
-
-      function modelField(key, val, onCh) {
-        const f = document.createElement("div");
-        f.className = "model-field";
-        const lbl = document.createElement("label");
-        lbl.className = "model-field-label";
-        lbl.textContent = key.toUpperCase().replace(/_/g, " ");
-        const inp = document.createElement("input");
-        inp.type = "text";
-        inp.className = "model-field-input";
-        inp.value = val == null ? "" : String(val);
-        inp.addEventListener("input", () => onCh(inp.value));
-        f.appendChild(lbl);
-        f.appendChild(inp);
-        return f;
-      }
-
-      function modelNumField(key, val) {
-        const f = document.createElement("div");
-        f.className = "model-field";
-        const lbl = document.createElement("label");
-        lbl.className = "model-field-label";
-        lbl.textContent = key.toUpperCase().replace(/_/g, " ");
-        const inp = document.createElement("input");
-        inp.type = "number";
-        inp.className = "model-field-input";
-        inp.value = val == null ? "" : val;
-        inp.addEventListener("input", () => {
-          const n = inp.value === "" ? undefined : Number(inp.value);
-          m[key] = Number.isFinite(n) ? n : undefined;
-          onChange();
-        });
-        f.appendChild(lbl);
-        f.appendChild(inp);
-        return f;
-      }
-
       const fg = document.createElement("div");
       fg.className = "model-field-grid";
 
-      // PROVIDER
-      fg.appendChild(modelField("provider", m.provider, v => { m.provider = v; onChange(); }));
+      // PROVIDER (dropdown sourced from d.providers)
+      const provF = document.createElement("div");
+      provF.className = "model-field";
+      const provLbl = document.createElement("label");
+      provLbl.className = "model-field-label";
+      provLbl.textContent = "PROVIDER";
+      const provSel = document.createElement("select");
+      provSel.className = "model-field-input";
+      if (!providerNames.length) {
+        const opt = document.createElement("option");
+        opt.value = ""; opt.textContent = "(no providers — add one first)";
+        provSel.appendChild(opt);
+        provSel.disabled = true;
+      } else {
+        for (const pn of providerNames) {
+          const opt = document.createElement("option");
+          opt.value = pn; opt.textContent = pn;
+          if (pn === (m.provider_ref || "")) opt.selected = true;
+          provSel.appendChild(opt);
+        }
+      }
+      provSel.addEventListener("change", () => { m.provider_ref = provSel.value; onChange(); });
+      provF.appendChild(provLbl); provF.appendChild(provSel);
+      fg.appendChild(provF);
 
-      // MODEL (combobox)
-      const combo = modelComboField(m, onChange);
+      // MODEL (combobox, sourced via provider_ref)
+      const combo = modelComboField(m, onChange, name => d.providers[name]);
       combo.className = "model-field model-field-combo";
       const comboSpan = combo.querySelector("span");
       if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
       fg.appendChild(combo);
 
-      // BASE URL (full width)
-      const urlF = modelField("base_url", m.base_url, v => { m.base_url = v; onChange(); });
-      urlF.classList.add("model-field-full");
-      fg.appendChild(urlF);
-
-      // API KEY (password, full width)
-      const keyF = document.createElement("div");
-      keyF.className = "model-field model-field-full";
-      const keyLbl = document.createElement("label");
-      keyLbl.className = "model-field-label";
-      keyLbl.textContent = "API KEY";
-      const keyWrap = document.createElement("div");
-      keyWrap.className = "env-secret-wrap";
-      const keyInp = document.createElement("input");
-      keyInp.type = "password";
-      keyInp.className = "model-field-input";
-      keyInp.value = m.api_key == null ? "" : String(m.api_key);
-      keyInp.addEventListener("input", () => { m.api_key = keyInp.value; onChange(); });
-      const keyEye = document.createElement("button");
-      keyEye.type = "button";
-      keyEye.className = "env-secret-eye";
-      keyEye.title = "Show/hide";
-      keyEye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-      keyEye.addEventListener("click", () => { keyInp.type = keyInp.type === "password" ? "text" : "password"; });
-      keyWrap.appendChild(keyInp);
-      keyWrap.appendChild(keyEye);
-      keyF.appendChild(keyLbl);
-      keyF.appendChild(keyWrap);
-      fg.appendChild(keyF);
-
-      fg.appendChild(modelNumField("context_length", m.context_length));
-      fg.appendChild(modelNumField("input_token_price_per_million", m.input_token_price_per_million));
-      fg.appendChild(modelNumField("cached_input_token_price_per_million", m.cached_input_token_price_per_million));
-      fg.appendChild(modelNumField("output_token_price_per_million", m.output_token_price_per_million));
+      fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
+      fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
+      fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
+      fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
 
       body.appendChild(fg);
 
       card.querySelector(".model-remove-link").addEventListener("click", async () => {
         if (!await appConfirm(`Remove model "${name}"?`)) return;
         delete d.models[name];
-        markFormDirty("agent");
-        renderAgentModels(d);
+        markFormDirty("models");
+        renderModelCards(d, el);
       });
       grid.appendChild(card);
     });
 
-    // Empty "Configure New Endpoint" card
-    const emptyCard = document.createElement("div");
-    emptyCard.className = "model-card model-card-empty";
-    const emptyBtn = document.createElement("button");
-    emptyBtn.type = "button";
-    emptyBtn.className = "model-card-empty-btn";
-    emptyBtn.innerHTML = `
-      <span class="model-card-empty-icon">⊕</span>
-      <span class="model-card-empty-label">Configure New Endpoint</span>
-      <span class="model-card-empty-sub">Add custom LLM providers or endpoints</span>
-    `;
-    emptyBtn.addEventListener("click", async () => {
-      let name = await appPrompt("New model name:");
-      if (!name) return;
-      name = name.trim().toLowerCase();
-      if (!name || d.models[name]) return;
-      d.models[name] = { provider: "", model: "", base_url: "", api_key: "" };
-      markFormDirty("agent");
-      renderAgentModels(d);
-    });
-    emptyCard.appendChild(emptyBtn);
-    grid.appendChild(emptyCard);
-
     el.appendChild(grid);
+  }
+
+  function textField(key, val, onCh) {
+    const f = document.createElement("div");
+    f.className = "model-field";
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = key.toUpperCase().replace(/_/g, " ");
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.className = "model-field-input";
+    inp.value = val == null ? "" : String(val);
+    inp.addEventListener("input", () => onCh(inp.value));
+    f.appendChild(lbl);
+    f.appendChild(inp);
+    return f;
+  }
+
+  function numField(key, val, onCh) {
+    const f = document.createElement("div");
+    f.className = "model-field";
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = key.toUpperCase().replace(/_/g, " ");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.className = "model-field-input";
+    inp.value = val == null ? "" : val;
+    inp.addEventListener("input", () => {
+      const n = inp.value === "" ? undefined : Number(inp.value);
+      onCh(Number.isFinite(n) ? n : undefined);
+    });
+    f.appendChild(lbl);
+    f.appendChild(inp);
+    return f;
+  }
+
+  function secretField(key, val, onCh) {
+    const f = document.createElement("div");
+    f.className = "model-field model-field-full";
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = key.toUpperCase().replace(/_/g, " ");
+    const wrap = document.createElement("div");
+    wrap.className = "env-secret-wrap";
+    const inp = document.createElement("input");
+    inp.type = "password";
+    inp.className = "model-field-input";
+    inp.value = val == null ? "" : String(val);
+    inp.addEventListener("input", () => onCh(inp.value));
+    const eye = document.createElement("button");
+    eye.type = "button";
+    eye.className = "env-secret-eye";
+    eye.title = "Show/hide";
+    eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
+    wrap.appendChild(inp); wrap.appendChild(eye);
+    f.appendChild(lbl); f.appendChild(wrap);
+    return f;
   }
 
   // modelComboField builds a form row for the "model" field: a free-text input
   // with a custom dropdown panel populated from the provider's model list API.
   // The panel shows ALL fetched models (filtered by what's typed); clicking one
   // sets the value. The ⟳ button fetches and opens the panel automatically.
-  function modelComboField(m, onChange) {
+  // resolveProvider is an optional callback that returns the provider entry by
+  // name; when set, the fetch uses provider_ref so credentials stay on the
+  // server. Otherwise it falls back to the legacy inline (provider/api_key/
+  // base_url) shape on the model itself.
+  function modelComboField(m, onChange, resolveProvider) {
     const row = document.createElement("div");
     row.className = "form-row form-row-combo";
 
@@ -1730,6 +1888,9 @@ const BASE_PATH = window.BASE_PATH || "";
           e.preventDefault(); // keep input focus
           input.value = mdl.id;
           m.model = mdl.id;
+          if (mdl.context_length && !m.context_length) m.context_length = mdl.context_length;
+          if (mdl.input_token_price_per_million && !m.input_token_price_per_million) m.input_token_price_per_million = mdl.input_token_price_per_million;
+          if (mdl.output_token_price_per_million && !m.output_token_price_per_million) m.output_token_price_per_million = mdl.output_token_price_per_million;
           onChange();
           panel.hidden = true;
         });
@@ -1757,15 +1918,21 @@ const BASE_PATH = window.BASE_PATH || "";
     fetchBtn.textContent = "⟳";
 
     fetchBtn.addEventListener("click", async () => {
-      const provider = (m.provider || "").trim();
-      if (!provider) { setStatus("Set a provider first."); return; }
+      const providerRef = (m.provider_ref || "").trim();
+      let params;
+      if (providerRef && typeof resolveProvider === "function") {
+        params = new URLSearchParams({ provider_ref: providerRef });
+      } else {
+        const provider = (m.provider || "").trim();
+        if (!provider) { setStatus("Set a provider first."); return; }
+        params = new URLSearchParams({ provider });
+        if (m.api_key) params.set("api_key", m.api_key);
+        if (m.base_url) params.set("base_url", m.base_url);
+      }
       fetchBtn.disabled = true;
       fetchBtn.textContent = "…";
       setStatus("Fetching model list…");
       try {
-        const params = new URLSearchParams({ provider });
-        if (m.api_key) params.set("api_key", m.api_key);
-        if (m.base_url) params.set("base_url", m.base_url);
         const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || r.statusText);
@@ -1895,7 +2062,9 @@ const BASE_PATH = window.BASE_PATH || "";
     renderAgentGroup(customAgents, "CUSTOM AGENTS");
 
     // Detail panel
-    renderAgentDetail(d, state.activeAgentIdx, Object.keys(d.models || {}));
+    const modelsCatalog = state.parsed.models?.value?.models;
+    const modelOptions = modelsCatalog && typeof modelsCatalog === "object" ? Object.keys(modelsCatalog) : [];
+    renderAgentDetail(d, state.activeAgentIdx, modelOptions);
   }
 
   function renderAgentDetail(d, idx, modelOptions) {

@@ -126,11 +126,11 @@ func newSettingsView(app *tview.Application, pages *tview.Pages, returnFocus tvi
 	// Phase D: six $EDITOR-driven config tabs. Each binds to one JSON
 	// file in the config search chain; validation runs on every save.
 	configDefs := []struct{ name, file, help string }{
-		{"Models", "agents.json", "Edit the models map (provider/model/prices) — also used by Squads."},
+		{"Models", "models.json", "Edit providers + models (provider/model/prices)."},
 		{"MCP", "mcp_config.json", "MCP server definitions (name, command, args, env)."},
 		{"A2A", "a2a_config.json", "Remote A2A peer endpoints + per-call inputs."},
 		{"Permissions", "permissions.json", "Tool permission rules: always_deny / always_allow / ask_user."},
-		{"Squads", "agents.json", "Squad composition (leader + members) — also used by Models."},
+		{"Squads", "agents.json", "Squad composition (leader + members)."},
 		{"Remotes", "remote_registries.json", "Remote skill / agent / MCP / A2A registries."},
 	}
 	for _, def := range configDefs {
