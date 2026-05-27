@@ -37,7 +37,7 @@ func toPublicRemote(r registries.Registry) publicRemote {
 // the agents UI).
 func normalizeKindInput(raw, defaultKind string) string {
 	switch strings.TrimSpace(raw) {
-	case registries.KindSkills, registries.KindAgents, registries.KindBoth, registries.KindMCP, registries.KindA2A, registries.KindSquads:
+	case registries.KindSkills, registries.KindAgents, registries.KindBoth, registries.KindMCP, registries.KindA2A, registries.KindSquads, registries.KindCommands:
 		return strings.TrimSpace(raw)
 	case "":
 		return defaultKind

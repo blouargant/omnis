@@ -15,12 +15,13 @@ const (
 // Kind values for Registry.Kind. An empty value is treated as KindSkills for
 // backwards compatibility with pre-existing remote_registries.json entries.
 const (
-	KindSkills = "skills"
-	KindAgents = "agents"
-	KindBoth   = "both"
-	KindMCP    = "mcp"
-	KindA2A    = "a2a"
-	KindSquads = "squads"
+	KindSkills   = "skills"
+	KindAgents   = "agents"
+	KindBoth     = "both"
+	KindMCP      = "mcp"
+	KindA2A      = "a2a"
+	KindSquads   = "squads"
+	KindCommands = "commands"
 )
 
 // Registry is one entry in remote_registries.json.
@@ -82,6 +83,19 @@ type SquadInfo struct {
 	Leader      string   `json:"leader,omitempty"`
 	Members     []string `json:"members,omitempty"`
 	Installed   bool     `json:"installed"`
+}
+
+// CommandInfo is one slash-command returned when browsing a remote command
+// registry. Each command corresponds to a single Claude Code-style markdown
+// file: filename (without .md) is the command name; YAML frontmatter (if any)
+// provides description/argument-hint; body is the prompt template.
+type CommandInfo struct {
+	Name         string `json:"name"`
+	DirPath      string `json:"dir_path"`        // path relative to registry root, e.g. "commands/foo.md"
+	Group        string `json:"group,omitempty"` // intermediate dirs before the file
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argument_hint,omitempty"`
+	Installed    bool   `json:"installed"`
 }
 
 // A2AAgentInfo is one A2A agent returned when browsing a remote A2A registry.

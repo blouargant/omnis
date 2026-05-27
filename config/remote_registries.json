@@ -30,6 +30,12 @@
     "kind": "a2a"
   },
   {
+    "id": "c4d8a05a",
+    "name": "Yoke Commands",
+    "url": "https://github.com/blouargant/yoke-registry/tree/main/commands",
+    "kind": "commands"
+  },
+  {
     "id": "dd19df2a",
     "name": "mattpocock",
     "url": "https://github.com/mattpocock/skills/tree/main/skills"

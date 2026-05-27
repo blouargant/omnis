@@ -464,7 +464,9 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	registerConfigRoutes(auth, d.ConfigFiles, d.Restart, d.Manager, d.AgentOptions)
 	registerPreferencesRoutes(auth, newPreferencesStore(d.ConfigFiles))
-	registerUserCommandsRoutes(auth, newUserCommandsStore())
+	userCmdStore := newUserCommandsStore()
+	registerUserCommandsRoutes(auth, userCmdStore)
+	registerCommandsRoutes(auth.Group("/commands"), userCmdStore)
 	registerProviderModelsRoute(auth)
 	registerAgentMetaRoutes(auth)
 	registerSkillsRoutes(auth.Group("/skills"), d.SkillsDeps)

@@ -181,6 +181,11 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "remotes", label: "Remotes" },
   ];
 
+  const COMMANDS_SUBTABS = [
+    { id: "user",    label: "User Commands" },
+    { id: "remotes", label: "Remotes"       },
+  ];
+
   const state = {
     activeFile: "skills",
     activeView: "form", // 'form' | 'raw'
@@ -190,6 +195,7 @@ const BASE_PATH = window.BASE_PATH || "";
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
     activeMCPSubtab: "servers",    // only used when activeFile === 'mcp'
     activeA2ASubtab: "agents",     // only used when activeFile === 'a2a'
+    activeCommandsSubtab: "user",  // only used when activeFile === USER_COMMANDS_ID
     activeAgentIdx: 0,            // selected agent in the fleet list
     activeAgentInitialized: false, // true once localStorage restore has been attempted
     activeSquadIdx: 0,            // selected squad in the squads list
@@ -200,6 +206,7 @@ const BASE_PATH = window.BASE_PATH || "";
     mcpRemotes: { browsing: null, viewing: null }, // MCP remotes panel state
     a2aRemotes: { browsing: null }, // A2A remotes panel state
     squadRemotes: { browsing: null }, // Squad remotes panel state
+    commandsRemotes: { browsing: null, viewing: null }, // Commands remotes panel state
     activeRemoteKind: "agents",       // Selected kind in the Registries left panel
     docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
   };
@@ -611,6 +618,10 @@ const BASE_PATH = window.BASE_PATH || "";
     if (id === "a2a") {
       state.a2aRemotes.browsing = null;
     }
+    if (id === USER_COMMANDS_ID) {
+      state.commandsRemotes.browsing = null;
+      state.commandsRemotes.viewing = null;
+    }
     syncActiveHighlight(id);
     renderBody();
   }
@@ -864,22 +875,57 @@ const BASE_PATH = window.BASE_PATH || "";
       bodyEl.innerHTML = `<p class="settings-error">User commands API not available.</p>`;
       return;
     }
+    // Render the sub-tab shell once; each tab body paints into the inner host.
+    const sub = state.activeCommandsSubtab;
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <div class="settings-subtabs" role="tablist">
+          ${COMMANDS_SUBTABS.map(t => `
+            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
+          `).join("")}
+        </div>
+        <div class="settings-subtab-body"></div>
+      </div>
+    `;
+    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
+      b.addEventListener("click", () => {
+        if (state.activeCommandsSubtab === b.dataset.subtab) {
+          if (b.dataset.subtab === "remotes" && state.commandsRemotes.browsing) {
+            state.commandsRemotes.browsing = null;
+            state.commandsRemotes.viewing = null;
+            renderUserCommands();
+          }
+          return;
+        }
+        state.activeCommandsSubtab = b.dataset.subtab;
+        renderUserCommands();
+      });
+    });
+
+    const host = bodyEl.querySelector(".settings-subtab-body");
+    if (sub === "remotes") {
+      await renderCommandsRemotesSection(host);
+      return;
+    }
+
     await UC.refresh();
-    paintUserCommands(UC);
+    paintUserCommands(UC, host);
     // Repaint when the underlying list changes (modal save, delete, etc.),
     // but only while this section is still the active view. The listener
     // accumulates across navigations; the guard makes that harmless.
     if (!state._userCmdListenerWired) {
       state._userCmdListenerWired = true;
       UC.onChanged(() => {
-        if (state.activeFile === USER_COMMANDS_ID && state.open) {
-          paintUserCommands(UC);
+        if (state.activeFile === USER_COMMANDS_ID && state.open &&
+            state.activeCommandsSubtab === "user") {
+          const h = bodyEl.querySelector(".settings-subtab-body");
+          if (h) paintUserCommands(UC, h);
         }
       });
     }
   }
 
-  function paintUserCommands(UC) {
+  function paintUserCommands(UC, host) {
     const builtins = UC.builtins();
     const commands = UC.list();
 
@@ -905,8 +951,8 @@ const BASE_PATH = window.BASE_PATH || "";
         </tr>
       `).join("");
 
-    bodyEl.innerHTML = `
-      <div class="settings-form user-cmd-settings">
+    host.innerHTML = `
+      <div class="user-cmd-settings">
         <p class="settings-hint" style="margin:0;">
           Slash commands shown in the chat composer. Built-in commands are reserved.
           User commands expand to a prompt template that is sent to the agent — use
@@ -934,17 +980,17 @@ const BASE_PATH = window.BASE_PATH || "";
       </div>
     `;
 
-    bodyEl.querySelector("#user-cmd-add-btn")?.addEventListener("click", () => {
+    host.querySelector("#user-cmd-add-btn")?.addEventListener("click", () => {
       UC.openModal(null);
     });
-    bodyEl.querySelectorAll(".btn-edit").forEach(btn => {
+    host.querySelectorAll(".btn-edit").forEach(btn => {
       btn.addEventListener("click", () => {
         const name = btn.dataset.name;
         const cmd = UC.list().find(c => c.name === name);
         if (cmd) UC.openModal(cmd);
       });
     });
-    bodyEl.querySelectorAll(".btn-del").forEach(btn => {
+    host.querySelectorAll(".btn-del").forEach(btn => {
       btn.addEventListener("click", async () => {
         const name = btn.dataset.name;
         if (!await appConfirm(`Remove command "/${name}"?`)) return;
@@ -3595,6 +3641,8 @@ const BASE_PATH = window.BASE_PATH || "";
         ? "https://github.com/owner/repo/tree/main/a2a-agents"
         : defaultKind === "squads"
         ? "https://github.com/owner/repo/tree/main/squads"
+        : defaultKind === "commands"
+        ? "https://github.com/owner/repo/tree/main/commands"
         : "https://github.com/owner/repo/tree/main/skills";
       const namePlaceholder = defaultKind === "agents"
         ? "My agent registry"
@@ -3604,6 +3652,8 @@ const BASE_PATH = window.BASE_PATH || "";
         ? "My A2A registry"
         : defaultKind === "squads"
         ? "My squad registry"
+        : defaultKind === "commands"
+        ? "My command registry"
         : "My skill registry";
       form.innerHTML = `
         <div class="registry-dialog-field">
@@ -3637,6 +3687,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>MCP Servers</option>
             <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>A2A Agents</option>
             <option value="squads"${kindVal === "squads" ? " selected" : ""}>Squads</option>
+            <option value="commands"${kindVal === "commands" ? " selected" : ""}>Slash Commands</option>
           </select>
           <span class="registry-dialog-hint">Tab where this registry will appear.</span>
         </div>
@@ -6741,6 +6792,351 @@ const BASE_PATH = window.BASE_PATH || "";
       } else {
         setStatus("Failed to refresh registry: " + e.message, "error");
       }
+    }
+  }
+
+  // ─── Commands — remote registries ─────────────────────────────────────
+  //
+  // Mirrors the MCP / A2A "Remote registries" section. Backed by
+  // /api/commands/remotes/* on the server. Each entry in a remote
+  // registry is a Claude Code-style slash-command markdown file
+  // (one .md per command). Installing merges it into user_commands.json.
+
+  const remoteCommandsCache = {}; // keyed by registry ID → { commands, timestamp }
+
+  async function renderCommandsRemotesSection(host) {
+    if (state.commandsRemotes.viewing) {
+      await renderCommandsRemoteCommandView(host);
+      return;
+    }
+    if (state.commandsRemotes.browsing) {
+      await renderCommandsRemoteBrowseView(host);
+      return;
+    }
+
+    host.innerHTML = `
+      <section class="form-section">
+        <h3>Remote command registries
+          <button type="button" class="add-btn" id="cmd-remote-add">+ Add</button>
+        </h3>
+        <p class="settings-hint">
+          Browse and install slash commands from GitHub, GitLab, or Gitea repositories.
+          Commands use Anthropic's Claude Code format — one markdown file per command,
+          with optional YAML frontmatter (<code>description</code>, <code>argument-hint</code>).
+        </p>
+        <div id="cmd-remote-list"></div>
+      </section>
+    `;
+    const listEl = host.querySelector("#cmd-remote-list");
+    await refreshCommandsRemoteList(listEl);
+
+    host.querySelector("#cmd-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({
+        title: "Add Command Registry",
+        defaultKind: "commands",
+      });
+      if (!result) return;
+      try {
+        await skillsPost("/commands/remotes", result);
+        await refreshCommandsRemoteList(listEl);
+      } catch (e) {
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
+    });
+  }
+
+  async function refreshCommandsRemoteList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/commands/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote command registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install slash commands.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.commandsRemotes.browsing = { id: r.id, name: r.name, url: r.url };
+        renderUserCommands();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit Command Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          isEdit: true,
+          defaultKind: "commands",
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/commands/remotes/${r.id}`, result);
+          delete remoteCommandsCache[r.id];
+          await refreshCommandsRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/commands/remotes/${r.id}`);
+          delete remoteCommandsCache[r.id];
+          await refreshCommandsRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  async function renderCommandsRemoteBrowseView(host) {
+    const { id, name } = state.commandsRemotes.browsing;
+    const cached = remoteCommandsCache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registries</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the repository tree for command markdown files. This may take a moment.</p>
+          </div>
+        ` : ""}
+        <div id="cmd-remote-browse-content"></div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.commandsRemotes.browsing = null;
+      renderUserCommands();
+    });
+
+    const contentEl = host.querySelector("#cmd-remote-browse-content");
+
+    function populateContent(commands) {
+      contentEl.innerHTML = "";
+
+      const truncated = commands.some(c => c.dir_path === "__truncated__");
+      const real = commands.filter(c => c.dir_path !== "__truncated__");
+
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${real.length} command${real.length !== 1 ? "s" : ""}${truncated ? " (tree truncated — some entries may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!real.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No slash commands found in this registry. Files must be markdown (.md) with optional YAML frontmatter.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const c of real) {
+        const g = c.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(c);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1; if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      function buildCommandCard(cmd) {
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card";
+
+        const actionHtml = cmd.installed
+          ? `<span class="remote-skill-installed-badge">Installed</span>`
+          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+        const argHintRow = cmd.argument_hint
+          ? `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">args</span><span class="remote-agent-meta-chips"><span class="remote-agent-chip">${escHtml(cmd.argument_hint)}</span></span></div>`
+          : "";
+
+        card.innerHTML = `
+          <div class="skill-mkt-header">
+            <span class="skill-mkt-filename">/${escHtml(cmd.name)}</span>
+            ${actionHtml}
+          </div>
+          <div class="skill-mkt-body">
+            <p class="skill-mkt-desc">${escHtml(cmd.description || "(no description)")}</p>
+            ${argHintRow}
+          </div>
+        `;
+
+        if (!cmd.installed) {
+          card.querySelector(".remote-install-btn").addEventListener("click", e => {
+            e.stopPropagation();
+            doInstallCommand(id, cmd, card);
+          });
+        }
+
+        card.addEventListener("click", e => {
+          if (e.target.closest(".remote-install-btn")) return;
+          state.commandsRemotes.viewing = { ...state.commandsRemotes.browsing, command: cmd };
+          renderUserCommands();
+        });
+
+        return card;
+      }
+
+      renderGroupedRemoteList({
+        contentEl,
+        sortedGroups,
+        grouped,
+        buildCard: buildCommandCard,
+      });
+    }
+
+    if (hasCached) {
+      populateContent(cached.commands);
+    }
+
+    try {
+      const res = await skillsGet(`/commands/remotes/${id}/browse`);
+      const commands = res.commands || [];
+      remoteCommandsCache[id] = { commands, timestamp: Date.now() };
+      host.querySelector(".remote-browse-refresh-badge")?.setAttribute("hidden", "");
+      host.querySelector(".remote-browse-loading")?.remove();
+      populateContent(commands);
+    } catch (e) {
+      if (!hasCached) {
+        contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
+      } else {
+        setStatus("Failed to refresh registry: " + e.message, "error");
+      }
+    }
+  }
+
+  async function renderCommandsRemoteCommandView(host) {
+    const { id, name, command } = state.commandsRemotes.viewing;
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header">
+          <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
+        </div>
+        <div class="skill-frontmatter-card" id="cmd-fm-card">
+          <p class="settings-loading">Loading…</p>
+        </div>
+        <div class="skill-content-wrap">
+          <div class="skill-md-preview markdown-body" id="cmd-md-preview"></div>
+        </div>
+        <div class="skill-detail-footer">
+          <span></span>
+          <span class="skill-save-status"></span>
+          ${command.installed
+            ? `<span class="remote-skill-installed-badge">Installed</span>`
+            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+        </div>
+      </div>
+    `;
+
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.commandsRemotes.viewing = null;
+      renderUserCommands();
+    });
+
+    const fmCard = host.querySelector("#cmd-fm-card");
+    const preview = host.querySelector("#cmd-md-preview");
+
+    let content;
+    try {
+      const res = await skillsGet(`/commands/remotes/${id}/command/${command.dir_path}`);
+      content = res.content || "";
+    } catch (e) {
+      fmCard.innerHTML = "";
+      preview.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+
+    // Render frontmatter as scalar rows (name / description / argument-hint),
+    // mirroring the agent detail view's parseAgentFrontmatter + fmScalarRow pattern.
+    function scalarRow(key, val) {
+      return `<div class="skill-fm-row"><span class="skill-fm-key">${escHtml(key)}</span><span class="skill-fm-value">${escHtml(String(val))}</span></div>`;
+    }
+    const fm = parseAgentFrontmatter(content) || {};
+    const displayName = fm.name || command.name;
+    const rows = [];
+    rows.push(scalarRow("name", "/" + displayName));
+    if (fm.description) rows.push(scalarRow("description", fm.description));
+    else if (command.description) rows.push(scalarRow("description", command.description));
+    const argHint = fm["argument-hint"] || fm.argument_hint || command.argument_hint;
+    if (argHint) rows.push(scalarRow("argument-hint", argHint));
+    fmCard.innerHTML = rows.join("");
+
+    // The body (after frontmatter) is the prompt template — render as markdown.
+    const body = stripFrontmatter(content);
+    if (body.trim()) {
+      preview.innerHTML = marked.parse(body, { breaks: false, gfm: true });
+    } else {
+      preview.innerHTML = `<p class="empty">(empty prompt body)</p>`;
+    }
+
+    const installBtn = host.querySelector(".remote-install-btn");
+    if (installBtn) {
+      installBtn.addEventListener("click", () => {
+        doInstallCommand(id, command, host, installBtn);
+      });
+    }
+  }
+
+  // doInstallCommand posts the install and swaps the button/card to the
+  // "Installed" state in place. cardOrHost is the surrounding card element
+  // (browse view) or the detail-view host; installBtn is supplied only by
+  // the detail view so we know which button to replace.
+  async function doInstallCommand(registryID, command, cardOrHost, installBtn) {
+    const btn = installBtn || cardOrHost.querySelector(".remote-install-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    try {
+      const res = await skillsPost(`/commands/remotes/${registryID}/install/${command.dir_path}`, {});
+      command.installed = true;
+      if (btn) {
+        btn.replaceWith(Object.assign(document.createElement("span"), {
+          className: "remote-skill-installed-badge",
+          textContent: "Installed",
+        }));
+      }
+      const verb = res.added ? "added" : "updated";
+      setStatus(`Command "/${res.name}" ${verb}.`, "success");
+      // Keep the in-memory UserCommands cache in sync so the composer's
+      // slash menu and the User tab pick the new command up immediately.
+      if (window.UserCommands && typeof window.UserCommands.refresh === "function") {
+        window.UserCommands.refresh();
+      }
+      delete remoteCommandsCache[registryID];
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Install";
+      }
+      setStatus("Install failed: " + err.message, "error");
     }
   }
 

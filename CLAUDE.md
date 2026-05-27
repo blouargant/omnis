@@ -525,18 +525,21 @@ a2a_enabled: true
 a2a_port: 8091
 ```
 
-### Remote registries (skills and agents)
+### Remote registries (skills, agents, mcp, a2a, squads, commands)
 
-The web UI can browse and install both skills and agents from any GitHub,
-GitLab, or Gitea repository. Both share the same `remote_registries.json`
-file (resolved from the config search chain; with the same fork-on-first-edit semantics as other config), and
-the same set of provider adapters in [internal/registries/](internal/registries/).
+The web UI can browse and install skills, agents, MCP servers, A2A peers,
+squads, and slash commands from any GitHub, GitLab, or Gitea repository.
+All share the same `remote_registries.json` file (resolved from the config
+search chain; with the same fork-on-first-edit semantics as other config),
+and the same set of provider adapters in
+[internal/registries/](internal/registries/).
 
 Each entry has a `kind` field: `skills` (default when missing — legacy),
-`agents`, or `both`. The Settings → Skills → Remotes and Settings → Agents
-→ Remotes tabs each list only the registries whose `kind` matches; a `both`
-entry shows up in both. The "Hosts" selector on the add/edit dialog sets
-the kind.
+`agents`, `both` (skills + agents), `mcp`, `a2a`, `squads`, or `commands`.
+The Settings → Skills/Agents/MCP/A2A/Commands → Remotes tabs each list
+only the registries whose `kind` matches; a `both` entry shows up in
+both the skills and agents tabs. The "Hosts" selector on the add/edit
+dialog sets the kind.
 
 Remote layout — agents:
 
@@ -559,11 +562,26 @@ repo/path/to/skills/
     └── SKILL.md
 ```
 
-The browse view discovers either `agent.json` or `SKILL.md` files
-recursively under the registry URL's `tree` path. The install button
-downloads every file in the matched directory into
+Remote layout — commands: one Claude Code-style markdown file per command
+(Anthropic's `~/.claude/commands/<name>.md` formalism). The filename
+without `.md` is the command name; YAML frontmatter (optional) supplies
+`description` and `argument-hint`; the body is the prompt template,
+supporting `$1..$N` positional and `$*` rest placeholders.
+
+```
+repo/path/to/commands/
+├── review.md             ← frontmatter + body
+└── triage/
+    └── repro.md
+```
+
+The browse view discovers `agent.json`, `SKILL.md`, or command `.md`
+files recursively under the registry URL's `tree` path. The install
+button downloads every file in the matched directory into
 `$YOKE_HOME/registry/agents/<name>/` (agents) or
-`$YOKE_HOME/registry/skills/<name>/` (skills). After installing a skill,
+`$YOKE_HOME/registry/skills/<name>/` (skills). Commands install into
+the single per-user `$YOKE_HOME/user_commands.json` file (same store
+the local Slash Commands editor writes to). After installing a skill,
 add its name to the target agent's `"skills"` list in `agent.json` —
 either via the web UI Skills tab or by editing the file directly.
 
