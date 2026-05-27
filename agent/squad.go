@@ -27,6 +27,7 @@ import (
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/a2a"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/softskills"
 	"github.com/blouargant/yoke/internal/teammates"
 	"github.com/blouargant/yoke/internal/worktree"
@@ -115,6 +116,13 @@ func buildSquadInstance(
 	leadTools = append(leadTools, worktree.Tools(infra.Repo)...)
 	leadTools = append(leadTools, infra.BgQueues.Tool())
 	leadTools = append(leadTools, curateSessionTool())
+	// record_session_feedback persists the wrap-session answer to
+	// $YOKE_HOME/logs/agent_feedback_<suffix>.json so the post-session
+	// reflector can treat it as the dominant verdict signal.
+	leadTools = append(leadTools, softskills.NewFeedbackTool(
+		paths.LogsDir(),
+		func(u, s string) string { return infra.SessionSuffix(u, s) },
+	))
 
 	skillTS, softSkillTS, _, toolsets, leaderHandles := buildLeaderToolsets(ctx, runtime, leaderCfg, infra.MCPPool)
 	allMCPHandles := append([]*mcpcfg.Handle(nil), leaderHandles...)

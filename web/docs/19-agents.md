@@ -19,8 +19,8 @@ A split view: fleet list on the left, agent detail panel on the right.
 Agents are grouped into two sections:
 
 - **BUILT-IN AGENTS** — shipped with yoke: `leader`, `skill_editor`,
-  `registries_crawler`, `summariser`, `curator`. Fields are read-only where
-  the binary bakes in defaults.
+  `registries_crawler`, `summariser`, `curator`, `reflector`. Fields are
+  read-only where the binary bakes in defaults.
 - **CUSTOM AGENTS** — user-added. All fields are editable; the agent can be
   removed or reordered.
 
@@ -141,8 +141,8 @@ The sub-tab shows a list on the left and a detail panel on the right:
 |---|---|
 | **Name** | Case-insensitive, unique. The `default` squad name is read-only. |
 | **Description** | Shown as the tooltip in the New Chat squad picker. |
-| **Leader** | Dropdown over enabled agents (excluding `curator`). |
-| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` is always excluded (it is process-wide). |
+| **Leader** | Dropdown over enabled agents (excluding `curator` and `reflector`). |
+| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` and `reflector` are always excluded (they are process-wide). |
 
 The `default` squad is always present. If `agents.json` doesn't declare one,
 the editor synthesises it from all enabled agents the first time the sub-tab

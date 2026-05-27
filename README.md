@@ -9,6 +9,13 @@ code changes required to retarget the agent at a new domain.
 > The same binary becomes a code reviewer, a Kubernetes triage assistant,
 > a DBA helper, or a release engineer purely by changing what is mounted.
 
+After every session a two-stage **reflection pipeline** (a deterministic
+heuristic + an optional LLM reflector) tags the soft-skills the session
+loaded as helpful, harmful, or neutral, extracts a key insight, and
+hands the verdict to a **curator** that distills a new soft-skill or
+prunes a misleading one. The corpus improves itself over time without
+manual authoring.
+
 ---
 
 ## Table of contents
@@ -373,12 +380,12 @@ yoke/
 │   ├── compress/                # context compression plugin
 │   ├── cache/                   # prompt-cache stats plugin
 │   ├── skills/                  # skill loader (skilltoolset wrapper)
-│   ├── softskills/              # curator-distilled procedures
+│   ├── softskills/              # curator-distilled procedures + reflectors (heuristic + LLM)
 │   ├── mcp/                     # MCP config loader
 │   └── a2a/                     # A2A protocol client + tool wiring
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
-├── softskills/                  # curator output
+├── softskills/                  # curator output (incl. _stats.json sidecar + wrap-session built-in)
 ├── config/                      # agents.json, permissions.json, mcp_config.json
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation

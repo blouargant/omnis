@@ -76,3 +76,61 @@ Both are markdown playbooks. The difference is provenance:
 
 Soft-skills make the agent better at recurring tasks over time without
 human authoring.
+
+## Post-session reflection
+
+The curator no longer judges sessions alone. At every session end yoke
+runs a two-stage reflection pipeline that informs the curator's
+decisions:
+
+1. **Heuristic reflector** (always on, no LLM) scans the StateLog
+   (open issues, decisions, tools), the last few user messages, tool
+   errors, and any explicit wrap-up feedback to produce a verdict
+   (`positive` / `negative` / `ambiguous` / `unknown`) and one
+   `helpful` / `harmful` / `neutral` tag per loaded soft-skill.
+2. **LLM reflector** (the `reflector` agent — optional) refines the
+   heuristic with reasons and extracts a single `key_insight` worth
+   distilling. The LLM wins on overlap; the heuristic fills the gaps.
+
+Tag counts live in `$YOKE_HOME/softskills/_stats.json` (keyed by
+`<agent>/<name>` for sub-agent skills, bare `<name>` for leader
+skills). The curator consults the counts plus the reflector's reasons
+to apply concrete gating rules:
+
+| Action | When |
+|---|---|
+| **create** | `success == positive` AND `key_insight` is non-empty AND no near-duplicate exists |
+| **update** | The `key_insight` cleanly extends an existing skill |
+| **delete** | `(stats.harmful >= 3 && stats.harmful > stats.helpful)` OR the reflector tagged the skill harmful with a reason mentioning "wrong assumptions" or "superseded" |
+| **skip** | Default — none of the above is satisfied |
+
+### Per-sub-agent micro-reflection
+
+The same pipeline runs at `EventRunEnd` (every user turn, not just
+session end) for the sub-agents that the leader called during the
+turn. For each invocation:
+
+- If the leader retried the sub-agent later in the same turn → the
+  first call's loaded skills are tagged `harmful`.
+- If the sub-agent's reply started with `Error:` or was effectively
+  empty → tagged `harmful`.
+- If the leader's text cited the sub-agent approvingly ("per
+  investigator", "investigator reported …") → tagged `helpful`.
+- Otherwise → `neutral`.
+
+This is a lexical scan; over-counting from false-positive citations is
+the trade-off vs. running a dedicated micro-classifier per turn.
+
+### Explicit wrap-up feedback
+
+A built-in `wrap-session` soft-skill ships in the default
+`softskills/` library. On interactive surfaces (TUI / Web UI) the
+leader loads it once per session when the user's work is complete; it
+asks "Anything off, or are we good to wrap?" and persists the answer
+via the `record_session_feedback` tool to
+`logs/agent_feedback_<session-suffix>.json`. Both reflectors treat the
+answer as the dominant verdict signal.
+
+Delete `softskills/wrap-session/` (or the directory under
+`$YOKE_HOME/softskills/wrap-session/` if you forked it) to disable the
+wrap-up question globally.

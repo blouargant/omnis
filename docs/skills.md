@@ -178,8 +178,128 @@ appends a short SKILL.md plus an INDEX.md entry.
    - **delete** — call `softskill_delete(name, reason)` + `softskill_index_remove(name)`.
      Used for obsolete or harmful skills. Prefer skip over delete when in doubt.
 
+   The decision is gated by concrete thresholds rather than the curator's
+   intuition. See the [post-session reflection pipeline](#post-session-reflection-pipeline)
+   below for the inputs (reflector outcome, `key_insight`, per-skill
+   `_stats.json` counters) and the rules wired into `CuratorPrompt`.
+
 5. The next session's lead sees the updated soft-skill library via `list_softskills`
    and may load entries on demand.
+
+## Post-session reflection pipeline
+
+The curator does not judge the session by itself. Two upstream
+reflectors prepare the inputs:
+
+### Heuristic reflector (always runs)
+
+[internal/softskills/reflector_heuristic.go](../internal/softskills/reflector_heuristic.go)
+is a deterministic, no-LLM tagger that runs in-process at every
+`EventSessionEnd`. It consumes:
+
+- the compressed StateLog (`open_issues`, `decisions`, `tools`),
+- the last user messages from the conversation file,
+- the tool errors observed during the session,
+- any explicit `wrap-session` feedback recorded by the leader,
+
+and emits a verdict (`positive` / `negative` / `ambiguous` / `unknown`)
+plus one tag per loaded soft-skill. Tags are written to
+[`softskills/_stats.json`](#softskillsstatsjson) — a sidecar tracking
+`loaded_count` + `helpful` / `harmful` / `neutral` per skill key.
+
+### LLM reflector (optional)
+
+`registry/agents/reflector/agent.json` defines a separate analyst agent
+(default model: `balanced`). When present and enabled, the curator hook
+runs it before the curator with a 60-second timeout. The reflector
+returns a strict JSON envelope:
+
+```json
+{
+  "reasoning":   "...",
+  "success":     "positive" | "negative" | "ambiguous",
+  "key_insight": "single-sentence generalisable lesson, or empty",
+  "bullet_tags": [
+    {"key": "<agent>/<name>", "tag": "helpful|harmful|neutral", "reason": "..."}
+  ]
+}
+```
+
+Tags returned by the LLM are merged onto the heuristic's — the LLM
+wins on overlap. Conflicting tags are reconciled by `Stats.Retag`
+(decrement the heuristic tag, increment the LLM tag) so each session
+contributes at most one tag per skill.
+
+### `softskills/_stats.json`
+
+```json
+{
+  "version": 1,
+  "entries": {
+    "investigator/k8s-pod-evidence": {
+      "loaded_count": 14,
+      "helpful": 8,
+      "harmful": 1,
+      "neutral": 5,
+      "first_loaded_at": "2026-01-04T12:01:00Z",
+      "last_loaded_at":  "2026-05-26T09:14:00Z",
+      "last_session":    "teaching-kite"
+    }
+  }
+}
+```
+
+Keyed by `<agent>/<name>` for sub-agent skills, bare `<name>` for the
+leader. Written with file-level locking so multiple yoke processes on
+the same host never corrupt the counters.
+
+### Per-sub-agent micro-reflection
+
+`agent/subagent_hook.go` buffers all sub-agent invocations seen during
+one leader run (keyed by `run_id`), then at `EventRunEnd` tags each
+invocation:
+
+- **retry** (same sub-agent appears later in the same run) → harmful.
+- **`Error:` prefix or empty output** → harmful.
+- **leader's assistant text cites the sub-agent approvingly**
+  (`per <agent>`, `<agent> reported`, `<agent>'s findings`) → helpful.
+- **leader retries / dismisses** ("let me ask again", "that failed",
+  "let's try again") → harmful.
+- otherwise → neutral.
+
+This runs on every user turn — not just at session end — so streaming
+feedback accrues over the lifetime of the session.
+
+### Curator gating rules
+
+`CuratorPrompt` enforces these explicit rules so the create / update /
+delete decision is auditable:
+
+- **create** only when `success == positive` AND `key_insight` is
+  non-empty AND no near-duplicate exists in `run_glob softskills/*/SKILL.md`.
+- **update** only when the `key_insight` cleanly extends an existing
+  skill (the `softskill_update` `reason` argument must be ≥20 chars
+  citing the improvement).
+- **delete** only when `(stats.harmful >= 3 && stats.harmful > stats.helpful)`
+  OR the reflector tagged the skill `harmful` this session with a
+  reason mentioning "wrong assumptions" or "superseded".
+- **skip** is the default; the curator falls through to it whenever
+  none of the rules permits action.
+
+### Explicit feedback (wrap-session)
+
+On interactive surfaces the leader is instructed to load the
+**wrap-session** soft-skill once per session when the user's work is
+complete. The skill asks one closing question ("Anything off, or are
+we good to wrap?") and persists the answer via the
+`record_session_feedback` tool to
+`$YOKE_HOME/logs/agent_feedback_<key>.json`. Both reflectors treat the
+answer as the dominant verdict signal (positive keywords drive a
+positive verdict; negative keywords drive a negative verdict).
+
+`softskills/wrap-session/SKILL.md` ships in the repo as a deletable
+built-in: delete the directory to disable the wrap-up question
+globally.
 
 ### The Harvested flag
 

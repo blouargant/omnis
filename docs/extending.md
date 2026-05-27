@@ -153,10 +153,10 @@ new agent, no session will see it — that's how you keep an agent
 reserved for a specific squad.
 
 Built-in vs custom: the agents shipped with yoke (`leader`,
-`skill_editor`, `registries_crawler`, `summariser`, `curator`) carry
-`"builtin": true` in their `agent.json`. The web UI displays them under
-a **Built-in Agents** section, separated from user-added **Custom
-Agents**. Leave the flag out for your own agents.
+`skill_editor`, `registries_crawler`, `summariser`, `curator`,
+`reflector`) carry `"builtin": true` in their `agent.json`. The web UI
+displays them under a **Built-in Agents** section, separated from
+user-added **Custom Agents**. Leave the flag out for your own agents.
 
 For programmatic embedders (CLI / examples / TUI) the same registry is
 consumed when `agent.NewAgent()` runs; the lower-level constructor
@@ -196,7 +196,9 @@ Rules:
 - The squad's `leader` must point to an agent marked `"leader": true`. The
   agent literally named `leader` is auto-flagged; mark any other coordinator
   with `"leader": true` to make it eligible as a squad lead.
-- `curator` cannot be a member — it stays process-wide.
+- `curator` and `reflector` cannot be members — they stay process-wide
+  (one hook per generation, fired at `EventSessionEnd` /
+  `EventSessionReflected`).
 
 Each squad becomes a separate wired tree inside the current generation
 (leader + sub-agents + runner + plugins). New chat sessions pick a

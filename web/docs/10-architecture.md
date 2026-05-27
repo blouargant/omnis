@@ -16,6 +16,7 @@ agent.NewAgent()                ← single wiring entry point
     │    │    ├── web_agent     ← web search + page fetch
     │    │    └── summariser    ← condenses bulk output
     │    └── "research"         ← leader + smaller team, picked per session
+    ├── reflector               ← process-wide post-session LLM analyst (optional)
     └── curator                 ← process-wide post-session soft-skill distiller
 ```
 
@@ -41,6 +42,15 @@ Only one sub-agent runs at a time. Concurrency is enforced by
 one finishes. The curator stays a single per-generation hook listening
 across every squad, so session-end curation runs at most once per
 session.
+
+The **reflector** is a peer process-wide hook that runs *before* the
+curator at session end. It tags every soft-skill the session loaded as
+`helpful` / `harmful` / `neutral`, extracts a single `key_insight`, and
+feeds the merged outcome plus per-skill stats into the curator's prompt
+so the create / update / delete decision is grounded in concrete
+evidence (see [11-skills.md](11-skills.md#post-session-reflection)). A
+deterministic in-process heuristic always runs; the LLM reflector layers
+on top when the `reflector` agent is enabled.
 
 ## Two-layer build
 
@@ -141,7 +151,7 @@ Rules:
   empty or omits one, the resolver synthesises a default from the
   enabled agents.
 - `leader` and every member must reference an enabled agent.
-- `curator` cannot be a member — it is process-wide.
+- `curator` and `reflector` cannot be members — they are process-wide.
 
 The new squad becomes selectable in the New Chat picker on the next
 hot-reload.

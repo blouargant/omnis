@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	adkagent "google.golang.org/adk/agent"
@@ -84,11 +85,27 @@ Read each file with run_read. Do not invent paths.
 3. Redundancy audit. For each candidate:
    - Use run_glob to discover existing soft-skills: ` + "`softskills/*/SKILL.md`" + ` (leader) and ` + "`softskills/<agent>/*/SKILL.md`" + ` (per-agent). Read relevant SKILL.md files with run_read.
    - Compare against the authored-skills list provided in the prompt.
-   - If an existing entry already covers the procedure, choose between:
-     a) Skip — if the existing entry is at least as good (default; prefer skipping over creating).
-     b) Update — only if the session revealed a concrete improvement: a new edge case handled, a step removed, a constraint discovered. You MUST justify the improvement in the 'reason' argument of softskill_update (at least 20 chars).
-     c) Delete — only if an existing skill is now **obsolete or actively harmful** (superseded by a better approach, based on wrong assumptions, or so rarely applicable it creates noise). Deletion requires a substantive reason (≥20 chars). Always prefer "skip" over "delete" when in doubt.
-   - Never create a near-duplicate.
+   - Apply the gating rules below in order. **Skip is the default; only act when the rule explicitly permits it.**
+
+   **Create** an entirely new soft-skill ONLY when ALL of the following hold:
+   - Reflector outcome ` + "`success == positive`" + ` (section 6 of the prompt).
+   - ` + "`key_insight`" + ` is non-empty (section 6).
+   - No near-duplicate exists in the authored-skills list or in the soft-skills you discovered with run_glob.
+   - The procedure has ≥3 concrete steps and is generalisable.
+   If any of those fail, skip the create — even if you think the procedure is interesting.
+
+   **Update** an existing soft-skill ONLY when:
+   - The reflector's ` + "`key_insight`" + ` cleanly extends or refines the existing skill (a new edge case, a removed step, a discovered constraint), AND
+   - The improvement is concrete enough to write in the ` + "`reason`" + ` argument (≥20 chars).
+   Pure rewrites for style or tone are rejected by the tool — do not attempt them.
+
+   **Delete** an existing soft-skill ONLY when at least ONE of these holds:
+   - Per-skill stats (section 7) show ` + "`harmful >= 3`" + ` AND ` + "`harmful > helpful`" + ` — the corpus is telling you the skill is doing more harm than good.
+   - Section 8 lists the skill as harmful this session AND the reason mentions "wrong assumptions", "superseded", or an explicit factual error.
+   Otherwise: skip. A neutral-but-rare skill is not a deletion candidate.
+   Deletion always requires a substantive ` + "`reason`" + ` (≥20 chars). Always prefer skip over delete when in doubt.
+
+   Never create a near-duplicate.
 
 4. Generalize. Strip session-specific identifiers (replace concrete pod names, file paths, user IDs with placeholders or remove them entirely). The skill must read as a procedure, not a story.
 
@@ -176,6 +193,15 @@ type CurateInputs struct {
 	// AgentNames lists the known sub-agent names (excluding leader and
 	// curator) so the curator knows which `agent` values are valid.
 	AgentNames []string
+	// Outcome is the merged (heuristic + LLM reflector) verdict for
+	// this session. Optional — when nil the curator falls back to the
+	// pre-Phase-4 prompt that judges success on its own. When set it
+	// drives the create/update/delete gating rules in CuratorPrompt.
+	Outcome *Outcome
+	// Stats is the current persistent softskill stats sidecar. Optional.
+	// When set the curator sees per-skill load/helpful/harmful/neutral
+	// counts so it can apply the harmful-threshold deletion rule.
+	Stats *Stats
 }
 
 // Curate runs the curator once against the provided inputs. It returns
@@ -236,9 +262,91 @@ func buildCuratePrompt(in CurateInputs) string {
 			fmt.Fprintf(&b, "   - %s\n", a)
 		}
 	}
-	b.WriteString("\n5. Existing soft-skills: use run_glob on `softskills/*/SKILL.md` (leader) and `softskills/<agent>/*/SKILL.md` (per-agent) to discover them before deciding whether to create or update.\n\n")
-	b.WriteString("Begin the workflow now. Reply only at the end with the one-paragraph summary.\n")
+	b.WriteString("\n5. Existing soft-skills: use run_glob on `softskills/*/SKILL.md` (leader) and `softskills/<agent>/*/SKILL.md` (per-agent) to discover them before deciding whether to create or update.\n")
+
+	// 6. Reflector outcome
+	b.WriteString("\n6. Reflector outcome for this session: ")
+	if in.Outcome == nil {
+		b.WriteString("(none — fall back on your own judgement from the audit + statelog)\n")
+	} else {
+		fmt.Fprintf(&b, "success=%s", in.Outcome.Success.String())
+		if ki := strings.TrimSpace(in.Outcome.KeyInsight); ki != "" {
+			fmt.Fprintf(&b, "; key_insight=%q", ki)
+		} else {
+			b.WriteString("; key_insight=(empty)")
+		}
+		b.WriteString("\n")
+	}
+
+	// 7. Per-skill stats (top 20 by LoadedCount)
+	b.WriteString("\n7. Per-skill usage stats (top 20 by loaded_count; sidecar at softskills/_stats.json):\n")
+	if in.Stats == nil || len(in.Stats.Entries) == 0 {
+		b.WriteString("   (none recorded yet)\n")
+	} else {
+		for _, line := range topStatsLines(in.Stats, 20) {
+			fmt.Fprintf(&b, "   - %s\n", line)
+		}
+	}
+
+	// 8. Reflector's harmful tags this session (with reasons)
+	b.WriteString("\n8. Skills the reflector tagged 'harmful' this session, with reasons:\n")
+	wroteAny := false
+	if in.Outcome != nil {
+		// Stable order so the prompt is deterministic across runs.
+		keys := make([]string, 0, len(in.Outcome.Tags))
+		for k, t := range in.Outcome.Tags {
+			if t == "harmful" {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			reason := strings.TrimSpace(in.Outcome.TagReasons[k])
+			if reason == "" {
+				reason = "(no reason recorded)"
+			}
+			fmt.Fprintf(&b, "   - %s: %s\n", k, reason)
+			wroteAny = true
+		}
+	}
+	if !wroteAny {
+		b.WriteString("   (none)\n")
+	}
+
+	b.WriteString("\nBegin the workflow now. Reply only at the end with the one-paragraph summary.\n")
 	return b.String()
+}
+
+// topStatsLines returns up to `n` "<key>: loaded=L helpful=H harmful=Ha neutral=Ne"
+// lines ordered by descending LoadedCount, with a stable secondary sort
+// on the key so the prompt body is deterministic across invocations.
+func topStatsLines(s *Stats, n int) []string {
+	if s == nil || len(s.Entries) == 0 {
+		return nil
+	}
+	type row struct {
+		key string
+		e   *StatsEntry
+	}
+	rows := make([]row, 0, len(s.Entries))
+	for k, e := range s.Entries {
+		rows = append(rows, row{key: k, e: e})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].e.LoadedCount != rows[j].e.LoadedCount {
+			return rows[i].e.LoadedCount > rows[j].e.LoadedCount
+		}
+		return rows[i].key < rows[j].key
+	})
+	if len(rows) > n {
+		rows = rows[:n]
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("%s: loaded=%d helpful=%d harmful=%d neutral=%d",
+			r.key, r.e.LoadedCount, r.e.Helpful, r.e.Harmful, r.e.Neutral))
+	}
+	return out
 }
 
 // CuratorRunner is a small convenience that pairs NewCurator + agentkit.Runner.

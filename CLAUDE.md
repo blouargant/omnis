@@ -75,6 +75,7 @@ main.go / server/
             │         ├── leader
             │         ├── web_agent
             │         └── summariser
+            ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
             └── curator             ← process-wide post-session soft-skill distiller (one hook per generation)
 ```
 
@@ -93,6 +94,51 @@ the leader after a sub-agent call. Only one sub-agent runs at a time
 (enforced by `newNonConcurrentTool`). The curator stays a single
 per-generation hook listening across every squad.
 
+**Soft-skill reflection pipeline** — at `EventSessionEnd`, [agent/load_recorder.go](agent/load_recorder.go)
+drains its in-memory bucket (leader-loaded skills, tool errors), runs
+the deterministic `softskills.ReflectHeuristic`, applies the heuristic
+tags to `softskills/_stats.json`, and emits `EventSessionReflected`
+with the gathered payload. [agent/curator_hook.go](agent/curator_hook.go)
+subscribes to that event: when a `reflector` agent is enabled it runs
+the LLM Reflector ([internal/softskills/reflector.go](internal/softskills/reflector.go))
+with a 60-second timeout, merges its Outcome over the heuristic (LLM
+wins on overlap), `Retag`s the stats to reflect the override, then
+gates and runs the curator. `EventCurateNow` (manual `/learn-now`)
+bypasses the reflector and drives the curator directly.
+
+**Sub-agent boundary events** — sub-agents run inside agenttool's private
+runner, so neither `EventRunStart/End` nor `EventBeforeRun/AfterRun` fire
+on the shared bus for their internal turns. To give reflection hooks a
+clean "one sub-agent invocation finished" signal, [agent/subagent_event.go](agent/subagent_event.go)
+subscribes to the leader's `EventBeforeTool / EventAfterTool / EventToolError`
+and re-emits any payload whose `tool` name matches a sub-agent as
+`EventSubAgentStart / EventSubAgentEnd`. Payload keys: `agent` (the
+sub-agent), `caller_agent` (the leader), `user_id`, `session_id`, `input`,
+`output` (end only), `duration` (end only), `error` (end only, on tool
+error), `call_id`, `run_id`. Registered once per Instance from sub-agent
+names spanning every squad; subscriptions detach on hot-reload.
+
+**`run_id` on every event** — `EventRunStart / EventRunEnd / EventBeforeTool /
+EventAfterTool / EventToolError / EventBeforeModel / EventAfterModel`
+all carry a `run_id` field set to ADK's `InvocationContext.InvocationID()`.
+It is stable across BeforeRun + AfterRun for a single `Runner.Run` call
+and lets [agent/subagent_hook.go](agent/subagent_hook.go) buffer all
+sub-agent invocations observed during one leader turn for the Phase 6
+per-invocation tagger. Sub-agent internal runs get their own (different)
+`run_id`s, so the leader-side `EventSubAgentStart/End` events keep the
+leader's `run_id` (which is what we group on).
+
+**Sub-agent reflection pipeline (Phase 6)** —
+[agent/subagent_hook.go](agent/subagent_hook.go) opens a per-`run_id`
+buffer at each `EventSubAgentStart`, attributes `load_softskill` events
+and `tool_error`s to the open invocation, captures the leader's
+`AfterModel` text for the lexical reaction scan, and at `EventRunEnd`
+walks the buffer to call `softskills.TagInvocation` per invocation
+(retry detection via "same sub-agent appears later in the same run",
+`Error:` / empty output detection, leader reaction via
+`ClassifyLeaderReaction`'s approval / retry / unknown classifier).
+Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
+
 ### Key packages
 
 | Path | Role |
@@ -109,7 +155,7 @@ per-generation hook listening across every squad.
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/inbox` |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
-| `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`) |
+| `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging) |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
@@ -231,6 +277,17 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   └── uploads/      # web UI file uploads (per-session)
   ├── mailboxes/        # JSONL inter-agent mailboxes
   ├── softskills/       # curator-distilled procedures (read AND write)
+  │   ├── _stats.json   # per-skill load/helpful/harmful/neutral counters
+  │   │                 #   sidecar; keyed by <agent>/<name> or bare <name>
+  │   │                 #   for leader. Maintained by agent/load_recorder.go.
+  │   └── wrap-session/ # built-in soft-skill (deletable) that asks one
+  │                     #   wrap-up question on interactive surfaces and
+  │                     #   persists the answer via record_session_feedback.
+  ├── logs/
+  │   └── agent_feedback_<key>.json  # Phase 5 wrap-session sidecar; one
+  │                                  #   record per session: {question,
+  │                                  #   answer, timestamp}. Consumed by
+  │                                  #   the heuristic + LLM reflectors.
   └── registry/
       ├── skills/       # web UI installed skills (override via YOKE_SKILLS_REGISTRY_DIR)
       └── agents/       # web UI installed agents (override via YOKE_AGENTS_REGISTRY_DIR)

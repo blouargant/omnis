@@ -15,7 +15,9 @@ single root).
 | `a2a_config.json`                             | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
 | `filters/`                                    | Bash output filter patterns (token optimization). |
 | `registry/skills/<name>/SKILL.md`             | Authored skill playbooks. |
-| `softskills/`                                 | Curator-distilled procedures. |
+| `softskills/`                                 | Curator-distilled procedures + the `wrap-session` built-in. |
+| `softskills/_stats.json`                      | Sidecar: per-skill `loaded_count` + `helpful` / `harmful` / `neutral` counters. Maintained by the reflection pipeline. |
+| `logs/agent_feedback_<key>.json`              | Wrap-session sidecar: one `{question, answer, timestamp}` record per session, consumed by the reflectors. |
 
 `agents.json` carries three top-level lists:
 
@@ -34,8 +36,8 @@ holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
 yoke (`leader`, `skill_editor`, `registries_crawler`, `summariser`,
-`curator`); the Web UI displays them under a **Built-in Agents**
-section, separate from user-added **Custom Agents**.
+`curator`, `reflector`); the Web UI displays them under a **Built-in
+Agents** section, separate from user-added **Custom Agents**.
 
 The registry directory follows the same lookup described below:
 `.agents/registry/agents` (and `agents/registry/agents` when present),
@@ -81,10 +83,12 @@ $HOME/.yoke/
 ├── mcp_config.json      # editor writes — user MCP server overrides
 ├── logs/                # agent_tasks_*, agent_todo_*, agent_memory_*,
 │   │                    #   agent_statelog_*, agent_events_*,
+│   │                    #   agent_feedback_*.json (wrap-session answers),
 │   │                    #   conversation_*.json (turns + title + squad + harvested)
 │   └── uploads/         # web UI file uploads (per-session)
 ├── mailboxes/           # JSONL inter-agent mailboxes
 ├── softskills/          # curator-distilled procedures (read AND write)
+│   └── _stats.json      # per-skill load/helpful/harmful/neutral counters
 └── registry/
     ├── skills/          # web UI installed skills (override: YOKE_SKILLS_REGISTRY_DIR)
     └── agents/          # web UI installed agents (override: YOKE_AGENTS_REGISTRY_DIR)

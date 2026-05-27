@@ -187,6 +187,15 @@ Key properties:
   with the union of every squad's member names — not per-squad — so
   session-end curation runs at most once per session regardless of
   which squad it used.
+- **Reflector pipeline runs alongside the curator.** A `reflector`
+  agent (optional, configured the same way as the curator) is built
+  per generation. At every session end an in-process heuristic tags the
+  session's loaded soft-skills (`helpful` / `harmful` / `neutral`),
+  then — when enabled — the LLM Reflector layers its own tags on top
+  with reasons + a `key_insight`. The merged outcome and per-skill
+  stats (`softskills/_stats.json`) feed the curator's prompt so the
+  create / update / delete decision is grounded in concrete thresholds
+  rather than the curator's intuition. See [skills.md](skills.md#post-session-reflection-pipeline).
 
 Add a squad by editing `agents.json` (or the Squads sub-tab in
 the web UI's Agent settings); see [extending.md](extending.md#adding-a-squad).
@@ -210,12 +219,34 @@ recompiling:
 2. ADK calls `BeforeModel` plugins (events, cache stats).
 3. Model produces a response. Each tool call is dispatched in turn:
    - `BeforeTool` — permissions plugin may auto-allow / ask / deny.
-   - Tool function runs.
-   - `AfterTool` — events plugin records I/O.
+     When the tool is a sub-agent wrapper, the events bus synthesises
+     `EventSubAgentStart` (carrying `caller_agent`, the sub-agent name,
+     and `run_id`).
+   - Tool function runs. Sub-agent runs use a private ADK runner; their
+     internal tool/model events still flow through the shared bus
+     because `AgentCallbacks` are attached on every sub-agent.
+   - `AfterTool` — events plugin records I/O. Sub-agent wrappers fire
+     `EventSubAgentEnd` with the same `run_id` (or `error` on tool
+     errors).
 4. Model is re-invoked with tool results until it stops emitting calls.
 5. `AfterModel` — compress plugin checks context size; if over
    threshold, writes a memory snapshot and rewrites session.
 6. Session events are appended to the `session.Service`.
+7. `EventRunEnd` fires. The sub-agent reflection hook walks every
+   `EventSubAgentStart/End` pair seen during this `run_id`, classifies
+   the leader's reaction from its assistant text, and applies
+   `helpful` / `harmful` / `neutral` tags to `softskills/_stats.json`
+   for every soft-skill the sub-agents loaded.
+
+When a real session ends (TUI quit / web UI close / idle timeout):
+
+8. `EventSessionEnd` fires. The session reflection pipeline drains its
+   buckets, computes the heuristic outcome, applies the heuristic tags
+   to `_stats.json`, and emits `EventSessionReflected`.
+9. The curator hook receives `EventSessionReflected`. When a reflector
+   agent is configured, it runs the LLM reflector (60-second timeout)
+   to refine the tags + extract a `key_insight`, applies the deltas
+   via `Stats.Retag`, then runs the curator gate and curator agent.
 
 ## Where to look next
 

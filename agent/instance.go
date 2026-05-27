@@ -15,6 +15,7 @@ import (
 	"time"
 
 	adkagent "google.golang.org/adk/agent"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/runner"
 
@@ -184,6 +185,62 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 	inst.LeaderCfg = def.LeaderCfg
 	inst.LeaderAllowFileAttachments = def.LeaderAllowFileAttachments
 
+	// Load recorder is registered once per generation. It counts
+	// `load_softskill` calls and flushes per-session totals to
+	// softskills/_stats.json on EventSessionEnd. Leader-loaded skills are
+	// keyed by bare name; sub-agent loads are keyed as "<agent>/<name>".
+	{
+		leaderSeen := map[string]bool{}
+		var leaderNames []string
+		for _, sq := range runtime.Squads {
+			if sq.Leader != "" && !leaderSeen[sq.Leader] {
+				leaderSeen[sq.Leader] = true
+				leaderNames = append(leaderNames, sq.Leader)
+			}
+		}
+		suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
+		subs := registerLoadRecorderHook(infra.Bus, runtime.SoftSkillsDir, leaderNames, suffix)
+		for _, sub := range subs {
+			s := sub
+			inst.closers = append(inst.closers, func() error { s.Off(); return nil })
+		}
+	}
+
+	// Sub-agent boundary synthesises EventSubAgentStart / EventSubAgentEnd
+	// from the leader's before_tool / after_tool / tool_error payloads
+	// whose `tool` matches a sub-agent name. Reflection hooks subscribe to
+	// these high-level events instead of filtering every after_tool.
+	if len(subAgentNamesAll) > 0 {
+		subs := registerSubAgentBoundary(infra.Bus, subAgentNamesAll)
+		for _, sub := range subs {
+			s := sub
+			inst.closers = append(inst.closers, func() error { s.Off(); return nil })
+		}
+	}
+
+	// Sub-agent load counter + per-invocation tagger: each load_softskill
+	// called from a sub-agent bumps LoadedCount, and at EventRunEnd the
+	// hook walks the per-run buffer to detect retries + classify the
+	// leader's reaction (Phase 6) and applies one tag per loaded skill.
+	if len(subAgentNamesAll) > 0 {
+		// Collect leader names so the leader-reaction lexical scan
+		// only consumes the leader's assistant text (sub-agents have
+		// their own AfterModel events on the same bus).
+		leaderSeen := map[string]bool{}
+		var subLeaderNames []string
+		for _, sq := range runtime.Squads {
+			if sq.Leader != "" && !leaderSeen[sq.Leader] {
+				leaderSeen[sq.Leader] = true
+				subLeaderNames = append(subLeaderNames, sq.Leader)
+			}
+		}
+		subs := registerSubAgentLoadHook(infra.Bus, runtime.SoftSkillsDir, subAgentNamesAll, subLeaderNames)
+		for _, sub := range subs {
+			s := sub
+			inst.closers = append(inst.closers, func() error { s.Off(); return nil })
+		}
+	}
+
 	// Curator hook is registered once per generation (not per squad). The
 	// curator listens on the shared event bus; its model is built from the
 	// curator agent config. Sub-agent names span every squad's members so
@@ -195,8 +252,17 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 				MinTurns:         runtime.CuratorMinTurns,
 				MinSubAgentCalls: runtime.CuratorMinSubAgentCalls,
 			}
+			// Reflector LLM is optional — when the reflector agent
+			// is disabled or unresolvable, curator_hook skips the LLM
+			// reflection step and runs with the heuristic Outcome only.
+			var reflectorLLM model.LLM
+			if reflectorCfg, ok := runtime.AgentConfig("reflector"); ok && reflectorCfg.Enabled {
+				if m, rerr := newModelForAgent(ctx, reflectorCfg); rerr == nil {
+					reflectorLLM = m
+				}
+			}
 			suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
-			subs := registerCuratorHook(infra.Bus, curatorLLM, runtime.SoftSkillsDir, subAgentNamesAll, gate, suffix)
+			subs := registerCuratorHook(infra.Bus, curatorLLM, reflectorLLM, runtime.SoftSkillsDir, subAgentNamesAll, gate, suffix)
 			for _, sub := range subs {
 				s := sub
 				inst.closers = append(inst.closers, func() error { s.Off(); return nil })

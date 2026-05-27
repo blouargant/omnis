@@ -61,6 +61,32 @@ const (
 	// Payload keys: user_id, session_id, summary (string), skipped (bool),
 	//               reason (string, when skipped), error (string, on failure).
 	EventCuratorEnd = "curator_end"
+	// EventSubAgentStart / EventSubAgentEnd are synthesised by
+	// agent/subagent_event.go: when a leader calls a sub-agent (via the
+	// agenttool wrapper) the surrounding before_tool / after_tool events
+	// are re-emitted under these names so per-invocation reflection hooks
+	// can subscribe to "a sub-agent invocation finished" without filtering
+	// every after_tool payload themselves.
+	//
+	// Payload keys (start): user_id, session_id, agent (the sub-agent name),
+	//                       input (the leader's prompt args), call_id.
+	// Payload keys (end):   user_id, session_id, agent, input, output,
+	//                       duration, call_id, error (when the sub-agent's
+	//                       tool call raised).
+	EventSubAgentStart = "subagent_start"
+	EventSubAgentEnd   = "subagent_end"
+	// EventSessionReflected is fired by the session reflection pipeline
+	// (load_recorder) immediately after EventSessionEnd, once the
+	// heuristic reflector has run and its tags have been recorded to
+	// _stats.json. It carries the data the LLM reflector + curator
+	// needs to layer on top.
+	//
+	// Payload keys: user_id, session_id, audit_path, state_log_path,
+	//               loaded_skills ([]string), heuristic_success (string),
+	//               heuristic_tags (map[string]string),
+	//               tool_errors ([]map[string]any with tool/agent/error/when),
+	//               last_user_messages ([]string).
+	EventSessionReflected = "session_reflected"
 )
 
 // Handler receives the event name and a free-form payload map.
@@ -181,10 +207,13 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Store(scopedToolKey(agentName, t, args), time.Now())
 		b.Emit(EventBeforeTool, map[string]any{
-			"agent":   agentName,
-			"tool":    t.Name(),
-			"input":   args,
-			"call_id": tctx.FunctionCallID(),
+			"agent":      agentName,
+			"tool":       t.Name(),
+			"input":      args,
+			"call_id":    tctx.FunctionCallID(),
+			"user_id":    tctx.UserID(),
+			"session_id": tctx.SessionID(),
+			"run_id":     tctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -195,12 +224,15 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 			elapsed = time.Since(v.(time.Time))
 		}
 		b.Emit(EventAfterTool, map[string]any{
-			"agent":    agentName,
-			"tool":     t.Name(),
-			"input":    args,
-			"output":   result,
-			"duration": elapsed,
-			"call_id":  tctx.FunctionCallID(),
+			"agent":      agentName,
+			"tool":       t.Name(),
+			"input":      args,
+			"output":     result,
+			"duration":   elapsed,
+			"call_id":    tctx.FunctionCallID(),
+			"user_id":    tctx.UserID(),
+			"session_id": tctx.SessionID(),
+			"run_id":     tctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -208,18 +240,26 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Delete(scopedToolKey(agentName, t, args))
 		b.Emit(EventToolError, map[string]any{
-			"agent":   agentName,
-			"tool":    t.Name(),
-			"input":   args,
-			"error":   err.Error(),
-			"call_id": tctx.FunctionCallID(),
+			"agent":      agentName,
+			"tool":       t.Name(),
+			"input":      args,
+			"error":      err.Error(),
+			"call_id":    tctx.FunctionCallID(),
+			"user_id":    tctx.UserID(),
+			"session_id": tctx.SessionID(),
+			"run_id":     tctx.InvocationID(),
 		})
 		return nil, nil
 	}
 	beforeModel := func(cb agent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 		agentName := cb.AgentName()
 		modelTimers.Store(modelKey(agentName, cb), time.Now())
-		payload := map[string]any{"agent": agentName}
+		payload := map[string]any{
+			"agent":      agentName,
+			"user_id":    cb.UserID(),
+			"session_id": cb.SessionID(),
+			"run_id":     cb.InvocationID(),
+		}
 		if req != nil && req.Model != "" {
 			payload["model"] = req.Model
 		}
@@ -245,9 +285,12 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 			elapsed = time.Since(v.(time.Time))
 		}
 		payload := map[string]any{
-			"agent":    agentName,
-			"response": resp,
-			"duration": elapsed,
+			"agent":      agentName,
+			"response":   resp,
+			"duration":   elapsed,
+			"user_id":    cb.UserID(),
+			"session_id": cb.SessionID(),
+			"run_id":     cb.InvocationID(),
 		}
 		if resp != nil && resp.UsageMetadata != nil {
 			u := resp.UsageMetadata
@@ -289,6 +332,10 @@ func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin
 			"agent":      agentNameOf(ctx),
 			"user_id":    s.UserID(),
 			"session_id": s.ID(),
+			// ADK's InvocationID is stable across BeforeRun + AfterRun
+			// for a single Runner.Run call, so we use it as the run_id
+			// that Phase 6's subagent_hook keys its per-turn buffer on.
+			"run_id": ctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -298,6 +345,7 @@ func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin
 			"agent":      agentNameOf(ctx),
 			"user_id":    s.UserID(),
 			"session_id": s.ID(),
+			"run_id":     ctx.InvocationID(),
 		})
 	}
 	return plugin.New(plugin.Config{

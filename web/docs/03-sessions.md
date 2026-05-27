@@ -53,13 +53,31 @@ Settings → Agents.
 ## Session lifecycle and the curator
 
 When a session ends (closed, deleted, or **idle** for `YOKE_CURATOR_IDLE_TIMEOUT`),
-the **curator** sub-agent reads the state log and distils any reusable
-procedures into soft-skill files under `$YOKE_HOME/softskills/`. These show up
-in future sessions as additional knowledge the leader can `load_softskill` on
-demand.
+yoke runs a two-stage reflection pipeline followed by the curator:
+
+1. **Heuristic reflector** tags every soft-skill the session loaded as
+   `helpful` / `harmful` / `neutral` based on the StateLog, the last
+   user messages, tool errors, and any explicit wrap-up feedback. Tag
+   counts land in `$YOKE_HOME/softskills/_stats.json`.
+2. **LLM reflector** (the `reflector` agent, when enabled) refines the
+   tags with reasons and extracts a `key_insight`.
+3. The **curator** sub-agent reads the audit + StateLog + per-skill
+   stats + the reflector's verdict, and creates / updates / deletes
+   soft-skill files under `$YOKE_HOME/softskills/`. The create / delete
+   thresholds are concrete (see [11-skills.md](11-skills.md#post-session-reflection))
+   so the curator skips by default.
+
+Soft-skills show up in future sessions as additional knowledge the
+leader can `load_softskill` on demand.
 
 Idle-harvested sessions are marked **Harvested** in the sidebar and skipped on
 re-runs until new activity occurs.
+
+On interactive surfaces the leader is told to load the built-in
+**wrap-session** soft-skill once per session, which asks one closing
+question ("Anything off, or are we good to wrap?"). The answer is
+persisted via `record_session_feedback` and becomes the dominant
+verdict signal for both reflectors.
 
 ## Hot reload
 

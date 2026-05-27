@@ -42,9 +42,10 @@ The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
 Key points:
 
 - **Agents** — fleet list split into **Built-in Agents** (`leader`,
-  `skill_editor`, `registries_crawler`, `summariser`, `curator`) and
-  **Custom Agents**. Each agent's detail panel exposes its tool set,
-  skill/MCP/A2A wiring, system instruction, and model reference.
+  `skill_editor`, `registries_crawler`, `summariser`, `curator`,
+  `reflector`) and **Custom Agents**. Each agent's detail panel exposes
+  its tool set, skill/MCP/A2A wiring, system instruction, and model
+  reference.
 - **Squads** — named groups `{ leader, members[] }` (see below).
 - **Remotes** — browse and install agent definitions from remote Git
   repositories. Switch between Agents and Squads registry views.
@@ -71,10 +72,10 @@ panel on the right:
 - **Name** — case-insensitive, unique within the file. The `default`
   squad is always present and its name is read-only.
 - **Description** — surfaced as the picker tooltip.
-- **Leader** — dropdown over the enabled agents (excluding `curator`).
+- **Leader** — dropdown over the enabled agents (excluding `curator` and `reflector`).
 - **Members** — checkbox grid over the enabled agents. The squad's
   current leader is disabled in the grid (a squad can never list its
-  own leader as a member). Curator is excluded — it stays
+  own leader as a member). Curator and reflector are excluded — they stay
   process-wide.
 - **Delete squad** — bottom-right; the `default` squad cannot be
   deleted.

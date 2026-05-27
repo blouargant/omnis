@@ -1,0 +1,12 @@
+{
+  "allow_file_attachments": false,
+  "builtin": false,
+  "description": "Post-session analyst that tags loaded soft-skills helpful/harmful/neutral and extracts a key insight.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "balanced",
+  "name": "reflector",
+  "skills": null,
+  "softskills_dir": "",
+  "tools": null
+}

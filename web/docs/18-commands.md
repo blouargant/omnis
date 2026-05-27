@@ -16,8 +16,8 @@ removed:
 | `/create-skill` | Start a new skill from the current conversation. |
 | `/update-skill` | Update an existing skill. |
 | `/status` | Show session and agent status. |
-| `/learn` | Queue a soft-skill harvest for this session. |
-| `/learn-now` | Run the curator immediately on this session. |
+| `/learn` | Queue a soft-skill harvest for this session (reflectors run first; curator follows). |
+| `/learn-now` | Run the curator immediately on this session. The LLM reflector is skipped on this path — only the curator-gate's threshold + the existing audit/statelog are used. |
 
 ## User commands
 
