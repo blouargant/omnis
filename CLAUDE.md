@@ -334,6 +334,36 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 
+### Permission prompts (ask_user) and grant scopes
+
+When a tool call matches `ask_user` (or no rule), the permissions plugin
+([core/permissions/permissions.go](core/permissions/permissions.go))
+calls the configured `Asker`. In server/TUI mode the asker is
+[agent/permission_asker.go](agent/permission_asker.go), which renders an
+`ask_user` SSE widget; in CLI mode it's the `StdinAsker`. The user picks
+one of five scopes, ordered by increasing blast radius (`AskOutcome`):
+
+| Choice | Outcome | Effect |
+|---|---|---|
+| Deny | `OutcomeDeny` | Reject this call; next identical call asks again. |
+| Allow once (this call) | `OutcomeAllowOnce` | Cache the **exact (tool, args)** probe for the session. |
+| Allow all `<Tool>` this session | `OutcomeAllowToolSession` | Cache a **per-tool** grant for the session — every later call of that tool auto-allows regardless of args. In memory only; never persisted. |
+| Allow in this project | `OutcomeAllowProject` | Persist an `always_allow` rule with `CWD` = project dir. |
+| Allow always | `OutcomeAllowAlways` | Persist an `always_allow` rule with no `CWD`. |
+
+The session-approval cache ([core/permissions/cache.go](core/permissions/cache.go))
+holds two granularities: per-call (`m`) and per-tool (`tools`); a per-tool
+grant short-circuits before per-call. Both are wiped by `Forget(sessionID)`
+on `EventSessionEnd`.
+
+**Persisted-rule breadth** ([core/permissions/persist.go](core/permissions/persist.go)
+`buildApprovalRule`) differs by tool: file tools (`Read`/`Write`/`Edit`/`revert`)
+broaden to "this tool on **any** path" (`^Write\b`), so approving the first
+of N file writes covers the rest — the `CWD` field still scopes "Allow in
+this project" to the project tree. `Bash` keeps an **exact-command** match
+(a blanket persisted shell allow is a footgun; use the ephemeral
+"Allow all Bash this session" grant for command bursts instead).
+
 ### Session isolation
 
 Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `$YOKE_HOME/logs/`:

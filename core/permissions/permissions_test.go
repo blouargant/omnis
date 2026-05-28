@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 )
@@ -124,6 +125,66 @@ func TestSessionApprovalCacheShortCircuits(t *testing.T) {
 	c.Forget("s1")
 	if c.has("s1", "k") {
 		t.Fatal("Forget did not clear")
+	}
+}
+
+func TestSessionApprovalCacheToolGrant(t *testing.T) {
+	t.Parallel()
+
+	c := newSessionApprovalCache()
+	if c.hasTool("s1", "Write") {
+		t.Fatal("empty cache reports tool grant")
+	}
+	c.addTool("s1", "Write")
+	if !c.hasTool("s1", "Write") {
+		t.Fatal("tool grant miss after add")
+	}
+	if c.hasTool("s1", "Bash") {
+		t.Fatal("tool grant leaked across tools")
+	}
+	if c.hasTool("s2", "Write") {
+		t.Fatal("tool grant leaked across sessions")
+	}
+	if c.hasTool("", "Write") {
+		t.Fatal("empty session id matched")
+	}
+	c.Forget("s1")
+	if c.hasTool("s1", "Write") {
+		t.Fatal("Forget did not clear tool grant")
+	}
+}
+
+func TestBuildApprovalRuleBroadensFileTools(t *testing.T) {
+	t.Parallel()
+
+	// File tools broaden to "this tool on any path" so approving the
+	// first of N writes covers the rest.
+	pat, _ := buildApprovalRule("Write", `{"file_path":"/proj/a.txt","content":"x"}`, "/proj")
+	re, err := regexp.Compile("(?i)" + pat)
+	if err != nil {
+		t.Fatalf("compile broadened pattern %q: %v", pat, err)
+	}
+	for _, fp := range []string{"/proj/a.txt", "/proj/sub/b.yaml", "/proj/c"} {
+		probe := `Write {"file_path":"` + fp + `","content":"x"}`
+		if !re.MatchString(probe) {
+			t.Errorf("broadened Write rule did not match %q", probe)
+		}
+	}
+	if re.MatchString(`Read {"file_path":"/proj/a.txt"}`) {
+		t.Error("Write rule should not match a Read probe")
+	}
+
+	// Bash stays exact-command — no blanket shell allow persisted.
+	pat, _ = buildApprovalRule("Bash", `{"command":"mkdir -p /proj/k8s"}`, "/proj")
+	re, err = regexp.Compile("(?i)" + pat)
+	if err != nil {
+		t.Fatalf("compile bash pattern %q: %v", pat, err)
+	}
+	if !re.MatchString(`Bash {"command":"mkdir -p /proj/k8s"}`) {
+		t.Error("bash rule did not match its own command")
+	}
+	if re.MatchString(`Bash {"command":"rm -rf /"}`) {
+		t.Error("bash rule must not match a different command")
 	}
 }
 

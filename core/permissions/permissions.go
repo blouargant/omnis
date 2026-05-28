@@ -195,6 +195,13 @@ const (
 	// cache the approval for the rest of the session so identical
 	// calls don't re-prompt; nothing is persisted to disk.
 	OutcomeAllowOnce
+	// OutcomeAllowToolSession permits this call and every later call of
+	// the same tool (regardless of arguments) for the rest of the
+	// session. The grant is cached in memory only — nothing is persisted
+	// to disk and it evaporates when the session ends. Lets the user
+	// approve a burst of same-tool calls (e.g. four Writes) with one
+	// click without granting a durable, cross-session rule.
+	OutcomeAllowToolSession
 	// OutcomeAllowProject permits this call and persists a rule in the
 	// user permissions file scoped to the current working directory.
 	// Future identical calls in this project auto-allow; other
@@ -221,8 +228,8 @@ type StdinAsker struct{}
 func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome {
 	fmt.Fprintf(os.Stderr,
 		"\n[PERMISSION] %s: %s\n  Reason: %s\n"+
-			"  [d] deny, [o] allow once, [p] allow in project, [a] allow always: ",
-		toolName, input, reason)
+			"  [d] deny, [o] allow once, [s] allow all %s this session, [p] allow in project, [a] allow always: ",
+		toolName, input, reason, toolName)
 	sc := bufio.NewScanner(os.Stdin)
 	if !sc.Scan() {
 		return OutcomeDeny
@@ -230,6 +237,8 @@ func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome
 	switch strings.ToLower(strings.TrimSpace(sc.Text())) {
 	case "o", "once", "y", "yes":
 		return OutcomeAllowOnce
+	case "s", "session", "tool":
+		return OutcomeAllowToolSession
 	case "p", "project":
 		return OutcomeAllowProject
 	case "a", "always", "all":
@@ -338,7 +347,13 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 		probeKey := t.Name() + "\x00" + input
 		sid := tc.SessionID()
 
-		// Session-cached approvals short-circuit before consulting the rules.
+		// Session-cached approvals short-circuit before consulting the
+		// rules: a per-tool grant ("allow all <tool> this session") wins
+		// over any per-call grant.
+		if cache.hasTool(sid, t.Name()) {
+			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
+			return nil, nil
+		}
 		if cache.has(sid, probeKey) {
 			logf("cache hit sid=%q tool=%s", sid, t.Name())
 			return nil, nil
@@ -366,6 +381,10 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 			case OutcomeAllowOnce:
 				cache.add(sid, probeKey)
 				logf("user ALLOW-ONCE sid=%q tool=%s (cached; will NOT affect other sessions)", sid, t.Name())
+				return nil, nil
+			case OutcomeAllowToolSession:
+				cache.addTool(sid, t.Name())
+				logf("user ALLOW-TOOL-SESSION sid=%q tool=%s (every later %s call this session auto-allows; not persisted)", sid, t.Name(), t.Name())
 				return nil, nil
 			case OutcomeAllowProject:
 				if err := persistApproval(cfg.UserConfigPath, t.Name(), input, cwd); err != nil {

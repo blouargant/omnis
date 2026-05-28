@@ -14,13 +14,22 @@ import (
 const askUserCmdSnippetMax = 1200
 
 // Choice labels the askuser widget renders. The order matters — the
-// safest option (Deny) is first to discourage accidental approvals.
+// safest option (Deny) is first to discourage accidental approvals, and
+// options widen in blast radius from top to bottom. The "Allow all
+// <Tool> this session" label is built per-call (see toolSessionChoice)
+// because it embeds the tool name.
 const (
 	choiceDeny    = "Deny"
-	choiceOnce    = "Allow once (this session)"
+	choiceOnce    = "Allow once (this call)"
 	choiceProject = "Allow in this project"
 	choiceAlways  = "Allow always"
 )
+
+// toolSessionChoice is the per-call label for the tool-scoped session
+// grant, e.g. "Allow all Write this session".
+func toolSessionChoice(toolName string) string {
+	return "Allow all " + toolName + " this session"
+}
 
 // NewAskUserPermissionAsker returns a permissions.Asker that routes
 // confirmations through the given askuser.Registry. The user picks one
@@ -46,10 +55,11 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 		return permissions.OutcomeDeny
 	}
 
+	choiceToolSession := toolSessionChoice(toolName)
 	q := askuser.Question{
 		Kind:    askuser.KindSingle,
 		Prompt:  buildPermissionPrompt(toolName, input, reason),
-		Choices: []string{choiceDeny, choiceOnce, choiceProject, choiceAlways},
+		Choices: []string{choiceDeny, choiceOnce, choiceToolSession, choiceProject, choiceAlways},
 		Default: choiceDeny,
 	}
 	ans, err := a.reg.Ask(context.Background(), sid, q)
@@ -62,6 +72,8 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 	switch ans.Selected[0] {
 	case choiceOnce:
 		return permissions.OutcomeAllowOnce
+	case choiceToolSession:
+		return permissions.OutcomeAllowToolSession
 	case choiceProject:
 		return permissions.OutcomeAllowProject
 	case choiceAlways:

@@ -47,9 +47,20 @@ func persistApproval(path, toolName, input, cwd string) error {
 	return writeRulesAtomic(path, rules)
 }
 
-// buildApprovalRule constructs an anchored, regex-escaped pattern that
-// matches the exact tool call (and the bash command line for the Bash
-// tool). Returns the pattern plus a human-readable reason string.
+// buildApprovalRule constructs the always_allow pattern persisted for an
+// approved tool call, plus a human-readable reason string.
+//
+// Granularity differs by tool, balancing convenience against blast radius:
+//
+//   - File tools (Read/Write/Edit/revert) broaden to "this tool on any
+//     path". A single approval therefore covers the other files the agent
+//     touches in the same task (the common "create N files, get N prompts"
+//     pain). The CWD field still scopes "Allow in this project" grants to
+//     the project tree, so the broadening only widens which paths match,
+//     not which working directories.
+//   - Bash keeps an exact-command match. A blanket "allow all shell
+//     commands" rule persisted to disk is a footgun; the ephemeral
+//     "Allow all Bash this session" outcome covers command bursts instead.
 func buildApprovalRule(toolName, input, cwd string) (string, string) {
 	args := map[string]any{}
 	_ = json.Unmarshal([]byte(input), &args)
@@ -66,10 +77,9 @@ func buildApprovalRule(toolName, input, cwd string) (string, string) {
 				"User-approved shell command " + scope
 		}
 	case "Read", "Write", "Edit", "revert":
-		if fp, ok := args["file_path"].(string); ok && fp != "" {
-			return "^" + regexp.QuoteMeta(toolName) + " .*\"file_path\":\"" + regexp.QuoteMeta(fp) + "\"",
-				"User-approved " + toolName + " on " + fp + " " + scope
-		}
+		// Match any invocation of this tool, regardless of file_path.
+		return "^" + regexp.QuoteMeta(toolName) + "\\b",
+			"User-approved " + toolName + " on any file " + scope
 	}
 	// Fallback: literal probe match. Anchored to toolName + exact input.
 	probe := toolName + " " + input
