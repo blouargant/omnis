@@ -60,7 +60,7 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 		Kind:    askuser.KindSingle,
 		Prompt:  buildPermissionPrompt(toolName, input, reason),
 		Choices: []string{choiceDeny, choiceOnce, choiceToolSession, choiceProject, choiceAlways},
-		Default: choiceDeny,
+		Default: choiceOnce,
 	}
 	ans, err := a.reg.Ask(context.Background(), sid, q)
 	if err != nil || ans.Cancelled {

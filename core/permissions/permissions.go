@@ -228,14 +228,15 @@ type StdinAsker struct{}
 func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome {
 	fmt.Fprintf(os.Stderr,
 		"\n[PERMISSION] %s: %s\n  Reason: %s\n"+
-			"  [d] deny, [o] allow once, [s] allow all %s this session, [p] allow in project, [a] allow always: ",
+			"  [o] allow once (default, press Enter), [s] allow all %s this session, [p] allow in project, [a] allow always, [d] deny: ",
 		toolName, input, reason, toolName)
 	sc := bufio.NewScanner(os.Stdin)
 	if !sc.Scan() {
 		return OutcomeDeny
 	}
 	switch strings.ToLower(strings.TrimSpace(sc.Text())) {
-	case "o", "once", "y", "yes":
+	case "", "o", "once", "y", "yes":
+		// A bare Enter accepts the default (allow once).
 		return OutcomeAllowOnce
 	case "s", "session", "tool":
 		return OutcomeAllowToolSession
@@ -243,6 +244,8 @@ func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome
 		return OutcomeAllowProject
 	case "a", "always", "all":
 		return OutcomeAllowAlways
+	case "d", "deny", "n", "no":
+		return OutcomeDeny
 	default:
 		return OutcomeDeny
 	}

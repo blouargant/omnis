@@ -1138,7 +1138,9 @@ function renderAskUserWidget(sessionId, q) {
   if (kind === "single" || kind === "confirm") {
     const choicesDiv = document.createElement("div");
     choicesDiv.className = "ask-user-choices";
-    let selectedValue = null;
+    // Pre-select the suggested default (when valid) so the user can just
+    // press Enter / click Submit to accept it.
+    let selectedValue = (q.default && choices.includes(q.default)) ? q.default : null;
     choices.forEach(ch => {
       const label = document.createElement("label");
       label.className = "ask-user-choice";
@@ -1146,6 +1148,7 @@ function renderAskUserWidget(sessionId, q) {
       radio.type = "radio";
       radio.name = "ask_" + q.question_id;
       radio.value = ch;
+      if (ch === selectedValue) radio.checked = true;
       radio.addEventListener("change", () => { selectedValue = ch; });
       label.appendChild(radio);
       label.appendChild(document.createTextNode(ch));
@@ -1217,6 +1220,13 @@ function renderAskUserWidget(sessionId, q) {
   slot.appendChild(row);
   pendingAskWidgets.set(q.question_id, { row, card, sessionId });
   scrollBottom();
+  // Give the card focus so the keydown handler catches Enter without a
+  // prior click. Only when this widget is for the visible session, so we
+  // don't yank focus for a background tab's prompt.
+  if (sessionId === activeSessionId) {
+    const checked = card.querySelector("input[type=radio]:checked");
+    (checked || submitBtn).focus();
+  }
 
   function resolveWidget(answer) {
     pendingAskWidgets.delete(q.question_id);
@@ -1277,6 +1287,16 @@ function renderAskUserWidget(sessionId, q) {
       if (res.ok) resolveWidget(answer);
       else { submitBtn.disabled = false; cancelBtn.disabled = false; }
     } catch { submitBtn.disabled = false; cancelBtn.disabled = false; }
+  });
+
+  // Enter submits the (pre-selected) answer so a defaulted prompt can be
+  // accepted with a single keypress. Ignored inside a multi-line textarea
+  // (where Enter inserts a newline) and when Shift is held.
+  card.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (e.target && e.target.tagName === "TEXTAREA") return;
+    e.preventDefault();
+    if (!submitBtn.disabled) submitBtn.click();
   });
 }
 
