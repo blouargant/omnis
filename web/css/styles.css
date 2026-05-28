@@ -788,6 +788,109 @@ body.resizing #sidebar-resize { transition: none; }
 .tool-pre.output { color: var(--text); }
 .tool-pre.tool-error { color: #f48771; }
 
+/* ─── Todo plan widget ─────────────────────────────────────────────────────
+   The todo_* tools render as a live, always-expanded checklist (no fold) so
+   users can follow plan execution. Done items strike through; the in-progress
+   item shows a spinning marker. */
+.todo-block {
+  max-width: 700px;
+  width: 100%;
+  margin: 0 auto;
+  border-left: 2px solid #6c75d8; /* indigo — matches the "Todo" tool badge */
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-panel);
+  padding: 8px 14px 10px;
+  font-size: 14px;
+}
+
+.todo-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 7px;
+}
+.todo-bullet {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #23d18b;
+  flex-shrink: 0;
+}
+.todo-title {
+  font-weight: 700;
+  color: var(--text-strong);
+  letter-spacing: .01em;
+}
+
+.todo-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 1px;
+}
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 1.45;
+}
+.todo-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+.todo-text { color: var(--text); word-break: break-word; }
+
+/* pending — empty box, normal text */
+.todo-item.status-pending .todo-check { background: transparent; }
+
+/* done — filled box with check, struck-through faint text */
+.todo-item.status-done .todo-check {
+  background: #23d18b;
+  border-color: #23d18b;
+  color: #10231a;
+}
+.todo-item.status-done .todo-text {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+/* failed — danger box, struck-through */
+.todo-item.status-failed .todo-check {
+  background: var(--danger-fg);
+  border-color: var(--danger-fg);
+  color: #2a0d0d;
+}
+.todo-item.status-failed .todo-text {
+  color: var(--danger-fg);
+  text-decoration: line-through;
+}
+
+/* in_progress — spinning marker, emphasised text */
+.todo-item.status-in_progress .todo-check {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+  animation: todo-spin 1.6s linear infinite;
+}
+.todo-item.status-in_progress .todo-text {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+@keyframes todo-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* Inline images surfaced from tool outputs (image_generator, MCP image tools).
    Thumbnails wrap to multiple rows; click-through opens via the same blob URL. */
 .tool-image-gallery {
@@ -1754,6 +1857,14 @@ body.resizing-composer #composer-resize { transition: none; }
   transition: border-color 0.1s, background 0.1s;
 }
 .ask-user-choice:hover { border-color: var(--accent-strong); background: var(--bg-raised); }
+/* The currently selected choice (initially the suggested default) reads
+   like a hover, plus an accent ring so the default is obvious at a glance. */
+.ask-user-choice.is-selected {
+  border-color: var(--accent-strong);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--accent-strong) inset;
+  font-weight: 600;
+}
 .ask-user-choice input { margin: 0; cursor: pointer; }
 
 .ask-user-text-input {

@@ -182,6 +182,7 @@ const sessionStatus     = new Map(); // sessionId → status string
 
 const sessionEventsCtrls = new Map(); // sessionId → AbortController
 const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
+const sessionTodos       = new Map(); // sessionId → [{ task, status }] live plan view
 
 // ─── Per-session file attachments ────────────────────────────────────────────
 // Pending uploads are stored per session so switching sessions preserves them.
@@ -1043,6 +1044,86 @@ function appendNestedToolCall(parentBlock, name, args) {
   return block;
 }
 
+// ─── Todo plan widget ────────────────────────────────────────────────────────
+// The todo_* tools drive a live plan. Rather than render each call as an
+// opaque, collapsed tool block, we keep a per-session view of the plan and
+// render an always-expanded checklist on every change so users can follow
+// execution at a glance (done = struck through, in_progress = spinner).
+
+const TODO_STATUS_ICON = {
+  done:        "✓",
+  failed:      "✕",
+  in_progress: "✳",
+  pending:     "",
+};
+
+function isTodoTool(name) {
+  return /^todo_/.test((name || "").toLowerCase());
+}
+
+// applyTodoEvent folds a todo tool call into the session's plan state and
+// returns the resulting list, or null when the call carries nothing renderable
+// (e.g. an update before any write was observed this page-session).
+function applyTodoEvent(sessionId, name, args) {
+  const n = (name || "").toLowerCase();
+  let list = sessionTodos.get(sessionId);
+  if (n === "todo_write") {
+    const tasks = Array.isArray(args && args.tasks) ? args.tasks : [];
+    list = tasks.map(t => ({ task: String(t), status: "pending" }));
+    sessionTodos.set(sessionId, list);
+    return list;
+  }
+  if (!list) return null;
+  if (n === "todo_update") {
+    const idx = Number(args && args.index);
+    const status = String((args && args.status) || "").trim();
+    if (Number.isInteger(idx) && idx >= 0 && idx < list.length && status) {
+      list[idx] = { ...list[idx], status };
+    }
+  }
+  // todo_read (and any other todo_*) just re-renders the known state.
+  return list;
+}
+
+// appendTodoBlock renders the always-expanded checklist for the current plan.
+function appendTodoBlock(list, container) {
+  const row = document.createElement("div");
+  row.className = "tool-row";
+
+  const block = document.createElement("div");
+  block.className = "todo-block";
+
+  const header = document.createElement("div");
+  header.className = "todo-header";
+  header.innerHTML =
+    `<span class="todo-bullet"></span>` +
+    `<span class="todo-title">Update Todos</span>`;
+  block.appendChild(header);
+
+  const items = document.createElement("div");
+  items.className = "todo-items";
+  for (const item of list) {
+    const st = item.status || "pending";
+    const li = document.createElement("div");
+    li.className = `todo-item status-${st}`;
+    const box = document.createElement("span");
+    box.className = "todo-check";
+    box.textContent = TODO_STATUS_ICON[st] || "";
+    const txt = document.createElement("span");
+    txt.className = "todo-text";
+    txt.textContent = item.task;
+    li.appendChild(box);
+    li.appendChild(txt);
+    items.appendChild(li);
+  }
+  block.appendChild(items);
+
+  row.appendChild(block);
+  (container || els.transcript).appendChild(row);
+  scrollBottom();
+  return block;
+}
+
 // ─── Curator block ───────────────────────────────────────────────────────────
 
 function appendCuratorBlock(container) {
@@ -1141,19 +1222,25 @@ function renderAskUserWidget(sessionId, q) {
     // Pre-select the suggested default (when valid) so the user can just
     // press Enter / click Submit to accept it.
     let selectedValue = (q.default && choices.includes(q.default)) ? q.default : null;
+    const labels = [];
+    const paintSelection = () => labels.forEach(l =>
+      l.classList.toggle("is-selected", l.dataset.choice === selectedValue));
     choices.forEach(ch => {
       const label = document.createElement("label");
       label.className = "ask-user-choice";
+      label.dataset.choice = ch;
       const radio = document.createElement("input");
       radio.type = "radio";
       radio.name = "ask_" + q.question_id;
       radio.value = ch;
       if (ch === selectedValue) radio.checked = true;
-      radio.addEventListener("change", () => { selectedValue = ch; });
+      radio.addEventListener("change", () => { selectedValue = ch; paintSelection(); });
       label.appendChild(radio);
       label.appendChild(document.createTextNode(ch));
       choicesDiv.appendChild(label);
+      labels.push(label);
     });
+    paintSelection();
     card.appendChild(choicesDiv);
     getAnswer = () => selectedValue ? { selected: [selectedValue], text: "", cancelled: false } : null;
   } else if (kind === "multi") {
@@ -1535,6 +1622,7 @@ async function deleteSession(id, li) {
     sessionCtxUsage.delete(id);
     sessionTokenAccum.delete(id);
     sessionAgentTokens.delete(id);
+    sessionTodos.delete(id);
     // Remove any pending ask_user widgets belonging to this session.
     const slot = document.getElementById("ask-user-slot");
     if (slot) {
@@ -2056,6 +2144,18 @@ async function sendMessage() {
         case "tool_call": {
           // Seal the preceding text segment before showing the tool.
           finalizeSegment();
+          // The todo_* tools render as a live, always-expanded checklist
+          // instead of an opaque collapsed block. Their tool_result carries
+          // no extra signal, so we don't track them in pendingTools.
+          if (isTodoTool(data.name)) {
+            const list = applyTodoEvent(sessionId, data.name, data.args);
+            if (list) {
+              appendTodoBlock(list, container);
+              activeOuterBlock = null;
+              setSessionStatus(sessionId, "thinking…");
+              break;
+            }
+          }
           const block = appendToolCall(data.name, data.args, container);
           pendingTools.push({ id: data.call_id || "", block });
           activeOuterBlock = block;

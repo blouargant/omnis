@@ -655,3 +655,18 @@ the badge as the single surface for new client-side measurements.
 Streaming itself always uses incremental Text-node appends; `marked.parse` runs
 once per segment at finalize. Don't reintroduce per-chunk markdown rendering —
 it makes the UI feel slow even when the wire is fast.
+
+### Web UI todo plan widget
+
+The `todo_write` / `todo_update` / `todo_read` tools do **not** render as the
+generic collapsed tool block. Instead [web/app.js](web/app.js) keeps a
+per-session plan view in `sessionTodos` (sessionId → `[{task, status}]`) and
+renders an always-expanded "Update Todos" checklist (`.todo-block`, styled in
+[web/css/styles.css](web/css/styles.css)) on every todo tool call so users can
+follow plan execution: pending = empty box, `in_progress` = spinning marker,
+`done`/`failed` = filled box + struck-through text. `todo_write` rebuilds the
+list from `args.tasks`; `todo_update` mutates the item at `args.index`. These
+calls are routed in the `tool_call` SSE case (via `isTodoTool`) and are **not**
+pushed to `pendingTools`, so their `tool_result` is ignored. State is live-only
+(history replay renders text turns, not tool calls) and is cleared on session
+delete.
