@@ -183,6 +183,7 @@ const sessionStatus     = new Map(); // sessionId → status string
 const sessionEventsCtrls = new Map(); // sessionId → AbortController
 const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
 const sessionTodos       = new Map(); // sessionId → [{ task, status }] live plan view
+const sessionTodoBlock   = new Map(); // sessionId → latest .todo-block (older ones auto-collapse)
 
 // ─── Per-session file attachments ────────────────────────────────────────────
 // Pending uploads are stored per session so switching sessions preserves them.
@@ -1085,19 +1086,30 @@ function applyTodoEvent(sessionId, name, args) {
   return list;
 }
 
-// appendTodoBlock renders the always-expanded checklist for the current plan.
-function appendTodoBlock(list, container) {
+// appendTodoBlock renders the checklist for the current plan. Only the latest
+// snapshot per session stays expanded; appending a new one collapses the
+// previous block down to its header (still click-to-toggle).
+function appendTodoBlock(sessionId, list, container) {
+  // Collapse the previous snapshot for this session, if any.
+  const prev = sessionTodoBlock.get(sessionId);
+  if (prev && prev.isConnected) prev.classList.add("collapsed");
+
   const row = document.createElement("div");
   row.className = "tool-row";
 
   const block = document.createElement("div");
   block.className = "todo-block";
 
+  const done = list.filter(t => t.status === "done" || t.status === "failed").length;
+
   const header = document.createElement("div");
   header.className = "todo-header";
   header.innerHTML =
     `<span class="todo-bullet"></span>` +
-    `<span class="todo-title">Update Todos</span>`;
+    `<span class="todo-title">Update Todos</span>` +
+    `<span class="todo-progress">${done}/${list.length}</span>` +
+    `<span class="todo-chevron">▶</span>`;
+  header.addEventListener("click", () => block.classList.toggle("collapsed"));
   block.appendChild(header);
 
   const items = document.createElement("div");
@@ -1120,6 +1132,7 @@ function appendTodoBlock(list, container) {
 
   row.appendChild(block);
   (container || els.transcript).appendChild(row);
+  sessionTodoBlock.set(sessionId, block);
   scrollBottom();
   return block;
 }
@@ -1623,6 +1636,7 @@ async function deleteSession(id, li) {
     sessionTokenAccum.delete(id);
     sessionAgentTokens.delete(id);
     sessionTodos.delete(id);
+    sessionTodoBlock.delete(id);
     // Remove any pending ask_user widgets belonging to this session.
     const slot = document.getElementById("ask-user-slot");
     if (slot) {
@@ -2150,7 +2164,7 @@ async function sendMessage() {
           if (isTodoTool(data.name)) {
             const list = applyTodoEvent(sessionId, data.name, data.args);
             if (list) {
-              appendTodoBlock(list, container);
+              appendTodoBlock(sessionId, list, container);
               activeOuterBlock = null;
               setSessionStatus(sessionId, "thinking…");
               break;

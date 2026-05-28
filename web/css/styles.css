@@ -821,6 +821,27 @@ body.resizing #sidebar-resize { transition: none; }
   color: var(--text-strong);
   letter-spacing: .01em;
 }
+.todo-progress {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.todo-chevron {
+  color: #555558;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+  transform: rotate(90deg); /* expanded by default */
+}
+.todo-block.collapsed .todo-chevron { transform: rotate(0deg); }
+
+/* The header is a toggle; only collapsed blocks hide their items. */
+.todo-header { cursor: pointer; user-select: none; }
+.todo-header:hover { color: var(--text-strong); }
+.todo-block.collapsed .todo-items { display: none; }
+.todo-block.collapsed .todo-header { margin-bottom: 0; }
+.todo-block.collapsed { padding-bottom: 8px; }
 
 .todo-items {
   display: flex;

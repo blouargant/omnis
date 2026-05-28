@@ -661,12 +661,17 @@ it makes the UI feel slow even when the wire is fast.
 The `todo_write` / `todo_update` / `todo_read` tools do **not** render as the
 generic collapsed tool block. Instead [web/app.js](web/app.js) keeps a
 per-session plan view in `sessionTodos` (sessionId → `[{task, status}]`) and
-renders an always-expanded "Update Todos" checklist (`.todo-block`, styled in
+renders an "Update Todos" checklist (`.todo-block`, styled in
 [web/css/styles.css](web/css/styles.css)) on every todo tool call so users can
 follow plan execution: pending = empty box, `in_progress` = spinning marker,
 `done`/`failed` = filled box + struck-through text. `todo_write` rebuilds the
 list from `args.tasks`; `todo_update` mutates the item at `args.index`. These
 calls are routed in the `tool_call` SSE case (via `isTodoTool`) and are **not**
-pushed to `pendingTools`, so their `tool_result` is ignored. State is live-only
-(history replay renders text turns, not tool calls) and is cleared on session
-delete.
+pushed to `pendingTools`, so their `tool_result` is ignored.
+
+Only the latest snapshot per session stays expanded: `sessionTodoBlock`
+(sessionId → latest `.todo-block`) lets `appendTodoBlock` add the `collapsed`
+class to the prior block when a new one arrives. Any block's header is a
+click-toggle, and its `done/total` progress count stays visible while
+collapsed. State is live-only (history replay renders text turns, not tool
+calls) and both maps are cleared on session delete.
