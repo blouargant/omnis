@@ -1703,6 +1703,9 @@ body.resizing-composer #composer-resize { transition: none; }
   color: var(--text);
   margin-bottom: 10px;
   line-height: 1.45;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .ask-user-prompt p { margin: 0 0 6px 0; }
 .ask-user-prompt p:last-child { margin-bottom: 0; }
