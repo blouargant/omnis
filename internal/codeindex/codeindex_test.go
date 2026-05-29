@@ -107,6 +107,30 @@ func TestIncrementalReindex(t *testing.T) {
 	}
 }
 
+func TestIndexesTextSkipsBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("YOKE_HOME", t.TempDir())
+	// An extension not on any allow-list (would have been skipped before) and
+	// an extensionless file: both are plain text and must be indexed.
+	writeFile(t, repo, "app.vue", "<template><!-- mcp dedup --></template>\n")
+	writeFile(t, repo, "Makefile", "build: ## permission grant\n\tgo build ./...\n")
+	// A deny-listed binary extension and a NUL-byte blob: both must be skipped.
+	writeFile(t, repo, "logo.png", "\x89PNG\x00\x00 not real")
+	writeFile(t, repo, "data.dat", "header\x00\x00binary\x00payload")
+
+	idx, err := Open(repo, fakeEmbedder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, _, err := idx.Reindex(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexed != 2 {
+		t.Fatalf("expected 2 text files indexed (app.vue, Makefile), got %d", indexed)
+	}
+}
+
 func TestNilEmbedderSkips(t *testing.T) {
 	idx, err := Open(t.TempDir(), nil)
 	if err != nil {

@@ -78,6 +78,7 @@ adds or removes it from the agent's `tools` list in `agent.json`.
 | `serpapi` | Web search via SerpAPI (requires `serpapi_key` in Global Environment). Mutually exclusive with `ddg`. |
 | `web` | Browser tool (fetch and parse web pages). |
 | `registries` | Browse and install skills and agents from remote registries. |
+| `code_search` | Semantic code search (`search_code`, `reindex_code`). Mounted only when an embedding model is configured; otherwise falls back to grep/read. |
 
 Two feature toggles also appear in the grid:
 

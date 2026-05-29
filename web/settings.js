@@ -132,7 +132,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const RESTART_FLAG = "agent_toolkit_needs_restart";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
-  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries"];
+  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search"];
   const TOOL_DESCRIPTIONS = {
     Bash:       "Run shell commands in the working directory.",
     Read:       "Read file contents from the filesystem.",
@@ -150,6 +150,7 @@ const BASE_PATH = window.BASE_PATH || "";
     serpapi:    "Web search: search the web via SerpAPI (Google). Requires serpapi_key in globals. Cannot be used together with ddg.",
     web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
     registries: "Skill registry tools: list configured remote registries, browse them, fetch a SKILL.md, install a skill, and link it to an agent.",
+    code_search: "Semantic code search (search_code, reindex_code): find code by meaning over the repo index. Mounted only when an embedding model is configured; otherwise the agent falls back to grep/read.",
   };
   // Tools that are mutually exclusive: selecting one auto-deselects the other.
   const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
@@ -2135,6 +2136,7 @@ const BASE_PATH = window.BASE_PATH || "";
     serpapi:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
     web:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
     registries: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
+    code_search: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/><polyline points="8 8 6 10 8 12"/><polyline points="12 8 14 10 12 12"/></svg>`,
   };
   const TOOL_DISPLAY = {
     Bash: "Shell", Read: "File Read", Write: "File Write", Edit: "Inline Edit",
@@ -2142,6 +2144,7 @@ const BASE_PATH = window.BASE_PATH || "";
     mcp: "Context Proto", Skill: "Core Skills",
     softskills: "Soft Skills", calc: "Math Eng", ddg: "Web Search",
     serpapi: "SerpAPI", web: "Browser Tool", registries: "Skill Registries",
+    code_search: "Code Search",
   };
 
   // updateFleetModelLine syncs the model display under a fleet-list item with
@@ -2390,11 +2393,20 @@ const BASE_PATH = window.BASE_PATH || "";
     const btnByTool = {};
     const toolEntries = [];
 
+    // code_search only mounts when a semantic embedder is configured. Mirror
+    // the serpapi pattern and grey it out when no embedding model is selected
+    // (agents.json override wins, else models.json embed_model_ref). Env-only
+    // (YOKE_EMBED_*) config isn't visible here — same limitation as serpapi_key.
+    const embedRef = (d.embed_model_ref || state.parsed.models?.value?.embed_model_ref || "").toString().trim();
+    const embedConfigured = !!embedRef;
+
     for (const t of TOOL_GROUPS) {
       const isSerpDisabled = t === "serpapi" && !d.serpapi_key;
+      const isCodeSearchDisabled = t === "code_search" && !embedConfigured;
+      const isDisabledTool = isSerpDisabled || isCodeSearchDisabled;
       const isOn = cur.has(t);
       const btn = document.createElement("div");
-      btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isSerpDisabled ? " tool-disabled" : "");
+      btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isDisabledTool ? " tool-disabled" : "");
       btn.title = TOOL_DISPLAY[t] || "";
       btn.innerHTML = `
         <div class="agent-tool-icon">${TOOL_ICONS[t] || ""}</div>
@@ -2404,7 +2416,7 @@ const BASE_PATH = window.BASE_PATH || "";
         </div>
         <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
       `;
-      if (!isSerpDisabled) {
+      if (!isDisabledTool) {
         btn.addEventListener("click", () => {
           const wasOn = cur.has(t);
           if (wasOn) {

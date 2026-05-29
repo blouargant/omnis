@@ -1,6 +1,7 @@
 // Package codeindex builds and queries a semantic index over a project's
-// source files so agents can find relevant code by natural-language query
-// instead of guessing file names for grep.
+// text files (source, docs, config — anything that isn't a binary blob) so
+// agents can find relevant code by natural-language query instead of guessing
+// file names for grep.
 //
 // v1 chunking is line-window based: each source file is split into overlapping
 // ~50-line windows. Re-indexing is content-hash gated per file — only changed
@@ -40,14 +41,50 @@ const (
 	maxFileBytes = 1 << 20
 )
 
-// sourceExts is the allow-list of indexable text/source file extensions.
-var sourceExts = map[string]bool{
-	".go": true, ".py": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
-	".java": true, ".c": true, ".h": true, ".cc": true, ".cpp": true, ".hpp": true,
-	".rs": true, ".rb": true, ".php": true, ".cs": true, ".kt": true, ".swift": true,
-	".scala": true, ".sh": true, ".bash": true, ".sql": true, ".proto": true,
-	".md": true, ".rst": true, ".txt": true, ".yaml": true, ".yml": true,
-	".toml": true, ".json": true, ".html": true, ".css": true, ".scss": true,
+// binaryExts is a deny-list of extensions we never index: compiled artifacts,
+// media, archives, fonts, and other binary blobs. Everything else is treated
+// as a candidate and indexed if it passes the content text-sniff (looksBinary).
+// A deny-list means new or uncommon source/text formats work without anyone
+// having to extend an allow-list.
+var binaryExts = map[string]bool{
+	// images
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true,
+	".ico": true, ".webp": true, ".tiff": true, ".tif": true, ".heic": true,
+	".avif": true, ".psd": true, ".ai": true, ".sketch": true,
+	// audio / video
+	".mp3": true, ".wav": true, ".flac": true, ".ogg": true, ".m4a": true,
+	".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true,
+	// archives
+	".zip": true, ".tar": true, ".gz": true, ".tgz": true, ".bz2": true,
+	".xz": true, ".7z": true, ".rar": true, ".jar": true, ".war": true,
+	// compiled / objects / binaries
+	".o": true, ".a": true, ".so": true, ".dylib": true, ".dll": true,
+	".exe": true, ".bin": true, ".class": true, ".pyc": true, ".pyo": true,
+	".wasm": true, ".node": true,
+	// binary document formats
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+	".ppt": true, ".pptx": true, ".odt": true, ".ods": true, ".odp": true,
+	// fonts
+	".ttf": true, ".otf": true, ".woff": true, ".woff2": true, ".eot": true,
+	// databases / index artifacts
+	".db": true, ".sqlite": true, ".sqlite3": true, ".tvim": true,
+}
+
+// looksBinary reports whether content appears to be a binary blob rather than
+// text. A NUL byte in the first 8KB is the same cheap, reliable signal git
+// uses to classify files as binary; it catches extensionless binaries and
+// odd-extension blobs the deny-list misses.
+func looksBinary(content []byte) bool {
+	n := len(content)
+	if n > 8192 {
+		n = 8192
+	}
+	for _, b := range content[:n] {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // chunkMeta is the per-chunk metadata persisted in the index and returned on a
@@ -156,7 +193,7 @@ func (i *Index) gitFiles() ([]string, error) {
 		if p == "" {
 			continue
 		}
-		if sourceExts[strings.ToLower(filepath.Ext(p))] {
+		if !binaryExts[strings.ToLower(filepath.Ext(p))] {
 			rel = append(rel, p)
 		}
 	}
@@ -181,7 +218,7 @@ func (i *Index) walkFiles() ([]string, error) {
 			}
 			return nil
 		}
-		if !sourceExts[strings.ToLower(filepath.Ext(path))] {
+		if binaryExts[strings.ToLower(filepath.Ext(path))] {
 			return nil
 		}
 		if info.Size() > maxFileBytes {
@@ -246,7 +283,7 @@ func (i *Index) Reindex(ctx context.Context) (indexed, removed int, err error) {
 	for _, rel := range files {
 		seen[rel] = true
 		content, rerr := os.ReadFile(filepath.Join(i.repo, rel))
-		if rerr != nil || len(content) > maxFileBytes {
+		if rerr != nil || len(content) > maxFileBytes || looksBinary(content) {
 			continue
 		}
 		sum := sha256.Sum256(content)
