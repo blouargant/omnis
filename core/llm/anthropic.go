@@ -246,9 +246,14 @@ func (a *anthropic) GenerateContent(ctx context.Context, req *model.LLMRequest, 
 			yield(nil, err)
 			return
 		}
+		// Derive a cancelable request context so the streaming stall guard can
+		// abort a frozen read (see newStallGuard). For non-stream calls the
+		// deferred cancel simply releases the request on return.
+		reqCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		var resp *http.Response
 		for attempt := 0; attempt < maxGenerateAttempts; attempt++ {
-			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
 				a.baseURL+"/messages", bytes.NewReader(body))
 			if err != nil {
 				yield(nil, err)
@@ -290,7 +295,8 @@ func (a *anthropic) GenerateContent(ctx context.Context, req *model.LLMRequest, 
 			yield(a.fromResponse(&out), nil)
 			return
 		}
-		a.streamSSE(resp.Body, yield)
+		guard := newStallGuard(reqCtx, resp.Body, cancel, streamStallTimeout())
+		a.streamSSE(guard, yield)
 	}
 }
 
