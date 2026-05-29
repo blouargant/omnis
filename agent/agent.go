@@ -120,6 +120,14 @@ type Options struct {
 	CuratorEnabled *bool
 	// DebugLogging enables full event payload logging, including model requests.
 	DebugLogging bool
+	// BackgroundMailboxDelivery declares that the host drains the leader's
+	// mailbox in the background (the server's pushManager polls it and injects
+	// incoming messages as synthetic turns). When true, the leader's
+	// teammate_check tool is omitted — model-driven polling would be redundant
+	// with the background drainer and would race it for the single-consumer
+	// inbox. Left false in CLI/TUI where no background drainer runs, so the
+	// leader keeps teammate_check as its only delivery path.
+	BackgroundMailboxDelivery bool
 }
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {

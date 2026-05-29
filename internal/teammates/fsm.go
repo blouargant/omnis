@@ -63,6 +63,14 @@ type Agent struct {
 	// NameFunc, enabling cross-session communication.
 	Registry *SessionRegistry
 
+	// SuppressInboxPolling omits the teammate_check tool from Tools() when
+	// set. Use it when the host already drains this agent's inbox in the
+	// background (e.g. the server's pushManager) and delivers messages as
+	// synthetic turns — model-driven polling would then be redundant and,
+	// because Receive consumes the message, would race the background drainer
+	// for the single-consumer inbox. teammate_ask/tell/list stay available.
+	SuppressInboxPolling bool
+
 	mu    sync.Mutex
 	state AgentState
 }
@@ -265,9 +273,10 @@ func (a *Agent) Tools() []tool.Tool {
 	})
 	check, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_check",
-		Description: "Check your own mailbox for one pending message (waits up to 1s). " +
+		Description: "Poll your own mailbox once for a pending cross-session message (waits up to 1s). " +
 			"Returns the message with a [From] field showing the sender's session name, or '(none)' if empty. " +
-			"Call this at the start of every response turn so cross-session messages are never missed.",
+			"Call this on demand — e.g. when the user asks whether a peer has replied, or after a 'teammate_tell' you expect a follow-up to. " +
+			"You do NOT need to poll every turn: incoming messages are normally delivered to you automatically.",
 	}, func(ctx tool.Context, _ checkIn) (checkOut, error) {
 		name := a.resolveName(ctx, a.Name)
 		m, err := a.checkWith(context.Background(), name, time.Second)
@@ -306,5 +315,10 @@ func (a *Agent) Tools() []tool.Tool {
 		return listOut{Sessions: sessions, YourSessionName: myName}, nil
 	})
 
-	return []tool.Tool{ask, tell, check, list}
+	tools := []tool.Tool{ask, tell}
+	if !a.SuppressInboxPolling {
+		tools = append(tools, check)
+	}
+	tools = append(tools, list)
+	return tools
 }

@@ -133,6 +133,10 @@ func buildSquadInstance(
 	leadMailbox := teammates.NewAgent(leaderCfg.Name, infra.Backend)
 	leadMailbox.NameFunc = nameFunc
 	leadMailbox.Registry = infra.Registry
+	// When the host drains the inbox in the background (server pushManager),
+	// drop the leader's teammate_check tool: polling would be redundant and
+	// would race the background drainer for the single-consumer inbox.
+	leadMailbox.SuppressInboxPolling = opts.BackgroundMailboxDelivery
 	leadTools = append(leadTools, leadMailbox.Tools()...)
 
 	// Mount remote A2A peers the leader can reach. A2AAgents names entries

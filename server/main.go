@@ -108,6 +108,10 @@ func run() error {
 		SoftSkillsDir:    os.Getenv("YOKE_SOFTSKILLS_DIR"),
 		AppName:          envOr("YOKE_APP_NAME", "yoke-server"),
 		DebugLogging:     debug,
+		// The server runs pushManager, which drains each session's leader
+		// mailbox in the background and injects incoming messages as synthetic
+		// turns. Suppress the leader's redundant per-turn teammate_check poll.
+		BackgroundMailboxDelivery: true,
 	}
 
 	log.Printf("server: yoke home: %s", paths.Home())

@@ -155,7 +155,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
 | `internal/bg/` | Background command queue; `bash_background` + `bg_list` tools |
 | `internal/worktree/` | Git worktree isolation tools |
-| `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/inbox` |
+| `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all four recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
@@ -443,6 +443,29 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
 - `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag (server only)
+
+### Background mailbox delivery
+
+In **server mode** the leader's mailbox is drained in the background, not
+polled by the model. [server/mailbox_push.go](server/mailbox_push.go)
+`pushManager` runs one goroutine per session (via
+[agent/infrastructure.go](agent/infrastructure.go) `WatchMailbox`); when a
+cross-session message arrives it `inject`s a synthetic `"[mailbox] …"` turn
+(serialised against user turns by `sessionRunGuard`) and fires the
+`sessionPushBroadcaster` so open web UI tabs refresh.
+
+Because the JSONL backend's `Receive` **consumes** the message (single
+reader), the model must not also poll the same inbox. The server therefore
+sets `Options.BackgroundMailboxDelivery = true`, which sets
+`teammates.Agent.SuppressInboxPolling` on the leader and **omits the
+`teammate_check` tool** from the leader's toolset. The leader instruction no
+longer mandates a per-turn mailbox poll — incoming messages arrive as
+injected turns instead. CLI/TUI leave the flag false (no background drainer),
+so `teammate_check` stays as the leader's only delivery path there.
+`teammate_ask/tell/list` are unaffected in both modes. (Note: `teammate_ask`
+still reads replies from the leader's own inbox, so under background delivery
+its reply can race the drainer — a known limitation, separate from the
+per-turn `teammate_check` tax this removed.)
 
 ### Hot reload (server mode)
 
