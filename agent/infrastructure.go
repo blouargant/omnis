@@ -48,6 +48,19 @@ type Infrastructure struct {
 	// handles at build time and releases them when Close is called, so a
 	// hot-reload that only changes one server doesn't restart the others.
 	MCPPool *mcpcfg.Pool
+
+	// embed memoises the process-wide semantic embedder (see Embedder). Built
+	// lazily from the first generation's runtime settings and reused across
+	// reloads — the client is expensive and the indexes it feeds live on disk.
+	embed embedderCache
+
+	// precedents memoises the process-wide cross-session precedent index (see
+	// Precedents). Backed by the same embedder; on-disk so it survives reloads.
+	precedents precedentsCache
+
+	// codeIndex memoises the process-wide project code-search index (see
+	// CodeIndex). Keyed by the repo root; backed by the same embedder.
+	codeIndex codeIndexCache
 }
 
 // BuildInfrastructure constructs the shared infrastructure for the agent.

@@ -23,6 +23,7 @@
     "mime",
     "mcp",
     "softskills",
-    "calc"
+    "calc",
+    "code_search"
   ]
 }

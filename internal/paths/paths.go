@@ -216,6 +216,11 @@ func MailboxesDir() string { return filepath.Join(Home(), "mailboxes") }
 // Always anchored under Home() (read AND write).
 func SoftSkillsDir() string { return filepath.Join(Home(), "softskills") }
 
+// IndexDir returns Home()/index — semantic vector indexes (go-turbovec
+// .tvim files, metadata sidecars, manifests) and the embedding cache.
+// State (write root), not config, so always anchored under Home().
+func IndexDir() string { return filepath.Join(Home(), "index") }
+
 // SkillsAllSearchDirs returns every directory that should be scanned for skill
 // definitions, across all layers and both the hand-crafted (skills/) and
 // registry-installed (registry/skills/) sub-paths. Directories are ordered

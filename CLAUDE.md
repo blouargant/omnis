@@ -46,6 +46,7 @@ make run-server                         # Server: HTTP API + web UI (needs YOKE_
 # Auxiliary subcommands
 go run . -d                             # debug: log full payloads (any mode)
 go run . curate --user u --session s    # manual soft-skill curation
+go run . reindex-precedents              # rebuild the cross-session precedent index (needs an embedder)
 go run . version                        # version info
 
 # Examples (opt-in; not part of `make build`)
@@ -143,9 +144,10 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 
 | Path | Role |
 |---|---|
-| `agent/` | `NewAgent()` — wires all components; `ResolveRuntimeSettings()` — config precedence |
+| `agent/` | `NewAgent()` — wires all components; `ResolveRuntimeSettings()` — config precedence; `ResolveEmbedder()` — builds the semantic embedder from `embed_model_ref`/`YOKE_EMBED_*` |
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
+| `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
 | `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor) |
 | `core/permissions/` | JSON-based permission gating: always_deny → always_allow → ask_user |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle |
@@ -155,7 +157,10 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/inbox` |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
-| `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging) |
+| `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
+| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all three recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
+| `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
+| `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
@@ -163,6 +168,32 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/tui/` | tview chat UI (trace pane + streaming chat) |
 | `server/` | HTTP API server with Bearer token auth |
 | `server/a2a_server.go` | Receives inbound A2A `tasks/send` / `tasks/sendSubscribe` calls; routes by squad + session |
+
+### Semantic recall (embedder + vector indexes)
+
+Three **additive, embedder-gated** recall features share `core/embed` +
+`internal/semindex` (a wrapper over the `go-turbovec` pure-Go ANN index,
+BitWidth 4 + UnitNorm cosine):
+
+1. **`recall_softskills`** (leader) — semantically ranks curator-distilled
+   soft-skills for the user's task; mounted beside the glob `list_softskills`
+   ([internal/softskills/recall.go](internal/softskills/recall.go)). Index
+   refreshes on call, content-hash gated.
+2. **`recall_precedents`** (reflector + curator) — recalls past sessions' goals
+   + decisions ([internal/precedents/](internal/precedents/)). Indexed on
+   `EventSessionReflected` by [agent/precedents_hook.go](agent/precedents_hook.go);
+   backfill via `yoke reindex-precedents`.
+3. **`search_code` / `reindex_code`** (investigator, registries_crawler) —
+   semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
+   `git ls-files`-aware, content-hash incremental.
+
+The embedder and all index handles are process-wide on `Infrastructure`
+(`Embedder()`, `Precedents()`, `CodeIndex()` in [agent/embedder.go](agent/embedder.go)),
+built lazily and surviving hot-reload. **Contract: when no embedder resolves,
+none of the recall tools are mounted and every path falls back to glob/grep —
+behaviour is byte-identical to a build without these features.** See
+[agent/embedder.go](agent/embedder.go) `ResolveEmbedder` for the
+`embed_model_ref` → `YOKE_EMBED_*` precedence.
 
 ### Configuration files
 
@@ -172,7 +203,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | File | Purpose |
 |---|---|
 | `agents.json` | List of enabled agent names, squad composition, global paths |
-| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref` |
+| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
@@ -223,6 +254,19 @@ expected path in the error message). The file holds two top-level sections:
 A model's `provider_ref` inherits `kind` (as `provider`), `base_url`, and
 `api_key` from the referenced provider; inline `provider`/`base_url`/`api_key`
 on a model still override the inherited values when set.
+
+**Embedding model selection (semantic recall).** A model entry may be flagged
+`"embedding": true` (with an optional `"dim"`); such entries are *not* picked by
+agents via `model_ref` — they show up in the Web UI Models panel's "internal
+embedding model" selector and in nothing else. The top-level `models.json`
+field `"embed_model_ref"` names which embedding model is the active internal
+embedder for all semantic recall (soft-skills, precedents, codebase). It can be
+overridden by `embed_model_ref` in `agents.json` and then by the
+`YOKE_EMBED_MODEL_REF` env var; when none resolves (and no `YOKE_EMBED_*` env is
+set) the embedder is absent and every recall feature silently falls back to its
+glob/grep path. The embedder is process-wide (built once on `Infrastructure`,
+survives hot-reload like the MCP pool); changing `embed_model_ref` needs a
+server restart to take effect.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,
@@ -276,6 +320,12 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
   ├── mailboxes/        # JSONL inter-agent mailboxes
+  ├── index/            # semantic vector indexes (paths.IndexDir())
+  │   ├── embed_cache/  #   content-hash embedding cache (sha256(model+text))
+  │   ├── softskills.tvim + .meta.json   # recall_softskills index
+  │   ├── precedents.tvim + .meta.json   # recall_precedents index
+  │   └── <repo-hash>/  #   per-repo code index: codebase.tvim + .meta.json
+  │                     #   + codebase.files.json (per-file hash→chunk-ids)
   ├── softskills/       # curator-distilled procedures (read AND write)
   │   ├── _stats.json   # per-skill load/helpful/harmful/neutral counters
   │   │                 #   sidecar; keyed by <agent>/<name> or bare <name>
@@ -320,6 +370,12 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_MODEL` | Provider-specific model ID |
 | `YOKE_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
 | `YOKE_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
+| `YOKE_EMBED_PROVIDER` | Embedder provider for semantic recall (default: `YOKE_PROVIDER`, else `openai_compat`). `anthropic` unsupported — use Voyage/OpenAI via `openai_compat` |
+| `YOKE_EMBED_MODEL` | Embedding model id (default `text-embedding-3-small`) |
+| `YOKE_EMBED_BASE_URL` | Embeddings endpoint (default `YOKE_BASE_URL`/`OPENAI_BASE_URL`) |
+| `YOKE_EMBED_API_KEY` | Embedder API key (default `YOKE_API_KEY`/provider key) |
+| `YOKE_EMBED_DIM` | Expected embedding dimension (default `1536`, or learned from the first response) |
+| `YOKE_EMBED_MODEL_REF` | Overrides `embed_model_ref` from `models.json` — selects which catalogue model is the internal embedder |
 | `YOKE_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `YOKE_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
 | `YOKE_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |

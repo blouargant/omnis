@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/yoke/core/embed"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/skills"
 	"github.com/blouargant/yoke/internal/softskills"
@@ -22,6 +23,7 @@ func buildLeaderToolsets(
 	runtime RuntimeSettings,
 	leaderCfg RuntimeAgentConfig,
 	pool *mcpcfg.Pool,
+	emb embed.Embedder,
 ) (skillTS, softSkillTS tool.Toolset, mcpToolsets, allToolsets []tool.Toolset, mcpHandles []*mcpcfg.Handle) {
 	leaderSoftSkillsDir := runtime.SoftSkillsDir
 	if leaderCfg.SoftSkillsDir != "" {
@@ -36,7 +38,7 @@ func buildLeaderToolsets(
 		skillTS = ts
 		allToolsets = append(allToolsets, ts)
 	}
-	if sts, err := softskills.Toolset(ctx, leaderSoftSkillsDir); err == nil {
+	if sts, err := softskills.Toolset(ctx, leaderSoftSkillsDir, emb); err == nil {
 		softSkillTS = sts
 		allToolsets = append(allToolsets, sts)
 	}

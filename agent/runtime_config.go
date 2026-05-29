@@ -78,25 +78,43 @@ type ModelEntry struct {
 	// cache_creation_input_tokens). Defaults to InputTokenPricePerMillion
 	// when unset.
 	CacheCreationTokenPricePerMillion float64 `json:"cache_creation_token_price_per_million"`
+	// Embedding marks this model entry as an embeddings model (not a chat
+	// model). The Web UI lists only Embedding:true models in the internal
+	// embedding-model selector, and agents never pick one via model_ref.
+	Embedding bool `json:"embedding,omitempty"`
+	// Dim is the output dimension of an embedding model (e.g. 1536 for
+	// text-embedding-3-small, 768 for nomic-embed-text). Ignored for chat
+	// models. Zero means "learn from the first response".
+	Dim int `json:"dim,omitempty"`
 }
 
 // modelsConfigFile is the on-disk shape of models.json.
 type modelsConfigFile struct {
 	Providers map[string]ProviderEntry `json:"providers"`
 	Models    map[string]ModelEntry    `json:"models"`
+	// EmbedModelRef names the model used as the internal semantic embedder.
+	// Lives here so the Web UI Models panel can manage the whole embedding
+	// config (the embedding model entries + which one is active) in one place.
+	// An agents.json `embed_model_ref` or YOKE_EMBED_MODEL_REF env override it.
+	EmbedModelRef string `json:"embed_model_ref,omitempty"`
 }
 
 type runtimeConfigFile struct {
-	SoftSkillsDir         string       `json:"softskills_dir"`
-	AppName               string       `json:"app_name"`
-	TokenOptimization     bool         `json:"token_optimization"`
-	BashOutputFiltersDir  string       `json:"bash_output_filters_dir"`
-	BashTimeoutSeconds    int          `json:"bash_timeout_seconds"`
-	MCPConfigPath         string       `json:"mcp_config_path"`
-	PermissionsConfigPath string       `json:"permissions_config_path"`
-	SerpAPIKey            string       `json:"serpapi_key"`
-	Agents                []string     `json:"agents"`
-	Squads                []SquadEntry `json:"squads"`
+	SoftSkillsDir         string `json:"softskills_dir"`
+	AppName               string `json:"app_name"`
+	TokenOptimization     bool   `json:"token_optimization"`
+	BashOutputFiltersDir  string `json:"bash_output_filters_dir"`
+	BashTimeoutSeconds    int    `json:"bash_timeout_seconds"`
+	MCPConfigPath         string `json:"mcp_config_path"`
+	PermissionsConfigPath string `json:"permissions_config_path"`
+	SerpAPIKey            string `json:"serpapi_key"`
+	// EmbedModelRef names the model in models.json used for internal semantic
+	// embedding (softskill/precedent/codebase recall). It must reference a
+	// model entry flagged `"embedding": true`. Empty disables semantic recall
+	// unless the YOKE_EMBED_* environment provides an embedder instead.
+	EmbedModelRef string       `json:"embed_model_ref,omitempty"`
+	Agents        []string     `json:"agents"`
+	Squads        []SquadEntry `json:"squads"`
 	// Models is no longer a supported field in agents.json. It is detected
 	// here only to produce a clear migration error. Move the block to
 	// models.json (see RuntimeSettings.ModelsConfigPath).
@@ -123,6 +141,8 @@ type RuntimeModelConfig struct {
 	OutputTokenPricePerMillion        float64
 	CachedInputTokenPricePerMillion   float64
 	CacheCreationTokenPricePerMillion float64
+	Embedding                         bool
+	Dim                               int
 }
 
 // RuntimeAgentConfig is one fully-resolved agent configuration entry.
@@ -192,6 +212,10 @@ type RuntimeSettings struct {
 	// A2A agent endpoints that any agent's `a2a_agents` list can reference.
 	A2AConfigPath string
 	SerpAPIKey    string
+	// EmbedModelRef names the model in Models used as the internal embedder for
+	// semantic recall. Empty means no config-selected embedder (the YOKE_EMBED_*
+	// environment may still provide one).
+	EmbedModelRef string
 	Models        map[string]RuntimeModelConfig
 	Agents        []RuntimeAgentConfig
 	// Squads is the normalised list of named agent groups. Always contains
@@ -360,6 +384,8 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 			OutputTokenPricePerMillion:        m.OutputTokenPricePerMillion,
 			CachedInputTokenPricePerMillion:   m.CachedInputTokenPricePerMillion,
 			CacheCreationTokenPricePerMillion: m.CacheCreationTokenPricePerMillion,
+			Embedding:                         m.Embedding,
+			Dim:                               m.Dim,
 		}
 	}
 	return out, nil
@@ -756,6 +782,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if err != nil {
 		return RuntimeSettings{}, err
 	}
+	if strings.TrimSpace(modelsCfg.EmbedModelRef) != "" {
+		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(modelsCfg.EmbedModelRef))
+	}
 
 	// File
 	if strings.TrimSpace(cfg.SoftSkillsDir) != "" {
@@ -779,6 +808,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
 		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))
+	}
+	if strings.TrimSpace(cfg.EmbedModelRef) != "" {
+		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(cfg.EmbedModelRef))
 	}
 	if len(cfg.Agents) > 0 {
 		agentsRegistryDirs := paths.AgentsRegistrySearchDirs()
@@ -810,6 +842,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
 			out.CuratorIdleTimeout = d
 		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("YOKE_EMBED_MODEL_REF")); raw != "" {
+		out.EmbedModelRef = strings.ToLower(raw)
 	}
 
 	// Options (highest precedence)

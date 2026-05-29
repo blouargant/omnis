@@ -1913,6 +1913,13 @@
 }
 .model-field-input:focus { outline: none; border-color: var(--accent); }
 
+/* Internal-embedding-model selector card sits above the model grid */
+.embed-select-card { margin-bottom: 1rem; }
+
+/* Embedding pill toggle inside a model card: align the switch under its label
+   with a little breathing room, matching the agent "Active State" toggle. */
+.model-field .agent-toggle-switch { margin-top: 0.3rem; }
+
 /* Combo field inside model card */
 .model-field-combo {
   display: flex;

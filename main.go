@@ -91,6 +91,8 @@ Usage:
   yoke [flags] run [prompt]     same as above; the explicit form
   yoke [flags] tui              launch the interactive TUI
   yoke [flags] curate ...       run the soft-skill curator one-shot
+  yoke [flags] reindex-precedents  rebuild the cross-session precedent index
+  yoke [flags] embed-test [text]   probe the configured embedder (semantic recall)
   yoke import-agent <file|-|URL> import a Claude Code sub-agent (.md or .json)
   yoke version                  print version information
   yoke help                     show this help
@@ -132,6 +134,10 @@ func run(ctx context.Context, opts options, args []string) error {
 			return nil
 		case "curate":
 			return runCurate(ctx, opts, args[1:])
+		case "reindex-precedents":
+			return runReindexPrecedents(ctx, opts, args[1:])
+		case "embed-test":
+			return runEmbedTest(ctx, opts, args[1:])
 		case "tui":
 			return runTUI(ctx, opts)
 		case "run":

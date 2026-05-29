@@ -6,7 +6,16 @@
       "api_key": "OPENAI_API_KEY"
     }
   },
+  "embed_model_ref": "embedder",
   "models": {
+    "embedder": {
+      "provider_ref": "openai-compat",
+      "model": "text-embedding-3-small",
+      "embedding": true,
+      "dim": 4096,
+      "context_length": 32000,
+      "input_token_price_per_million": 0.10
+    },
     "balanced": {
       "provider_ref": "openai-compat",
       "model": "gpt-4.1-mini-sweden",

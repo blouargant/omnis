@@ -6,6 +6,7 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.1
 	github.com/Knetic/govaluate v3.0.0+incompatible
 	github.com/PuerkitoBio/goquery v1.12.0
+	github.com/blouargant/go-turbovec v0.1.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/dustinkirkland/golang-petname v0.0.0-20260215035315-f0c533e9ce9b

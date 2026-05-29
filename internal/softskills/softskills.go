@@ -22,6 +22,7 @@ import (
 	"google.golang.org/adk/tool/skilltoolset/skill"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/yoke/core/embed"
 	"github.com/blouargant/yoke/internal/fsutil"
 	"github.com/blouargant/yoke/internal/paths"
 )
@@ -75,8 +76,10 @@ IMPORTANT — do NOT use ` + "`load_skill`" + ` to open names returned by ` + "`
 `
 
 // Toolset returns an ADK tool.Toolset reading softskills from `dir`.
-// `dir` is created if missing.
-func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
+// `dir` is created if missing. When `emb` is non-nil the returned toolset also
+// exposes the semantic `recall_softskills` tool beside the glob tools; when nil
+// the behaviour is byte-identical to the glob-only loader.
+func Toolset(ctx context.Context, dir string, emb embed.Embedder) (tool.Toolset, error) {
 	if dir == "" {
 		dir = DefaultDir()
 	}
@@ -93,7 +96,33 @@ func Toolset(ctx context.Context, dir string) (tool.Toolset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("softskills toolset: %w", err)
 	}
-	return &renamedToolset{SkillToolset: inner}, nil
+	ts := &renamedToolset{SkillToolset: inner}
+	if emb == nil {
+		return ts, nil
+	}
+	recall, err := RecallTool(ctx, dir, emb)
+	if err != nil || recall == nil {
+		// Recall is additive: a build failure leaves the glob loader intact.
+		return ts, nil
+	}
+	return &recallToolset{renamedToolset: ts, recall: recall}, nil
+}
+
+// recallToolset augments the glob soft-skill toolset with the semantic
+// recall_softskills tool. It inherits ProcessRequest (system-instruction +
+// frontmatter injection) from the embedded *renamedToolset / *SkillToolset and
+// only appends one extra tool to Tools().
+type recallToolset struct {
+	*renamedToolset
+	recall tool.Tool
+}
+
+func (r *recallToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
+	base, err := r.renamedToolset.Tools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(base, r.recall), nil
 }
 
 // renamedToolset wraps the upstream skilltoolset so the three tools it

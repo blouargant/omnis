@@ -1718,12 +1718,14 @@ const BASE_PATH = window.BASE_PATH || "";
       <div class="model-panel-header">
         <div>
           <h2 class="model-panel-title">Configured Models</h2>
-          <p class="model-panel-desc">Each model references a provider for credentials and endpoint. Use the ⟳ button to populate the model list from the provider.</p>
+          <p class="model-panel-desc">Each model references a provider for credentials and endpoint. Use the ⟳ button to populate the model list from the provider. Mark a model <strong>EMBEDDING</strong> to make it selectable as the internal semantic embedder.</p>
         </div>
         <button type="button" class="add-btn model-add-btn" id="add-model">+ Add model</button>
       </div>
+      <div id="embed-select-row"></div>
       <div id="models-grid"></div>
     `;
+    renderEmbedSelector(d, host.querySelector("#embed-select-row"));
     host.querySelector("#add-model").addEventListener("click", async () => {
       const providerNames = Object.keys(d.providers || {});
       if (!providerNames.length) {
@@ -1739,6 +1741,65 @@ const BASE_PATH = window.BASE_PATH || "";
       renderModelCards(d, host.querySelector("#models-grid"));
     });
     renderModelCards(d, host.querySelector("#models-grid"));
+  }
+
+  // renderEmbedSelector renders the "internal embedding model" dropdown,
+  // listing only models flagged `embedding: true`. The selection is persisted
+  // as models.json `embed_model_ref` and drives semantic recall (soft-skills,
+  // precedents, codebase). When unset, recall is disabled and the agent uses
+  // its glob/grep fallbacks.
+  function renderEmbedSelector(d, el) {
+    if (!el) return;
+    const embedModels = Object.keys(d.models || {}).filter(n => d.models[n] && d.models[n].embedding);
+    el.innerHTML = "";
+
+    // Mirror the standard model-card structure (header bar + padded body) so
+    // this selector sits flush with the model grid below it.
+    const wrap = document.createElement("div");
+    wrap.className = "embed-select-card model-card";
+
+    const hdr = document.createElement("div");
+    hdr.className = "model-card-hdr";
+    const title = document.createElement("div");
+    title.className = "model-card-title";
+    const strong = document.createElement("strong");
+    strong.textContent = "INTERNAL EMBEDDING MODEL";
+    title.appendChild(strong);
+    hdr.appendChild(title);
+
+    const body = document.createElement("div");
+    body.className = "model-card-body";
+    const fld = document.createElement("div");
+    fld.className = "model-field model-field-full";
+
+    const sel = document.createElement("select");
+    sel.className = "model-field-input";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = embedModels.length
+      ? "(disabled — semantic recall off)"
+      : "(no embedding models — tick EMBEDDING MODEL on a model below)";
+    sel.appendChild(none);
+    for (const n of embedModels) {
+      const opt = document.createElement("option");
+      opt.value = n; opt.textContent = n;
+      if ((d.embed_model_ref || "").toLowerCase() === n.toLowerCase()) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.disabled = !embedModels.length;
+    sel.addEventListener("change", () => {
+      if (sel.value) d.embed_model_ref = sel.value; else delete d.embed_model_ref;
+      markFormDirty("models");
+    });
+    const desc = document.createElement("p");
+    desc.className = "model-panel-desc";
+    desc.textContent = "Drives soft-skill / precedent / codebase semantic recall. Changing it rebuilds the indexes on next use; a server restart applies it.";
+
+    fld.appendChild(sel); fld.appendChild(desc);
+    body.appendChild(fld);
+    wrap.appendChild(hdr);
+    wrap.appendChild(body);
+    el.appendChild(wrap);
   }
 
   function renderModelCards(d, el) {
@@ -1803,6 +1864,42 @@ const BASE_PATH = window.BASE_PATH || "";
       fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
       fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
       fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
+
+      // EMBEDDING flag — marks this entry as an embeddings model so it appears
+      // in the "internal embedding model" selector above. Uses the same pill
+      // switch as the agent "Active State" toggle; the explanatory text is a
+      // tooltip rather than an inline label.
+      const embF = document.createElement("div");
+      embF.className = "model-field";
+      embF.title = "usable as internal embedder";
+      const embLbl = document.createElement("label");
+      embLbl.className = "model-field-label";
+      embLbl.textContent = "EMBEDDING MODEL";
+      const embSwitch = document.createElement("label");
+      embSwitch.className = "agent-toggle-switch";
+      embSwitch.title = "usable as internal embedder";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "agent-toggle-input";
+      cb.checked = !!m.embedding;
+      cb.addEventListener("change", () => {
+        if (cb.checked) m.embedding = true; else delete m.embedding;
+        // If this model was the active embedder and is no longer embedding,
+        // clear the selection so the saved config stays consistent.
+        if (!cb.checked && (d.embed_model_ref || "").toLowerCase() === name.toLowerCase()) delete d.embed_model_ref;
+        onChange();
+        const row = el.parentElement && el.parentElement.querySelector("#embed-select-row");
+        if (row) renderEmbedSelector(d, row);
+      });
+      const embSlider = document.createElement("span");
+      embSlider.className = "agent-toggle-slider";
+      embSwitch.appendChild(cb); embSwitch.appendChild(embSlider);
+      embF.appendChild(embLbl); embF.appendChild(embSwitch);
+      fg.appendChild(embF);
+
+      // DIM — embedding output dimension (e.g. 1536, 768). Blank = learn it
+      // from the first response. Only meaningful for embedding models.
+      fg.appendChild(numField("dim", m.dim, v => { if (v) m.dim = v; else delete m.dim; onChange(); }));
 
       body.appendChild(fg);
 

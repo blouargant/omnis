@@ -35,6 +35,7 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
+	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/yoke/core/agentkit"
@@ -106,6 +107,9 @@ Reply with EXACTLY one JSON object — no preamble, no farewell, no markdown fen
 type ReflectorConfig struct {
 	// Model is required.
 	Model model.LLM
+	// ExtraTools are optional additional tools to mount (e.g. recall_precedents
+	// for cross-session precedent lookup). Nil leaves behaviour unchanged.
+	ExtraTools []tool.Tool
 }
 
 // NewReflector builds the reflector agent. It mounts ONLY the read-only
@@ -116,12 +120,17 @@ func NewReflector(_ context.Context, cfg ReflectorConfig) (adkagent.Agent, error
 		return nil, fmt.Errorf("softskills: reflector requires Model")
 	}
 	tools := fstools.New()
+	tools = append(tools, cfg.ExtraTools...)
+	instruction := ReflectorPrompt
+	if len(cfg.ExtraTools) > 0 {
+		instruction += precedentsHint
+	}
 	return agentkit.New(agentkit.AgentConfig{
 		Name:        "reflector",
 		Description: "Post-session analyst that tags loaded soft-skills helpful/harmful/neutral.",
 		Model:       cfg.Model,
 		Tools:       tools,
-		Instruction: ReflectorPrompt,
+		Instruction: instruction,
 	})
 }
 

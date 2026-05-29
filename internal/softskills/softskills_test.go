@@ -29,7 +29,7 @@ Just a fixture.
 		t.Fatal(err)
 	}
 
-	ts, err := Toolset(context.Background(), dir)
+	ts, err := Toolset(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatalf("Toolset: %v", err)
 	}
@@ -58,7 +58,7 @@ Just a fixture.
 
 func TestToolsetCreatesMissingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist-yet")
-	if _, err := Toolset(context.Background(), dir); err != nil {
+	if _, err := Toolset(context.Background(), dir, nil); err != nil {
 		t.Fatalf("Toolset: %v", err)
 	}
 	if _, err := os.Stat(dir); err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/blouargant/yoke/core/agentkit"
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/codeindex"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 )
 
@@ -27,6 +28,7 @@ func buildSubAgents(
 	pool *mcpcfg.Pool,
 	modelForAgent func(RuntimeAgentConfig) (model.LLM, error),
 	callbacks events.AgentCallbacks,
+	codeIdx *codeindex.Index,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -41,7 +43,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -67,6 +69,7 @@ func buildSubAgentsFromConfigs(
 	pool *mcpcfg.Pool,
 	modelForAgent func(RuntimeAgentConfig) (model.LLM, error),
 	callbacks events.AgentCallbacks,
+	codeIdx *codeindex.Index,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -100,7 +103,7 @@ func buildSubAgentsFromConfigs(
 			instr = defaultAgentInstruction(cfg.Name)
 		}
 
-		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool)
+		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 

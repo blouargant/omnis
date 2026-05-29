@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"google.golang.org/adk/model"
+	"google.golang.org/adk/tool"
 
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/paths"
@@ -95,6 +96,7 @@ func registerCuratorHook(
 	agentNames []string,
 	gate CuratorGateConfig,
 	sessionSuffix func(u, s string) string,
+	precedentsTool tool.Tool,
 ) []*events.Subscription {
 	reflectedHandler := func(_ string, payload map[string]any) {
 		userID, _ := payload["user_id"].(string)
@@ -106,7 +108,7 @@ func registerCuratorHook(
 		if key == "" {
 			key = sessionSuffix(userID, sessionID)
 		}
-		runCuratorPipeline(bus, curatorLLM, reflectorLLM, softDir, agentNames, gate, key, userID, sessionID, payload)
+		runCuratorPipeline(bus, curatorLLM, reflectorLLM, softDir, agentNames, gate, key, userID, sessionID, payload, precedentsTool)
 	}
 
 	curateNowHandler := func(_ string, payload map[string]any) {
@@ -118,7 +120,7 @@ func registerCuratorHook(
 		key := sessionSuffix(userID, sessionID)
 		// Forced trigger: skip the reflector (no heuristic context) and
 		// drive the curator directly. Pass an empty payload.
-		runCuratorPipeline(bus, curatorLLM, nil, softDir, agentNames, gate, key, userID, sessionID, nil)
+		runCuratorPipeline(bus, curatorLLM, nil, softDir, agentNames, gate, key, userID, sessionID, nil, precedentsTool)
 	}
 
 	return []*events.Subscription{
@@ -139,6 +141,7 @@ func runCuratorPipeline(
 	gate CuratorGateConfig,
 	key, userID, sessionID string,
 	payload map[string]any,
+	precedentsTool tool.Tool,
 ) {
 	forced := CurateSessionRequested(key)
 	auditPath := filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_memory_%s.md", key))
@@ -203,7 +206,7 @@ func runCuratorPipeline(
 			loaded := stringSliceFromPayload(payload["loaded_skills"])
 			if len(loaded) > 0 {
 				rctx, rcancel := context.WithTimeout(context.Background(), reflectTimeout)
-				out, err := runReflector(rctx, reflectorLLM, auditPath, statePath, loaded, payload)
+				out, err := runReflector(rctx, reflectorLLM, auditPath, statePath, loaded, payload, precedentsTool)
 				rcancel()
 				if err != nil {
 					log.Printf("reflector: skipped for session %s (%v)", key, err)
@@ -244,10 +247,15 @@ func runCuratorPipeline(
 		ctx, cancel := context.WithTimeout(context.Background(), curateTimeout)
 		defer cancel()
 
+		curatorExtra := []tool.Tool(nil)
+		if precedentsTool != nil {
+			curatorExtra = []tool.Tool{precedentsTool}
+		}
 		r, err := softskills.CuratorRunner(ctx, softskills.CuratorConfig{
 			Model:         curatorLLM,
 			SoftSkillsDir: softDir,
 			AgentNames:    agentNames,
+			ExtraTools:    curatorExtra,
 		})
 		if err != nil {
 			log.Printf("curator: build failed for session %s: %v", key, err)
@@ -282,8 +290,13 @@ func runReflector(
 	auditPath, statePath string,
 	loadedSkills []string,
 	payload map[string]any,
+	precedentsTool tool.Tool,
 ) (softskills.Outcome, error) {
-	r, err := softskills.ReflectorRunner(ctx, softskills.ReflectorConfig{Model: llm})
+	reflectorExtra := []tool.Tool(nil)
+	if precedentsTool != nil {
+		reflectorExtra = []tool.Tool{precedentsTool}
+	}
+	r, err := softskills.ReflectorRunner(ctx, softskills.ReflectorConfig{Model: llm, ExtraTools: reflectorExtra})
 	if err != nil {
 		return softskills.Outcome{}, fmt.Errorf("build reflector: %w", err)
 	}

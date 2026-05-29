@@ -18,6 +18,7 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/runner"
+	"google.golang.org/adk/tool"
 
 	fstools "github.com/blouargant/yoke/core/tools"
 )
@@ -241,6 +242,24 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 		}
 	}
 
+	// Cross-session precedent index (Phase 2). Built once per process from the
+	// shared embedder; when present, index every finalised session's goal +
+	// decisions and expose recall_precedents to the reflector/curator. Absent
+	// an embedder, precStore is nil and everything degrades to today's behaviour.
+	precStore := infra.Precedents(ctx, runtime)
+	var precedentsTool tool.Tool
+	if precStore != nil {
+		if t, err := precStore.Tool(); err == nil && t != nil {
+			precedentsTool = t
+		}
+		suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
+		subs := registerPrecedentsHook(infra.Bus, precStore, suffix)
+		for _, sub := range subs {
+			s := sub
+			inst.closers = append(inst.closers, func() error { s.Off(); return nil })
+		}
+	}
+
 	// Curator hook is registered once per generation (not per squad). The
 	// curator listens on the shared event bus; its model is built from the
 	// curator agent config. Sub-agent names span every squad's members so
@@ -262,7 +281,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 				}
 			}
 			suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
-			subs := registerCuratorHook(infra.Bus, curatorLLM, reflectorLLM, runtime.SoftSkillsDir, subAgentNamesAll, gate, suffix)
+			subs := registerCuratorHook(infra.Bus, curatorLLM, reflectorLLM, runtime.SoftSkillsDir, subAgentNamesAll, gate, suffix, precedentsTool)
 			for _, sub := range subs {
 				s := sub
 				inst.closers = append(inst.closers, func() error { s.Off(); return nil })

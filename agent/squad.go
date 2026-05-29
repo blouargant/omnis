@@ -124,7 +124,8 @@ func buildSquadInstance(
 		func(u, s string) string { return infra.SessionSuffix(u, s) },
 	))
 
-	skillTS, softSkillTS, _, toolsets, leaderHandles := buildLeaderToolsets(ctx, runtime, leaderCfg, infra.MCPPool)
+	emb := infra.Embedder(ctx, runtime)
+	skillTS, softSkillTS, _, toolsets, leaderHandles := buildLeaderToolsets(ctx, runtime, leaderCfg, infra.MCPPool, emb)
 	allMCPHandles := append([]*mcpcfg.Handle(nil), leaderHandles...)
 
 	nameFunc := func(u, s, name string) string { return infra.NameFunc(u, s, name) }
@@ -165,10 +166,11 @@ func buildSquadInstance(
 		memberCfgs = append(memberCfgs, cfg)
 	}
 
+	codeIdx := infra.CodeIndex(ctx, runtime)
 	subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, err := buildSubAgentsFromConfigs(
 		ctx, memberCfgs, runtime,
 		skillTS, softSkillTS, leaderHandles, infra.MCPPool,
-		modelForAgent, subAgentCallbacks,
+		modelForAgent, subAgentCallbacks, codeIdx,
 	)
 	if err != nil {
 		for _, h := range allMCPHandles {
@@ -191,6 +193,11 @@ func buildSquadInstance(
 	}
 	if skillTS != nil && softSkillTS != nil {
 		leaderInstruction = softskills.LoaderRule + leaderInstruction
+	}
+	// When the semantic embedder is configured the leader also gets the
+	// recall_softskills tool; tell it to rank with recall before the glob scan.
+	if emb != nil && softSkillTS != nil {
+		leaderInstruction = softskills.RecallProtocolAddendum + leaderInstruction
 	}
 	if mounted := filterMCPHandles(leaderHandles, leaderCfg.MCPServers); len(mounted) > 0 {
 		names := make([]string, 0, len(mounted))

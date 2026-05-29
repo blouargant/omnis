@@ -27,6 +27,7 @@ import (
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/a2a"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/codeindex"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/registries"
@@ -162,7 +163,7 @@ func defaultToolKeys(name string) []string {
 	}
 }
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -181,7 +182,9 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 		agentSoftSkillsDir = filepath.Join(runtime.SoftSkillsDir, cfg.Name)
 	}
 	if agentSoftSkillsDir != "" && agentSoftSkillsDir != runtime.SoftSkillsDir {
-		if sts, err := softskills.Toolset(ctx, agentSoftSkillsDir); err == nil {
+		// Sub-agents use the glob-only soft-skill loader (recall is mounted on
+		// the leader in Phase 1); pass a nil embedder.
+		if sts, err := softskills.Toolset(ctx, agentSoftSkillsDir, nil); err == nil {
 			resolvedSoftSkillTS = sts
 		}
 	}
@@ -241,6 +244,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 		case "registries":
 			agentTools = append(agentTools, registries.NewTools(buildRegistriesDeps(runtime))...)
 			hasRegistries = true
+		case "code_search":
+			// Mounted only when a semantic embedder is configured; otherwise
+			// the agent falls back to grep/read (additive contract).
+			if codeIdx != nil {
+				agentTools = append(agentTools, codeIdx.Tools()...)
+			}
 		default:
 			if t, ok := namedTools[key]; ok {
 				agentTools = append(agentTools, t)

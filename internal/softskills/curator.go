@@ -26,11 +26,22 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
+	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/yoke/core/agentkit"
 	fstools "github.com/blouargant/yoke/core/tools"
 )
+
+// precedentsHint is appended to the curator/reflector instruction only when a
+// recall_precedents tool is mounted (i.e. an embedder is configured). It tells
+// the agent it may consult how similar past sessions were resolved.
+const precedentsHint = `
+
+## Cross-session precedents (optional)
+
+A 'recall_precedents' tool is available. You MAY call it with a short query (the session goal or a candidate decision) to retrieve goals/decisions from semantically similar past sessions before deciding. Treat results as weak prior evidence, not ground truth; never invent precedents it did not return.
+`
 
 // CuratorPrompt is the curator's role-specific instruction. Appended to
 // the harness SystemPrompt by agentkit.New.
@@ -151,6 +162,9 @@ type CuratorConfig struct {
 	// curator). Passed to the curator prompt so it knows which `agent`
 	// values are valid write targets.
 	AgentNames []string
+	// ExtraTools are optional additional tools to mount (e.g. recall_precedents
+	// for cross-session precedent lookup). Nil leaves behaviour unchanged.
+	ExtraTools []tool.Tool
 }
 
 // NewCurator builds the curator agent. It mounts:
@@ -171,13 +185,18 @@ func NewCurator(ctx context.Context, cfg CuratorConfig) (adkagent.Agent, error) 
 
 	tools := fstools.New()
 	tools = append(tools, WriteTools(cfg.SoftSkillsDir)...)
+	tools = append(tools, cfg.ExtraTools...)
 
+	instruction := CuratorPrompt
+	if len(cfg.ExtraTools) > 0 {
+		instruction += precedentsHint
+	}
 	return agentkit.New(agentkit.AgentConfig{
 		Name:        "curator",
 		Description: "Distils successful session experience into reusable soft-skills.",
 		Model:       cfg.Model,
 		Tools:       tools,
-		Instruction: CuratorPrompt,
+		Instruction: instruction,
 	})
 }
 
