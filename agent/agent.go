@@ -249,6 +249,32 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// the agent falls back to grep/read (additive contract).
 			if codeIdx != nil {
 				agentTools = append(agentTools, codeIdx.Tools()...)
+				// search_code returns file paths + line ranges; Read, Grep,
+				// and Glob are needed to retrieve the actual content. Auto-inject
+				// them if not already covered by "fs" or an explicit named key.
+				hasFS := false
+				for _, k := range keys {
+					if k == "fs" {
+						hasFS = true
+						break
+					}
+				}
+				if !hasFS {
+					for _, dep := range []string{"Read", "Grep", "Glob"} {
+						already := false
+						for _, k := range keys {
+							if k == dep {
+								already = true
+								break
+							}
+						}
+						if !already {
+							if t, ok := namedTools[dep]; ok {
+								agentTools = append(agentTools, t)
+							}
+						}
+					}
+				}
 			}
 		default:
 			if t, ok := namedTools[key]; ok {
