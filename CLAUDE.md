@@ -47,6 +47,7 @@ make run-server                         # Server: HTTP API + web UI (needs YOKE_
 go run . -d                             # debug: log full payloads (any mode)
 go run . curate --user u --session s    # manual soft-skill curation
 go run . reindex-precedents              # rebuild the cross-session precedent index (needs an embedder)
+go run . reindex-docs                    # rebuild the documentation semantic index (needs an embedder)
 go run . version                        # version info
 
 # Examples (opt-in; not part of `make build`)
@@ -158,10 +159,11 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
-| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all four recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
+| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/regindex/` | Semantic index over **remote registry** items of **all six kinds** (skills, agents, mcp, a2a, squads, commands) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
+| `internal/docindex/` | Semantic index over **yoke's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/yoke/docs`; roots from `Roots()`, override `YOKE_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
@@ -172,7 +174,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 
 ### Semantic recall (embedder + vector indexes)
 
-Four **additive, embedder-gated** recall features share `core/embed` +
+Five **additive, embedder-gated** recall features share `core/embed` +
 `internal/semindex` (a wrapper over the `go-turbovec` pure-Go ANN index,
 BitWidth 4 + UnitNorm cosine):
 
@@ -195,7 +197,7 @@ BitWidth 4 + UnitNorm cosine):
 3. **`search_code` / `reindex_code`** (investigator) —
    semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
    `git ls-files`-aware, content-hash incremental.
-4. **`search_registries` / `reindex_registries`** (registries_crawler) —
+4. **`search_registries` / `reindex_registries`** (helper) —
    semantic search over **every kind** advertised by the configured remote
    registries — skills, agents, mcp, a2a, squads, commands
    ([internal/regindex/](internal/regindex/)). Mounted alongside the
@@ -211,9 +213,22 @@ BitWidth 4 + UnitNorm cosine):
    changes); a `registries.OnSave` hook also rebuilds in the background after
    any web-UI/tool edit to `remote_registries.json`. Remote *content* drift
    (same URL, changed skills) is only caught by explicit `reindex_registries`.
+5. **`search_docs` / `reindex_docs`** (helper) — semantic search over **yoke's
+   own documentation** so the Helper can answer questions about yoke and quote
+   the source ([internal/docindex/](internal/docindex/)). Indexes markdown across
+   every doc root from `docindex.Roots()` — the web UI user docs (`web/docs` →
+   `/usr/share/yoke/web/docs`) and the developer docs (`docs` →
+   `/usr/share/doc/yoke/docs`), override with `YOKE_DOCS_DIRS`. Mounted via the
+   `docs` tool group alongside the always-on glob `list_docs` / `read_doc` /
+   `grep_docs` (`NewNavTools`), which are the no-embedder fallback. Chunking is
+   line-window + heading-aware and content-hash incremental; each hit carries the
+   source `path`, `heading`, line range and the quoted `text`. Built/refreshed in
+   the background at server startup ([server/docs_indexer.go](server/docs_indexer.go)
+   `startDocsIndexer`): the incremental `Reindex` builds on first boot and after
+   docs/embedder change, no-op otherwise. Backfill via `yoke reindex-docs`.
 
 The embedder and all index handles are process-wide on `Infrastructure`
-(`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()` in [agent/embedder.go](agent/embedder.go)),
+(`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()` in [agent/embedder.go](agent/embedder.go)),
 built lazily and surviving hot-reload. **Contract: when no embedder resolves,
 none of the recall tools are mounted and every path falls back to glob/grep —
 behaviour is byte-identical to a build without these features.** See
@@ -245,7 +260,7 @@ objects; its `agents` field is a list of names that reference the registry:
 
 ```json
 {
-  "agents": ["leader", "investigator", "web_agent", "skill_editor", "registries_crawler", "summariser", "curator"],
+  "agents": ["leader", "investigator", "web_agent", "skill_editor", "helper", "summariser", "curator"],
   "squads": [ ... ]
 }
 ```
@@ -317,7 +332,7 @@ returns ids only.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,
-skill_editor, registries_crawler, summariser, curator); custom agents added
+skill_editor, helper, summariser, curator); custom agents added
 by the user omit the flag. The web UI groups them under separate
 **Built-in** and **Custom** sections in the agents list.
 
@@ -372,6 +387,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   ├── softskills.tvim + .meta.json   # recall_softskills index
   │   ├── precedents.tvim + .meta.json   # recall_precedents index
   │   ├── registries.tvim + .meta.json   # search_registries index (remote skills+agents)
+  │   ├── docs.tvim + .meta.json         # search_docs index (yoke's own docs)
+  │   │                 #   + docs.files.json (per-file hash→chunk-ids)
   │   └── <repo-hash>/  #   per-repo code index: codebase.tvim + .meta.json
   │                     #   + codebase.files.json (per-file hash→chunk-ids)
   ├── softskills/       # curator-distilled procedures (read AND write)
@@ -424,6 +441,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_EMBED_API_KEY` | Embedder API key (default `YOKE_API_KEY`/provider key) |
 | `YOKE_EMBED_DIM` | Expected embedding dimension (default `1536`, or learned from the first response) |
 | `YOKE_EMBED_MODEL_REF` | Overrides `embed_model_ref` from `models.json` — selects which catalogue model is the internal embedder |
+| `YOKE_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/yoke/web/docs`, `docs`, `/usr/share/doc/yoke/docs`) |
 | `YOKE_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `YOKE_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
 | `YOKE_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |

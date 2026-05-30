@@ -42,7 +42,7 @@ The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
 Key points:
 
 - **Agents** — fleet list split into **Built-in Agents** (`leader`,
-  `skill_editor`, `registries_crawler`, `summariser`, `curator`,
+  `skill_editor`, `helper`, `summariser`, `curator`,
   `reflector`) and **Custom Agents**. Each agent's detail panel exposes
   its tool set, skill/MCP/A2A wiring, system instruction, and model
   reference.

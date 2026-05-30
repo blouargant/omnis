@@ -61,6 +61,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "themes",          file: "05-themes.md",          label: "Appearance & Themes", group: "Web UI" },
     { id: "architecture",    file: "10-architecture.md",    label: "Architecture",    group: "Core Concepts" },
     { id: "skills-concept",  file: "11-skills.md",          label: "Skills",          group: "Core Concepts" },
+    { id: "learning-recall", file: "20-learning-and-recall.md", label: "Learning & Recall", group: "Core Concepts" },
     { id: "agents-settings", file: "19-agents.md",          label: "Agents Settings",      group: "Core Concepts" },
     { id: "mcp-concept",     file: "12-mcp.md",             label: "MCP Servers",     group: "Core Concepts" },
     { id: "a2a",             file: "17-a2a.md",             label: "A2A Agents",          group: "Core Concepts" },
@@ -2659,7 +2660,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     // Separate agents into built-in and custom
     // Check the builtin flag from API, or fall back to known built-in agent names
-    const BUILTIN_AGENT_NAMES = new Set(["leader", "skill_editor", "registries_crawler", "summariser", "curator"]);
+    const BUILTIN_AGENT_NAMES = new Set(["leader", "skill_editor", "helper", "summariser", "curator"]);
     const isBuiltinByName = (a) => a.builtin === true || BUILTIN_AGENT_NAMES.has(a.name);
     const builtinAgents = d.agents.filter(isBuiltinByName);
     const customAgents = d.agents.filter(a => !isBuiltinByName(a));

@@ -52,11 +52,12 @@ https://github.com/user-attachments/assets/e6047770-878e-44ea-95f5-01ff4f2198db
 
 ---
 
-### Registries crawler — discovering skills and agents
+### Helper — answering questions and discovering skills and agents
 
-Using the dedicated **registries_crawler** squad to browse remote GitHub
-or Gitea registries for community skills and agents, then installing them
-directly from the web UI.
+Using the dedicated **Helper** squad to answer questions about yoke from its
+own documentation (quoting the source), and to browse remote GitHub or Gitea
+registries for community skills and agents, then installing them directly from
+the web UI.
 
 https://github.com/user-attachments/assets/53b9e83d-54da-4bc5-bc40-b7a99db7cc6c
 
@@ -247,6 +248,7 @@ See [docs/specialising.md](docs/specialising.md) for the full recipe.
 | [docs/architecture.md](docs/architecture.md)  | Component map, data flow, plugin lifecycle        |
 | [docs/methodology.md](docs/methodology.md)    | The Claude Code 7-step operating method           |
 | [docs/context-management.md](docs/context-management.md) | How context compression works + session decision log |
+| [docs/semantic-recall.md](docs/semantic-recall.md) | Embedder, vector indexes, and cross-session precedents |
 | [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
 | [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |

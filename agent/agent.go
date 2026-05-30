@@ -29,6 +29,7 @@ import (
 	"github.com/blouargant/yoke/internal/askuser"
 	"github.com/blouargant/yoke/internal/claudeformat"
 	"github.com/blouargant/yoke/internal/codeindex"
+	"github.com/blouargant/yoke/internal/docindex"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/regindex"
@@ -175,7 +176,7 @@ func defaultToolKeys(name string) []string {
 	}
 }
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -261,6 +262,14 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// falls back to browse_registry (additive contract).
 			if regIdx != nil {
 				agentTools = append(agentTools, regIdx.Tools()...)
+			}
+		case "docs":
+			// Documentation navigation (list_docs / read_doc / grep_docs) is
+			// always available; semantic search_docs is mounted alongside only
+			// when an embedder is configured (additive contract).
+			agentTools = append(agentTools, docindex.NewNavTools(docindex.Roots)...)
+			if docIdx != nil {
+				agentTools = append(agentTools, docIdx.Tools()...)
 			}
 		case "code_search":
 			// Mounted only when a semantic embedder is configured; otherwise
@@ -860,8 +869,8 @@ func defaultSubAgentUsageGuidance(name string) string {
 		return "Delegate focused evidence questions here; expect compact cited findings with sources, confidence, and open questions. Do not routinely send these reports to summariser unless they are oversized or poorly structured."
 	case "summariser":
 		return "Send oversized raw output, verbose reports, or user-requested briefs here; expect a lossy structured brief that preserves source anchors when present."
-	case "registries_crawler":
-		return "Delegate when you need to discover, inspect, install, or link a skill from a remote registry. Pass the topic and, when linking is needed, the target agent name."
+	case "helper":
+		return "Delegate questions about yoke itself (how a feature works, what a config field or env var does) — it answers from yoke's documentation and quotes the source. Also delegate when you need to discover, inspect, install, or link an item from a remote registry; pass the topic and, when linking is needed, the target agent name."
 	default:
 		return ""
 	}

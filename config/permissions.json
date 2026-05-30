@@ -75,7 +75,7 @@
       "reason": "internal coordination / planning tool — never blocks the agent loop"
     },
     {
-      "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|registries_crawler)\\b",
+      "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|helper)\\b",
       "reason": "sub-agent delegation — the leader always controls the outcome; no direct side-effects"
     },
     {

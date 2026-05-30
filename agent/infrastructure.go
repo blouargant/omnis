@@ -66,6 +66,11 @@ type Infrastructure struct {
 	// items (see RegistryIndex). Backed by the same embedder; rebuilt on
 	// registry config change via registries.OnSave.
 	regIndex regIndexCache
+
+	// docIndex memoises the process-wide semantic index over yoke's own
+	// documentation (see DocIndex). Backed by the same embedder; on-disk so it
+	// survives reloads, refreshed by the startup docs indexer.
+	docIndex docIndexCache
 }
 
 // BuildInfrastructure constructs the shared infrastructure for the agent.

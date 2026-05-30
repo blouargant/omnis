@@ -68,7 +68,10 @@ yoke runs a two-stage reflection pipeline followed by the curator:
    so the curator skips by default.
 
 Soft-skills show up in future sessions as additional knowledge the
-leader can `load_softskill` on demand.
+leader can `load_softskill` on demand. The session's StateLog is also
+indexed into the cross-session precedents store — see
+[Learning & Recall](20-learning-and-recall.md) for how the StateLog is
+built and recalled.
 
 Idle-harvested sessions are marked **Harvested** in the sidebar and skipped on
 re-runs until new activity occurs.

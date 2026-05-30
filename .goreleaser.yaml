@@ -67,6 +67,8 @@ archives:
     files:
       - LICENSE
       - README.md
+      - src: docs
+        dst: docs
       - src: config/*.json
         dst: config
       - src: config/filters/*.json
@@ -192,6 +194,9 @@ nfpms:
         dst: /usr/share/doc/yoke/README.md
         file_info:
           mode: 0644
+      - src: docs
+        dst: /usr/share/doc/yoke/docs
+        type: tree
 
     overrides:
       rpm:

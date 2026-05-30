@@ -1,6 +1,6 @@
 // Package registries provides remote skill and agent registry browsing,
 // installation, and per-agent linking. It is shared between the HTTP
-// server's web UI handlers and the in-agent registries_crawler tool group:
+// server's web UI handlers and the in-agent Helper tool group:
 // both surfaces use the same providers (GitHub/GitLab/Gitea), the same
 // remote_registries.json config file, and the same on-disk layout.
 package registries

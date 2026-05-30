@@ -24,6 +24,24 @@ shell before launching `make run-server` (or pass through a `.env` file).
 | `YOKE_CURATOR_MIN_TURNS`          | Minimum model-response count before non-forced curation runs. Default `3`. |
 | `YOKE_CURATOR_MIN_SUB_AGENT_CALLS`| Minimum sub-agent invocations required when no explicit decision is recorded. Default `2`. |
 
+## Embedding / semantic recall
+
+These select the internal embedding model that powers all semantic-recall
+features (precedents, soft-skill recall, code and registry search — see
+[Learning & Recall](20-learning-and-recall.md)). When none resolves, recall is
+disabled and every path falls back to glob/grep. The embedder is built once per
+process, so changes take effect on a **server restart**, not a hot-reload.
+
+| Variable                | Purpose |
+|---|---|
+| `YOKE_EMBED_MODEL_REF`  | Overrides `embed_model_ref` from `models.json` — names the catalogue model used as the internal embedder. |
+| `YOKE_EMBED_PROVIDER`   | Embedder provider. Default: `YOKE_PROVIDER`, else `openai_compat`. `anthropic` is unsupported — use Voyage/OpenAI via `openai_compat`. |
+| `YOKE_EMBED_MODEL`      | Embedding model id. Default `text-embedding-3-small`. |
+| `YOKE_EMBED_BASE_URL`   | Embeddings endpoint. Default `YOKE_BASE_URL` / `OPENAI_BASE_URL`. |
+| `YOKE_EMBED_API_KEY`    | Embedder API key. Default `YOKE_API_KEY` / provider key. |
+| `YOKE_EMBED_DIM`        | Expected embedding dimension. Default `1536`, or learned from the first response. |
+| `YOKE_DOCS_DIRS`        | Colon-separated documentation roots for the Helper's `search_docs` / `list_docs`. Replaces the auto-discovered set (`web/docs`, `/usr/share/yoke/web/docs`, `docs`, `/usr/share/doc/yoke/docs`). |
+
 ## Server
 
 | Variable                  | Purpose |

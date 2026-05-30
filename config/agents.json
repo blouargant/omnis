@@ -5,7 +5,7 @@
     "web_agent",
     "image_generator",
     "skill_editor",
-    "registries_crawler",
+    "helper",
     "summariser",
     "curator",
     "reflector"
@@ -21,26 +21,25 @@
         "investigator",
         "web_agent",
         "summariser",
-        "image_generator"
+        "image_generator",
+        "helper"
       ]
     },
     {
       "name": "Skill Editor",
-      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the registries crawler for sourcing existing skills.",
+      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the Helper for sourcing existing skills and answering questions about yoke.",
       "leader": "skill_editor",
       "members": [
         "web_agent",
         "skill_editor",
-        "registries_crawler"
+        "helper"
       ]
     },
     {
-      "name": "Registries Crawler",
-      "description": "Focused on crawling remote registries to find, inspect, and install skills on demand. The registries crawler is the sole member and leader of this squad.",
-      "leader": "leader",
-      "members": [
-        "registries_crawler"
-      ]
+      "name": "Helper",
+      "description": "Focused on answering questions about yoke from its documentation and crawling remote registries to find, inspect, and install items on demand. The Helper is the sole member and leader of this squad.",
+      "leader": "helper",
+      "members": []
     }
   ],
   "token_optimization": true

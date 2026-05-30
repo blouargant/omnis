@@ -171,6 +171,11 @@ func run() error {
 		Bus:      infra.Bus,
 	})
 
+	// Build/refresh the documentation semantic index in the background at
+	// startup (no-op when nothing changed). Lets the Helper answer questions
+	// about yoke grounded in its own docs.
+	startDocsIndexer(rootCtx, infra, firstInst.Settings)
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox)

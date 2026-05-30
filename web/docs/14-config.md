@@ -35,7 +35,7 @@ Each agent's definition lives in its own directory under
 holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
-yoke (`leader`, `skill_editor`, `registries_crawler`, `summariser`,
+yoke (`leader`, `skill_editor`, `helper`, `summariser`,
 `curator`, `reflector`); the Web UI displays them under a **Built-in
 Agents** section, separate from user-added **Custom Agents**.
 
@@ -89,6 +89,12 @@ $HOME/.yoke/
 ├── mailboxes/           # JSONL inter-agent mailboxes
 ├── softskills/          # curator-distilled procedures (read AND write)
 │   └── _stats.json      # per-skill load/helpful/harmful/neutral counters
+├── index/               # semantic-recall vector indexes (see 20-learning-and-recall.md)
+│   ├── embed_cache/     #   content-hash embedding cache
+│   ├── precedents.tvim  #   cross-session goals + decisions (+ .meta.json sidecar)
+│   ├── softskills.tvim  #   recall_softskills index (+ .meta.json)
+│   ├── registries.tvim  #   search_registries index (+ .meta.json)
+│   └── <repo-hash>/     #   per-repo code index
 └── registry/
     ├── skills/          # web UI installed skills (override: YOKE_SKILLS_REGISTRY_DIR)
     └── agents/          # web UI installed agents (override: YOKE_AGENTS_REGISTRY_DIR)

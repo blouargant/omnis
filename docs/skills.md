@@ -134,6 +134,11 @@ appends a short SKILL.md plus an INDEX.md entry.
 | Mutated by lead     | No                               | No (write/delete tools mounted on curator only) |
 | Permissions         | n/a                              | `softskills/` writes denied to lead in `permissions.json` |
 
+When an embedding model is configured, the leader also gets a semantic
+`recall_softskills` tool beside the glob `list_softskills`, and finished
+sessions are indexed into a cross-session **precedent** store the reflector and
+curator can recall — see [semantic-recall.md](semantic-recall.md).
+
 ### Lifecycle
 
 1. The lead works through the user's request as usual; `compress`

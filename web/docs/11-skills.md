@@ -75,7 +75,9 @@ Both are markdown playbooks. The difference is provenance:
   `list_softskills` / `load_softskill` tools.
 
 Soft-skills make the agent better at recurring tasks over time without
-human authoring.
+human authoring. They are also recalled semantically — see
+[Learning & Recall](20-learning-and-recall.md) for the StateLog, the
+cross-session precedents index, and the embedder that powers recall.
 
 ## Post-session reflection
 

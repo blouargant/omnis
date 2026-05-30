@@ -172,10 +172,11 @@ func buildSquadInstance(
 
 	codeIdx := infra.CodeIndex(ctx, runtime)
 	regIdx := infra.RegistryIndex(ctx, runtime)
+	docIdx := infra.DocIndex(ctx, runtime)
 	subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, err := buildSubAgentsFromConfigs(
 		ctx, memberCfgs, runtime,
 		skillTS, softSkillTS, leaderHandles, infra.MCPPool,
-		modelForAgent, subAgentCallbacks, codeIdx, regIdx,
+		modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx,
 	)
 	if err != nil {
 		for _, h := range allMCPHandles {

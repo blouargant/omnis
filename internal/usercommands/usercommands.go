@@ -1,7 +1,7 @@
 // Package usercommands owns the on-disk format, validation, and persistence
 // of user-defined slash commands (the per-user user_commands.json file). It is
 // shared between the HTTP server's web-UI routes and the agent-side
-// registries_crawler command install, so both surfaces agree on the schema,
+// Helper command install, so both surfaces agree on the schema,
 // the name rules, and the set of reserved built-in command names.
 package usercommands
 

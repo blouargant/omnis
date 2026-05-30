@@ -1,6 +1,6 @@
 // Package regindex builds and queries a semantic index over every item
 // advertised by the configured remote registries — skills, agents, MCP servers,
-// squads, A2A agents, and slash commands — so the registries_crawler can find a
+// squads, A2A agents, and slash commands — so the Helper agent can find a
 // relevant item by meaning ("a skill about flaky tests") instead of paging
 // through browse_registry listings.
 //

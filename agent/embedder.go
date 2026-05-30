@@ -10,6 +10,7 @@ import (
 
 	"github.com/blouargant/yoke/core/embed"
 	"github.com/blouargant/yoke/internal/codeindex"
+	"github.com/blouargant/yoke/internal/docindex"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/precedents"
 	"github.com/blouargant/yoke/internal/regindex"
@@ -188,4 +189,33 @@ func (i *Infrastructure) RegistryIndex(ctx context.Context, runtime RuntimeSetti
 		i.regIndex.index = idx
 	})
 	return i.regIndex.index
+}
+
+// docIndexCache memoises the process-wide documentation semantic index.
+type docIndexCache struct {
+	once  sync.Once
+	index *docindex.Index
+}
+
+// DocIndex lazily opens and caches the semantic index over yoke's own
+// documentation, backed by the process-wide embedder. Returns nil when no
+// embedder is configured, so callers skip mounting search_docs and the Helper
+// falls back to list_docs / read_doc / grep_docs.
+func (i *Infrastructure) DocIndex(ctx context.Context, runtime RuntimeSettings) *docindex.Index {
+	if i == nil {
+		return nil
+	}
+	emb := i.Embedder(ctx, runtime)
+	if emb == nil {
+		return nil
+	}
+	i.docIndex.once.Do(func() {
+		idx, err := docindex.Open(emb)
+		if err != nil {
+			log.Printf("docindex: index unavailable: %v", err)
+			return
+		}
+		i.docIndex.index = idx
+	})
+	return i.docIndex.index
 }

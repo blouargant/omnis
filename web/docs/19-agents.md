@@ -19,8 +19,10 @@ A split view: fleet list on the left, agent detail panel on the right.
 Agents are grouped into two sections:
 
 - **BUILT-IN AGENTS** — shipped with yoke: `leader`, `skill_editor`,
-  `registries_crawler`, `summariser`, `curator`, `reflector`. Fields are
-  read-only where the binary bakes in defaults.
+  `helper`, `summariser`, `curator`, `reflector`. Fields are
+  read-only where the binary bakes in defaults. The **`helper`** answers
+  questions about yoke from its bundled documentation (quoting the source via
+  `search_docs`) and browses/installs remote registry items.
 - **CUSTOM AGENTS** — user-added. All fields are editable; the agent can be
   removed or reordered.
 

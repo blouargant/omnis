@@ -153,7 +153,7 @@ new agent, no session will see it — that's how you keep an agent
 reserved for a specific squad.
 
 Built-in vs custom: the agents shipped with yoke (`leader`,
-`skill_editor`, `registries_crawler`, `summariser`, `curator`,
+`skill_editor`, `helper`, `summariser`, `curator`,
 `reflector`) carry `"builtin": true` in their `agent.json`. The web UI
 displays them under a **Built-in Agents** section, separated from
 user-added **Custom Agents**. Leave the flag out for your own agents.
