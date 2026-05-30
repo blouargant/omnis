@@ -612,6 +612,13 @@ body.resizing #sidebar-resize { transition: none; }
   min-height: 0;
   overflow-y: auto;
   padding: 16px 0 24px;
+  /* Reserve the scrollbar gutter on BOTH edges so the message column stays
+   * centred within the full chat width — matching the floating #prompt-header
+   * (which sits outside the scroll container and has no scrollbar). Without
+   * this the in-transcript column is offset by half the scrollbar width, so
+   * the pinned prompt and the inline bubble don't line up. Also prevents a
+   * sideways shift when the scrollbar appears/disappears. */
+  scrollbar-gutter: stable both-edges;
 }
 
 /* ─── Message rows ─────────────────────────────────────────── */
@@ -1103,7 +1110,7 @@ body.resizing #sidebar-resize { transition: none; }
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   height: var(--composer-h, auto);
 }
 
@@ -1112,15 +1119,29 @@ body.resizing #sidebar-resize { transition: none; }
 #composer-wrap.archived-readonly #prompt { cursor: not-allowed; }
 
 #composer-resize {
+  position: absolute;
+  /* Straddle the editor's top edge so the grab line sits ON the top of the
+   * editor rather than a few px below it. */
+  top: -5px;
+  left: 0;
+  right: 0;
+  /* Match the centred editor column so the line spans only the editor width
+   * (background-clip: content-box keeps the line inside the 20px padding). */
+  max-width: var(--col-w);
+  margin: 0 auto;
+  padding: 0 20px;
+  box-sizing: border-box;
   height: 10px;
-  flex-shrink: 0;
+  z-index: 1;
   cursor: ns-resize;
-  background: linear-gradient(to bottom, transparent 40%, var(--border) 40%, var(--border) 60%, transparent 60%);
+  background: transparent;
+  background-clip: content-box;
   transition: background 0.15s;
 }
 #composer-resize:hover,
 #composer-resize.is-dragging {
   background: linear-gradient(to bottom, transparent 40%, var(--accent-strong) 40%, var(--accent-strong) 60%, transparent 60%);
+  background-clip: content-box;
 }
 body.resizing-composer { cursor: ns-resize; }
 body.resizing-composer #composer-resize { transition: none; }

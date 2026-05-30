@@ -900,19 +900,42 @@ function pinnedPromptLabel(text) {
   return s.length > 1000 ? s.slice(0, 1000) + "…" : s;
 }
 
+// Apply a header mutation while keeping the transcript content visually
+// stationary. The floating header is a flex sibling of #transcript, so
+// showing/hiding/resizing it steals (or returns) height from the transcript
+// — which would otherwise shove every visible line up or down by the header's
+// height. That shove is the "jump" users see when the pinned prompt kicks in
+// mid-scroll. We measure the height the mutation costs the transcript and
+// counter-scroll by the same amount, so the content stays put and the header
+// simply appears in the constant gap above it. (This also keeps the activeBubble
+// decision in updatePinnedForScroll stable, avoiding a show/hide flicker.)
+function withStableScroll(mutate) {
+  const before = els.transcript.clientHeight;
+  mutate();
+  const delta = before - els.transcript.clientHeight; // >0 when header grew
+  if (delta) els.transcript.scrollTop += delta;
+}
+
 // Show the user prompt text in the floating header above the transcript.
 // Attachments are intentionally NOT rendered here — they live in the inline
 // user bubble so the floating header stays compact.
 function setPinnedPrompt(text, _files) {
-  els.promptHeader.innerHTML = "";
   const label = pinnedPromptLabel(text);
-  if (label) {
-    const textEl = document.createElement("span");
-    textEl.className = "pinned-prompt-text";
-    textEl.textContent = label;
-    els.promptHeader.appendChild(textEl);
-  }
-  els.promptHeader.classList.add("visible");
+  // Called on every scroll tick — skip the rebuild (and the forced reflow it
+  // would cost) when the visible header already shows this prompt.
+  if (els.promptHeader.classList.contains("visible") &&
+      els.promptHeader._pinnedLabel === label) return;
+  withStableScroll(() => {
+    els.promptHeader.innerHTML = "";
+    if (label) {
+      const textEl = document.createElement("span");
+      textEl.className = "pinned-prompt-text";
+      textEl.textContent = label;
+      els.promptHeader.appendChild(textEl);
+    }
+    els.promptHeader._pinnedLabel = label;
+    els.promptHeader.classList.add("visible");
+  });
 }
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
@@ -1052,8 +1075,13 @@ function updatePinnedForScroll() {
 }
 
 function clearPinnedPrompt() {
-  els.promptHeader.innerHTML = "";
-  els.promptHeader.classList.remove("visible");
+  if (!els.promptHeader.classList.contains("visible") &&
+      els.promptHeader.innerHTML === "") return;
+  withStableScroll(() => {
+    els.promptHeader.innerHTML = "";
+    els.promptHeader._pinnedLabel = "";
+    els.promptHeader.classList.remove("visible");
+  });
 }
 
 // ─── DOM builders ───────────────────────────────────────────────────────────
