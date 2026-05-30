@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,39 @@ func TestOpenAIRetriesLiteLLMAnthropicOverload(t *testing.T) {
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("calls = %d, want 2", got)
+	}
+}
+
+func TestDisableStreamingForcesNonStreaming(t *testing.T) {
+	// Selection.DisableStreaming must make the adapter ignore stream=true.
+	llm := withStreamPref(NewOpenAI("test-model", "test-key", "http://x"), true)
+	o, ok := llm.(*openAI)
+	if !ok || !o.forceNonStreaming {
+		t.Fatalf("withStreamPref did not set forceNonStreaming: %+v", llm)
+	}
+
+	var gotStream atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"stream":true`) {
+			gotStream.Store(true)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	o2 := NewOpenAI("test-model", "test-key", server.URL).(*openAI)
+	o2.forceNonStreaming = true
+	// Call with stream=true; the adapter must downgrade to non-streaming.
+	resp, err := firstResponse(o2.GenerateContent(context.Background(), basicRequest(), true))
+	if err != nil {
+		t.Fatalf("GenerateContent() error = %v", err)
+	}
+	if responseText(resp) != "ok" {
+		t.Fatalf("response text = %q, want ok", responseText(resp))
+	}
+	if gotStream.Load() {
+		t.Fatalf("request was sent with stream:true despite forceNonStreaming")
 	}
 }
 

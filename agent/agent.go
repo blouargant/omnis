@@ -132,10 +132,11 @@ type Options struct {
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {
 	return llm.Selection{
-		Provider: cfg.Provider,
-		Model:    cfg.Model,
-		BaseURL:  cfg.BaseURL,
-		APIKey:   cfg.APIKey,
+		Provider:         cfg.Provider,
+		Model:            cfg.Model,
+		BaseURL:          cfg.BaseURL,
+		APIKey:           cfg.APIKey,
+		DisableStreaming: cfg.DisableStreaming,
 	}
 }
 

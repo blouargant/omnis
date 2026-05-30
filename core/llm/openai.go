@@ -33,6 +33,13 @@ type openAI struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
+	// forceNonStreaming makes GenerateContent ignore a caller's stream=true
+	// and use the non-streaming endpoint instead. Set per-model via
+	// models.json `disable_streaming` for backends whose streaming output
+	// misbehaves (e.g. some quantised models behind vLLM/LiteLLM that run away
+	// only when streamed). The non-streaming response is delivered as one
+	// final turn, which the web UI renders fine (just not token-by-token).
+	forceNonStreaming bool
 }
 
 // NewOpenAI returns an LLM. baseURL may be empty for the official endpoint.
@@ -310,20 +317,15 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 			r.Stop = req.Config.StopSequences
 		}
 	}
-	// Always cap output: an uncapped OpenAI-compat request lets a model that
-	// never emits a stop token run away (observed: 20k+ tokens / minutes on a
-	// 4-bit quant), freezing the turn "mid sentence". Mirrors the Anthropic
-	// adapter, which has always sent a default max_tokens.
-	if r.MaxTokens == nil {
-		n := defaultMaxOutputTokens()
-		r.MaxTokens = &n
-	}
 	return r
 }
 
 // ── ADK entry point ──────────────────────────────────────────────────────
 
 func (o *openAI) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	if o.forceNonStreaming {
+		stream = false
+	}
 	return func(yield func(*model.LLMResponse, error) bool) {
 		body, err := json.Marshal(o.buildRequest(req, stream))
 		if err != nil {

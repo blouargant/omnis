@@ -1866,6 +1866,34 @@ const BASE_PATH = window.BASE_PATH || "";
       fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
       fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
 
+      // DISABLE STREAMING flag — forces agents using this model onto the
+      // non-streaming endpoint even when the surface (web UI) requests SSE.
+      // Use it for backends whose streamed output misbehaves (e.g. a quantised
+      // model behind vLLM/LiteLLM that runs away only when streamed). Same pill
+      // switch as the EMBEDDING toggle; the explanation is a tooltip.
+      const streamF = document.createElement("div");
+      streamF.className = "model-field";
+      streamF.title = "call the non-streaming endpoint for this model";
+      const streamLbl = document.createElement("label");
+      streamLbl.className = "model-field-label";
+      streamLbl.textContent = "DISABLE STREAMING";
+      const streamSwitch = document.createElement("label");
+      streamSwitch.className = "agent-toggle-switch";
+      streamSwitch.title = "call the non-streaming endpoint for this model";
+      const streamCb = document.createElement("input");
+      streamCb.type = "checkbox";
+      streamCb.className = "agent-toggle-input";
+      streamCb.checked = !!m.disable_streaming;
+      streamCb.addEventListener("change", () => {
+        if (streamCb.checked) m.disable_streaming = true; else delete m.disable_streaming;
+        onChange();
+      });
+      const streamSlider = document.createElement("span");
+      streamSlider.className = "agent-toggle-slider";
+      streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
+      streamF.appendChild(streamLbl); streamF.appendChild(streamSwitch);
+      fg.appendChild(streamF);
+
       // EMBEDDING flag — marks this entry as an embeddings model so it appears
       // in the "internal embedding model" selector above. Uses the same pill
       // switch as the agent "Active State" toggle; the explanatory text is a

@@ -4,33 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const maxGenerateAttempts = 3
-
-// fallbackMaxOutputTokens caps a single generation's output when neither the
-// request config nor YOKE_LLM_MAX_OUTPUT_TOKENS specifies a limit. Without a
-// cap an OpenAI-compatible endpoint streams unbounded, so a model that fails
-// to emit a stop token (common with heavily-quantised weights) can run away —
-// e.g. 20k+ tokens over minutes — which presents in the UI as a turn frozen
-// "mid sentence". Matches the Anthropic adapter's long-standing default.
-const fallbackMaxOutputTokens int32 = 4096
-
-// defaultMaxOutputTokens returns the output-token cap to apply when the request
-// config does not set one. Override the 4096 default via
-// YOKE_LLM_MAX_OUTPUT_TOKENS (a positive integer).
-func defaultMaxOutputTokens() int32 {
-	if v := strings.TrimSpace(os.Getenv("YOKE_LLM_MAX_OUTPUT_TOKENS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return int32(n)
-		}
-	}
-	return fallbackMaxOutputTokens
-}
 
 var generateRetryBaseDelay = 750 * time.Millisecond
 

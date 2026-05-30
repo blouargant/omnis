@@ -215,7 +215,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | File | Purpose |
 |---|---|
 | `agents.json` | List of enabled agent names, squad composition, global paths |
-| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall |
+| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
@@ -403,7 +403,6 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 | `YOKE_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `30s`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
-| `YOKE_LLM_MAX_OUTPUT_TOKENS` | Output-token cap applied to every LLM call when the request config sets none (positive int, default `4096`). Without it the OpenAI/compat path is unbounded, so a model that fails to emit a stop token (common with heavily-quantised weights) can run away — 20k+ tokens over minutes — presenting as a turn frozen "mid sentence". Both adapters honor it ([core/llm/retry.go](core/llm/retry.go) `defaultMaxOutputTokens`). |
 
 ### Permission prompts (ask_user) and grant scopes
 

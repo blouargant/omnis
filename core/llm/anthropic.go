@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	defaultAnthropicBase   = "https://api.anthropic.com/v1"
-	anthropicVersionHeader = "2023-06-01"
+	defaultAnthropicBase    = "https://api.anthropic.com/v1"
+	anthropicVersionHeader  = "2023-06-01"
+	anthropicDefaultMaxToks = 4096
 )
 
 type anthropic struct {
@@ -31,6 +32,10 @@ type anthropic struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
+	// forceNonStreaming makes GenerateContent ignore a caller's stream=true.
+	// See openAI.forceNonStreaming; set per-model via models.json
+	// `disable_streaming`.
+	forceNonStreaming bool
 }
 
 // NewAnthropic returns an LLM. baseURL may be empty for the official endpoint.
@@ -217,7 +222,7 @@ func (a *anthropic) buildRequest(req *model.LLMRequest, stream bool) antRequest 
 		Model:     firstNonEmpty(req.Model, a.model),
 		Messages:  a.toMessages(req),
 		Tools:     a.toTools(req),
-		MaxTokens: defaultMaxOutputTokens(),
+		MaxTokens: anthropicDefaultMaxToks,
 		Stream:    stream,
 	}
 	if req.Config != nil {
@@ -239,6 +244,9 @@ func (a *anthropic) buildRequest(req *model.LLMRequest, stream bool) antRequest 
 // ── ADK entry point ──────────────────────────────────────────────────────
 
 func (a *anthropic) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	if a.forceNonStreaming {
+		stream = false
+	}
 	return func(yield func(*model.LLMResponse, error) bool) {
 		body, err := json.Marshal(a.buildRequest(req, stream))
 		if err != nil {

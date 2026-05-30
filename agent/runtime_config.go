@@ -86,6 +86,12 @@ type ModelEntry struct {
 	// text-embedding-3-small, 768 for nomic-embed-text). Ignored for chat
 	// models. Zero means "learn from the first response".
 	Dim int `json:"dim,omitempty"`
+	// DisableStreaming forces agents using this model to call the
+	// non-streaming endpoint even when the surface (web UI) requests SSE.
+	// Set it for backends whose streamed output misbehaves (e.g. a quantised
+	// model behind vLLM/LiteLLM that runs away only when streamed); the
+	// non-streaming path delivers the full reply in one turn.
+	DisableStreaming bool `json:"disable_streaming,omitempty"`
 }
 
 // modelsConfigFile is the on-disk shape of models.json.
@@ -143,6 +149,7 @@ type RuntimeModelConfig struct {
 	CacheCreationTokenPricePerMillion float64
 	Embedding                         bool
 	Dim                               int
+	DisableStreaming                  bool
 }
 
 // RuntimeAgentConfig is one fully-resolved agent configuration entry.
@@ -158,6 +165,7 @@ type RuntimeAgentConfig struct {
 	OutputTokenPricePerMillion        float64
 	CachedInputTokenPricePerMillion   float64
 	CacheCreationTokenPricePerMillion float64
+	DisableStreaming                  bool
 	Description                       string
 	Instruction                       string
 	Enabled                           bool
@@ -386,6 +394,7 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 			CacheCreationTokenPricePerMillion: m.CacheCreationTokenPricePerMillion,
 			Embedding:                         m.Embedding,
 			Dim:                               m.Dim,
+			DisableStreaming:                  m.DisableStreaming,
 		}
 	}
 	return out, nil
@@ -443,6 +452,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			OutputTokenPricePerMillion:        refModel.OutputTokenPricePerMillion,
 			CachedInputTokenPricePerMillion:   refModel.CachedInputTokenPricePerMillion,
 			CacheCreationTokenPricePerMillion: refModel.CacheCreationTokenPricePerMillion,
+			DisableStreaming:                  refModel.DisableStreaming,
 			Description:                       strings.TrimSpace(e.Description),
 			Instruction:                       strings.TrimSpace(e.Instruction),
 			Enabled:                           enabled,
@@ -549,6 +559,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		OutputTokenPricePerMillion:        in.OutputTokenPricePerMillion,
 		CachedInputTokenPricePerMillion:   in.CachedInputTokenPricePerMillion,
 		CacheCreationTokenPricePerMillion: in.CacheCreationTokenPricePerMillion,
+		DisableStreaming:                  in.DisableStreaming,
 		Description:                       strings.TrimSpace(in.Description),
 		Instruction:                       strings.TrimSpace(in.Instruction),
 		Enabled:                           in.Enabled,

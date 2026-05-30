@@ -46,6 +46,11 @@ type Selection struct {
 	Model    string
 	BaseURL  string
 	APIKey   string
+	// DisableStreaming forces the adapter to use the non-streaming endpoint
+	// even when the runner requests SSE streaming. Set per-model via
+	// models.json `disable_streaming` for backends whose streamed output
+	// misbehaves. No effect on the gemini provider.
+	DisableStreaming bool
 }
 
 // New returns an ADK LLM selected by YOKE_PROVIDER.
@@ -105,23 +110,38 @@ func NewWithSelection(ctx context.Context, sel Selection) (model.LLM, error) {
 		if apiKey == "" {
 			return nil, fmt.Errorf("llm: anthropic requires ANTHROPIC_API_KEY")
 		}
-		return NewAnthropic(modelName, apiKey, baseURL), nil
+		return withStreamPref(NewAnthropic(modelName, apiKey, baseURL), sel.DisableStreaming), nil
 
 	case "openai":
 		if apiKey == "" {
 			return nil, fmt.Errorf("llm: openai requires OPENAI_API_KEY")
 		}
-		return NewOpenAI(modelName, apiKey, baseURL), nil
+		return withStreamPref(NewOpenAI(modelName, apiKey, baseURL), sel.DisableStreaming), nil
 
 	case "openai_compat":
 		if baseURL == "" {
 			return nil, fmt.Errorf("llm: openai_compat requires OPENAI_BASE_URL")
 		}
-		return NewOpenAI(modelName, apiKey, baseURL), nil
+		return withStreamPref(NewOpenAI(modelName, apiKey, baseURL), sel.DisableStreaming), nil
 
 	default:
 		return nil, fmt.Errorf("llm: unknown provider %q (want gemini|anthropic|openai|openai_compat)", provider)
 	}
+}
+
+// withStreamPref flips the per-model non-streaming flag on the concrete
+// adapter when disable is set. Unknown adapter types (e.g. gemini) pass
+// through unchanged.
+func withStreamPref(m model.LLM, disable bool) model.LLM {
+	if disable {
+		switch v := m.(type) {
+		case *openAI:
+			v.forceNonStreaming = true
+		case *anthropic:
+			v.forceNonStreaming = true
+		}
+	}
+	return m
 }
 
 func resolveProviderModel(provider, modelName string) (string, string, error) {
