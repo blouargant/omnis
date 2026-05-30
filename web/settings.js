@@ -1941,8 +1941,15 @@ const BASE_PATH = window.BASE_PATH || "";
       provF.appendChild(provLbl); provF.appendChild(provSel);
       fg.appendChild(provF);
 
-      // MODEL (combobox, sourced via provider_ref)
-      const combo = modelComboField(m, onChange, name => d.providers[name]);
+      // MODEL (combobox, sourced via provider_ref). On selection we re-render
+      // the whole card grid (and the embed selector) so prefilled metadata —
+      // context length, prices, dim, embedding flag — becomes visible.
+      const rerender = () => {
+        renderModelCards(d, el);
+        const row = el.parentElement && el.parentElement.querySelector("#embed-select-row");
+        if (row) renderEmbedSelector(d, row);
+      };
+      const combo = modelComboField(m, onChange, name => d.providers[name], rerender);
       combo.className = "model-field model-field-combo";
       const comboSpan = combo.querySelector("span");
       if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
@@ -2146,7 +2153,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // name; when set, the fetch uses provider_ref so credentials stay on the
   // server. Otherwise it falls back to the legacy inline (provider/api_key/
   // base_url) shape on the model itself.
-  function modelComboField(m, onChange, resolveProvider) {
+  function modelComboField(m, onChange, resolveProvider, onPrefill) {
     const row = document.createElement("div");
     row.className = "form-row form-row-combo";
 
@@ -2199,11 +2206,21 @@ const BASE_PATH = window.BASE_PATH || "";
           e.preventDefault(); // keep input focus
           input.value = mdl.id;
           m.model = mdl.id;
+          // Prefill any metadata the provider exposed (LiteLLM /model/info),
+          // without clobbering values the user already set.
           if (mdl.context_length && !m.context_length) m.context_length = mdl.context_length;
           if (mdl.input_token_price_per_million && !m.input_token_price_per_million) m.input_token_price_per_million = mdl.input_token_price_per_million;
+          if (mdl.cached_input_token_price_per_million && !m.cached_input_token_price_per_million) m.cached_input_token_price_per_million = mdl.cached_input_token_price_per_million;
           if (mdl.output_token_price_per_million && !m.output_token_price_per_million) m.output_token_price_per_million = mdl.output_token_price_per_million;
+          if (mdl.dim && !m.dim) m.dim = mdl.dim;
+          // An embedding-mode model selected here is, by definition, an embedder.
+          if (mdl.embedding) m.embedding = true;
           onChange();
           panel.hidden = true;
+          // Re-render so the prefilled fields (which are static inputs built at
+          // render time) reflect the new values; falls back to no-op when the
+          // caller didn't supply a re-render hook.
+          if (typeof onPrefill === "function") onPrefill();
         });
         list.appendChild(li);
       }

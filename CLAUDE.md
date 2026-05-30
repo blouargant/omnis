@@ -286,12 +286,21 @@ server helper routes back this (both resolve credentials via `provider_ref` —
 no secrets cross the wire — or explicit `provider`/`api_key`/`base_url`
 overrides; see [server/provider_models.go](server/provider_models.go)):
 `GET /api/providers/models` lists the provider's models (the model combobox's
-⟳ button; clicking a result also prefills `context_length`/prices when the
-upstream returns them), and `GET /api/providers/embedding-dim?model=…` probes
-the embeddings endpoint with one tiny request and returns the vector length,
-filling the DIM field via the ⟳ button beside it ([web/settings.js](web/settings.js)
-`dimField`). Dimension detection requires both a provider and a model id and
-reports the model's native dimension.
+⟳ button) and `GET /api/providers/embedding-dim?model=…` probes the embeddings
+endpoint with one tiny request and returns the vector length, filling the DIM
+field via the ⟳ button beside it ([web/settings.js](web/settings.js) `dimField`).
+Dimension detection requires both a provider and a model id and reports the
+model's native dimension.
+
+The model list is metadata-aware for **LiteLLM** proxies (ChapsVision's gateways
+are LiteLLM): `fetchOpenAIStyleModels` first tries `GET {base}/v1/model/info`
+and, when present, maps each model's `model_info` — `max_input_tokens` →
+`context_length`, `input/output/cache_read cost_per_token` → the per-million
+prices, `output_vector_size` → `dim`, and `mode == "embedding"` → the embedding
+flag. Selecting such a model in the combobox prefills all of these (without
+overwriting fields the user already set) and re-renders the card. Plain OpenAI /
+Ollama / vLLM endpoints (no `/model/info`) fall back to `GET /v1/models`, which
+returns ids only.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -16,16 +17,20 @@ import (
 )
 
 // providerModelInfo is a single model entry returned to the browser.
-// Pricing / context fields are optional and forwarded only when the upstream
-// provider exposes them. Today no supported provider returns these via the
-// list-models endpoint, but the shape is fixed so the UI can prefill on the
-// day they do (or when a future provider adapter inlines a static price book).
+// Pricing / context / dim / mode fields are optional and forwarded only when
+// the upstream provider exposes them (e.g. a LiteLLM proxy via /v1/model/info).
+// Plain OpenAI-style /v1/models endpoints return ids only, in which case just
+// ID is set and the UI leaves the other fields for the user to fill.
 type providerModelInfo struct {
-	ID                         string  `json:"id"`
-	DisplayName                string  `json:"display_name,omitempty"`
-	ContextLength              int     `json:"context_length,omitempty"`
-	InputTokenPricePerMillion  float64 `json:"input_token_price_per_million,omitempty"`
-	OutputTokenPricePerMillion float64 `json:"output_token_price_per_million,omitempty"`
+	ID                              string  `json:"id"`
+	DisplayName                     string  `json:"display_name,omitempty"`
+	ContextLength                   int     `json:"context_length,omitempty"`
+	InputTokenPricePerMillion       float64 `json:"input_token_price_per_million,omitempty"`
+	CachedInputTokenPricePerMillion float64 `json:"cached_input_token_price_per_million,omitempty"`
+	OutputTokenPricePerMillion      float64 `json:"output_token_price_per_million,omitempty"`
+	Dim                             int     `json:"dim,omitempty"`
+	Mode                            string  `json:"mode,omitempty"`
+	Embedding                       bool    `json:"embedding,omitempty"`
 }
 
 // registerProviderModelsRoute mounts GET /providers/models on the given router group.
@@ -199,9 +204,19 @@ func fetchAnthropicModels(ctx context.Context, apiKey string) ([]providerModelIn
 	return out, nil
 }
 
-// fetchOpenAIStyleModels calls GET {baseURL}/v1/models (OpenAI and compatible endpoints).
-// Response: { "data": [ { "id": "gpt-4o", ... }, ... ] }
+// fetchOpenAIStyleModels lists models from an OpenAI-compatible endpoint.
+//
+// LiteLLM proxies (the shape behind ChapsVision's gateways) additionally expose
+// GET /v1/model/info with per-model metadata — context window, per-token
+// pricing, cache pricing, embedding vector size, and mode (chat/embedding). When
+// that endpoint answers we use it so the Models editor can prefill those fields
+// on selection. For plain OpenAI / Ollama / vLLM endpoints (no /model/info) we
+// fall back to GET /v1/models, which returns ids only.
 func fetchOpenAIStyleModels(ctx context.Context, apiKey, baseURL string) ([]providerModelInfo, error) {
+	if infos, err := fetchLiteLLMModelInfo(ctx, apiKey, baseURL); err == nil && len(infos) > 0 {
+		return infos, nil
+	}
+
 	baseURL = strings.TrimRight(baseURL, "/")
 	// Support base URLs that already include /v1.
 	url := baseURL + "/models"
@@ -240,6 +255,98 @@ func fetchOpenAIStyleModels(ctx context.Context, apiKey, baseURL string) ([]prov
 		out[i] = providerModelInfo{ID: m.ID}
 	}
 	return out, nil
+}
+
+// fetchLiteLLMModelInfo queries a LiteLLM proxy's GET /v1/model/info endpoint
+// and maps each entry to a providerModelInfo with whatever metadata the proxy
+// records. Returns an error (so the caller falls back to /v1/models) when the
+// endpoint is absent, unauthorised, or not LiteLLM-shaped. Per-token costs are
+// converted to the per-million units the editor stores; null/zero fields are
+// left unset so the UI only prefills what the proxy actually knows.
+func fetchLiteLLMModelInfo(ctx context.Context, apiKey, baseURL string) ([]providerModelInfo, error) {
+	root := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	root = strings.TrimSuffix(root, "/v1")
+	url := root + "/v1/model/info"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("model/info returned %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data []struct {
+			ModelName string `json:"model_name"`
+			ModelInfo struct {
+				Mode                    string  `json:"mode"`
+				MaxInputTokens          float64 `json:"max_input_tokens"`
+				MaxTokens               float64 `json:"max_tokens"`
+				InputCostPerToken       float64 `json:"input_cost_per_token"`
+				OutputCostPerToken      float64 `json:"output_cost_per_token"`
+				CacheReadInputTokenCost float64 `json:"cache_read_input_token_cost"`
+				OutputVectorSize        float64 `json:"output_vector_size"`
+			} `json:"model_info"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse model/info: %w", err)
+	}
+
+	// A LiteLLM proxy can list several deployments under one public alias;
+	// the editor only needs one row per model id, so dedup by model_name.
+	seen := make(map[string]struct{}, len(result.Data))
+	out := make([]providerModelInfo, 0, len(result.Data))
+	for _, m := range result.Data {
+		if m.ModelName == "" {
+			continue
+		}
+		if _, dup := seen[m.ModelName]; dup {
+			continue
+		}
+		seen[m.ModelName] = struct{}{}
+
+		mi := m.ModelInfo
+		ctxLen := mi.MaxInputTokens
+		if ctxLen == 0 {
+			ctxLen = mi.MaxTokens
+		}
+		out = append(out, providerModelInfo{
+			ID:                              m.ModelName,
+			ContextLength:                   int(ctxLen),
+			InputTokenPricePerMillion:       perMillion(mi.InputCostPerToken),
+			CachedInputTokenPricePerMillion: perMillion(mi.CacheReadInputTokenCost),
+			OutputTokenPricePerMillion:      perMillion(mi.OutputCostPerToken),
+			Dim:                             int(mi.OutputVectorSize),
+			Mode:                            mi.Mode,
+			Embedding:                       mi.Mode == "embedding",
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("model/info returned no models")
+	}
+	return out, nil
+}
+
+// perMillion converts a LiteLLM per-token cost to a per-million-token price,
+// rounded to 4 decimals to shed the float noise LiteLLM stores (e.g.
+// 5.249999958e-06 → 5.25). Zero stays zero so the UI leaves the field blank.
+func perMillion(costPerToken float64) float64 {
+	if costPerToken <= 0 {
+		return 0
+	}
+	return math.Round(costPerToken*1e6*1e4) / 1e4
 }
 
 // fetchGeminiModels calls the Generative Language API to list available models.
