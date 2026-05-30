@@ -161,7 +161,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all four recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
-| `internal/regindex/` | Semantic index over **remote registry** items (skills + agents) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
+| `internal/regindex/` | Semantic index over **remote registry** items of **all six kinds** (skills, agents, mcp, a2a, squads, commands) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
@@ -188,10 +188,15 @@ BitWidth 4 + UnitNorm cosine):
    semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
    `git ls-files`-aware, content-hash incremental.
 4. **`search_registries` / `reindex_registries`** (registries_crawler) —
-   semantic search over the skills + agents advertised by the configured remote
-   registries ([internal/regindex/](internal/regindex/)). Mounted alongside the
+   semantic search over **every kind** advertised by the configured remote
+   registries — skills, agents, mcp, a2a, squads, commands
+   ([internal/regindex/](internal/regindex/)). Mounted alongside the
    glob `browse_registry` whenever the `registries` tool group is present and an
-   embedder resolves. **Metadata-only**: embeds the name/description/tags a
+   embedder resolves. The crawler's `browse_registry` / `get_remote_item` /
+   `install_remote_item` tools likewise cover all six kinds (command install
+   writes the per-user `user_commands.json` via the shared
+   [internal/usercommands/](internal/usercommands/) package, which also backs the
+   web-UI command editor). **Metadata-only**: embeds the name/description/tags a
    browse already returns, so no HTTP fetch beyond a normal browse. Indexing is
    lazy (first `search_registries` call) and self-healing (a corpus hash of the
    registry set — ids+urls+kinds — triggers a rebuild in `Search` when it
@@ -731,6 +736,23 @@ The Settings → Skills/Agents/MCP/A2A/Commands → Remotes tabs each list
 only the registries whose `kind` matches; a `both` entry shows up in
 both the skills and agents tabs. The "Hosts" selector on the add/edit
 dialog sets the kind.
+
+There is also a consolidated **Settings → Registries** section (top-level
+sidebar entry, between Commands and Appearance) that concentrates every remote
+registry grouped by kind in a left nav (Skills / Agents / Squads / MCP / A2A /
+Commands), with the same Add / Edit / Remove / Browse / Install flows as the
+per-kind Remotes tabs — it *reuses* those per-kind renderers
+([web/settings.js](web/settings.js) `renderRegistriesHub`), it does not
+duplicate them. Two nav-context indirections let the reused renderers re-render
+into the hub's right panel: `registriesHubRefresh` for the form-based kinds
+(skills/mcp/a2a/commands) and the pre-existing `refreshRemotesRightFn` for
+agents/squads; both are cleared at the top of each per-kind form renderer so the
+standalone tabs are unchanged. A single **Reindex** button rebuilds the semantic
+registry index via `POST /api/registries/reindex`
+([server/server.go](server/server.go)), which calls
+`Infrastructure.RegistryIndex(...).Reindex(ctx)` and returns the indexed-item
+count (or `400` with a clear message when no embedding model is configured, in
+which case the index is absent and recall falls back to glob/browse).
 
 Remote layout — agents:
 

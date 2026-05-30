@@ -27,6 +27,7 @@ import (
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/a2a"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/claudeformat"
 	"github.com/blouargant/yoke/internal/codeindex"
 	mcpcfg "github.com/blouargant/yoke/internal/mcp"
 	"github.com/blouargant/yoke/internal/paths"
@@ -34,6 +35,7 @@ import (
 	"github.com/blouargant/yoke/internal/registries"
 	"github.com/blouargant/yoke/internal/skills"
 	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/yoke/internal/usercommands"
 )
 
 // AgentResult holds the fully configured agent and its supporting components.
@@ -371,52 +373,10 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 			return paths.AgentsRegistryDir()
 		},
 
-		InstalledMCPNames: func() map[string]bool {
-			cfg, err := mcpcfg.Load(paths.FindConfig("mcp_config.json"))
-			if err != nil {
-				return map[string]bool{}
-			}
-			out := make(map[string]bool, len(cfg.Servers))
-			for _, s := range cfg.ServerList() {
-				out[s.Name] = true
-			}
-			return out
-		},
-
-		InstalledSquadNames: func() map[string]bool {
-			data, err := os.ReadFile(paths.FindConfig("agents.json"))
-			if err != nil {
-				return map[string]bool{}
-			}
-			var cfg map[string]any
-			if err := json.Unmarshal(data, &cfg); err != nil {
-				return map[string]bool{}
-			}
-			rawSquads, _ := cfg["squads"].([]any)
-			out := make(map[string]bool, len(rawSquads))
-			for _, item := range rawSquads {
-				m, ok := item.(map[string]any)
-				if !ok {
-					continue
-				}
-				if name, _ := m["name"].(string); name != "" {
-					out[strings.TrimSpace(name)] = true
-				}
-			}
-			return out
-		},
-
-		InstalledA2ANames: func() map[string]bool {
-			cfg, err := a2a.Load(paths.FindConfig("a2a_config.json"))
-			if err != nil {
-				return map[string]bool{}
-			}
-			out := make(map[string]bool, len(cfg.Agents))
-			for _, ag := range cfg.AgentList() {
-				out[ag.Name] = true
-			}
-			return out
-		},
+		InstalledMCPNames:     installedMCPNames,
+		InstalledSquadNames:   installedSquadNames,
+		InstalledA2ANames:     installedA2ANames,
+		InstalledCommandNames: installedCommandNames,
 
 		InstallMCP: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
 			body, err := registries.FetchMCPManifest(ref, token, dirPath)
@@ -593,7 +553,107 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 			}
 			return agentName, !already, os.WriteFile(writePath, append(out, '\n'), 0o644)
 		},
+
+		InstallCommand: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
+			raw, err := registries.FetchCommandMD(ref, token, dirPath)
+			if err != nil {
+				return "", false, err
+			}
+			def, err := claudeformat.ParseCommandMarkdown(raw)
+			if err != nil {
+				return "", false, fmt.Errorf("parse command: %w", err)
+			}
+			// Name resolution: frontmatter > filename leaf (mirrors the server's
+			// command install in server/remote_registry_commands.go).
+			name := def.Name
+			if name == "" {
+				leaf := dirPath
+				if i := strings.LastIndex(dirPath, "/"); i >= 0 {
+					leaf = dirPath[i+1:]
+				}
+				name = strings.TrimSuffix(leaf, ".md")
+			}
+			cmd := usercommands.Command{
+				Name:        name,
+				Description: def.Description,
+				Args:        def.ArgumentHint,
+				Prompt:      def.Prompt,
+			}
+			if err := usercommands.Validate(&cmd); err != nil {
+				return "", false, err
+			}
+			_, added, err := usercommands.Upsert(usercommands.DefaultPath(), cmd, "")
+			if err != nil {
+				return "", false, err
+			}
+			return cmd.Name, added, nil
+		},
 	}
+}
+
+// installedMCPNames returns the set of MCP server names currently in
+// mcp_config.json. Shared by buildRegistriesDeps (browse Installed flag) and
+// the regindex Config (index Installed annotation).
+func installedMCPNames() map[string]bool {
+	cfg, err := mcpcfg.Load(paths.FindConfig("mcp_config.json"))
+	if err != nil {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(cfg.Servers))
+	for _, s := range cfg.ServerList() {
+		out[s.Name] = true
+	}
+	return out
+}
+
+// installedSquadNames returns the set of squad names currently listed in
+// agents.json.
+func installedSquadNames() map[string]bool {
+	data, err := os.ReadFile(paths.FindConfig("agents.json"))
+	if err != nil {
+		return map[string]bool{}
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return map[string]bool{}
+	}
+	rawSquads, _ := cfg["squads"].([]any)
+	out := make(map[string]bool, len(rawSquads))
+	for _, item := range rawSquads {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := m["name"].(string); name != "" {
+			out[strings.TrimSpace(name)] = true
+		}
+	}
+	return out
+}
+
+// installedA2ANames returns the set of A2A agent names currently in
+// a2a_config.json.
+func installedA2ANames() map[string]bool {
+	cfg, err := a2a.Load(paths.FindConfig("a2a_config.json"))
+	if err != nil {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(cfg.Agents))
+	for _, ag := range cfg.AgentList() {
+		out[ag.Name] = true
+	}
+	return out
+}
+
+// installedCommandNames returns the set of user slash-command names (normalised)
+// currently in user_commands.json.
+func installedCommandNames() map[string]bool {
+	cmds := usercommands.Load(usercommands.DefaultPath())
+	out := make(map[string]bool, len(cmds))
+	for _, c := range cmds {
+		out[usercommands.NormName(c.Name)] = true
+	}
+	return out
 }
 
 // layerForConfigFile returns the layer where the named config file currently

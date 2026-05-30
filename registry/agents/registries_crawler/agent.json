@@ -1,7 +1,7 @@
 {
   "allow_file_attachments": false,
   "builtin": false,
-  "description": "Browses configured remote registries to discover, inspect, and install skills, agents, MCP servers, squads, and A2A agents on demand.",
+  "description": "Browses configured remote registries to discover, inspect, and install skills, agents, MCP servers, squads, A2A agents, and slash commands on demand.",
   "enabled": true,
   "leader": false,
   "model_ref": "hosted",

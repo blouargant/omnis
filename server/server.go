@@ -198,6 +198,33 @@ func newEngine(d serverDeps) *gin.Engine {
 		logGCStats("admin", stats)
 		c.JSON(http.StatusOK, stats)
 	})
+	// POST /api/registries/reindex — rebuild the semantic registry index over
+	// the configured remote registries (skills + agents metadata). Backs the
+	// "Reindex" button in the consolidated Settings → Registries section.
+	// Returns 400 when no embedding model is configured (the index is absent
+	// and every recall path falls back to glob/browse).
+	auth.POST("/registries/reindex", func(c *gin.Context) {
+		if d.Manager == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no agent instance"})
+			return
+		}
+		inst := d.Manager.Current()
+		if inst == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no agent instance"})
+			return
+		}
+		idx := d.Manager.Infra().RegistryIndex(c.Request.Context(), inst.Settings)
+		if idx == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "registry index unavailable (no embedding model configured)"})
+			return
+		}
+		n, err := idx.Reindex(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"indexed": n})
+	})
 	auth.POST("/sessions", func(c *gin.Context) {
 		// Body is optional: clients that don't care about squads can POST
 		// with no body or `{}` and get the default squad.

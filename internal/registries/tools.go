@@ -39,6 +39,10 @@ type Deps struct {
 	// InstalledA2ANames returns the set of A2A agent names currently in
 	// a2a_config.json. Used to annotate Installed flag when browsing.
 	InstalledA2ANames func() map[string]bool
+	// InstalledCommandNames returns the set of user slash-command names
+	// (normalised) currently in user_commands.json. Used to annotate the
+	// Installed flag when browsing command registries.
+	InstalledCommandNames func() map[string]bool
 
 	// InstallMCP downloads and merges an MCP server into mcp_config.json.
 	// Returns the server name, whether it was newly added, and any error.
@@ -59,16 +63,22 @@ type Deps struct {
 	// Returns the agent name, whether it was newly added, and any error.
 	// When nil, the install tool returns an error in this surface.
 	InstallA2A func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
+
+	// InstallCommand downloads a remote slash command and merges it into the
+	// per-user user_commands.json. Returns the command name, whether it was
+	// newly added (vs. replaced), and any error. When nil, the install tool
+	// returns an error in this surface.
+	InstallCommand func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
 }
 
 // LoaderProtocol is prepended to the instruction of any agent that mounts the
 // "registries" tool group. It nudges the model to discover registries before
 // invoking specialised actions.
 const LoaderProtocol = `
-REGISTRY ACCESS — when looking for an existing skill, agent, MCP server, squad, or A2A agent:
+REGISTRY ACCESS — when looking for an existing skill, agent, MCP server, squad, A2A agent, or slash command:
 - For skills ALREADY ON DISK: call 'list_installed_skills' to see everything in the local registry and which agents each skill is linked to; use 'get_installed_skill' to read a SKILL.md.
-- For remote items: 'list_registries' enumerates configured remote sources (each has a 'kind': skills, agents, mcp, squads, a2a, or both); 'browse_registry' lists items of the appropriate kind; 'get_remote_item' fetches raw content for inspection.
-- Writing actions: 'install_remote_skill' downloads a remote skill into the local registry. 'link_skill_to_agent' grants an agent access to a locally installed skill. 'install_remote_item' installs any remote item (skill, agent, MCP server, squad, or A2A agent).
+- For remote items: 'list_registries' enumerates configured remote sources (each has a 'kind': skills, agents, mcp, squads, a2a, commands, or both); 'browse_registry' lists items of the appropriate kind; 'get_remote_item' fetches raw content for inspection. When you don't know which registry holds a capability, 'search_registries' (when available) ranks items across ALL registries by meaning.
+- Writing actions: 'install_remote_skill' downloads a remote skill into the local registry. 'link_skill_to_agent' grants an agent access to a locally installed skill. 'install_remote_item' installs any remote item (skill, agent, MCP server, squad, A2A agent, or slash command).
 - These tools are for stewarding registry items on behalf of OTHER agents — never to load or execute skill content yourself.
 `
 
@@ -98,9 +108,10 @@ type browseRegistryOut struct {
 	Kind   string         `json:"kind"`
 	Skills []SkillInfo    `json:"skills,omitempty"`
 	Agents []AgentInfo    `json:"agents,omitempty"`
-	MCP    []MCPToolInfo  `json:"mcp,omitempty"`
-	Squads []SquadInfo    `json:"squads,omitempty"`
-	A2A    []A2AAgentInfo `json:"a2a,omitempty"`
+	MCP      []MCPToolInfo  `json:"mcp,omitempty"`
+	Squads   []SquadInfo    `json:"squads,omitempty"`
+	A2A      []A2AAgentInfo `json:"a2a,omitempty"`
+	Commands []CommandInfo  `json:"commands,omitempty"`
 }
 
 type getRemoteSkillIn struct {
@@ -252,7 +263,7 @@ func NewTools(deps Deps) []tool.Tool {
 			"List every item available in a remote registry. The response includes a "+
 				"`kind` field and one populated slice: `skills` (kind=skills/both), "+
 				"`agents` (kind=agents/both), `mcp` (kind=mcp), `squads` (kind=squads), "+
-				"or `a2a` (kind=a2a). Each item includes its `dir_path` for use with "+
+				"`a2a` (kind=a2a), or `commands` (kind=commands). Each item includes its `dir_path` for use with "+
 				"get_remote_item or install_remote_item, a description, and an `installed` "+
 				"flag. For agents, a `format` field of `\"claude\"` means the agent uses "+
 				"Claude Code markdown format (a single .md file) — this is fully supported "+
@@ -343,6 +354,17 @@ func NewTools(deps Deps) []tool.Tool {
 					}
 					out.A2A = agents
 
+				case KindCommands:
+					installed := map[string]bool{}
+					if deps.InstalledCommandNames != nil {
+						installed = deps.InstalledCommandNames()
+					}
+					commands, err := BrowseCommands(ref, token, installed)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Commands = commands
+
 				default:
 					return browseRegistryOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
@@ -370,10 +392,10 @@ func NewTools(deps Deps) []tool.Tool {
 
 		mustTool("get_remote_item",
 			"Fetch the raw content of any remote registry item (skill, agent, MCP server, "+
-				"squad, or A2A agent) without installing it. Use this to inspect an item "+
+				"squad, A2A agent, or slash command) without installing it. Use this to inspect an item "+
 				"before recommending or installing it. The response includes the `kind` and "+
 				"the raw `content` (SKILL.md, agent.json or agent .md for Claude Code format, "+
-				"mcp.json/mcp.md, squad.json, or a2a.json). For agents with `format: \"claude\"` "+
+				"mcp.json/mcp.md, squad.json, a2a.json, or the command .md). For agents with `format: \"claude\"` "+
 				"the content is the raw Claude Code markdown definition. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) — from browse_registry.",
 			func(_ tool.Context, in getRemoteItemIn) (getRemoteItemOut, error) {
@@ -397,6 +419,8 @@ func NewTools(deps Deps) []tool.Tool {
 					body, err = FetchSquadJSON(ref, token, in.DirPath)
 				case KindA2A:
 					body, err = FetchA2AAgentJSON(ref, token, in.DirPath)
+				case KindCommands:
+					body, err = FetchCommandMD(ref, token, in.DirPath)
 				default:
 					return getRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
@@ -426,7 +450,7 @@ func NewTools(deps Deps) []tool.Tool {
 			}),
 
 		mustTool("install_remote_item",
-			"Install any remote registry item: skill, agent, MCP server, squad, or A2A agent. "+
+			"Install any remote registry item: skill, agent, MCP server, squad, A2A agent, or slash command. "+
 				"Dispatches based on the registry's kind. For skills, use link_skill_to_agent "+
 				"afterwards to grant a specific agent access. For agents, set `enable: true` to "+
 				"append the agent to agents.json so the next hot-reload wires it in. "+
@@ -489,6 +513,16 @@ func NewTools(deps Deps) []tool.Tool {
 						return installRemoteItemOut{}, err
 					}
 					return installRemoteItemOut{Name: name, Kind: KindA2A, Added: added}, nil
+
+				case KindCommands:
+					if deps.InstallCommand == nil {
+						return installRemoteItemOut{}, fmt.Errorf("command install is not available in this surface")
+					}
+					name, added, err := deps.InstallCommand(ref, token, in.DirPath)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					return installRemoteItemOut{Name: name, Kind: KindCommands, Added: added}, nil
 
 				default:
 					return installRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)

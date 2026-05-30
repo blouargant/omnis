@@ -41,8 +41,8 @@ func writeRegistries(t *testing.T, regs ...registries.Registry) {
 
 // fakeBrowse returns canned items for known registry IDs, simulating a remote
 // browse without any network.
-func fakeBrowse(perReg map[string][]semindex.Item) func(registries.Registry, string, string) []semindex.Item {
-	return func(reg registries.Registry, _, _ string) []semindex.Item {
+func fakeBrowse(perReg map[string][]semindex.Item) func(registries.Registry, Config) []semindex.Item {
+	return func(reg registries.Registry, _ Config) []semindex.Item {
 		return perReg[reg.ID]
 	}
 }
@@ -91,6 +91,50 @@ func TestReindexAndSearch(t *testing.T) {
 	}
 	if hits[0].DirPath != "ops/deployer" || hits[0].RegistryID != "r1" {
 		t.Errorf("metadata not preserved: %+v", hits[0])
+	}
+}
+
+// TestReindexAllKinds proves items of non-skill/agent kinds (mcp, command) are
+// indexed and surface in search with their kind preserved.
+func TestReindexAllKinds(t *testing.T) {
+	t.Setenv("YOKE_HOME", t.TempDir())
+	writeRegistries(t,
+		registries.Registry{ID: "m1", Name: "MCP Hub", URL: "https://github.com/x/mcp", Kind: registries.KindMCP},
+		registries.Registry{ID: "c1", Name: "Cmd Hub", URL: "https://github.com/x/cmd", Kind: registries.KindCommands},
+	)
+
+	idx := openTest(t)
+	idx.browse = fakeBrowse(map[string][]semindex.Item{
+		"m1": {
+			newItem(registries.Registry{ID: "m1", Name: "MCP Hub"}, kindMCP, "postgres", "servers/postgres", "connect to a postgresql database", nil, false),
+		},
+		"c1": {
+			newItem(registries.Registry{ID: "c1", Name: "Cmd Hub"}, kindCommand, "review", "commands/review.md", "review a pull request diff", nil, true),
+		},
+	})
+
+	n, err := idx.Reindex(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 indexed items, got %d", n)
+	}
+
+	hits, err := idx.Search(context.Background(), "talk to a postgres database", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Name != "postgres" || hits[0].Kind != kindMCP {
+		t.Fatalf("expected mcp 'postgres' hit, got %+v", hits)
+	}
+
+	hits, err = idx.Search(context.Background(), "review a PR", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Kind != kindCommand || !hits[0].Installed {
+		t.Fatalf("expected installed command hit, got %+v", hits)
 	}
 }
 

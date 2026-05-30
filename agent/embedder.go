@@ -174,6 +174,12 @@ func (i *Infrastructure) RegistryIndex(ctx context.Context, runtime RuntimeSetti
 				}
 				return paths.AgentsRegistryDir()
 			},
+			// Installed-name providers shared with buildRegistriesDeps so the
+			// index's Installed annotation matches the web UI / crawler browse.
+			InstalledMCP:      installedMCPNames,
+			InstalledSquads:   installedSquadNames,
+			InstalledA2A:      installedA2ANames,
+			InstalledCommands: installedCommandNames,
 		})
 		if err != nil {
 			log.Printf("regindex: index unavailable: %v", err)

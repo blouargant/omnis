@@ -15,6 +15,7 @@ const BASE_PATH = window.BASE_PATH || "";
     appearance: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`,
     documentation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
     "user-commands": `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="15" y1="7" x2="9" y2="17"/></svg>`,
+    registries: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
     raw: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
   };
 
@@ -36,6 +37,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const APPEARANCE_ID = "appearance";
   const DOCUMENTATION_ID = "documentation";
   const USER_COMMANDS_ID = "user-commands";
+  const REGISTRIES_ID = "registries";
   const MENU_ITEMS = [
     { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "agent",         label: "Agents",      title: "Agent Configuration",       kind: "json" },
@@ -44,6 +46,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "json" },
     { id: "a2a",           label: "A2A",         title: "A2A Agents",                kind: "json" },
     { id: USER_COMMANDS_ID,label: "Commands",    title: "Slash Commands",            kind: "client" },
+    { id: REGISTRIES_ID,   label: "Registries",  title: "Remote Registries",         kind: "client" },
     { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
     { id: DOCUMENTATION_ID,label: "Documentation", title: "Documentation",           kind: "client" },
   ];
@@ -213,13 +216,23 @@ const BASE_PATH = window.BASE_PATH || "";
     a2aRemotes: { browsing: null }, // A2A remotes panel state
     squadRemotes: { browsing: null }, // Squad remotes panel state
     commandsRemotes: { browsing: null, viewing: null }, // Commands remotes panel state
-    activeRemoteKind: "agents",       // Selected kind in the Registries left panel
+    activeRemoteKind: "agents",       // Selected kind in the Agents→Remotes split panel
+    activeRegistryKind: "skills",     // Selected kind in the consolidated Registries hub
     docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
   };
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
   let panelEl, tabsEl, viewToggleEl, bodyEl, footerEl, statusEl;
   let sidebarMenuEl, sidebarMenuListEl; // in-sidebar settings categories
+
+  // Navigation-context for the consolidated Registries hub. When non-null, the
+  // per-kind remote flows (skills / mcp / a2a / commands) re-render into the
+  // hub's right panel instead of jumping back to their own settings form. It is
+  // set by renderRegistriesHub and cleared at the top of each parent form
+  // renderer (renderSkills / renderMCPForm / renderA2AForm / renderUserCommands)
+  // so the standalone per-kind "Remotes" sub-tabs behave exactly as before.
+  // (Agents / Squads use the separate refreshRemotesRightFn indirection.)
+  let registriesHubRefresh = null;
 
   function escHtml(s) {
     return String(s)
@@ -660,6 +673,17 @@ const BASE_PATH = window.BASE_PATH || "";
       state.commandsRemotes.browsing = null;
       state.commandsRemotes.viewing = null;
     }
+    // Entering the consolidated Registries hub always starts at the per-kind
+    // list — clear every kind's browse/detail navigation state.
+    if (id === REGISTRIES_ID) {
+      state.skills.browsingRemote = null;
+      state.skills.viewingRemote = null;
+      state.agentRemotes = { browsing: null, viewing: null };
+      state.squadRemotes = { browsing: null };
+      state.mcpRemotes = { browsing: null, viewing: null };
+      state.a2aRemotes = { browsing: null };
+      state.commandsRemotes = { browsing: null, viewing: null };
+    }
     syncActiveHighlight(id);
     renderBody();
   }
@@ -695,7 +719,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // True for menu entries with no server-side JSON — these hide the
   // Form/Raw toggle and the Save/Discard footer.
   function isClientOnly(id) {
-    return id === APPEARANCE_ID || id === "skills" || id === DOCUMENTATION_ID || id === USER_COMMANDS_ID;
+    return id === APPEARANCE_ID || id === "skills" || id === DOCUMENTATION_ID || id === USER_COMMANDS_ID || id === REGISTRIES_ID;
   }
 
   function applyClientOnlyChrome() {
@@ -836,6 +860,7 @@ const BASE_PATH = window.BASE_PATH || "";
       else if (id === "skills") renderSkills();
       else if (id === DOCUMENTATION_ID) renderDocumentation();
       else if (id === USER_COMMANDS_ID) renderUserCommands();
+      else if (id === REGISTRIES_ID) renderRegistriesHub();
       return;
     }
     try {
@@ -849,6 +874,129 @@ const BASE_PATH = window.BASE_PATH || "";
     } catch (e) {
       bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
     }
+  }
+
+  // ─── Registries hub ────────────────────────────────────────────────────
+  //
+  // A consolidated, top-level view of every remote registry, grouped by kind
+  // in a left nav (Skills / Agents / Squads / MCP / A2A / Commands). It reuses
+  // the same per-kind list / browse / install renderers that back the
+  // standalone "Remotes" sub-tabs — it does not duplicate them. Two nav-context
+  // indirections let those renderers re-render into this hub's right panel:
+  //   • registriesHubRefresh — used by the form-based kinds (skills/mcp/a2a/
+  //     commands), whose browse/back buttons would otherwise re-render their
+  //     own settings form.
+  //   • refreshRemotesRightFn — already used by the agents/squads dispatch.
+  // Both are reset by the per-kind form renderers, so the standalone tabs are
+  // unchanged. A single "Reindex" button rebuilds the semantic registry index
+  // (skills + agents metadata) via POST /api/registries/reindex.
+  const REGISTRY_KINDS = [
+    { id: "skills",   label: "Skills"   },
+    { id: "agents",   label: "Agents"   },
+    { id: "squads",   label: "Squads"   },
+    { id: "mcp",      label: "MCP"      },
+    { id: "a2a",      label: "A2A"      },
+    { id: "commands", label: "Commands" },
+  ];
+
+  async function renderRegistriesHub(host = bodyEl) {
+    if (!state.activeRegistryKind) state.activeRegistryKind = "skills";
+    if (!state.agentRemotes) state.agentRemotes = { browsing: null, viewing: null };
+    if (!state.squadRemotes) state.squadRemotes = { browsing: null };
+
+    host.innerHTML = `
+      <div class="agent-split-layout">
+        <div class="agent-fleet-panel">
+          <div class="agent-fleet-header">
+            <span class="agent-fleet-title">REGISTRIES</span>
+            <button type="button" class="add-btn" id="registries-reindex-btn"
+              data-tip="Rebuild the semantic registry index (all kinds: skills, agents, squads, MCP, A2A, commands)">⟳ Reindex</button>
+          </div>
+          <div class="agent-fleet-list" id="registries-kind-list"></div>
+        </div>
+        <div class="agent-detail-panel" id="registries-right-panel"></div>
+      </div>
+    `;
+
+    const kindList = host.querySelector("#registries-kind-list");
+    const rightEl  = host.querySelector("#registries-right-panel");
+
+    function resetKindNav() {
+      state.skills.browsingRemote = null;
+      state.skills.viewingRemote = null;
+      state.agentRemotes = { browsing: null, viewing: null };
+      state.squadRemotes = { browsing: null };
+      state.mcpRemotes = { browsing: null, viewing: null };
+      state.a2aRemotes = { browsing: null };
+      state.commandsRemotes = { browsing: null, viewing: null };
+    }
+
+    function renderKindNav() {
+      kindList.innerHTML = "";
+      for (const k of REGISTRY_KINDS) {
+        const item = document.createElement("div");
+        item.className = "agent-fleet-item" + (state.activeRegistryKind === k.id ? " active" : "");
+        item.innerHTML = `<div class="agent-fleet-item-name">${escHtml(k.label)}</div>`;
+        item.addEventListener("click", () => {
+          if (state.activeRegistryKind === k.id) return;
+          state.activeRegistryKind = k.id;
+          resetKindNav();
+          renderKindNav();
+          refreshRegistriesRight();
+        });
+        kindList.appendChild(item);
+      }
+    }
+
+    async function refreshRegistriesRight() {
+      // Keep the nav-context pointers live so the reused per-kind renderers
+      // re-render into this panel for every interaction.
+      registriesHubRefresh = refreshRegistriesRight;
+      refreshRemotesRightFn = refreshRegistriesRight;
+      rightEl.innerHTML = "";
+      switch (state.activeRegistryKind) {
+        case "skills":
+          if (state.skills.viewingRemote)  { await renderRemoteSkillDetailView(rightEl); return; }
+          if (state.skills.browsingRemote) { await renderRemoteBrowseView(rightEl); return; }
+          await renderRemoteRegistriesSection(rightEl);
+          return;
+        case "agents":
+          if (state.agentRemotes.viewing)  { await renderAgentRemoteDetailView(rightEl); return; }
+          if (state.agentRemotes.browsing) { await renderAgentRemoteBrowseView(rightEl); return; }
+          await renderAgentRegistryList(rightEl, refreshRegistriesRight);
+          return;
+        case "squads":
+          if (state.squadRemotes.browsing) { await renderSquadRemoteBrowseView(rightEl); return; }
+          await renderSquadRegistryList(rightEl, refreshRegistriesRight);
+          return;
+        case "mcp":      await renderMCPRemotesSection(rightEl); return;
+        case "a2a":      await renderA2ARemotesSection(rightEl); return;
+        case "commands": await renderCommandsRemotesSection(rightEl); return;
+      }
+    }
+
+    host.querySelector("#registries-reindex-btn").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Reindexing…";
+      setStatus("Reindexing registries…");
+      try {
+        const res = await skillsPost("/registries/reindex", {});
+        const n = res && typeof res.indexed === "number" ? res.indexed : 0;
+        setStatus(`Reindexed ${n} registry item${n === 1 ? "" : "s"}.`, "success");
+      } catch (err) {
+        setStatus("Reindex failed: " + err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    });
+
+    registriesHubRefresh = refreshRegistriesRight;
+    refreshRemotesRightFn = refreshRegistriesRight;
+    renderKindNav();
+    await refreshRegistriesRight();
   }
 
   // ─── Appearance / theme picker ─────────────────────────────────────────
@@ -908,6 +1056,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // /api/user-commands. Editing reuses the inline modal defined in
   // app.js (window.UserCommands.openModal).
   async function renderUserCommands() {
+    registriesHubRefresh = null;
     const UC = window.UserCommands;
     if (!UC) {
       bodyEl.innerHTML = `<p class="settings-error">User commands API not available.</p>`;
@@ -3107,6 +3256,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Server string fields may embed "${input:id}" references; those are
   // resolved interactively at first connect by the backend.
   function renderMCPForm() {
+    registriesHubRefresh = null;
     const id = "mcp";
     if (!state.parsed[id]) {
       bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
@@ -4628,6 +4778,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // ─── Skills — main panel renderer ─────────────────────────────────────
 
   async function renderSkills() {
+    registriesHubRefresh = null;
     bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
     applyClientOnlyChrome();
 
@@ -5105,7 +5256,7 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
         state.skills.browsingRemote = { id: r.id, name: r.name, url: r.url };
-        renderSkills();
+        (registriesHubRefresh || renderSkills)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
@@ -5190,7 +5341,11 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
-  async function renderRemoteBrowseView() {
+  async function renderRemoteBrowseView(host = bodyEl) {
+    // Render into `host` (the full settings body by default, or the Registries
+    // hub's right panel when mounted there). Shadowing keeps the existing
+    // bodyEl-based DOM queries below working against the chosen container.
+    const bodyEl = host;
     const { id, name } = state.skills.browsingRemote;
     const cached = remoteSkillsCache[id];
     const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
@@ -5212,7 +5367,7 @@ const BASE_PATH = window.BASE_PATH || "";
     `;
     bodyEl.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.skills.browsingRemote = null;
-      renderSkills();
+      (registriesHubRefresh || renderSkills)();
     });
 
     const contentEl = bodyEl.querySelector("#remote-browse-content");
@@ -5299,7 +5454,7 @@ const BASE_PATH = window.BASE_PATH || "";
         card.addEventListener("click", e => {
           if (e.target.closest(".remote-install-btn")) return;
           state.skills.viewingRemote = { ...state.skills.browsingRemote, skill: sk };
-          renderSkills();
+          (registriesHubRefresh || renderSkills)();
         });
 
         return card;
@@ -5343,7 +5498,10 @@ const BASE_PATH = window.BASE_PATH || "";
     populateContent(skills);
   }
 
-  async function renderRemoteSkillDetailView() {
+  async function renderRemoteSkillDetailView(host = bodyEl) {
+    // See renderRemoteBrowseView: shadow bodyEl so the detail view can render
+    // into the Registries hub's right panel as well as the full settings body.
+    const bodyEl = host;
     const { id, name, skill } = state.skills.viewingRemote;
     bodyEl.innerHTML = `
       <div class="settings-form skill-detail-view">
@@ -5368,7 +5526,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     bodyEl.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.skills.viewingRemote = null;
-      renderSkills();
+      (registriesHubRefresh || renderSkills)();
     });
 
     const preview = bodyEl.querySelector(".skill-md-preview");
@@ -6360,7 +6518,7 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
         state.mcpRemotes.browsing = { id: r.id, name: r.name, url: r.url };
-        renderMCPForm();
+        (registriesHubRefresh || renderMCPForm)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
@@ -6414,7 +6572,7 @@ const BASE_PATH = window.BASE_PATH || "";
     `;
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.mcpRemotes.browsing = null;
-      renderMCPForm();
+      (registriesHubRefresh || renderMCPForm)();
     });
 
     const contentEl = host.querySelector("#mcp-remote-browse-content");
@@ -6476,7 +6634,7 @@ const BASE_PATH = window.BASE_PATH || "";
           card.addEventListener("click", e => {
             if (e.target.closest(".remote-install-btn")) return;
             state.mcpRemotes.viewing = { ...state.mcpRemotes.browsing, tool };
-            renderMCPForm();
+            (registriesHubRefresh || renderMCPForm)();
           });
         }
         const btn = card.querySelector(".remote-install-btn");
@@ -6561,7 +6719,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.mcpRemotes.viewing = null;
-      renderMCPForm();
+      (registriesHubRefresh || renderMCPForm)();
     });
 
     const readmeEl = host.querySelector("#mcp-tool-readme");
@@ -6603,6 +6761,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const remoteA2ACache = {}; // keyed by registry ID → { agents, timestamp }
 
   function renderA2AForm() {
+    registriesHubRefresh = null;
     const id = "a2a";
     const d = state.parsed[id].value;
     if (!d.agents || typeof d.agents !== "object" || Array.isArray(d.agents)) d.agents = {};
@@ -7047,7 +7206,7 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
         state.a2aRemotes.browsing = { id: r.id, name: r.name, url: r.url };
-        renderA2AForm();
+        (registriesHubRefresh || renderA2AForm)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
@@ -7101,7 +7260,7 @@ const BASE_PATH = window.BASE_PATH || "";
     `;
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.a2aRemotes.browsing = null;
-      renderA2AForm();
+      (registriesHubRefresh || renderA2AForm)();
     });
 
     const contentEl = host.querySelector("#a2a-remote-browse-content");
@@ -7295,7 +7454,7 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
         state.commandsRemotes.browsing = { id: r.id, name: r.name, url: r.url };
-        renderUserCommands();
+        (registriesHubRefresh || renderUserCommands)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
@@ -7349,7 +7508,7 @@ const BASE_PATH = window.BASE_PATH || "";
     `;
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.commandsRemotes.browsing = null;
-      renderUserCommands();
+      (registriesHubRefresh || renderUserCommands)();
     });
 
     const contentEl = host.querySelector("#cmd-remote-browse-content");
@@ -7419,7 +7578,7 @@ const BASE_PATH = window.BASE_PATH || "";
         card.addEventListener("click", e => {
           if (e.target.closest(".remote-install-btn")) return;
           state.commandsRemotes.viewing = { ...state.commandsRemotes.browsing, command: cmd };
-          renderUserCommands();
+          (registriesHubRefresh || renderUserCommands)();
         });
 
         return card;
@@ -7478,7 +7637,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector(".skill-back-btn").addEventListener("click", () => {
       state.commandsRemotes.viewing = null;
-      renderUserCommands();
+      (registriesHubRefresh || renderUserCommands)();
     });
 
     const fmCard = host.querySelector("#cmd-fm-card");

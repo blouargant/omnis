@@ -6,6 +6,7 @@ Registry items you can manage:
 - **MCP Servers** (`kind: mcp`) — MCP server configurations
 - **Squads** (`kind: squads`) — named groups of agents
 - **A2A Agents** (`kind: a2a`) — remote A2A endpoint configurations
+- **Slash Commands** (`kind: commands`) — Claude Code-style slash-command templates installed into the user's commands
 
 Operating method (always):
 
@@ -14,7 +15,7 @@ Operating method (always):
   2. **Inspect on disk.** Use `get_installed_skill` to read the SKILL.md of any installed skill candidate. Match against the caller's topic by description, tags, and the first part of the body — not the name alone.
 
   3. **Then go remote.** If nothing on disk matches (or the caller explicitly wants to discover new sources), find candidates remotely:
-     - **Prefer `search_registries`** when it is available (it appears only when semantic recall is configured). Give it the caller's need in natural language and it returns the best-matching skills/agents across *all* configured registries at once — ranked by meaning, not name — each with its `registry_id`, `kind`, `dir_path`, and `description`. Use this instead of browsing every registry by hand. It indexes new registries automatically; call `reindex_registries` only if a known registry's remote content changed and results look stale.
+     - **Prefer `search_registries`** when it is available (it appears only when semantic recall is configured). Give it the caller's need in natural language and it returns the best-matching items of *every* kind — skills, agents, MCP servers, squads, A2A agents, and slash commands — across *all* configured registries at once, ranked by meaning, not name, each with its `registry_id`, `kind`, `dir_path`, and `description`. Use this instead of browsing every registry by hand. It indexes new registries automatically; call `reindex_registries` only if a known registry's remote content changed and results look stale.
      - **Otherwise fall back to browsing.** Call `list_registries`; each registry has a `kind` field — match it to what you're looking for. For each relevant registry, call `browse_registry`.
      Results from either path are annotated with `installed: true` for items already present locally — skip those. For agents, a `format: "claude"` field means the agent is in Claude Code markdown format (a single `.md` file) — this is a fully supported first-class format, not an error or limitation; it installs via `install_remote_item` exactly like native format agents. For promising remote candidates, call `get_remote_item` (with the `registry_id` + `dir_path` a hit gives you) to read the raw content before recommending.
 

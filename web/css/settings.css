@@ -2360,6 +2360,23 @@
 .agent-fleet-import { font-size: 0.95rem; }
 .agent-fleet-import:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* Reindex button in the Registries hub fleet header — compact so it fits the
+   240px panel next to the REGISTRIES title. */
+#registries-reindex-btn {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.45rem;
+  white-space: nowrap;
+}
+#registries-reindex-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* The hub right panel reuses per-kind renderers: form-section-based kinds
+   (skills/mcp/a2a/commands) and the skills browse/detail views need outer
+   spacing + a scroll container, while the agents/squads .remote-kind-list-wrap
+   manages its own full-height scroll. */
+#registries-right-panel { overflow-y: auto; }
+#registries-right-panel > .form-section { margin: 1rem 1.25rem; }
+#registries-right-panel > .settings-form { padding: 1rem 1.25rem; }
+
 .agent-fleet-list { flex: 1; overflow-y: auto; }
 
 .agent-fleet-section-header {
