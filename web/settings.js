@@ -1774,13 +1774,12 @@ const BASE_PATH = window.BASE_PATH || "";
         setStatus("Add a provider first (Providers tab).", "error");
         return;
       }
-      let name = await appPrompt("New model name:");
-      if (!name) return;
-      name = name.trim().toLowerCase();
-      if (!name || d.models[name]) return;
-      d.models[name] = { provider_ref: providerNames[0], model: "" };
+      const result = await appModelDialog(d);
+      if (!result) return;
+      d.models[result.name] = result.model;
       markFormDirty("models");
       renderModelCards(d, host.querySelector("#models-grid"));
+      renderEmbedSelector(d, host.querySelector("#embed-select-row"));
     });
     renderModelCards(d, host.querySelector("#models-grid"));
   }
@@ -1885,125 +1884,18 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       const body = card.querySelector(".model-card-body");
 
-      // STREAMING toggle — lives in the header, left of the model name. ON when
-      // the model streams (the default), OFF when it falls back to the
-      // non-streaming endpoint (persisted as disable_streaming). Use OFF for
-      // backends whose streamed output misbehaves (e.g. a quantised model
-      // behind vLLM/LiteLLM that runs away only when streamed). A smaller pill
-      // than the body toggles so it fits the header row.
-      const streamWrap = document.createElement("span");
-      streamWrap.className = "model-stream-wrap";
-      streamWrap.title = "stream this model's output (off = use the non-streaming endpoint)";
-      const streamText = document.createElement("span");
-      streamText.className = "model-stream-label";
-      streamText.textContent = "Streaming";
-      const streamSwitch = document.createElement("label");
-      streamSwitch.className = "agent-toggle-switch model-stream-toggle";
-      const streamCb = document.createElement("input");
-      streamCb.type = "checkbox";
-      streamCb.className = "agent-toggle-input";
-      streamCb.checked = !m.disable_streaming;
-      streamCb.addEventListener("change", () => {
-        if (streamCb.checked) delete m.disable_streaming; else m.disable_streaming = true;
-        onChange();
-      });
-      const streamSlider = document.createElement("span");
-      streamSlider.className = "agent-toggle-slider";
-      streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
-      streamWrap.appendChild(streamSwitch); streamWrap.appendChild(streamText);
-      card.querySelector(".model-card-title").appendChild(streamWrap);
-
-      const fg = document.createElement("div");
-      fg.className = "model-field-grid";
-
-      // PROVIDER (dropdown sourced from d.providers)
-      const provF = document.createElement("div");
-      provF.className = "model-field";
-      const provLbl = document.createElement("label");
-      provLbl.className = "model-field-label";
-      provLbl.textContent = "PROVIDER";
-      const provSel = document.createElement("select");
-      provSel.className = "model-field-input";
-      if (!providerNames.length) {
-        const opt = document.createElement("option");
-        opt.value = ""; opt.textContent = "(no providers — add one first)";
-        provSel.appendChild(opt);
-        provSel.disabled = true;
-      } else {
-        for (const pn of providerNames) {
-          const opt = document.createElement("option");
-          opt.value = pn; opt.textContent = pn;
-          if (pn === (m.provider_ref || "")) opt.selected = true;
-          provSel.appendChild(opt);
-        }
-      }
-      provSel.addEventListener("change", () => { m.provider_ref = provSel.value; onChange(); });
-      provF.appendChild(provLbl); provF.appendChild(provSel);
-      fg.appendChild(provF);
-
-      // MODEL (combobox, sourced via provider_ref). On selection we re-render
-      // the whole card grid (and the embed selector) so prefilled metadata —
-      // context length, prices, dim, embedding flag — becomes visible.
-      const rerender = () => {
-        renderModelCards(d, el);
+      // On model-combo selection we re-render the whole card grid (and the
+      // embed selector) so prefilled metadata — context length, prices, dim,
+      // embedding flag — becomes visible.
+      const refreshEmbed = () => {
         const row = el.parentElement && el.parentElement.querySelector("#embed-select-row");
         if (row) renderEmbedSelector(d, row);
       };
-      const combo = modelComboField(m, onChange, name => d.providers[name], rerender);
-      combo.className = "model-field model-field-combo";
-      const comboSpan = combo.querySelector("span");
-      if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
-      fg.appendChild(combo);
-
-      fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
-      fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
-      fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
-      fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
-
-      // Thin separator setting the embedder-specific fields (EMBEDDING MODEL +
-      // DIM) apart from the general model configuration above. Spans the full
-      // grid row so it inherits the card body's left/right padding.
-      const sep = document.createElement("div");
-      sep.className = "model-field-sep";
-      fg.appendChild(sep);
-
-      // EMBEDDING flag — marks this entry as an embeddings model so it appears
-      // in the "internal embedding model" selector above. Uses the same pill
-      // switch as the agent "Active State" toggle; the explanatory text is a
-      // tooltip rather than an inline label.
-      const embF = document.createElement("div");
-      embF.className = "model-field";
-      embF.title = "usable as internal embedder";
-      const embLbl = document.createElement("label");
-      embLbl.className = "model-field-label";
-      embLbl.textContent = "EMBEDDING MODEL";
-      const embSwitch = document.createElement("label");
-      embSwitch.className = "agent-toggle-switch";
-      embSwitch.title = "usable as internal embedder";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.className = "agent-toggle-input";
-      cb.checked = !!m.embedding;
-      cb.addEventListener("change", () => {
-        if (cb.checked) m.embedding = true; else delete m.embedding;
-        // If this model was the active embedder and is no longer embedding,
-        // clear the selection so the saved config stays consistent.
-        if (!cb.checked && (d.embed_model_ref || "").toLowerCase() === name.toLowerCase()) delete d.embed_model_ref;
-        onChange();
-        const row = el.parentElement && el.parentElement.querySelector("#embed-select-row");
-        if (row) renderEmbedSelector(d, row);
+      const rerender = () => { renderModelCards(d, el); refreshEmbed(); };
+      const { streamWrap, fg } = buildModelConfigFields(d, m, {
+        onChange, rerender, refreshEmbedSelector: refreshEmbed, name,
       });
-      const embSlider = document.createElement("span");
-      embSlider.className = "agent-toggle-slider";
-      embSwitch.appendChild(cb); embSwitch.appendChild(embSlider);
-      embF.appendChild(embLbl); embF.appendChild(embSwitch);
-      fg.appendChild(embF);
-
-      // DIM — embedding output dimension (e.g. 1536, 768). Blank = learn it
-      // from the first response. Only meaningful for embedding models. The ⟳
-      // button probes the embeddings endpoint and fills the detected length.
-      fg.appendChild(dimField(m, onChange));
-
+      card.querySelector(".model-card-title").appendChild(streamWrap);
       body.appendChild(fg);
 
       card.querySelector(".model-remove-link").addEventListener("click", async () => {
@@ -2016,6 +1908,226 @@ const BASE_PATH = window.BASE_PATH || "";
     });
 
     el.appendChild(grid);
+  }
+
+  // buildModelConfigFields builds the shared model-configuration controls used
+  // both by an in-place model card and by the "Add model" dialog. It returns
+  // the header STREAMING toggle (`streamWrap`) and the field grid (`fg`:
+  // provider, model combo, prices, separator, embedding flag, dim) bound to the
+  // model object `m`. `onChange` fires after every edit; `rerender` rebuilds the
+  // host so model-combo prefills become visible; `refreshEmbedSelector`
+  // re-renders the embed dropdown when the EMBEDDING flag toggles; `name` is the
+  // model's key, used to clear `embed_model_ref` when a model stops being an
+  // embedder (pass "" for a not-yet-named new model).
+  function buildModelConfigFields(d, m, { onChange, rerender, refreshEmbedSelector, name } = {}) {
+    onChange = onChange || (() => {});
+    rerender = rerender || (() => {});
+    refreshEmbedSelector = refreshEmbedSelector || (() => {});
+    name = name || "";
+    const providerNames = Object.keys(d.providers || {});
+
+    // STREAMING toggle — meant to live in the card header, left of the model
+    // name. ON when the model streams (the default), OFF when it falls back to
+    // the non-streaming endpoint (persisted as disable_streaming). Use OFF for
+    // backends whose streamed output misbehaves (e.g. a quantised model behind
+    // vLLM/LiteLLM that runs away only when streamed).
+    const streamWrap = document.createElement("span");
+    streamWrap.className = "model-stream-wrap";
+    streamWrap.title = "stream this model's output (off = use the non-streaming endpoint)";
+    const streamText = document.createElement("span");
+    streamText.className = "model-stream-label";
+    streamText.textContent = "Streaming";
+    const streamSwitch = document.createElement("label");
+    streamSwitch.className = "agent-toggle-switch model-stream-toggle";
+    const streamCb = document.createElement("input");
+    streamCb.type = "checkbox";
+    streamCb.className = "agent-toggle-input";
+    streamCb.checked = !m.disable_streaming;
+    streamCb.addEventListener("change", () => {
+      if (streamCb.checked) delete m.disable_streaming; else m.disable_streaming = true;
+      onChange();
+    });
+    const streamSlider = document.createElement("span");
+    streamSlider.className = "agent-toggle-slider";
+    streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
+    streamWrap.appendChild(streamSwitch); streamWrap.appendChild(streamText);
+
+    const fg = document.createElement("div");
+    fg.className = "model-field-grid";
+
+    // PROVIDER (dropdown sourced from d.providers)
+    const provF = document.createElement("div");
+    provF.className = "model-field";
+    const provLbl = document.createElement("label");
+    provLbl.className = "model-field-label";
+    provLbl.textContent = "PROVIDER";
+    const provSel = document.createElement("select");
+    provSel.className = "model-field-input";
+    if (!providerNames.length) {
+      const opt = document.createElement("option");
+      opt.value = ""; opt.textContent = "(no providers — add one first)";
+      provSel.appendChild(opt);
+      provSel.disabled = true;
+    } else {
+      for (const pn of providerNames) {
+        const opt = document.createElement("option");
+        opt.value = pn; opt.textContent = pn;
+        if (pn === (m.provider_ref || "")) opt.selected = true;
+        provSel.appendChild(opt);
+      }
+    }
+    provSel.addEventListener("change", () => { m.provider_ref = provSel.value; onChange(); });
+    provF.appendChild(provLbl); provF.appendChild(provSel);
+    fg.appendChild(provF);
+
+    // MODEL (combobox, sourced via provider_ref).
+    const combo = modelComboField(m, onChange, n => d.providers[n], rerender);
+    combo.className = "model-field model-field-combo";
+    const comboSpan = combo.querySelector("span");
+    if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
+    fg.appendChild(combo);
+
+    fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
+    fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
+    fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
+    fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
+
+    // Thin separator setting the embedder-specific fields (EMBEDDING MODEL +
+    // DIM) apart from the general model configuration above.
+    const sep = document.createElement("div");
+    sep.className = "model-field-sep";
+    fg.appendChild(sep);
+
+    // EMBEDDING flag — marks this entry as an embeddings model so it appears in
+    // the "internal embedding model" selector. Uses the same pill switch as the
+    // agent "Active State" toggle; the explanatory text is a tooltip.
+    const embF = document.createElement("div");
+    embF.className = "model-field";
+    embF.title = "usable as internal embedder";
+    const embLbl = document.createElement("label");
+    embLbl.className = "model-field-label";
+    embLbl.textContent = "EMBEDDING MODEL";
+    const embSwitch = document.createElement("label");
+    embSwitch.className = "agent-toggle-switch";
+    embSwitch.title = "usable as internal embedder";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "agent-toggle-input";
+    cb.checked = !!m.embedding;
+    cb.addEventListener("change", () => {
+      if (cb.checked) m.embedding = true; else delete m.embedding;
+      // If this model was the active embedder and is no longer embedding, clear
+      // the selection so the saved config stays consistent.
+      if (!cb.checked && name && (d.embed_model_ref || "").toLowerCase() === name.toLowerCase()) delete d.embed_model_ref;
+      onChange();
+      refreshEmbedSelector();
+    });
+    const embSlider = document.createElement("span");
+    embSlider.className = "agent-toggle-slider";
+    embSwitch.appendChild(cb); embSwitch.appendChild(embSlider);
+    embF.appendChild(embLbl); embF.appendChild(embSwitch);
+    fg.appendChild(embF);
+
+    // DIM — embedding output dimension (e.g. 1536, 768). Blank = learn it from
+    // the first response. The ⟳ button probes the embeddings endpoint.
+    fg.appendChild(dimField(m, onChange));
+
+    return { streamWrap, fg };
+  }
+
+  // appModelDialog presents a full model-configuration popup for adding a new
+  // model: a NAME field plus the shared streaming/provider/model/price/embedding
+  // controls. Resolves to { name, model } on Save, or null on Discard/Escape.
+  function appModelDialog(d) {
+    return new Promise(resolve => {
+      const providerNames = Object.keys(d.providers || {});
+      const m = { provider_ref: providerNames[0] || "", model: "" };
+
+      const overlay = document.createElement("div");
+      overlay.className = "app-dialog-overlay";
+
+      const box = document.createElement("div");
+      box.className = "app-dialog model-dialog";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+
+      const titleEl = document.createElement("p");
+      titleEl.className = "app-dialog-msg";
+      titleEl.textContent = "Add Model";
+      box.appendChild(titleEl);
+
+      // NAME — kept outside the re-rendered config area so its value survives a
+      // model-combo prefill re-render.
+      const nameField = document.createElement("div");
+      nameField.className = "model-field model-field-full";
+      const nameLbl = document.createElement("label");
+      nameLbl.className = "model-field-label";
+      nameLbl.textContent = "NAME";
+      const nameInp = document.createElement("input");
+      nameInp.type = "text";
+      nameInp.className = "model-field-input";
+      nameInp.setAttribute("autocomplete", "off");
+      nameInp.placeholder = "e.g. premium, fast, embedder";
+      const nameErr = document.createElement("span");
+      nameErr.className = "model-dialog-err";
+      nameInp.addEventListener("input", () => { nameErr.textContent = ""; });
+      nameField.appendChild(nameLbl);
+      nameField.appendChild(nameInp);
+      nameField.appendChild(nameErr);
+      box.appendChild(nameField);
+
+      const configHost = document.createElement("div");
+      box.appendChild(configHost);
+
+      function renderConfig() {
+        configHost.innerHTML = "";
+        const { streamWrap, fg } = buildModelConfigFields(d, m, {
+          onChange: () => {},
+          rerender: renderConfig,
+          refreshEmbedSelector: () => {},
+          name: "",
+        });
+        const streamRow = document.createElement("div");
+        streamRow.className = "model-dialog-stream";
+        streamRow.appendChild(streamWrap);
+        configHost.appendChild(streamRow);
+        configHost.appendChild(fg);
+      }
+      renderConfig();
+
+      const actions = document.createElement("div");
+      actions.className = "app-dialog-actions";
+
+      const discardBtn = document.createElement("button");
+      discardBtn.type = "button";
+      discardBtn.textContent = "Discard";
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "btn-primary";
+      saveBtn.textContent = "Save";
+
+      const close = result => { overlay.remove(); resolve(result); };
+      discardBtn.addEventListener("click", () => close(null));
+      saveBtn.addEventListener("click", () => {
+        const name = nameInp.value.trim().toLowerCase();
+        if (!name) { nameErr.textContent = "Name is required."; nameInp.focus(); return; }
+        if (d.models[name]) { nameErr.textContent = `Model "${name}" already exists.`; nameInp.focus(); return; }
+        close({ name, model: m });
+      });
+
+      overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
+      box.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); close(null); }
+      });
+
+      actions.appendChild(discardBtn);
+      actions.appendChild(saveBtn);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      nameInp.focus();
+    });
   }
 
   function textField(key, val, onCh) {

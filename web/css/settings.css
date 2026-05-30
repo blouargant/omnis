@@ -1066,6 +1066,20 @@
 .registry-dialog-field input:focus,
 .registry-dialog-field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 
+/* ─── Add-model dialog ─────────────────────────────────────────────────── */
+.model-dialog { min-width: 460px; max-width: 560px; }
+/* Streaming toggle row above the field grid. */
+.model-dialog-stream {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.6rem;
+}
+.model-dialog-err {
+  font-size: 0.78rem;
+  color: var(--danger, #e06c75);
+  min-height: 0.9rem;
+}
+
 /* ─── Skills panel ─────────────────────────────────────────────────────── */
 
 .skills-subtab-body { padding-top: 0.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
