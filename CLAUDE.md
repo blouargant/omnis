@@ -280,6 +280,19 @@ glob/grep path. The embedder is process-wide (built once on `Infrastructure`,
 survives hot-reload like the MCP pool); changing `embed_model_ref` needs a
 server restart to take effect.
 
+**Models editor auto-fill (web UI).** The Settings → Models panel can prefill
+model fields from the provider instead of asking the user to type them. Two
+server helper routes back this (both resolve credentials via `provider_ref` —
+no secrets cross the wire — or explicit `provider`/`api_key`/`base_url`
+overrides; see [server/provider_models.go](server/provider_models.go)):
+`GET /api/providers/models` lists the provider's models (the model combobox's
+⟳ button; clicking a result also prefills `context_length`/prices when the
+upstream returns them), and `GET /api/providers/embedding-dim?model=…` probes
+the embeddings endpoint with one tiny request and returns the vector length,
+filling the DIM field via the ⟳ button beside it ([web/settings.js](web/settings.js)
+`dimField`). Dimension detection requires both a provider and a model id and
+reports the model's native dimension.
+
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with yoke (leader,
 skill_editor, registries_crawler, summariser, curator); custom agents added
@@ -534,8 +547,23 @@ server restarts just that server.
 
 `GET /api/config/status` exposes the current generation and per-generation
 refcounts so the web UI can render a "n sessions draining on previous
-version" pill. The "Restart server" button stays available as the escape
-hatch for changes that hot-reload cannot apply (env vars, binary updates).
+version" pill.
+
+The Settings editor's post-save banner ([web/settings.js](web/settings.js))
+picks **one** action by mode, decided at save time:
+- **reload** (default) — offers only **Reload** (hot-reload, no downtime).
+- **restart** — offers only **Restart server**. Entered when a save changes
+  the **embedder identity** in `models.json` (the `embed_model_ref`, or the
+  referenced model's id/dim/provider connection — see `embedderFingerprint`),
+  because the embedder is process-wide on `Infrastructure` and survives
+  hot-reload, so only a full restart applies it. The mode is a sticky
+  `localStorage` flag (`agent_toolkit_restart_required`) so a later
+  hot-reloadable save can't downgrade a still-pending embedder restart back to
+  Reload; it clears only on an actual Reload/Restart. The "Restart server"
+  option is therefore **proposed only when an embedder change is pending** —
+  every other edit shows Reload. (Restart remains the conceptual escape hatch
+  for env/binary updates, but those are applied out-of-band, not via this
+  banner.)
 
 ### Adding a new sub-agent
 

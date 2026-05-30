@@ -1975,6 +1975,10 @@
 .model-field-combo .combo-wrap { width: 100%; }
 .model-field-combo .combo-wrap input { width: 100%; }
 
+/* DIM field: number input + detect button share a flex row like the combo. */
+.model-field-dim .combo-wrap { width: 100%; }
+.model-field-dim .combo-wrap input[type="number"] { flex: 1 1 auto; min-width: 0; width: auto; }
+
 .model-card-empty {
   border-style: dashed;
   background: transparent;

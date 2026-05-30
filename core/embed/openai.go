@@ -39,6 +39,10 @@ type openaiEmbedRequest struct {
 	Model      string   `json:"model"`
 	Input      []string `json:"input"`
 	Dimensions int      `json:"dimensions,omitempty"`
+	// EncodingFormat is always sent. OpenAI treats it as optional (defaults to
+	// "float"), but some compat gateways (e.g. LiteLLM fronting Scaleway) reject
+	// the request outright when it is absent, so we pin it explicitly.
+	EncodingFormat string `json:"encoding_format"`
 }
 
 type openaiEmbedResponse struct {
@@ -83,7 +87,7 @@ func (e *openaiEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 }
 
 func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := openaiEmbedRequest{Model: e.model, Input: texts}
+	reqBody := openaiEmbedRequest{Model: e.model, Input: texts, EncodingFormat: "float"}
 	// OpenAI's text-embedding-3-* models honour an explicit dimensions param.
 	// Compat servers (Ollama et al.) ignore unknown fields, so it's safe to
 	// pass when the caller pinned a non-default dimension.

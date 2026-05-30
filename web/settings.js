@@ -130,6 +130,11 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
+  // Sticky flag: a pending config change touches the embedder, which is built
+  // once on Infrastructure and survives hot-reload — only a full server
+  // restart applies it. Set at save time by detecting an embedder-identity
+  // change in models.json; cleared only by an actual restart.
+  const RESTART_REQUIRED_FLAG = "agent_toolkit_restart_required";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
   const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search"];
@@ -228,42 +233,71 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   // ─── Banner ────────────────────────────────────────────────────────────
-  // The reload button hot-reloads the agent generation in place (no
-  // downtime, no SSE interruption — in-flight sessions stay on their
-  // current generation, new sessions get the reloaded config). The
-  // restart button remains as the escape hatch for changes that the
-  // hot-reload path cannot apply (env vars, binary updates).
+  // Two mutually-exclusive modes, decided at save time:
+  //   • "reload"  — the change is hot-reloadable; offer Reload only (no
+  //                 downtime, no SSE interruption — in-flight sessions stay
+  //                 on their current generation, new ones get the new config).
+  //   • "restart" — the change touches the embedder, which hot-reload cannot
+  //                 swap (it is process-wide on Infrastructure); offer Restart
+  //                 only, since Reload would silently leave it unapplied.
+  // The restart option is therefore proposed *only* when an embedder change
+  // is pending — every other edit shows Reload.
+  function bannerMode() {
+    return localStorage.getItem(RESTART_REQUIRED_FLAG) === "1" ? "restart" : "reload";
+  }
+
   function ensureBanner() {
     let b = document.getElementById("restart-banner");
     if (b) return b;
     b = document.createElement("div");
     b.id = "restart-banner";
     b.hidden = true;
-    b.innerHTML = `
-      <span class="restart-banner-text">
-        Configuration changed — apply with hot-reload (no downtime) or restart the server.
-      </span>
-      <button type="button" id="restart-banner-reload" class="reload-primary">Reload</button>
-      <button type="button" id="restart-banner-btn">Restart server</button>
-      <button type="button" id="restart-banner-dismiss" title="Dismiss">×</button>
-    `;
     const main = document.getElementById("chat");
     main.insertBefore(b, main.firstChild);
-    b.querySelector("#restart-banner-reload").addEventListener("click", () => doReload());
-    b.querySelector("#restart-banner-btn").addEventListener("click", () => doRestart());
+    return b;
+  }
+
+  // renderBannerContent (re)builds the banner's text + buttons for the given
+  // mode and (re)binds their handlers. Called on every show so a save that
+  // flips the mode updates the controls in place.
+  function renderBannerContent(b, mode) {
+    if (mode === "restart") {
+      b.innerHTML = `
+        <span class="restart-banner-text">
+          Embedder changed — a server restart is required to apply it (hot-reload can't swap the embedder).
+        </span>
+        <button type="button" id="restart-banner-btn" class="reload-primary">Restart server</button>
+        <button type="button" id="restart-banner-dismiss" title="Dismiss">×</button>
+      `;
+      b.querySelector("#restart-banner-btn").addEventListener("click", () => doRestart());
+    } else {
+      b.innerHTML = `
+        <span class="restart-banner-text">
+          Configuration changed — apply with hot-reload (no downtime).
+        </span>
+        <button type="button" id="restart-banner-reload" class="reload-primary">Reload</button>
+        <button type="button" id="restart-banner-dismiss" title="Dismiss">×</button>
+      `;
+      b.querySelector("#restart-banner-reload").addEventListener("click", () => doReload());
+    }
     b.querySelector("#restart-banner-dismiss").addEventListener("click", () => {
       // Persistent dismissal until the next successful save re-arms the banner.
       localStorage.setItem(BANNER_DISMISS_FLAG, "1");
       b.hidden = true;
     });
-    return b;
   }
 
-  function showBanner() {
+  // showBanner arms the banner after a save. restartRequired sets the sticky
+  // embedder flag (it is never cleared here — a later hot-reloadable save must
+  // not downgrade a still-pending embedder restart back to Reload; only an
+  // actual restart clears it).
+  function showBanner(restartRequired) {
     localStorage.setItem(RESTART_FLAG, "1");
+    if (restartRequired) localStorage.setItem(RESTART_REQUIRED_FLAG, "1");
     // Re-arm visibility: a fresh save invalidates any earlier dismissal.
     localStorage.removeItem(BANNER_DISMISS_FLAG);
     const b = ensureBanner();
+    renderBannerContent(b, bannerMode());
     // Clear any leftover fade-out state from a previous successful reload
     // before un-hiding, otherwise the banner would appear in its 0-opacity
     // / 0-height collapsed state.
@@ -275,6 +309,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (localStorage.getItem(RESTART_FLAG) !== "1") return;
     if (localStorage.getItem(BANNER_DISMISS_FLAG) === "1") return;
     const b = ensureBanner();
+    renderBannerContent(b, bannerMode());
     b.classList.remove("is-fading-out");
     b.hidden = false;
   }
@@ -344,6 +379,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       const body = await r.json().catch(() => ({}));
       localStorage.removeItem(RESTART_FLAG);
+      localStorage.removeItem(RESTART_REQUIRED_FLAG);
       localStorage.removeItem(BANNER_DISMISS_FLAG);
 
       const draining = body.draining_sessions || 0;
@@ -443,6 +479,7 @@ const BASE_PATH = window.BASE_PATH || "";
         throw new Error(j.error || `HTTP ${r.status}`);
       }
       localStorage.removeItem(RESTART_FLAG);
+      localStorage.removeItem(RESTART_REQUIRED_FLAG);
       localStorage.removeItem(BANNER_DISMISS_FLAG);
       const b = document.getElementById("restart-banner");
       if (b) b.hidden = true;
@@ -1956,8 +1993,9 @@ const BASE_PATH = window.BASE_PATH || "";
       fg.appendChild(embF);
 
       // DIM — embedding output dimension (e.g. 1536, 768). Blank = learn it
-      // from the first response. Only meaningful for embedding models.
-      fg.appendChild(numField("dim", m.dim, v => { if (v) m.dim = v; else delete m.dim; onChange(); }));
+      // from the first response. Only meaningful for embedding models. The ⟳
+      // button probes the embeddings endpoint and fills the detected length.
+      fg.appendChild(dimField(m, onChange));
 
       body.appendChild(fg);
 
@@ -2005,6 +2043,74 @@ const BASE_PATH = window.BASE_PATH || "";
     });
     f.appendChild(lbl);
     f.appendChild(inp);
+    return f;
+  }
+
+  // dimField builds the embedding DIM row: a number input plus a ⟳ button that
+  // probes the provider's embeddings endpoint (GET /api/providers/embedding-dim)
+  // with the configured model and fills the detected vector length. Detection
+  // needs both a provider (provider_ref, or legacy inline provider) and a model
+  // id; it errors clearly when either is missing or the model isn't an
+  // embeddings model.
+  function dimField(m, onCh) {
+    const f = document.createElement("div");
+    f.className = "model-field model-field-dim";
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = "DIM";
+    const wrap = document.createElement("div");
+    wrap.className = "combo-wrap";
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.className = "model-field-input";
+    inp.value = m.dim == null ? "" : m.dim;
+    inp.addEventListener("input", () => {
+      const n = inp.value === "" ? undefined : Number(inp.value);
+      if (Number.isFinite(n) && n) m.dim = n; else delete m.dim;
+      onCh();
+    });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "combo-fetch-btn";
+    btn.title = "Detect dimension from provider";
+    btn.textContent = "⟳";
+    btn.addEventListener("click", async () => {
+      const model = (m.model || "").trim();
+      if (!model) { setStatus("Set a model first."); return; }
+      const providerRef = (m.provider_ref || "").trim();
+      const params = new URLSearchParams();
+      if (providerRef) {
+        params.set("provider_ref", providerRef);
+      } else {
+        const provider = (m.provider || "").trim();
+        if (!provider) { setStatus("Set a provider first."); return; }
+        params.set("provider", provider);
+        if (m.api_key) params.set("api_key", m.api_key);
+        if (m.base_url) params.set("base_url", m.base_url);
+      }
+      params.set("model", model);
+      btn.disabled = true;
+      btn.textContent = "…";
+      setStatus("Detecting embedding dimension…");
+      try {
+        const r = await fetch(BASE_PATH + `/api/providers/embedding-dim?${params}`, { headers: authHeaders() });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || r.statusText);
+        m.dim = j.dim;
+        inp.value = j.dim;
+        onCh();
+        setStatus(`Detected dimension: ${j.dim}.`);
+      } catch (e) {
+        setStatus("Failed to detect dimension: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "⟳";
+      }
+    });
+    wrap.appendChild(inp);
+    wrap.appendChild(btn);
+    f.appendChild(lbl);
+    f.appendChild(wrap);
     return f;
   }
 
@@ -7346,12 +7452,53 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   // ─── Save / Discard ────────────────────────────────────────────────────
+
+  // embedderFingerprint reduces a parsed models.json object to a stable string
+  // capturing everything that determines the internal embedder's identity:
+  // the embed_model_ref, the referenced model's id/dim, and the connection
+  // fields (kind/base_url/api_key) resolved through its provider_ref. A change
+  // to any of these means hot-reload can't apply it — a restart is required.
+  // Returns "" when no embedder is configured (embed_model_ref absent).
+  function embedderFingerprint(models) {
+    if (!models || typeof models !== "object") return "";
+    const ref = String(models.embed_model_ref || "").trim().toLowerCase();
+    if (!ref) return "";
+    const ci = (obj, key) => {
+      if (!obj || typeof obj !== "object") return null;
+      if (obj[key]) return obj[key];
+      const hit = Object.keys(obj).find(k => k.toLowerCase() === key);
+      return hit ? obj[hit] : null;
+    };
+    const m = ci(models.models, ref);
+    if (!m) return `ref:${ref}|<missing>`;
+    const prov = ci(models.providers, String(m.provider_ref || "").trim().toLowerCase());
+    const kind = String(m.provider || (prov && prov.kind) || "").trim();
+    const baseURL = String(m.base_url || (prov && prov.base_url) || "").trim();
+    const apiKey = String(m.api_key || (prov && prov.api_key) || "").trim();
+    return [ref, kind, baseURL, apiKey, String(m.model || "").trim(), String(m.dim || "")].join("|");
+  }
+
+  // embedderChangedOnSave compares the pre-save and post-save models.json for
+  // an embedder-identity change. Only meaningful for the "models" file; every
+  // other file returns false (hot-reloadable). `oldVal`/`newVal` are parsed
+  // objects (form view) or JSON strings (raw view).
+  function embedderChangedOnSave(id, oldVal, newVal) {
+    if (id !== "models") return false;
+    const parse = (v) => {
+      if (typeof v === "string") { try { return JSON.parse(v); } catch (_) { return null; } }
+      return v;
+    };
+    return embedderFingerprint(parse(oldVal)) !== embedderFingerprint(parse(newVal));
+  }
+
   async function saveActive() {
     const id = state.activeFile;
     setStatus("Saving…");
     try {
+      let restartRequired = false;
       if (state.activeView === "raw") {
         const s = state.raw[id];
+        const prevContent = s.content;
         const r = await fetch(BASE_PATH + `/api/config/file/${id}`, {
           method: "PUT",
           headers: authHeaders({ "Content-Type": "application/json" }),
@@ -7359,11 +7506,13 @@ const BASE_PATH = window.BASE_PATH || "";
         });
         if (!r.ok) throw new Error(await errText(r));
         const j = await r.json();
+        restartRequired = embedderChangedOnSave(id, prevContent, j.content);
         s.content = j.content; s.mtime = j.mtime; s.dirty = false;
         // Invalidate parsed cache so the form view re-fetches.
         delete state.parsed[id];
       } else {
         const p = state.parsed[id];
+        const prevData = p.data;
         const r = await fetch(BASE_PATH + `/api/config/parsed/${id}`, {
           method: "PUT",
           headers: authHeaders({ "Content-Type": "application/json" }),
@@ -7371,14 +7520,17 @@ const BASE_PATH = window.BASE_PATH || "";
         });
         if (!r.ok) throw new Error(await errText(r));
         const j = await r.json();
+        restartRequired = embedderChangedOnSave(id, prevData, p.value);
         p.data = deepClone(p.value);
         p.mtime = j.mtime;
         p.dirty = false;
         // Invalidate raw cache so the raw view re-fetches the canonical JSON.
         delete state.raw[id];
       }
-      setStatus("Saved. Restart the server to apply.", "success");
-      showBanner();
+      setStatus(restartRequired
+        ? "Saved. Restart the server to apply the embedder change."
+        : "Saved. Reload the agent to apply.", "success");
+      showBanner(restartRequired);
       renderBody();
     } catch (e) {
       setStatus("Save failed: " + e.message, "error");

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/yoke/core/embed"
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,34 +36,10 @@ type providerModelInfo struct {
 //     env-var names first, matching the agent config convention.
 func registerProviderModelsRoute(rg *gin.RouterGroup) {
 	rg.GET("/providers/models", func(c *gin.Context) {
-		var (
-			providerKind string
-			apiKey       string
-			baseURL      string
-		)
-
-		if ref := strings.TrimSpace(c.Query("provider_ref")); ref != "" {
-			settings, err := agent.ResolveRuntimeSettings(agent.Options{})
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("resolve runtime settings: %v", err)})
-				return
-			}
-			p, ok := settings.Providers[strings.ToLower(ref)]
-			if !ok {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("unknown provider_ref %q", ref)})
-				return
-			}
-			providerKind = p.Kind
-			apiKey = p.APIKey
-			baseURL = p.BaseURL
-		} else {
-			providerKind = strings.TrimSpace(c.Query("provider"))
-			if providerKind == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "provider or provider_ref query param is required"})
-				return
-			}
-			apiKey = resolveEnvRef(c.Query("api_key"))
-			baseURL = resolveEnvRef(c.Query("base_url"))
+		providerKind, apiKey, baseURL, status, err := resolveProviderConn(c)
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
 		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
@@ -75,6 +52,83 @@ func registerProviderModelsRoute(rg *gin.RouterGroup) {
 		}
 		c.JSON(http.StatusOK, gin.H{"models": models})
 	})
+
+	// GET /providers/embedding-dim probes a single embeddings request against
+	// the resolved provider and reports the output vector length, so the Models
+	// editor can auto-fill the DIM field instead of asking the user to look it
+	// up. Credentials resolve the same way as /providers/models (provider_ref
+	// preferred; provider/api_key/base_url overrides for test-driving). The
+	// model id is required and must name an embeddings-capable model.
+	rg.GET("/providers/embedding-dim", func(c *gin.Context) {
+		model := strings.TrimSpace(c.Query("model"))
+		if model == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model query param is required"})
+			return
+		}
+		providerKind, apiKey, baseURL, status, err := resolveProviderConn(c)
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+
+		dim, err := probeEmbeddingDim(ctx, providerKind, apiKey, baseURL, model)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"dim": dim})
+	})
+}
+
+// resolveProviderConn extracts the provider kind + resolved credentials from a
+// request, honouring provider_ref (looked up in the live models.json catalogue,
+// so no secrets cross the wire) or the explicit provider/api_key/base_url
+// overrides. The returned status is the HTTP code to use when err is non-nil.
+func resolveProviderConn(c *gin.Context) (providerKind, apiKey, baseURL string, status int, err error) {
+	if ref := strings.TrimSpace(c.Query("provider_ref")); ref != "" {
+		settings, err := agent.ResolveRuntimeSettings(agent.Options{})
+		if err != nil {
+			return "", "", "", http.StatusInternalServerError, fmt.Errorf("resolve runtime settings: %v", err)
+		}
+		p, ok := settings.Providers[strings.ToLower(ref)]
+		if !ok {
+			return "", "", "", http.StatusNotFound, fmt.Errorf("unknown provider_ref %q", ref)
+		}
+		return p.Kind, p.APIKey, p.BaseURL, http.StatusOK, nil
+	}
+	providerKind = strings.TrimSpace(c.Query("provider"))
+	if providerKind == "" {
+		return "", "", "", http.StatusBadRequest, fmt.Errorf("provider or provider_ref query param is required")
+	}
+	return providerKind, resolveEnvRef(c.Query("api_key")), resolveEnvRef(c.Query("base_url")), http.StatusOK, nil
+}
+
+// probeEmbeddingDim builds an embedder for the given connection and performs a
+// single tiny embeddings request, returning the dimension of the vector the
+// provider produced. The model's native dimension is reported (the embedder
+// only pins a non-default dimension for OpenAI's text-embedding-3-* family,
+// which is not what we want to discover here).
+func probeEmbeddingDim(ctx context.Context, providerKind, apiKey, baseURL, model string) (int, error) {
+	emb, err := embed.NewWithSelection(ctx, embed.Selection{
+		Provider: providerKind,
+		Model:    model,
+		BaseURL:  baseURL,
+		APIKey:   apiKey,
+	})
+	if err != nil {
+		return 0, err
+	}
+	vecs, err := emb.Embed(ctx, []string{"yoke embedding dimension probe"})
+	if err != nil {
+		return 0, err
+	}
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return 0, fmt.Errorf("provider returned no embedding vector")
+	}
+	return len(vecs[0]), nil
 }
 
 // resolveEnvRef returns the value of the environment variable named val when

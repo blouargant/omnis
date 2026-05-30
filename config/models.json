@@ -6,10 +6,11 @@
       "api_key": "OPENAI_API_KEY"
     }
   },
+  "embed_model_ref": "embedder",
   "models": {
     "embedder": {
       "provider_ref": "openai-compat",
-      "model": "text-embedding-3-small",
+      "model": "qwen3-embedding-8b-scaleway",
       "embedding": true,
       "disable_streaming": true,
       "dim": 4096,
