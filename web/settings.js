@@ -1919,7 +1919,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // re-renders the embed dropdown when the EMBEDDING flag toggles; `name` is the
   // model's key, used to clear `embed_model_ref` when a model stops being an
   // embedder (pass "" for a not-yet-named new model).
-  function buildModelConfigFields(d, m, { onChange, rerender, refreshEmbedSelector, name } = {}) {
+  function buildModelConfigFields(d, m, { onChange, rerender, refreshEmbedSelector, name, prefillOverwrites } = {}) {
     onChange = onChange || (() => {});
     rerender = rerender || (() => {});
     refreshEmbedSelector = refreshEmbedSelector || (() => {});
@@ -1981,7 +1981,7 @@ const BASE_PATH = window.BASE_PATH || "";
     fg.appendChild(provF);
 
     // MODEL (combobox, sourced via provider_ref).
-    const combo = modelComboField(m, onChange, n => d.providers[n], rerender);
+    const combo = modelComboField(m, onChange, n => d.providers[n], rerender, { prefillOverwrites });
     combo.className = "model-field model-field-combo";
     const comboSpan = combo.querySelector("span");
     if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
@@ -2086,6 +2086,7 @@ const BASE_PATH = window.BASE_PATH || "";
           rerender: renderConfig,
           refreshEmbedSelector: () => {},
           name: "",
+          prefillOverwrites: true,
         });
         const streamRow = document.createElement("div");
         streamRow.className = "model-dialog-stream";
@@ -2265,7 +2266,16 @@ const BASE_PATH = window.BASE_PATH || "";
   // name; when set, the fetch uses provider_ref so credentials stay on the
   // server. Otherwise it falls back to the legacy inline (provider/api_key/
   // base_url) shape on the model itself.
-  function modelComboField(m, onChange, resolveProvider, onPrefill) {
+  //
+  // opts.prefillOverwrites — when true (the add-model dialog), picking a model
+  // from the dropdown does a clean refresh of the prefillable metadata: each
+  // field is replaced by the selected model's value, and cleared when the model
+  // doesn't expose one. This prevents a first pick's context length / prices
+  // from sticking when the user then chooses a different model. When false (the
+  // default, used for an already-configured card) prefill only fills fields the
+  // user left blank, so it never clobbers values they typed.
+  function modelComboField(m, onChange, resolveProvider, onPrefill, opts) {
+    const prefillOverwrites = !!(opts && opts.prefillOverwrites);
     const row = document.createElement("div");
     row.className = "form-row form-row-combo";
 
@@ -2318,15 +2328,22 @@ const BASE_PATH = window.BASE_PATH || "";
           e.preventDefault(); // keep input focus
           input.value = mdl.id;
           m.model = mdl.id;
-          // Prefill any metadata the provider exposed (LiteLLM /model/info),
-          // without clobbering values the user already set.
-          if (mdl.context_length && !m.context_length) m.context_length = mdl.context_length;
-          if (mdl.input_token_price_per_million && !m.input_token_price_per_million) m.input_token_price_per_million = mdl.input_token_price_per_million;
-          if (mdl.cached_input_token_price_per_million && !m.cached_input_token_price_per_million) m.cached_input_token_price_per_million = mdl.cached_input_token_price_per_million;
-          if (mdl.output_token_price_per_million && !m.output_token_price_per_million) m.output_token_price_per_million = mdl.output_token_price_per_million;
-          if (mdl.dim && !m.dim) m.dim = mdl.dim;
+          // Prefill any metadata the provider exposed (LiteLLM /model/info). In
+          // overwrite mode (add-model dialog) set the field from the selected
+          // model and clear it when absent — a clean refresh per selection.
+          // Otherwise only fill fields the user left blank.
+          const setMeta = (key, val) => {
+            if (prefillOverwrites) { if (val) m[key] = val; else delete m[key]; }
+            else if (val && !m[key]) m[key] = val;
+          };
+          setMeta("context_length", mdl.context_length);
+          setMeta("input_token_price_per_million", mdl.input_token_price_per_million);
+          setMeta("cached_input_token_price_per_million", mdl.cached_input_token_price_per_million);
+          setMeta("output_token_price_per_million", mdl.output_token_price_per_million);
+          setMeta("dim", mdl.dim);
           // An embedding-mode model selected here is, by definition, an embedder.
           if (mdl.embedding) m.embedding = true;
+          else if (prefillOverwrites) delete m.embedding;
           onChange();
           panel.hidden = true;
           // Re-render so the prefilled fields (which are static inputs built at
