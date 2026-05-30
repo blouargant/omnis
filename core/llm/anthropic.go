@@ -22,9 +22,8 @@ import (
 )
 
 const (
-	defaultAnthropicBase    = "https://api.anthropic.com/v1"
-	anthropicVersionHeader  = "2023-06-01"
-	anthropicDefaultMaxToks = 4096
+	defaultAnthropicBase   = "https://api.anthropic.com/v1"
+	anthropicVersionHeader = "2023-06-01"
 )
 
 type anthropic struct {
@@ -218,7 +217,7 @@ func (a *anthropic) buildRequest(req *model.LLMRequest, stream bool) antRequest 
 		Model:     firstNonEmpty(req.Model, a.model),
 		Messages:  a.toMessages(req),
 		Tools:     a.toTools(req),
-		MaxTokens: anthropicDefaultMaxToks,
+		MaxTokens: defaultMaxOutputTokens(),
 		Stream:    stream,
 	}
 	if req.Config != nil {

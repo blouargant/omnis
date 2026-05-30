@@ -310,6 +310,14 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 			r.Stop = req.Config.StopSequences
 		}
 	}
+	// Always cap output: an uncapped OpenAI-compat request lets a model that
+	// never emits a stop token run away (observed: 20k+ tokens / minutes on a
+	// 4-bit quant), freezing the turn "mid sentence". Mirrors the Anthropic
+	// adapter, which has always sent a default max_tokens.
+	if r.MaxTokens == nil {
+		n := defaultMaxOutputTokens()
+		r.MaxTokens = &n
+	}
 	return r
 }
 

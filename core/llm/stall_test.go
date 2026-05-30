@@ -6,6 +6,8 @@ import (
 	"io"
 	"testing"
 	"time"
+
+	"google.golang.org/adk/model"
 )
 
 // stallReader emits `prefix` once, then blocks forever (simulating an upstream
@@ -50,6 +52,26 @@ func TestStallGuardAbortsFrozenStream(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("stall took %s, expected abort near the 100ms timeout", elapsed)
+	}
+}
+
+func TestOpenAIBuildRequestAlwaysCapsOutput(t *testing.T) {
+	o := &openAI{model: "test"}
+
+	// No config → default cap applied (not unbounded).
+	r := o.buildRequest(&model.LLMRequest{}, false)
+	if r.MaxTokens == nil {
+		t.Fatalf("MaxTokens is nil; an uncapped request lets the model run away")
+	}
+	if *r.MaxTokens != fallbackMaxOutputTokens {
+		t.Fatalf("MaxTokens = %d, want default %d", *r.MaxTokens, fallbackMaxOutputTokens)
+	}
+
+	// Env override is honored.
+	t.Setenv("YOKE_LLM_MAX_OUTPUT_TOKENS", "256")
+	r = o.buildRequest(&model.LLMRequest{}, false)
+	if r.MaxTokens == nil || *r.MaxTokens != 256 {
+		t.Fatalf("MaxTokens = %v, want 256 from env override", r.MaxTokens)
 	}
 }
 

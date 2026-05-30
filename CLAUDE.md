@@ -403,6 +403,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 | `YOKE_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `30s`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
+| `YOKE_LLM_MAX_OUTPUT_TOKENS` | Output-token cap applied to every LLM call when the request config sets none (positive int, default `4096`). Without it the OpenAI/compat path is unbounded, so a model that fails to emit a stop token (common with heavily-quantised weights) can run away — 20k+ tokens over minutes — presenting as a turn frozen "mid sentence". Both adapters honor it ([core/llm/retry.go](core/llm/retry.go) `defaultMaxOutputTokens`). |
 
 ### Permission prompts (ask_user) and grant scopes
 
