@@ -141,7 +141,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const RESTART_REQUIRED_FLAG = "agent_toolkit_restart_required";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
-  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search"];
+  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search", "docs"];
   const TOOL_DESCRIPTIONS = {
     Bash:       "Run shell commands in the working directory.",
     Read:       "Read file contents from the filesystem.",
@@ -160,6 +160,7 @@ const BASE_PATH = window.BASE_PATH || "";
     web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
     registries: "Skill registry tools: list configured remote registries, browse them, fetch a SKILL.md, install a skill, and link it to an agent.",
     code_search: "Semantic code search (search_code, reindex_code): find code by meaning over the repo index. Mounted only when an embedding model is configured; otherwise the agent falls back to grep/read.",
+    docs: "Documentation tools: answer questions about yoke from its own docs. Always provides list_docs / read_doc / grep_docs; adds semantic search_docs / reindex_docs when an embedding model is configured.",
   };
   // Tools that are mutually exclusive: selecting one auto-deselects the other.
   const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
@@ -2596,6 +2597,7 @@ const BASE_PATH = window.BASE_PATH || "";
     web:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
     registries: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
     code_search: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/><polyline points="8 8 6 10 8 12"/><polyline points="12 8 14 10 12 12"/></svg>`,
+    docs: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
   };
   const TOOL_DISPLAY = {
     Bash: "Shell", Read: "File Read", Write: "File Write", Edit: "Inline Edit",
@@ -2603,7 +2605,7 @@ const BASE_PATH = window.BASE_PATH || "";
     mcp: "Context Proto", Skill: "Core Skills",
     softskills: "Soft Skills", calc: "Math Eng", ddg: "Web Search",
     serpapi: "SerpAPI", web: "Browser Tool", registries: "Skill Registries",
-    code_search: "Code Search",
+    code_search: "Code Search", docs: "Documentation",
   };
 
   // updateFleetModelLine syncs the model display under a fleet-list item with
