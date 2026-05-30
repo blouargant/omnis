@@ -6,6 +6,7 @@
       "api_key": "OPENAI_API_KEY"
     }
   },
+  "embed_model_ref": "embedder",
   "models": {
     "embedder": {
       "provider_ref": "openai-compat",
