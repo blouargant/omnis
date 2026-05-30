@@ -432,7 +432,13 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.PushEvents != nil {
 			d.PushEvents.notify(id)
 		}
+		// Archiving is a natural session-end signal: push the session's
+		// StateLog into the precedent index now rather than waiting for the
+		// idle indexer's staleness threshold.
 		meta, _ := d.Registry.Get(id)
+		if meta != nil && d.EventBus != nil {
+			indexSession(d.Registry, d.EventBus, meta.UserID, id)
+		}
 		c.JSON(http.StatusOK, meta)
 	})
 	// POST /api/sessions/:id/unarchive — restore an archived session to active.

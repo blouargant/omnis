@@ -87,6 +87,16 @@ const (
 	//               tool_errors ([]map[string]any with tool/agent/error/when),
 	//               last_user_messages ([]string).
 	EventSessionReflected = "session_reflected"
+	// EventSessionIndexNow is a lightweight, indexing-only trigger: it asks
+	// the precedents hook to upsert a session's StateLog (goal + decisions)
+	// into the cross-session precedent index without driving the heavier
+	// reflection/curation pipeline. The server emits it when a session goes
+	// idle past the index-stale threshold or is archived, so Web UI sessions
+	// (which never fire EventSessionEnd) still feed semantic recall.
+	//
+	// Payload keys: user_id, session_id (session_key optional — derived from
+	// the suffix when absent).
+	EventSessionIndexNow = "session_index_now"
 )
 
 // Handler receives the event name and a free-form payload map.

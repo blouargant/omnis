@@ -182,8 +182,16 @@ BitWidth 4 + UnitNorm cosine):
    refreshes on call, content-hash gated.
 2. **`recall_precedents`** (reflector + curator) — recalls past sessions' goals
    + decisions ([internal/precedents/](internal/precedents/)). Indexed on
-   `EventSessionReflected` by [agent/precedents_hook.go](agent/precedents_hook.go);
-   backfill via `yoke reindex-precedents`.
+   `EventSessionReflected` by [agent/precedents_hook.go](agent/precedents_hook.go).
+   Web UI sessions never fire `EventSessionEnd` (so never `EventSessionReflected`),
+   so the server also indexes them via the lightweight, indexing-only
+   `EventSessionIndexNow` trigger (same hook): the idle indexer
+   ([server/idle_indexer.go](server/idle_indexer.go)) fires it once a session
+   has been idle ≥ 5 min (fixed threshold, independent of the curator's
+   `YOKE_CURATOR_IDLE_TIMEOUT`), and the archive handler fires it immediately on
+   `POST /api/sessions/:id/archive`. An in-memory `SessionMeta.Indexed` flag
+   (set by `Registry.MarkIndexed`, cleared by `Touch`) stops re-indexing every
+   scan tick. Backfill via `yoke reindex-precedents`.
 3. **`search_code` / `reindex_code`** (investigator) —
    semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
    `git ls-files`-aware, content-hash incremental.

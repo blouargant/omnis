@@ -45,6 +45,12 @@ type SessionMeta struct {
 	// indexes) and are surfaced in a separate panel by the UI surfaces. The flag
 	// is persisted in the conversation file so it survives server restarts.
 	Archived bool `json:"archived,omitempty"`
+	// Indexed is set by the idle indexer (and on archive) once a session's
+	// StateLog has been pushed into the cross-session precedent index. It is
+	// in-memory only and cleared by Touch on new activity so a session that
+	// keeps evolving gets re-indexed; it is deliberately not persisted, so a
+	// server restart re-indexes idle sessions once (an idempotent upsert).
+	Indexed bool `json:"-"`
 }
 
 // Registry is the in-memory session index. It is safe for concurrent
@@ -176,6 +182,19 @@ func (r *Registry) Touch(id string) {
 		m.LastUsedAt = time.Now()
 		m.Turns++
 		m.Harvested = false
+		// New activity means the goal/decisions may have changed; let the
+		// idle indexer re-index this session once it goes stale again.
+		m.Indexed = false
+	}
+}
+
+// MarkIndexed flags a session so the idle indexer skips it until new activity
+// (Touch) clears the flag. In-memory only — see SessionMeta.Indexed.
+func (r *Registry) MarkIndexed(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m, ok := r.items[id]; ok {
+		m.Indexed = true
 	}
 }
 

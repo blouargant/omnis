@@ -163,6 +163,14 @@ func run() error {
 		IdleTimeout: firstInst.CuratorIdleTimeout,
 	})
 
+	// Index idle sessions into the cross-session precedent store. Runs on a
+	// fixed staleness threshold independent of the curator, so Web UI sessions
+	// (which never fire EventSessionEnd) still feed semantic recall.
+	startIdleIndexer(rootCtx, IdleIndexerConfig{
+		Registry: registry,
+		Bus:      infra.Bus,
+	})
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox)
