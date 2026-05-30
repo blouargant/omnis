@@ -11,6 +11,7 @@
       "provider_ref": "openai-compat",
       "model": "text-embedding-3-small",
       "embedding": true,
+      "disable_streaming": true,
       "dim": 4096,
       "context_length": 32000,
       "input_token_price_per_million": 0.10
@@ -33,6 +34,7 @@
       "provider_ref": "openai-compat",
       "model": "gemini-3-pro-image-preview",
       "context_length": 65536,
+      "disable_streaming": true,
       "input_token_price_per_million": 2.1,
       "output_token_price_per_million": 12.6
     },

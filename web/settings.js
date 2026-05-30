@@ -1580,6 +1580,10 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!d.providers || typeof d.providers !== "object") d.providers = {};
     if (!d.models || typeof d.models !== "object") d.models = {};
 
+    // The model "in use" dot is driven by whether any agent references the
+    // model via model_ref, so make sure the agent config is loaded first.
+    if (!state.parsed["agent"]) { try { await loadParsed("agent"); } catch (_) {} }
+
     const sub = state.activeModelsSubtab;
     bodyEl.innerHTML = `
       <div class="settings-form">
@@ -1809,23 +1813,69 @@ const BASE_PATH = window.BASE_PATH || "";
     grid.className = "model-cards-grid";
     const providerNames = Object.keys(d.providers || {});
 
+    // Models referenced by at least one agent via model_ref are "in use" and
+    // get a live (green) dot; the rest are unused (grey). Keep the referencing
+    // agent names so the hover label can name the consumer.
+    const usedBy = new Map();
+    for (const a of ((state.parsed["agent"]?.value?.agents) || [])) {
+      if (!a || !a.model_ref) continue;
+      const k = String(a.model_ref).toLowerCase();
+      if (!usedBy.has(k)) usedBy.set(k, []);
+      usedBy.get(k).push(a.name || "(unnamed)");
+    }
+
     Object.keys(d.models).forEach(name => {
       const m = d.models[name] || {};
       const onChange = () => markFormDirty("models");
+      const agents = usedBy.get(name.toLowerCase()) || [];
+      const inUse = agents.length > 0;
+      const dotClass = inUse ? "dot-active" : "dot-standby";
+      const MAX_TIP_AGENTS = 4;
+      const dotTip = inUse
+        ? `Used by ${agents.slice(0, MAX_TIP_AGENTS).join(", ")}${agents.length > MAX_TIP_AGENTS ? ", …" : ""}`
+        : "Unused — no agent uses this model";
       const card = document.createElement("div");
       card.className = "model-card";
       card.innerHTML = `
         <div class="model-card-hdr">
           <div class="model-card-title">
-            <span class="model-status-dot dot-active"></span>
+            <span class="model-status-dot ${dotClass}" data-tip="${escHtml(dotTip)}"></span>
             <strong>${escHtml(name.toUpperCase())}</strong>
-            <span class="model-status-badge badge-active">ACTIVE</span>
           </div>
           <button type="button" class="model-remove-link">⏷ REMOVE</button>
         </div>
         <div class="model-card-body"></div>
       `;
       const body = card.querySelector(".model-card-body");
+
+      // STREAMING toggle — lives in the header, left of the model name. ON when
+      // the model streams (the default), OFF when it falls back to the
+      // non-streaming endpoint (persisted as disable_streaming). Use OFF for
+      // backends whose streamed output misbehaves (e.g. a quantised model
+      // behind vLLM/LiteLLM that runs away only when streamed). A smaller pill
+      // than the body toggles so it fits the header row.
+      const streamWrap = document.createElement("span");
+      streamWrap.className = "model-stream-wrap";
+      streamWrap.title = "stream this model's output (off = use the non-streaming endpoint)";
+      const streamText = document.createElement("span");
+      streamText.className = "model-stream-label";
+      streamText.textContent = "Streaming";
+      const streamSwitch = document.createElement("label");
+      streamSwitch.className = "agent-toggle-switch model-stream-toggle";
+      const streamCb = document.createElement("input");
+      streamCb.type = "checkbox";
+      streamCb.className = "agent-toggle-input";
+      streamCb.checked = !m.disable_streaming;
+      streamCb.addEventListener("change", () => {
+        if (streamCb.checked) delete m.disable_streaming; else m.disable_streaming = true;
+        onChange();
+      });
+      const streamSlider = document.createElement("span");
+      streamSlider.className = "agent-toggle-slider";
+      streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
+      streamWrap.appendChild(streamSwitch); streamWrap.appendChild(streamText);
+      card.querySelector(".model-card-title").appendChild(streamWrap);
+
       const fg = document.createElement("div");
       fg.className = "model-field-grid";
 
@@ -1866,33 +1916,12 @@ const BASE_PATH = window.BASE_PATH || "";
       fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
       fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
 
-      // DISABLE STREAMING flag — forces agents using this model onto the
-      // non-streaming endpoint even when the surface (web UI) requests SSE.
-      // Use it for backends whose streamed output misbehaves (e.g. a quantised
-      // model behind vLLM/LiteLLM that runs away only when streamed). Same pill
-      // switch as the EMBEDDING toggle; the explanation is a tooltip.
-      const streamF = document.createElement("div");
-      streamF.className = "model-field";
-      streamF.title = "call the non-streaming endpoint for this model";
-      const streamLbl = document.createElement("label");
-      streamLbl.className = "model-field-label";
-      streamLbl.textContent = "DISABLE STREAMING";
-      const streamSwitch = document.createElement("label");
-      streamSwitch.className = "agent-toggle-switch";
-      streamSwitch.title = "call the non-streaming endpoint for this model";
-      const streamCb = document.createElement("input");
-      streamCb.type = "checkbox";
-      streamCb.className = "agent-toggle-input";
-      streamCb.checked = !!m.disable_streaming;
-      streamCb.addEventListener("change", () => {
-        if (streamCb.checked) m.disable_streaming = true; else delete m.disable_streaming;
-        onChange();
-      });
-      const streamSlider = document.createElement("span");
-      streamSlider.className = "agent-toggle-slider";
-      streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
-      streamF.appendChild(streamLbl); streamF.appendChild(streamSwitch);
-      fg.appendChild(streamF);
+      // Thin separator setting the embedder-specific fields (EMBEDDING MODEL +
+      // DIM) apart from the general model configuration above. Spans the full
+      // grid row so it inherits the card body's left/right padding.
+      const sep = document.createElement("div");
+      sep.className = "model-field-sep";
+      fg.appendChild(sep);
 
       // EMBEDDING flag — marks this entry as an embeddings model so it appears
       // in the "internal embedding model" selector above. Uses the same pill

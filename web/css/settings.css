@@ -1832,18 +1832,59 @@
   border-radius: 50%;
   flex: 0 0 auto;
 }
+/* Themed hover tooltip for the model "in use" dot. Uses app surface/border
+   tokens so it tracks the active theme; native `title` is intentionally not
+   used so the styling matches the rest of the UI. */
+.model-status-dot[data-tip] { cursor: help; position: relative; }
+.model-status-dot[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -4px;
+  white-space: nowrap;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 50;
+}
+/* Small arrow pointing down at the dot. */
+.model-status-dot[data-tip]::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: rotate(45deg) translateY(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 51;
+}
+.model-status-dot[data-tip]:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+.model-status-dot[data-tip]:hover::before {
+  opacity: 1;
+  transform: rotate(45deg) translateY(0);
+}
 .dot-active  { background: #4ec94e; box-shadow: 0 0 4px #4ec94e88; }
 .dot-standby { background: #555; }
 .model-card-title strong { font-size: 0.85rem; color: var(--text-strong); letter-spacing: 0.04em; }
-.model-status-badge {
-  font-size: 0.67rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 0.1em 0.45em;
-  border-radius: 3px;
-}
-.badge-active  { background: rgba(78,201,78,0.15); color: #4ec94e; }
-.badge-standby { background: rgba(100,100,100,0.15); color: #999; }
 
 .model-remove-link {
   font-size: 0.75rem;
@@ -1891,6 +1932,11 @@
   gap: 0.3rem;
 }
 .model-field-full { grid-column: 1 / -1; }
+.model-field-sep {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+  margin: 0.25rem 0;
+}
 
 .model-field-label {
   font-size: 0.7rem;
@@ -2449,6 +2495,25 @@
 .agent-toggle-input:checked + .agent-toggle-slider { background: var(--accent); }
 .agent-toggle-input:checked + .agent-toggle-slider::before { transform: translateX(16px); }
 .agent-toggle-input:disabled + .agent-toggle-slider { opacity: 0.5; cursor: not-allowed; }
+
+/* Streaming toggle in the model-card header (right of the name + ACTIVE badge) */
+.model-stream-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1.5rem;
+}
+.model-stream-label {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #999);
+}
+/* Smaller pill for the model-card header streaming toggle */
+.model-stream-toggle { width: 28px; height: 16px; flex: 0 0 auto; }
+.model-stream-toggle .agent-toggle-slider::before { width: 10px; height: 10px; top: 3px; left: 3px; }
+.model-stream-toggle .agent-toggle-input:checked + .agent-toggle-slider::before { transform: translateX(12px); }
 
 /* Detail body */
 .agent-detail-body {

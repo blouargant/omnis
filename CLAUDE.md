@@ -745,9 +745,30 @@ from the browser console. Extend it by adding new fields to the object in
 [web/app.js](web/app.js) and calling `_paint()` after mutating state — keeping
 the badge as the single surface for new client-side measurements.
 
-Streaming itself always uses incremental Text-node appends; `marked.parse` runs
-once per segment at finalize. Don't reintroduce per-chunk markdown rendering —
-it makes the UI feel slow even when the wire is fast.
+Streaming renders in two tiers ([web/app.js](web/app.js)
+`streamMdAdvance`/`streamMdFinalize`). **Completed blocks** — anything before a
+blank line outside a fence, or a closed code fence — are promoted to HTML by
+the full `marked.parse` exactly once and never re-parsed. The **in-progress
+trailing block** (the "tail") is a single live node: a raw `<pre><code>` Text
+node for code fences (appended via `appendData` at wire speed, verbatim), and a
+`<span class="md-stream-tail">` for prose. The prose tail is re-rendered every
+token by `lightStreamMd` — a tiny regex renderer that handles the common block
+constructs (ATX headings, ordered/unordered tight lists, `<hr>`, blockquotes)
+plus inline emphasis/strike/code via `lightInline`, collapses accumulated blank
+lines, and emits `<br>` for single newlines to mirror `breaks:true`. Its HTML is
+shaped to match `marked`'s tight-list/heading output so the preview doesn't
+reflow when the real parser flushes the block. `lightInline` protects inline
+code with private-use sentinels (`<n>`) before escaping/emphasis so
+`**\`x\`**` renders as bold-wrapping-code (and code-internal `*`/digits stay
+literal). This is cheap because it only ever touches the current block
+(everything before `s.blockStart` is already flushed), so cost stays O(block),
+not O(message²). The bubble carries **no `white-space: pre-wrap`** — the tail
+emits its own `<br>`s and code lives in `<pre>`, so dropping pre-wrap stops the
+literal newlines `marked` puts between block tags (`</ul>\n<ul>`) from rendering
+as blank gaps mid-stream. **Do not run the full `marked.parse` per chunk on the
+whole message** — that quadratic re-parse is what makes the UI feel slow even
+when the wire is fast; `lightStreamMd` is the bounded exception, and only the
+heavy parser produces the authoritative final HTML at block flush / finalize.
 
 ### Web UI todo plan widget
 

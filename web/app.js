@@ -678,9 +678,87 @@ function collectImagePathsFromResponse(response) {
 // is O(block-size) instead of O(message²), so cost stays bounded as the
 // response grows. The tail keeps streaming at wire speed between flushes.
 
+// Inline-only markdown for one line of the streaming tail: emphasis + inline
+// code. Inline code is first swapped for private-use sentinels (\uE000<n>\uE001
+// — they survive escaping and never occur in real text) so emphasis can still
+// match across a code span (e.g. **`x`** -> bold wrapping code, like marked),
+// then restored verbatim afterwards. Only CLOSED markers render — a half-typed
+// "**bo" stays literal until its closer arrives — mirroring marked (GFM) so the
+// preview doesn't reflow when the real parser flushes the block.
+function lightInline(s) {
+  const code = [];
+  let t = String(s).replace(/`([^`\n]+)`/g, (_, c) => "\uE000" + (code.push(c) - 1) + "\uE001");
+  t = escHtml(t);
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  t = t.replace(/(^|[^_\w])_([^_\n]+)_/g, "$1<em>$2</em>");
+  t = t.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  return t.replace(/\uE000(\d+)\uE001/g, (_, i) => "<code>" + escHtml(code[+i]) + "</code>");
+}
+// Lightweight block+inline renderer for the prose tail (the still-open block).
+// It runs on every token, so by design it only ever touches the current block
+// — never the whole message — which keeps it bounded (O(block)) and cheap; the
+// heavy marked.parse is still reserved for block flush/finalize. It makes the
+// in-flight preview readable instead of showing raw syntax: blank-line runs
+// collapse (a single blank flushes upstream; extras pile up here), and the
+// common block constructs render — ATX headings, unordered/ordered lists,
+// horizontal rules, blockquotes — with inline emphasis inside. The HTML mirrors
+// marked's tight-list/heading output so the preview doesn't reflow on flush.
+function lightStreamMd(text) {
+  let html = "";
+  let para = [];        // buffered consecutive paragraph lines
+  let quote = [];       // buffered consecutive blockquote lines
+  let items = [];       // buffered consecutive list items
+  let listTag = null;   // "ul" | "ol" for the open list
+  const flushPara = () => {
+    if (para.length) { html += "<p>" + para.map(lightInline).join("<br>") + "</p>"; para = []; }
+  };
+  const flushQuote = () => {
+    if (quote.length) { html += "<blockquote><p>" + quote.map(lightInline).join("<br>") + "</p></blockquote>"; quote = []; }
+  };
+  const flushList = () => {
+    if (items.length) {
+      html += "<" + listTag + ">" + items.map(it => "<li>" + lightInline(it) + "</li>").join("") + "</" + listTag + ">";
+      items = []; listTag = null;
+    }
+  };
+  const flushAll = () => { flushPara(); flushQuote(); flushList(); };
+  // Within a tail block, content-separating blank lines have already triggered
+  // an upstream flush, so the only blanks here are leading/accumulated ones.
+  for (const line of String(text || "").split("\n")) {
+    if (line.trim() === "") continue;
+    let m;
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+      flushAll();
+      const lvl = m[1].length;
+      html += "<h" + lvl + ">" + lightInline(m[2]) + "</h" + lvl + ">";
+    } else if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushAll();
+      html += "<hr>";
+    } else if ((m = /^\s*[-*+]\s+(.*)$/.exec(line))) {
+      flushPara(); flushQuote();
+      if (listTag && listTag !== "ul") flushList();
+      listTag = "ul"; items.push(m[1]);
+    } else if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) {
+      flushPara(); flushQuote();
+      if (listTag && listTag !== "ol") flushList();
+      listTag = "ol"; items.push(m[1]);
+    } else if ((m = /^>\s?(.*)$/.exec(line))) {
+      flushPara(); flushList();
+      quote.push(m[1]);
+    } else {
+      flushQuote(); flushList();
+      para.push(line);
+    }
+  }
+  flushAll();
+  return html;
+}
 function streamMdInit(bubble) {
   bubble.textContent = "";
-  const tail = document.createTextNode("");
+  const tail = document.createElement("span");
+  tail.className = "md-stream-tail";
   bubble.appendChild(tail);
   bubble._stream = {
     scanIdx: 0,         // chars of segAcc scanned for line boundaries
@@ -688,16 +766,16 @@ function streamMdInit(bubble) {
     inFence: false,
     fenceCodeStart: 0,  // start of fenced code body (after opening fence line)
     tailEl: tail,       // outer DOM node holding the streaming text
-    tailTextNode: tail, // Text node we appendData() into
+    tailTextNode: null, // raw Text node for code tails (appendData target)
     tailKind: "text",
-    tailSyncedTo: 0,    // segAcc index up to which the tail mirrors
+    tailSyncedTo: 0,    // segAcc index up to which a code tail mirrors
   };
 }
 
 function streamMdReplaceTail(bubble, kind, lang) {
   const s = bubble._stream;
   s.tailEl.remove();
-  let newTail, textNode;
+  let newTail, textNode = null;
   if (kind === "code") {
     newTail = document.createElement("pre");
     const code = document.createElement("code");
@@ -706,8 +784,8 @@ function streamMdReplaceTail(bubble, kind, lang) {
     code.appendChild(textNode);
     newTail.appendChild(code);
   } else {
-    newTail = document.createTextNode("");
-    textNode = newTail;
+    newTail = document.createElement("span");
+    newTail.className = "md-stream-tail";
   }
   bubble.appendChild(newTail);
   s.tailEl = newTail;
@@ -763,10 +841,18 @@ function streamMdAdvance(bubble, fullText) {
       streamMdReplaceTail(bubble, "text");
     }
   }
-  // Append any unprocessed tail (incl. partial trailing line) to the live node.
-  const delta = fullText.slice(s.tailSyncedTo);
-  if (delta) s.tailTextNode.appendData(delta);
-  s.tailSyncedTo = fullText.length;
+  // Update the live tail. Code tails append the raw delta to their Text node
+  // at wire speed (code must stay verbatim). Prose tails re-render the current
+  // block — bounded, since everything before s.blockStart is already flushed —
+  // through the lightweight inline renderer so emphasis/code show and blank
+  // lines collapse during the stream instead of waiting for the block flush.
+  if (s.tailKind === "code") {
+    const delta = fullText.slice(s.tailSyncedTo);
+    if (delta) s.tailTextNode.appendData(delta);
+    s.tailSyncedTo = fullText.length;
+  } else {
+    s.tailEl.innerHTML = lightStreamMd(fullText.slice(s.blockStart));
+  }
 }
 
 function streamMdFinalize(bubble, fullText) {
