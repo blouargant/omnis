@@ -168,6 +168,7 @@ func TestStateLogExtractAndPersist(t *testing.T) {
 	st.recentUserTurns = []string{"please ship feature X using Go"}
 
 	mgr.maybeRefreshStateLog(context.Background(), "u", "s", st)
+	mgr.waitStateLog() // refresh now runs on a detached goroutine
 	if got := llm.calls.Load(); got != 1 {
 		t.Fatalf("expected 1 extractor call, got %d", got)
 	}

@@ -150,6 +150,11 @@ type sessionState struct {
 	recentModelTurns []string     // last few model responses (text + tool calls); used by state-log extractor
 	sumCache         *summaryCache
 	stateLog         stateLogState
+	// stateLogRefreshing guards against overlapping async State Log
+	// refreshes for this session: while one extractor goroutine is running,
+	// further due-refreshes are skipped (turnsSince keeps climbing, so the
+	// next turn after it finishes still triggers one).
+	stateLogRefreshing atomic.Bool
 }
 
 // Plugin returns the configured plugin plus a Wait function (kept for API
@@ -186,13 +191,27 @@ func PluginWithTools(name string, cfg Config) (*plugin.Plugin, []tool.Tool, func
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return p, mgr.tools(), func() {}, nil
+	return p, mgr.tools(), mgr.waitStateLog, nil
 }
+
+// waitStateLog blocks until all in-flight async State Log refreshes have
+// finished. Exposed as the plugin's Wait func and used by tests; production
+// callers generally never need it (refreshes are best-effort and detached).
+func (m *manager) waitStateLog() { m.refreshWG.Wait() }
+
+// stateLogRefreshTimeout bounds a single detached State Log extraction so a
+// hung provider call can't leak a goroutine indefinitely.
+const stateLogRefreshTimeout = 60 * time.Second
 
 // manager owns all session state and the compression pipeline.
 type manager struct {
 	cfg      Config
 	sessions sync.Map // string -> *sessionState
+	// refreshWG tracks in-flight async State Log refreshes so callers (and
+	// tests) can wait for them to settle. The State Log extractor makes a
+	// blocking LLM call; it now runs on a detached goroutine (never on the
+	// live turn's goroutine), so this is the only way to observe completion.
+	refreshWG sync.WaitGroup
 }
 
 func newManager(cfg Config) *manager { return &manager{cfg: cfg} }
@@ -276,6 +295,19 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 // calls (not only user prompts), and refreshes the per-session State Log
 // every StateLogEvery turns.
 func (m *manager) afterModel(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+	// ADK fires this callback for every streamed chunk, not just the
+	// finished turn. Acting on partials is wrong on three counts: it
+	// over-counts turns (once per token), it buffers single-token fragments
+	// into the State Log transcript ("what", "L", "LM"), and — critically —
+	// maybeRefreshStateLog below issues a blocking LLM call that would run
+	// reentrantly while this streamed response body is still being read,
+	// deadlocking the shared HTTP/2 connection to the provider (the stream
+	// never drains, connection flow-control fills, both requests hang).
+	// Only the final, complete response carries the full turn, so ignore
+	// partials entirely.
+	if resp != nil && resp.Partial {
+		return nil, nil
+	}
 	st := m.state(ctx.UserID(), ctx.SessionID())
 	st.totalTurns.Add(1)
 	if resp != nil && resp.UsageMetadata != nil {
@@ -455,22 +487,46 @@ func (m *manager) maybeRefreshStateLog(ctx context.Context, userID, sessionID st
 	if !due {
 		return
 	}
+	// Claim the refresh slot for this session. If one is already running we
+	// skip: turnsSince stays at/above the threshold, so the next turn after
+	// the in-flight refresh completes will trigger a fresh one.
+	if !st.stateLogRefreshing.CompareAndSwap(false, true) {
+		return
+	}
 	transcript := m.stateLogDelta(st)
 	if transcript == "" {
+		st.stateLogRefreshing.Store(false)
 		st.stateLog.mu.Lock()
 		st.stateLog.turnsSince = 0
 		st.stateLog.mu.Unlock()
 		return
 	}
-	delta := extractStateLog(ctx, llm, transcript)
+	// We are committing to a refresh; reset the counter now so turns that
+	// arrive while the extractor runs count toward the next one.
 	st.stateLog.mu.Lock()
-	defer st.stateLog.mu.Unlock()
-	if delta != nil {
-		st.stateLog.log.merge(delta)
-	}
-	st.stateLog.log.TurnCount = int(st.totalTurns.Load())
-	_ = persistStateLog(m.cfg.StateLogPathFunc(userID, sessionID), &st.stateLog.log)
 	st.stateLog.turnsSince = 0
+	st.stateLog.mu.Unlock()
+
+	// Run the extractor on a DETACHED goroutine. It makes a blocking LLM
+	// call; doing that on the live turn's goroutine (which, when streaming,
+	// is mid-read of the response body) reentrantly deadlocks the shared
+	// HTTP/2 connection to the provider. A fresh, timeout-bounded context
+	// keeps it alive past the turn that spawned it without leaking forever.
+	m.refreshWG.Add(1)
+	go func() {
+		defer m.refreshWG.Done()
+		defer st.stateLogRefreshing.Store(false)
+		bgctx, cancel := context.WithTimeout(context.Background(), stateLogRefreshTimeout)
+		defer cancel()
+		delta := extractStateLog(bgctx, llm, transcript)
+		st.stateLog.mu.Lock()
+		defer st.stateLog.mu.Unlock()
+		if delta != nil {
+			st.stateLog.log.merge(delta)
+		}
+		st.stateLog.log.TurnCount = int(st.totalTurns.Load())
+		_ = persistStateLog(m.cfg.StateLogPathFunc(userID, sessionID), &st.stateLog.log)
+	}()
 }
 
 // stateLogDelta renders the conversation slice fed to the State Log
