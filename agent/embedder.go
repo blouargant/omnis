@@ -181,6 +181,9 @@ func (i *Infrastructure) RegistryIndex(ctx context.Context, runtime RuntimeSetti
 			InstalledSquads:   installedSquadNames,
 			InstalledA2A:      installedA2ANames,
 			InstalledCommands: installedCommandNames,
+			InstalledPermissionPatterns: func() map[string]bool {
+				return registries.InstalledPermissionPatterns(paths.FindConfig("permissions.json"))
+			},
 		})
 		if err != nil {
 			log.Printf("regindex: index unavailable: %v", err)

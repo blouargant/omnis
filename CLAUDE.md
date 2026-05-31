@@ -219,7 +219,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
-| `internal/regindex/` | Semantic index over **remote registry** items of **all six kinds** (skills, agents, mcp, a2a, squads, commands) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
+| `internal/regindex/` | Semantic index over **remote registry** items of **all seven kinds** (skills, agents, mcp, a2a, squads, commands, permissions) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
 | `internal/docindex/` | Semantic index over **yoke's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/yoke/docs`; roots from `Roots()`, override `YOKE_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
@@ -256,14 +256,15 @@ BitWidth 4 + UnitNorm cosine):
    `git ls-files`-aware, content-hash incremental.
 4. **`search_registries` / `reindex_registries`** (helper) —
    semantic search over **every kind** advertised by the configured remote
-   registries — skills, agents, mcp, a2a, squads, commands
+   registries — skills, agents, mcp, a2a, squads, commands, permissions
    ([internal/regindex/](internal/regindex/)). Mounted alongside the
    glob `browse_registry` whenever the `registries` tool group is present and an
    embedder resolves. The crawler's `browse_registry` / `get_remote_item` /
-   `install_remote_item` tools likewise cover all six kinds (command install
+   `install_remote_item` tools likewise cover all seven kinds (command install
    writes the per-user `user_commands.json` via the shared
    [internal/usercommands/](internal/usercommands/) package, which also backs the
-   web-UI command editor). **Metadata-only**: embeds the name/description/tags a
+   web-UI command editor; permission install merges rule-sets into
+   `permissions.json`). **Metadata-only**: embeds the name/description/tags a
    browse already returns, so no HTTP fetch beyond a normal browse. Indexing is
    lazy (first `search_registries` call) and self-healing (a corpus hash of the
    registry set — ids+urls+kinds — triggers a rebuild in `Search` when it
@@ -808,10 +809,18 @@ add/delete. Hot-reload picks up squad edits without a process restart.
    ---
    name: my-skill
    description: One-line description shown in list_skills output
+   commands:        # optional — slash commands this skill depends on
+     - my-command
+   permissions:     # optional — permission rule-sets this skill depends on
+     - my-ruleset
    ---
    # Skill content as markdown instructions
    ```
-   The directory name must equal the frontmatter `name` field.
+   The directory name must equal the frontmatter `name` field. The optional
+   `commands` / `permissions` lists are **dependency declarations**: when the
+   skill is installed from a registry, each name is resolved from a configured
+   `commands` / `permissions` registry and installed too (see "Dependency
+   cascade on skill install"). They are inert for a hand-authored local skill.
 
 2. Add the skill name to the `"skills"` list in each agent's
    `registry/agents/<name>/agent.json` that should have access to it:
@@ -889,17 +898,23 @@ a2a_enabled: true
 a2a_port: 8091
 ```
 
-### Remote registries (skills, agents, mcp, a2a, squads, commands)
+### Remote registries (skills, agents, mcp, a2a, squads, commands, permissions)
 
 The web UI can browse and install skills, agents, MCP servers, A2A peers,
-squads, and slash commands from any GitHub, GitLab, or Gitea repository.
-All share the same `remote_registries.json` file (resolved from the config
-search chain; with the same fork-on-first-edit semantics as other config),
-and the same set of provider adapters in
+squads, slash commands, and permission rule-sets from any GitHub, GitLab, or
+Gitea repository. All share the same `remote_registries.json` file (resolved
+from the config search chain; with the same fork-on-first-edit semantics as
+other config), and the same set of provider adapters in
 [internal/registries/](internal/registries/).
 
 Each entry has a `kind` field: `skills` (default when missing — legacy),
-`agents`, `both` (skills + agents), `mcp`, `a2a`, `squads`, or `commands`.
+`agents`, `both` (skills + agents), `mcp`, `a2a`, `squads`, `commands`, or
+`permissions`. A **permissions** registry item is a directory holding a
+`permissions.json` (same `always_deny`/`always_allow`/`ask_user` shape as the
+local file); installing **merges** its rules into the user's `permissions.json`
+deduped by pattern (`registries.MergePermissionsFile`), rather than copying a
+file. The Settings → Registries hub exposes a **Permissions** kind alongside
+the others.
 The Settings → Skills/Agents/MCP/A2A/Commands → Remotes tabs each list
 only the registries whose `kind` matches; a `both` entry shows up in
 both the skills and agents tabs. The "Hosts" selector on the add/edit
@@ -956,6 +971,19 @@ repo/path/to/commands/
     └── repro.md
 ```
 
+Remote layout — permissions: one directory per rule-set, each holding a
+`permissions.json` (same `always_deny`/`always_allow`/`ask_user` shape as the
+local file). The directory leaf is the rule-set name; install **merges** the
+rules into `permissions.json` rather than copying a file.
+
+```
+repo/path/to/permissions/
+├── kubectl-readonly/
+│   └── permissions.json
+└── git-safe/
+    └── permissions.json
+```
+
 The browse view discovers `agent.json`, `SKILL.md`, or command `.md`
 files recursively under the registry URL's `tree` path. The install
 button downloads every file in the matched directory into
@@ -994,6 +1022,27 @@ the web UI route stay in lock-step. Anything not found in any matching registry
 comes back as a `warnings[]` entry, surfaced by `showInstallResult`
 ([web/settings.js](web/settings.js)) for the web UI or in the tool result for the
 helper. Resolution is best-effort and never rolls back the agent install.
+
+**Dependency cascade on skill install** — symmetrically, a **skill** declares
+its dependencies via two SKILL.md frontmatter lists, `commands:` and
+`permissions:` (parsed onto `registries.Frontmatter`). Installing the skill
+cascades them from the configured `commands` / `permissions` registries on
+**both** surfaces:
+
+- **Web UI** ([server/remote_registry.go](server/remote_registry.go) skill
+  install route → [server/install_helpers.go](server/install_helpers.go)):
+  `parseSkillMDDeps` + `tryAutoInstallCommands` / `tryAutoInstallPermissions`.
+- **Helper agent** (`install_remote_item` / `install_remote_skill`,
+  `KindSkills`/`KindBoth`): `Deps.cascadeSkillDeps` fetches the SKILL.md and
+  `Deps.resolveSkillDeps` installs the declared commands/permissions
+  ([internal/registries/agent_deps.go](internal/registries/agent_deps.go)).
+
+Commands install into `user_commands.json`; permission rule-sets **merge** into
+`permissions.json` (deduped by pattern, idempotent). The helper triggers a
+hot-reload after a skill install so newly-merged permission overlays apply live.
+A skill's bundled `permissions.json` (a file inside the skill dir) is still
+copied by `InstallSkill` and loaded as a per-skill runtime overlay — separate
+from the registry-merge path above.
 
 **Hot-reload on helper install** — the `install_remote_item` /
 `link_skill_to_agent` tools call `Deps.RequestReload` after a config-affecting

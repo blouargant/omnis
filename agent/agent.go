@@ -406,6 +406,9 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 		InstalledSquadNames:   installedSquadNames,
 		InstalledA2ANames:     installedA2ANames,
 		InstalledCommandNames: installedCommandNames,
+		InstalledPermissionPatterns: func() map[string]bool {
+			return registries.InstalledPermissionPatterns(paths.FindConfig("permissions.json"))
+		},
 
 		RequestReload: requestReload,
 
@@ -419,6 +422,16 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 			writePath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("mcp_config.json")), "mcp_config.json")
 			added, err := registries.MergeMCPServer(paths.FindConfig("mcp_config.json"), writePath, serverName, srv, inputs)
 			return serverName, added, err
+		},
+
+		InstallPermission: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
+			raw, err := registries.FetchPermissionJSON(ref, token, dirPath)
+			if err != nil {
+				return "", false, err
+			}
+			writePath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("permissions.json")), "permissions.json")
+			added, err := registries.MergePermissionsFile(paths.FindConfig("permissions.json"), writePath, raw)
+			return registries.PermissionSetName(dirPath), added > 0, err
 		},
 
 		InstallAgent: func(ref registries.RepoRef, token, dirPath string, enable bool) (string, bool, error) {

@@ -45,12 +45,13 @@ const (
 	SearchToolName  = "search_registries"
 	ReindexToolName = "reindex_registries"
 
-	kindSkill   = "skill"
-	kindAgent   = "agent"
-	kindMCP     = "mcp"
-	kindA2A     = "a2a"
-	kindSquad   = "squad"
-	kindCommand = "command"
+	kindSkill      = "skill"
+	kindAgent      = "agent"
+	kindMCP        = "mcp"
+	kindA2A        = "a2a"
+	kindSquad      = "squad"
+	kindCommand    = "command"
+	kindPermission = "permission"
 )
 
 // Config supplies the path thunks regindex needs. All are optional; a nil or
@@ -68,6 +69,10 @@ type Config struct {
 	InstalledSquads   func() map[string]bool // agents.json squad names
 	InstalledA2A      func() map[string]bool // a2a_config.json agent names
 	InstalledCommands func() map[string]bool // user_commands.json command names
+	// InstalledPermissionPatterns returns the rule patterns currently in
+	// permissions.json; a permission rule-set whose patterns are all present
+	// indexes as installed.
+	InstalledPermissionPatterns func() map[string]bool
 }
 
 // Meta is the per-item metadata persisted in the sidecar and returned on a hit.
@@ -263,6 +268,16 @@ func defaultBrowse(reg registries.Registry, cfg Config) []semindex.Item {
 					continue
 				}
 				items = append(items, newItem(reg, kindCommand, c.Name, c.DirPath, c.Description, nil, c.Installed))
+			}
+		}
+	}
+	if reg.Serves(registries.KindPermissions) {
+		if perms, berr := registries.BrowsePermissions(ref, reg.Token, resolveMap(cfg.InstalledPermissionPatterns)); berr == nil {
+			for _, p := range perms {
+				if !indexable(p.DirPath) {
+					continue
+				}
+				items = append(items, newItem(reg, kindPermission, p.Name, p.DirPath, p.Description, nil, p.Installed))
 			}
 		}
 	}

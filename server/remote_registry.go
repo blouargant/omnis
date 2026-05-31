@@ -3,12 +3,26 @@ package main
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/registries"
 )
+
+// prefixAll returns a copy of names with prefix prepended to each entry.
+func prefixAll(prefix string, names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = prefix + n
+	}
+	return out
+}
 
 // publicRemote is the browser-safe shape of a remoteRegistry (no token).
 type publicRemote struct {
@@ -37,7 +51,7 @@ func toPublicRemote(r registries.Registry) publicRemote {
 // the agents UI).
 func normalizeKindInput(raw, defaultKind string) string {
 	switch strings.TrimSpace(raw) {
-	case registries.KindSkills, registries.KindAgents, registries.KindBoth, registries.KindMCP, registries.KindA2A, registries.KindSquads, registries.KindCommands:
+	case registries.KindSkills, registries.KindAgents, registries.KindBoth, registries.KindMCP, registries.KindA2A, registries.KindSquads, registries.KindCommands, registries.KindPermissions:
 		return strings.TrimSpace(raw)
 	case "":
 		return defaultKind
@@ -113,7 +127,30 @@ func registerRemoteRegistryRoutes(rg *gin.RouterGroup, readPath func() string, w
 			c.JSON(http.StatusBadGateway, skillsErr("INSTALL_ERROR", err.Error()))
 			return
 		}
-		c.JSON(http.StatusCreated, gin.H{"name": skillName})
+		// Cascade the skill's declared commands + permission rule-sets so it
+		// arrives with everything it needs (mirrors the agent dependency
+		// cascade and the helper agent's install_remote_item).
+		var installedDeps, warnings []string
+		if raw, ferr := registries.FetchSkillMD(ref, reg.Token, dirPath); ferr == nil {
+			commands, perms := parseSkillMDDeps(raw)
+			cmdInstalled, cmdWarns := tryAutoInstallCommands(commands, readPath())
+			installedDeps = append(installedDeps, prefixAll("command:", cmdInstalled)...)
+			warnings = append(warnings, cmdWarns...)
+
+			permRead := paths.FindConfig("permissions.json")
+			permWrite := filepath.Join(paths.ConfigWriteDir(), "permissions.json")
+			permInstalled, permWarns := tryAutoInstallPermissions(perms, permRead, permWrite, readPath())
+			installedDeps = append(installedDeps, prefixAll("permission:", permInstalled)...)
+			warnings = append(warnings, permWarns...)
+		}
+		resp := gin.H{"name": skillName}
+		if len(installedDeps) > 0 {
+			resp["installed_deps"] = installedDeps
+		}
+		if len(warnings) > 0 {
+			resp["warnings"] = warnings
+		}
+		c.JSON(http.StatusCreated, resp)
 	})
 }
 

@@ -43,6 +43,11 @@ type Deps struct {
 	// (normalised) currently in user_commands.json. Used to annotate the
 	// Installed flag when browsing command registries.
 	InstalledCommandNames func() map[string]bool
+	// InstalledPermissionPatterns returns the set of rule patterns currently in
+	// the user's permissions.json. Used to annotate the Installed flag when
+	// browsing a permissions registry (a rule-set whose patterns are all present
+	// shows as installed).
+	InstalledPermissionPatterns func() map[string]bool
 
 	// InstallMCP downloads and merges an MCP server into mcp_config.json.
 	// Returns the server name, whether it was newly added, and any error.
@@ -69,6 +74,12 @@ type Deps struct {
 	// newly added (vs. replaced), and any error. When nil, the install tool
 	// returns an error in this surface.
 	InstallCommand func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
+
+	// InstallPermission downloads a remote permission rule-set and merges its
+	// rules into the user's permissions.json (deduped by pattern). Returns the
+	// rule-set name, whether any new rule was added, and any error. When nil,
+	// the install tool returns an error in this surface.
+	InstallPermission func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
 
 	// RequestReload, when set, triggers a hot-reload of the agent generation so
 	// a just-installed item (agent, MCP server, squad, A2A peer) is wired into
@@ -112,13 +123,14 @@ type browseRegistryIn struct {
 // browseRegistryOut is a union type: only the fields matching the registry's
 // Kind are populated. Check the Kind field to know which slice to read.
 type browseRegistryOut struct {
-	Kind     string         `json:"kind"`
-	Skills   []SkillInfo    `json:"skills,omitempty"`
-	Agents   []AgentInfo    `json:"agents,omitempty"`
-	MCP      []MCPToolInfo  `json:"mcp,omitempty"`
-	Squads   []SquadInfo    `json:"squads,omitempty"`
-	A2A      []A2AAgentInfo `json:"a2a,omitempty"`
-	Commands []CommandInfo  `json:"commands,omitempty"`
+	Kind        string           `json:"kind"`
+	Skills      []SkillInfo      `json:"skills,omitempty"`
+	Agents      []AgentInfo      `json:"agents,omitempty"`
+	MCP         []MCPToolInfo    `json:"mcp,omitempty"`
+	Squads      []SquadInfo      `json:"squads,omitempty"`
+	A2A         []A2AAgentInfo   `json:"a2a,omitempty"`
+	Commands    []CommandInfo    `json:"commands,omitempty"`
+	Permissions []PermissionInfo `json:"permissions,omitempty"`
 }
 
 type getRemoteSkillIn struct {
@@ -147,6 +159,13 @@ type installRemoteSkillIn struct {
 
 type installRemoteSkillOut struct {
 	Name string `json:"name"`
+	// InstalledDeps lists commands/permission-sets auto-installed alongside the
+	// skill (prefixed "command:" / "permission:"), declared in its SKILL.md.
+	InstalledDeps []string `json:"installed_deps,omitempty"`
+	// Warnings carries best-effort dependency-resolution failures.
+	Warnings []string `json:"warnings,omitempty"`
+	// Reloaded reports whether a hot-reload was triggered.
+	Reloaded bool `json:"reloaded,omitempty"`
 }
 
 type installRemoteItemIn struct {
@@ -382,6 +401,17 @@ func NewTools(deps Deps) []tool.Tool {
 					}
 					out.Commands = commands
 
+				case KindPermissions:
+					var installedPatterns map[string]bool
+					if deps.InstalledPermissionPatterns != nil {
+						installedPatterns = deps.InstalledPermissionPatterns()
+					}
+					perms, err := BrowsePermissions(ref, token, installedPatterns)
+					if err != nil {
+						return browseRegistryOut{}, err
+					}
+					out.Permissions = perms
+
 				default:
 					return browseRegistryOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
@@ -438,6 +468,8 @@ func NewTools(deps Deps) []tool.Tool {
 					body, err = FetchA2AAgentJSON(ref, token, in.DirPath)
 				case KindCommands:
 					body, err = FetchCommandMD(ref, token, in.DirPath)
+				case KindPermissions:
+					body, err = FetchPermissionJSON(ref, token, in.DirPath)
 				default:
 					return getRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
@@ -463,12 +495,20 @@ func NewTools(deps Deps) []tool.Tool {
 				if err != nil {
 					return installRemoteSkillOut{}, err
 				}
-				return installRemoteSkillOut{Name: name}, nil
+				// Cascade the skill's declared commands + permission rule-sets so
+				// it arrives with everything it needs, then reload so bundled
+				// permission overlays apply live.
+				installedDeps, warnings := deps.cascadeSkillDeps(ref, token, in.DirPath)
+				reloaded := false
+				if len(installedDeps) > 0 {
+					reloaded = deps.requestReload()
+				}
+				return installRemoteSkillOut{Name: name, InstalledDeps: installedDeps, Warnings: warnings, Reloaded: reloaded}, nil
 			}),
 
 		mustTool("install_remote_item",
-			"Install any remote registry item: skill, agent, MCP server, squad, A2A agent, or slash command. "+
-				"Dispatches based on the registry's kind. For skills, use link_skill_to_agent "+
+			"Install any remote registry item: skill, agent, MCP server, squad, A2A agent, slash command, or permission rule-set. "+
+				"Dispatches based on the registry's kind. Installing a skill also cascades any commands/permissions it declares in its SKILL.md. For skills, use link_skill_to_agent "+
 				"afterwards to grant a specific agent access. For agents, set `enable: true` to "+
 				"append the agent to agents.json so the next hot-reload wires it in. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) "+
@@ -489,7 +529,16 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					return installRemoteItemOut{Name: name, Kind: KindSkills, Added: true}, nil
+					// Cascade the skill's declared commands + permission rule-sets.
+					installedDeps, warnings := deps.cascadeSkillDeps(ref, token, in.DirPath)
+					reloaded := false
+					if len(installedDeps) > 0 {
+						reloaded = deps.requestReload()
+					}
+					return installRemoteItemOut{
+						Name: name, Kind: KindSkills, Added: true,
+						InstalledDeps: installedDeps, Warnings: warnings, Reloaded: reloaded,
+					}, nil
 
 				case KindAgents:
 					if deps.InstallAgent == nil {
@@ -555,6 +604,17 @@ func NewTools(deps Deps) []tool.Tool {
 						return installRemoteItemOut{}, err
 					}
 					return installRemoteItemOut{Name: name, Kind: KindCommands, Added: added}, nil
+
+				case KindPermissions:
+					if deps.InstallPermission == nil {
+						return installRemoteItemOut{}, fmt.Errorf("permission install is not available in this surface")
+					}
+					name, added, err := deps.InstallPermission(ref, token, in.DirPath)
+					if err != nil {
+						return installRemoteItemOut{}, err
+					}
+					reloaded := added && deps.requestReload()
+					return installRemoteItemOut{Name: name, Kind: KindPermissions, Added: added, Reloaded: reloaded}, nil
 
 				default:
 					return installRemoteItemOut{}, fmt.Errorf("unsupported registry kind %q", kind)

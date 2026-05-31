@@ -5,7 +5,127 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// resolveSkillDeps installs the commands and permission rule-sets a skill
+// declares (in its SKILL.md frontmatter) but that are not yet present locally,
+// browsing the configured `commands` and `permissions` registries. Mirrors
+// resolveAgentDeps: best-effort, a dependency that cannot be located yields a
+// warning rather than an error so the skill install is never rolled back.
+// Returns the names installed (prefixed "command:" / "permission:") and
+// warnings for anything not found.
+func (d Deps) resolveSkillDeps(commands, perms []string) (installed, warnings []string) {
+	if len(commands) == 0 && len(perms) == 0 {
+		return nil, nil
+	}
+	var regs []Registry
+	if d.ConfigPath != nil {
+		regs, _ = LoadRegistries(d.ConfigPath())
+	}
+
+	var cmdInstalled map[string]bool
+	if d.InstalledCommandNames != nil {
+		cmdInstalled = d.InstalledCommandNames()
+	}
+	for _, name := range commands {
+		if name == "" {
+			continue
+		}
+		if cmdInstalled[strings.ToLower(strings.TrimSpace(name))] {
+			continue
+		}
+		if d.InstallCommand == nil {
+			warnings = append(warnings, fmt.Sprintf("command %q is required but command install is unavailable in this surface", name))
+			continue
+		}
+		found := false
+		for _, reg := range regs {
+			if !reg.Serves(KindCommands) {
+				continue
+			}
+			ref, err := ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			items, err := BrowseCommands(ref, reg.Token, nil)
+			if err != nil {
+				continue
+			}
+			for _, c := range items {
+				if strings.EqualFold(c.Name, name) {
+					if _, _, err := d.InstallCommand(ref, reg.Token, c.DirPath); err == nil {
+						installed = append(installed, "command:"+name)
+						found = true
+					}
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("command %q is required but was not found in any configured registry", name))
+		}
+	}
+
+	for _, name := range perms {
+		if name == "" {
+			continue
+		}
+		if d.InstallPermission == nil {
+			warnings = append(warnings, fmt.Sprintf("permission set %q is required but permission install is unavailable in this surface", name))
+			continue
+		}
+		found := false
+		for _, reg := range regs {
+			if !reg.Serves(KindPermissions) {
+				continue
+			}
+			ref, err := ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			items, err := BrowsePermissions(ref, reg.Token, nil)
+			if err != nil {
+				continue
+			}
+			for _, p := range items {
+				if strings.EqualFold(p.Name, name) {
+					if _, _, err := d.InstallPermission(ref, reg.Token, p.DirPath); err == nil {
+						installed = append(installed, "permission:"+name)
+						found = true
+					}
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("permission set %q is required but was not found in any configured registry", name))
+		}
+	}
+	return installed, warnings
+}
+
+// cascadeSkillDeps fetches a just-installed skill's SKILL.md, parses its
+// declared commands/permissions from the frontmatter, and installs the missing
+// ones from the configured registries. Best-effort: a missing SKILL.md or
+// unreadable frontmatter simply yields no cascade.
+func (d Deps) cascadeSkillDeps(ref RepoRef, token, dirPath string) (installed, warnings []string) {
+	raw, err := FetchSkillMD(ref, token, dirPath)
+	if err != nil {
+		return nil, nil
+	}
+	fm, err := ParseFrontmatter(raw)
+	if err != nil {
+		return nil, nil
+	}
+	return d.resolveSkillDeps(fm.Commands, fm.Permissions)
+}
 
 // requestReload fires the hot-reload hook if the surface wired one and reports
 // whether it did. A no-op (returns false) on surfaces without hot-reload

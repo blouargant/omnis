@@ -17,6 +17,12 @@ type Frontmatter struct {
 	Name        string                 `yaml:"name"`
 	Description string                 `yaml:"description"`
 	Metadata    map[string]interface{} `yaml:"metadata"`
+	// Commands and Permissions are dependency lists, mirroring how an
+	// agent.json declares skills/mcp_servers: each name is resolved from a
+	// configured commands / permissions registry and installed when the skill
+	// itself is installed, so a skill arrives with everything it needs.
+	Commands    []string `yaml:"commands"`
+	Permissions []string `yaml:"permissions"`
 }
 
 // Author extracts metadata.author, returning "" when absent.

@@ -218,6 +218,7 @@ const BASE_PATH = window.BASE_PATH || "";
     a2aRemotes: { browsing: null }, // A2A remotes panel state
     squadRemotes: { browsing: null }, // Squad remotes panel state
     commandsRemotes: { browsing: null, viewing: null }, // Commands remotes panel state
+    permissionsRemotes: { browsing: null, viewing: null }, // Permissions remotes panel state
     activeRemoteKind: "agents",       // Selected kind in the Agents→Remotes split panel
     activeRegistryKind: "skills",     // Selected kind in the consolidated Registries hub
     docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
@@ -902,6 +903,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "mcp",      label: "MCP"      },
     { id: "a2a",      label: "A2A"      },
     { id: "commands", label: "Commands" },
+    { id: "permissions", label: "Permissions" },
   ];
 
   async function renderRegistriesHub(host = bodyEl) {
@@ -934,6 +936,7 @@ const BASE_PATH = window.BASE_PATH || "";
       state.mcpRemotes = { browsing: null, viewing: null };
       state.a2aRemotes = { browsing: null };
       state.commandsRemotes = { browsing: null, viewing: null };
+      state.permissionsRemotes = { browsing: null, viewing: null };
     }
 
     function renderKindNav() {
@@ -977,6 +980,7 @@ const BASE_PATH = window.BASE_PATH || "";
         case "mcp":      await renderMCPRemotesSection(rightEl); return;
         case "a2a":      await renderA2ARemotesSection(rightEl); return;
         case "commands": await renderCommandsRemotesSection(rightEl); return;
+        case "permissions": await renderPermissionsRemotesSection(rightEl); return;
       }
     }
 
@@ -4369,6 +4373,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>A2A Agents</option>
             <option value="squads"${kindVal === "squads" ? " selected" : ""}>Squads</option>
             <option value="commands"${kindVal === "commands" ? " selected" : ""}>Slash Commands</option>
+            <option value="permissions"${kindVal === "permissions" ? " selected" : ""}>Permissions</option>
           </select>
           <span class="registry-dialog-hint">Tab where this registry will appear.</span>
         </div>
@@ -7826,6 +7831,295 @@ const BASE_PATH = window.BASE_PATH || "";
         btn.disabled = false;
         btn.textContent = "Install";
       }
+      setStatus("Install failed: " + err.message, "error");
+    }
+  }
+
+  // ─── Permissions remotes ───────────────────────────────────────────────
+  // Mirrors the commands remotes section but for permission rule-sets, backed
+  // by /api/permissions-registry/remotes/* on the server. Each entry in a
+  // remote registry is a directory containing a permissions.json; installing
+  // merges its rules into the user's permissions.json (deduped by pattern).
+
+  const remotePermissionsCache = {}; // keyed by registry ID → { permissions, timestamp }
+
+  async function renderPermissionsRemotesSection(host) {
+    if (state.permissionsRemotes.viewing) {
+      await renderPermissionsRemoteDetailView(host);
+      return;
+    }
+    if (state.permissionsRemotes.browsing) {
+      await renderPermissionsRemoteBrowseView(host);
+      return;
+    }
+
+    host.innerHTML = `
+      <section class="form-section">
+        <h3>Remote permission registries
+          <button type="button" class="add-btn" id="perm-remote-add">+ Add</button>
+        </h3>
+        <p class="settings-hint">
+          Browse and install permission rule-sets from GitHub, GitLab, or Gitea repositories.
+          Each rule-set is a directory holding a <code>permissions.json</code>
+          (<code>always_deny</code> / <code>always_allow</code> / <code>ask_user</code>).
+          Installing merges its rules into your permissions.json (deduped by pattern).
+        </p>
+        <div id="perm-remote-list"></div>
+      </section>
+    `;
+    const listEl = host.querySelector("#perm-remote-list");
+    await refreshPermissionsRemoteList(listEl);
+
+    host.querySelector("#perm-remote-add").addEventListener("click", async () => {
+      const result = await appRegistryDialog({
+        title: "Add Permission Registry",
+        defaultKind: "permissions",
+      });
+      if (!result) return;
+      try {
+        await skillsPost("/permissions-registry/remotes", result);
+        await refreshPermissionsRemoteList(listEl);
+      } catch (e) {
+        setStatus("Failed to add registry: " + e.message, "error");
+      }
+    });
+  }
+
+  async function refreshPermissionsRemoteList(container) {
+    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    let remotes;
+    try {
+      const res = await skillsGet("/permissions-registry/remotes");
+      remotes = res.remotes || [];
+    } catch (e) {
+      container.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      return;
+    }
+    if (!remotes.length) {
+      container.innerHTML = `<p class="empty">No remote permission registries configured. Add a GitHub, GitLab, or Gitea repository to browse and install permission rule-sets.</p>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const r of remotes) {
+      const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
+      const row = document.createElement("div");
+      row.className = "remote-reg-row";
+      row.innerHTML = `
+        <div class="remote-reg-info">
+          <span class="remote-reg-name">${escHtml(r.name)}${providerLabel ? ` <span class="remote-reg-provider">${escHtml(providerLabel)}</span>` : ""}</span>
+          <span class="remote-reg-url">${escHtml(r.url)}</span>
+        </div>
+        <div class="remote-reg-actions">
+          <button type="button" class="add-btn remote-browse-btn">Browse</button>
+          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
+          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+        </div>
+      `;
+      row.querySelector(".remote-browse-btn").addEventListener("click", () => {
+        state.permissionsRemotes.browsing = { id: r.id, name: r.name, url: r.url };
+        (registriesHubRefresh || (() => renderPermissionsRemotesSection(container.parentElement)))();
+      });
+      row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
+        const result = await appRegistryDialog({
+          title: "Edit Permission Registry",
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          isEdit: true,
+          defaultKind: "permissions",
+        });
+        if (!result) return;
+        try {
+          await skillsPut(`/permissions-registry/remotes/${r.id}`, result);
+          delete remotePermissionsCache[r.id];
+          await refreshPermissionsRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to update registry: " + e.message, "error");
+        }
+      });
+      row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
+        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        try {
+          await skillsDel(`/permissions-registry/remotes/${r.id}`);
+          delete remotePermissionsCache[r.id];
+          await refreshPermissionsRemoteList(container);
+        } catch (e) {
+          setStatus("Failed to remove registry: " + e.message, "error");
+        }
+      });
+      container.appendChild(row);
+    }
+  }
+
+  async function renderPermissionsRemoteBrowseView(host) {
+    const { id, name } = state.permissionsRemotes.browsing;
+    const cached = remotePermissionsCache[id];
+    const hasCached = !!(cached && (Date.now() - cached.timestamp < REMOTE_CACHE_TTL));
+
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header remote-browse-top">
+          <button type="button" class="skill-back-btn">Back to registries</button>
+          <span class="remote-browse-refresh-badge"${hasCached ? "" : " hidden"}>Refreshing…</span>
+        </div>
+        ${!hasCached ? `
+          <div class="remote-browse-loading">
+            <p class="settings-loading">Browsing <strong>${escHtml(name)}</strong>…</p>
+            <p class="settings-hint">Scanning the repository tree for permission rule-sets. This may take a moment.</p>
+          </div>
+        ` : ""}
+        <div id="perm-remote-browse-content"></div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.permissionsRemotes.browsing = null;
+      (registriesHubRefresh || (() => renderPermissionsRemotesSection(host)))();
+    });
+
+    const contentEl = host.querySelector("#perm-remote-browse-content");
+
+    function populateContent(perms) {
+      contentEl.innerHTML = "";
+      const truncated = perms.some(p => p.dir_path === "__truncated__");
+      const real = perms.filter(p => p.dir_path !== "__truncated__");
+
+      const hdr = document.createElement("div");
+      hdr.className = "remote-browse-header";
+      hdr.innerHTML = `
+        <span class="remote-browse-title">${escHtml(name)}</span>
+        <span class="remote-browse-count">${real.length} rule-set${real.length !== 1 ? "s" : ""}${truncated ? " (tree truncated — some entries may be missing)" : ""}</span>
+      `;
+      contentEl.appendChild(hdr);
+
+      if (!real.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No permission rule-sets found. Each must be a directory containing a permissions.json file.";
+        contentEl.appendChild(empty);
+        return;
+      }
+
+      const grouped = new Map();
+      for (const p of real) {
+        const g = p.group || "";
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g).push(p);
+      }
+      const sortedGroups = [...grouped.keys()].sort((a, b) => {
+        if (a === "") return -1; if (b === "") return 1;
+        return a.localeCompare(b);
+      });
+
+      function buildPermCard(perm) {
+        const card = document.createElement("div");
+        card.className = "skill-mkt-card remote-skill-card";
+        const actionHtml = perm.installed
+          ? `<span class="remote-skill-installed-badge">Installed</span>`
+          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+        const rulesRow = perm.rules
+          ? `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">rules</span><span class="remote-agent-meta-chips"><span class="remote-agent-chip">${perm.rules}</span></span></div>`
+          : "";
+        card.innerHTML = `
+          <div class="skill-mkt-header">
+            <span class="skill-mkt-filename">${escHtml(perm.name)}</span>
+            ${actionHtml}
+          </div>
+          <div class="skill-mkt-body">
+            <p class="skill-mkt-desc">${escHtml(perm.description || "(permission rule-set)")}</p>
+            ${rulesRow}
+          </div>
+        `;
+        if (!perm.installed) {
+          card.querySelector(".remote-install-btn").addEventListener("click", e => {
+            e.stopPropagation();
+            doInstallPermission(id, perm, card);
+          });
+        }
+        card.addEventListener("click", e => {
+          if (e.target.closest(".remote-install-btn")) return;
+          state.permissionsRemotes.viewing = { ...state.permissionsRemotes.browsing, perm };
+          (registriesHubRefresh || (() => renderPermissionsRemotesSection(host)))();
+        });
+        return card;
+      }
+
+      renderGroupedRemoteList({ contentEl, sortedGroups, grouped, buildCard: buildPermCard });
+    }
+
+    if (hasCached) populateContent(cached.permissions);
+
+    try {
+      const res = await skillsGet(`/permissions-registry/remotes/${id}/browse`);
+      const perms = res.permissions || [];
+      remotePermissionsCache[id] = { permissions: perms, timestamp: Date.now() };
+      host.querySelector(".remote-browse-refresh-badge")?.setAttribute("hidden", "");
+      host.querySelector(".remote-browse-loading")?.remove();
+      populateContent(perms);
+    } catch (e) {
+      if (!hasCached) {
+        contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
+      } else {
+        setStatus("Failed to refresh registry: " + e.message, "error");
+      }
+    }
+  }
+
+  async function renderPermissionsRemoteDetailView(host) {
+    const { id, name, perm } = state.permissionsRemotes.viewing;
+    host.innerHTML = `
+      <div class="skill-detail-view">
+        <div class="skill-detail-header">
+          <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
+        </div>
+        <div class="skill-content-wrap">
+          <pre class="skill-md-preview" id="perm-json-preview"><code>Loading…</code></pre>
+        </div>
+        <div class="skill-detail-footer">
+          <span></span>
+          <span class="skill-save-status"></span>
+          ${perm.installed
+            ? `<span class="remote-skill-installed-badge">Installed</span>`
+            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+        </div>
+      </div>
+    `;
+    host.querySelector(".skill-back-btn").addEventListener("click", () => {
+      state.permissionsRemotes.viewing = null;
+      (registriesHubRefresh || (() => renderPermissionsRemotesSection(host)))();
+    });
+
+    const preview = host.querySelector("#perm-json-preview code");
+    try {
+      const res = await skillsGet(`/permissions-registry/remotes/${id}/permission/${perm.dir_path}`);
+      let pretty = res.content || "";
+      try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch { /* leave raw */ }
+      preview.textContent = pretty;
+    } catch (e) {
+      preview.textContent = e.message;
+    }
+
+    const installBtn = host.querySelector(".remote-install-btn");
+    if (installBtn) {
+      installBtn.addEventListener("click", () => doInstallPermission(id, perm, host, installBtn));
+    }
+  }
+
+  // doInstallPermission posts the install and swaps the button to "Installed".
+  async function doInstallPermission(registryID, perm, cardOrHost, installBtn) {
+    const btn = installBtn || cardOrHost.querySelector(".remote-install-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    try {
+      const res = await skillsPost(`/permissions-registry/remotes/${registryID}/install/${perm.dir_path}`, {});
+      perm.installed = true;
+      if (btn) {
+        btn.replaceWith(Object.assign(document.createElement("span"), {
+          className: "remote-skill-installed-badge",
+          textContent: "Installed",
+        }));
+      }
+      const n = res.rules || 0;
+      setStatus(`Permission set "${res.name}" merged (${n} new rule${n !== 1 ? "s" : ""}). Reload to apply.`, "success");
+      delete remotePermissionsCache[registryID];
+    } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = "Install"; }
       setStatus("Install failed: " + err.message, "error");
     }
   }

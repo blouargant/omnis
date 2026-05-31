@@ -15,13 +15,14 @@ const (
 // Kind values for Registry.Kind. An empty value is treated as KindSkills for
 // backwards compatibility with pre-existing remote_registries.json entries.
 const (
-	KindSkills   = "skills"
-	KindAgents   = "agents"
-	KindBoth     = "both"
-	KindMCP      = "mcp"
-	KindA2A      = "a2a"
-	KindSquads   = "squads"
-	KindCommands = "commands"
+	KindSkills      = "skills"
+	KindAgents      = "agents"
+	KindBoth        = "both"
+	KindMCP         = "mcp"
+	KindA2A         = "a2a"
+	KindSquads      = "squads"
+	KindCommands    = "commands"
+	KindPermissions = "permissions"
 )
 
 // Registry is one entry in remote_registries.json.
@@ -96,6 +97,20 @@ type CommandInfo struct {
 	Description  string `json:"description,omitempty"`
 	ArgumentHint string `json:"argument_hint,omitempty"`
 	Installed    bool   `json:"installed"`
+}
+
+// PermissionInfo is one permission rule-set returned when browsing a remote
+// permissions registry. Each item is a directory containing a permissions.json
+// (the same always_deny / always_allow / ask_user shape as the local
+// permissions.json); the directory leaf is the rule-set name. Installing merges
+// its rules into the user's permissions.json.
+type PermissionInfo struct {
+	Name        string `json:"name"`
+	DirPath     string `json:"dir_path"`        // path to the permissions.json, relative to registry root
+	Group       string `json:"group,omitempty"` // intermediate dirs before the rule-set dir
+	Description string `json:"description,omitempty"`
+	Rules       int    `json:"rules,omitempty"` // total rule count across the three tiers
+	Installed   bool   `json:"installed"`
 }
 
 // A2AAgentInfo is one A2A agent returned when browsing a remote A2A registry.

@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
+	"github.com/blouargant/yoke/internal/claudeformat"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/yoke/internal/usercommands"
 )
 
 // tryAutoInstallSkills checks which skills in skillNames are not locally installed
@@ -222,4 +226,130 @@ func parseAgentJSONDeps(agentJSONPath string) (skills, mcpServers []string) {
 	}
 	mcpServers = append(entry.MCPServers, entry.MCPServersAlt...)
 	return entry.Skills, mcpServers
+}
+
+// parseSkillMDDeps extracts the commands and permissions dependency lists
+// declared in a SKILL.md's YAML frontmatter.
+func parseSkillMDDeps(raw []byte) (commands, permissions []string) {
+	fm, err := registries.ParseFrontmatter(raw)
+	if err != nil {
+		return nil, nil
+	}
+	return fm.Commands, fm.Permissions
+}
+
+// tryAutoInstallCommands installs the named slash-commands from configured
+// `commands` registries (skipping those already present in user_commands.json),
+// mirroring tryAutoInstallSkills/tryAutoInstallMCP. Returns the names installed
+// and warnings for anything not found.
+func tryAutoInstallCommands(commandNames []string, remoteRegistriesPath string) (installed []string, warnings []string) {
+	if len(commandNames) == 0 {
+		return
+	}
+	regs, _ := registries.LoadRegistries(remoteRegistriesPath)
+	existing := map[string]bool{}
+	for _, c := range usercommands.Load(usercommands.DefaultPath()) {
+		existing[usercommands.NormName(c.Name)] = true
+	}
+	for _, name := range commandNames {
+		if name == "" || existing[usercommands.NormName(name)] {
+			continue
+		}
+		found := false
+		for _, reg := range regs {
+			if !reg.Serves(registries.KindCommands) {
+				continue
+			}
+			ref, err := registries.ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			items, err := registries.BrowseCommands(ref, reg.Token, nil)
+			if err != nil {
+				continue
+			}
+			for _, ci := range items {
+				if !strings.EqualFold(ci.Name, name) {
+					continue
+				}
+				raw, ferr := registries.FetchCommandMD(ref, reg.Token, ci.DirPath)
+				if ferr != nil {
+					break
+				}
+				def, perr := claudeformat.ParseCommandMarkdown(raw)
+				if perr != nil {
+					break
+				}
+				cn := def.Name
+				if cn == "" {
+					cn = strings.TrimSuffix(path.Base(ci.DirPath), ".md")
+				}
+				cmd := usercommands.Command{Name: cn, Description: def.Description, Args: def.ArgumentHint, Prompt: def.Prompt}
+				if usercommands.Validate(&cmd) == nil {
+					if _, _, uerr := usercommands.Upsert(usercommands.DefaultPath(), cmd, ""); uerr == nil {
+						installed = append(installed, name)
+						found = true
+					}
+				}
+				break
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("command %q is required but was not found in any configured registry", name))
+		}
+	}
+	return
+}
+
+// tryAutoInstallPermissions merges the named permission rule-sets from configured
+// `permissions` registries into permissions.json. Returns the names installed and
+// warnings for anything not found.
+func tryAutoInstallPermissions(permNames []string, permReadPath, permWritePath, remoteRegistriesPath string) (installed []string, warnings []string) {
+	if len(permNames) == 0 {
+		return
+	}
+	regs, _ := registries.LoadRegistries(remoteRegistriesPath)
+	for _, name := range permNames {
+		if name == "" {
+			continue
+		}
+		found := false
+		for _, reg := range regs {
+			if !reg.Serves(registries.KindPermissions) {
+				continue
+			}
+			ref, err := registries.ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			items, err := registries.BrowsePermissions(ref, reg.Token, nil)
+			if err != nil {
+				continue
+			}
+			for _, pi := range items {
+				if !strings.EqualFold(pi.Name, name) {
+					continue
+				}
+				raw, ferr := registries.FetchPermissionJSON(ref, reg.Token, pi.DirPath)
+				if ferr != nil {
+					break
+				}
+				if _, merr := registries.MergePermissionsFile(permReadPath, permWritePath, raw); merr == nil {
+					installed = append(installed, name)
+					found = true
+				}
+				break
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("permission set %q is required but was not found in any configured registry", name))
+		}
+	}
+	return
 }
