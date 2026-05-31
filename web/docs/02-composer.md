@@ -36,6 +36,49 @@ are short prompts the agent expands into a full instruction — for example:
 The slash registry is populated from the agent's loaded skills; see the
 **Skills** section for how to add your own.
 
+## Shell commands (`!`)
+
+Start a message with `!` to run the rest of the line **directly on the host**,
+without involving the agent — a shell-escape, like `!` in `vim` or `psql`. For
+example:
+
+```
+!ls -hal /tmp
+!git status
+!cd src && go build ./...
+```
+
+The command runs on the machine the server is running on, and its output is
+shown in a green terminal-style block right in the chat.
+
+- **Permissions are bypassed.** Because you typed the command yourself, it is
+  *not* routed through the `ask_user` permission prompts. The hard **safety
+  floor** still applies, so commands like `rm -rf /` are refused (see the
+  **Permissions** section).
+- **The working directory persists per session.** `!cd somedir` affects later
+  `!` commands in the same session; the directory is shown under each block.
+  (Only the directory carries over — environment variables and shell functions
+  do not, because each command runs in a fresh shell.)
+- **Not part of the conversation.** Shell output is a live convenience: it is
+  shown in the transcript but is *not* sent to the model and does *not* survive
+  a page reload.
+
+### Tab completion
+
+As you type after `!`, a completion menu appears, just like a terminal:
+
+- The **first word** completes against executable command names on your `$PATH`.
+- **Later words** (and anything containing a `/`) complete against files and
+  directories, relative to the session's current directory. Directories get a
+  trailing `/` so you can keep completing into them.
+
+Use **↑/↓** to move through the suggestions, **Tab** or **Enter** to accept the
+highlighted one, and **Esc** to dismiss the menu. Pressing **Enter** with
+nothing highlighted runs the command.
+
+> The same `!` shell-escape and completion are also available in the terminal
+> UI (`yoke tui`), where it uses the input field's autocomplete dropdown.
+
 ## Context ring
 
 The small ring next to the Stop/Send buttons visualises how much of the

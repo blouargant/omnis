@@ -23,6 +23,9 @@ The agent has access to the file system rooted at the working directory the
 server was launched from. It can read, grep, glob, write, and run shell
 commands — subject to the permission rules described later.
 
+> **Tip:** prefix a message with `/` to run a command, or with `!` to run a
+> shell command directly on the host (e.g. `!ls -hal`). See **The Composer**.
+
 ## Switching sessions
 
 Each chat in the **Sessions** sidebar is an isolated conversation: its

@@ -27,6 +27,14 @@ an `always_allow` rule cannot authorise commands that look like `rm -rf /`
 or that try to disable hooks (`--no-verify`). Those are unconditionally
 rejected and a one-line explanation is returned to the agent.
 
+## The `!` shell-escape
+
+The permissions engine governs commands the **agent** decides to run. When
+*you* run a command directly by prefixing a message with `!` (see **The
+Composer → Shell commands**), the `ask_user` tier is **bypassed** — you already
+authorised it by typing it. The same hard **safety floor** still applies, so
+`rm -rf /` and friends are refused regardless.
+
 ## Skill-contributed permissions
 
 When a skill is loaded, any permission rules it declares are merged into the

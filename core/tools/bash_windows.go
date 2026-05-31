@@ -32,3 +32,12 @@ func newShellCommand(ctx context.Context, command string) *exec.Cmd {
 	}
 	return cmd
 }
+
+// wrapCaptureCwd appends an `echo` of the current directory (%CD%) after the
+// user command so an embedded `cd` persists across separate
+// RunBashInteractive calls. Unlike the Unix variant the command's exit status
+// is not preserved (cmd.exe makes that awkward) — interactive callers rely on
+// the visible output rather than the exit code.
+func wrapCaptureCwd(command string) string {
+	return command + " & echo " + cwdSentinel + "%CD%"
+}

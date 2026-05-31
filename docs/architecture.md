@@ -89,6 +89,19 @@ Categorisation:
 | `internal/mcp`         | (loads MCP toolsets from JSON)                                  | External tool servers         |
 | `internal/a2a`         | `a2a_<name>` (one per configured peer)                          | Remote A2A agent delegation   |
 
+**Interactive shell-escape (`!`).** Separate from the agent's `bash` *tool*,
+both UIs let a user run a shell command directly by prefixing a message with
+`!` (e.g. `!ls -hal /tmp`). This path does **not** go through the model or the
+permissions engine — the user authorised it by typing it — but the same hard
+safety floor still applies. It is backed by `tools.RunBashInteractive` (which
+reuses RunBash's safety floor, timeout, and filtering but carries a working
+directory in and the resulting directory out, so an embedded `cd` persists
+**per session**) and `internal/shellcomplete` (dependency-free bash-like Tab
+completion: `$PATH` executables for the first token, filesystem paths
+otherwise). The server exposes `POST /api/sessions/:id/bash` and
+`GET /api/complete`; the TUI calls the same functions in-process. Output is
+rendered live and is not added to the conversation history.
+
 ### 4. Plugins — `core/events`, `core/permissions`, `internal/cache`, `internal/compress`
 
 ADK plugins observe and mutate the agent loop. The OOTB harness wires:

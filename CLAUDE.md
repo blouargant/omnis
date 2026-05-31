@@ -184,6 +184,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
+| `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
@@ -555,6 +556,43 @@ collapse state in `localStorage`), and the TUI `archivedPane` in the left column
 ([internal/tui/tui.go](internal/tui/tui.go), toggled with **Ctrl-A**; `a` archives
 the highlighted session, `u` unarchives, `d` deletes). Viewing an archived session
 disables the composer in both surfaces.
+
+### Interactive shell-escape (`!` commands)
+
+A composer prompt that starts with `!` is a **shell-escape**: the rest of the
+line runs directly on the host instead of going to the agent. It works in both
+the TUI and the web UI and **bypasses the permission layer by design** (the
+user typed the command explicitly) — but the hard safety floor in
+[core/tools/bash.go](core/tools/bash.go) (`rm -rf /`, `mkfs`, fork bomb) still
+blocks. Output is rendered live and is **not** added to the conversation /
+LLM history (a convenience, like the todo widget).
+
+- **Execution**: [core/tools/bash.go](core/tools/bash.go) `RunBashInteractive(ctx, command, cwd, timeoutSec)`
+  reuses RunBash's safety floor, timeout, output filtering, and truncation, but
+  takes a working directory and returns the directory **after** the command ran.
+  The platform `wrapCaptureCwd` (bash_unix.go / bash_windows.go) appends a
+  `__YOKE_CWD__:` sentinel line carrying `pwd`; `extractCapturedCwd` strips it
+  and reports the new dir, so an embedded `cd` **persists per session** across
+  separate `!` commands (CWD only — not env vars or shell functions, since each
+  call is a fresh shell). The Unix wrapper preserves the command's exit status;
+  the cmd.exe wrapper does not.
+- **CWD store**: per-session, in-memory, never persisted. TUI keeps a
+  `map[sessionID]string` in [internal/tui/tui.go](internal/tui/tui.go); the
+  server keeps the process-wide `bashCwd *bashCwdStore` in
+  [server/bash.go](server/bash.go) (defaults to the process CWD; also used when
+  no session id is supplied, e.g. completion from a draft tab).
+- **Web routes** ([server/bash.go](server/bash.go), registered in
+  [server/server.go](server/server.go)): `POST /api/sessions/:id/bash`
+  `{command}` → `{output, dir}` (rejects archived sessions); `GET /api/complete?line=…&session=…`
+  → `{start, candidates}`.
+- **Completion**: bash-like, served by [internal/shellcomplete/](internal/shellcomplete/)
+  (no shell subprocess). In the TUI it extends the existing `SetAutocompleteFunc`
+  dropdown (the `!` branch shows just the completed leaf and splices it onto the
+  preserved prefix). In the web UI the shared `#slash-menu` element is reused —
+  `menuMode` (`"slash"`/`"bang"`) routes the keydown nav (Tab/Enter) and
+  selection; `renderBangMenu`/`applyBangCompletion`/`runBangCommand` plus the
+  `bash-block` renderer live in [web/app.js](web/app.js), styled in
+  [web/css/styles.css](web/css/styles.css).
 
 ### Background mailbox delivery
 

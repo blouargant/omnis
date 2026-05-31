@@ -519,6 +519,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
+	auth.POST("/sessions/:id/bash", handleBash(d))
+	auth.GET("/complete", handleComplete(d))
 	auth.POST("/sessions/:id/files", handleFileUpload(d))
 	auth.GET("/sessions/:id/media", handleMedia(d))
 	auth.POST("/sessions/:id/ask-user/:qid", handleAskUserResponse(d))

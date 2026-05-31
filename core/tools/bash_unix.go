@@ -24,3 +24,12 @@ func newShellCommand(ctx context.Context, command string) *exec.Cmd {
 	}
 	return cmd
 }
+
+// wrapCaptureCwd appends a line that prints the shell's working directory
+// after the user command runs, so an embedded `cd` persists across separate
+// RunBashInteractive calls. Newline-separated (not `&&`) so the pwd is emitted
+// regardless of the command's exit status, and the original status is
+// preserved via the trailing `exit`.
+func wrapCaptureCwd(command string) string {
+	return command + "\n__yoke_rc=$?\nprintf '%s%s\\n' '" + cwdSentinel + "' \"$(pwd)\"\nexit $__yoke_rc"
+}

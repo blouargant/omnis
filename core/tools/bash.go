@@ -17,6 +17,13 @@ import (
 // is the hard floor that always applies, even when permissions are disabled.
 var alwaysBlock = []string{"rm -rf /", ":(){:|:&};:", "mkfs"}
 
+// cwdSentinel prefixes the line RunBashInteractive appends to capture the
+// shell's working directory after the command ran (so an embedded `cd`
+// persists across the interactive "!" shell-escape). It is unlikely to
+// collide with real command output; the parser scans from the end and takes
+// the last match. See wrapCaptureCwd in bash_unix.go / bash_windows.go.
+const cwdSentinel = "__YOKE_CWD__:"
+
 var (
 	bashFilterMu       sync.RWMutex
 	bashFilterEnabled  bool
@@ -190,4 +197,71 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 		return "(no output)", nil
 	}
 	return truncate(s), nil
+}
+
+// RunBashInteractive runs command through the platform shell with cwd as the
+// working directory and reports the working directory after the command ran,
+// so an embedded `cd` persists to the caller's next invocation. It shares
+// RunBash's safety floor, timeout, output filtering, and truncation.
+//
+// This backs the interactive "!" shell-escape in the TUI and web UI. By
+// design it bypasses the agent permission layer (the user typed the command
+// explicitly), but the hard safety floor still applies. timeoutSec ≤ 0 uses
+// the configured default. On any error newCwd falls back to the input cwd.
+func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int) (output, newCwd string, err error) {
+	for _, b := range alwaysBlock {
+		if strings.Contains(command, b) {
+			return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), cwd, nil
+		}
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout <= 0 {
+		bashDefaultTimeoutMu.RLock()
+		timeout = bashDefaultTimeout
+		bashDefaultTimeoutMu.RUnlock()
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	execCommand := maybeInjectBashFilterArgs(command)
+	cmd := newShellCommand(cctx, wrapCaptureCwd(execCommand))
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	cmd.WaitDelay = 5 * time.Second
+	out, runErr := cmd.CombinedOutput()
+	s, resultCwd := extractCapturedCwd(string(out), cwd)
+	s = strings.TrimRight(s, "\n")
+	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, truncate(s)), resultCwd, nil
+	}
+	if runErr != nil && s == "" {
+		return fmt.Sprintf("Error: %v", runErr), resultCwd, nil
+	}
+	s = maybeApplyBashOutputFilter(command, s)
+	if s == "" {
+		s = "(no output)"
+	}
+	return truncate(s), resultCwd, nil
+}
+
+// extractCapturedCwd removes the cwdSentinel line emitted by wrapCaptureCwd
+// from out and returns the cleaned output plus the captured directory. The
+// scan runs from the end so any literal sentinel in real output earlier loses
+// to the appended one. fallback is returned when no sentinel is present or it
+// carries an empty path.
+func extractCapturedCwd(out, fallback string) (string, string) {
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !strings.HasPrefix(lines[i], cwdSentinel) {
+			continue
+		}
+		dir := strings.TrimRight(strings.TrimPrefix(lines[i], cwdSentinel), "\r")
+		cleaned := strings.Join(append(lines[:i], lines[i+1:]...), "\n")
+		if strings.TrimSpace(dir) == "" {
+			dir = fallback
+		}
+		return cleaned, dir
+	}
+	return out, fallback
 }

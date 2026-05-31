@@ -585,6 +585,7 @@ function attachPaneHandlers(panel) {
     const firstLine = val.split("\n")[0];
     const firstWord = firstLine.split(" ")[0];
     if (val.startsWith("/") && !firstLine.includes(" ")) renderSlashMenu(firstWord);
+    else if (val.startsWith("!")) renderBangMenu(panel, firstLine);
     else hideSlashMenu();
   });
 
@@ -659,6 +660,11 @@ function onPromptKeydown(e, panel) {
     }
     if (e.key === "Tab") {
       e.preventDefault();
+      if (menuMode === "bang") {
+        if (items.length === 1) applyBangCompletion(panel, items[0].dataset.value);
+        else if (items.length > 0) { slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length; updateSlashMenuFocus(); }
+        return;
+      }
       const selectable = items.filter(it => !it.classList.contains("slash-menu-add"));
       if (selectable.length === 1) {
         selectSlashCommand(selectable[0].dataset.value);
@@ -671,6 +677,7 @@ function onPromptKeydown(e, panel) {
     if (e.key === "Enter" && slashMenuFocusIdx >= 0) {
       e.preventDefault();
       const focused = items[slashMenuFocusIdx];
+      if (menuMode === "bang") { applyBangCompletion(panel, focused.dataset.value); return; }
       if (focused.classList.contains("slash-menu-add")) { hideSlashMenu(); openUserCommandModal(null); }
       else selectSlashCommand(focused.dataset.value);
       return;
@@ -3046,6 +3053,15 @@ async function sendMessage(panel) {
     await handleSlashCommand(prompt, panel);
     return;
   }
+  // Bang shell-escape: "!<cmd>" runs directly on the host, bypassing the
+  // agent (the hard safety floor still applies server-side).
+  if (prompt.startsWith("!") && pendingFiles.length === 0) {
+    panel.els.prompt.value = "";
+    autoGrowPrompt(panel);
+    hideSlashMenu();
+    await runBangCommand(prompt.slice(1), panel);
+    return;
+  }
   if (!panel.sessionId) await newChat(panel);
   if (!panel.sessionId) return;
 
@@ -3349,8 +3365,14 @@ function getAllSlashEntries() {
 // The slash menu lives in the focused pane's composer (the user is typing
 // there). All slash helpers resolve elements through fp().els.
 let slashMenuFocusIdx = -1;
+// The shared #slash-menu element doubles as the bang ("!") shell completion
+// menu. menuMode tracks which content it currently holds so the keydown nav
+// and selection logic dispatch correctly.
+let menuMode = "slash"; // "slash" | "bang"
+let bangReqSeq = 0;      // guards against out-of-order completion responses
 
 function renderSlashMenu(prefix) {
+  menuMode = "slash";
   const panel = fp();
   if (!panel) return;
   const sm = panel.els.slashMenu;
@@ -3422,6 +3444,113 @@ function selectSlashCommand(text) {
   panel.els.prompt.setSelectionRange(text.length, text.length);
   panel.els.prompt.focus();
   hideSlashMenu();
+}
+
+// ─── Bang ("!") shell-escape ───────────────────────────────────────────────
+
+// renderBangMenu fetches bash-like completions for the line typed after "!"
+// and renders them into the shared slash-menu element. Stale responses (the
+// user kept typing) are dropped via bangReqSeq.
+async function renderBangMenu(panel, val) {
+  const line = val.slice(1);
+  if (line === "") { hideSlashMenu(); return; } // bare "!" — don't dump every command
+  const seq = ++bangReqSeq;
+  const q = new URLSearchParams({ line });
+  if (panel.sessionId) q.set("session", panel.sessionId);
+  let data;
+  try {
+    const res = await apiFetch(`/api/complete?${q.toString()}`);
+    data = await res.json();
+  } catch { return; }
+  if (seq !== bangReqSeq) return;                  // superseded by a newer keystroke
+  if (panel.els.prompt.value !== val) return;      // input changed while awaiting
+  const cands = data.candidates || [];
+  if (!cands.length) { hideSlashMenu(); return; }
+  const prefix = "!" + line.slice(0, data.start || 0);
+  const sm = panel.els.slashMenu;
+  sm.innerHTML = "";
+  menuMode = "bang";
+  cands.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "slash-menu-item";
+    row.dataset.value = prefix + c;
+    row.innerHTML = `<span class="slash-menu-cmd">${escHtml(c)}</span>`;
+    row.addEventListener("mousedown", e => { e.preventDefault(); applyBangCompletion(panel, prefix + c); });
+    sm.appendChild(row);
+  });
+  slashMenuFocusIdx = -1;
+  sm.removeAttribute("hidden");
+}
+
+// applyBangCompletion splices a chosen completion into the composer and
+// re-triggers completion (so e.g. completing a directory shows its contents).
+function applyBangCompletion(panel, full) {
+  panel.els.prompt.value = full;
+  panel.els.prompt.setSelectionRange(full.length, full.length);
+  panel.els.prompt.focus();
+  hideSlashMenu();
+  if (full.endsWith("/")) renderBangMenu(panel, full);
+}
+
+// runBangCommand executes a "!" shell command against a pane's session and
+// renders the output as a local (non-streamed, non-persisted) bash block.
+async function runBangCommand(command, panel) {
+  command = command.trim();
+  if (!command) return;
+  if (!panel.sessionId) await newChat(panel);
+  if (!panel.sessionId) return;
+  const sessionId = panel.sessionId;
+  const container = getContainer(sessionId);
+  mountInPanel(panel, sessionId);
+  appendUserBubble("!" + command, container);
+  const block = appendBashBlock(container, command);
+  scrollBottom(panel, true);
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/bash`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    });
+    const data = await res.json();
+    if (!res.ok) setBashBlockOutput(block, data.error || `error ${res.status}`, "");
+    else setBashBlockOutput(block, data.output || "", data.dir || "");
+  } catch (e) {
+    setBashBlockOutput(block, "error: " + e, "");
+  }
+  scrollBottom(panel, true);
+}
+
+// appendBashBlock renders the command header + a pending output area.
+function appendBashBlock(container, command) {
+  const row = document.createElement("div");
+  row.className = "msg-row";
+  const block = document.createElement("div");
+  block.className = "bash-block";
+  const head = document.createElement("div");
+  head.className = "bash-block-cmd";
+  head.textContent = "$ " + command;
+  const out = document.createElement("pre");
+  out.className = "bash-block-out";
+  out.textContent = "…";
+  block.appendChild(head);
+  block.appendChild(out);
+  row.appendChild(block);
+  if (container) container.appendChild(row);
+  return block;
+}
+
+// setBashBlockOutput fills in a bash block's output and (optional) cwd footer.
+function setBashBlockOutput(block, output, dir) {
+  const out = block.querySelector(".bash-block-out");
+  if (out) out.textContent = output || "(no output)";
+  if (dir) {
+    let foot = block.querySelector(".bash-block-cwd");
+    if (!foot) {
+      foot = document.createElement("div");
+      foot.className = "bash-block-cwd";
+      block.appendChild(foot);
+    }
+    foot.textContent = dir;
+  }
 }
 
 // appendCommandBubble renders a local (non-streamed) reply for slash commands

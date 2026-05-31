@@ -136,6 +136,10 @@ Open <http://localhost:8080>, paste the token when prompted, and start chatting.
 yoke tui
 ```
 
+In both the web UI and the TUI, prefix a message with `/` to run a command or
+with `!` to run a shell command directly on the host (e.g. `!ls -hal`), with
+bash-like Tab completion and a per-session working directory.
+
 ---
 
 ## Choosing an LLM provider

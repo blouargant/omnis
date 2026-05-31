@@ -40,9 +40,11 @@ import (
 	toolkitagent "github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/core/llm"
+	"github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/askuser"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/yoke/internal/shellcomplete"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -267,6 +269,28 @@ func Run(ctx context.Context, cfg Config) error {
 	var current atomic.Pointer[sessionState]
 	initial := pickInitialSession(cfg)
 	current.Store(initial)
+
+	// Per-session working directory for the interactive "!" shell-escape, so
+	// an embedded `cd` persists between commands. Defaults to the process CWD.
+	var bashCwdMu sync.Mutex
+	bashCwd := map[string]string{}
+	getBashCwd := func(id string) string {
+		bashCwdMu.Lock()
+		defer bashCwdMu.Unlock()
+		if d, ok := bashCwd[id]; ok && d != "" {
+			return d
+		}
+		wd, _ := os.Getwd()
+		return wd
+	}
+	setBashCwd := func(id, dir string) {
+		if dir == "" {
+			return
+		}
+		bashCwdMu.Lock()
+		bashCwd[id] = dir
+		bashCwdMu.Unlock()
+	}
 	if cfg.RegisterSession != nil {
 		_ = cfg.RegisterSession(cfg.UserID, initial.ID, initial.ID)
 	}
@@ -311,7 +335,35 @@ func Run(ctx context.Context, cfg Config) error {
 		"/upload <path>",
 		"/new",
 	}
+	// Bang ("!") shell-escape completion state, recomputed on each keystroke.
+	// The dropdown shows just the completed leaf; selecting one splices it
+	// onto bangPrefix to rebuild the full line.
+	var bangPrefix string
+	var bangCands []string
 	input.SetAutocompleteFunc(func(currentText string) []string {
+		if strings.HasPrefix(currentText, "!") {
+			line := currentText[1:]
+			if line == "" {
+				bangCands = nil
+				return nil // bare "!" — don't dump every command on PATH
+			}
+			cur := current.Load()
+			cwd := ""
+			if cur != nil {
+				cwd = getBashCwd(cur.ID)
+			} else {
+				cwd = getBashCwd("")
+			}
+			start, cands := shellcomplete.Complete(line, cwd)
+			if len(cands) == 0 {
+				bangCands = nil
+				return nil
+			}
+			bangPrefix = "!" + line[:start]
+			bangCands = cands
+			return cands
+		}
+		bangCands = nil
 		trimmed := strings.TrimLeft(currentText, " ")
 		if !strings.HasPrefix(trimmed, "/") {
 			return nil
@@ -327,6 +379,11 @@ func Run(ctx context.Context, cfg Config) error {
 	input.SetAutocompletedFunc(func(text string, index int, source int) bool {
 		if source == tview.AutocompletedNavigate {
 			return false // keep dropdown open while navigating
+		}
+		// Bang completion: splice the chosen leaf onto the preserved prefix.
+		if bangCands != nil && index >= 0 && index < len(bangCands) {
+			input.SetText(bangPrefix + bangCands[index])
+			return true
 		}
 		// Find the corresponding raw command (without the display hint).
 		raw := text
@@ -1241,6 +1298,28 @@ func Run(ctx context.Context, cfg Config) error {
 		if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
 			input.SetText("")
 			go handleShortcut(prompt)
+			return
+		}
+		// Bang shell-escape: "!<cmd>" runs <cmd> directly (bypassing the agent,
+		// keeping the hard safety floor) in the session's persistent CWD. Like
+		// the slash path, the body runs in its own goroutine so appendChat's
+		// QueueUpdateDraw doesn't deadlock the Enter handler.
+		if strings.HasPrefix(strings.TrimSpace(prompt), "!") {
+			command := strings.TrimSpace(strings.TrimSpace(prompt)[1:])
+			input.SetText("")
+			if command == "" {
+				return
+			}
+			sid := ""
+			if cur := current.Load(); cur != nil {
+				sid = cur.ID
+			}
+			go func() {
+				appendChat("\n[::b]you[-]\n\n[teal]![-]%s\n", tview.Escape(command))
+				out, newCwd, _ := tools.RunBashInteractive(ctx, command, getBashCwd(sid), 0)
+				setBashCwd(sid, newCwd)
+				appendChat("[gray]── %s ──[-]\n%s\n", tview.Escape(newCwd), tview.Escape(out))
+			}()
 			return
 		}
 		if busy {

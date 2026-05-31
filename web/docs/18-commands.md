@@ -4,6 +4,10 @@ The **Settings → Commands** panel lets you define custom slash commands
 that expand to prompt templates. Type `/` in the chat composer to see the
 full command list.
 
+> Slash commands (`/…`) expand into prompts **for the agent**. To run a shell
+> command **directly on the host** instead, prefix the line with `!` — see
+> **The Composer → Shell commands**.
+
 ## Built-in commands
 
 Built-in commands are shipped with the Web UI and cannot be edited or
