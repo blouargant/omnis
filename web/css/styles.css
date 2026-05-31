@@ -364,7 +364,15 @@ body.resizing #sidebar { transition: none; }
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: var(--bg-raised); color: var(--text); }
-#session-list li.active { background: var(--bg-active); color: var(--text-strong); }
+/* Open in some (non-focused) pane: a subtle highlight. */
+#session-list li.active { background: var(--bg-raised); color: var(--text); }
+/* The chat in the focused pane — the one the user is working in — stands out
+ * with the active background, brighter text, and an accent rail on the left. */
+#session-list li.active-focused {
+  background: var(--bg-active);
+  color: var(--text-strong);
+  box-shadow: inset 3px 0 0 var(--accent, #4a9eff);
+}
 .session-name-row {
   display: flex;
   align-items: center;
@@ -583,13 +591,14 @@ body.resizing #sidebar-resize { transition: none; }
   position: relative;
 }
 .chat-pane.is-focused::before {
-  /* Subtle accent on the focused pane (hidden when only one pane). */
+  /* Subtle accent on the focused pane (hidden when only one pane). Kept above
+   * the tab bar (z-index 8) so the accent line reads as the active tab. */
   content: "";
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
   background: var(--accent, #4a9eff);
-  z-index: 5;
+  z-index: 9;
   pointer-events: none;
 }
 #chat.solo .chat-pane.is-focused::before { display: none; }
@@ -626,6 +635,10 @@ body.resizing #sidebar-resize { transition: none; }
   height: 34px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border, #333);
+  /* Sit above the empty-pane picker (z-index 4) so the tab label and the
+   * split/close actions stay visible/usable even before a session is bound. */
+  position: relative;
+  z-index: 8;
 }
 .pane-tab {
   display: inline-flex;
@@ -636,10 +649,10 @@ body.resizing #sidebar-resize { transition: none; }
   padding: 0 12px;
   background: var(--bg-raised, #2a2d2e);
   border-right: 1px solid var(--border, #333);
-  color: var(--text-dim, #aaa);
+  color: var(--text-muted, #888);
   font-size: 12.5px;
 }
-.chat-pane.is-focused .pane-tab { color: var(--text, #eee); }
+.chat-pane.is-focused .pane-tab { color: var(--text-strong, #fff); }
 .pane-tab-icon { flex-shrink: 0; color: var(--text-muted); }
 .pane-tab-name {
   min-width: 0;

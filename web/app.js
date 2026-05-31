@@ -256,12 +256,18 @@ function setFocusedPanel(pid) {
   saveLayout();
 }
 
-// refreshSidebarActive highlights every session currently shown in any pane.
+// refreshSidebarActive highlights every session currently shown in any pane,
+// and marks the focused pane's session distinctly (`.active-focused`) so the
+// chat the user is actually working in stands out from those open in other
+// panes.
 function refreshSidebarActive() {
   if (!els.list) return;
   const shown = new Set(panels.map(p => p.sessionId).filter(Boolean));
+  const focusedId = (focusedPanel() || {}).sessionId || null;
   for (const li of els.list.children) {
-    li.classList.toggle("active", shown.has(li.dataset.id));
+    const id = li.dataset.id;
+    li.classList.toggle("active", shown.has(id));
+    li.classList.toggle("active-focused", !!focusedId && id === focusedId);
   }
 }
 

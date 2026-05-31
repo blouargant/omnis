@@ -262,7 +262,11 @@ func (r *Registry) SetTitle(id, title string) bool {
 	return true
 }
 
-// List returns all sessions sorted by creation time, newest first.
+// List returns all sessions sorted by most recent activity, newest first.
+// A freshly created session has LastUsedAt == CreatedAt == now, so new chats
+// always sort to the top; sessions then re-sort up as they receive turns.
+// Ties (e.g. two sessions touched in the same instant) fall back to creation
+// time so the order stays deterministic.
 func (r *Registry) List() []*SessionMeta {
 	r.mu.RLock()
 	out := make([]*SessionMeta, 0, len(r.items))
@@ -271,6 +275,9 @@ func (r *Registry) List() []*SessionMeta {
 	}
 	r.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LastUsedAt.Equal(out[j].LastUsedAt) {
+			return out[i].LastUsedAt.After(out[j].LastUsedAt)
+		}
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	return out
