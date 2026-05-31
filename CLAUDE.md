@@ -970,6 +970,20 @@ The agent install dialog also exposes an "Enable in agents.json"
 checkbox — when checked the installed agent's name is appended to the
 runtime config's `agents` list so the next hot-reload wires it in.
 
+**Dependency cascade on agent install** — installing an agent also resolves
+the `skills` and `mcp_servers` (alias `mcpServers`) it declares in its
+`agent.json` so the agent is actually usable, not just present
+([server/remote_registry_agents.go](server/remote_registry_agents.go)
+install route → [server/install_helpers.go](server/install_helpers.go)).
+Each missing skill is auto-installed from a configured `skills` registry
+(`tryAutoInstallSkills`) and each missing MCP server from a configured `mcp`
+registry (`tryAutoInstallMCP`, which reuses the install route's
+`resolveMCPServerFromRef` to handle both `mcp.md` and JSON manifests, then
+`mergeMCPServer` into `mcp_config.json`). Anything not found in any matching
+registry comes back as a `warnings[]` entry in the install response, which the
+web UI surfaces via `showInstallResult` ([web/settings.js](web/settings.js)).
+Resolution is best-effort and never rolls back the agent install.
+
 Use `YOKE_AGENTS_REGISTRY_DIR` or `YOKE_SKILLS_REGISTRY_DIR` to redirect
 either install location independently of `YOKE_HOME`.
 

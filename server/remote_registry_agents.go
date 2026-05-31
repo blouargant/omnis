@@ -33,6 +33,7 @@ func registerRemoteAgentRegistryRoutes(
 	skillsReadDir string,
 	skillsWriteDir string,
 	mcpConfigRead func() string,
+	mcpConfigWrite string,
 ) {
 	registerRemoteRegistryCRUD(rg, readPath, writePath, registries.KindAgents)
 
@@ -147,7 +148,8 @@ func registerRemoteAgentRegistryRoutes(
 			warnings = append(warnings, skillWarns...)
 		}
 		if len(mcpServers) > 0 {
-			warnings = append(warnings, checkMCPServerDeps(mcpServers, mcpConfigRead())...)
+			_, mcpWarns := tryAutoInstallMCP(mcpServers, mcpConfigRead(), mcpConfigWrite, readPath())
+			warnings = append(warnings, mcpWarns...)
 		}
 
 		resp := gin.H{"name": agentName, "enabled": enabled}
@@ -237,6 +239,7 @@ type agentsRoutesDeps struct {
 	SkillsRegistryReadDir  string        // abs path to skills registry for dependency resolution
 	SkillsRegistryWriteDir string        // abs write target for auto-installed skills
 	MCPConfigRead          func() string // re-resolves mcp_config.json read path
+	MCPConfigWrite         string        // abs $YOKE_HOME/config/mcp_config.json write target
 }
 
 // resolveAgentsRoutesDeps mirrors resolveSkillsDeps for the agents side.
@@ -249,6 +252,7 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 	absRegistryDir, _ := filepath.Abs(registryDir)
 	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), registries.ConfigFileName))
 	absAgentsWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "agents.json"))
+	absMCPWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "mcp_config.json"))
 	skillsRead, _ := filepath.Abs(paths.SkillsRegistryDir())
 	skillsWrite, _ := filepath.Abs(paths.SkillsRegistryWriteDir())
 	if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
@@ -273,6 +277,7 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 			p, _ := filepath.Abs(paths.FindConfig("mcp_config.json"))
 			return p
 		},
+		MCPConfigWrite: absMCPWrite,
 	}
 }
 
@@ -290,6 +295,7 @@ func registerAgentsRoutes(rg *gin.RouterGroup) {
 		deps.SkillsRegistryReadDir,
 		deps.SkillsRegistryWriteDir,
 		deps.MCPConfigRead,
+		deps.MCPConfigWrite,
 	)
 	registerImportAgentRoute(rg)
 }

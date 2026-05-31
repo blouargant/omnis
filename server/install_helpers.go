@@ -77,6 +77,65 @@ func checkMCPServerDeps(serverNames []string, mcpConfigPath string) []string {
 	return warnings
 }
 
+// tryAutoInstallMCP checks which MCP servers in serverNames are not configured
+// in mcp_config.json and attempts to install them from configured MCP registries.
+// Returns the successfully auto-installed names and warning messages for servers
+// not found in any registry (so an agent that references an MCP server is usable
+// after install, mirroring tryAutoInstallSkills).
+func tryAutoInstallMCP(serverNames []string, mcpConfigRead, mcpConfigWrite, remoteRegistriesPath string) (installed []string, warnings []string) {
+	if len(serverNames) == 0 {
+		return
+	}
+
+	regs, _ := registries.LoadRegistries(remoteRegistriesPath)
+	configured := readInstalledMCPNames(mcpConfigRead)
+
+	for _, name := range serverNames {
+		if name == "" {
+			continue
+		}
+		if configured[name] {
+			continue
+		}
+
+		found := false
+		for _, reg := range regs {
+			if !reg.Serves(registries.KindMCP) {
+				continue
+			}
+			ref, err := registries.ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			tools, err := registries.BrowseMCPTools(ref, reg.Token, nil)
+			if err != nil {
+				continue
+			}
+			for _, t := range tools {
+				if t.Name != name {
+					continue
+				}
+				resolved, srv, inputs, _, resErr := resolveMCPServerFromRef(ref, reg.Token, t.DirPath)
+				if resErr != nil {
+					break
+				}
+				if _, mergeErr := mergeMCPServer(mcpConfigRead, mcpConfigWrite, resolved, srv, inputs); mergeErr == nil {
+					installed = append(installed, name)
+					found = true
+				}
+				break
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("MCP server %q is required but not configured and was not found in any configured MCP registry", name))
+		}
+	}
+	return
+}
+
 // tryAutoInstallAgents checks which agents in agentNames are not installed/enabled
 // and attempts to install and enable them from configured agent registries. Returns
 // lists of successfully auto-installed names and warning messages for agents not
@@ -150,12 +209,17 @@ func parseAgentJSONDeps(agentJSONPath string) (skills, mcpServers []string) {
 	if err != nil {
 		return
 	}
+	// AgentEntry accepts both the snake_case "mcp_servers" and the camelCase
+	// "mcpServers" alias, so read both and merge to avoid missing a dependency
+	// declared in a Claude-format / converted agent.json.
 	var entry struct {
-		Skills     []string `json:"skills"`
-		MCPServers []string `json:"mcp_servers"`
+		Skills        []string `json:"skills"`
+		MCPServers    []string `json:"mcp_servers"`
+		MCPServersAlt []string `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return
 	}
-	return entry.Skills, entry.MCPServers
+	mcpServers = append(entry.MCPServers, entry.MCPServersAlt...)
+	return entry.Skills, mcpServers
 }
