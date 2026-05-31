@@ -2626,6 +2626,68 @@
   color: var(--text-muted);
 }
 
+/* Small info badge next to a label that carries an app tooltip (data-tip). */
+.agent-gen-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+.agent-gen-info:hover { color: var(--text); border-color: #555; }
+
+/* Custom number stepper — themed +/- controls in place of the native browser
+   spinner, matching the rest of the settings UI. */
+.num-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+.num-stepper .num-stepper-input {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.num-stepper .num-stepper-input::-webkit-outer-spin-button,
+.num-stepper .num-stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-stepper-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.num-stepper-btn:first-child { border-radius: 4px 0 0 4px; }
+.num-stepper-btn:last-child { border-radius: 0 4px 4px 0; }
+.num-stepper-btn:hover:not(:disabled) { background: var(--bg-raised-hover); border-color: #555; }
+.num-stepper-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* Available Tools grid */
 .agent-tools-grid {
   display: grid;

@@ -2978,26 +2978,57 @@ const BASE_PATH = window.BASE_PATH || "";
       const parLbl = document.createElement("label");
       parLbl.className = "agent-gen-label";
       parLbl.textContent = "Max parallel instances";
+      // App tooltip (themed #tip-layer via data-tip), not the native browser
+      // title bubble, to match the rest of the settings UI.
+      const parInfo = document.createElement("span");
+      parInfo.className = "agent-gen-info";
+      parInfo.textContent = "?";
+      parInfo.setAttribute("data-tip", "1 = run one at a time (default). >1 lets the leader dispatch up to this many independent tasks to this agent in one parallel batch call.");
+      parLbl.appendChild(parInfo);
+      // Custom stepper so the +/- controls match the app look & feel instead of
+      // the browser's native number spinner.
+      const parWrap = document.createElement("div");
+      parWrap.className = "num-stepper";
       const parInp = document.createElement("input");
       parInp.type = "number"; parInp.min = "1"; parInp.step = "1";
-      parInp.className = "agent-gen-input";
+      parInp.className = "agent-gen-input num-stepper-input";
       parInp.value = String(Math.max(1, parseInt(a.max_instances, 10) || 1));
-      parInp.title = "1 = run one at a time (default). >1 lets the leader dispatch up to this many independent tasks to this agent in one parallel batch call.";
+      const parDec = document.createElement("button");
+      parDec.type = "button";
+      parDec.className = "num-stepper-btn";
+      parDec.textContent = "−";
+      parDec.setAttribute("aria-label", "Decrease");
+      const parInc = document.createElement("button");
+      parInc.type = "button";
+      parInc.className = "num-stepper-btn";
+      parInc.textContent = "+";
+      parInc.setAttribute("aria-label", "Increase");
       const applyMax = () => {
         let n = parseInt(parInp.value, 10);
         if (!Number.isFinite(n) || n < 1) n = 1;
         parInp.value = String(n);
+        parDec.disabled = n <= 1;
         // Keep the file clean: only persist when it opts into parallelism.
         if (n > 1) a.max_instances = n; else delete a.max_instances;
         onChange();
       };
+      const bump = (delta) => {
+        parInp.value = String((parseInt(parInp.value, 10) || 1) + delta);
+        applyMax();
+      };
+      parDec.addEventListener("click", () => bump(-1));
+      parInc.addEventListener("click", () => bump(1));
       parInp.addEventListener("input", applyMax);
       parInp.addEventListener("change", applyMax);
+      parDec.disabled = (parseInt(parInp.value, 10) || 1) <= 1;
+      parWrap.appendChild(parDec);
+      parWrap.appendChild(parInp);
+      parWrap.appendChild(parInc);
       const parHint = document.createElement("p");
       parHint.className = "agent-gen-hint";
       parHint.textContent = "1 = serial (one at a time). Higher values let the leader run that many independent tasks for this agent in parallel.";
       parField.appendChild(parLbl);
-      parField.appendChild(parInp);
+      parField.appendChild(parWrap);
       parField.appendChild(parHint);
       parBody.appendChild(parField);
       parSec.appendChild(parBody);
