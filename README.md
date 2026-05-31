@@ -37,8 +37,7 @@ manual authoring.
 A simple chat session with the web UI — streaming responses, session
 history, and file attachments.
 
-https://github.com/user-attachments/assets/ba54d363-40ab-444d-ba8b-a550f03651fa
-
+https://github.com/user-attachments/assets/555274eb-04d8-477a-9b06-aeab2f44a6ae
 
 ---
 
@@ -48,7 +47,7 @@ Two sessions talking to each other via the built-in mailbox: one session
 delegates a sub-task and the other picks it up, processes it, and sends
 the result back.
 
-https://github.com/user-attachments/assets/e6047770-878e-44ea-95f5-01ff4f2198db
+https://github.com/user-attachments/assets/187c12e0-5473-4fa7-aa78-91cdfc214242
 
 ---
 
@@ -59,7 +58,12 @@ own documentation (quoting the source), and to browse remote GitHub or Gitea
 registries for community skills and agents, then installing them directly from
 the web UI.
 
-https://github.com/user-attachments/assets/53b9e83d-54da-4bc5-bc40-b7a99db7cc6c
+
+
+https://github.com/user-attachments/assets/7adae42d-f8db-44d6-9618-2aeffac1ff85
+
+
+https://github.com/user-attachments/assets/39cee171-a643-4f82-93d3-6598336a79c0
 
 ---
 
@@ -69,8 +73,7 @@ A tour of the Settings area: agent configuration, model profiles, squad
 composition, MCP server wiring, and permission rules — all editable
 without touching a config file.
 
-https://github.com/user-attachments/assets/6c5a4897-2f7b-436c-8ae4-5feacba2621d
-
+https://github.com/user-attachments/assets/6d292488-a4ed-4a28-ac30-c8f31f5f7497
 
 ---
 
@@ -78,10 +81,7 @@ https://github.com/user-attachments/assets/6c5a4897-2f7b-436c-8ae4-5feacba2621d
 
 How to switch the web UI theme and persist the choice across sessions.
 
-
-https://github.com/user-attachments/assets/aa4af480-5ae8-4b5b-9ea4-c5c84ddd24b7
-
-
+https://github.com/user-attachments/assets/a04c81d9-2c93-4ef6-9d82-98dc26f1f726
 
 ---
 
