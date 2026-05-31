@@ -1272,6 +1272,7 @@ function renderMarkdown(el, text) {
     return;
   }
   const t0 = AgentDebug.enabled ? performance.now() : 0;
+  el._rawText = text || "";
   el.innerHTML = marked.parse(text || "");
   el.classList.add("rendered");
   if (el._stream) el._stream = null;
@@ -1850,6 +1851,36 @@ function clearPinnedPrompt(panel) {
   });
 }
 
+// Copy text to the clipboard. The async Clipboard API is only available in
+// secure contexts (HTTPS or localhost); when the web UI is served over plain
+// HTTP on a LAN address `navigator.clipboard` is undefined, so we fall back to
+// the legacy execCommand("copy") via a hidden textarea. Resolves to true on
+// success, false otherwise.
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => fallbackCopy(text));
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+
+function fallbackCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ─── DOM builders ───────────────────────────────────────────────────────────
 
 function appendAssistantBubble(container) {
@@ -1864,10 +1895,11 @@ function appendAssistantBubble(container) {
   copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
   copyBtn.addEventListener("click", () => {
     const text = bubble._rawText || bubble.textContent || "";
-    navigator.clipboard.writeText(text).then(() => {
+    copyTextToClipboard(text).then((ok) => {
+      if (!ok) return;
       copyBtn.classList.add("copied");
       setTimeout(() => copyBtn.classList.remove("copied"), 1500);
-    }).catch(() => {});
+    });
   });
 
   row.appendChild(bubble);
