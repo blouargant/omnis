@@ -58,12 +58,14 @@ own documentation (quoting the source), and to browse remote GitHub or Gitea
 registries for community skills and agents, then installing them directly from
 the web UI.
 
-
-
-https://github.com/user-attachments/assets/7adae42d-f8db-44d6-9618-2aeffac1ff85
-
+#### Get help on the application
 
 https://github.com/user-attachments/assets/39cee171-a643-4f82-93d3-6598336a79c0
+
+
+#### Ask about skills and agents and install them.
+
+https://github.com/user-attachments/assets/7adae42d-f8db-44d6-9618-2aeffac1ff85
 
 ---
 
