@@ -683,6 +683,9 @@ body.resizing #sidebar-resize { transition: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Pending "New Chat" draft tab — no session yet, shows the start picker. */
+.pane-tab-draft .pane-tab-name { font-style: italic; }
+
 /* Busy dot — visible only while the tab's session is streaming. */
 .pane-tab-busy {
   flex-shrink: 0;

@@ -941,17 +941,27 @@ columns separated by draggable `.pane-divider` handles ([web/index.html](web/ind
 pane owns its own copy of the chat UI (transcript, composer, prompt, send/cancel,
 status, context ring + popup, ask-user slot, attachments).
 
-**Each pane is a tab group**: it holds an ordered list of open sessions as tabs
-(`panel.tabs[]`) with one **active** tab (`panel.sessionId`, still the single
-"what this pane displays" handle). The tab strip (`.pane-tabs` in the
-`.pane-tabbar`, one `.pane-tab` per session + a `+` `.pane-newtab-btn`) is rebuilt
-by `renderPaneTabs(panel)`; clicking a tab `activateTab`s it, the `×`/middle-click
-`closeTab`s it, `+` opens a fresh chat tab (`newChat(panel)`). A session's
-transcript is a single cached DOM node (`getContainer(sessionId)`), so a session
-lives in **at most one tab across all panes** — selecting a session open elsewhere
-focuses that pane and activates its tab rather than duplicating. Background tabs
-(open but not active) keep their push subscription and accrue streamed turns into
-their detached container; the per-tab busy dot reflects `sessionSending`.
+**Each pane is a tab group**: `panel.tabs[]` is an ordered list of **tab keys** —
+each key is either a real sessionId or a synthetic **draft** key (`"draft#N"`, a
+pending "New Chat" tab with no session). `panel.activeTab` is the visible key;
+`panel.sessionId` mirrors it but is **null while a draft is active** (kept for the
+many call sites that read the active session). A pane always has ≥1 tab. The tab
+strip (`.pane-tabs` in the `.pane-tabbar`, one `.pane-tab` per key — drafts get
+`.pane-tab-draft` — plus a `+` `.pane-newtab-btn`) is rebuilt by
+`renderPaneTabs(panel)`; clicking a tab `activateTab`s it (a draft key shows the
+start picker, a session key mounts its transcript), the `×`/middle-click
+`closeTab`s it. `+` (`newDraftTab`) **always** appends a fresh draft tab and
+activates it — several drafts can coexist; the session is created only when the
+user clicks "Start a new chat" (`newChat`) or picks one from the picker
+(`bindSessionToPanel`), which takes the active draft's slot in place rather than
+appending. Closing the last tab closes the pane, except the sole pane gets a fresh
+draft so it's never tab-less. A session's transcript is a single cached DOM node
+(`getContainer(sessionId)`), so a session lives in **at most one tab across all
+panes** — selecting a session open elsewhere focuses that pane and activates its
+tab rather than duplicating. Background tabs (open but not active) keep their push
+subscription and accrue streamed turns into their detached container; the per-tab
+busy dot reflects `sessionSending`. Draft keys are ephemeral — `saveLayout` strips
+them and persists only session tabs.
 
 Two membership helpers: `panelsForSession(id)` = panes where `id` is the **active**
 tab (drives visible-pane chrome — status, ctx ring, ask widget, scroll);

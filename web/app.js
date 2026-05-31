@@ -219,6 +219,12 @@ function panelsForSession(id) { return id ? panels.filter(p => p.sessionId === i
 // background) — used for "is it open anywhere" checks: push subscriptions,
 // sidebar highlight, dedupe-on-open, and delete/archive cleanup.
 function panelsWithTab(id) { return id ? panels.filter(p => p.tabs.includes(id)) : []; }
+
+// Draft tabs are pending "New Chat" tabs with no session yet. They live in
+// panel.tabs as synthetic keys so several can coexist in one pane.
+let draftSeq = 0;
+function isDraft(key) { return typeof key === "string" && key.startsWith("draft#"); }
+function newDraftKey() { return "draft#" + (++draftSeq); }
 function getPanel(pid) { return panels.find(p => p.id === pid) || null; }
 function focusedPanel() { return getPanel(focusedPanelId) || panels[0] || null; }
 function fp() { return focusedPanel(); }
@@ -231,9 +237,13 @@ function createPanel(sessionId) {
   const id = "p" + (panelSeq++);
   root.dataset.panelId = id;
   const panel = {
-    // `tabs` is the ordered list of sessionIds open in this pane; `sessionId`
-    // is the active (visible) tab. A pane with no tabs shows the empty picker.
-    id, sessionId: sessionId || null, tabs: sessionId ? [sessionId] : [], root,
+    // `tabs` is the ordered list of tab keys open in this pane — each key is
+    // either a real sessionId or a synthetic draft key ("draft#N", a pending
+    // "New Chat" tab with no session yet). `activeTab` is the visible tab key;
+    // `sessionId` mirrors it but is null while a draft tab is active (kept for
+    // the many call sites that read the active session directly).
+    id, sessionId: sessionId || null, activeTab: sessionId || null,
+    tabs: sessionId ? [sessionId] : [], root,
     els: bindPaneEls(root),
     width: 0, _stick: true, _scrollPending: false,
   };
@@ -352,7 +362,7 @@ function splitPanel(after) {
   np.width = half;
   rebuildChatDOM();
   setFocusedPanel(np.id);
-  showPanePicker(np);
+  newDraftTab(np); // a new pane starts with an empty "New Chat" tab
   saveLayout();
 }
 
@@ -498,8 +508,10 @@ function attachPaneHandlers(panel) {
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
 
-  // "+" opens a fresh chat as a new tab in this pane.
-  if (pe.newTabBtn) pe.newTabBtn.addEventListener("click", (e) => { e.stopPropagation(); newChat(panel); });
+  // "+" always opens a fresh "New Chat" tab showing the start picker — no
+  // session is created until the user clicks "Start a new chat". Several drafts
+  // can coexist.
+  if (pe.newTabBtn) pe.newTabBtn.addEventListener("click", (e) => { e.stopPropagation(); newDraftTab(panel); });
 
   // Empty-pane picker. The squad selector (when shown) overrides the global
   // choice for this new chat only.
@@ -694,8 +706,9 @@ function saveLayout() {
       const rec = {
         version: 2,
         panes: panels.map(p => ({
-          tabs: p.tabs.slice(),
-          activeId: p.sessionId,
+          // Persist only real session tabs — draft "New Chat" tabs are ephemeral.
+          tabs: p.tabs.filter(k => !isDraft(k)),
+          activeId: p.sessionId, // null while a draft is active
           width: Math.round(p.width),
         })),
         focusedIndex: Math.max(0, panels.findIndex(p => p.id === focusedPanelId)),
@@ -822,20 +835,22 @@ function paneTabTitle(sessionId) {
 
 const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
 
-// renderPaneTabs rebuilds a pane's tab strip — one button per open session,
-// the active one highlighted, each with a close affordance. A busy dot marks
-// tabs whose session is streaming (so background tabs show activity too).
+// renderPaneTabs rebuilds a pane's tab strip — one button per open tab (session
+// or pending "New Chat" draft), the active one highlighted, each with a close
+// affordance. A busy dot marks session tabs whose session is streaming (so
+// background tabs show activity too).
 function renderPaneTabs(panel) {
   const strip = panel.els.tabs;
   if (!strip) return;
   strip.innerHTML = "";
-  for (const sid of panel.tabs) {
-    const label = paneTabTitle(sid);
+  for (const key of panel.tabs) {
+    const draft = isDraft(key);
+    const label = draft ? "New Chat" : paneTabTitle(key);
     const tab = document.createElement("div");
-    tab.className = "pane-tab" + (sid === panel.sessionId ? " active" : "");
+    tab.className = "pane-tab" + (draft ? " pane-tab-draft" : "") + (key === panel.activeTab ? " active" : "");
     tab.setAttribute("role", "tab");
-    tab.dataset.session = sid;
-    tab.setAttribute("data-tip", label);
+    tab.dataset.tab = key;
+    tab.setAttribute("data-tip", draft ? "New chat" : label);
 
     const dot = document.createElement("span");
     dot.className = "pane-tab-busy";
@@ -851,20 +866,34 @@ function renderPaneTabs(panel) {
     close.className = "pane-tab-close";
     close.setAttribute("aria-label", "Close tab");
     close.innerHTML = ICON_TAB_CLOSE;
-    close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, sid); });
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", sessionSending.has(sid));
+    tab.classList.toggle("is-busy", !draft && sessionSending.has(key));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
-      if (e.button === 1) { e.preventDefault(); closeTab(panel, sid); return; }
+      if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
     });
     tab.addEventListener("click", (e) => {
       if (e.target.closest(".pane-tab-close")) return;
-      activateTab(panel, sid);
+      activateTab(panel, key);
     });
     strip.appendChild(tab);
   }
+}
+
+// newDraftTab always appends a fresh pending "New Chat" tab and activates it —
+// even when the active tab is already a draft (so several can coexist).
+function newDraftTab(panel) {
+  const key = newDraftKey();
+  panel.tabs.push(key);
+  activateTab(panel, key);
+}
+
+// updatePaneTabsForSession refreshes tabs on every pane holding a session
+// (used when a title changes after a turn / rename).
+function updatePaneTabsForSession(sessionId) {
+  for (const p of panelsWithTab(sessionId)) renderPaneTabs(p);
 }
 
 // updatePaneTabsForSession refreshes tabs on every pane holding a session
@@ -2581,64 +2610,80 @@ async function selectSession(id) {
   await bindSessionToPanel(panel, id);
 }
 
-// bindSessionToPanel opens `id` as a tab in `panel` (adding it if absent) and
-// makes it the active tab. Existing tabs in the pane stay open.
+// bindSessionToPanel opens `id` as a tab in `panel` and makes it active. If the
+// pane's active tab is a pending draft, the session replaces that draft slot
+// in place (rather than appending a third tab); otherwise it's appended.
 async function bindSessionToPanel(panel, id) {
-  if (!panel.tabs.includes(id)) panel.tabs.push(id);
+  if (!panel.tabs.includes(id)) {
+    const ai = panel.tabs.indexOf(panel.activeTab);
+    if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = id;
+    else panel.tabs.push(id);
+  }
   await activateTab(panel, id);
 }
 
-// closeTab removes `id` from a pane's tab strip. When the active tab closes the
-// neighbour is activated; closing the last tab closes the pane (or, if it is the
-// only pane, falls back to the empty picker).
-function closeTab(panel, id) {
-  const idx = panel.tabs.indexOf(id);
+// closeTab removes `key` (a session or draft tab) from a pane's tab strip. When
+// the active tab closes the neighbour is activated; closing the last tab closes
+// the pane (or, for the sole pane, leaves a fresh empty "New Chat" draft).
+function closeTab(panel, key) {
+  const idx = panel.tabs.indexOf(key);
   if (idx === -1) return;
-  const wasActive = panel.sessionId === id;
+  const wasActive = panel.activeTab === key;
   panel.tabs.splice(idx, 1);
 
   if (!panel.tabs.length) {
     if (panels.length > 1) {
       closePanel(panel);            // drops the pane; releases its (now empty) tabs
-      releaseSessionIfUnviewed(id);
+      releaseSessionIfUnviewed(key);
       refreshSidebarActive();
       return;
     }
-    // Sole pane: keep it, show the empty picker.
-    panel.sessionId = null;
-    mountInPanel(panel, null);
-    clearPinnedPrompt(panel);
+    // Sole pane: never leave it tab-less — open a fresh "New Chat" draft.
     if (focusedPanelId === panel.id) activeSessionId = null;
-    renderPaneTabs(panel);
-    showPanePicker(panel);
-    releaseSessionIfUnviewed(id);
+    newDraftTab(panel);
+    releaseSessionIfUnviewed(key);
     refreshSidebarActive();
-    saveLayout();
     return;
   }
 
   if (wasActive) {
-    const nextId = panel.tabs[Math.min(idx, panel.tabs.length - 1)];
-    activateTab(panel, nextId);     // re-renders tabs + saveLayout
+    const nextKey = panel.tabs[Math.min(idx, panel.tabs.length - 1)];
+    activateTab(panel, nextKey);    // re-renders tabs + saveLayout
   } else {
     renderPaneTabs(panel);
     saveLayout();
   }
-  releaseSessionIfUnviewed(id);
+  releaseSessionIfUnviewed(key);
   refreshSidebarActive();
 }
 
-// activateTab makes `id` the visible tab of `panel` (id must already be in
-// panel.tabs), mounting its transcript, loading history if needed, subscribing
-// to push events, and flushing any queued ask-user widgets.
-async function activateTab(panel, id) {
-  if (panel.sessionId === id) {
+// activateTab makes `key` the visible tab of `panel` (key must already be in
+// panel.tabs). A draft key shows the start picker with no session; a session key
+// mounts its transcript, loads history if needed, subscribes to push events, and
+// flushes any queued ask-user widgets.
+async function activateTab(panel, key) {
+  // Draft tab — show the picker, no session is active.
+  if (isDraft(key)) {
+    panel.activeTab = key;
+    panel.sessionId = null;
+    mountInPanel(panel, null);
+    clearPinnedPrompt(panel);
+    setFocusedPanel(panel.id);
+    renderPaneTabs(panel);
+    showPanePicker(panel);
+    saveLayout();
+    return;
+  }
+
+  const id = key;
+  if (panel.sessionId === id && panel.activeTab === id) {
     setFocusedPanel(panel.id);
     renderPaneTabs(panel);
     mountInPanel(panel, id);
     return;
   }
 
+  panel.activeTab = id;
   panel.sessionId = id;
   hidePanePicker(panel);
   setFocusedPanel(panel.id); // updates activeSessionId + sidebar highlight
@@ -2854,8 +2899,14 @@ async function newChat(panel, squadOverride) {
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
-    // Open the new session as a tab in the pane and make it active.
-    if (!panel.tabs.includes(newId)) panel.tabs.push(newId);
+    // Open the new session as a tab in the pane and make it active. If the
+    // active tab is a pending draft, the session takes that draft's slot.
+    if (!panel.tabs.includes(newId)) {
+      const ai = panel.tabs.indexOf(panel.activeTab);
+      if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = newId;
+      else panel.tabs.push(newId);
+    }
+    panel.activeTab = newId;
     panel.sessionId = newId;
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
@@ -4191,7 +4242,7 @@ async function restoreLayout(rec, liveIds) {
   for (let i = 0; i < panels.length; i++) {
     const panel = panels[i];
     const { tabs, active } = plans[i];
-    if (!tabs.length) { showPanePicker(panel); continue; }
+    if (!tabs.length) { newDraftTab(panel); continue; }
     // Register every tab on the pane, then mount the active one (loads history).
     panel.tabs = tabs.slice();
     renderPaneTabs(panel);
@@ -4249,6 +4300,6 @@ async function restoreLayout(rec, liveIds) {
   if (!restored && !panels.some(p => p.sessionId)) {
     const first = els.list.querySelector("li[data-id]");
     if (first) await bindSessionToPanel(fp(), first.dataset.id);
-    else { showPanePicker(fp()); autoGrowPrompt(fp()); }
+    else { newDraftTab(fp()); autoGrowPrompt(fp()); }
   }
 })();
