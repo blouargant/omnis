@@ -267,8 +267,11 @@ const BASE_PATH = window.BASE_PATH || "";
     b = document.createElement("div");
     b.id = "restart-banner";
     b.hidden = true;
-    const main = document.getElementById("chat");
-    main.insertBefore(b, main.firstChild);
+    // Insert into #chat-area (the flex column) above #chat (the pane row), so
+    // the banner is a full-width top bar — not a flex item inside the pane row
+    // (where it became a phantom column that survived into the chat view).
+    const area = document.getElementById("chat-area") || document.getElementById("chat");
+    area.insertBefore(b, area.firstChild);
     return b;
   }
 

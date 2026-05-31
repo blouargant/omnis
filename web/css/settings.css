@@ -605,8 +605,11 @@
   margin-bottom: 0.3rem;
 }
 
-/* Restart-required banner */
+/* Restart-required banner. Lives in #chat-area (the flex column) above #chat,
+ * so it is a full-width top bar; flex:none keeps it at its natural height while
+ * the max-height transition below animates it open/closed. */
 #restart-banner {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 0.75rem;

@@ -86,7 +86,12 @@
        pane is built by app.js on init. Cloned panes intentionally repeat the
        inner ids — CSS #id selectors style every pane identically, while app.js
        resolves per-pane elements via root.querySelector scoped to the pane. -->
-  <main id="chat" class="solo"></main>
+  <!-- #chat-area is a flex column: an optional full-width config banner stacks
+       above #chat (the horizontal pane row), so the banner never becomes a
+       phantom pane column nor overlaps content. -->
+  <div id="chat-area">
+    <main id="chat" class="solo"></main>
+  </div>
   <template id="chat-pane-tpl">
     <section class="chat-pane">
       <div class="pane-tabbar">
