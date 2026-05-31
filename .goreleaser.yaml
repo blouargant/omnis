@@ -19,12 +19,13 @@ builds:
       - -X main.version={{ .Version }}
       - -X main.commit={{ .Commit }}
       - -X main.date={{ .Date }}
-    # Windows is intentionally omitted: core/tools/bash.go uses Unix-only
-    # syscalls (syscall.Setpgid / syscall.Kill). Add platform-guarded
-    # variants of that file before re-enabling `windows` here.
+    # Windows builds rely on the platform-guarded shell helpers in
+    # core/tools/bash_unix.go / bash_windows.go (the Unix-only Setpgid/Kill
+    # path is no longer compiled into the Windows binary).
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -41,12 +42,13 @@ builds:
       - -X main.version={{ .Version }}
       - -X main.commit={{ .Commit }}
       - -X main.date={{ .Date }}
-    # Windows is intentionally omitted: core/tools/bash.go uses Unix-only
-    # syscalls (syscall.Setpgid / syscall.Kill). Add platform-guarded
-    # variants of that file before re-enabling `windows` here.
+    # Windows builds rely on the platform-guarded shell helpers in
+    # core/tools/bash_unix.go / bash_windows.go (the Unix-only Setpgid/Kill
+    # path is no longer compiled into the Windows binary).
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -64,6 +66,12 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     formats:
       - tar.gz
+    # Windows users expect a .zip rather than a tar.gz; this is also the
+    # artifact the WiX MSI pipeline unpacks to source the binaries + assets.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
@@ -71,6 +79,8 @@ archives:
         dst: docs
       - src: config/*.json
         dst: config
+      - src: config/server.yaml
+        dst: config/server.yaml
       - src: config/filters/*.json
         dst: config/filters
       - src: registry/skills
@@ -205,6 +215,67 @@ nfpms:
       deb:
         dependencies: []
         recommends: []
+
+brews:
+  - name: yoke
+    # Source the macOS/Linux archive (binaries + bundled config/web/registry).
+    ids:
+      - default
+    repository:
+      owner: blouargant
+      name: homebrew-tap
+      branch: main
+      # PAT with write access to blouargant/homebrew-tap, exposed in CI.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/blouargant/yoke"
+    description: "Multi-agent harness: CLI/TUI (yoke) + HTTP API & Web UI server (yoke-server)"
+    license: "MIT"
+    # Never publish a formula from rc/beta pre-release tags.
+    skip_upload: auto
+    install: |
+      # Keep the real binaries in libexec; expose env-injecting wrappers on
+      # PATH so yoke finds the bundled web assets + config without the user
+      # setting anything. YOKE_SYSTEM_CONFIG_DIR relocates only the system
+      # layer of the config search chain, leaving ./.agents and ~/.yoke intact.
+      libexec.install "yoke", "yoke-server"
+      (bin/"yoke").write_env_script libexec/"yoke",
+        YOKE_WEB_DIR:           pkgshare/"web",
+        YOKE_SYSTEM_CONFIG_DIR: pkgshare
+      (bin/"yoke-server").write_env_script libexec/"yoke-server",
+        YOKE_WEB_DIR:           pkgshare/"web",
+        YOKE_SYSTEM_CONFIG_DIR: pkgshare
+
+      # Bundled defaults, refreshed on every `brew upgrade`. User overrides
+      # live in ~/.yoke (higher precedence) so upgrades never clobber them.
+      pkgshare.install "web"
+      pkgshare.install "registry"
+      pkgshare.install Dir["config/*.json"]
+      pkgshare.install "config/server.yaml"
+      (pkgshare/"filters").install Dir["config/filters/*.json"]
+    caveats: |
+      Bundled agents, skills and the Web UI install under
+        #{HOMEBREW_PREFIX}/share/yoke
+      and are refreshed on every `brew upgrade`. Put your own overrides in
+        ~/.yoke   (e.g. ~/.yoke/agents.json, ~/.yoke/models.json)
+      which take precedence over the bundled defaults.
+
+      Set a provider API key before first run, e.g.:
+        export ANTHROPIC_API_KEY=sk-...
+
+      Run the Web UI / HTTP API server (listens on :8080, unauthenticated by
+      default — set YOKE_SERVER_TOKEN to require a bearer token):
+        yoke-server
+      or as a background service:
+        brew services start yoke
+    service: |
+      run [opt_bin/"yoke-server"]
+      keep_alive true
+      log_path var/"log/yoke-server.log"
+      error_log_path var/"log/yoke-server.log"
+      working_dir var
+    test: |
+      system bin/"yoke", "version"
 
 checksum:
   name_template: "checksums.txt"

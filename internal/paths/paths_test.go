@@ -53,6 +53,29 @@ func TestConfigSearchDirsEnvOverride(t *testing.T) {
 	}
 }
 
+func TestConfigSearchDirsSystemOverride(t *testing.T) {
+	tmp := t.TempDir()
+	sys := t.TempDir()
+	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("YOKE_CONFIG_DIRS", "")
+	t.Setenv("YOKE_SYSTEM_CONFIG_DIR", sys)
+	dirs := ConfigSearchDirs()
+	// .agents and $HOME/.yoke layers must be preserved; only the system
+	// (lowest-precedence) layer is relocated.
+	if len(dirs) != 3 {
+		t.Fatalf("ConfigSearchDirs() len = %d, want 3", len(dirs))
+	}
+	if dirs[0] != LocalDir {
+		t.Errorf("first layer = %q, want %q", dirs[0], LocalDir)
+	}
+	if dirs[1] != tmp {
+		t.Errorf("second layer = %q, want %q", dirs[1], tmp)
+	}
+	if dirs[2] != sys {
+		t.Errorf("system layer = %q, want override %q", dirs[2], sys)
+	}
+}
+
 func TestFindConfigPrecedence(t *testing.T) {
 	home := t.TempDir()
 	local := t.TempDir()

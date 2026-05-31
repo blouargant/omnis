@@ -477,6 +477,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
 | `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
 | `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke` |
+| `YOKE_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/yoke`), leaving `.agents` and `$HOME/.yoke` in the chain — unlike `YOKE_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/yoke`; Windows MSI → `C:\ProgramData\Yoke`) to relocate bundled config/registry without a rebuild |
 | `YOKE_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
 | `YOKE_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$YOKE_HOME/registry/skills`) |
 | `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |

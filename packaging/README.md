@@ -25,11 +25,19 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
 /usr/share/doc/yoke/           LICENSE + README.md
 ```
 
-Windows is currently disabled in `.goreleaser.yaml` because
-[core/tools/bash.go](../core/tools/bash.go) uses Unix-only syscalls
-(`syscall.Setpgid`, `syscall.Kill`). Once that file gains a platform-guarded
-Windows variant, flip the `goos` lists in `.goreleaser.yaml` back on and a
-`yoke_<version>_Windows_x86_64.zip` artifact will join the lineup.
+Windows is built. The Unix-only process-group syscalls (`Setpgid`, `Kill`)
+that used to block it now live behind build tags in
+[core/tools/bash_unix.go](../core/tools/bash_unix.go); the Windows binary
+compiles its counterpart [core/tools/bash_windows.go](../core/tools/bash_windows.go)
+instead (shell via `cmd.exe /C`, process-tree kill via `taskkill /T /F`).
+`make package` therefore emits a `yoke_<version>_Windows_x86_64.zip` alongside
+the Linux/macOS archives — that zip is the artifact the (forthcoming) WiX MSI
+pipeline will unpack to source the binaries + `web/` assets.
+
+> Caveat: the Bash tool's command strings are POSIX-shell oriented. On native
+> Windows they run under `cmd.exe`, so sh builtins/pipelines may not behave
+> identically — run yoke-server under WSL or Git-Bash if you need bash
+> semantics. The server, web UI, A2A, and MCP wiring are unaffected.
 
 ## What lives where in this directory
 
@@ -43,10 +51,99 @@ The `config/filters/` directory and the `skills/`, `web/`, `LICENSE`, and
 `README.md` files are pulled directly from the source tree by goreleaser —
 we don't duplicate them here.
 
+## macOS — Homebrew tap
+
+macOS is distributed as a **Homebrew formula** published to the
+`blouargant/homebrew-tap` repository by the `brews:` block in
+`.goreleaser.yaml`. Users install with:
+
+```
+brew install blouargant/tap/yoke
+```
+
+Layout on a `brew`-installed Mac (`$(brew --prefix)` is `/opt/homebrew` on
+Apple Silicon, `/usr/local` on Intel):
+
+```
+$(brew --prefix)/bin/yoke              env-injecting wrapper → libexec/yoke
+$(brew --prefix)/bin/yoke-server       env-injecting wrapper → libexec/yoke-server
+$(brew --prefix)/share/yoke/web/       static Web UI assets
+$(brew --prefix)/share/yoke/registry/  bundled agents + skills
+$(brew --prefix)/share/yoke/*.json     bundled config defaults (agents.json, …)
+$(brew --prefix)/share/yoke/filters/   bash output filter patterns
+```
+
+Because yoke embeds no defaults (it reads config/registry from disk), the
+formula installs the bundled tree under `share/yoke` and the `bin/` wrappers
+export `YOKE_WEB_DIR` + `YOKE_SYSTEM_CONFIG_DIR` so the binaries find it. The
+latter relocates **only** the system layer of the config search chain — user
+overrides in `~/.yoke` (and project-local `.agents/`) keep their higher
+precedence, so `brew upgrade` refreshes the bundled defaults without ever
+touching user config. `brew services start yoke` runs `yoke-server` via the
+formula's `service` block (unauthenticated unless `YOKE_SERVER_TOKEN` is set).
+
+> Note: `brews` is marked deprecated by goreleaser (which now nudges toward
+> `homebrew_casks`), so `make package-check` reports that deprecation. The
+> formula is kept deliberately: a Homebrew **cask** cannot inject the runtime
+> env vars the linked binaries need to locate the bundled (non-embedded)
+> config/registry, nor run a `brew services` daemon. Publishing the tap
+> requires a `HOMEBREW_TAP_GITHUB_TOKEN` secret (a PAT with write access to
+> `blouargant/homebrew-tap`) in the release workflow.
+
+## Windows — MSI installer
+
+Windows ships a per-machine **MSI** built with the
+[WiX Toolset](https://wixtoolset.org) from [windows/yoke.wxs](windows/yoke.wxs).
+goreleaser (OSS) can't build MSI, so the `msi` job in
+`.github/workflows/release.yml` runs on a `windows-latest` runner *after* the
+goreleaser `release` job: it downloads the published
+`yoke_<ver>_Windows_x86_64.zip`, stages it, and runs `wix build`. The MSI is
+attached to the same GitHub Release. It builds on **stable tags only** — MSI
+`ProductVersion` is strictly numeric (`x.y.z.0`) and can't carry an
+`-rcN`/`-betaN` suffix.
+
+Layout on a packaged Windows install (mirrors the Linux FHS split — binaries +
+static UI read-only, config under the system data dir):
+
+```
+C:\Program Files\Yoke\yoke.exe          CLI / REPL binary
+C:\Program Files\Yoke\yoke-server.exe   HTTP API + Web UI binary
+C:\Program Files\Yoke\web\              static Web UI assets
+C:\ProgramData\Yoke\*.json             bundled config defaults (agents.json, …)
+C:\ProgramData\Yoke\server.yaml        server listen address, token, A2A settings
+C:\ProgramData\Yoke\filters\           bash output filter patterns
+C:\ProgramData\Yoke\registry\          bundled agents + skills
+```
+
+The installer sets three **machine** environment variables so a fresh shell
+finds everything with no user setup:
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `PATH` (appended) | `C:\Program Files\Yoke\` | `yoke` / `yoke-server` on PATH |
+| `YOKE_WEB_DIR` | `C:\Program Files\Yoke\web` | locate the static Web UI |
+| `YOKE_SYSTEM_CONFIG_DIR` | `C:\ProgramData\Yoke` | system layer of the config chain |
+
+`YOKE_SYSTEM_CONFIG_DIR` relocates **only** the system layer, so per-user
+overrides in `%USERPROFILE%\.yoke` (and project-local `.agents\`) keep their
+higher precedence; the `ProgramData` tree is bundled defaults refreshed on
+upgrade — same model as the Homebrew `share/yoke` tree above.
+
+> Caveats / future work:
+> - **No Windows Service yet.** `yoke-server.exe` isn't SCM-aware
+>   (`golang.org/x/sys/windows/svc`), so the MSI installs binaries + assets +
+>   PATH but doesn't register an auto-start service — run `yoke-server` from a
+>   terminal (or wrap it with NSSM / a Scheduled Task). Adding `svc` support +
+>   a WiX `ServiceInstall` is the natural next step.
+> - **Bash tool** runs under `cmd.exe` on native Windows (see the build-tag
+>   note above) — run under WSL for full POSIX-shell semantics.
+> - **Code signing**: the MSI is unsigned, so SmartScreen will warn. An
+>   Authenticode certificate + `signtool` removes the warning (not wired up).
+
 ## Building the packages
 
 ```
-make package          # cross-compile + .deb + .rpm + .zip into dist/
+make package          # cross-compile + .deb + .rpm + .zip + brew formula into dist/
 ```
 
 See the top-level `Makefile` and `.goreleaser.yaml` for the full pipeline.

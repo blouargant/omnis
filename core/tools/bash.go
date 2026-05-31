@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/blouargant/yoke/internal/filter"
@@ -173,19 +171,11 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	execCommand := maybeInjectBashFilterArgs(in.Command)
-	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", execCommand)
-	// Put the shell in its own process group so that all child processes it
-	// spawns are part of the same group. When the context deadline fires,
-	// cmd.Cancel kills the entire group (negative PID), ensuring orphaned
-	// children don't keep the stdout/stderr pipes open and cause
-	// CombinedOutput to hang past the timeout.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	// newShellCommand wires up the platform's shell plus a Cancel hook that
+	// kills the whole process tree when the context deadline fires, so
+	// orphaned children can't keep the stdout/stderr pipes open and hang
+	// CombinedOutput past the timeout. See bash_unix.go / bash_windows.go.
+	cmd := newShellCommand(cctx, execCommand)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	s := strings.TrimRight(string(out), "\n")

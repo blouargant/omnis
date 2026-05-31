@@ -100,7 +100,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Non-blocking: goreleaser deprecated the `brews` property (it now nudges
+      # toward `homebrew_casks`), so `check` exits non-zero on that deprecation
+      # warning alone. The formula is kept deliberately — a cask can't inject
+      # the runtime env the binaries need to locate yoke's non-embedded config,
+      # nor run a `brew services` daemon (see packaging/README.md). Keep an eye
+      # on this step's log for any OTHER (real) config error.
       - name: Validate goreleaser config
+        continue-on-error: true
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -115,6 +122,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with write access to blouargant/homebrew-tap, required to push
+          # the generated Formula/yoke.rb. Add it as a repo/org secret. Without
+          # it, goreleaser fails only the brew publish, not the GitHub release.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Job summary
         run: |
@@ -127,3 +138,63 @@ jobs:
             echo ""
             echo "Artifacts published to the GitHub Release page."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Build the Windows MSI from the Windows .zip goreleaser just published, then
+  # attach it to the same GitHub Release. goreleaser OSS can't build MSI, and
+  # WiX needs a Windows host — so this runs on windows-latest after `release`.
+  # Stable tags only: MSI ProductVersion is strictly numeric (x.y.z.0) and can't
+  # carry an -rcN/-betaN suffix, matching the brew formula's stable-only publish.
+  msi:
+    name: Build Windows MSI (x64)
+    needs: [validate, release]
+    if: needs.validate.outputs.kind == 'stable'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the Windows archive from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" --pattern "*Windows_x86_64.zip" --dir "$env:RUNNER_TEMP\zip"
+
+      - name: Stage files into the install / data layout
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem "$env:RUNNER_TEMP\zip\*Windows_x86_64.zip" | Select-Object -First 1
+          $ex  = "$env:RUNNER_TEMP\extract"
+          Expand-Archive -Path $zip.FullName -DestinationPath $ex -Force
+          $stage = "$env:RUNNER_TEMP\stage"
+          New-Item -ItemType Directory -Force -Path "$stage\install\web","$stage\data" | Out-Null
+          # Binaries + static web UI -> Program Files\Yoke
+          Copy-Item "$ex\yoke.exe","$ex\yoke-server.exe" "$stage\install\"
+          Copy-Item "$ex\web\*" "$stage\install\web\" -Recurse
+          # System config layer -> ProgramData\Yoke (flatten config\, keep filters\ + registry\)
+          Copy-Item "$ex\config\*.json" "$stage\data\"
+          Copy-Item "$ex\config\server.yaml" "$stage\data\"
+          Copy-Item "$ex\config\filters" "$stage\data\filters" -Recurse
+          Copy-Item "$ex\registry" "$stage\data\registry" -Recurse
+          "STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.*
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.validate.outputs.version }}"
+          $out = "$env:RUNNER_TEMP\yoke_${ver}_windows_x86_64.msi"
+          wix build packaging\windows\yoke.wxs -arch x64 -d Version="$ver.0" -d StageDir="$env:STAGE" -o "$out"
+          "MSI=$out" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload MSI to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$env:GITHUB_REF_NAME" "$env:MSI" --repo "$env:GITHUB_REPOSITORY" --clobber

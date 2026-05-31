@@ -41,6 +41,14 @@ const (
 	envHome       = "YOKE_HOME"
 	envConfigDirs = "YOKE_CONFIG_DIRS"
 
+	// envSystemConfigDir overrides just the system layer (SystemConfigDir)
+	// at runtime, leaving the higher-precedence .agents and $HOME/.yoke
+	// layers intact — unlike YOKE_CONFIG_DIRS, which replaces the whole
+	// chain. Distribution wrappers that install bundled config outside the
+	// FHS /etc/yoke location use this: the Homebrew formula points it at
+	// "$(brew --prefix)/etc/yoke" and the Windows MSI at "C:\ProgramData\Yoke".
+	envSystemConfigDir = "YOKE_SYSTEM_CONFIG_DIR"
+
 	// LocalDir is the canonical project-local configuration directory
 	// (CWD-relative). Place agents.json, permissions.json, registry/agents/,
 	// etc. here to scope configuration to a single project checkout.
@@ -59,8 +67,21 @@ const (
 // registries live under SystemConfigDir/registry/agents and
 // SystemConfigDir/registry/skills respectively. It's a package-level variable
 // so distribution packagers can override it at build time via -ldflags for
-// non-FHS targets.
+// non-FHS targets. For runtime overrides (e.g. a package wrapper that can't
+// know the install prefix at build time) use the YOKE_SYSTEM_CONFIG_DIR env
+// var instead — read via systemConfigDir().
 var SystemConfigDir = "/etc/yoke"
+
+// systemConfigDir returns the effective system-config base directory: the
+// YOKE_SYSTEM_CONFIG_DIR env override when set, otherwise the SystemConfigDir
+// package variable. All internal resolution goes through this so a package
+// wrapper can relocate the system layer without recompiling.
+func systemConfigDir() string {
+	if v := strings.TrimSpace(os.Getenv(envSystemConfigDir)); v != "" {
+		return v
+	}
+	return SystemConfigDir
+}
 
 // LocalDirNames returns the candidate local-dir names in precedence order.
 // `.agents/` (canonical) comes before `agents/` (alias).
@@ -125,7 +146,7 @@ func ConfigSearchDirs() []string {
 		}
 	}
 	out := append([]string(nil), LocalDirs()...)
-	out = append(out, Home(), SystemConfigDir)
+	out = append(out, Home(), systemConfigDir())
 	return out
 }
 
@@ -238,8 +259,8 @@ func SkillsAllSearchDirs() []string {
 		filepath.Join(Home(), "skills"),
 		filepath.Join(Home(), "registry/skills"),
 	)
-	if SystemConfigDir != "" {
-		out = append(out, filepath.Join(SystemConfigDir, "registry/skills"))
+	if sys := systemConfigDir(); sys != "" {
+		out = append(out, filepath.Join(sys, "registry/skills"))
 	}
 	return out
 }
@@ -300,8 +321,8 @@ func skillsRegistrySearchDirs() []string {
 		out = append(out, filepath.Join(base, "registry/skills"))
 	}
 	out = append(out, filepath.Join(Home(), "registry/skills"))
-	if SystemConfigDir != "" {
-		out = append(out, filepath.Join(SystemConfigDir, "registry/skills"))
+	if sys := systemConfigDir(); sys != "" {
+		out = append(out, filepath.Join(sys, "registry/skills"))
 	}
 	return out
 }
@@ -342,8 +363,8 @@ func agentsRegistrySearchDirs() []string {
 		out = append(out, filepath.Join(base, "registry/agents"))
 	}
 	out = append(out, filepath.Join(Home(), "registry/agents"))
-	if SystemConfigDir != "" {
-		out = append(out, filepath.Join(SystemConfigDir, "registry/agents"))
+	if sys := systemConfigDir(); sys != "" {
+		out = append(out, filepath.Join(sys, "registry/agents"))
 	}
 	return out
 }
