@@ -931,3 +931,39 @@ class to the prior block when a new one arrives. Any block's header is a
 click-toggle, and its `done/total` progress count stays visible while
 collapsed. State is live-only (history replay renders text turns, not tool
 calls) and both maps are cleared on session delete.
+
+### Web UI split panels (VS Code-style)
+
+`#chat` is a horizontal flex **row** of one-or-more independent `.chat-pane`
+columns separated by draggable `.pane-divider` handles ([web/index.html](web/index.html)
+`<template id="chat-pane-tpl">` is cloned per pane; [web/css/styles.css](web/css/styles.css)
+`.chat-pane`/`.pane-divider`/`.pane-toolbar`/`.pane-picker`). Each pane owns its
+own copy of the chat UI (transcript, composer, prompt, send/cancel, status,
+context ring + popup, ask-user slot, attachments) and is bound to **at most one
+session** — `getContainer(sessionId)` returns a single DOM node per session, so a
+session can be mounted in only one pane at a time. Selecting a session already
+shown elsewhere focuses that pane instead of duplicating.
+
+Per-session state stays in the existing `sessionId`-keyed Maps; the refactor is
+purely in the view layer ([web/app.js](web/app.js)): a `panels` array of
+`{id, sessionId, root, els, width, _stick}` objects, `focusedPanelId`, and
+helpers `panelsForSession(id)`, `focusedPanel()`/`fp()`, `setFocusedPanel`,
+`bindSessionToPanel`, `createPanel`/`splitPanel`/`closePanel`,
+`rebuildChatDOM`/`layoutWidths`, `paneOfNode` (resolve a node's pane for
+scroll/media). `activeSessionId` is a **compatibility shim** = the focused pane's
+session, so global-action sites (sidebar, modals, ctx browser) keep working.
+Display-write functions (`applySessionUI`, `renderCtxRing/Popup`, `setStatus`,
+`scrollBottom`, pinned-prompt, `renderAttachmentsUI`, `renderAskUserWidget`,
+streaming gates) take/loop a `panel` via `panelsForSession` so **background panes
+update too** and each pane scrolls independently. Composer/prompt/attach/slash/
+ctx-ring/cancel/resize listeners are wired **per-pane** in `attachPaneHandlers`.
+
+A pane's toolbar has split (clones a new empty pane to the right) and close
+(hidden when `#chat.solo`) buttons; an empty pane shows `.pane-picker` (start a
+new chat → `newChat(panel)`, or open an existing session). Push subscriptions
+follow `releaseSessionIfUnviewed` (subscribe while mounted, drop when no pane
+shows it). Layout (sessions + widths + focus) persists to
+`localStorage["agent_toolkit_layout"]` (`saveLayout`/`restoreLayout`, restored
+on boot after `loadSessions`, dropping dead session ids to empty panes). The
+Settings panel still appends to `#chat`; `#chat.chat--settings > .chat-pane`
+hides panes while it's open, and `rebuildChatDOM` preserves `#settings-panel`.

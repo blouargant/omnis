@@ -555,18 +555,255 @@ body.resizing #sidebar-resize { transition: none; }
 #sidebar.collapsed ~ #sidebar-resize:hover::after { color: var(--text); }
 
 /* ─── Main chat ────────────────────────────────────────────── */
+/* #chat is now a horizontal row of one-or-more .chat-pane columns separated by
+ * draggable .pane-divider handles. Each pane is an independent chat (its own
+ * transcript + composer + session). */
 #chat {
   flex: 1;
   min-width: 0;
   height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   background: var(--bg-panel);
   /* Positioning context for the absolutely-positioned settings panel
    * (see settings.css). Always set, not gated by a class, so the panel
    * is correctly anchored regardless of load order. */
   position: relative;
+}
+
+/* A single chat pane: the former #chat column layout. */
+.chat-pane {
+  flex: 1 1 0;
+  min-width: 360px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.chat-pane.is-focused::before {
+  /* Subtle accent on the focused pane (hidden when only one pane). */
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent, #4a9eff);
+  z-index: 5;
+  pointer-events: none;
+}
+#chat.solo .chat-pane.is-focused::before { display: none; }
+
+/* Draggable vertical divider between panes. */
+.pane-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 6;
+}
+/* Thin visible line, centered in the wider (easier-to-grab) hit area. */
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border, #333);
+}
+.pane-divider:hover::before,
+.pane-divider.is-dragging::before { background: var(--accent, #4a9eff); }
+
+/* Per-pane tab bar: a persistent strip at the top of each pane showing the
+ * bound session's name (VS Code-style), with the split/close actions pinned
+ * to its right edge. */
+.pane-tabbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border, #333);
+}
+.pane-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: calc(100% - 72px);
+  padding: 0 12px;
+  background: var(--bg-raised, #2a2d2e);
+  border-right: 1px solid var(--border, #333);
+  color: var(--text-dim, #aaa);
+  font-size: 12.5px;
+}
+.chat-pane.is-focused .pane-tab { color: var(--text, #eee); }
+.pane-tab-icon { flex-shrink: 0; color: var(--text-muted); }
+.pane-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Split / close actions, pinned to the right of the tab bar. */
+.pane-toolbar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  opacity: .55;
+  transition: opacity .12s ease;
+}
+.chat-pane:hover .pane-toolbar,
+.chat-pane.is-focused .pane-toolbar { opacity: .8; }
+.pane-toolbar:hover { opacity: 1; }
+.pane-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim, #aaa);
+  cursor: pointer;
+}
+.pane-toolbar button:hover {
+  background: var(--bg-raised-hover, #333);
+  border-color: var(--border, #333);
+  color: var(--text, #eee);
+}
+/* The close button is hidden when only one pane remains. */
+#chat.solo .pane-close-btn { display: none; }
+
+/* Empty-pane session picker (shown when a pane has no bound session). */
+.pane-picker {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
+}
+.pane-picker[hidden] { display: none; }
+.pane-picker-inner {
+  width: min(420px, 80%);
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pane-picker-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--bg-raised, #2a2d2e);
+  color: var(--text, #eee);
+  font-size: 14px;
+  cursor: pointer;
+}
+.pane-picker-new:hover { background: var(--bg-raised-hover, #333); }
+.pane-picker-squad {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim, #888);
+}
+.pane-picker-squad[hidden] { display: none; }
+.pane-picker-squad-label { flex: 0 0 auto; }
+.pane-picker-squad-control {
+  position: relative;
+  flex: 1 1 auto;
+}
+.pane-picker-squad-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-raised, #2a2d2e);
+  color: var(--text, #eee);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pane-picker-squad-toggle:hover { background: var(--bg-raised-hover, #333); }
+.pane-picker-squad-icon { flex-shrink: 0; color: var(--text-muted); }
+.pane-picker-squad-name {
+  flex: 1 1 auto;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pane-picker-squad-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+.pane-picker-squad-toggle[aria-expanded="true"] .pane-picker-squad-chevron { transform: rotate(180deg); }
+.pane-picker-squad-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pane-picker-squad-menu[hidden] { display: none; }
+.pane-picker-or {
+  text-align: center;
+  color: var(--text-dim, #888);
+  font-size: 12px;
+}
+.pane-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+.pane-picker-item {
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text, #eee);
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-picker-item:last-child { border-bottom: none; }
+.pane-picker-item:hover { background: var(--bg-raised-hover, #333); }
+.pane-picker-item.is-open { opacity: .55; }
+.pane-picker-item.is-open::after { content: " (open)"; color: var(--text-dim, #888); }
+.pane-picker-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-dim, #888);
+  font-size: 12px;
 }
 
 /* ─── Shared user message style (floating header + inline bubbles) ── */
@@ -589,7 +826,7 @@ body.resizing #sidebar-resize { transition: none; }
   flex-shrink: 0;
   display: none;
   width: 100%;
-  max-width: calc(var(--col-w) - 40px);
+  max-width: min(calc(var(--col-w) - 40px), calc(100% - 40px));
   margin: 16px auto 0;
   white-space: normal;
 }
@@ -625,7 +862,7 @@ body.resizing #sidebar-resize { transition: none; }
 .msg-row {
   display: flex;
   padding: 2px 20px;
-  max-width: var(--col-w);
+  max-width: min(var(--col-w), 100%);
   width: 100%;
   margin: 0 auto 2px;
 }
@@ -772,7 +1009,7 @@ body.resizing #sidebar-resize { transition: none; }
 .tool-row {
   display: flex;
   padding: 2px 20px;
-  max-width: var(--col-w);
+  max-width: min(var(--col-w), 100%);
   width: 100%;
   margin: 0 auto 2px;
 }
@@ -1127,7 +1364,7 @@ body.resizing #sidebar-resize { transition: none; }
   right: 0;
   /* Match the centred editor column so the line spans only the editor width
    * (background-clip: content-box keeps the line inside the 20px padding). */
-  max-width: var(--col-w);
+  max-width: min(var(--col-w), 100%);
   margin: 0 auto;
   padding: 0 20px;
   box-sizing: border-box;
@@ -1152,7 +1389,7 @@ body.resizing-composer #composer-resize { transition: none; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: var(--col-w);
+  max-width: min(var(--col-w), 100%);
   margin: 0 auto;
   padding: 0 20px;
   width: 100%;
@@ -1944,7 +2181,7 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 
 .ask-user-card {
-  max-width: var(--col-w);
+  max-width: min(var(--col-w), 100%);
   width: 100%;
   margin-left: auto;
   margin-right: auto;

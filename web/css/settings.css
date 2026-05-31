@@ -935,12 +935,12 @@
   transform: scale(1);
 }
 
-/* When the settings panel is open, hide normal chat surfaces. The toggle is
- * a single class on #chat (set by Settings.open/close) so we never fight
- * with app.js over inline display styles. */
-#chat.chat--settings #transcript,
-#chat.chat--settings #composer-wrap,
-#chat.chat--settings #prompt-header {
+/* When the settings panel is open, hide the chat panes (and their dividers)
+ * entirely so #settings-panel (flex:1) fills the chat area. The toggle is a
+ * single class on #chat (set by Settings.open/close) so we never fight with
+ * app.js over inline display styles. */
+#chat.chat--settings > .chat-pane,
+#chat.chat--settings > .pane-divider {
   display: none;
 }
 

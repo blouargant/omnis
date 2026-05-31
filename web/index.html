@@ -81,74 +81,124 @@
   </aside>
   <div id="sidebar-resize" aria-hidden="true"></div>
 
-  <main id="chat">
-    <div id="prompt-header"></div>
-    <div id="transcript" aria-live="polite"></div>
-    <div id="ask-user-slot"></div>
-    <div id="composer-wrap">
-      <div id="composer-resize" aria-hidden="true"></div>
-      <div id="slash-menu" hidden></div>
-      <form id="composer">
-        <input type="file" id="file-input" multiple hidden />
-        <div id="attachments" hidden></div>
-        <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)"></textarea>
-        <div class="composer-actions">
-          <div id="attach-wrap">
-            <button id="attach-btn" type="button" data-tip="Attach files">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-              </svg>
-            </button>
-            <div id="attach-menu" hidden>
-              <button id="attach-computer" type="button">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                Upload from computer
-              </button>
-              <button id="attach-context" type="button">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                </svg>
-                Add context
-              </button>
-            </div>
-          </div>
-          <button id="edit-mode-btn" type="button" data-tip="Toggle Enter key: send vs new line">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 7V4h16v3"/>
-              <path d="M9 20h6"/>
-              <path d="M12 4v16"/>
+  <!-- Chat is a horizontal row of one-or-more independent panes. Each pane is
+       cloned from #chat-pane-tpl below and bound to its own session. The first
+       pane is built by app.js on init. Cloned panes intentionally repeat the
+       inner ids — CSS #id selectors style every pane identically, while app.js
+       resolves per-pane elements via root.querySelector scoped to the pane. -->
+  <main id="chat" class="solo"></main>
+  <template id="chat-pane-tpl">
+    <section class="chat-pane">
+      <div class="pane-tabbar">
+        <div class="pane-tab">
+          <svg class="pane-tab-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="pane-tab-name"></span>
+        </div>
+        <div class="pane-toolbar">
+          <button class="pane-split-btn" type="button" data-tip="Split editor right" aria-label="Split editor right">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <line x1="12" y1="4" x2="12" y2="20"/>
             </svg>
           </button>
-          <button id="slash-btn" type="button" data-tip="Slash commands (/)">/</button>
-          <span id="ctx-ring-wrap">
-            <svg id="ctx-ring-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-              <circle class="ctx-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"/>
-              <circle class="ctx-ring-fill" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"
-                stroke-linecap="round" transform="rotate(-90 12 12)"/>
+          <button class="pane-close-btn" type="button" data-tip="Close panel" aria-label="Close panel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
-            <div id="ctx-popup" hidden>
-              <div class="ctx-popup-header">Context</div>
-              <div class="ctx-popup-grid">
-                <span>Tokens used</span>  <span id="ctx-pop-used">—</span>
-                <span>Max context</span>  <span id="ctx-pop-max">—</span>
-                <span>Percent</span>      <span id="ctx-pop-pct">—</span>
-                <span>Budget</span>       <span id="ctx-pop-budget">—</span>
-              </div>
-              <div id="ctx-pop-agents" hidden></div>
-              <button id="ctx-compact-btn" type="button">Compress Now</button>
-            </div>
-          </span>
-          <span id="status"></span>
-          <button id="cancel" type="button" disabled>Stop</button>
-          <button id="send" type="submit">Send</button>
+          </button>
         </div>
-      </form>
-    </div>
-  </main>
+      </div>
+      <div id="prompt-header"></div>
+      <div id="transcript" aria-live="polite"></div>
+      <div class="pane-picker" hidden>
+        <div class="pane-picker-inner">
+          <div class="pane-picker-squad" hidden>
+            <span class="pane-picker-squad-label">Squad</span>
+            <div class="pane-picker-squad-control">
+              <button class="pane-picker-squad-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Choose squad for new chat">
+                <svg class="pane-picker-squad-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="pane-picker-squad-name"></span>
+                <svg class="pane-picker-squad-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="pane-picker-squad-menu" role="menu" hidden></div>
+            </div>
+          </div>
+          <button class="pane-picker-new" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Start a new chat</span>
+          </button>
+          <div class="pane-picker-or">or open an existing session</div>
+          <ul class="pane-picker-list" aria-label="open session in this panel"></ul>
+        </div>
+      </div>
+      <div id="ask-user-slot"></div>
+      <div id="composer-wrap">
+        <div id="composer-resize" aria-hidden="true"></div>
+        <div id="slash-menu" hidden></div>
+        <form id="composer">
+          <input type="file" id="file-input" multiple hidden />
+          <div id="attachments" hidden></div>
+          <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)"></textarea>
+          <div class="composer-actions">
+            <div id="attach-wrap">
+              <button id="attach-btn" type="button" data-tip="Attach files">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                </svg>
+              </button>
+              <div id="attach-menu" hidden>
+                <button id="attach-computer" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  Upload from computer
+                </button>
+                <button id="attach-context" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Add context
+                </button>
+              </div>
+            </div>
+            <button id="edit-mode-btn" type="button" data-tip="Toggle Enter key: send vs new line">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 7V4h16v3"/>
+                <path d="M9 20h6"/>
+                <path d="M12 4v16"/>
+              </svg>
+            </button>
+            <button id="slash-btn" type="button" data-tip="Slash commands (/)">/</button>
+            <span id="ctx-ring-wrap">
+              <svg id="ctx-ring-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="ctx-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"/>
+                <circle class="ctx-ring-fill" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"
+                  stroke-linecap="round" transform="rotate(-90 12 12)"/>
+              </svg>
+              <div id="ctx-popup" hidden>
+                <div class="ctx-popup-header">Context</div>
+                <div class="ctx-popup-grid">
+                  <span>Tokens used</span>  <span id="ctx-pop-used">—</span>
+                  <span>Max context</span>  <span id="ctx-pop-max">—</span>
+                  <span>Percent</span>      <span id="ctx-pop-pct">—</span>
+                  <span>Budget</span>       <span id="ctx-pop-budget">—</span>
+                </div>
+                <div id="ctx-pop-agents" hidden></div>
+                <button id="ctx-compact-btn" type="button">Compress Now</button>
+              </div>
+            </span>
+            <span id="status"></span>
+            <button id="cancel" type="button" disabled>Stop</button>
+            <button id="send" type="submit">Send</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </template>
 
   <div id="ctx-browser-overlay" hidden>
     <div id="ctx-browser">

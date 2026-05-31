@@ -100,6 +100,10 @@ AgentDebug.reset();
 if (AgentDebug.enabled) AgentDebug._paint();
 window.AgentDebug = AgentDebug;
 
+// `els` holds only the GLOBAL, single-instance UI: the sidebar and the
+// full-screen modal overlays. Per-pane chat elements (transcript, composer,
+// prompt, send/cancel, status, context ring, ask-user slot, attachments, …)
+// live on each panel object's `.els` map instead — see the Panels section.
 const els = {
   sidebar:       document.getElementById("sidebar"),
   sidebarResize: document.getElementById("sidebar-resize"),
@@ -113,34 +117,8 @@ const els = {
   archivedHeader:document.getElementById("archived-header"),
   archivedList:  document.getElementById("archived-list"),
   archivedCount: document.getElementById("archived-count"),
-  promptHeader:  document.getElementById("prompt-header"),
-  transcript:    document.getElementById("transcript"),
-  composerWrap:  document.getElementById("composer-wrap"),
-  composer:      document.getElementById("composer"),
-  prompt:        document.getElementById("prompt"),
-  editModeBtn:   document.getElementById("edit-mode-btn"),
-  slashBtn:      document.getElementById("slash-btn"),
-  slashMenu:     document.getElementById("slash-menu"),
-  send:          document.getElementById("send"),
-  cancel:        document.getElementById("cancel"),
-  status:        document.getElementById("status"),
-  ctxRingWrap:    document.getElementById("ctx-ring-wrap"),
-  ctxRingSvg:     document.getElementById("ctx-ring-svg"),
-  ctxRingFill:    document.querySelector(".ctx-ring-fill"),
-  ctxPopup:       document.getElementById("ctx-popup"),
-  ctxPopUsed:     document.getElementById("ctx-pop-used"),
-  ctxPopMax:      document.getElementById("ctx-pop-max"),
-  ctxPopPct:      document.getElementById("ctx-pop-pct"),
-  ctxPopBudget:   document.getElementById("ctx-pop-budget"),
-  ctxPopAgents:   document.getElementById("ctx-pop-agents"),
-  ctxCompactBtn:  document.getElementById("ctx-compact-btn"),
-  composerResize: document.getElementById("composer-resize"),
-  fileInput:          document.getElementById("file-input"),
-  attachBtn:          document.getElementById("attach-btn"),
-  attachMenu:         document.getElementById("attach-menu"),
-  attachComputer:     document.getElementById("attach-computer"),
-  attachContext:      document.getElementById("attach-context"),
-  attachments:        document.getElementById("attachments"),
+  chat:          document.getElementById("chat"),
+  paneTpl:       document.getElementById("chat-pane-tpl"),
   ctxBrowserOverlay:  document.getElementById("ctx-browser-overlay"),
   ctxBrowserClose:    document.getElementById("ctx-browser-close"),
   ctxBrowserPath:     document.getElementById("ctx-browser-path"),
@@ -168,9 +146,553 @@ const els = {
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
+// `activeSessionId` is a compatibility shim: it mirrors the FOCUSED panel's
+// session. Global actions (sidebar, modals, slash commands) act on the focused
+// pane through it. Per-session display writes are routed to the right pane(s)
+// via panelsForSession() regardless of focus, so background panes update too.
 let activeSessionId = null;
 let sendOnEnter = true;
 const ctxBrowserSelected = new Map(); // path → {name, path, size}
+
+// ─── Panels (split-screen) ───────────────────────────────────────────────────
+// The chat area is a horizontal row of one-or-more independent panes. Each pane
+// owns a cloned copy of the chat UI (transcript + composer + context ring + …)
+// and is bound to at most one session. A session can be shown in at most one
+// pane (its transcript DOM is a single node — see getContainer). `panels` is
+// ordered left→right; `focusedPanelId` is the pane that sidebar clicks and the
+// shared menus/modals target.
+
+let panels = [];
+let focusedPanelId = null;
+let panelSeq = 0;
+const PANE_MIN_W = 360;       // px; minimum width of a pane
+const PANE_DIVIDER_W = 6;     // px; width of a draggable divider
+const LAYOUT_KEY = "agent_toolkit_layout";
+
+// Pending ask-user widgets for sessions not currently shown in any pane, keyed
+// by sessionId → [question objects]. Flushed into a pane when the session is
+// bound to it (bindSessionToPanel).
+const queuedAskWidgets = new Map();
+
+// Per-pane element ids resolved (scoped) from the cloned template. The cloned
+// panes intentionally repeat these ids; we always resolve them via
+// root.querySelector so duplicates never matter to JS (and #id CSS selectors
+// style every pane identically).
+const PANE_EL_IDS = {
+  promptHeader: "prompt-header", transcript: "transcript",
+  composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
+  editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
+  send: "send", cancel: "cancel", status: "status",
+  ctxRingWrap: "ctx-ring-wrap", ctxRingSvg: "ctx-ring-svg",
+  ctxPopup: "ctx-popup", ctxPopUsed: "ctx-pop-used", ctxPopMax: "ctx-pop-max",
+  ctxPopPct: "ctx-pop-pct", ctxPopBudget: "ctx-pop-budget", ctxPopAgents: "ctx-pop-agents",
+  ctxCompactBtn: "ctx-compact-btn", composerResize: "composer-resize",
+  fileInput: "file-input", attachBtn: "attach-btn", attachMenu: "attach-menu",
+  attachComputer: "attach-computer", attachContext: "attach-context",
+  attachments: "attachments",
+};
+
+function bindPaneEls(root) {
+  const e = {};
+  for (const k in PANE_EL_IDS) e[k] = root.querySelector("#" + PANE_EL_IDS[k]);
+  e.ctxRingFill = root.querySelector(".ctx-ring-fill");
+  e.askSlot     = root.querySelector("#ask-user-slot");
+  e.toolbar     = root.querySelector(".pane-toolbar");
+  e.splitBtn    = root.querySelector(".pane-split-btn");
+  e.closeBtn    = root.querySelector(".pane-close-btn");
+  e.tab         = root.querySelector(".pane-tab");
+  e.tabName     = root.querySelector(".pane-tab-name");
+  e.picker      = root.querySelector(".pane-picker");
+  e.pickerNew   = root.querySelector(".pane-picker-new");
+  e.pickerSquad = root.querySelector(".pane-picker-squad");
+  e.pickerSquadToggle = root.querySelector(".pane-picker-squad-toggle");
+  e.pickerSquadName   = root.querySelector(".pane-picker-squad-name");
+  e.pickerSquadMenu   = root.querySelector(".pane-picker-squad-menu");
+  e.pickerList  = root.querySelector(".pane-picker-list");
+  return e;
+}
+
+function panelsForSession(id) { return id ? panels.filter(p => p.sessionId === id) : []; }
+function getPanel(pid) { return panels.find(p => p.id === pid) || null; }
+function focusedPanel() { return getPanel(focusedPanelId) || panels[0] || null; }
+function fp() { return focusedPanel(); }
+
+// createPanel clones the template and registers a panel object (not yet
+// inserted into the DOM — see rebuildChatDOM / layoutWidths).
+function createPanel(sessionId) {
+  const frag = els.paneTpl.content.cloneNode(true);
+  const root = frag.querySelector(".chat-pane");
+  const id = "p" + (panelSeq++);
+  root.dataset.panelId = id;
+  const panel = {
+    id, sessionId: sessionId || null, root,
+    els: bindPaneEls(root),
+    width: 0, _stick: true, _scrollPending: false,
+  };
+  panels.push(panel);
+  attachPaneHandlers(panel);
+  updatePaneTab(panel);
+  return panel;
+}
+
+// mountInPanel swaps a session's transcript container into the pane (or clears
+// it when sessionId is null).
+function mountInPanel(panel, sessionId) {
+  const t = panel.els.transcript;
+  const next = sessionId ? getContainer(sessionId) : null;
+  updatePaneTab(panel);
+  if (next && t.contains(next)) return;
+  while (t.firstChild) t.removeChild(t.firstChild);
+  if (next) t.appendChild(next);
+}
+
+function setFocusedPanel(pid) {
+  focusedPanelId = pid;
+  for (const p of panels) p.root.classList.toggle("is-focused", p.id === pid);
+  const p = getPanel(pid);
+  activeSessionId = p ? p.sessionId : null;
+  if (AgentDebug.enabled) { AgentDebug.activeSession = activeSessionId; AgentDebug._paint(); }
+  refreshSidebarActive();
+  saveLayout();
+}
+
+// refreshSidebarActive highlights every session currently shown in any pane.
+function refreshSidebarActive() {
+  if (!els.list) return;
+  const shown = new Set(panels.map(p => p.sessionId).filter(Boolean));
+  for (const li of els.list.children) {
+    li.classList.toggle("active", shown.has(li.dataset.id));
+  }
+}
+
+// ─── Pane layout (widths + dividers) ──────────────────────────────────────────
+
+function applyPaneWidths() {
+  for (const p of panels) p.root.style.flex = `0 0 ${Math.round(p.width)}px`;
+}
+
+// layoutWidths normalizes the stored per-pane widths to fill the chat area,
+// clamping each to PANE_MIN_W, then writes them to the DOM.
+function layoutWidths() {
+  if (!panels.length) return;
+  const total = els.chat.clientWidth || (panels.length * PANE_MIN_W);
+  const dividers = Math.max(0, panels.length - 1) * PANE_DIVIDER_W;
+  const avail = Math.max(panels.length * PANE_MIN_W, total - dividers);
+  let sum = panels.reduce((s, p) => s + (p.width > 0 ? p.width : 0), 0);
+  if (sum <= 0) {
+    const w = avail / panels.length;
+    for (const p of panels) p.width = w;
+  } else {
+    const k = avail / sum;
+    for (const p of panels) p.width = Math.max(PANE_MIN_W, (p.width > 0 ? p.width : avail / panels.length) * k);
+  }
+  applyPaneWidths();
+}
+
+// rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
+// It removes only existing panes and dividers, preserving #settings-panel
+// (which Settings.js appends to #chat) and inserts panes before it.
+function rebuildChatDOM() {
+  for (const el of [...els.chat.querySelectorAll(":scope > .chat-pane, :scope > .pane-divider")]) {
+    el.remove();
+  }
+  const anchor = els.chat.querySelector(":scope > #settings-panel");
+  panels.forEach((p, i) => {
+    if (i > 0) els.chat.insertBefore(makeDivider(panels[i - 1], p), anchor);
+    els.chat.insertBefore(p.root, anchor);
+  });
+  els.chat.classList.toggle("solo", panels.length <= 1);
+  layoutWidths();
+}
+
+function makeDivider(left, right) {
+  const d = document.createElement("div");
+  d.className = "pane-divider";
+  d.setAttribute("aria-hidden", "true");
+  d.addEventListener("mousedown", (e) => {
+    paneDividerDrag = {
+      left, right, startX: e.clientX,
+      startLeftW: left.width, startRightW: right.width,
+    };
+    d.classList.add("is-dragging");
+    document.body.classList.add("resizing");
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  return d;
+}
+
+let paneDividerDrag = null;
+
+// ─── Split / close ─────────────────────────────────────────────────────────
+
+function splitPanel(after) {
+  // The new pane takes half of `after`'s width.
+  const half = Math.max(PANE_MIN_W, (after.width || els.chat.clientWidth / panels.length) / 2);
+  const np = createPanel(null);
+  // Insert np right after `after` in the ordering.
+  const idx = panels.indexOf(np); // np is at the end after createPanel
+  panels.splice(idx, 1);
+  const afterIdx = panels.indexOf(after);
+  panels.splice(afterIdx + 1, 0, np);
+  after.width = half;
+  np.width = half;
+  rebuildChatDOM();
+  setFocusedPanel(np.id);
+  showPanePicker(np);
+  saveLayout();
+}
+
+function closePanel(panel) {
+  if (panels.length <= 1) return; // never close the last pane
+  const idx = panels.indexOf(panel);
+  const sid = panel.sessionId;
+  panels.splice(idx, 1);
+  if (focusedPanelId === panel.id) {
+    const neighbor = panels[Math.min(idx, panels.length - 1)];
+    focusedPanelId = neighbor ? neighbor.id : null;
+  }
+  // The session's transcript DOM stays cached in sessionContainers (no loss).
+  releaseSessionIfUnviewed(sid);
+  rebuildChatDOM();
+  setFocusedPanel(focusedPanelId);
+  saveLayout();
+}
+
+// releaseSessionIfUnviewed drops a session's push subscription once no pane
+// shows it anymore (and it isn't actively streaming).
+function releaseSessionIfUnviewed(sessionId) {
+  if (!sessionId) return;
+  if (panelsForSession(sessionId).length === 0 && !sessionSending.has(sessionId)) {
+    unsubscribeSessionEvents(sessionId);
+  }
+}
+
+// ─── Empty-pane session picker ────────────────────────────────────────────────
+
+function showPanePicker(panel) {
+  renderPanePicker(panel);
+  if (panel.els.picker) panel.els.picker.hidden = false;
+}
+function hidePanePicker(panel) {
+  if (panel.els.picker) panel.els.picker.hidden = true;
+}
+
+function renderPanePicker(panel) {
+  renderPickerSquad(panel);
+  const list = panel.els.pickerList;
+  if (!list) return;
+  list.innerHTML = "";
+  const shown = new Set(panels.map(p => p.sessionId).filter(Boolean));
+  for (const li of els.list.children) {
+    const id = li.dataset.id;
+    if (!id) continue;
+    const nameEl = li.querySelector(".session-name");
+    const name = nameEl ? nameEl.textContent : id;
+    const item = document.createElement("li");
+    item.className = "pane-picker-item";
+    item.textContent = name;
+    if (shown.has(id)) item.classList.add("is-open"); // shown elsewhere
+    item.addEventListener("click", () => {
+      const existing = panelsForSession(id)[0];
+      if (existing && existing !== panel) { setFocusedPanel(existing.id); return; }
+      bindSessionToPanel(panel, id);
+    });
+    list.appendChild(item);
+  }
+  if (!list.children.length) {
+    const empty = document.createElement("li");
+    empty.className = "pane-picker-empty";
+    empty.textContent = "No other sessions yet.";
+    list.appendChild(empty);
+  }
+}
+
+// Populate the empty-pane squad selector from the loaded squads. Mirrors the
+// sidebar squad menu (custom dropdown of .squad-menu-item buttons, so each item
+// carries a themed `data-tip` tooltip): hidden entirely when only the default
+// squad exists, and defaulted to the globally-selected squad so it matches the
+// New Chat button. The per-pane choice lives on `panel._pickerSquad`.
+function renderPickerSquad(panel) {
+  const wrap = panel.els.pickerSquad;
+  const menu = panel.els.pickerSquadMenu;
+  if (!wrap || !menu) return;
+  if (availableSquads.length <= 1) {
+    wrap.hidden = true;
+    panel._pickerSquad = null;
+    return;
+  }
+  wrap.hidden = false;
+  // Keep a prior valid choice; otherwise fall back to the global selection.
+  if (!availableSquads.some(s => s.name === panel._pickerSquad)) {
+    panel._pickerSquad = currentSquadChoice();
+  }
+  menu.innerHTML = "";
+  for (const sq of availableSquads) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "squad-menu-item" + (sq.name === panel._pickerSquad ? " selected" : "");
+    btn.dataset.squad = sq.name;
+    btn.setAttribute("role", "menuitem");
+    btn.setAttribute("data-tip", sq.description || `${sq.leader} + ${(sq.members || []).join(", ")}`);
+    btn.innerHTML = squadIconSVG();
+    const label = document.createElement("span");
+    label.className = "squad-menu-label";
+    label.textContent = sq.name;
+    btn.appendChild(label);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      panel._pickerSquad = sq.name;
+      closePickerSquadMenu(panel);
+      renderPickerSquad(panel);
+    });
+    menu.appendChild(btn);
+  }
+  if (panel.els.pickerSquadName) panel.els.pickerSquadName.textContent = panel._pickerSquad;
+}
+
+function openPickerSquadMenu(panel) {
+  const menu = panel.els.pickerSquadMenu;
+  const toggle = panel.els.pickerSquadToggle;
+  if (!menu || !toggle) return;
+  menu.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+}
+function closePickerSquadMenu(panel) {
+  const menu = panel.els.pickerSquadMenu;
+  const toggle = panel.els.pickerSquadToggle;
+  if (!menu || !toggle) return;
+  menu.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+}
+
+// ─── Per-pane event handlers ──────────────────────────────────────────────────
+
+function attachPaneHandlers(panel) {
+  const pe = panel.els;
+
+  // Focus tracking: any pointer/focus inside the pane makes it the target of
+  // sidebar clicks and shared menus.
+  panel.root.addEventListener("mousedown", () => {
+    if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
+  }, true);
+  panel.root.addEventListener("focusin", () => {
+    if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
+  });
+
+  // Toolbar: split / close.
+  if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
+  if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
+
+  // Empty-pane picker. The squad selector (when shown) overrides the global
+  // choice for this new chat only.
+  if (pe.pickerSquadToggle) {
+    pe.pickerSquadToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (pe.pickerSquadMenu.hidden) openPickerSquadMenu(panel);
+      else closePickerSquadMenu(panel);
+    });
+  }
+  if (pe.pickerSquadMenu) pe.pickerSquadMenu.addEventListener("click", (e) => e.stopPropagation());
+  if (pe.pickerNew) pe.pickerNew.addEventListener("click", () => {
+    const squad = (pe.pickerSquad && !pe.pickerSquad.hidden) ? panel._pickerSquad : undefined;
+    newChat(panel, squad);
+  });
+
+  // Composer submit.
+  pe.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(panel); });
+
+  // Attach menu.
+  pe.attachBtn.addEventListener("click", (e) => { e.stopPropagation(); pe.attachMenu.toggleAttribute("hidden"); });
+  pe.attachMenu.addEventListener("click", (e) => e.stopPropagation());
+  pe.attachComputer.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); pe.fileInput.click(); });
+  pe.attachContext.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); openCtxBrowser(); });
+
+  pe.fileInput.addEventListener("change", () => uploadPickedFiles(panel, Array.from(pe.fileInput.files), () => { pe.fileInput.value = ""; }));
+
+  pe.prompt.addEventListener("paste", async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems = Array.from(items).filter(it => it.kind === "file" && it.type.startsWith("image/"));
+    if (!imageItems.length) return;
+    e.preventDefault();
+    const files = imageItems.map(it => it.getAsFile()).filter(Boolean);
+    uploadPickedFiles(panel, files);
+  });
+
+  // Drag & drop onto the composer.
+  let dragCounter = 0;
+  pe.composerWrap.addEventListener("dragenter", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault(); dragCounter++; pe.composerWrap.classList.add("drag-over");
+  });
+  pe.composerWrap.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+  });
+  pe.composerWrap.addEventListener("dragleave", () => {
+    dragCounter--; if (dragCounter <= 0) { dragCounter = 0; pe.composerWrap.classList.remove("drag-over"); }
+  });
+  pe.composerWrap.addEventListener("drop", (e) => {
+    e.preventDefault(); dragCounter = 0; pe.composerWrap.classList.remove("drag-over");
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length) uploadPickedFiles(panel, files);
+  });
+
+  // Cancel streaming.
+  pe.cancel.addEventListener("click", () => {
+    const ctrl = sessionAbortCtrls.get(panel.sessionId);
+    if (ctrl) ctrl.abort();
+  });
+
+  // Enter-key mode toggle (a global preference; reflect on all panes).
+  pe.editModeBtn.addEventListener("click", () => { sendOnEnter = !sendOnEnter; updateEditModeBtn(); });
+
+  // Prompt keydown (slash-menu nav + send).
+  pe.prompt.addEventListener("keydown", (e) => onPromptKeydown(e, panel));
+  pe.prompt.addEventListener("input", () => {
+    autoGrowPrompt(panel);
+    const val = pe.prompt.value;
+    const firstLine = val.split("\n")[0];
+    const firstWord = firstLine.split(" ")[0];
+    if (val.startsWith("/") && !firstLine.includes(" ")) renderSlashMenu(firstWord);
+    else hideSlashMenu();
+  });
+
+  pe.slashBtn.addEventListener("click", () => {
+    if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
+    if (!pe.prompt.value.startsWith("/")) pe.prompt.value = "/" + pe.prompt.value;
+    pe.prompt.focus();
+    renderSlashMenu(pe.prompt.value.split("\n")[0].split(" ")[0]);
+  });
+
+  // Composer resize handle.
+  pe.composerResize.addEventListener("mousedown", (e) => {
+    composerDragging   = true;
+    composerDragStartY = e.clientY;
+    composerDragStartH = pe.composerWrap.getBoundingClientRect().height;
+    pe.composerResize.classList.add("is-dragging");
+    document.body.classList.add("resizing-composer");
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  // Context ring popup.
+  pe.ctxRingWrap.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (pe.ctxPopup.hasAttribute("hidden")) openCtxPopup(panel);
+    else closeCtxPopup(panel);
+  });
+  pe.ctxCompactBtn.addEventListener("click", (e) => onCompactClick(e, panel));
+
+  // Sticky-bottom autoscroll + pinned prompt header per pane.
+  pe.transcript.addEventListener("scroll", () => {
+    panel._stick = isAtBottom(pe.transcript);
+    updatePinnedForScroll(panel);
+  });
+}
+
+// uploadPickedFiles uploads files to a pane's session (creating one if the
+// pane is empty), then renders the attachment chips.
+async function uploadPickedFiles(panel, files, after) {
+  if (after) after();
+  if (!files || !files.length) return;
+  if (!panel.sessionId) { await newChat(panel); }
+  if (!panel.sessionId) return;
+  const sessionId = panel.sessionId;
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name || `screenshot-${Date.now()}.png`);
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/files`, { method: "POST", body: form });
+    if (!res.ok) { console.error("upload failed:", await res.text()); return; }
+    const data = await res.json();
+    for (const f of (data.files || [])) addAttachment(sessionId, f);
+    renderAttachmentsUI(sessionId);
+  } catch (e) { console.error("upload error:", e); }
+}
+
+// onPromptKeydown handles slash-menu navigation and send/newline for a pane.
+function onPromptKeydown(e, panel) {
+  const pe = panel.els;
+  if (!pe.slashMenu.hasAttribute("hidden")) {
+    const items = Array.from(pe.slashMenu.querySelectorAll(".slash-menu-item"));
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      slashMenuFocusIdx = Math.min(slashMenuFocusIdx + 1, items.length - 1);
+      updateSlashMenuFocus();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      slashMenuFocusIdx = Math.max(slashMenuFocusIdx - 1, -1);
+      updateSlashMenuFocus();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const selectable = items.filter(it => !it.classList.contains("slash-menu-add"));
+      if (selectable.length === 1) {
+        selectSlashCommand(selectable[0].dataset.value);
+      } else if (items.length > 0) {
+        slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length;
+        updateSlashMenuFocus();
+      }
+      return;
+    }
+    if (e.key === "Enter" && slashMenuFocusIdx >= 0) {
+      e.preventDefault();
+      const focused = items[slashMenuFocusIdx];
+      if (focused.classList.contains("slash-menu-add")) { hideSlashMenu(); openUserCommandModal(null); }
+      else selectSlashCommand(focused.dataset.value);
+      return;
+    }
+    if (e.key === "Escape") { hideSlashMenu(); return; }
+  }
+  if (sendOnEnter) {
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(panel);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      const start = pe.prompt.selectionStart, end = pe.prompt.selectionEnd;
+      pe.prompt.value = pe.prompt.value.substring(0, start) + "\n" + pe.prompt.value.substring(end);
+      pe.prompt.selectionStart = pe.prompt.selectionEnd = start + 1;
+      pe.prompt.dispatchEvent(new Event("input"));
+    }
+  } else {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); sendMessage(panel); }
+  }
+}
+
+// ─── Layout persistence ───────────────────────────────────────────────────────
+
+let _layoutSaveTimer = null;
+function saveLayout() {
+  if (_layoutSaveTimer) return;
+  _layoutSaveTimer = setTimeout(() => {
+    _layoutSaveTimer = null;
+    try {
+      const rec = {
+        version: 1,
+        panes: panels.map(p => ({ sessionId: p.sessionId, width: Math.round(p.width) })),
+        focusedIndex: Math.max(0, panels.findIndex(p => p.id === focusedPanelId)),
+      };
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(rec));
+    } catch (_) { /* ignore quota errors */ }
+  }, 250);
+}
+
+function loadSavedLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return null;
+    const rec = JSON.parse(raw);
+    if (!rec || !Array.isArray(rec.panes) || !rec.panes.length) return null;
+    return rec;
+  } catch (_) { return null; }
+}
 
 // ─── Per-session streaming state ─────────────────────────────────────────────
 // Tracks which sessions are actively streaming so switching sessions doesn't
@@ -180,6 +702,7 @@ const sessionAbortCtrls = new Map(); // sessionId → AbortController
 const sessionSending    = new Set(); // sessionIds currently streaming
 const sessionStatus     = new Map(); // sessionId → status string
 const archivedSessions  = new Set(); // sessionIds in the archived (read-only) state
+const sessionTitles     = new Map(); // sessionId → display title (for pane tabs)
 
 // ─── Per-session push event subscriptions ────────────────────────────────────
 // Each open session has a persistent SSE connection to /api/sessions/:id/events
@@ -214,65 +737,89 @@ function clearAttachments(sessionId) {
   sessionAttachments.delete(sessionId);
 }
 
+// renderAttachmentsUI renders the pending-upload chips into whichever pane
+// currently shows the session (0 or 1 pane).
 function renderAttachmentsUI(sessionId) {
-  if (!els.attachments) return;
-  const files = getAttachments(sessionId);
-  if (files.length === 0) {
-    els.attachments.hidden = true;
-    els.attachments.innerHTML = "";
-    return;
-  }
-  els.attachments.hidden = false;
-  els.attachments.innerHTML = "";
-  for (const f of files) {
-    const chip = document.createElement("div");
-    chip.className = "attachment-chip";
-    chip.title = f.path;
-    const name = document.createElement("span");
-    name.className = "attachment-chip-name";
-    name.textContent = f.name;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "attachment-chip-remove";
-    remove.setAttribute("aria-label", `Remove ${f.name}`);
-    remove.textContent = "×";
-    remove.addEventListener("click", () => {
-      removeAttachment(sessionId, f.path);
-      renderAttachmentsUI(sessionId);
-    });
-    chip.appendChild(name);
-    chip.appendChild(remove);
-    els.attachments.appendChild(chip);
+  for (const panel of panelsForSession(sessionId)) {
+    const slot = panel.els.attachments;
+    if (!slot) continue;
+    const files = getAttachments(sessionId);
+    if (files.length === 0) { slot.hidden = true; slot.innerHTML = ""; continue; }
+    slot.hidden = false;
+    slot.innerHTML = "";
+    for (const f of files) {
+      const chip = document.createElement("div");
+      chip.className = "attachment-chip";
+      chip.title = f.path;
+      const name = document.createElement("span");
+      name.className = "attachment-chip-name";
+      name.textContent = f.name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "attachment-chip-remove";
+      remove.setAttribute("aria-label", `Remove ${f.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        removeAttachment(sessionId, f.path);
+        renderAttachmentsUI(sessionId);
+      });
+      chip.appendChild(name);
+      chip.appendChild(remove);
+      slot.appendChild(chip);
+    }
   }
 }
 
 function setSessionStatus(sessionId, s) {
   sessionStatus.set(sessionId, s);
-  if (sessionId === activeSessionId) setStatus(s);
+  for (const p of panelsForSession(sessionId)) setStatus(p, s);
 }
 
+// applySessionUI reflects a session's streaming/archived state on every pane
+// that currently shows it.
 function applySessionUI(id) {
   const active = sessionSending.has(id);
   const archived = archivedSessions.has(id);
-  els.send.disabled   = active || archived;
-  els.cancel.disabled = !active;
-  setStatus(sessionStatus.get(id) || "");
-  if (id === activeSessionId) {
-    setComposerReadOnly(archived);
-    setCtxRingSpinning(active);
-    renderCtxRing(id);
+  for (const p of panelsForSession(id)) {
+    p.els.send.disabled   = active || archived;
+    p.els.cancel.disabled = !active;
+    setStatus(p, sessionStatus.get(id) || "");
+    setComposerReadOnly(p, archived);
+    setCtxRingSpinning(p, active);
+    renderCtxRing(p);
   }
 }
 
-// setComposerReadOnly disables the composer when viewing an archived session.
+// paneTabTitle resolves the label shown on a pane's tab: the session's title
+// (falling back to its id), or "New Chat" for an empty pane.
+function paneTabTitle(sessionId) {
+  if (!sessionId) return "New Chat";
+  return sessionTitles.get(sessionId) || sessionId;
+}
+
+// updatePaneTab refreshes the tab label for a single pane.
+function updatePaneTab(panel) {
+  if (!panel || !panel.els.tabName) return;
+  const label = paneTabTitle(panel.sessionId);
+  panel.els.tabName.textContent = label;
+  if (panel.els.tab) panel.els.tab.setAttribute("data-tip", label);
+}
+
+// updatePaneTabsForSession refreshes the tab on every pane showing a session
+// (used when a title changes after a turn / rename).
+function updatePaneTabsForSession(sessionId) {
+  for (const p of panelsForSession(sessionId)) updatePaneTab(p);
+}
+
+// setComposerReadOnly disables a pane's composer when viewing an archived session.
 // Archived sessions are view-only; the user must unarchive to chat again.
-function setComposerReadOnly(readonly) {
-  if (els.composerWrap) els.composerWrap.classList.toggle("archived-readonly", readonly);
-  if (els.prompt) {
-    els.prompt.disabled = readonly;
-    els.prompt.placeholder = readonly
+function setComposerReadOnly(panel, readonly) {
+  if (panel.els.composerWrap) panel.els.composerWrap.classList.toggle("archived-readonly", readonly);
+  if (panel.els.prompt) {
+    panel.els.prompt.disabled = readonly;
+    panel.els.prompt.placeholder = readonly
       ? "Session archived — unarchive to continue the conversation"
-      : "Message the agent… (Enter to send)";
+      : (sendOnEnter ? "Message the agent… (Enter to send)" : "Message the agent… (Ctrl+Enter to send)");
   }
 }
 
@@ -286,54 +833,59 @@ const sessionTokenAccum = new Map(); // sessionId → {prompt: number, output: n
 const PRICE_INPUT_PER_TOK  = 3.0  / 1_000_000; // $3  per million input tokens
 const PRICE_OUTPUT_PER_TOK = 15.0 / 1_000_000; // $15 per million output tokens
 
-function setCtxRingSpinning(spinning) {
-  if (els.ctxRingSvg) els.ctxRingSvg.classList.toggle("spinning", spinning);
+function setCtxRingSpinning(panel, spinning) {
+  if (panel.els.ctxRingSvg) panel.els.ctxRingSvg.classList.toggle("spinning", spinning);
 }
 
-function renderCtxRing(sessionId) {
-  if (!els.ctxRingFill || !els.ctxRingSvg || !els.ctxRingWrap) return;
-  const usage = sessionCtxUsage.get(sessionId);
+// renderCtxRing renders the context-usage ring for a pane, reading the usage of
+// the session that pane currently shows.
+function renderCtxRing(panel) {
+  const e = panel.els;
+  if (!e.ctxRingFill || !e.ctxRingSvg || !e.ctxRingWrap) return;
+  const usage = sessionCtxUsage.get(panel.sessionId);
   if (!usage || !usage.window_tokens) {
-    els.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE;
-    els.ctxRingSvg.dataset.zone = "ok";
-    els.ctxRingWrap.classList.remove("has-data");
-    els.ctxRingWrap.dataset.tip = "Context window — click for details";
+    e.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE;
+    e.ctxRingSvg.dataset.zone = "ok";
+    e.ctxRingWrap.classList.remove("has-data");
+    e.ctxRingWrap.dataset.tip = "Context window — click for details";
     return;
   }
   const { tokens_used, soft_limit, hard_limit, window_tokens } = usage;
   const ratio = Math.min(tokens_used / window_tokens, 1);
   const pct = Math.round(ratio * 100);
-  els.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE * (1 - ratio);
-  els.ctxRingSvg.dataset.zone = tokens_used >= hard_limit ? "danger"
+  e.ctxRingFill.style.strokeDashoffset = CTX_RING_CIRCUMFERENCE * (1 - ratio);
+  e.ctxRingSvg.dataset.zone = tokens_used >= hard_limit ? "danger"
     : tokens_used >= soft_limit ? "warn" : "ok";
-  els.ctxRingWrap.classList.add("has-data");
-  els.ctxRingWrap.dataset.tip = `Context: ${pct}% used — click for more information`;
+  e.ctxRingWrap.classList.add("has-data");
+  e.ctxRingWrap.dataset.tip = `Context: ${pct}% used — click for more information`;
 }
 
-function renderCtxPopup(sessionId) {
-  if (!els.ctxPopup) return;
+function renderCtxPopup(panel) {
+  const e = panel.els;
+  if (!e.ctxPopup) return;
+  const sessionId = panel.sessionId;
   const usage = sessionCtxUsage.get(sessionId);
   if (!usage || !usage.window_tokens) {
-    els.ctxPopUsed.textContent   = "—";
-    els.ctxPopMax.textContent    = "—";
-    els.ctxPopPct.textContent    = "—";
-    els.ctxPopBudget.textContent = "—";
-    if (els.ctxPopAgents) els.ctxPopAgents.hidden = true;
+    e.ctxPopUsed.textContent   = "—";
+    e.ctxPopMax.textContent    = "—";
+    e.ctxPopPct.textContent    = "—";
+    e.ctxPopBudget.textContent = "—";
+    if (e.ctxPopAgents) e.ctxPopAgents.hidden = true;
     return;
   }
   const { tokens_used, window_tokens } = usage;
   const ratio = Math.min(tokens_used / window_tokens, 1);
   const pct   = Math.round(ratio * 100);
-  els.ctxPopUsed.textContent = tokens_used.toLocaleString();
-  els.ctxPopMax.textContent  = window_tokens.toLocaleString();
-  els.ctxPopPct.textContent  = `${pct}%`;
+  e.ctxPopUsed.textContent = tokens_used.toLocaleString();
+  e.ctxPopMax.textContent  = window_tokens.toLocaleString();
+  e.ctxPopPct.textContent  = `${pct}%`;
 
   const acc  = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
   const cost = acc.prompt * PRICE_INPUT_PER_TOK + acc.output * PRICE_OUTPUT_PER_TOK;
-  els.ctxPopBudget.textContent = cost > 0 ? `$${cost.toFixed(4)}` : "—";
+  e.ctxPopBudget.textContent = cost > 0 ? `$${cost.toFixed(4)}` : "—";
 
   // Per-agent breakdown
-  const agentsEl = els.ctxPopAgents;
+  const agentsEl = e.ctxPopAgents;
   if (agentsEl) {
     const agentMap = sessionAgentTokens.get(sessionId);
     if (!agentMap || agentMap.size === 0) {
@@ -385,21 +937,23 @@ async function fetchUsageEstimate(sessionId) {
         output: data.output_total || 0,
       });
     }
-    if (sessionId === activeSessionId) renderCtxRing(sessionId);
+    for (const p of panelsForSession(sessionId)) renderCtxRing(p);
   } catch (e) {
     console.error("failed to fetch usage estimate:", e);
   }
 }
 
-function openCtxPopup() {
-  if (!els.ctxPopup) return;
-  renderCtxPopup(activeSessionId);
-  els.ctxPopup.removeAttribute("hidden");
+function openCtxPopup(panel) {
+  panel = panel || fp();
+  if (!panel || !panel.els.ctxPopup) return;
+  renderCtxPopup(panel);
+  panel.els.ctxPopup.removeAttribute("hidden");
 }
 
-function closeCtxPopup() {
-  if (!els.ctxPopup) return;
-  els.ctxPopup.setAttribute("hidden", "");
+function closeCtxPopup(panel) {
+  panel = panel || fp();
+  if (!panel || !panel.els.ctxPopup) return;
+  panel.els.ctxPopup.setAttribute("hidden", "");
 }
 
 // ─── Per-session transcript containers ──────────────────────────────────────
@@ -418,18 +972,27 @@ function getContainer(sessionId) {
   return sessionContainers.get(sessionId);
 }
 
-function mountSession(sessionId) {
-  const next = sessionId ? getContainer(sessionId) : null;
-  if (next && els.transcript.contains(next)) return; // already mounted
-  while (els.transcript.firstChild) els.transcript.removeChild(els.transcript.firstChild);
-  if (next) els.transcript.appendChild(next);
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function setStatus(s) {
-  els.status.textContent = s;
-  els.status.classList.toggle("active", s !== "");
+function setStatus(panel, s) {
+  if (!panel || !panel.els.status) return;
+  panel.els.status.textContent = s;
+  panel.els.status.classList.toggle("active", s !== "");
+}
+
+// fpTranscript returns the focused pane's transcript element (fallback target
+// for append helpers that are normally handed an explicit container).
+function fpTranscript() {
+  const p = fp();
+  return p ? p.els.transcript : null;
+}
+
+// paneOfNode resolves the panel a DOM node currently lives in (or null when the
+// node belongs to a session not mounted in any pane). Used by append helpers to
+// scroll the right pane regardless of focus.
+function paneOfNode(node) {
+  const root = node && node.closest ? node.closest(".chat-pane") : null;
+  return root ? getPanel(root.dataset.panelId) : null;
 }
 
 function authHeaders(extra = {}) {
@@ -453,21 +1016,23 @@ function escHtml(s) {
 // User-initiated actions (send, switch session, load history) call
 // scrollBottom(true) to re-pin unconditionally.
 const STICK_THRESHOLD_PX = 80;
-let _stickToBottom = true;
-let _scrollPending = false;
 
 function isAtBottom(el) {
   return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_THRESHOLD_PX;
 }
 
-function scrollBottom(force = false) {
-  if (!force && !_stickToBottom) return;
-  if (_scrollPending) return;
-  _scrollPending = true;
+// scrollBottom keeps a pane pinned to the bottom while it is "stuck" (see the
+// per-pane scroll listener in attachPaneHandlers). Stickiness is per-pane so
+// streaming in one pane never yanks another pane's scroll position.
+function scrollBottom(panel, force = false) {
+  if (!panel || !panel.els.transcript) return;
+  if (!force && !panel._stick) return;
+  if (panel._scrollPending) return;
+  panel._scrollPending = true;
   requestAnimationFrame(() => {
-    _scrollPending = false;
-    els.transcript.scrollTop = els.transcript.scrollHeight;
-    _stickToBottom = true;
+    panel._scrollPending = false;
+    panel.els.transcript.scrollTop = panel.els.transcript.scrollHeight;
+    panel._stick = true;
   });
 }
 
@@ -630,8 +1195,12 @@ async function fetchMediaBlobURL(sessionId, path) {
 }
 
 function rewriteLocalImages(rootEl) {
-  if (!rootEl || !activeSessionId) return;
-  const sessionId = activeSessionId;
+  if (!rootEl) return;
+  // Resolve the session that owns this DOM (the pane it lives in), so media
+  // fetches use the right session even for a background pane.
+  const ownerPanel = paneOfNode(rootEl);
+  const sessionId = ownerPanel ? ownerPanel.sessionId : activeSessionId;
+  if (!sessionId) return;
   const imgs = rootEl.querySelectorAll("img");
   imgs.forEach(img => {
     let src = img.getAttribute("src") || "";
@@ -909,32 +1478,33 @@ function pinnedPromptLabel(text) {
 // counter-scroll by the same amount, so the content stays put and the header
 // simply appears in the constant gap above it. (This also keeps the activeBubble
 // decision in updatePinnedForScroll stable, avoiding a show/hide flicker.)
-function withStableScroll(mutate) {
-  const before = els.transcript.clientHeight;
+function withStableScroll(panel, mutate) {
+  const t = panel.els.transcript;
+  const before = t.clientHeight;
   mutate();
-  const delta = before - els.transcript.clientHeight; // >0 when header grew
-  if (delta) els.transcript.scrollTop += delta;
+  const delta = before - t.clientHeight; // >0 when header grew
+  if (delta) t.scrollTop += delta;
 }
 
 // Show the user prompt text in the floating header above the transcript.
 // Attachments are intentionally NOT rendered here — they live in the inline
 // user bubble so the floating header stays compact.
-function setPinnedPrompt(text, _files) {
+function setPinnedPrompt(panel, text, _files) {
+  const ph = panel.els.promptHeader;
   const label = pinnedPromptLabel(text);
   // Called on every scroll tick — skip the rebuild (and the forced reflow it
   // would cost) when the visible header already shows this prompt.
-  if (els.promptHeader.classList.contains("visible") &&
-      els.promptHeader._pinnedLabel === label) return;
-  withStableScroll(() => {
-    els.promptHeader.innerHTML = "";
+  if (ph.classList.contains("visible") && ph._pinnedLabel === label) return;
+  withStableScroll(panel, () => {
+    ph.innerHTML = "";
     if (label) {
       const textEl = document.createElement("span");
       textEl.className = "pinned-prompt-text";
       textEl.textContent = label;
-      els.promptHeader.appendChild(textEl);
+      ph.appendChild(textEl);
     }
-    els.promptHeader._pinnedLabel = label;
-    els.promptHeader.classList.add("visible");
+    ph._pinnedLabel = label;
+    ph.classList.add("visible");
   });
 }
 
@@ -968,7 +1538,7 @@ function appendUserBubble(text, container, files) {
     bubble.appendChild(chips);
   }
   row.appendChild(bubble);
-  (container || els.transcript).appendChild(row);
+  (container || fpTranscript()).appendChild(row);
   // After layout, decide whether the message overflows three lines and, if so,
   // mark it truncated and add a click-to-expand affordance.
   requestAnimationFrame(() => applyUserBubbleTruncation(bubble));
@@ -1043,7 +1613,7 @@ function appendMailboxBlock(text, container) {
   block.appendChild(header);
   block.appendChild(bodyEl);
   row.appendChild(block);
-  (container || els.transcript).appendChild(row);
+  (container || fpTranscript()).appendChild(row);
 }
 
 // Update the floating prompt header to show the question whose agent reply is
@@ -1051,9 +1621,10 @@ function appendMailboxBlock(text, container) {
 // has scrolled completely above the transcript top — its reply is what the
 // reader sees first, so the header provides the matching context.
 // While a bubble is still visible no header is shown (the bubble itself is the label).
-function updatePinnedForScroll() {
-  const transcriptRect = els.transcript.getBoundingClientRect();
-  const userBubbles = els.transcript.querySelectorAll(".bubble-user");
+function updatePinnedForScroll(panel) {
+  const t = panel.els.transcript;
+  const transcriptRect = t.getBoundingClientRect();
+  const userBubbles = t.querySelectorAll(".bubble-user");
   let activeBubble = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
@@ -1068,19 +1639,21 @@ function updatePinnedForScroll() {
       const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
       files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
     }
-    setPinnedPrompt(text, files);
+    setPinnedPrompt(panel, text, files);
   } else {
-    clearPinnedPrompt();
+    clearPinnedPrompt(panel);
   }
 }
 
-function clearPinnedPrompt() {
-  if (!els.promptHeader.classList.contains("visible") &&
-      els.promptHeader.innerHTML === "") return;
-  withStableScroll(() => {
-    els.promptHeader.innerHTML = "";
-    els.promptHeader._pinnedLabel = "";
-    els.promptHeader.classList.remove("visible");
+function clearPinnedPrompt(panel) {
+  panel = panel || fp();
+  if (!panel) return;
+  const ph = panel.els.promptHeader;
+  if (!ph.classList.contains("visible") && ph.innerHTML === "") return;
+  withStableScroll(panel, () => {
+    ph.innerHTML = "";
+    ph._pinnedLabel = "";
+    ph.classList.remove("visible");
   });
 }
 
@@ -1106,8 +1679,8 @@ function appendAssistantBubble(container) {
 
   row.appendChild(bubble);
   row.appendChild(copyBtn);
-  (container || els.transcript).appendChild(row);
-  scrollBottom();
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
   return bubble;
 }
 
@@ -1118,8 +1691,8 @@ function appendErrorBubble(text, container) {
   bubble.className = "bubble-error";
   bubble.textContent = text;
   row.appendChild(bubble);
-  (container || els.transcript).appendChild(row);
-  scrollBottom();
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
 }
 
 // buildToolBlock creates the shared DOM structure for both top-level and nested
@@ -1156,8 +1729,8 @@ function appendToolCall(name, args, container) {
   const row = document.createElement("div");
   row.className = "tool-row";
   row.appendChild(block);
-  (container || els.transcript).appendChild(row);
-  scrollBottom();
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
   return block;
 }
 
@@ -1174,7 +1747,7 @@ function appendNestedToolCall(parentBlock, name, args) {
   const block = buildToolBlock(name, args);
   block.classList.add("tool-nested-item");
   nested.appendChild(block);
-  scrollBottom();
+  scrollBottom(paneOfNode(block));
   return block;
 }
 
@@ -1264,9 +1837,9 @@ function appendTodoBlock(sessionId, list, container) {
   block.appendChild(items);
 
   row.appendChild(block);
-  (container || els.transcript).appendChild(row);
+  (container || fpTranscript()).appendChild(row);
   sessionTodoBlock.set(sessionId, block);
-  scrollBottom();
+  scrollBottom(paneOfNode(row));
   return block;
 }
 
@@ -1287,8 +1860,8 @@ function appendCuratorBlock(container) {
   const row = document.createElement("div");
   row.className = "tool-row";
   row.appendChild(block);
-  (container || els.transcript).appendChild(row);
-  scrollBottom();
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
   return block;
 }
 
@@ -1336,14 +1909,22 @@ const pendingAskWidgets = new Map();
 // Widgets are appended to a fixed slot just above the composer (#ask-user-slot)
 // and tagged with the owning session so we can show/hide them on session switch.
 function renderAskUserWidget(sessionId, q) {
-  const slot = document.getElementById("ask-user-slot");
+  const panel = panelsForSession(sessionId)[0];
+  if (!panel) {
+    // No pane currently shows this session — queue it; bindSessionToPanel
+    // flushes the queue when the session is opened in a pane.
+    const list = queuedAskWidgets.get(sessionId) || [];
+    if (!list.some(x => x.question_id === q.question_id)) list.push(q);
+    queuedAskWidgets.set(sessionId, list);
+    return;
+  }
+  const slot = panel.els.askSlot;
   if (!slot) return;
 
   const row = document.createElement("div");
   row.className = "ask-user-row";
   row.setAttribute("data-ask-id", q.question_id);
   row.setAttribute("data-session-id", sessionId);
-  if (sessionId !== activeSessionId) row.style.display = "none";
 
   const card = document.createElement("div");
   card.className = "ask-user-card";
@@ -1452,11 +2033,11 @@ function renderAskUserWidget(sessionId, q) {
   row.appendChild(card);
   slot.appendChild(row);
   pendingAskWidgets.set(q.question_id, { row, card, sessionId });
-  scrollBottom();
-  // Give the card focus so the keydown handler catches Enter without a
-  // prior click. Only when this widget is for the visible session, so we
-  // don't yank focus for a background tab's prompt.
-  if (sessionId === activeSessionId) {
+  scrollBottom(panel);
+  // Give the card focus so the keydown handler catches Enter without a prior
+  // click — but only when its pane is focused, so we don't yank focus away
+  // from a pane the user is actively typing in.
+  if (focusedPanelId === panel.id) {
     const checked = card.querySelector("input[type=radio]:checked");
     (checked || submitBtn).focus();
   }
@@ -1488,7 +2069,7 @@ function renderAskUserWidget(sessionId, q) {
     // Move out of the bottom slot into the transcript so it scrolls as history.
     const container = getContainer(sessionId);
     if (container) container.appendChild(row);
-    scrollBottom();
+    scrollBottom(panel);
   }
 
   submitBtn.addEventListener("click", async () => {
@@ -1714,7 +2295,7 @@ const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="no
 function buildSessionRow(s, { archived }) {
   const li = document.createElement("li");
   li.dataset.id = s.id;
-  if (s.id === activeSessionId) li.classList.add("active");
+  if (panelsForSession(s.id).length) li.classList.add("active");
   const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const displayName = s.title || s.id;
 
@@ -1783,6 +2364,7 @@ function renderSessions(sessions) {
   for (const s of sessions) {
     if (s.archived) { archived.push(s); archivedSessions.add(s.id); }
     else active.push(s);
+    sessionTitles.set(s.id, s.title || s.id);
   }
 
   els.list.innerHTML = "";
@@ -1793,13 +2375,29 @@ function renderSessions(sessions) {
   els.archivedPanel.hidden = archived.length === 0;
   els.archivedCount.textContent = archived.length ? `(${archived.length})` : "";
 
-  // Reflect the active session's (possibly changed) archived state on the composer.
-  if (activeSessionId) applySessionUI(activeSessionId);
+  // Reflect each shown session's (possibly changed) archived state, refresh the
+  // sidebar highlight, and re-render any open empty-pane pickers.
+  refreshSidebarActive();
+  for (const p of panels) {
+    updatePaneTab(p);
+    if (p.sessionId) applySessionUI(p.sessionId);
+    else if (p.els.picker && !p.els.picker.hidden) renderPanePicker(p);
+  }
 }
 
 function setSessionBusy(sessionId, busy) {
   const li = els.list.querySelector(`li[data-id="${CSS.escape(sessionId)}"]`);
   if (li) li.classList.toggle("session-busy", busy);
+}
+
+// clearPaneSession detaches a pane from its session and shows the empty-pane
+// picker. Used when the shown session is deleted/archived.
+function clearPaneSession(panel) {
+  panel.sessionId = null;
+  mountInPanel(panel, null);
+  clearPinnedPrompt(panel);
+  if (focusedPanelId === panel.id) activeSessionId = null;
+  showPanePicker(panel);
 }
 
 async function deleteSession(id, li) {
@@ -1813,9 +2411,11 @@ async function deleteSession(id, li) {
     sessionAgentTokens.delete(id);
     sessionTodos.delete(id);
     sessionTodoBlock.delete(id);
-    // Remove any pending ask_user widgets belonging to this session.
-    const slot = document.getElementById("ask-user-slot");
-    if (slot) {
+    // Remove any pending ask_user widgets belonging to this session from every
+    // pane's slot, plus the queued/ pending maps.
+    for (const p of panels) {
+      const slot = p.els.askSlot;
+      if (!slot) continue;
       for (const row of [...slot.children]) {
         if (row.getAttribute("data-session-id") === id) row.remove();
       }
@@ -1823,12 +2423,12 @@ async function deleteSession(id, li) {
     for (const [qid, entry] of pendingAskWidgets) {
       if (entry.sessionId === id) pendingAskWidgets.delete(qid);
     }
-    if (activeSessionId === id) {
-      activeSessionId = null;
-      clearPinnedPrompt();
-      els.transcript.innerHTML = "";
-    }
+    queuedAskWidgets.delete(id);
+    // Empty any pane that was showing this session.
+    for (const p of panelsForSession(id)) clearPaneSession(p);
     li.remove();
+    refreshSidebarActive();
+    saveLayout();
   } catch (e) {
     console.error("failed to delete session:", e);
   }
@@ -1840,17 +2440,12 @@ async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
     unsubscribeSessionEvents(id);
-    // Clear the chat panel like a delete does — an archived session is set
-    // aside, so it shouldn't stay open in the transcript. Its DOM stays cached
-    // in sessionContainers, so clicking it in the archived panel re-mounts the
-    // read-only history.
-    if (activeSessionId === id) {
-      activeSessionId = null;
-      clearPinnedPrompt();
-      mountSession(null);
-      setStatus("");
-    }
+    // Empty any pane showing it — an archived session is set aside, so it
+    // shouldn't stay open. Its DOM stays cached in sessionContainers, so
+    // clicking it in the archived panel re-mounts the read-only history.
+    for (const p of panelsForSession(id)) clearPaneSession(p);
     await loadSessions();
+    saveLayout();
   } catch (e) {
     console.error("failed to archive session:", e);
   }
@@ -1861,7 +2456,7 @@ async function unarchiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
     await loadSessions();
-    if (activeSessionId === id) {
+    if (panelsForSession(id).length) {
       subscribeSessionEvents(id);
       applySessionUI(id);
     }
@@ -1902,28 +2497,32 @@ function startRename(li, id, currentTitle) {
   input.addEventListener("blur", commit);
 }
 
+// selectSession is the sidebar-click entry point. If a pane already shows the
+// session, just focus that pane; otherwise bind it into the focused pane.
 async function selectSession(id) {
-  // Leave the settings panel if it's open so the chat is visible.
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
-  // Unsubscribe from the previous session's push events.
-  if (activeSessionId && activeSessionId !== id) {
-    unsubscribeSessionEvents(activeSessionId);
-  }
+  const existing = panelsForSession(id)[0];
+  if (existing) { setFocusedPanel(existing.id); return; }
+  let panel = fp();
+  if (!panel) panel = createPanel(null), rebuildChatDOM(), setFocusedPanel(panel.id);
+  await bindSessionToPanel(panel, id);
+}
 
-  activeSessionId = id;
+// bindSessionToPanel mounts `id` into `panel`, loading history if needed,
+// subscribing to push events, and flushing any queued ask-user widgets. The
+// session previously shown in the pane is released if no longer viewed.
+async function bindSessionToPanel(panel, id) {
+  const prev = panel.sessionId;
+  if (prev === id) { setFocusedPanel(panel.id); return; }
+
+  panel.sessionId = id;
+  hidePanePicker(panel);
+  setFocusedPanel(panel.id); // updates activeSessionId + sidebar highlight
+  clearPinnedPrompt(panel);
   if (AgentDebug.enabled) { AgentDebug.activeSession = id; AgentDebug._paint(); }
-  clearPinnedPrompt();
-  for (const li of els.list.children) {
-    li.classList.toggle("active", li.dataset.id === id);
-  }
 
-  // Toggle ask-user widgets so only this session's pending question is visible.
-  const slot = document.getElementById("ask-user-slot");
-  if (slot) {
-    for (const row of slot.children) {
-      row.style.display = row.getAttribute("data-session-id") === id ? "" : "none";
-    }
-  }
+  // The previously shown session may now be invisible.
+  if (prev && prev !== id) releaseSessionIfUnviewed(prev);
 
   applySessionUI(id);
   renderAttachmentsUI(id);
@@ -1932,22 +2531,26 @@ async function selectSession(id) {
   // real-time SSE data yet (cold load or page refresh).
   if (!sessionCtxUsage.has(id)) fetchUsageEstimate(id);
 
-  // Subscribe to background push events for the newly opened session.
   subscribeSessionEvents(id);
+
+  // Flush any ask-user questions that queued while no pane showed this session.
+  const queued = queuedAskWidgets.get(id);
+  if (queued) { queuedAskWidgets.delete(id); for (const q of queued) renderAskUserWidget(id, q); }
+
+  saveLayout();
 
   const container = getContainer(id);
 
-  // If the container already has content it's either a live stream in progress
-  // or was previously viewed — show it and check for background turns that
-  // arrived while this session was not the active view.
+  // If the container already has content it's a live stream or a previously
+  // viewed session — show it and pull any background turns that arrived since.
   if (container.childNodes.length > 0) {
-    mountSession(id);
-    scrollBottom(true);
+    mountInPanel(panel, id);
+    scrollBottom(panel, true);
     await appendNewPushTurns(id);
     return;
   }
 
-  mountSession(id);
+  mountInPanel(panel, id);
 
   try {
     const res = await apiFetch(`/api/sessions/${id}/messages`);
@@ -1972,7 +2575,7 @@ async function selectSession(id) {
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turn.assistant_text);
     }
-    scrollBottom(true);
+    scrollBottom(panel, true);
   } catch (e) {
     console.error("failed to load session history:", e);
   }
@@ -2091,12 +2694,15 @@ function currentSquadChoice() {
   return selectedSquadName || defaultSquadName;
 }
 
-async function newChat() {
-  // Leave the settings panel if it's open so the new chat is visible.
+// newChat creates a fresh session and binds it into `panel` (the focused pane
+// when omitted — e.g. the sidebar "New Chat" button). `squadOverride` picks the
+// squad for this session only (used by the empty-pane picker); when omitted the
+// globally-selected squad applies. Returns the new id.
+async function newChat(panel, squadOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
-  // Drop the outgoing session's push subscription before switching.
-  if (activeSessionId) unsubscribeSessionEvents(activeSessionId);
-  const squad = currentSquadChoice();
+  panel = panel || fp();
+  if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
+  const squad = squadOverride || currentSquadChoice();
   try {
     const res = await apiFetch("/api/sessions", {
       method: "POST",
@@ -2105,18 +2711,26 @@ async function newChat() {
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
       console.error("new chat failed:", errBody.error || res.statusText);
-      return;
+      return null;
     }
     const data = await res.json();
-    activeSessionId = data.session_id;
+    const newId = data.session_id;
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
-    clearPinnedPrompt();
-    mountSession(activeSessionId);
-    applySessionUI(activeSessionId);
-    subscribeSessionEvents(activeSessionId);
+
+    const prev = panel.sessionId;
+    panel.sessionId = newId;
+    hidePanePicker(panel);
+    setFocusedPanel(panel.id);
+    clearPinnedPrompt(panel);
+    if (prev && prev !== newId) releaseSessionIfUnviewed(prev);
+    mountInPanel(panel, newId);
+    applySessionUI(newId);
+    subscribeSessionEvents(newId);
+    saveLayout();
     await loadSessions();
-  } catch (e) { console.error(e); }
+    return newId;
+  } catch (e) { console.error(e); return null; }
 }
 
 // ─── Background push helpers ─────────────────────────────────────────────────
@@ -2178,9 +2792,9 @@ async function appendNewPushTurns(sessionId) {
     }
     sessionTurnCounts.set(sessionId, turns.length);
 
-    if (sessionId === activeSessionId) {
+    for (const p of panelsForSession(sessionId)) {
       // Defer scroll until after the browser has reflowed the rendered markdown.
-      requestAnimationFrame(scrollBottom);
+      requestAnimationFrame(() => scrollBottom(p));
       showPushBanner(container);
     }
     // Refresh sidebar turn counter.
@@ -2227,25 +2841,28 @@ async function* parseSSE(res) {
 
 // ─── Send message ────────────────────────────────────────────────────────────
 
-async function sendMessage() {
-  const prompt = els.prompt.value.trim();
-  const pendingFiles = getAttachments(activeSessionId);
+async function sendMessage(panel) {
+  panel = panel || fp();
+  if (!panel) return;
+  const prompt = panel.els.prompt.value.trim();
+  const pendingFiles = getAttachments(panel.sessionId);
   if (!prompt && pendingFiles.length === 0) return;
   if (prompt.startsWith("/") && pendingFiles.length === 0) {
-    els.prompt.value = "";
+    panel.els.prompt.value = "";
     hideSlashMenu();
-    await handleSlashCommand(prompt);
+    await handleSlashCommand(prompt, panel);
     return;
   }
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) return;
+  if (!panel.sessionId) await newChat(panel);
+  if (!panel.sessionId) return;
 
-  // Capture session identity and container. The user may switch sessions
-  // mid-stream; these captured references keep writes going to the right DOM.
-  const sessionId = activeSessionId;
+  // Capture session identity and container. The user may switch the pane's
+  // session mid-stream; these captured references keep writes flowing to the
+  // right DOM.
+  const sessionId = panel.sessionId;
   const files = getAttachments(sessionId);
   const container = getContainer(sessionId);
-  if (!els.transcript.contains(container)) mountSession(sessionId);
+  mountInPanel(panel, sessionId);
 
   // Collect uploaded file paths. Images are passed as structured data so the
   // server can attach them as inline binary parts for vision-capable models.
@@ -2255,9 +2872,9 @@ async function sendMessage() {
 
   // Insert the user message into the transcript before streaming starts.
   appendUserBubble(prompt, container, files.length > 0 ? files : null);
-  scrollBottom(true);
-  els.prompt.value = "";
-  autoGrowPrompt();
+  scrollBottom(panel, true);
+  panel.els.prompt.value = "";
+  autoGrowPrompt(panel);
   clearAttachments(sessionId);
   renderAttachmentsUI(sessionId);
 
@@ -2322,7 +2939,7 @@ async function sendMessage() {
   sessionSending.add(sessionId);
   setSessionBusy(sessionId, true);
   setSessionStatus(sessionId, "thinking…");
-  if (sessionId === activeSessionId) applySessionUI(sessionId);
+  applySessionUI(sessionId);
 
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
@@ -2347,7 +2964,7 @@ async function sendMessage() {
           segAcc += txt;
           AgentDebug.token(txt.length);
           scheduleRender();
-          scrollBottom();
+          scrollBottom(panel);
           break;
         }
 
@@ -2362,7 +2979,7 @@ async function sendMessage() {
             ensureSegment();
             segAcc = data.text;
             renderMarkdown(segBubble, segAcc);
-            scrollBottom();
+            scrollBottom(panel);
           }
           break;
         }
@@ -2420,7 +3037,7 @@ async function sendMessage() {
 
         case "context_usage": {
           sessionCtxUsage.set(sessionId, data);
-          if (sessionId === activeSessionId) renderCtxRing(sessionId);
+          for (const p of panelsForSession(sessionId)) renderCtxRing(p);
           break;
         }
 
@@ -2431,10 +3048,10 @@ async function sendMessage() {
           sessionTokenAccum.set(sessionId, acc);
           // Always accumulate per-agent tokens (used by ctx popup and debug badge).
           AgentDebug.addAgentUsage(sessionId, data.agent, data.prompt_tokens || 0, data.output_tokens || 0);
-          if (sessionId === activeSessionId) {
-            if (els.ctxPopup && !els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(sessionId);
-            if (AgentDebug.enabled) AgentDebug._paint();
+          for (const p of panelsForSession(sessionId)) {
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
           }
+          if (AgentDebug.enabled && sessionId === activeSessionId) AgentDebug._paint();
           break;
         }
 
@@ -2477,11 +3094,11 @@ async function sendMessage() {
     sessionSending.delete(sessionId);
     setSessionBusy(sessionId, false);
     sessionStatus.delete(sessionId);
-    if (sessionId === activeSessionId) applySessionUI(sessionId);
+    applySessionUI(sessionId);
     // Track turn count so appendNewPushTurns knows where to start.
     sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
     loadSessions();
-    scrollBottom();
+    scrollBottom(panel);
   }
 }
 
@@ -2536,13 +3153,18 @@ function getAllSlashEntries() {
   return BUILTIN_SLASH_COMMANDS.concat(userSlashCommands.map(userCommandAsMenuEntry));
 }
 
+// The slash menu lives in the focused pane's composer (the user is typing
+// there). All slash helpers resolve elements through fp().els.
 let slashMenuFocusIdx = -1;
 
 function renderSlashMenu(prefix) {
+  const panel = fp();
+  if (!panel) return;
+  const sm = panel.els.slashMenu;
   const p = prefix.toLowerCase();
   const all = getAllSlashEntries();
   const matches = p === "/" ? all : all.filter(c => c.cmd.startsWith(p));
-  els.slashMenu.innerHTML = "";
+  sm.innerHTML = "";
 
   if (matches.length === 0 && p !== "/") {
     hideSlashMenu();
@@ -2558,7 +3180,7 @@ function renderSlashMenu(prefix) {
     hideSlashMenu();
     openUserCommandModal(null);
   });
-  els.slashMenu.appendChild(add);
+  sm.appendChild(add);
 
   matches.forEach(item => {
     const row = document.createElement("div");
@@ -2572,22 +3194,28 @@ function renderSlashMenu(prefix) {
       e.preventDefault(); // keep textarea focus
       selectSlashCommand(item.cmd + (item.args ? " " : ""));
     });
-    els.slashMenu.appendChild(row);
+    sm.appendChild(row);
   });
 
   slashMenuFocusIdx = -1;
-  els.slashMenu.removeAttribute("hidden");
-  els.slashBtn.classList.add("active");
+  sm.removeAttribute("hidden");
+  panel.els.slashBtn.classList.add("active");
 }
 
 function hideSlashMenu() {
-  els.slashMenu.setAttribute("hidden", "");
-  els.slashBtn.classList.remove("active");
+  // Hide the slash menu in every pane (only one is ever open, but the focused
+  // pane may have changed between open and hide).
+  for (const p of panels) {
+    p.els.slashMenu.setAttribute("hidden", "");
+    p.els.slashBtn.classList.remove("active");
+  }
   slashMenuFocusIdx = -1;
 }
 
 function updateSlashMenuFocus() {
-  const items = els.slashMenu.querySelectorAll(".slash-menu-item");
+  const panel = fp();
+  if (!panel) return;
+  const items = panel.els.slashMenu.querySelectorAll(".slash-menu-item");
   items.forEach((it, i) => it.classList.toggle("focused", i === slashMenuFocusIdx));
   if (slashMenuFocusIdx >= 0 && items[slashMenuFocusIdx]) {
     items[slashMenuFocusIdx].scrollIntoView({ block: "nearest" });
@@ -2595,15 +3223,21 @@ function updateSlashMenuFocus() {
 }
 
 function selectSlashCommand(text) {
-  els.prompt.value = text;
-  els.prompt.setSelectionRange(text.length, text.length);
-  els.prompt.focus();
+  const panel = fp();
+  if (!panel) return;
+  panel.els.prompt.value = text;
+  panel.els.prompt.setSelectionRange(text.length, text.length);
+  panel.els.prompt.focus();
   hideSlashMenu();
 }
 
-function appendCommandBubble(text, isError = false) {
-  const container = activeSessionId ? getContainer(activeSessionId) : els.transcript;
-  if (activeSessionId && !els.transcript.contains(container)) mountSession(activeSessionId);
+// appendCommandBubble renders a local (non-streamed) reply for slash commands
+// into a pane. Defaults to the focused pane when none is supplied.
+function appendCommandBubble(text, isError = false, panel) {
+  panel = panel || fp();
+  const sessionId = panel ? panel.sessionId : null;
+  const container = sessionId ? getContainer(sessionId) : (panel && panel.els.transcript);
+  if (panel && sessionId) mountInPanel(panel, sessionId);
   const row = document.createElement("div");
   row.className = "msg-row";
   const bubble = document.createElement("div");
@@ -2615,8 +3249,8 @@ function appendCommandBubble(text, isError = false) {
     renderMarkdown(bubble, text);
   }
   row.appendChild(bubble);
-  container.appendChild(row);
-  scrollBottom(true);
+  if (container) container.appendChild(row);
+  scrollBottom(panel, true);
 }
 
 // Substitute $1..$N positional args and $* (all args joined) in a user
@@ -2634,7 +3268,9 @@ function applyUserCommandTemplate(promptTemplate, argText) {
   return out;
 }
 
-async function handleSlashCommand(raw) {
+async function handleSlashCommand(raw, panel) {
+  panel = panel || fp();
+  if (!panel) return;
   const trimmed = raw.trim();
   const spaceIdx = trimmed.indexOf(" ");
   const cmdPart = spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed;
@@ -2648,12 +3284,12 @@ async function handleSlashCommand(raw) {
     if (uc) {
       const expanded = applyUserCommandTemplate(uc.prompt, argPart).trim();
       if (!expanded) {
-        appendCommandBubble(`Command \`/${cmd}\` expanded to an empty prompt.`, true);
+        appendCommandBubble(`Command \`/${cmd}\` expanded to an empty prompt.`, true, panel);
         return;
       }
-      els.prompt.value = expanded;
-      autoGrowPrompt();
-      await sendMessage();
+      panel.els.prompt.value = expanded;
+      autoGrowPrompt(panel);
+      await sendMessage(panel);
       return;
     }
   }
@@ -2676,54 +3312,55 @@ async function handleSlashCommand(raw) {
           return `- \`/${c.name}${args}\`${desc}`;
         }).join("\n");
       }
-      appendCommandBubble(body);
+      appendCommandBubble(body, false, panel);
       break;
     }
 
     case "status": {
-      const sid = activeSessionId || "none";
+      const sid = panel.sessionId || "none";
       appendCommandBubble(
         `**Session status**\n\n- Session: \`${sid}\`\n` +
-        `- Use \`/learn\` to schedule soft-skill curation`
+        `- Use \`/learn\` to schedule soft-skill curation`,
+        false, panel
       );
       break;
     }
 
     case "learn": {
-      if (!activeSessionId) {
-        appendCommandBubble("No active session — start a chat first.", true);
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
         return;
       }
       const reason = argPart || "manual /learn request from web UI";
       try {
-        const res = await apiFetch(`/api/sessions/${activeSessionId}/curate`, {
+        const res = await apiFetch(`/api/sessions/${panel.sessionId}/curate`, {
           method: "POST",
           body: JSON.stringify({ reason, immediate: false }),
         });
         if (!res.ok) {
           const d = await res.json();
-          appendCommandBubble(d.error || "curate request failed", true);
+          appendCommandBubble(d.error || "curate request failed", true, panel);
           return;
         }
-        appendCommandBubble("Session marked for soft-skill curation — runs on session end.");
+        appendCommandBubble("Session marked for soft-skill curation — runs on session end.", false, panel);
       } catch (err) {
-        appendCommandBubble(String(err), true);
+        appendCommandBubble(String(err), true, panel);
       }
       break;
     }
 
     case "learn-now": {
-      if (!activeSessionId) {
-        appendCommandBubble("No active session — start a chat first.", true);
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
         return;
       }
       const reason = argPart || "manual /learn-now request from web UI";
-      const container = getContainer(activeSessionId);
-      if (!els.transcript.contains(container)) mountSession(activeSessionId);
+      const container = getContainer(panel.sessionId);
+      mountInPanel(panel, panel.sessionId);
       const curatorBlock = appendCuratorBlock(container);
-      scrollBottom(true);
+      scrollBottom(panel, true);
       try {
-        const res = await apiFetch(`/api/sessions/${activeSessionId}/curate`, {
+        const res = await apiFetch(`/api/sessions/${panel.sessionId}/curate`, {
           method: "POST",
           body: JSON.stringify({ reason, immediate: true }),
         });
@@ -2763,7 +3400,8 @@ async function handleSlashCommand(raw) {
     case "create-skill": {
       openSkillNameModal("Create skill", argPart.trim(), (name) => {
         sendSkillPrompt(
-          `Create a new skill called "${name}". Load the skill-creator skill and guide me through defining it interactively.`
+          `Create a new skill called "${name}". Load the skill-creator skill and guide me through defining it interactively.`,
+          panel
         );
       });
       break;
@@ -2772,35 +3410,36 @@ async function handleSlashCommand(raw) {
     case "update-skill": {
       openSkillNameModal("Update skill", argPart.trim(), (name) => {
         sendSkillPrompt(
-          `Update the skill "${name}". Load the skill-creator skill and help me revise it.`
+          `Update the skill "${name}". Load the skill-creator skill and help me revise it.`,
+          panel
         );
       });
       break;
     }
 
     case "compress": {
-      if (!activeSessionId) {
-        appendCommandBubble("No active session — start a chat first.", true);
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
         return;
       }
       try {
-        const res = await apiFetch(`/api/sessions/${activeSessionId}/compact`, {
+        const res = await apiFetch(`/api/sessions/${panel.sessionId}/compact`, {
           method: "POST",
         });
         if (!res.ok) {
           const d = await res.json();
-          appendCommandBubble(d.error || "compress request failed", true);
+          appendCommandBubble(d.error || "compress request failed", true, panel);
           return;
         }
-        appendCommandBubble("Context compression queued — runs before the next model call.");
+        appendCommandBubble("Context compression queued — runs before the next model call.", false, panel);
       } catch (err) {
-        appendCommandBubble(String(err), true);
+        appendCommandBubble(String(err), true, panel);
       }
       break;
     }
 
     default:
-      appendCommandBubble(`Unknown command: \`/${cmd}\` — try \`/help\``, true);
+      appendCommandBubble(`Unknown command: \`/${cmd}\` — try \`/help\``, true, panel);
   }
 }
 
@@ -2988,11 +3627,8 @@ function closeCtxBrowser() {
 
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
-els.transcript.addEventListener("scroll", () => {
-  _stickToBottom = isAtBottom(els.transcript);
-  updatePinnedForScroll();
-});
-els.newChat.addEventListener("click", newChat);
+// "New Chat" in the sidebar opens a new session in the focused pane.
+els.newChat.addEventListener("click", () => newChat());
 
 // Squad picker dropdown — chevron next to the New Chat button toggles
 // a menu that picks which squad future sessions use. The menu is hidden
@@ -3003,9 +3639,14 @@ els.squadToggle.addEventListener("click", (e) => {
   else closeSquadMenu();
 });
 els.squadMenu.addEventListener("click", (e) => e.stopPropagation());
-document.addEventListener("click", () => closeSquadMenu());
+document.addEventListener("click", () => {
+  closeSquadMenu();
+  for (const p of panels) closePickerSquadMenu(p);
+});
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !els.squadMenu.hidden) closeSquadMenu();
+  if (e.key !== "Escape") return;
+  if (!els.squadMenu.hidden) closeSquadMenu();
+  for (const p of panels) closePickerSquadMenu(p);
 });
 
 // ─── Hover tooltips (data-tip) ────────────────────────────────────────────────
@@ -3082,24 +3723,14 @@ function initTooltips() {
 }
 initTooltips();
 
-els.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(); });
+// The composer, attach menu, prompt keys, drag-and-drop, cancel, slash button,
+// context ring and composer-resize listeners are wired per-pane in
+// attachPaneHandlers (each pane owns its own copy of these elements). A few
+// document-level fallbacks below close per-pane flyouts on an outside click.
 
-// Attach button toggles the popup menu
-els.attachBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  els.attachMenu.toggleAttribute("hidden");
-});
-// Clicks outside the popup close it; clicks inside don't bubble up
-document.addEventListener("click", () => els.attachMenu.setAttribute("hidden", ""));
-els.attachMenu.addEventListener("click", (e) => e.stopPropagation());
-
-els.attachComputer.addEventListener("click", () => {
-  els.attachMenu.setAttribute("hidden", "");
-  els.fileInput.click();
-});
-els.attachContext.addEventListener("click", () => {
-  els.attachMenu.setAttribute("hidden", "");
-  openCtxBrowser();
+// Clicks outside any attach menu close every open one.
+document.addEventListener("click", () => {
+  for (const p of panels) p.els.attachMenu.setAttribute("hidden", "");
 });
 
 // ─── Skill name modal ────────────────────────────────────────────────────────
@@ -3141,13 +3772,15 @@ function confirmSkillNameModal() {
   if (cb) cb(name);
 }
 
-// Sends a pre-crafted prompt to the active session (creating one if needed).
-async function sendSkillPrompt(prompt) {
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) return;
-  els.prompt.value = prompt;
-  autoGrowPrompt();
-  await sendMessage();
+// Sends a pre-crafted prompt to a pane's session (creating one if needed).
+async function sendSkillPrompt(prompt, panel) {
+  panel = panel || fp();
+  if (!panel) return;
+  if (!panel.sessionId) await newChat(panel);
+  if (!panel.sessionId) return;
+  panel.els.prompt.value = prompt;
+  autoGrowPrompt(panel);
+  await sendMessage(panel);
 }
 
 els.skillNameClose.addEventListener("click", closeSkillNameModal);
@@ -3189,243 +3822,35 @@ els.ctxBrowserOverlay.addEventListener("click", (e) => {
 });
 els.ctxBrowserAdd.addEventListener("click", async () => {
   if (!ctxBrowserSelected.size) return;
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) { closeCtxBrowser(); return; }
-  const sid = activeSessionId;
+  const panel = fp();
+  if (!panel) { closeCtxBrowser(); return; }
+  if (!panel.sessionId) await newChat(panel);
+  if (!panel.sessionId) { closeCtxBrowser(); return; }
+  const sid = panel.sessionId;
   for (const f of ctxBrowserSelected.values()) addAttachment(sid, f);
   renderAttachmentsUI(sid);
   closeCtxBrowser();
 });
 
-els.fileInput.addEventListener("change", async () => {
-  const picked = Array.from(els.fileInput.files);
-  if (!picked.length) return;
-  els.fileInput.value = "";
+// (file upload, paste, drag-and-drop and cancel are wired per-pane in
+// attachPaneHandlers via uploadPickedFiles.)
 
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) return;
-
-  const sessionId = activeSessionId;
-  const form = new FormData();
-  for (const f of picked) form.append("files", f);
-
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      console.error("upload failed:", txt);
-      return;
-    }
-    const data = await res.json();
-    for (const f of (data.files || [])) addAttachment(sessionId, f);
-    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
-  } catch (e) {
-    console.error("upload error:", e);
-  }
-});
-els.prompt.addEventListener("paste", async (e) => {
-  const items = e.clipboardData?.items;
-  if (!items) return;
-
-  const imageItems = Array.from(items).filter(it => it.kind === "file" && it.type.startsWith("image/"));
-  if (!imageItems.length) return;
-
-  e.preventDefault();
-
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) return;
-
-  const sessionId = activeSessionId;
-  const form = new FormData();
-  for (const item of imageItems) {
-    const file = item.getAsFile();
-    if (file) form.append("files", file, file.name || `screenshot-${Date.now()}.png`);
-  }
-
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) {
-      console.error("paste upload failed:", await res.text());
-      return;
-    }
-    const data = await res.json();
-    for (const f of (data.files || [])) addAttachment(sessionId, f);
-    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
-  } catch (err) {
-    console.error("paste upload error:", err);
-  }
-});
-
-// ─── Drag-and-drop file upload ────────────────────────────────────────────────
-let dragCounter = 0;
-
-els.composerWrap.addEventListener("dragenter", (e) => {
-  if (!e.dataTransfer?.types.includes("Files")) return;
-  e.preventDefault();
-  dragCounter++;
-  els.composerWrap.classList.add("drag-over");
-});
-
-els.composerWrap.addEventListener("dragover", (e) => {
-  if (!e.dataTransfer?.types.includes("Files")) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "copy";
-});
-
-els.composerWrap.addEventListener("dragleave", () => {
-  dragCounter--;
-  if (dragCounter <= 0) {
-    dragCounter = 0;
-    els.composerWrap.classList.remove("drag-over");
-  }
-});
-
-els.composerWrap.addEventListener("drop", async (e) => {
-  e.preventDefault();
-  dragCounter = 0;
-  els.composerWrap.classList.remove("drag-over");
-
-  const files = Array.from(e.dataTransfer?.files || []);
-  if (!files.length) return;
-
-  if (!activeSessionId) await newChat();
-  if (!activeSessionId) return;
-
-  const sessionId = activeSessionId;
-  const form = new FormData();
-  for (const f of files) form.append("files", f);
-
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/files`, {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) {
-      console.error("drop upload failed:", await res.text());
-      return;
-    }
-    const data = await res.json();
-    for (const f of (data.files || [])) addAttachment(sessionId, f);
-    if (sessionId === activeSessionId) renderAttachmentsUI(sessionId);
-  } catch (err) {
-    console.error("drop upload error:", err);
-  }
-});
-
-els.cancel.addEventListener("click", () => {
-  const ctrl = sessionAbortCtrls.get(activeSessionId);
-  if (ctrl) ctrl.abort();
-});
 function updateEditModeBtn() {
-  els.editModeBtn.classList.toggle("active", !sendOnEnter);
-  els.editModeBtn.dataset.tip = sendOnEnter
-    ? "Edit mode: switch to Enter=new line, Ctrl+Enter=send"
-    : "Send mode: switch to Enter=send, Ctrl+Enter=new line";
-  els.prompt.placeholder = sendOnEnter
-    ? "Message the agent… (Enter to send)"
-    : "Message the agent… (Ctrl+Enter to send)";
+  // The Enter-key mode is a global preference; reflect it on every pane.
+  for (const p of panels) {
+    p.els.editModeBtn.classList.toggle("active", !sendOnEnter);
+    p.els.editModeBtn.dataset.tip = sendOnEnter
+      ? "Edit mode: switch to Enter=new line, Ctrl+Enter=send"
+      : "Send mode: switch to Enter=send, Ctrl+Enter=new line";
+    p.els.prompt.placeholder = archivedSessions.has(p.sessionId)
+      ? "Session archived — unarchive to continue the conversation"
+      : (sendOnEnter ? "Message the agent… (Enter to send)" : "Message the agent… (Ctrl+Enter to send)");
+  }
 }
-
-els.editModeBtn.addEventListener("click", () => {
-  sendOnEnter = !sendOnEnter;
-  updateEditModeBtn();
-});
-
-els.prompt.addEventListener("keydown", (e) => {
-  if (!els.slashMenu.hasAttribute("hidden")) {
-    const items = Array.from(els.slashMenu.querySelectorAll(".slash-menu-item"));
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      slashMenuFocusIdx = Math.min(slashMenuFocusIdx + 1, items.length - 1);
-      updateSlashMenuFocus();
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      slashMenuFocusIdx = Math.max(slashMenuFocusIdx - 1, -1);
-      updateSlashMenuFocus();
-      return;
-    }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const selectable = items.filter(it => !it.classList.contains("slash-menu-add"));
-      if (selectable.length === 1) {
-        selectSlashCommand(selectable[0].dataset.value);
-      } else if (items.length > 0) {
-        slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length;
-        updateSlashMenuFocus();
-      }
-      return;
-    }
-    if (e.key === "Enter" && slashMenuFocusIdx >= 0) {
-      e.preventDefault();
-      const focused = items[slashMenuFocusIdx];
-      if (focused.classList.contains("slash-menu-add")) {
-        hideSlashMenu();
-        openUserCommandModal(null);
-      } else {
-        selectSlashCommand(focused.dataset.value);
-      }
-      return;
-    }
-    if (e.key === "Escape") {
-      hideSlashMenu();
-      return;
-    }
-  }
-  if (sendOnEnter) {
-    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      const start = els.prompt.selectionStart;
-      const end = els.prompt.selectionEnd;
-      els.prompt.value = els.prompt.value.substring(0, start) + "\n" + els.prompt.value.substring(end);
-      els.prompt.selectionStart = els.prompt.selectionEnd = start + 1;
-      els.prompt.dispatchEvent(new Event("input"));
-    }
-  } else {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
-});
-
-els.prompt.addEventListener("input", () => {
-  autoGrowPrompt();
-  const val = els.prompt.value;
-  const firstLine = val.split("\n")[0];
-  const firstWord = firstLine.split(" ")[0];
-  if (val.startsWith("/") && !firstLine.includes(" ")) {
-    renderSlashMenu(firstWord);
-  } else {
-    hideSlashMenu();
-  }
-});
-
-els.slashBtn.addEventListener("click", () => {
-  if (!els.prompt.value.startsWith("/")) {
-    els.prompt.value = "/" + els.prompt.value;
-  }
-  els.prompt.focus();
-  const firstWord = els.prompt.value.split("\n")[0].split(" ")[0];
-  renderSlashMenu(firstWord);
-});
-
+// Clicking outside the focused pane's composer closes its slash menu.
 document.addEventListener("mousedown", (e) => {
-  if (!els.slashMenu.hasAttribute("hidden") && !els.composerWrap.contains(e.target)) {
-    hideSlashMenu();
-  }
+  const open = panels.find(p => !p.els.slashMenu.hasAttribute("hidden"));
+  if (open && !open.els.composerWrap.contains(e.target)) hideSlashMenu();
 });
 
 // ─── Composer resize ─────────────────────────────────────────────────────────
@@ -3439,20 +3864,24 @@ let composerDragStartY     = 0;
 let composerDragStartH     = 0;
 let composerManuallyResized = false;
 
+// Composer height is a global CSS var shared by every pane's composer.
 function setComposerHeight(h) {
   const clamped = Math.max(COMPOSER_MIN_H, h);
   document.documentElement.style.setProperty("--composer-h", clamped + "px");
   localStorage.setItem(COMPOSER_H_KEY, clamped + "px");
   if (!composerManuallyResized) {
     composerManuallyResized = true;
-    els.composerWrap.classList.add("is-manual");
-    els.prompt.style.height = "";
+    for (const p of panels) {
+      p.els.composerWrap.classList.add("is-manual");
+      p.els.prompt.style.height = "";
+    }
   }
 }
 
-function autoGrowPrompt() {
-  if (composerManuallyResized) return;
-  const el = els.prompt;
+function autoGrowPrompt(panel) {
+  panel = panel || fp();
+  if (!panel || composerManuallyResized) return;
+  const el = panel.els.prompt;
   const cs = getComputedStyle(el);
   const lineH  = parseFloat(cs.lineHeight);
   const padY   = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
@@ -3463,15 +3892,23 @@ function autoGrowPrompt() {
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
 }
 
-els.composerResize.addEventListener("mousedown", (e) => {
-  composerDragging   = true;
-  composerDragStartY = e.clientY;
-  composerDragStartH = els.composerWrap.getBoundingClientRect().height;
-  els.composerResize.classList.add("is-dragging");
-  document.body.classList.add("resizing-composer");
-  document.body.style.userSelect = "none";
-  e.preventDefault();
-});
+// onCompactClick backs each pane's "Compress Now" button in the ctx popup.
+async function onCompactClick(e, panel) {
+  e.stopPropagation();
+  if (!panel.sessionId) return;
+  const btn = panel.els.ctxCompactBtn;
+  btn.disabled = true;
+  btn.textContent = "Queuing…";
+  try {
+    const res = await apiFetch(`/api/sessions/${panel.sessionId}/compact`, { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    btn.textContent = "Queued ✓";
+  } catch (err) {
+    console.error("compact request failed:", err);
+    btn.textContent = "Error";
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Compress Now"; closeCtxPopup(panel); }, 1400);
+}
 
 // ─── Sidebar resize & toggle ─────────────────────────────────────────────────
 
@@ -3518,12 +3955,21 @@ document.addEventListener("mousemove", (e) => {
     const w = Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, e.clientX));
     setSidebarWidth(w);
   }
+  if (paneDividerDrag) {
+    const d = paneDividerDrag;
+    const totalPair = d.startLeftW + d.startRightW;
+    const delta = e.clientX - d.startX;
+    let leftW = Math.max(PANE_MIN_W, Math.min(totalPair - PANE_MIN_W, d.startLeftW + delta));
+    d.left.width = leftW;
+    d.right.width = totalPair - leftW;
+    applyPaneWidths();
+  }
 });
 
 document.addEventListener("mouseup", () => {
   if (composerDragging) {
     composerDragging = false;
-    els.composerResize.classList.remove("is-dragging");
+    for (const p of panels) p.els.composerResize.classList.remove("is-dragging");
     document.body.classList.remove("resizing-composer");
     document.body.style.userSelect = "";
   }
@@ -3532,6 +3978,13 @@ document.addEventListener("mouseup", () => {
     els.sidebarResize.classList.remove("is-dragging");
     document.body.classList.remove("resizing");
     document.body.style.userSelect = "";
+  }
+  if (paneDividerDrag) {
+    paneDividerDrag = null;
+    for (const d of els.chat.querySelectorAll(".pane-divider")) d.classList.remove("is-dragging");
+    document.body.classList.remove("resizing");
+    document.body.style.userSelect = "";
+    saveLayout();
   }
 });
 
@@ -3560,43 +4013,45 @@ els.archivedHeader.addEventListener("keydown", (e) => {
 });
 
 // ─── Context ring popup ───────────────────────────────────────────────────────
-
-els.ctxRingWrap.addEventListener("click", (e) => {
-  e.stopPropagation();
-  if (els.ctxPopup.hasAttribute("hidden")) openCtxPopup();
-  else closeCtxPopup();
-});
-
-// Close popup when clicking outside it.
+// The ring + popup live per-pane (wired in attachPaneHandlers). A document-level
+// click closes any open popup when the click lands outside its ring wrap.
 document.addEventListener("click", (e) => {
-  if (els.ctxPopup && !els.ctxPopup.hasAttribute("hidden") &&
-      !els.ctxRingWrap.contains(e.target)) {
-    closeCtxPopup();
+  for (const p of panels) {
+    if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden") &&
+        !p.els.ctxRingWrap.contains(e.target)) {
+      closeCtxPopup(p);
+    }
   }
 });
 
-// Compress Now button.
-els.ctxCompactBtn.addEventListener("click", async (e) => {
-  e.stopPropagation();
-  if (!activeSessionId) return;
-  els.ctxCompactBtn.disabled = true;
-  els.ctxCompactBtn.textContent = "Queuing…";
-  try {
-    const res = await apiFetch(`/api/sessions/${activeSessionId}/compact`, { method: "POST" });
-    if (!res.ok) throw new Error(await res.text());
-    els.ctxCompactBtn.textContent = "Queued ✓";
-  } catch (err) {
-    console.error("compact request failed:", err);
-    els.ctxCompactBtn.textContent = "Error";
-  }
-  setTimeout(() => {
-    els.ctxCompactBtn.disabled = false;
-    els.ctxCompactBtn.textContent = "Compress Now";
-    closeCtxPopup();
-  }, 1400);
-});
+// Re-normalize pane widths when the window resizes.
+window.addEventListener("resize", () => { layoutWidths(); });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+
+// restoreLayout rebuilds the pane row from a saved layout record, dropping any
+// pane whose session no longer exists. Returns true if at least one pane was
+// bound to a live session.
+async function restoreLayout(rec, liveIds) {
+  panels = [];
+  const intended = [];
+  for (const pane of rec.panes) {
+    const sid = pane.sessionId && liveIds.has(pane.sessionId) ? pane.sessionId : null;
+    const panel = createPanel(null);
+    panel.width = pane.width > 0 ? pane.width : 0;
+    intended.push(sid);
+  }
+  if (!panels.length) return false;
+  rebuildChatDOM();
+  const focusIdx = Math.min(Math.max(0, rec.focusedIndex | 0), panels.length - 1);
+  setFocusedPanel((panels[focusIdx] || panels[0]).id);
+  let bound = false;
+  for (let i = 0; i < panels.length; i++) {
+    if (intended[i]) { await bindSessionToPanel(panels[i], intended[i]); bound = true; }
+    else showPanePicker(panels[i]);
+  }
+  return bound;
+}
 
 (async function init() {
   if (typeof marked !== "undefined") {
@@ -3608,22 +4063,43 @@ els.ctxCompactBtn.addEventListener("click", async (e) => {
   if (savedComposerH) {
     document.documentElement.style.setProperty("--composer-h", savedComposerH);
     composerManuallyResized = true;
-    els.composerWrap.classList.add("is-manual");
-  } else {
-    autoGrowPrompt();
   }
   if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
   await loadSquads();
   // After a hot-reload from the Settings panel, refresh the squad picker so
   // newly installed squads show up without a page refresh.
-  window.addEventListener("yoke:config-reloaded", () => { loadSquads(); });
+  window.addEventListener("yoke:config-reloaded", () => {
+    loadSquads().then(() => {
+      // Refresh any open empty-pane picker so new squads show up immediately.
+      for (const p of panels) {
+        if (!p.sessionId && p.els.picker && !p.els.picker.hidden) renderPickerSquad(p);
+      }
+    });
+  });
   loadUserCommands(); // fire-and-forget; menu re-renders when it lands
   await loadSessions();
-  // Auto-select the most recent session so the user is never left without an
-  // active session. This prevents implicit session creation inside sendMessage()
-  // which caused session/mailbox state to get scrambled.
-  if (!activeSessionId) {
+
+  // Collect live session ids for layout validation.
+  const liveIds = new Set();
+  for (const li of els.list.children) if (li.dataset.id) liveIds.add(li.dataset.id);
+
+  const saved = loadSavedLayout();
+  let restored = false;
+  if (saved) {
+    try { restored = await restoreLayout(saved, liveIds); }
+    catch (e) { console.error("layout restore failed:", e); panels = []; }
+  }
+
+  // Fall back to a single pane bound to the most recent session.
+  if (!panels.length) {
+    const panel = createPanel(null);
+    rebuildChatDOM();
+    setFocusedPanel(panel.id);
+  }
+  if (composerManuallyResized) for (const p of panels) p.els.composerWrap.classList.add("is-manual");
+  if (!restored && !panels.some(p => p.sessionId)) {
     const first = els.list.querySelector("li[data-id]");
-    if (first) await selectSession(first.dataset.id);
+    if (first) await bindSessionToPanel(fp(), first.dataset.id);
+    else { showPanePicker(fp()); autoGrowPrompt(fp()); }
   }
 })();

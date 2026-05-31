@@ -105,9 +105,9 @@ type browseRegistryIn struct {
 // browseRegistryOut is a union type: only the fields matching the registry's
 // Kind are populated. Check the Kind field to know which slice to read.
 type browseRegistryOut struct {
-	Kind   string         `json:"kind"`
-	Skills []SkillInfo    `json:"skills,omitempty"`
-	Agents []AgentInfo    `json:"agents,omitempty"`
+	Kind     string         `json:"kind"`
+	Skills   []SkillInfo    `json:"skills,omitempty"`
+	Agents   []AgentInfo    `json:"agents,omitempty"`
 	MCP      []MCPToolInfo  `json:"mcp,omitempty"`
 	Squads   []SquadInfo    `json:"squads,omitempty"`
 	A2A      []A2AAgentInfo `json:"a2a,omitempty"`
