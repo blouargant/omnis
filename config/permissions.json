@@ -75,6 +75,10 @@
       "reason": "internal coordination / planning tool — never blocks the agent loop"
     },
     {
+      "pattern": "^(recall_softskills|recall_precedents|search_code|search_registries|search_docs|list_docs|read_doc|grep_docs|browse_registry|get_remote_item)\\b",
+      "reason": "read-only semantic recall / search — no side effects (reindex_* and install_remote_item still prompt)"
+    },
+    {
       "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|helper)\\b",
       "reason": "sub-agent delegation — the leader always controls the outcome; no direct side-effects"
     },
