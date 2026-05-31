@@ -321,6 +321,23 @@ func (i *Index) Reindex(ctx context.Context) (indexed int, err error) {
 	return len(items), nil
 }
 
+// EnsureBuilt builds the index when it is empty or stale, and is a no-op when a
+// persisted index for the current registry set is already loaded. It applies
+// the same trigger as Search's lazy build, so a startup warm-up moves the slow
+// network browse + embed off the first user search. Returns the number of items
+// in the index afterwards.
+func (i *Index) EnsureBuilt(ctx context.Context) (int, error) {
+	if i == nil {
+		return 0, embed.ErrNoEmbedder
+	}
+	if i.store.Len() == 0 || i.stale() {
+		if _, err := i.Reindex(ctx); err != nil {
+			return 0, err
+		}
+	}
+	return i.Len(), nil
+}
+
 // stale reports whether the configured registry set differs from what the
 // index was built against. Cheap: reads the config file, no network.
 func (i *Index) stale() bool {

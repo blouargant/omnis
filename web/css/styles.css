@@ -90,7 +90,12 @@ body { display: flex; overflow: hidden; }
   left: 0;
   z-index: 9999;
   pointer-events: none;
-  white-space: nowrap;
+  /* Short tips stay on one line (the box shrink-wraps); long descriptions
+     soft-wrap onto multiple lines within max-width instead of stretching into
+     one unreadable strip. */
+  white-space: normal;
+  max-width: 18rem;
+  text-align: left;
   background: var(--bg-raised);
   color: var(--text-strong);
   border: 1px solid var(--border-strong);

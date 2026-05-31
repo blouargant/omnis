@@ -176,6 +176,11 @@ func run() error {
 	// about yoke grounded in its own docs.
 	startDocsIndexer(rootCtx, infra, firstInst.Settings)
 
+	// Warm the remote-registry semantic index in the background at startup so the
+	// first search_registries call doesn't pay for browsing + embedding every
+	// configured registry (no-op when a fresh persisted index is already loaded).
+	startRegistryIndexer(rootCtx, infra, firstInst.Settings)
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox)

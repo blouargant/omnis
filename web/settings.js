@@ -285,7 +285,7 @@ const BASE_PATH = window.BASE_PATH || "";
           Embedder changed — a server restart is required to apply it (hot-reload can't swap the embedder).
         </span>
         <button type="button" id="restart-banner-btn" class="reload-primary">Restart server</button>
-        <button type="button" id="restart-banner-dismiss" title="Dismiss">×</button>
+        <button type="button" id="restart-banner-dismiss" data-tip="Dismiss">×</button>
       `;
       b.querySelector("#restart-banner-btn").addEventListener("click", () => doRestart());
     } else {
@@ -294,7 +294,7 @@ const BASE_PATH = window.BASE_PATH || "";
           Configuration changed — apply with hot-reload (no downtime).
         </span>
         <button type="button" id="restart-banner-reload" class="reload-primary">Reload</button>
-        <button type="button" id="restart-banner-dismiss" title="Dismiss">×</button>
+        <button type="button" id="restart-banner-dismiss" data-tip="Dismiss">×</button>
       `;
       b.querySelector("#restart-banner-reload").addEventListener("click", () => doReload());
     }
@@ -1380,7 +1380,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
               <span class="agent-fleet-title">SQUADS</span>
-              <button type="button" class="agent-fleet-add" id="add-squad" title="Add squad">+</button>
+              <button type="button" class="agent-fleet-add" id="add-squad" data-tip="Add squad">+</button>
             </div>
             <div class="agent-fleet-list" id="squad-list"></div>
           </div>
@@ -1404,8 +1404,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
               <span class="agent-fleet-title">ACTIVE FLEET</span>
-              <button type="button" class="agent-fleet-import" id="import-agent" title="Import Claude Code agent (.md / .json)">&#8595;</button>
-              <button type="button" class="agent-fleet-add" id="add-agent" title="Add agent">+</button>
+              <button type="button" class="agent-fleet-import" id="import-agent" data-tip="Import Claude Code agent (.md / .json)">&#8595;</button>
+              <button type="button" class="agent-fleet-add" id="add-agent" data-tip="Add agent">+</button>
             </div>
             <div class="agent-fleet-list" id="agent-fleet-list"></div>
           </div>
@@ -1562,7 +1562,7 @@ const BASE_PATH = window.BASE_PATH || "";
               const isLeaderRow = a.name === sq.leader;
               const desc = a.description || "";
               return `
-              <div class="agent-tool-card${isOn ? " tool-on" : ""}${isLeaderRow ? " tool-disabled" : ""}" data-name="${escHtml(a.name)}" title="${escHtml(desc)}">
+              <div class="agent-tool-card${isOn ? " tool-on" : ""}${isLeaderRow ? " tool-disabled" : ""}" data-name="${escHtml(a.name)}" data-tip="${escHtml(desc)}">
                 <div class="agent-tool-icon">${agentIcon}</div>
                 <div class="agent-tool-info">
                   <span class="agent-tool-name">${escHtml(a.name)}</span>
@@ -1625,8 +1625,25 @@ const BASE_PATH = window.BASE_PATH || "";
         } else {
           sq.members.push(name);
         }
+        // Reflect the new selection in place instead of re-rendering the whole
+        // grid. A full renderAgentSquads(d) re-sorts members (selected first),
+        // so the just-clicked chip would jump to the front of the list. Keeping
+        // each card where it is until the next real render (page/server reload)
+        // is far less jarring while toggling several members.
+        const paint = (el, on) => {
+          el.classList.toggle("tool-on", on);
+          const pill = el.querySelector(".agent-tool-toggle-pill");
+          if (pill) { pill.classList.toggle("pill-on", on); pill.classList.toggle("pill-off", !on); }
+        };
+        paint(card, sq.members.includes(name));
+        if (leaderless) {
+          // Single-select: clear the visual state of every other member card.
+          panel.querySelectorAll("#squad-members .agent-tool-card").forEach(other => {
+            if (other === card || other.classList.contains("tool-disabled")) return;
+            paint(other, false);
+          });
+        }
         onChange();
-        renderAgentSquads(d);
       });
     });
     if (!isDefault) {
@@ -1765,7 +1782,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const eye = document.createElement("button");
       eye.type = "button";
       eye.className = "env-secret-eye";
-      eye.title = "Show/hide";
+      eye.setAttribute("data-tip", "Show/hide");
       eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
       eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
       inputWrap.appendChild(inp);
@@ -1856,7 +1873,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <strong>${escHtml(name.toUpperCase())}</strong>
           </div>
           <div>
-            <button type="button" class="model-test-link" title="Fetch model list from this provider">⟳ TEST</button>
+            <button type="button" class="model-test-link" data-tip="Fetch model list from this provider">⟳ TEST</button>
             <button type="button" class="model-remove-link">⏷ REMOVE</button>
           </div>
         </div>
@@ -2101,7 +2118,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // vLLM/LiteLLM that runs away only when streamed).
     const streamWrap = document.createElement("span");
     streamWrap.className = "model-stream-wrap";
-    streamWrap.title = "stream this model's output (off = use the non-streaming endpoint)";
+    streamWrap.setAttribute("data-tip", "stream this model's output (off = use the non-streaming endpoint)");
     const streamText = document.createElement("span");
     streamText.className = "model-stream-label";
     streamText.textContent = "Streaming";
@@ -2171,13 +2188,13 @@ const BASE_PATH = window.BASE_PATH || "";
     // agent "Active State" toggle; the explanatory text is a tooltip.
     const embF = document.createElement("div");
     embF.className = "model-field";
-    embF.title = "usable as internal embedder";
+    embF.setAttribute("data-tip", "usable as internal embedder");
     const embLbl = document.createElement("label");
     embLbl.className = "model-field-label";
     embLbl.textContent = "EMBEDDING MODEL";
     const embSwitch = document.createElement("label");
     embSwitch.className = "agent-toggle-switch";
-    embSwitch.title = "usable as internal embedder";
+    embSwitch.setAttribute("data-tip", "usable as internal embedder");
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.className = "agent-toggle-input";
@@ -2360,7 +2377,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "combo-fetch-btn";
-    btn.title = "Detect dimension from provider";
+    btn.setAttribute("data-tip", "Detect dimension from provider");
     btn.textContent = "⟳";
     btn.addEventListener("click", async () => {
       const model = (m.model || "").trim();
@@ -2418,7 +2435,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const eye = document.createElement("button");
     eye.type = "button";
     eye.className = "env-secret-eye";
-    eye.title = "Show/hide";
+    eye.setAttribute("data-tip", "Show/hide");
     eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
     eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
     wrap.appendChild(inp); wrap.appendChild(eye);
@@ -2539,7 +2556,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const fetchBtn = document.createElement("button");
     fetchBtn.type = "button";
     fetchBtn.className = "combo-fetch-btn";
-    fetchBtn.title = "Load models from provider";
+    fetchBtn.setAttribute("data-tip", "Load models from provider");
     fetchBtn.textContent = "⟳";
 
     fetchBtn.addEventListener("click", async () => {
@@ -2848,7 +2865,7 @@ const BASE_PATH = window.BASE_PATH || "";
         const hint = document.createElement("span");
         hint.className = "agent-model-recommendation";
         hint.textContent = `<${a.recommended_model}>`;
-        hint.title = "Recommended by the agent's instruction.md frontmatter (no matching entry in models.json).";
+        hint.setAttribute("data-tip", "Recommended by the agent's instruction.md frontmatter (no matching entry in models.json).");
         f.appendChild(hint);
       }
     }));
@@ -2885,7 +2902,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const isOn = cur.has(t);
       const btn = document.createElement("div");
       btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isDisabledTool ? " tool-disabled" : "");
-      btn.title = TOOL_DISPLAY[t] || "";
+      btn.setAttribute("data-tip", TOOL_DISPLAY[t] || "");
       btn.innerHTML = `
         <div class="agent-tool-icon">${TOOL_ICONS[t] || ""}</div>
         <div class="agent-tool-info">
@@ -2949,7 +2966,7 @@ const BASE_PATH = window.BASE_PATH || "";
       let fcOn = fc.getValue();
       const fcBtn = document.createElement("div");
       fcBtn.className = "agent-tool-card" + (fcOn ? " tool-on" : "") + (fc.locked ? " tool-disabled" : "");
-      fcBtn.title = fc.desc || "";
+      fcBtn.setAttribute("data-tip", fc.desc || "");
       fcBtn.innerHTML = `
         <div class="agent-tool-icon">${fc.icon}</div>
         <div class="agent-tool-info">
@@ -3610,7 +3627,7 @@ const BASE_PATH = window.BASE_PATH || "";
       chip.dataset.kind = inp.type === "pickString" ? "pick" : (inp.password ? "secret" : "text");
       chip.tabIndex = 0;
       chip.setAttribute("role", "button");
-      chip.title = inp.description || inp.id || "";
+      chip.setAttribute("data-tip", inp.description || inp.id || "");
 
       const icon = document.createElement("span");
       icon.className = "mcp-input-chip-icon";
@@ -3992,7 +4009,7 @@ const BASE_PATH = window.BASE_PATH || "";
       // section element.
       function mcpKVList({ title, addLabel, store, keyPlaceholder, valuePlaceholder, addPromptMsg, hint }) {
         const sec = mcpSection(title);
-        if (hint) sec.querySelector(".mcp-section-title").title = hint;
+        if (hint) sec.querySelector(".mcp-section-title").setAttribute("data-tip", hint);
 
         const grid = document.createElement("div");
         grid.className = "mcp-kv-grid";
@@ -4486,7 +4503,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (t === "serpapi" && !serpApiKeySet) {
         cb.disabled = true;
         lab.className += " tools-check-disabled";
-        lab.title = "Set serpapi_key in Globals to enable this tool.";
+        lab.setAttribute("data-tip", "Set serpapi_key in Globals to enable this tool.");
       }
       cb.addEventListener("change", () => {
         if (cb.checked) {
@@ -6937,7 +6954,7 @@ const BASE_PATH = window.BASE_PATH || "";
       chip.dataset.kind = inp.type === "pickString" ? "pick" : (inp.password ? "secret" : "text");
       chip.tabIndex = 0;
       chip.setAttribute("role", "button");
-      chip.title = inp.description || inp.id || "";
+      chip.setAttribute("data-tip", inp.description || inp.id || "");
 
       const icon = document.createElement("span");
       icon.className = "mcp-input-chip-icon";

@@ -803,7 +803,7 @@ function renderAttachmentsUI(sessionId) {
     for (const f of files) {
       const chip = document.createElement("div");
       chip.className = "attachment-chip";
-      chip.title = f.path;
+      chip.setAttribute("data-tip", f.path);
       const name = document.createElement("span");
       name.className = "attachment-chip-name";
       name.textContent = f.name;
@@ -1681,7 +1681,7 @@ async function resolveFileRefs(refs, sessionId) {
     anchor.classList.remove("file-ref-pending");
     if (kind === "file" || kind === "dir") {
       if (kind === "dir") anchor.classList.add("file-ref-dir");
-      anchor.title = token;
+      anchor.setAttribute("data-tip", token);
       anchor.addEventListener("click", e => { e.preventDefault(); openFileRef(token, sessionId); });
     } else {
       anchor.replaceWith(document.createTextNode(anchor.textContent));
@@ -1726,7 +1726,7 @@ function appendUserBubble(text, container, files) {
       const chip = document.createElement("span");
       chip.className = "attachment-chip attachment-chip-sent";
       chip.textContent = f.name;
-      chip.title = f.path || f.name;
+      chip.setAttribute("data-tip", f.path || f.name);
       chips.appendChild(chip);
     }
     bubble.appendChild(chips);
@@ -2547,10 +2547,10 @@ function buildSessionRow(s, { archived }) {
   // Delete rightmost (unarchive → delete).
   const bottomActions = archived ? `${setAsideBtn}${deleteBtn}` : `${deleteBtn}${setAsideBtn}`;
   li.innerHTML = `
-    <span class="session-abbr" title="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
+    <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
       <span class="session-busy-dot"></span>
-      <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+      <div class="session-name" data-tip="${escHtml(displayName)}">${escHtml(displayName)}</div>
       <div class="session-actions">${topActions}</div>
     </div>
     <div class="session-bottom-row">
@@ -2962,7 +2962,7 @@ function renderSquadMenu() {
     btn.className = "squad-menu-item" + (sq.name === selectedSquadName ? " selected" : "");
     btn.dataset.squad = sq.name;
     btn.setAttribute("role", "menuitem");
-    btn.title = sq.description || `${sq.leader} + ${(sq.members || []).join(", ")}`;
+    btn.setAttribute("data-tip", sq.description || `${sq.leader} + ${(sq.members || []).join(", ")}`);
     btn.innerHTML = squadIconSVG();
     const label = document.createElement("span");
     label.className = "squad-menu-label";

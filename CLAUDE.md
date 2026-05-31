@@ -1042,6 +1042,34 @@ whole message** — that quadratic re-parse is what makes the UI feel slow even
 when the wire is fast; `lightStreamMd` is the bounded exception, and only the
 heavy parser produces the authoritative final HTML at block flush / finalize.
 
+### Web UI tooltips (`data-tip`, never native `title`)
+
+All hover tooltips in the web UI go through the **in-app themed tooltip
+popup**, never the browser's native `title` attribute. A single body-appended
+`#tip-layer` element ([web/app.js](web/app.js) `initTooltips`) renders every
+`[data-tip]` tooltip: because it is `position: fixed` it escapes the sidebar /
+panel `overflow` clipping, sits above every panel, and is styled to match the
+active theme. Placement is above the target by default, flipping below only
+when there isn't room near the viewport top; the arrow tracks the target's
+centre after horizontal clamping.
+
+- **To add a tooltip**: set `data-tip="…"` in an HTML string, or
+  `el.setAttribute("data-tip", …)` in JS. **Do not use the `title` attribute
+  or `el.title = …`** — native tooltips are unstyled, can't escape `overflow`
+  clipping, and look inconsistent. Hovering a child of a `[data-tip]` element
+  still resolves to the nearest ancestor (the handler uses
+  `closest("[data-tip]")`), so wrapping containers can carry the tip.
+- **Exception**: `.model-status-dot` keeps its own dedicated CSS pseudo-element
+  tooltip and is explicitly **excluded** from the `#tip-layer` handler — leave
+  its `data-tip` in place but don't expect the JS layer to render it.
+- The layer reads `data-tip` via `textContent` (no HTML injection); HTML-string
+  call sites still `escHtml()` the value as usual.
+- **Long tips wrap**: the layer is `white-space: normal` with `max-width: 18rem`,
+  so short tips stay on one line (the box shrink-wraps) while a long description
+  soft-wraps onto multiple lines instead of stretching into one unreadable
+  strip. Just write the full description in `data-tip` — wrapping is automatic,
+  no manual line breaks.
+
 ### Web UI todo plan widget
 
 The `todo_write` / `todo_update` / `todo_read` tools do **not** render as the
