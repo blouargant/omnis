@@ -16,6 +16,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/internal/fileref"
 	"github.com/blouargant/yoke/internal/sessions"
 )
 
@@ -113,6 +114,12 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				note += "\n- " + p
 			}
 			parts[0] = &genai.Part{Text: req.Prompt + note}
+		}
+
+		// Inline the content of any "@path" file references typed in the prompt,
+		// resolved against the session's interactive working directory.
+		if note := fileref.Context(req.Prompt, bashCwd.get(meta.ID)); note != "" {
+			parts = append(parts, &genai.Part{Text: note})
 		}
 
 		seq := sq.Runner.Run(ctx, meta.UserID, meta.ID,

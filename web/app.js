@@ -195,6 +195,7 @@ const PANE_EL_IDS = {
 function bindPaneEls(root) {
   const e = {};
   for (const k in PANE_EL_IDS) e[k] = root.querySelector("#" + PANE_EL_IDS[k]);
+  e.promptHighlight = root.querySelector(".prompt-highlight");
   e.ctxRingFill = root.querySelector(".ctx-ring-fill");
   e.askSlot     = root.querySelector("#ask-user-slot");
   e.toolbar     = root.querySelector(".pane-toolbar");
@@ -586,13 +587,22 @@ function attachPaneHandlers(panel) {
     const firstWord = firstLine.split(" ")[0];
     if (val.startsWith("/") && !firstLine.includes(" ")) renderSlashMenu(firstWord);
     else if (val.startsWith("!")) renderBangMenu(panel, firstLine);
+    else if (atTokenAtCaret(pe.prompt) !== null) renderAtMenu(panel);
     else hideSlashMenu();
   });
+  // Keep the "@file" highlight backdrop aligned when the textarea scrolls.
+  pe.prompt.addEventListener("scroll", () => syncPromptHighlightScroll(panel));
+  // The textarea text is transparent (the backdrop shows it). IME pre-edit text
+  // never reaches .value, so make the textarea's own text visible during
+  // composition and repaint the backdrop once the character is committed.
+  pe.prompt.addEventListener("compositionstart", () => pe.composerWrap.classList.add("ime-composing"));
+  pe.prompt.addEventListener("compositionend", () => { pe.composerWrap.classList.remove("ime-composing"); renderPromptHighlight(panel); });
 
   pe.slashBtn.addEventListener("click", () => {
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
     if (!pe.prompt.value.startsWith("/")) pe.prompt.value = "/" + pe.prompt.value;
     pe.prompt.focus();
+    autoGrowPrompt(panel);
     renderSlashMenu(pe.prompt.value.split("\n")[0].split(" ")[0]);
   });
 
@@ -660,8 +670,9 @@ function onPromptKeydown(e, panel) {
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      if (menuMode === "bang") {
-        if (items.length === 1) applyBangCompletion(panel, items[0].dataset.value);
+      if (menuMode === "bang" || menuMode === "at") {
+        const apply = menuMode === "bang" ? applyBangCompletion : applyAtCompletion;
+        if (items.length === 1) apply(panel, items[0].dataset.value);
         else if (items.length > 0) { slashMenuFocusIdx = (slashMenuFocusIdx + 1) % items.length; updateSlashMenuFocus(); }
         return;
       }
@@ -678,6 +689,7 @@ function onPromptKeydown(e, panel) {
       e.preventDefault();
       const focused = items[slashMenuFocusIdx];
       if (menuMode === "bang") { applyBangCompletion(panel, focused.dataset.value); return; }
+      if (menuMode === "at") { applyAtCompletion(panel, focused.dataset.value); return; }
       if (focused.classList.contains("slash-menu-add")) { hideSlashMenu(); openUserCommandModal(null); }
       else selectSlashCommand(focused.dataset.value);
       return;
@@ -1609,12 +1621,83 @@ function setPinnedPrompt(panel, text, _files) {
     if (label) {
       const textEl = document.createElement("span");
       textEl.className = "pinned-prompt-text";
-      textEl.textContent = label;
+      renderUserText(textEl, label, panel.sessionId);
       ph.appendChild(textEl);
     }
     ph._pinnedLabel = label;
     ph.classList.add("visible");
   });
+}
+
+// Trailing punctuation stripped from an "@" reference token — mirrors
+// fileref.TrailingTrim on the server so highlighting lines up with inlining.
+const FILE_REF_TRAILING_RE = /[.,;:!?)\]}>"']+$/;
+
+// renderUserText fills textEl with the user message, rendering "@path" file
+// references (at start or after whitespace, so emails are excluded) as
+// tentative links. Validity is resolved server-side; valid files/dirs become
+// openable links and the rest are downgraded to plain text.
+function renderUserText(textEl, text, sessionId) {
+  textEl.textContent = "";
+  const re = /(^|\s)@(\S+)/g;
+  let last = 0, m;
+  const refs = [];
+  while ((m = re.exec(text)) !== null) {
+    let token = m[2];
+    const tm = token.match(FILE_REF_TRAILING_RE);
+    const trailing = tm ? tm[0] : "";
+    if (trailing) token = token.slice(0, token.length - trailing.length);
+    if (!token) continue;
+    const atIdx = m.index + m[1].length; // index of the "@"
+    textEl.appendChild(document.createTextNode(text.slice(last, atIdx)));
+    const a = document.createElement("a");
+    a.className = "file-ref file-ref-pending";
+    a.href = "#";
+    a.textContent = "@" + token;
+    refs.push({ anchor: a, token });
+    textEl.appendChild(a);
+    if (trailing) textEl.appendChild(document.createTextNode(trailing));
+    last = atIdx + 1 + token.length + trailing.length;
+  }
+  textEl.appendChild(document.createTextNode(text.slice(last)));
+  if (refs.length) resolveFileRefs(refs, sessionId);
+}
+
+// resolveFileRefs asks the server to classify the referenced paths, then turns
+// valid files/dirs into openable links and replaces invalid ones with plain text.
+async function resolveFileRefs(refs, sessionId) {
+  const paths = [...new Set(refs.map(r => r.token))];
+  let kinds = {};
+  try {
+    const res = await apiFetch("/api/fileref/resolve", {
+      method: "POST",
+      body: JSON.stringify({ paths, session: sessionId || "" }),
+    });
+    kinds = (await res.json()).kinds || {};
+  } catch { return; }
+  for (const { anchor, token } of refs) {
+    const kind = kinds[token];
+    anchor.classList.remove("file-ref-pending");
+    if (kind === "file" || kind === "dir") {
+      if (kind === "dir") anchor.classList.add("file-ref-dir");
+      anchor.title = token;
+      anchor.addEventListener("click", e => { e.preventDefault(); openFileRef(token, sessionId); });
+    } else {
+      anchor.replaceWith(document.createTextNode(anchor.textContent));
+    }
+  }
+}
+
+// openFileRef fetches a referenced file/dir (with auth) and opens it in a new tab.
+async function openFileRef(token, sessionId) {
+  const q = new URLSearchParams({ path: token });
+  if (sessionId) q.set("session", sessionId);
+  try {
+    const res = await apiFetch(`/api/file?${q.toString()}`);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank", "noopener");
+  } catch { /* ignore */ }
 }
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
@@ -1631,7 +1714,8 @@ function appendUserBubble(text, container, files) {
   if (text) {
     const textEl = document.createElement("div");
     textEl.className = "bubble-user-text";
-    textEl.textContent = text;
+    const sessionId = sessionIdOfNode(container) || (fp() && fp().sessionId) || activeSessionId;
+    renderUserText(textEl, text, sessionId);
     bubble.appendChild(textEl);
   }
   if (files && files.length > 0) {
@@ -3368,8 +3452,12 @@ let slashMenuFocusIdx = -1;
 // The shared #slash-menu element doubles as the bang ("!") shell completion
 // menu. menuMode tracks which content it currently holds so the keydown nav
 // and selection logic dispatch correctly.
-let menuMode = "slash"; // "slash" | "bang"
+let menuMode = "slash"; // "slash" | "bang" | "at"
 let bangReqSeq = 0;      // guards against out-of-order completion responses
+let atReqSeq = 0;        // same, for "@file" reference completion
+// atMenuState tracks the in-progress "@" reference so a chosen candidate
+// replaces exactly its path token: { panel, tokenStart, pathLen }.
+let atMenuState = null;
 
 function renderSlashMenu(prefix) {
   menuMode = "slash";
@@ -3444,6 +3532,7 @@ function selectSlashCommand(text) {
   panel.els.prompt.setSelectionRange(text.length, text.length);
   panel.els.prompt.focus();
   hideSlashMenu();
+  autoGrowPrompt(panel);
 }
 
 // ─── Bang ("!") shell-escape ───────────────────────────────────────────────
@@ -3489,7 +3578,72 @@ function applyBangCompletion(panel, full) {
   panel.els.prompt.setSelectionRange(full.length, full.length);
   panel.els.prompt.focus();
   hideSlashMenu();
+  autoGrowPrompt(panel);
   if (full.endsWith("/")) renderBangMenu(panel, full);
+}
+
+// ─── "@file" reference completion ──────────────────────────────────────────
+
+// atTokenAtCaret returns the path part of the "@" reference being typed
+// immediately before the caret (start of buffer or after whitespace, so emails
+// are excluded), or null when the caret is not inside such a token. The empty
+// string is a valid result (caret right after a bare "@").
+function atTokenAtCaret(el) {
+  const upto = el.value.slice(0, el.selectionStart);
+  const m = upto.match(/(?:^|\s)@(\S*)$/);
+  return m ? m[1] : null;
+}
+
+// renderAtMenu fetches filesystem completions for the "@" reference at the
+// caret and renders them into the shared slash-menu element.
+async function renderAtMenu(panel) {
+  const el = panel.els.prompt;
+  const pathTok = atTokenAtCaret(el);
+  if (pathTok === null) { hideSlashMenu(); return; }
+  const tokenStart = el.selectionStart - pathTok.length; // index just after "@"
+  const seq = ++atReqSeq;
+  const q = new URLSearchParams({ path: pathTok });
+  if (panel.sessionId) q.set("session", panel.sessionId);
+  let data;
+  try {
+    const res = await apiFetch(`/api/complete-file?${q.toString()}`);
+    data = await res.json();
+  } catch { return; }
+  if (seq !== atReqSeq) return;                 // superseded by a newer keystroke
+  if (atTokenAtCaret(el) !== pathTok) return;   // input/caret changed while awaiting
+  const cands = data.candidates || [];
+  if (!cands.length) { hideSlashMenu(); return; }
+  const sm = panel.els.slashMenu;
+  sm.innerHTML = "";
+  menuMode = "at";
+  atMenuState = { panel, tokenStart, pathLen: pathTok.length };
+  cands.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "slash-menu-item";
+    row.dataset.value = c;
+    row.innerHTML = `<span class="slash-menu-cmd">@${escHtml(c)}</span>`;
+    row.addEventListener("mousedown", e => { e.preventDefault(); applyAtCompletion(panel, c); });
+    sm.appendChild(row);
+  });
+  slashMenuFocusIdx = -1;
+  sm.removeAttribute("hidden");
+}
+
+// applyAtCompletion replaces the in-progress "@" reference's path token with the
+// chosen candidate and re-triggers completion when a directory was picked.
+function applyAtCompletion(panel, cand) {
+  const st = atMenuState;
+  if (!st) return;
+  const el = panel.els.prompt;
+  const before = el.value.slice(0, st.tokenStart);
+  const after = el.value.slice(st.tokenStart + st.pathLen);
+  el.value = before + cand + after;
+  const caret = before.length + cand.length;
+  el.setSelectionRange(caret, caret);
+  el.focus();
+  hideSlashMenu();
+  autoGrowPrompt(panel);
+  if (cand.endsWith("/")) renderAtMenu(panel); // drill into the directory
 }
 
 // runBangCommand executes a "!" shell command against a pane's session and
@@ -4202,7 +4356,9 @@ function setComposerHeight(h) {
 
 function autoGrowPrompt(panel) {
   panel = panel || fp();
-  if (!panel || composerManuallyResized) return;
+  if (!panel) return;
+  renderPromptHighlight(panel);
+  if (composerManuallyResized) return;
   const el = panel.els.prompt;
   const cs = getComputedStyle(el);
   const lineH  = parseFloat(cs.lineHeight);
@@ -4212,6 +4368,89 @@ function autoGrowPrompt(panel) {
   const natural = Math.min(el.scrollHeight, maxH);
   el.style.height = natural + "px";
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+}
+
+// ─── Composer "@file" reference highlighting ───────────────────────────────
+
+// renderPromptHighlight rebuilds the backdrop layer behind the composer
+// textarea so valid "@path" references show in colour while the user types.
+// The textarea's own text is transparent (see CSS), so the backdrop is what
+// the user sees. Validity is cached per panel and resolved server-side.
+function renderPromptHighlight(panel) {
+  const hl = panel.els.promptHighlight;
+  if (!hl) return;
+  hl.innerHTML = highlightRefsHTML(panel.els.prompt.value, panel);
+  syncPromptHighlightScroll(panel);
+}
+
+// syncPromptHighlightScroll keeps the backdrop aligned with the textarea when
+// its content scrolls (manual-resize mode, long prompts).
+function syncPromptHighlightScroll(panel) {
+  const hl = panel.els.promptHighlight, el = panel.els.prompt;
+  if (!hl || !el) return;
+  hl.scrollTop = el.scrollTop;
+  hl.scrollLeft = el.scrollLeft;
+}
+
+// highlightRefsHTML returns escaped HTML mirroring text, with valid "@file"
+// references wrapped in coloured spans. Unknown tokens render plain and are
+// queued for a debounced server resolve that repaints when they come back.
+function highlightRefsHTML(text, panel) {
+  const cache = panel._fileRefKinds || (panel._fileRefKinds = new Map());
+  const inflight = panel._fileRefInflight || (panel._fileRefInflight = new Set());
+  const re = /(^|\s)@(\S+)/g;
+  let out = "", last = 0, m;
+  const need = [];
+  while ((m = re.exec(text)) !== null) {
+    let token = m[2];
+    const tm = token.match(FILE_REF_TRAILING_RE);
+    const trailing = tm ? tm[0] : "";
+    if (trailing) token = token.slice(0, token.length - trailing.length);
+    if (!token) continue;
+    const atIdx = m.index + m[1].length;
+    out += escHtml(text.slice(last, atIdx));
+    const kind = cache.get(token);
+    if (kind === "file" || kind === "dir") {
+      const cls = kind === "dir" ? "file-ref file-ref-dir" : "file-ref";
+      out += `<span class="${cls}">@${escHtml(token)}</span>`;
+    } else {
+      out += escHtml("@" + token);
+      if (kind === undefined && !inflight.has(token)) need.push(token);
+    }
+    out += escHtml(trailing);
+    last = atIdx + 1 + token.length + trailing.length;
+  }
+  out += escHtml(text.slice(last));
+  if (text.endsWith("\n")) out += " "; // make a trailing blank line render under pre-wrap
+  if (need.length) scheduleRefResolve(panel, need);
+  return out;
+}
+
+// scheduleRefResolve batches+debounces classification of new "@" tokens, caches
+// the result on the panel, then repaints the backdrop.
+function scheduleRefResolve(panel, tokens) {
+  const inflight = panel._fileRefInflight || (panel._fileRefInflight = new Set());
+  const pending = panel._fileRefPending || (panel._fileRefPending = new Set());
+  for (const t of tokens) { inflight.add(t); pending.add(t); }
+  clearTimeout(panel._fileRefTimer);
+  panel._fileRefTimer = setTimeout(async () => {
+    const batch = [...pending];
+    pending.clear();
+    const cache = panel._fileRefKinds || (panel._fileRefKinds = new Map());
+    try {
+      const res = await apiFetch("/api/fileref/resolve", {
+        method: "POST",
+        body: JSON.stringify({ paths: batch, session: panel.sessionId || "" }),
+      });
+      const kinds = (await res.json()).kinds || {};
+      batch.forEach(t => cache.set(t, kinds[t] || "missing"));
+    } catch {
+      /* leave uncached so a later keystroke retries */
+    } finally {
+      batch.forEach(t => inflight.delete(t));
+    }
+    renderPromptHighlight(panel);
+  }, 150);
 }
 
 // onCompactClick backs each pane's "Compress Now" button in the ctx popup.

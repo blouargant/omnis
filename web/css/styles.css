@@ -1034,6 +1034,28 @@ body.resizing #sidebar-resize { transition: none; }
 }
 .bubble-user-toggle:hover { text-decoration: underline; }
 
+/* "@path" file references inside a user message. Valid files get a distinct
+   colour and read as links; valid directories use the regular link colour;
+   pending (not-yet-resolved) refs are dimmed; invalid refs are downgraded to
+   plain text nodes in JS so they never reach these rules. */
+.bubble-user-text a.file-ref,
+.pinned-prompt-text a.file-ref {
+  color: #7ee787;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+.bubble-user-text a.file-ref:hover,
+.pinned-prompt-text a.file-ref:hover { text-decoration: none; border-bottom-style: solid; }
+.bubble-user-text a.file-ref.file-ref-dir,
+.pinned-prompt-text a.file-ref.file-ref-dir { color: #4fc1ff; }
+.bubble-user-text a.file-ref.file-ref-pending,
+.pinned-prompt-text a.file-ref.file-ref-pending {
+  color: inherit;
+  border-bottom-color: transparent;
+  opacity: 0.85;
+}
+
 /* Assistant content — plain text, no bubble */
 .bubble-assistant {
   max-width: 700px;
@@ -1565,12 +1587,55 @@ body.resizing-composer #composer-resize { transition: none; }
   width: 100%;
 }
 
+/* The composer is a two-layer stack: a backdrop (.prompt-highlight) that
+   renders the text with "@file" references coloured, and the real <textarea>
+   on top with TRANSPARENT text (only its caret/selection show). They share
+   identical box metrics so glyphs line up exactly. See renderPromptHighlight. */
+.prompt-stack {
+  position: relative;
+  width: 100%;
+  display: block;
+}
+#composer-wrap.is-manual .prompt-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+#composer-wrap.is-manual .prompt-stack #prompt { flex: 1; }
+
+.prompt-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.prompt-highlight .file-ref { color: #7ee787; }
+.prompt-highlight .file-ref.file-ref-dir { color: #4fc1ff; }
+
 #prompt {
+  display: block;
+  position: relative;
+  z-index: 1;
   width: 100%;
   min-height: calc(1.5em + 20px);
-  background: var(--bg);
+  background: transparent;
   border: 1px solid var(--border);
-  color: var(--text);
+  color: transparent;
+  caret-color: var(--text);
   border-radius: 6px;
   padding: 10px 14px;
   font-size: 15px;
@@ -1582,10 +1647,16 @@ body.resizing-composer #composer-resize { transition: none; }
   transition: border-color 0.15s;
 }
 #composer-wrap.is-manual #prompt {
-  flex: 1;
   overflow-y: auto;
 }
 #prompt:focus { border-color: var(--accent-strong); }
+/* While an IME is composing, show the textarea's own (preedit) text and hide
+   the backdrop, since preedit text never reaches .value. */
+#composer-wrap.ime-composing #prompt { color: var(--text); }
+#composer-wrap.ime-composing .prompt-highlight { visibility: hidden; }
+/* Translucent selection so the coloured backdrop text shows through the
+   transparent textarea text while selecting. */
+#prompt::selection { background: rgba(79, 193, 255, 0.35); }
 #prompt::placeholder { color: #555558; }
 
 #composer-wrap.drag-over::after {

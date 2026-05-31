@@ -184,7 +184,8 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`) |
-| `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web |
+| `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
+| `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
@@ -593,6 +594,42 @@ LLM history (a convenience, like the todo widget).
   selection; `renderBangMenu`/`applyBangCompletion`/`runBangCommand` plus the
   `bash-block` renderer live in [web/app.js](web/app.js), styled in
   [web/css/styles.css](web/css/styles.css).
+
+### `@file` references in the composer
+
+A composer prompt may reference files with `@path` — an `@` at the **start of
+the line or after whitespace** (so emails like `a@b.com` are not matched),
+followed by a non-whitespace path token. The grammar and resolution live in
+[internal/fileref/](internal/fileref/) (`Spans`/`Tokens`/`Classify`/`Resolve`/`Context`),
+mirrored in JS for the web UI.
+
+- **Context inlining**: at send time each surface resolves `@` references
+  against the session's working dir and appends the content of every referenced
+  **regular file** as an extra `genai.Part` on the user turn (capped 64 KB/file,
+  20 refs). The raw prompt (with the `@token` intact) is what gets persisted to
+  history — the inlined block is turn-only. Wired in [server/sse.go](server/sse.go)
+  `handleMessages` (cwd from `bashCwd`), [internal/tui/tui.go](internal/tui/tui.go)
+  `send`, and [internal/cli/cli.go](internal/cli/cli.go) `runTurn` (process cwd).
+  Directories and missing paths are **not** inlined.
+- **Completion**: path-only, via `shellcomplete.CompletePath`. TUI adds an `@`
+  branch to `SetAutocompleteFunc` (completes the last token's path, splices onto
+  the `@` prefix). Web reuses `#slash-menu` with `menuMode === "at"`
+  (`atTokenAtCaret`/`renderAtMenu`/`applyAtCompletion`, served by
+  `GET /api/complete-file?path=…&session=…` → `{candidates}`).
+- **Rendering**: in the web user bubble and the floating pinned-prompt header
+  (`renderUserText`), valid file refs render as `.file-ref` links (distinct
+  colour) that open the file in a new tab via `GET /api/file?path=…&session=…`
+  (auth'd blob fetch); valid dirs render as `.file-ref-dir` links (dir listing);
+  invalid refs downgrade to plain text. Validity comes from the batch
+  `POST /api/fileref/resolve` `{paths,session}` → `{kinds}`. The **composer**
+  highlights refs live as you type via a backdrop overlay: the `<textarea>` text
+  is transparent (`color: transparent`, visible caret) and a `.prompt-highlight`
+  div behind it (`renderPromptHighlight`/`highlightRefsHTML`, per-panel kind
+  cache + debounced `scheduleRefResolve`) re-renders the same text with coloured
+  `.file-ref` spans; an `ime-composing` class shows the raw textarea text during
+  IME pre-edit. The TUI colourises valid refs in the echoed turn (`colorizeFileRefs`).
+  `GET /api/file` is read-only but trusts the authenticated user with host file
+  access (same trust model as the `!` shell-escape and the Read tool).
 
 ### Background mailbox delivery
 

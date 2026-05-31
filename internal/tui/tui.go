@@ -42,6 +42,7 @@ import (
 	"github.com/blouargant/yoke/core/llm"
 	"github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/fileref"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/sessions"
 	"github.com/blouargant/yoke/internal/shellcomplete"
@@ -123,6 +124,31 @@ func sanitizeInputText(s string) string {
 	s = stripTerminalControlSequences(s)
 	s = oscColorResponseAtStartRE.ReplaceAllString(s, "")
 	return oscColorResponseRE.ReplaceAllString(s, " ")
+}
+
+// colorizeFileRefs wraps valid "@path" file/directory references in a colour
+// tag so they read as links in the echoed user turn; missing paths are left as
+// plain text. References are resolved against cwd.
+func colorizeFileRefs(prompt, cwd string) string {
+	spans := fileref.Spans(prompt)
+	if len(spans) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	prev := 0
+	for _, s := range spans {
+		b.WriteString(prompt[prev:s.Start])
+		ref := prompt[s.Start:s.End]
+		switch fileref.Classify(s.Token, cwd).Kind {
+		case fileref.KindFile, fileref.KindDir:
+			b.WriteString("[#4fc1ff]" + ref + "[-]")
+		default:
+			b.WriteString(ref)
+		}
+		prev = s.End
+	}
+	b.WriteString(prompt[prev:])
+	return b.String()
 }
 
 // markdownRenderer caches Glamour renderers by width. The chat TextView keeps
@@ -340,30 +366,52 @@ func Run(ctx context.Context, cfg Config) error {
 	// onto bangPrefix to rebuild the full line.
 	var bangPrefix string
 	var bangCands []string
+	// "@file" reference completion state. When the token at the end of the
+	// buffer is an "@" reference (start of line or after a space, so emails are
+	// excluded), the dropdown shows path candidates; selecting one splices it
+	// onto atPrefix (everything up to and including the "@").
+	var atPrefix string
+	var atCands []string
+	curCwd := func() string {
+		if cur := current.Load(); cur != nil {
+			return getBashCwd(cur.ID)
+		}
+		return getBashCwd("")
+	}
 	input.SetAutocompleteFunc(func(currentText string) []string {
 		if strings.HasPrefix(currentText, "!") {
 			line := currentText[1:]
 			if line == "" {
 				bangCands = nil
+				atCands = nil
 				return nil // bare "!" — don't dump every command on PATH
 			}
-			cur := current.Load()
-			cwd := ""
-			if cur != nil {
-				cwd = getBashCwd(cur.ID)
-			} else {
-				cwd = getBashCwd("")
-			}
-			start, cands := shellcomplete.Complete(line, cwd)
+			start, cands := shellcomplete.Complete(line, curCwd())
 			if len(cands) == 0 {
 				bangCands = nil
+				atCands = nil
 				return nil
 			}
 			bangPrefix = "!" + line[:start]
 			bangCands = cands
+			atCands = nil
 			return cands
 		}
 		bangCands = nil
+		// "@file" reference: complete the path of the last whitespace-delimited
+		// token when it is an "@" reference.
+		ts := strings.LastIndexAny(currentText, " \t\n") + 1
+		if last := currentText[ts:]; strings.HasPrefix(last, "@") {
+			cands := shellcomplete.CompletePath(last[1:], curCwd())
+			if len(cands) == 0 {
+				atCands = nil
+				return nil
+			}
+			atPrefix = currentText[:ts] + "@"
+			atCands = cands
+			return cands
+		}
+		atCands = nil
 		trimmed := strings.TrimLeft(currentText, " ")
 		if !strings.HasPrefix(trimmed, "/") {
 			return nil
@@ -383,6 +431,11 @@ func Run(ctx context.Context, cfg Config) error {
 		// Bang completion: splice the chosen leaf onto the preserved prefix.
 		if bangCands != nil && index >= 0 && index < len(bangCands) {
 			input.SetText(bangPrefix + bangCands[index])
+			return true
+		}
+		// "@file" completion: splice the chosen path onto the "@" prefix.
+		if atCands != nil && index >= 0 && index < len(atCands) {
+			input.SetText(atPrefix + atCands[index])
 			return true
 		}
 		// Find the corresponding raw command (without the display hint).
@@ -1356,7 +1409,7 @@ func Run(ctx context.Context, cfg Config) error {
 			// Echo the user turn immediately as plain text so the first
 			// submission is visible right away even if markdown rendering
 			// is still warming up.
-			appendChat("\n[::b]you[-]\n\n%s\n", sanitizeInputText(prompt))
+			appendChat("\n[::b]you[-]\n\n%s\n", colorizeFileRefs(sanitizeInputText(prompt), getBashCwd(sessionID)))
 			appendChat("[::b]assistant[-]\n")
 			// Snapshot the per-session counters now so the turn-usage line
 			// reports only the delta this turn produced. We snapshot the
@@ -1393,8 +1446,14 @@ func Run(ctx context.Context, cfg Config) error {
 				appendChat("%s\n", buildTurnUsageText(cfg, turnInput, turnCached, turnCacheCreate, turnOutput))
 			}()
 
+			parts := []*genai.Part{{Text: prompt}}
+			// Inline the content of any "@path" file references, resolved
+			// against the session's interactive working directory.
+			if note := fileref.Context(prompt, getBashCwd(sessionID)); note != "" {
+				parts = append(parts, &genai.Part{Text: note})
+			}
 			seq := squadInst.Runner.Run(ctx, cfg.UserID, sessionID,
-				&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
+				&genai.Content{Role: "user", Parts: parts},
 				adkagent.RunConfig{})
 
 			// Buffer assistant text per turn; flush as rendered markdown

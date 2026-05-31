@@ -47,6 +47,20 @@ func Complete(line, cwd string) (start int, candidates []string) {
 	return start, completePaths(token, cwd)
 }
 
+// CompletePath returns filesystem completion candidates for a single path
+// token — the text after a chat "@" reference — resolved against cwd. Unlike
+// Complete it never falls back to $PATH command completion (an "@" reference is
+// always a path). Each candidate is the full replacement token; directories
+// carry a trailing "/".
+func CompletePath(token, cwd string) []string {
+	if cwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			cwd = wd
+		}
+	}
+	return completePaths(token, cwd)
+}
+
 // tokenStart returns the byte offset of the last unquoted whitespace-delimited
 // token. Quoting is not interpreted (best-effort, matching the lightweight
 // nature of this completer).

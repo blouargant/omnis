@@ -138,7 +138,10 @@
         <form id="composer">
           <input type="file" id="file-input" multiple hidden />
           <div id="attachments" hidden></div>
-          <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)"></textarea>
+          <div class="prompt-stack">
+            <div class="prompt-highlight" aria-hidden="true"></div>
+            <textarea id="prompt" rows="3" placeholder="Message the agent… (Enter to send)"></textarea>
+          </div>
           <div class="composer-actions">
             <div id="attach-wrap">
               <button id="attach-btn" type="button" data-tip="Attach files">

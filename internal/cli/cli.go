@@ -29,6 +29,7 @@ import (
 
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/fileref"
 )
 
 // Config bundles everything the CLI needs to run.
@@ -200,8 +201,14 @@ func readLineCtx(ctx context.Context, mu *sync.Mutex, r *bufio.Reader) (string, 
 // sees the agent's activity in interactive mode. In one-shot mode the trace
 // is suppressed so piped output stays clean.
 func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool) error {
+	parts := []*genai.Part{{Text: prompt}}
+	// Inline the content of any "@path" file references in the prompt, resolved
+	// against the process working directory.
+	if note := fileref.Context(prompt, ""); note != "" {
+		parts = append(parts, &genai.Part{Text: note})
+	}
 	seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
-		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
+		&genai.Content{Role: "user", Parts: parts},
 		adkagent.RunConfig{})
 
 	wroteText := false
