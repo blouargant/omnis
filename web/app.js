@@ -2401,6 +2401,10 @@ function buildSessionRow(s, { archived }) {
   if (panelsWithTab(s.id).length) li.classList.add("active");
   const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const displayName = s.title || s.id;
+  // Two-letter glyph shown when the sidebar is collapsed to a rail
+  // (e.g. "alive-sole" → "al"). First two alphanumerics, lowercased.
+  const abbr = (displayName.match(/[a-zA-Z0-9]/g) || []).slice(0, 2).join("").toLowerCase()
+    || displayName.trim().slice(0, 2).toLowerCase();
 
   if (!archived && sessionSending.has(s.id)) li.classList.add("session-busy");
   // Show a squad badge only when the session uses a non-default squad,
@@ -2420,6 +2424,7 @@ function buildSessionRow(s, { archived }) {
   // Delete rightmost (unarchive → delete).
   const bottomActions = archived ? `${setAsideBtn}${deleteBtn}` : `${deleteBtn}${setAsideBtn}`;
   li.innerHTML = `
+    <span class="session-abbr" title="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
       <span class="session-busy-dot"></span>
       <div class="session-name" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
@@ -4114,11 +4119,13 @@ function setSidebarWidth(px) {
 
 function collapseSidebar() {
   els.sidebar.classList.add("collapsed");
+  els.sidebarToggle.setAttribute("data-tip", "Show sidebar");
   localStorage.setItem(SIDEBAR_COL_KEY, "1");
 }
 
 function expandSidebar() {
   els.sidebar.classList.remove("collapsed");
+  els.sidebarToggle.setAttribute("data-tip", "Hide sidebar");
   localStorage.setItem(SIDEBAR_COL_KEY, "0");
 }
 
@@ -4264,7 +4271,7 @@ async function restoreLayout(rec, liveIds) {
     document.documentElement.style.setProperty("--composer-h", savedComposerH);
     composerManuallyResized = true;
   }
-  if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") els.sidebar.classList.add("collapsed");
+  if (localStorage.getItem(SIDEBAR_COL_KEY) === "1") collapseSidebar();
   await loadSquads();
   // After a hot-reload from the Settings panel, refresh the squad picker so
   // newly installed squads show up without a page refresh.

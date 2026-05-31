@@ -140,11 +140,79 @@ body { display: flex; overflow: hidden; }
   overflow: hidden;
   transition: width 0.15s ease;
 }
+/* ─── Collapsed → icon rail ──────────────────────────────────
+ * Instead of hiding the sidebar entirely, shrink it to a narrow
+ * rail that keeps the key icons (toggle, new chat, sessions,
+ * settings) visible and clickable. Session rows collapse to a
+ * two-letter glyph (e.g. "alive-sole" → "al"). */
 #sidebar.collapsed {
-  width: 0 !important;
-  border-right: none;
+  width: var(--sidebar-rail-w, 52px) !important;
 }
 body.resizing #sidebar { transition: none; }
+
+/* Hide everything that needs horizontal room in rail mode. */
+#sidebar.collapsed .app-name,
+#sidebar.collapsed .new-chat-text,
+#sidebar.collapsed #squad-toggle,
+#sidebar.collapsed #squad-menu,
+#sidebar.collapsed .sidebar-section-label,
+#sidebar.collapsed #archived-panel,
+#sidebar.collapsed #settings-menu,
+#sidebar.collapsed .session-name-row,
+#sidebar.collapsed .session-bottom-row,
+#sidebar.collapsed #settings-btn span {
+  display: none;
+}
+
+/* Header: drop the app name, centre + flip the toggle so it
+ * points the way it now expands. */
+#sidebar.collapsed #sidebar-header { justify-content: center; padding: 10px 4px; }
+#sidebar.collapsed #sidebar-toggle svg { transform: rotate(180deg); }
+
+/* New-chat pill becomes a square icon button. */
+#sidebar.collapsed #new-chat-wrap { margin: 10px 8px 4px; }
+#sidebar.collapsed #new-chat { padding: 0; border-radius: 10px; }
+
+/* Session list: centred two-letter glyph avatars. */
+#sidebar.collapsed #session-list { padding: 6px 4px; }
+#sidebar.collapsed #session-list li {
+  padding: 3px 0;
+  display: flex;
+  justify-content: center;
+  background: none;
+  box-shadow: none;
+}
+.session-abbr { display: none; }
+#sidebar.collapsed .session-abbr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s, box-shadow 0.1s;
+}
+#sidebar.collapsed #session-list li:hover .session-abbr { color: var(--text); }
+#sidebar.collapsed #session-list li.active .session-abbr {
+  background: var(--bg-active);
+  color: var(--text);
+}
+#sidebar.collapsed #session-list li.active-focused .session-abbr {
+  color: var(--text-strong);
+  box-shadow: inset 0 0 0 2px var(--accent, #4a9eff);
+}
+#sidebar.collapsed #session-list li.session-busy .session-abbr {
+  box-shadow: inset 0 0 0 2px #f0b429;
+}
+
+/* Settings footer: centre the gear, drop the label. */
+#sidebar.collapsed #sidebar-footer { padding: 8px 4px; }
+#sidebar.collapsed #settings-btn { justify-content: center; padding: 0.4rem 0; gap: 0; }
 
 #sidebar-header {
   display: flex;
@@ -543,24 +611,9 @@ body.resizing #sidebar { transition: none; }
 #sidebar-resize.is-dragging { background: var(--accent-strong); }
 body.resizing #sidebar-resize { transition: none; }
 
-#sidebar.collapsed ~ #sidebar-resize {
-  width: 20px;
-  cursor: pointer;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-}
-#sidebar.collapsed ~ #sidebar-resize::after {
-  content: '›';
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 17px;
-  line-height: 1;
-  color: var(--text-muted);
-}
-#sidebar.collapsed ~ #sidebar-resize:hover { background: var(--bg-raised); }
-#sidebar.collapsed ~ #sidebar-resize:hover::after { color: var(--text); }
+/* In rail mode the handle just expands on click (the toggle button in
+ * the rail is the primary control); no resize, so use a pointer. */
+#sidebar.collapsed ~ #sidebar-resize { cursor: pointer; }
 
 /* ─── Main chat ────────────────────────────────────────────── */
 /* #chat is now a horizontal row of one-or-more .chat-pane columns separated by
