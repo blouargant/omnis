@@ -1,0 +1,65 @@
+package registries
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestParseAgentDeps(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		raw       string
+		wantSkill []string
+		wantMCP   []string
+	}{
+		{
+			name:      "snake_case",
+			raw:       `{"name":"fluxcd","skills":["a","b"],"mcp_servers":["flux-operator-mcp"]}`,
+			wantSkill: []string{"a", "b"},
+			wantMCP:   []string{"flux-operator-mcp"},
+		},
+		{
+			name:      "camelCase alias merged",
+			raw:       `{"skills":["a"],"mcpServers":["x"],"mcp_servers":["y"]}`,
+			wantSkill: []string{"a"},
+			wantMCP:   []string{"y", "x"},
+		},
+		{
+			name:      "none",
+			raw:       `{"name":"plain"}`,
+			wantSkill: nil,
+			wantMCP:   nil,
+		},
+		{
+			name:      "claude markdown is not json",
+			raw:       "---\nname: x\n---\nbody",
+			wantSkill: nil,
+			wantMCP:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			skills, mcp := parseAgentDeps([]byte(tc.raw))
+			if !reflect.DeepEqual(skills, tc.wantSkill) {
+				t.Errorf("skills = %v, want %v", skills, tc.wantSkill)
+			}
+			if !reflect.DeepEqual(mcp, tc.wantMCP) {
+				t.Errorf("mcp = %v, want %v", mcp, tc.wantMCP)
+			}
+		})
+	}
+}
+
+func TestRequestReloadNilHook(t *testing.T) {
+	t.Parallel()
+	var d Deps // RequestReload nil
+	if d.requestReload() {
+		t.Error("requestReload() with nil hook = true, want false")
+	}
+	fired := false
+	d.RequestReload = func() bool { fired = true; return true }
+	if !d.requestReload() || !fired {
+		t.Error("requestReload() did not invoke the wired hook")
+	}
+}

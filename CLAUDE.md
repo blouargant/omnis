@@ -972,17 +972,38 @@ runtime config's `agents` list so the next hot-reload wires it in.
 
 **Dependency cascade on agent install** — installing an agent also resolves
 the `skills` and `mcp_servers` (alias `mcpServers`) it declares in its
-`agent.json` so the agent is actually usable, not just present
-([server/remote_registry_agents.go](server/remote_registry_agents.go)
-install route → [server/install_helpers.go](server/install_helpers.go)).
-Each missing skill is auto-installed from a configured `skills` registry
-(`tryAutoInstallSkills`) and each missing MCP server from a configured `mcp`
-registry (`tryAutoInstallMCP`, which reuses the install route's
-`resolveMCPServerFromRef` to handle both `mcp.md` and JSON manifests, then
-`mergeMCPServer` into `mcp_config.json`). Anything not found in any matching
-registry comes back as a `warnings[]` entry in the install response, which the
-web UI surfaces via `showInstallResult` ([web/settings.js](web/settings.js)).
-Resolution is best-effort and never rolls back the agent install.
+`agent.json` so the agent is actually usable, not just present. This happens on
+**both** install surfaces:
+
+- **Web UI** ([server/remote_registry_agents.go](server/remote_registry_agents.go)
+  install route → [server/install_helpers.go](server/install_helpers.go)): each
+  missing skill via `tryAutoInstallSkills` and each missing MCP server via
+  `tryAutoInstallMCP`.
+- **Helper agent** (the `install_remote_item` tool, `KindAgents` case in
+  [internal/registries/tools.go](internal/registries/tools.go)): after the
+  install it fetches the remote `agent.json`, `parseAgentDeps` extracts the
+  lists, and `Deps.resolveAgentDeps` ([internal/registries/agent_deps.go](internal/registries/agent_deps.go))
+  installs the missing skills/MCP servers from the configured registries. The
+  remote manifest is the dependency source of truth (no disk-layer guess).
+
+MCP resolution is shared by every surface via `registries.ResolveMCPServer` +
+`registries.MergeMCPServer` ([internal/registries/mcp_install.go](internal/registries/mcp_install.go)),
+which handle both `mcp.md` (YAML frontmatter) and JSON manifests — so the helper
+agent's `InstallMCP` ([agent/agent.go](agent/agent.go) `buildRegistriesDeps`) and
+the web UI route stay in lock-step. Anything not found in any matching registry
+comes back as a `warnings[]` entry, surfaced by `showInstallResult`
+([web/settings.js](web/settings.js)) for the web UI or in the tool result for the
+helper. Resolution is best-effort and never rolls back the agent install.
+
+**Hot-reload on helper install** — the `install_remote_item` /
+`link_skill_to_agent` tools call `Deps.RequestReload` after a config-affecting
+install (agent / MCP / squad / A2A / skill-link) so the item is wired into the
+running fleet without a manual "Reload" click. The server wires this hook to
+`Manager.Reload` via the process-wide `agent.SetReloadHook`
+([agent/reload_hook.go](agent/reload_hook.go), set in [server/main.go](server/main.go));
+CLI/TUI leave it nil (config edits apply on next start), and the tool result's
+`reloaded` flag honestly reflects whether a reload fired. The web UI keeps its
+existing post-save Reload banner instead.
 
 Use `YOKE_AGENTS_REGISTRY_DIR` or `YOKE_SKILLS_REGISTRY_DIR` to redirect
 either install location independently of `YOKE_HOME`.

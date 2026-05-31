@@ -69,6 +69,13 @@ type Deps struct {
 	// newly added (vs. replaced), and any error. When nil, the install tool
 	// returns an error in this surface.
 	InstallCommand func(ref RepoRef, token, dirPath string) (name string, added bool, err error)
+
+	// RequestReload, when set, triggers a hot-reload of the agent generation so
+	// a just-installed item (agent, MCP server, squad, A2A peer) is wired into
+	// the running fleet without waiting for the next manual reload. It returns
+	// whether a reload actually fired. The server wires this to Manager.Reload;
+	// CLI/TUI leave it nil (config edits there apply on the next start).
+	RequestReload func() bool
 }
 
 // LoaderProtocol is prepended to the instruction of any agent that mounts the
@@ -155,6 +162,15 @@ type installRemoteItemOut struct {
 	Kind    string `json:"kind"`
 	Added   bool   `json:"added,omitempty"`
 	Enabled bool   `json:"enabled,omitempty"` // agents only
+	// InstalledDeps lists dependencies auto-installed alongside an agent
+	// (prefixed "skill:" / "mcp:"). Agents only.
+	InstalledDeps []string `json:"installed_deps,omitempty"`
+	// Warnings carries best-effort failures (e.g. a declared dependency not
+	// found in any configured registry) that did not abort the install.
+	Warnings []string `json:"warnings,omitempty"`
+	// Reloaded reports whether a hot-reload was triggered so the item is live
+	// in the running fleet without a manual reload.
+	Reloaded bool `json:"reloaded,omitempty"`
 }
 
 type linkSkillToAgentIn struct {
@@ -167,6 +183,7 @@ type linkSkillToAgentOut struct {
 	AlreadyLinked bool   `json:"already_linked"` // true when an equivalent symlink already existed
 	SkillName     string `json:"skill_name"`
 	AgentName     string `json:"agent_name"`
+	Reloaded      bool   `json:"reloaded,omitempty"` // true when a hot-reload was triggered
 }
 
 type listInstalledIn struct{}
@@ -482,7 +499,19 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					return installRemoteItemOut{Name: name, Kind: KindAgents, Added: true, Enabled: enabled}, nil
+					// Resolve the skills and MCP servers the agent declares so it
+					// is actually usable, mirroring the web-UI install route. The
+					// remote manifest is the source of truth (no disk-layer guess).
+					var installedDeps, warnings []string
+					if raw, ferr := FetchAgentJSON(ref, token, in.DirPath); ferr == nil {
+						skills, mcpServers := parseAgentDeps(raw)
+						installedDeps, warnings = deps.resolveAgentDeps(skills, mcpServers)
+					}
+					reloaded := deps.requestReload()
+					return installRemoteItemOut{
+						Name: name, Kind: KindAgents, Added: true, Enabled: enabled,
+						InstalledDeps: installedDeps, Warnings: warnings, Reloaded: reloaded,
+					}, nil
 
 				case KindMCP:
 					if deps.InstallMCP == nil {
@@ -492,7 +521,8 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					return installRemoteItemOut{Name: name, Kind: KindMCP, Added: added}, nil
+					reloaded := added && deps.requestReload()
+					return installRemoteItemOut{Name: name, Kind: KindMCP, Added: added, Reloaded: reloaded}, nil
 
 				case KindSquads:
 					if deps.InstallSquad == nil {
@@ -502,7 +532,8 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					return installRemoteItemOut{Name: name, Kind: KindSquads, Added: added}, nil
+					reloaded := added && deps.requestReload()
+					return installRemoteItemOut{Name: name, Kind: KindSquads, Added: added, Reloaded: reloaded}, nil
 
 				case KindA2A:
 					if deps.InstallA2A == nil {
@@ -512,7 +543,8 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					return installRemoteItemOut{Name: name, Kind: KindA2A, Added: added}, nil
+					reloaded := added && deps.requestReload()
+					return installRemoteItemOut{Name: name, Kind: KindA2A, Added: added, Reloaded: reloaded}, nil
 
 				case KindCommands:
 					if deps.InstallCommand == nil {
@@ -551,6 +583,7 @@ func NewTools(deps Deps) []tool.Tool {
 					AlreadyLinked: false,
 					SkillName:     in.SkillName,
 					AgentName:     in.AgentName,
+					Reloaded:      deps.requestReload(),
 				}, nil
 			}),
 	}

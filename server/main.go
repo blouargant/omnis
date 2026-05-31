@@ -141,6 +141,19 @@ func run() error {
 	manager := agent.NewManager(infra, firstInst)
 	defer manager.Close()
 
+	// Wire the helper agent's registry-install tools to trigger a hot-reload so
+	// a just-installed agent / MCP server / squad / A2A peer is wired into the
+	// running fleet without a manual "Reload" click. In-flight sessions stay
+	// pinned to their generation; new turns pick up the rebuilt one.
+	agent.SetReloadHook(func() {
+		if _, err := manager.Reload(rootCtx, agentOpts); err != nil {
+			log.Printf("server: registry-install hot-reload failed: %v", err)
+			return
+		}
+		log.Printf("server: hot-reload triggered by registry install (generation=%d)", manager.CurrentGeneration())
+	})
+	defer agent.SetReloadHook(nil)
+
 	registry := sessions.NewRegistry()
 
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.

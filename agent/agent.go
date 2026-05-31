@@ -407,47 +407,18 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 		InstalledA2ANames:     installedA2ANames,
 		InstalledCommandNames: installedCommandNames,
 
+		RequestReload: requestReload,
+
 		InstallMCP: func(ref registries.RepoRef, token, dirPath string) (string, bool, error) {
-			body, err := registries.FetchMCPManifest(ref, token, dirPath)
+			// Shared resolver handles both mcp.md (YAML frontmatter) and JSON
+			// manifests, so the helper agent's install matches the web UI.
+			serverName, srv, inputs, _, err := registries.ResolveMCPServer(ref, token, dirPath)
 			if err != nil {
 				return "", false, err
-			}
-			// Resolve the server name from manifest "name" field or directory leaf.
-			serverName := dirPath
-			if i := strings.LastIndex(strings.TrimSuffix(dirPath, ".json"), "/"); i >= 0 {
-				serverName = dirPath[i+1:]
-			}
-			serverName = strings.TrimSuffix(serverName, ".json")
-			var nameCheck struct {
-				Name string `json:"name,omitempty"`
-			}
-			if json.Unmarshal(body, &nameCheck) == nil && strings.TrimSpace(nameCheck.Name) != "" {
-				serverName = strings.TrimSpace(nameCheck.Name)
-			}
-			var srv mcpcfg.Server
-			if err := json.Unmarshal(body, &srv); err != nil {
-				return "", false, fmt.Errorf("parse mcp manifest: %w", err)
-			}
-			srv.Name = serverName
-			cfgPath := paths.FindConfig("mcp_config.json")
-			cfg, err := mcpcfg.Load(cfgPath)
-			if err != nil {
-				return "", false, fmt.Errorf("load mcp_config.json: %w", err)
-			}
-			_, already := cfg.Servers[serverName]
-			if cfg.Servers == nil {
-				cfg.Servers = map[string]mcpcfg.Server{}
-			}
-			cfg.Servers[serverName] = srv
-			out, err := json.MarshalIndent(cfg, "", "  ")
-			if err != nil {
-				return "", false, fmt.Errorf("marshal mcp_config.json: %w", err)
 			}
 			writePath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("mcp_config.json")), "mcp_config.json")
-			if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
-				return "", false, err
-			}
-			return serverName, !already, os.WriteFile(writePath, append(out, '\n'), 0o644)
+			added, err := registries.MergeMCPServer(paths.FindConfig("mcp_config.json"), writePath, serverName, srv, inputs)
+			return serverName, added, err
 		},
 
 		InstallAgent: func(ref registries.RepoRef, token, dirPath string, enable bool) (string, bool, error) {

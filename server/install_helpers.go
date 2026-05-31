@@ -115,11 +115,11 @@ func tryAutoInstallMCP(serverNames []string, mcpConfigRead, mcpConfigWrite, remo
 				if t.Name != name {
 					continue
 				}
-				resolved, srv, inputs, _, resErr := resolveMCPServerFromRef(ref, reg.Token, t.DirPath)
+				resolved, srv, inputs, _, resErr := registries.ResolveMCPServer(ref, reg.Token, t.DirPath)
 				if resErr != nil {
 					break
 				}
-				if _, mergeErr := mergeMCPServer(mcpConfigRead, mcpConfigWrite, resolved, srv, inputs); mergeErr == nil {
+				if _, mergeErr := registries.MergeMCPServer(mcpConfigRead, mcpConfigWrite, resolved, srv, inputs); mergeErr == nil {
 					installed = append(installed, name)
 					found = true
 				}

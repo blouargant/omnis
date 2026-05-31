@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -125,12 +123,12 @@ func registerRemoteMCPRegistryRoutes(
 			return
 		}
 
-		name, srv, inputs, mdSkills, err := resolveMCPServerFromRef(ref, reg.Token, dirPath)
+		name, srv, inputs, mdSkills, err := registries.ResolveMCPServer(ref, reg.Token, dirPath)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, skillsErr("INSTALL_ERROR", err.Error()))
 			return
 		}
-		added, err := mergeMCPServer(mcpConfigRead(), mcpConfigWrite, name, srv, inputs)
+		added, err := registries.MergeMCPServer(mcpConfigRead(), mcpConfigWrite, name, srv, inputs)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
@@ -146,81 +144,6 @@ func registerRemoteMCPRegistryRoutes(
 	})
 }
 
-// resolveMCPServerFromRef fetches and parses the manifest at dirPath inside a
-// remote registry into a ready-to-merge MCP server definition. It handles both
-// the mcp.md (YAML frontmatter) and JSON manifest formats, mirroring the install
-// route. mdSkills carries any skills declared by an mcp.md manifest so the caller
-// can resolve them. Shared by the install route and the agent-dependency
-// auto-installer (tryAutoInstallMCP).
-func resolveMCPServerFromRef(ref registries.RepoRef, token, dirPath string) (name string, srv internalmcp.Server, inputs []internalmcp.Input, mdSkills []string, err error) {
-	// mcp.md format: parse YAML frontmatter directly into a Server struct.
-	if path.Base(dirPath) == registries.MCPMarkdownFile {
-		raw, status, fetchErr := ref.RawFile(dirPath, token)
-		if fetchErr != nil || status != 200 {
-			return "", internalmcp.Server{}, nil, nil, fmt.Errorf("fetch mcp.md: HTTP %d", status)
-		}
-		def, parseErr := claudeformat.ParseMCPMarkdown(raw)
-		if parseErr != nil {
-			return "", internalmcp.Server{}, nil, nil, fmt.Errorf("parse mcp.md: %v", parseErr)
-		}
-		srv = internalmcp.Server{
-			Type:    def.Type,
-			Command: def.Command,
-			Args:    def.Args,
-			Env:     def.Env,
-			URL:     def.URL,
-			Headers: def.Headers,
-		}
-		inputs = make([]internalmcp.Input, len(def.Inputs))
-		for i, inp := range def.Inputs {
-			inputs[i] = internalmcp.Input{
-				ID:          inp.ID,
-				Type:        inp.Type,
-				Description: inp.Description,
-				Password:    inp.Password,
-				Options:     inp.Options,
-				Default:     inp.Default,
-			}
-		}
-		return def.Name, srv, inputs, def.Skills, nil
-	}
-
-	// json manifest format.
-	body, err := registries.FetchMCPToolJSON(ref, token, dirPath)
-	if err != nil {
-		return "", internalmcp.Server{}, nil, nil, err
-	}
-
-	// Resolve the server name: directory leaf by default, manifest "name" overrides.
-	// DirPath may be a full file path (e.g. "mcp/srv/tokensave.json"), so strip the
-	// filename to get the directory before extracting the leaf name.
-	namePath := dirPath
-	if strings.HasSuffix(dirPath, ".json") {
-		namePath = path.Dir(dirPath)
-	}
-	serverName := namePath
-	if i := strings.LastIndex(namePath, "/"); i >= 0 {
-		serverName = namePath[i+1:]
-	}
-	var nameCheck struct {
-		Name string `json:"name,omitempty"`
-	}
-	if e := json.Unmarshal(body, &nameCheck); e == nil && strings.TrimSpace(nameCheck.Name) != "" {
-		serverName = strings.TrimSpace(nameCheck.Name)
-	}
-	if serverName == "" {
-		return "", internalmcp.Server{}, nil, nil, fmt.Errorf("could not determine server name from mcp.json")
-	}
-
-	// Parse the server definition — unknown fields (description, name) are silently
-	// ignored by json.Unmarshal since Server has no matching exported fields for them.
-	if e := json.Unmarshal(body, &srv); e != nil {
-		return "", internalmcp.Server{}, nil, nil, fmt.Errorf("parse mcp.json: %v", e)
-	}
-	srv.Name = serverName
-	return serverName, srv, nil, nil, nil
-}
-
 // readInstalledMCPNames returns the set of server names currently in mcp_config.json.
 // Returns an empty map on any read/parse error so callers can safely use it for
 // membership tests without crashing.
@@ -234,48 +157,6 @@ func readInstalledMCPNames(configPath string) map[string]bool {
 		out[s.Name] = true
 	}
 	return out
-}
-
-// mergeMCPServer reads the current mcp_config.json, adds or updates a server entry
-// and merges any new inputs (by ID) into the top-level inputs array, then writes
-// atomically. Returns (added, error): added=false when the server name was already present.
-func mergeMCPServer(readPath, writePath, serverName string, srv internalmcp.Server, inputs []internalmcp.Input) (bool, error) {
-	cfg, err := internalmcp.Load(readPath)
-	if err != nil {
-		return false, fmt.Errorf("read mcp_config.json: %w", err)
-	}
-	_, already := cfg.Servers[serverName]
-	if cfg.Servers == nil {
-		cfg.Servers = map[string]internalmcp.Server{}
-	}
-	cfg.Servers[serverName] = srv
-
-	// Merge inputs: add any input not already present (matched by ID).
-	for _, newIn := range inputs {
-		found := false
-		for _, existing := range cfg.Inputs {
-			if existing.ID == newIn.ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			cfg.Inputs = append(cfg.Inputs, newIn)
-		}
-	}
-
-	out, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return false, fmt.Errorf("marshal mcp_config.json: %w", err)
-	}
-	out = append(out, '\n')
-	if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
-		return false, fmt.Errorf("mkdir: %w", err)
-	}
-	if err := atomicWriteFile(writePath, out); err != nil {
-		return false, fmt.Errorf("write %s: %w", writePath, err)
-	}
-	return !already, nil
 }
 
 // mcpRoutesDeps bundles the resolved paths required by the MCP remote-registry routes.
