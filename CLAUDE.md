@@ -937,33 +937,54 @@ calls) and both maps are cleared on session delete.
 `#chat` is a horizontal flex **row** of one-or-more independent `.chat-pane`
 columns separated by draggable `.pane-divider` handles ([web/index.html](web/index.html)
 `<template id="chat-pane-tpl">` is cloned per pane; [web/css/styles.css](web/css/styles.css)
-`.chat-pane`/`.pane-divider`/`.pane-toolbar`/`.pane-picker`). Each pane owns its
-own copy of the chat UI (transcript, composer, prompt, send/cancel, status,
-context ring + popup, ask-user slot, attachments) and is bound to **at most one
-session** — `getContainer(sessionId)` returns a single DOM node per session, so a
-session can be mounted in only one pane at a time. Selecting a session already
-shown elsewhere focuses that pane instead of duplicating.
+`.chat-pane`/`.pane-divider`/`.pane-tabbar`/`.pane-toolbar`/`.pane-picker`). Each
+pane owns its own copy of the chat UI (transcript, composer, prompt, send/cancel,
+status, context ring + popup, ask-user slot, attachments).
 
-Per-session state stays in the existing `sessionId`-keyed Maps; the refactor is
-purely in the view layer ([web/app.js](web/app.js)): a `panels` array of
-`{id, sessionId, root, els, width, _stick}` objects, `focusedPanelId`, and
-helpers `panelsForSession(id)`, `focusedPanel()`/`fp()`, `setFocusedPanel`,
-`bindSessionToPanel`, `createPanel`/`splitPanel`/`closePanel`,
-`rebuildChatDOM`/`layoutWidths`, `paneOfNode` (resolve a node's pane for
-scroll/media). `activeSessionId` is a **compatibility shim** = the focused pane's
-session, so global-action sites (sidebar, modals, ctx browser) keep working.
-Display-write functions (`applySessionUI`, `renderCtxRing/Popup`, `setStatus`,
-`scrollBottom`, pinned-prompt, `renderAttachmentsUI`, `renderAskUserWidget`,
-streaming gates) take/loop a `panel` via `panelsForSession` so **background panes
-update too** and each pane scrolls independently. Composer/prompt/attach/slash/
-ctx-ring/cancel/resize listeners are wired **per-pane** in `attachPaneHandlers`.
+**Each pane is a tab group**: it holds an ordered list of open sessions as tabs
+(`panel.tabs[]`) with one **active** tab (`panel.sessionId`, still the single
+"what this pane displays" handle). The tab strip (`.pane-tabs` in the
+`.pane-tabbar`, one `.pane-tab` per session + a `+` `.pane-newtab-btn`) is rebuilt
+by `renderPaneTabs(panel)`; clicking a tab `activateTab`s it, the `×`/middle-click
+`closeTab`s it, `+` opens a fresh chat tab (`newChat(panel)`). A session's
+transcript is a single cached DOM node (`getContainer(sessionId)`), so a session
+lives in **at most one tab across all panes** — selecting a session open elsewhere
+focuses that pane and activates its tab rather than duplicating. Background tabs
+(open but not active) keep their push subscription and accrue streamed turns into
+their detached container; the per-tab busy dot reflects `sessionSending`.
+
+Two membership helpers: `panelsForSession(id)` = panes where `id` is the **active**
+tab (drives visible-pane chrome — status, ctx ring, ask widget, scroll);
+`panelsWithTab(id)` = panes holding `id` as **any** tab (drives "open anywhere"
+logic — push subscriptions via `releaseSessionIfUnviewed`, sidebar `.active`
+highlight, dedupe-on-open, and delete/archive cleanup via `closeTabEverywhere`).
+The shared per-pane ask-user slot is tab-scoped: `activateTab` re-queues a hidden
+tab's ask widgets (`row._askQ` → `queuedAskWidgets`) and flushes the active tab's.
+
+Per-session state stays in the existing `sessionId`-keyed Maps; the rest is in the
+view layer ([web/app.js](web/app.js)): a `panels` array of
+`{id, sessionId, tabs, root, els, width, _stick}` objects, `focusedPanelId`, and
+helpers `focusedPanel()`/`fp()`, `setFocusedPanel`, `activateTab`/`closeTab`/
+`bindSessionToPanel` (add-tab + activate), `createPanel`/`splitPanel`/`closePanel`,
+`renderPaneTabs`, `rebuildChatDOM`/`layoutWidths`, `paneOfNode`/`sessionIdOfNode`
+(resolve a node's pane/session for scroll/media — the latter handles background
+tabs whose container is detached). `activeSessionId` is a **compatibility shim** =
+the focused pane's active tab, so global-action sites (sidebar, modals, ctx
+browser) keep working. Display-write functions (`applySessionUI`,
+`renderCtxRing/Popup`, `setStatus`, `scrollBottom`, pinned-prompt,
+`renderAttachmentsUI`, `renderAskUserWidget`, streaming gates) take/loop a `panel`
+via `panelsForSession` so **background panes update too**; `applySessionUI` also
+re-renders tabs (busy dot) via `panelsWithTab`. Listeners are wired **per-pane** in
+`attachPaneHandlers`.
 
 A pane's toolbar has split (clones a new empty pane to the right) and close
-(hidden when `#chat.solo`) buttons; an empty pane shows `.pane-picker` (start a
-new chat → `newChat(panel)`, or open an existing session). Push subscriptions
-follow `releaseSessionIfUnviewed` (subscribe while mounted, drop when no pane
-shows it). Layout (sessions + widths + focus) persists to
-`localStorage["agent_toolkit_layout"]` (`saveLayout`/`restoreLayout`, restored
-on boot after `loadSessions`, dropping dead session ids to empty panes). The
+(hidden when `#chat.solo`) buttons. Selecting a sidebar session opens it as a
+**new tab** in the focused pane; closing the **last** tab closes the pane (or, for
+the sole pane, falls back to the empty `.pane-picker`). An empty pane shows
+`.pane-picker` (start a new chat → `newChat(panel)`, or open an existing session).
+Layout (per-pane `tabs` + `activeId` + widths + focus) persists to
+`localStorage["agent_toolkit_layout"]` as a **v2** record (`saveLayout`/
+`restoreLayout`; v1 single-`sessionId` records still load), restored on boot after
+`loadSessions`, dropping dead session ids (and empty panes show the picker). The
 Settings panel still appends to `#chat`; `#chat.chat--settings > .chat-pane`
 hides panes while it's open, and `rebuildChatDOM` preserves `#settings-panel`.

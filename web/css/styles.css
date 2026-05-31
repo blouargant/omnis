@@ -625,9 +625,9 @@ body.resizing #sidebar-resize { transition: none; }
 .pane-divider:hover::before,
 .pane-divider.is-dragging::before { background: var(--accent, #4a9eff); }
 
-/* Per-pane tab bar: a persistent strip at the top of each pane showing the
- * bound session's name (VS Code-style), with the split/close actions pinned
- * to its right edge. */
+/* Per-pane tab bar: a persistent strip at the top of each pane holding one tab
+ * per open session (VS Code-style), a "+" to open a new chat tab, and the
+ * split/close actions pinned to the right edge. */
 .pane-tabbar {
   flex: 0 0 auto;
   display: flex;
@@ -635,31 +635,101 @@ body.resizing #sidebar-resize { transition: none; }
   height: 34px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border, #333);
-  /* Sit above the empty-pane picker (z-index 4) so the tab label and the
-   * split/close actions stay visible/usable even before a session is bound. */
+  /* Sit above the empty-pane picker (z-index 4) so the tabs and the
+   * split/close/new actions stay visible/usable even before a session is bound. */
   position: relative;
   z-index: 8;
 }
+/* The scrollable strip of tabs. */
+.pane-tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.pane-tabs::-webkit-scrollbar { height: 0; }
 .pane-tab {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: calc(100% - 72px);
-  padding: 0 12px;
-  background: var(--bg-raised, #2a2d2e);
+  gap: 6px;
+  min-width: 90px;
+  max-width: 200px;
+  padding: 0 6px 0 12px;
+  background: transparent;
   border-right: 1px solid var(--border, #333);
   color: var(--text-muted, #888);
   font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
 }
-.chat-pane.is-focused .pane-tab { color: var(--text-strong, #fff); }
-.pane-tab-icon { flex-shrink: 0; color: var(--text-muted); }
+.pane-tab:hover { background: var(--bg-raised, #2a2d2e); color: var(--text, #eee); }
+/* The active tab of the pane. */
+.pane-tab.active {
+  background: var(--bg-raised, #2a2d2e);
+  color: var(--text, #eee);
+}
+/* Brighter still when the active tab belongs to the focused pane. */
+.chat-pane.is-focused .pane-tab.active {
+  background: var(--bg-active);
+  color: var(--text-strong, #fff);
+  box-shadow: inset 0 -2px 0 var(--accent, #4a9eff);
+}
 .pane-tab-name {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Busy dot — visible only while the tab's session is streaming. */
+.pane-tab-busy {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #4a9eff);
+  display: none;
+}
+.pane-tab.is-busy .pane-tab-busy { display: block; }
+/* Per-tab close button (revealed on hover / when active). */
+.pane-tab-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .1s, background .1s;
+}
+.pane-tab:hover .pane-tab-close,
+.pane-tab.active .pane-tab-close { opacity: .7; }
+.pane-tab-close:hover { opacity: 1; background: var(--bg-raised-hover, #333); }
+/* A single open tab can't be closed via its × when it's the pane's only tab in
+ * the only pane — but we keep the affordance; closeTab handles the picker. */
+
+/* "+" new-tab button. */
+.pane-newtab-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  margin-left: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim, #aaa);
+  cursor: pointer;
+}
+.pane-newtab-btn:hover { background: var(--bg-raised-hover, #333); color: var(--text, #eee); }
 
 /* Split / close actions, pinned to the right of the tab bar. */
 .pane-toolbar {

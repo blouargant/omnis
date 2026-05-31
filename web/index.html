@@ -90,12 +90,10 @@
   <template id="chat-pane-tpl">
     <section class="chat-pane">
       <div class="pane-tabbar">
-        <div class="pane-tab">
-          <svg class="pane-tab-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span class="pane-tab-name"></span>
-        </div>
+        <div class="pane-tabs" role="tablist"></div>
+        <button class="pane-newtab-btn" type="button" data-tip="New chat tab" aria-label="New chat tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
         <div class="pane-toolbar">
           <button class="pane-split-btn" type="button" data-tip="Split editor right" aria-label="Split editor right">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

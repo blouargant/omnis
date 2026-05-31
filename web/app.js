@@ -200,8 +200,8 @@ function bindPaneEls(root) {
   e.toolbar     = root.querySelector(".pane-toolbar");
   e.splitBtn    = root.querySelector(".pane-split-btn");
   e.closeBtn    = root.querySelector(".pane-close-btn");
-  e.tab         = root.querySelector(".pane-tab");
-  e.tabName     = root.querySelector(".pane-tab-name");
+  e.tabs        = root.querySelector(".pane-tabs");
+  e.newTabBtn   = root.querySelector(".pane-newtab-btn");
   e.picker      = root.querySelector(".pane-picker");
   e.pickerNew   = root.querySelector(".pane-picker-new");
   e.pickerSquad = root.querySelector(".pane-picker-squad");
@@ -212,7 +212,13 @@ function bindPaneEls(root) {
   return e;
 }
 
+// panelsForSession returns panes where `id` is the ACTIVE (visible) tab — used
+// to update visible pane chrome (status, ctx ring, ask widget, scroll).
 function panelsForSession(id) { return id ? panels.filter(p => p.sessionId === id) : []; }
+// panelsWithTab returns panes that hold `id` as a tab at all (active or in the
+// background) — used for "is it open anywhere" checks: push subscriptions,
+// sidebar highlight, dedupe-on-open, and delete/archive cleanup.
+function panelsWithTab(id) { return id ? panels.filter(p => p.tabs.includes(id)) : []; }
 function getPanel(pid) { return panels.find(p => p.id === pid) || null; }
 function focusedPanel() { return getPanel(focusedPanelId) || panels[0] || null; }
 function fp() { return focusedPanel(); }
@@ -225,13 +231,15 @@ function createPanel(sessionId) {
   const id = "p" + (panelSeq++);
   root.dataset.panelId = id;
   const panel = {
-    id, sessionId: sessionId || null, root,
+    // `tabs` is the ordered list of sessionIds open in this pane; `sessionId`
+    // is the active (visible) tab. A pane with no tabs shows the empty picker.
+    id, sessionId: sessionId || null, tabs: sessionId ? [sessionId] : [], root,
     els: bindPaneEls(root),
     width: 0, _stick: true, _scrollPending: false,
   };
   panels.push(panel);
   attachPaneHandlers(panel);
-  updatePaneTab(panel);
+  renderPaneTabs(panel);
   return panel;
 }
 
@@ -240,7 +248,6 @@ function createPanel(sessionId) {
 function mountInPanel(panel, sessionId) {
   const t = panel.els.transcript;
   const next = sessionId ? getContainer(sessionId) : null;
-  updatePaneTab(panel);
   if (next && t.contains(next)) return;
   while (t.firstChild) t.removeChild(t.firstChild);
   if (next) t.appendChild(next);
@@ -262,7 +269,7 @@ function setFocusedPanel(pid) {
 // panes.
 function refreshSidebarActive() {
   if (!els.list) return;
-  const shown = new Set(panels.map(p => p.sessionId).filter(Boolean));
+  const shown = new Set(panels.flatMap(p => p.tabs));
   const focusedId = (focusedPanel() || {}).sessionId || null;
   for (const li of els.list.children) {
     const id = li.dataset.id;
@@ -352,24 +359,25 @@ function splitPanel(after) {
 function closePanel(panel) {
   if (panels.length <= 1) return; // never close the last pane
   const idx = panels.indexOf(panel);
-  const sid = panel.sessionId;
+  const tabIds = panel.tabs.slice();
   panels.splice(idx, 1);
   if (focusedPanelId === panel.id) {
     const neighbor = panels[Math.min(idx, panels.length - 1)];
     focusedPanelId = neighbor ? neighbor.id : null;
   }
-  // The session's transcript DOM stays cached in sessionContainers (no loss).
-  releaseSessionIfUnviewed(sid);
+  // Each tab's transcript DOM stays cached in sessionContainers (no loss); drop
+  // the push subscription of any tab not still open in another pane.
+  for (const sid of tabIds) releaseSessionIfUnviewed(sid);
   rebuildChatDOM();
   setFocusedPanel(focusedPanelId);
   saveLayout();
 }
 
 // releaseSessionIfUnviewed drops a session's push subscription once no pane
-// shows it anymore (and it isn't actively streaming).
+// holds it as a tab anymore (and it isn't actively streaming).
 function releaseSessionIfUnviewed(sessionId) {
   if (!sessionId) return;
-  if (panelsForSession(sessionId).length === 0 && !sessionSending.has(sessionId)) {
+  if (panelsWithTab(sessionId).length === 0 && !sessionSending.has(sessionId)) {
     unsubscribeSessionEvents(sessionId);
   }
 }
@@ -389,7 +397,7 @@ function renderPanePicker(panel) {
   const list = panel.els.pickerList;
   if (!list) return;
   list.innerHTML = "";
-  const shown = new Set(panels.map(p => p.sessionId).filter(Boolean));
+  const shown = new Set(panels.flatMap(p => p.tabs));
   for (const li of els.list.children) {
     const id = li.dataset.id;
     if (!id) continue;
@@ -398,10 +406,10 @@ function renderPanePicker(panel) {
     const item = document.createElement("li");
     item.className = "pane-picker-item";
     item.textContent = name;
-    if (shown.has(id)) item.classList.add("is-open"); // shown elsewhere
+    if (shown.has(id)) item.classList.add("is-open"); // open in some pane
     item.addEventListener("click", () => {
-      const existing = panelsForSession(id)[0];
-      if (existing && existing !== panel) { setFocusedPanel(existing.id); return; }
+      const existing = panelsWithTab(id)[0];
+      if (existing && existing !== panel) { setFocusedPanel(existing.id); activateTab(existing, id); return; }
       bindSessionToPanel(panel, id);
     });
     list.appendChild(item);
@@ -489,6 +497,9 @@ function attachPaneHandlers(panel) {
   // Toolbar: split / close.
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
+
+  // "+" opens a fresh chat as a new tab in this pane.
+  if (pe.newTabBtn) pe.newTabBtn.addEventListener("click", (e) => { e.stopPropagation(); newChat(panel); });
 
   // Empty-pane picker. The squad selector (when shown) overrides the global
   // choice for this new chat only.
@@ -681,8 +692,12 @@ function saveLayout() {
     _layoutSaveTimer = null;
     try {
       const rec = {
-        version: 1,
-        panes: panels.map(p => ({ sessionId: p.sessionId, width: Math.round(p.width) })),
+        version: 2,
+        panes: panels.map(p => ({
+          tabs: p.tabs.slice(),
+          activeId: p.sessionId,
+          width: Math.round(p.width),
+        })),
         focusedIndex: Math.max(0, panels.findIndex(p => p.id === focusedPanelId)),
       };
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(rec));
@@ -794,27 +809,68 @@ function applySessionUI(id) {
     setCtxRingSpinning(p, active);
     renderCtxRing(p);
   }
+  // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
+  // including background tabs whose session is streaming.
+  for (const p of panelsWithTab(id)) renderPaneTabs(p);
 }
 
-// paneTabTitle resolves the label shown on a pane's tab: the session's title
-// (falling back to its id), or "New Chat" for an empty pane.
+// paneTabTitle resolves a tab's label: the session's title (falling back to id).
 function paneTabTitle(sessionId) {
   if (!sessionId) return "New Chat";
   return sessionTitles.get(sessionId) || sessionId;
 }
 
-// updatePaneTab refreshes the tab label for a single pane.
-function updatePaneTab(panel) {
-  if (!panel || !panel.els.tabName) return;
-  const label = paneTabTitle(panel.sessionId);
-  panel.els.tabName.textContent = label;
-  if (panel.els.tab) panel.els.tab.setAttribute("data-tip", label);
+const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+
+// renderPaneTabs rebuilds a pane's tab strip — one button per open session,
+// the active one highlighted, each with a close affordance. A busy dot marks
+// tabs whose session is streaming (so background tabs show activity too).
+function renderPaneTabs(panel) {
+  const strip = panel.els.tabs;
+  if (!strip) return;
+  strip.innerHTML = "";
+  for (const sid of panel.tabs) {
+    const label = paneTabTitle(sid);
+    const tab = document.createElement("div");
+    tab.className = "pane-tab" + (sid === panel.sessionId ? " active" : "");
+    tab.setAttribute("role", "tab");
+    tab.dataset.session = sid;
+    tab.setAttribute("data-tip", label);
+
+    const dot = document.createElement("span");
+    dot.className = "pane-tab-busy";
+    tab.appendChild(dot);
+
+    const name = document.createElement("span");
+    name.className = "pane-tab-name";
+    name.textContent = label;
+    tab.appendChild(name);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "pane-tab-close";
+    close.setAttribute("aria-label", "Close tab");
+    close.innerHTML = ICON_TAB_CLOSE;
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, sid); });
+    tab.appendChild(close);
+
+    tab.classList.toggle("is-busy", sessionSending.has(sid));
+    tab.addEventListener("mousedown", (e) => {
+      // Middle-click closes the tab, like a browser.
+      if (e.button === 1) { e.preventDefault(); closeTab(panel, sid); return; }
+    });
+    tab.addEventListener("click", (e) => {
+      if (e.target.closest(".pane-tab-close")) return;
+      activateTab(panel, sid);
+    });
+    strip.appendChild(tab);
+  }
 }
 
-// updatePaneTabsForSession refreshes the tab on every pane showing a session
+// updatePaneTabsForSession refreshes tabs on every pane holding a session
 // (used when a title changes after a turn / rename).
 function updatePaneTabsForSession(sessionId) {
-  for (const p of panelsForSession(sessionId)) updatePaneTab(p);
+  for (const p of panelsWithTab(sessionId)) renderPaneTabs(p);
 }
 
 // setComposerReadOnly disables a pane's composer when viewing an archived session.
@@ -996,6 +1052,16 @@ function fpTranscript() {
 // paneOfNode resolves the panel a DOM node currently lives in (or null when the
 // node belongs to a session not mounted in any pane). Used by append helpers to
 // scroll the right pane regardless of focus.
+// sessionIdOfNode maps a DOM node back to the session whose (possibly detached,
+// background-tab) container holds it. Used when paneOfNode can't resolve it.
+function sessionIdOfNode(node) {
+  if (!node) return null;
+  for (const [sid, c] of sessionContainers) {
+    if (c.contains(node)) return sid;
+  }
+  return null;
+}
+
 function paneOfNode(node) {
   const root = node && node.closest ? node.closest(".chat-pane") : null;
   return root ? getPanel(root.dataset.panelId) : null;
@@ -1202,10 +1268,11 @@ async function fetchMediaBlobURL(sessionId, path) {
 
 function rewriteLocalImages(rootEl) {
   if (!rootEl) return;
-  // Resolve the session that owns this DOM (the pane it lives in), so media
-  // fetches use the right session even for a background pane.
+  // Resolve the session that owns this DOM so media fetches use the right
+  // session. A background tab's container is detached from every pane, so fall
+  // back to the session-container map before the focused-session shim.
   const ownerPanel = paneOfNode(rootEl);
-  const sessionId = ownerPanel ? ownerPanel.sessionId : activeSessionId;
+  const sessionId = (ownerPanel && ownerPanel.sessionId) || sessionIdOfNode(rootEl) || activeSessionId;
   if (!sessionId) return;
   const imgs = rootEl.querySelectorAll("img");
   imgs.forEach(img => {
@@ -1931,6 +1998,7 @@ function renderAskUserWidget(sessionId, q) {
   row.className = "ask-user-row";
   row.setAttribute("data-ask-id", q.question_id);
   row.setAttribute("data-session-id", sessionId);
+  row._askQ = q; // kept so the widget can be re-queued when its tab is hidden
 
   const card = document.createElement("div");
   card.className = "ask-user-card";
@@ -2301,7 +2369,7 @@ const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="no
 function buildSessionRow(s, { archived }) {
   const li = document.createElement("li");
   li.dataset.id = s.id;
-  if (panelsForSession(s.id).length) li.classList.add("active");
+  if (panelsWithTab(s.id).length) li.classList.add("active");
   const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const displayName = s.title || s.id;
 
@@ -2385,7 +2453,7 @@ function renderSessions(sessions) {
   // sidebar highlight, and re-render any open empty-pane pickers.
   refreshSidebarActive();
   for (const p of panels) {
-    updatePaneTab(p);
+    renderPaneTabs(p);
     if (p.sessionId) applySessionUI(p.sessionId);
     else if (p.els.picker && !p.els.picker.hidden) renderPanePicker(p);
   }
@@ -2396,14 +2464,11 @@ function setSessionBusy(sessionId, busy) {
   if (li) li.classList.toggle("session-busy", busy);
 }
 
-// clearPaneSession detaches a pane from its session and shows the empty-pane
-// picker. Used when the shown session is deleted/archived.
-function clearPaneSession(panel) {
-  panel.sessionId = null;
-  mountInPanel(panel, null);
-  clearPinnedPrompt(panel);
-  if (focusedPanelId === panel.id) activeSessionId = null;
-  showPanePicker(panel);
+// closeTabEverywhere removes `id` as a tab from every pane that holds it.
+// Used when a session is deleted or archived. Snapshots the pane list first
+// since closeTab may close a pane (mutating `panels`).
+function closeTabEverywhere(id) {
+  for (const p of panelsWithTab(id)) closeTab(p, id);
 }
 
 async function deleteSession(id, li) {
@@ -2430,8 +2495,8 @@ async function deleteSession(id, li) {
       if (entry.sessionId === id) pendingAskWidgets.delete(qid);
     }
     queuedAskWidgets.delete(id);
-    // Empty any pane that was showing this session.
-    for (const p of panelsForSession(id)) clearPaneSession(p);
+    // Close the session's tab in every pane that held it.
+    closeTabEverywhere(id);
     li.remove();
     refreshSidebarActive();
     saveLayout();
@@ -2446,10 +2511,10 @@ async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
     unsubscribeSessionEvents(id);
-    // Empty any pane showing it — an archived session is set aside, so it
+    // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
     // clicking it in the archived panel re-mounts the read-only history.
-    for (const p of panelsForSession(id)) clearPaneSession(p);
+    closeTabEverywhere(id);
     await loadSessions();
     saveLayout();
   } catch (e) {
@@ -2462,7 +2527,7 @@ async function unarchiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
     await loadSessions();
-    if (panelsForSession(id).length) {
+    if (panelsWithTab(id).length) {
       subscribeSessionEvents(id);
       applySessionUI(id);
     }
@@ -2507,28 +2572,79 @@ function startRename(li, id, currentTitle) {
 // session, just focus that pane; otherwise bind it into the focused pane.
 async function selectSession(id) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
-  const existing = panelsForSession(id)[0];
-  if (existing) { setFocusedPanel(existing.id); return; }
+  // Already open as a tab somewhere → focus that pane and surface the tab.
+  const existing = panelsWithTab(id)[0];
+  if (existing) { setFocusedPanel(existing.id); await activateTab(existing, id); return; }
+  // Otherwise open it as a new tab in the focused pane.
   let panel = fp();
   if (!panel) panel = createPanel(null), rebuildChatDOM(), setFocusedPanel(panel.id);
   await bindSessionToPanel(panel, id);
 }
 
-// bindSessionToPanel mounts `id` into `panel`, loading history if needed,
-// subscribing to push events, and flushing any queued ask-user widgets. The
-// session previously shown in the pane is released if no longer viewed.
+// bindSessionToPanel opens `id` as a tab in `panel` (adding it if absent) and
+// makes it the active tab. Existing tabs in the pane stay open.
 async function bindSessionToPanel(panel, id) {
-  const prev = panel.sessionId;
-  if (prev === id) { setFocusedPanel(panel.id); return; }
+  if (!panel.tabs.includes(id)) panel.tabs.push(id);
+  await activateTab(panel, id);
+}
+
+// closeTab removes `id` from a pane's tab strip. When the active tab closes the
+// neighbour is activated; closing the last tab closes the pane (or, if it is the
+// only pane, falls back to the empty picker).
+function closeTab(panel, id) {
+  const idx = panel.tabs.indexOf(id);
+  if (idx === -1) return;
+  const wasActive = panel.sessionId === id;
+  panel.tabs.splice(idx, 1);
+
+  if (!panel.tabs.length) {
+    if (panels.length > 1) {
+      closePanel(panel);            // drops the pane; releases its (now empty) tabs
+      releaseSessionIfUnviewed(id);
+      refreshSidebarActive();
+      return;
+    }
+    // Sole pane: keep it, show the empty picker.
+    panel.sessionId = null;
+    mountInPanel(panel, null);
+    clearPinnedPrompt(panel);
+    if (focusedPanelId === panel.id) activeSessionId = null;
+    renderPaneTabs(panel);
+    showPanePicker(panel);
+    releaseSessionIfUnviewed(id);
+    refreshSidebarActive();
+    saveLayout();
+    return;
+  }
+
+  if (wasActive) {
+    const nextId = panel.tabs[Math.min(idx, panel.tabs.length - 1)];
+    activateTab(panel, nextId);     // re-renders tabs + saveLayout
+  } else {
+    renderPaneTabs(panel);
+    saveLayout();
+  }
+  releaseSessionIfUnviewed(id);
+  refreshSidebarActive();
+}
+
+// activateTab makes `id` the visible tab of `panel` (id must already be in
+// panel.tabs), mounting its transcript, loading history if needed, subscribing
+// to push events, and flushing any queued ask-user widgets.
+async function activateTab(panel, id) {
+  if (panel.sessionId === id) {
+    setFocusedPanel(panel.id);
+    renderPaneTabs(panel);
+    mountInPanel(panel, id);
+    return;
+  }
 
   panel.sessionId = id;
   hidePanePicker(panel);
   setFocusedPanel(panel.id); // updates activeSessionId + sidebar highlight
   clearPinnedPrompt(panel);
+  renderPaneTabs(panel);
   if (AgentDebug.enabled) { AgentDebug.activeSession = id; AgentDebug._paint(); }
-
-  // The previously shown session may now be invisible.
-  if (prev && prev !== id) releaseSessionIfUnviewed(prev);
 
   applySessionUI(id);
   renderAttachmentsUI(id);
@@ -2539,7 +2655,21 @@ async function bindSessionToPanel(panel, id) {
 
   subscribeSessionEvents(id);
 
-  // Flush any ask-user questions that queued while no pane showed this session.
+  // The ask-user slot is shared by the pane's tabs. Pull any widget belonging
+  // to a now-hidden tab out of the slot and back into its queue, so it reappears
+  // when that tab is reselected — then flush the active tab's queued widgets.
+  const slot = panel.els.askSlot;
+  if (slot) {
+    for (const row of [...slot.children]) {
+      const sid = row.getAttribute("data-session-id");
+      if (sid && sid !== id && row._askQ) {
+        const list = queuedAskWidgets.get(sid) || [];
+        if (!list.some(x => x.question_id === row._askQ.question_id)) list.push(row._askQ);
+        queuedAskWidgets.set(sid, list);
+        row.remove();
+      }
+    }
+  }
   const queued = queuedAskWidgets.get(id);
   if (queued) { queuedAskWidgets.delete(id); for (const q of queued) renderAskUserWidget(id, q); }
 
@@ -2724,12 +2854,13 @@ async function newChat(panel, squadOverride) {
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
-    const prev = panel.sessionId;
+    // Open the new session as a tab in the pane and make it active.
+    if (!panel.tabs.includes(newId)) panel.tabs.push(newId);
     panel.sessionId = newId;
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
     clearPinnedPrompt(panel);
-    if (prev && prev !== newId) releaseSessionIfUnviewed(prev);
+    renderPaneTabs(panel);
     mountInPanel(panel, newId);
     applySessionUI(newId);
     subscribeSessionEvents(newId);
@@ -4040,12 +4171,17 @@ window.addEventListener("resize", () => { layoutWidths(); });
 // bound to a live session.
 async function restoreLayout(rec, liveIds) {
   panels = [];
-  const intended = [];
+  const plans = [];
   for (const pane of rec.panes) {
-    const sid = pane.sessionId && liveIds.has(pane.sessionId) ? pane.sessionId : null;
+    // v2 records carry { tabs, activeId }; v1 carried a single { sessionId }.
+    const rawTabs = Array.isArray(pane.tabs)
+      ? pane.tabs
+      : (pane.sessionId ? [pane.sessionId] : []);
+    const tabs = rawTabs.filter(id => liveIds.has(id));
+    let active = pane.activeId && tabs.includes(pane.activeId) ? pane.activeId : tabs[0] || null;
     const panel = createPanel(null);
     panel.width = pane.width > 0 ? pane.width : 0;
-    intended.push(sid);
+    plans.push({ tabs, active });
   }
   if (!panels.length) return false;
   rebuildChatDOM();
@@ -4053,8 +4189,15 @@ async function restoreLayout(rec, liveIds) {
   setFocusedPanel((panels[focusIdx] || panels[0]).id);
   let bound = false;
   for (let i = 0; i < panels.length; i++) {
-    if (intended[i]) { await bindSessionToPanel(panels[i], intended[i]); bound = true; }
-    else showPanePicker(panels[i]);
+    const panel = panels[i];
+    const { tabs, active } = plans[i];
+    if (!tabs.length) { showPanePicker(panel); continue; }
+    // Register every tab on the pane, then mount the active one (loads history).
+    panel.tabs = tabs.slice();
+    renderPaneTabs(panel);
+    for (const id of tabs) if (id !== active) subscribeSessionEvents(id);
+    await bindSessionToPanel(panel, active);
+    bound = true;
   }
   return bound;
 }
