@@ -262,7 +262,11 @@
     },
     {
       "pattern": "^install_remote_skill ",
-      "reason": "Installing a skill from a remote registry writes to $HOME/.yoke/registry/skills/<name> — confirm the skill name and source before proceeding"
+      "reason": "Installing a skill from a remote registry downloads files into your local skills registry and persists on disk — confirm the skill and source before proceeding"
+    },
+    {
+      "pattern": "^install_remote_item ",
+      "reason": "Installing an item from a remote registry downloads files into your local config and persists on disk — confirm the item and source before proceeding"
     },
     {
       "pattern": "^link_skill_to_agent ",

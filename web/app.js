@@ -2128,7 +2128,11 @@ function resolveCuratorBlock(block, data, errorMsg) {
 
 // ─── Ask-user widget ─────────────────────────────────────────────────────────
 // Maps questionId → { card, sessionId } so ask_user_cancel can collapse it.
+// Grouped entries instead look like { grouped: true, key, sessionId }.
 const pendingAskWidgets = new Map();
+// Maps `${sessionId} ${group}` → grouped-widget state so a burst of
+// related questions (e.g. install permissions) coalesces into one card.
+const pendingAskGroups = new Map();
 
 // renderAskUserWidget creates an interactive card for a structured question.
 // Widgets are appended to a fixed slot just above the composer (#ask-user-slot)
@@ -2145,6 +2149,11 @@ function renderAskUserWidget(sessionId, q) {
   }
   const slot = panel.els.askSlot;
   if (!slot) return;
+
+  // Coalesce questions that carry a group tag (e.g. a burst of install
+  // permission prompts) into a single combined card instead of a stack of
+  // identical radio lists.
+  if (q.group) { addToAskGroup(panel, sessionId, slot, q); return; }
 
   const row = document.createElement("div");
   row.className = "ask-user-row";
@@ -2340,11 +2349,227 @@ function renderAskUserWidget(sessionId, q) {
   });
 }
 
+// ─── Grouped ask-user widget (install bursts) ────────────────────────────────
+// Friendly plural labels per item kind for the grouped install card.
+const ASK_GROUP_KIND_LABELS = {
+  skill: "Skills", agent: "Agents", mcp: "MCP servers", squad: "Squads",
+  a2a: "A2A agents", command: "Commands", permission: "Permission rule-sets",
+  item: "Items",
+};
+
+// The five permission scopes, positional in every question's `choices` array
+// ([Deny, allow-once, allow-tool-session, allow-project, allow-always]). A
+// grouped decision picks one index and applies it to every member question.
+const ASK_GROUP_SCOPES = [
+  { idx: 0, label: "Deny all" },
+  { idx: 1, label: "Allow once" },
+  { idx: 2, label: "Allow all installs this session" },
+  { idx: 3, label: "Allow in this project" },
+  { idx: 4, label: "Allow always" },
+];
+
+function askGroupKey(sessionId, group) { return sessionId + " " + group; }
+
+// addToAskGroup buffers a grouped question into a single shared card, creating
+// the card on first arrival and re-rendering it as more questions land.
+function addToAskGroup(panel, sessionId, slot, q) {
+  const key = askGroupKey(sessionId, q.group);
+  let grp = pendingAskGroups.get(key);
+  if (!grp) {
+    const row = document.createElement("div");
+    row.className = "ask-user-row";
+    row.setAttribute("data-session-id", sessionId);
+    const card = document.createElement("div");
+    card.className = "ask-user-card ask-group-card";
+    row.appendChild(card);
+    slot.appendChild(row);
+    grp = { key, sessionId, row, card, questions: [], scopeIdx: 1, busy: false };
+    row._askGroup = grp; // so a tab switch can requeue every member question
+    pendingAskGroups.set(key, grp);
+  }
+  if (!grp.questions.some(x => x.question_id === q.question_id)) grp.questions.push(q);
+  pendingAskWidgets.set(q.question_id, { grouped: true, key, sessionId });
+  renderAskGroupCard(grp);
+  scrollBottom(panel);
+}
+
+// renderAskGroupCard rebuilds the grouped card body: a "what will be installed"
+// list grouped by kind, plus one shared set of scope choices.
+function renderAskGroupCard(grp) {
+  const { card, questions } = grp;
+  while (card.lastChild) card.removeChild(card.lastChild);
+
+  const n = questions.length;
+  const title = document.createElement("div");
+  title.className = "ask-user-prompt";
+  const strong = document.createElement("strong");
+  strong.textContent = "Install " + n + " item" + (n === 1 ? "" : "s") + "?";
+  title.appendChild(strong);
+  card.appendChild(title);
+
+  // Group by kind, preserving first-seen order.
+  const byKind = new Map();
+  for (const q of questions) {
+    const kind = (q.item && q.item.kind) || "item";
+    if (!byKind.has(kind)) byKind.set(kind, []);
+    byKind.get(kind).push(q);
+  }
+  const itemsWrap = document.createElement("div");
+  itemsWrap.className = "ask-group-items";
+  for (const [kind, qs] of byKind) {
+    const section = document.createElement("div");
+    section.className = "ask-group-section";
+    const h = document.createElement("div");
+    h.className = "ask-group-kind";
+    h.textContent = (ASK_GROUP_KIND_LABELS[kind] || kind) + " (" + qs.length + ")";
+    section.appendChild(h);
+    for (const q of qs) {
+      const it = document.createElement("div");
+      it.className = "ask-group-item";
+      const nameEl = document.createElement("span");
+      nameEl.className = "ask-group-item-name";
+      nameEl.textContent = (q.item && q.item.name) || "(unnamed)";
+      it.appendChild(nameEl);
+      const src = q.item && q.item.source;
+      if (src) {
+        const srcEl = document.createElement("span");
+        srcEl.className = "ask-group-item-src";
+        srcEl.textContent = "from " + src;
+        it.appendChild(srcEl);
+      }
+      section.appendChild(it);
+    }
+    itemsWrap.appendChild(section);
+  }
+  card.appendChild(itemsWrap);
+
+  const choicesDiv = document.createElement("div");
+  choicesDiv.className = "ask-user-choices";
+  const labels = [];
+  const paint = () => labels.forEach(l =>
+    l.classList.toggle("is-selected", Number(l.dataset.idx) === grp.scopeIdx));
+  ASK_GROUP_SCOPES.forEach(s => {
+    const label = document.createElement("label");
+    label.className = "ask-user-choice";
+    label.dataset.idx = String(s.idx);
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "askgrp_" + grp.key;
+    radio.value = String(s.idx);
+    if (s.idx === grp.scopeIdx) radio.checked = true;
+    radio.addEventListener("change", () => { grp.scopeIdx = s.idx; paint(); });
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(s.label));
+    choicesDiv.appendChild(label);
+    labels.push(label);
+  });
+  paint();
+  card.appendChild(choicesDiv);
+
+  const actions = document.createElement("div");
+  actions.className = "ask-user-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "ask-user-cancel-btn";
+  cancelBtn.textContent = "Skip all";
+  actions.appendChild(cancelBtn);
+  const submitBtn = document.createElement("button");
+  submitBtn.className = "ask-user-submit";
+  submitBtn.textContent = "Submit";
+  actions.appendChild(submitBtn);
+  card.appendChild(actions);
+
+  submitBtn.addEventListener("click", () => resolveAskGroup(grp, false));
+  cancelBtn.addEventListener("click", () => resolveAskGroup(grp, true));
+  card.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (e.target && e.target.tagName === "TEXTAREA") return;
+    e.preventDefault();
+    if (!submitBtn.disabled) submitBtn.click();
+  });
+}
+
+// resolveAskGroup resolves every member question with the shared scope (or
+// cancels them all), then collapses the card. Questions whose POST fails are
+// kept so the user can retry.
+async function resolveAskGroup(grp, cancelled) {
+  if (grp.busy) return;
+  grp.busy = true;
+  const qs = grp.questions.slice();
+  const results = await Promise.all(qs.map(q => {
+    let answer;
+    if (cancelled) {
+      answer = { selected: [], text: "", cancelled: true };
+    } else {
+      const choices = Array.isArray(q.choices) ? q.choices : [];
+      const choice = choices[grp.scopeIdx];
+      if (!choice) return Promise.resolve({ q, ok: false });
+      answer = { selected: [choice], text: "", cancelled: false };
+    }
+    return apiFetch(`/api/sessions/${grp.sessionId}/ask-user/${q.question_id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(answer),
+    }).then(res => ({ q, ok: res.ok })).catch(() => ({ q, ok: false }));
+  }));
+  for (const r of results) if (r.ok) pendingAskWidgets.delete(r.q.question_id);
+  const failed = results.filter(r => !r.ok).map(r => r.q);
+  if (failed.length === 0) {
+    finalizeAskGroup(grp, cancelled, qs.length);
+  } else {
+    grp.questions = failed;
+    grp.busy = false;
+    renderAskGroupCard(grp);
+  }
+}
+
+// finalizeAskGroup collapses a fully-resolved group to a one-line summary and
+// moves it into the transcript so it scrolls as history.
+function finalizeAskGroup(grp, cancelled, count) {
+  pendingAskGroups.delete(grp.key);
+  for (const q of grp.questions) pendingAskWidgets.delete(q.question_id);
+  const { row, card, sessionId } = grp;
+  card.classList.add("resolved");
+  row.classList.add("resolved");
+  while (card.lastChild) card.removeChild(card.lastChild);
+  const scope = ASK_GROUP_SCOPES.find(s => s.idx === grp.scopeIdx);
+  const noun = "install" + (count === 1 ? "" : "s");
+  const resolved = document.createElement("div");
+  resolved.className = "ask-user-resolved-text";
+  resolved.textContent = cancelled
+    ? "✗ skipped " + count + " " + noun
+    : "✓ " + (scope ? scope.label : "submitted") + " — " + count + " " + noun;
+  card.appendChild(resolved);
+  const container = getContainer(sessionId);
+  if (container) container.appendChild(row);
+}
+
 // cancelAskUserWidget collapses a pending widget when the server cancels the question.
 function cancelAskUserWidget(questionId) {
   const entry = pendingAskWidgets.get(questionId);
   if (!entry) return;
   pendingAskWidgets.delete(questionId);
+  // Grouped member: drop it from its group; collapse the card only once the
+  // whole group has been cancelled server-side.
+  if (entry.grouped) {
+    const grp = pendingAskGroups.get(entry.key);
+    if (!grp) return;
+    grp.questions = grp.questions.filter(q => q.question_id !== questionId);
+    if (grp.questions.length === 0) {
+      pendingAskGroups.delete(grp.key);
+      grp.card.classList.add("resolved");
+      grp.row.classList.add("resolved");
+      while (grp.card.lastChild) grp.card.removeChild(grp.card.lastChild);
+      const resolved = document.createElement("div");
+      resolved.className = "ask-user-resolved-text";
+      resolved.textContent = "✗ cancelled";
+      grp.card.appendChild(resolved);
+      const container = getContainer(grp.sessionId);
+      if (container) container.appendChild(grp.row);
+    } else if (!grp.busy) {
+      renderAskGroupCard(grp);
+    }
+    return;
+  }
   const { row, card, sessionId } = entry;
   card.classList.add("resolved");
   row.classList.add("resolved");
@@ -2651,6 +2876,9 @@ async function deleteSession(id, li) {
     for (const [qid, entry] of pendingAskWidgets) {
       if (entry.sessionId === id) pendingAskWidgets.delete(qid);
     }
+    for (const [k, grp] of pendingAskGroups) {
+      if (grp.sessionId === id) pendingAskGroups.delete(k);
+    }
     queuedAskWidgets.delete(id);
     // Close the session's tab in every pane that held it.
     closeTabEverywhere(id);
@@ -2835,7 +3063,18 @@ async function activateTab(panel, key) {
   if (slot) {
     for (const row of [...slot.children]) {
       const sid = row.getAttribute("data-session-id");
-      if (sid && sid !== id && row._askQ) {
+      if (!sid || sid === id) continue;
+      if (row._askGroup) {
+        // A grouped card requeues every member question, then is torn down so
+        // re-selecting the tab rebuilds it from the queue.
+        const list = queuedAskWidgets.get(sid) || [];
+        for (const q of row._askGroup.questions) {
+          if (!list.some(x => x.question_id === q.question_id)) list.push(q);
+        }
+        queuedAskWidgets.set(sid, list);
+        pendingAskGroups.delete(row._askGroup.key);
+        row.remove();
+      } else if (row._askQ) {
         const list = queuedAskWidgets.get(sid) || [];
         if (!list.some(x => x.question_id === row._askQ.question_id)) list.push(row._askQ);
         queuedAskWidgets.set(sid, list);

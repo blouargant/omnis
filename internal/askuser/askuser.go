@@ -45,6 +45,25 @@ type Question struct {
 	// the input as a masked field (e.g. <input type="password"> in the
 	// web UI). Only meaningful for KindText.
 	Password bool `json:"password,omitempty"`
+	// Group, when non-empty, marks this question as part of a coalescible
+	// group (e.g. a burst of install-permission prompts fired in one turn).
+	// A surface MAY render every pending question sharing a (session, group)
+	// as a single combined widget. This is purely a display hint — each
+	// question is still registered and resolved independently by its own ID.
+	Group string `json:"group,omitempty"`
+	// Item carries structured metadata about the subject of the question
+	// (e.g. what is about to be installed), so a grouped widget can show a
+	// tidy "what will be installed" list instead of raw JSON args. Optional.
+	Item *QuestionItem `json:"item,omitempty"`
+}
+
+// QuestionItem describes the subject of a question (typically an install
+// permission prompt) so a UI surface can render a friendly summary grouped by
+// kind rather than dumping the raw tool arguments.
+type QuestionItem struct {
+	Kind   string `json:"kind,omitempty"`   // e.g. "skill", "agent", "mcp"
+	Name   string `json:"name,omitempty"`   // human-friendly item name
+	Source string `json:"source,omitempty"` // origin (e.g. registry id/name)
 }
 
 // Answer is the user's response to a question.
@@ -279,6 +298,22 @@ func QuestionToPayload(q Question) map[string]any {
 	}
 	if q.Password {
 		p["password"] = true
+	}
+	if q.Group != "" {
+		p["group"] = q.Group
+	}
+	if q.Item != nil {
+		item := map[string]any{}
+		if q.Item.Kind != "" {
+			item["kind"] = q.Item.Kind
+		}
+		if q.Item.Name != "" {
+			item["name"] = q.Item.Name
+		}
+		if q.Item.Source != "" {
+			item["source"] = q.Item.Source
+		}
+		p["item"] = item
 	}
 	return p
 }

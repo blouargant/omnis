@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"path"
 	"strings"
 
 	"google.golang.org/adk/tool"
@@ -61,6 +62,13 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 		Prompt:  buildPermissionPrompt(toolName, input, reason),
 		Choices: []string{choiceDeny, choiceOnce, choiceToolSession, choiceProject, choiceAlways},
 		Default: choiceOnce,
+	}
+	// Tag registry-install prompts with a shared group + structured item
+	// metadata so a surface can coalesce a burst of installs into a single
+	// "what will be installed" widget instead of a stack of identical cards.
+	if item := installItemMeta(toolName, input); item != nil {
+		q.Group = "install"
+		q.Item = item
 	}
 	ans, err := a.reg.Ask(context.Background(), sid, q)
 	if err != nil || ans.Cancelled {
@@ -139,4 +147,70 @@ func summariseToolCall(toolName, input string) (string, string, string) {
 		return "List files matching glob?", "", str("pattern")
 	}
 	return "Allow `" + toolName + "` call?", "json", input
+}
+
+// installItemMeta derives a friendly "what is being installed" summary for the
+// registry install tools so a grouped permission widget can list items by kind.
+// Returns nil for any other tool. The kind for install_remote_item is inferred
+// from the dir_path manifest filename (display-only — the authoritative kind is
+// the registry's, resolved inside the tool).
+func installItemMeta(toolName, input string) *askuser.QuestionItem {
+	var kind string
+	switch toolName {
+	case "install_remote_skill":
+		kind = "skill"
+	case "install_remote_item":
+		// inferred below from dir_path
+	default:
+		return nil
+	}
+	args := map[string]any{}
+	if input != "" {
+		_ = json.Unmarshal([]byte(input), &args)
+	}
+	dirPath, _ := args["dir_path"].(string)
+	source, _ := args["registry_id"].(string)
+	if kind == "" {
+		kind = inferInstallKind(dirPath)
+	}
+	return &askuser.QuestionItem{Kind: kind, Name: installItemName(dirPath), Source: source}
+}
+
+// inferInstallKind guesses the registry item kind from the trailing manifest
+// filename of a dir_path (e.g. ".../mcp.md" → "mcp"). A path with no manifest
+// suffix is treated as a skill/agent directory and reported as "skill".
+func inferInstallKind(dirPath string) string {
+	switch strings.ToLower(path.Base(dirPath)) {
+	case "mcp.md", "mcp.json":
+		return "mcp"
+	case "agent.md", "agent.json":
+		return "agent"
+	case "a2a.json":
+		return "a2a"
+	case "squad.json":
+		return "squad"
+	}
+	if strings.HasSuffix(strings.ToLower(path.Base(dirPath)), ".md") {
+		return "command"
+	}
+	return "skill"
+}
+
+// installItemName extracts a human-friendly item name from a dir_path. For a
+// manifest-file path (".../<name>/mcp.md") the name is the parent directory;
+// for a bare command/skill file the extension is dropped; otherwise the last
+// path segment is used.
+func installItemName(dirPath string) string {
+	if dirPath == "" {
+		return ""
+	}
+	base := path.Base(dirPath)
+	switch strings.ToLower(base) {
+	case "mcp.md", "mcp.json", "agent.md", "agent.json", "a2a.json", "squad.json":
+		return path.Base(path.Dir(dirPath))
+	}
+	if ext := path.Ext(base); ext != "" {
+		return strings.TrimSuffix(base, ext)
+	}
+	return base
 }

@@ -2494,6 +2494,43 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 .ask-user-prompt pre code { background: none; padding: 0; }
 
+/* Grouped install card: a "what will be installed" list grouped by kind,
+   above one shared set of scope choices. */
+.ask-group-items {
+  margin-bottom: 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ask-group-section { margin-bottom: 10px; }
+.ask-group-section:last-child { margin-bottom: 0; }
+.ask-group-kind {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #888);
+  margin-bottom: 5px;
+}
+.ask-group-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.ask-group-item:last-child { margin-bottom: 0; }
+.ask-group-item-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+  font-weight: 600;
+}
+.ask-group-item-src { color: var(--text-muted, #888); font-size: 12px; }
+
 .ask-user-choices {
   display: flex;
   flex-direction: column;
