@@ -88,10 +88,18 @@ func (e *openaiEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 
 func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	reqBody := openaiEmbedRequest{Model: e.model, Input: texts, EncodingFormat: "float"}
-	// OpenAI's text-embedding-3-* models honour an explicit dimensions param.
-	// Compat servers (Ollama et al.) ignore unknown fields, so it's safe to
-	// pass when the caller pinned a non-default dimension.
-	if e.dim > 0 && e.dim != DefaultDim && strings.HasPrefix(e.model, "text-embedding-3") {
+	// Request a reduced output dimension whenever the operator pinned a
+	// non-default one. OpenAI's text-embedding-3-* models honour it, and so do
+	// Matryoshka-trained models behind OpenAI-compatible gateways (e.g. the
+	// qwen3-embedding family on Scaleway/LiteLLM, which natively emit 4096-dim
+	// vectors but truncate to `dimensions` when asked). This is the lever that
+	// keeps the downstream ANN index small: go-turbovec's rotation/QJL matrices
+	// are O(dim²) in memory and O(dim³) to build, so a 4096→1024 cut shrinks
+	// each index ~16× and speeds its load ~64×. Compat servers that don't
+	// support the field ignore unknown JSON keys, so only a gateway that
+	// actively rejects it AND lacks dimension support is a problem — in which
+	// case the operator simply leaves dim at the model's native size.
+	if e.dim > 0 && e.dim != DefaultDim {
 		reqBody.Dimensions = e.dim
 	}
 	payload, err := json.Marshal(reqBody)

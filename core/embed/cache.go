@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/blouargant/yoke/internal/paths"
 )
@@ -29,7 +30,12 @@ func (c *cachingEmbedder) Model() string { return c.base.Model() }
 func (c *cachingEmbedder) Dim() int      { return c.base.Dim() }
 
 func (c *cachingEmbedder) key(text string) string {
-	h := sha256.Sum256([]byte(c.base.Model() + "\x00" + text))
+	// The dimension is part of the identity: the same model can emit vectors of
+	// different lengths when a `dimensions` request truncates a Matryoshka
+	// model. Without it, lowering the configured dim would return the old
+	// full-size vectors from cache and corrupt the index.
+	dim := strconv.Itoa(c.base.Dim())
+	h := sha256.Sum256([]byte(c.base.Model() + "\x00" + dim + "\x00" + text))
 	return hex.EncodeToString(h[:])
 }
 

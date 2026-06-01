@@ -250,6 +250,14 @@ func (i *Index) Reindex(ctx context.Context) (indexed, removed int, err error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// If the vector store was invalidated (the embedder model or dimension
+	// changed, so semindex.Open dropped the persisted index), the per-file hash
+	// cache no longer matches any stored chunks. Drop it so every file is
+	// re-embedded instead of being skipped as "unchanged" against an empty store.
+	if i.store.Len() == 0 && len(i.files) > 0 {
+		i.files = map[string]fileRecord{}
+	}
+
 	seen := make(map[string]bool, len(files))
 	for _, f := range files {
 		seen[f.abs] = true
@@ -284,6 +292,13 @@ func (i *Index) Reindex(ctx context.Context) (indexed, removed int, err error) {
 		_ = i.store.Remove(rec.IDs...)
 		delete(i.files, abs)
 		removed++
+	}
+
+	// Nothing changed ⇒ skip Save (and saveFiles). This keeps the common
+	// "restart with unchanged docs" path from materialising the deferred index
+	// load just to re-write an identical file.
+	if indexed == 0 && removed == 0 {
+		return 0, 0, nil
 	}
 
 	if err := i.store.Save(); err != nil {

@@ -29,9 +29,13 @@ func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 }
 
 func newFake() *fakeEmbedder {
+	// dog is "related" to cat but clearly separated (cosine 0.6, not 0.99): a
+	// 4-bit quantizer cannot resolve the original 0.99-vs-1.0 gap, so the
+	// round-trip ranking assertion must use vectors that differ by more than the
+	// quantization noise floor.
 	return &fakeEmbedder{vectors: map[string][]float32{
 		"cat":   {1, 0, 0},
-		"dog":   {0.9, 0.1, 0},
+		"dog":   {0.6, 0.8, 0},
 		"car":   {0, 1, 0},
 		"query": {1, 0, 0},
 	}}

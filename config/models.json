@@ -10,10 +10,10 @@
   "models": {
     "embedder": {
       "provider_ref": "openai-compat",
-      "model": "qwen3-embedding-8b-scaleway",
+      "model": "hosted_vllm/qwen3-embedding-8b-scaleway",
       "embedding": true,
       "disable_streaming": true,
-      "dim": 4096,
+      "dim": 768,
       "context_length": 32000,
       "input_token_price_per_million": 0.10
     },

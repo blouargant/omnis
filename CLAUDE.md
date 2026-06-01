@@ -293,6 +293,39 @@ behaviour is byte-identical to a build without these features.** See
 [agent/embedder.go](agent/embedder.go) `ResolveEmbedder` for the
 `embed_model_ref` → `YOKE_EMBED_*` precedence.
 
+**Embedding dimension is the dominant cost lever.** go-turbovec builds, per
+index, a `dim×dim` rotation matrix (Π) and a `dim×dim` QJL matrix (S) — `O(dim²)`
+memory and `O(dim³)` to construct (Modified Gram-Schmidt QR). The matrices are
+*not* stored on disk; only their seeds are, so each index reconstructs them on
+load. At `dim=4096` (e.g. `qwen3-embedding-8b`) that is ~134 MB **per index** and
+a multi-second QR; with docs+registries+precedents+code that is ~500 MB of RAM
+and seconds of CPU. **Prefer an embedding `dim` in go-turbovec's design range
+(~768–1536).** The OpenAI-compat embedder sends a `dimensions` request for any
+pinned non-default `dim` ([core/embed/openai.go](core/embed/openai.go)), so a
+Matryoshka model (qwen3 family, OpenAI `text-embedding-3-*`) can be truncated to
+1024/768 purely by setting the model's `dim` in `models.json` (the embed cache
+key includes `dim`, [core/embed/cache.go](core/embed/cache.go), so a dim change
+never returns stale vectors). Changing `dim` (or the model) invalidates the
+persisted index: [internal/semindex/](internal/semindex/) `Open` rebuilds when
+the manifest model/dim differ, and docindex/codeindex drop their per-file hash
+cache when the store comes up empty so every file is re-embedded.
+
+Two mechanisms keep the matrix cost bounded:
+- **Shared matrices.** Every semindex index is built with a fixed `Seed`
+  (`indexSeed` in [internal/semindex/semindex.go](internal/semindex/semindex.go))
+  instead of go-turbovec's default random seed, and go-turbovec memoises
+  `rotation.New` / `quant.NewQJL` by `(dim, seed)` — so all same-dim indexes
+  **share one Π and one S** (built/loaded once) rather than each allocating its
+  own pair. (Requires go-turbovec ≥ the memoised build; yoke currently pins it
+  via a local `replace` in `go.mod` — publish + bump for release.)
+- **Deferred load.** `semindex.Open` reads only the cheap metadata sidecar and
+  marks the `.tvim` as `pendingLoad`; the expensive `LoadIdMapFile` (the QR) is
+  deferred to first real `Query`/`Upsert`/`Save` via `ensureLoadedLocked`, off
+  the server-boot path. `Len()`/`Manifest()` answer from the persisted manifest
+  without forcing the load, so an unchanged-corpus restart (docs Reindex is a
+  no-op, registries `EnsureBuilt` is a no-op) never reconstructs a matrix — boot
+  reaches `ListenAndServe` immediately and the QR happens lazily on first search.
+
 ### Configuration files
 
 Config files are resolved through a **3-layer search chain** (high → low precedence):

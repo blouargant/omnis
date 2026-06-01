@@ -58,15 +58,28 @@ type metaFile struct {
 
 const bitWidth = 4
 
+// indexSeed fixes the rotation/QJL seed for every semindex index. go-turbovec
+// treats Config.Seed == 0 as "draw a random seed", which would give each index
+// (docs, registries, precedents, per-repo code) a distinct rotation matrix.
+// Pinning a shared, non-zero seed lets go-turbovec memoise the O(dim²) Π and S
+// matrices across all same-dim indexes — they build/load the matrices once and
+// share them, instead of every index allocating its own ~67 MB pair at dim
+// 4096. The seed value is immaterial to quality (the algorithm needs a random-
+// looking orthogonal rotation, not a secret one); it only needs to be fixed and
+// non-zero. The concrete seed is persisted per index, so old indexes built with
+// a random seed still load correctly and simply don't share until rebuilt.
+const indexSeed int64 = 0x796f6b65696e6478 // "yokeindx"
+
 // Store is a persistent semantic index. It is safe for concurrent use.
 type Store struct {
 	base string // path without extension; .tvim + .meta.json derive from it
 	emb  embed.Embedder
 
-	mu       sync.Mutex
-	idx      *goturbovec.IdMapIndex
-	meta     map[uint64]json.RawMessage
-	manifest Manifest
+	mu          sync.Mutex
+	idx         *goturbovec.IdMapIndex
+	meta        map[uint64]json.RawMessage
+	manifest    Manifest
+	pendingLoad bool // a compatible persisted .tvim exists but hasn't been read yet
 }
 
 // Open loads an existing index (<path>.tvim + <path>.meta.json) if present and
@@ -91,21 +104,43 @@ func Open(path string, emb embed.Embedder) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Manifest mismatch (model change) ⇒ rebuild from scratch: drop any
-	// existing vectors + meta so the caller re-populates from the corpus.
-	if mf != nil && mf.Manifest.Model == emb.Model() {
-		idx, lerr := goturbovec.LoadIdMapFile(s.tvimPath())
-		if lerr == nil {
-			s.idx = idx
+	// Reuse the persisted index only when it is compatible. A model change
+	// (different embedder) or a dimension change (same model, but a
+	// `dimensions` request now truncates the vectors) ⇒ rebuild from scratch:
+	// loading a mismatched-dim index would crash the next Upsert. emb.Dim()==0
+	// means "not yet learned", so fall back to the model-only check then.
+	compatible := mf != nil && mf.Manifest.Model == emb.Model() &&
+		(emb.Dim() <= 0 || mf.Manifest.Dim == emb.Dim())
+	if compatible {
+		// Read the (cheap) metadata sidecar now, but defer the expensive
+		// goturbovec.LoadIdMapFile — it rebuilds the O(dim²) rotation/QJL
+		// matrices via an O(dim³) QR — to first actual use. Server boot opens
+		// every recall index up front; doing the QR here would block
+		// ListenAndServe for seconds at large dim. See ensureLoadedLocked.
+		if _, statErr := os.Stat(s.tvimPath()); statErr == nil {
 			s.manifest = mf.Manifest
 			for k, v := range mf.Meta {
 				if id, perr := parseUint(k); perr == nil {
 					s.meta[id] = v
 				}
 			}
+			s.pendingLoad = true
 		}
 	}
 	return s, nil
+}
+
+// ensureLoadedLocked materialises the deferred persisted index (see Open). It
+// must be called with s.mu held before any operation that touches s.idx. A load
+// failure leaves s.idx nil so the caller rebuilds from the corpus.
+func (s *Store) ensureLoadedLocked() {
+	if !s.pendingLoad {
+		return
+	}
+	s.pendingLoad = false
+	if idx, lerr := goturbovec.LoadIdMapFile(s.tvimPath()); lerr == nil {
+		s.idx = idx
+	}
 }
 
 func (s *Store) tvimPath() string { return s.base + ".tvim" }
@@ -115,6 +150,11 @@ func (s *Store) metaPath() string { return s.base + ".meta.json" }
 func (s *Store) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.pendingLoad {
+		// Report the persisted count without paying the deferred QR load, so
+		// "is the index non-empty?" checks (Search/EnsureBuilt) stay cheap.
+		return s.manifest.Count
+	}
 	if s.idx == nil {
 		return 0
 	}
@@ -126,6 +166,10 @@ func (s *Store) Manifest() Manifest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := s.manifest
+	if s.pendingLoad {
+		// m.Count already reflects the persisted index.
+		return m
+	}
 	m.Count = 0
 	if s.idx != nil {
 		m.Count = s.idx.Len()
@@ -147,6 +191,8 @@ func (s *Store) Reset() {
 	s.idx = nil
 	s.meta = map[uint64]json.RawMessage{}
 	s.manifest.CorpusHash = ""
+	s.manifest.Count = 0
+	s.pendingLoad = false // discarding everything — no need to read the old file
 	s.mu.Unlock()
 }
 
@@ -154,7 +200,7 @@ func (s *Store) ensureIndex(dim int) error {
 	if s.idx != nil {
 		return nil
 	}
-	idx, err := goturbovec.NewIdMap(goturbovec.Config{Dim: dim, BitWidth: bitWidth, UnitNorm: true})
+	idx, err := goturbovec.NewIdMap(goturbovec.Config{Dim: dim, BitWidth: bitWidth, UnitNorm: true, Seed: indexSeed})
 	if err != nil {
 		return fmt.Errorf("semindex: new index: %w", err)
 	}
@@ -187,6 +233,7 @@ func (s *Store) Upsert(ctx context.Context, items []Item) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureLoadedLocked()
 	if err := s.ensureIndex(len(vecs[0])); err != nil {
 		return err
 	}
@@ -224,6 +271,7 @@ func (s *Store) Query(ctx context.Context, text string, k int) ([]Hit, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureLoadedLocked()
 	if s.idx == nil || s.idx.Len() == 0 {
 		return nil, nil
 	}
@@ -242,6 +290,7 @@ func (s *Store) Query(ctx context.Context, text string, k int) ([]Hit, error) {
 func (s *Store) Remove(ids ...uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureLoadedLocked()
 	if s.idx == nil {
 		return nil
 	}
@@ -258,6 +307,7 @@ func (s *Store) Remove(ids ...uint64) error {
 func (s *Store) Contains(id uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureLoadedLocked()
 	return s.idx != nil && s.idx.Contains(id)
 }
 
@@ -265,6 +315,7 @@ func (s *Store) Contains(id uint64) bool {
 func (s *Store) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureLoadedLocked()
 	if s.idx == nil {
 		return nil
 	}

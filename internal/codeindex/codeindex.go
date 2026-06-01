@@ -279,6 +279,14 @@ func (i *Index) Reindex(ctx context.Context) (indexed, removed int, err error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// If the vector store was invalidated (the embedder model or dimension
+	// changed, so semindex.Open dropped the persisted index), the per-file hash
+	// cache no longer matches any stored chunks. Drop it so every file is
+	// re-embedded instead of being skipped as "unchanged" against an empty store.
+	if i.store.Len() == 0 && len(i.files) > 0 {
+		i.files = map[string]fileRecord{}
+	}
+
 	seen := make(map[string]bool, len(files))
 	for _, rel := range files {
 		seen[rel] = true
