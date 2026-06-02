@@ -1209,6 +1209,39 @@ click-toggle, and its `done/total` progress count stays visible while
 collapsed. State is live-only (history replay renders text turns, not tool
 calls) and both maps are cleared on session delete.
 
+### Web UI ask-user wizard
+
+`ask_user` questions for a session render as a **single multi-step wizard
+card** in the pane's `#ask-user-slot` (above the composer), not a stack of
+separate cards. The model lives in [web/app.js](web/app.js): `askWizards`
+(sessionId → wizard `{ row, card, steps, current, busy, _submit }`) plus
+`pendingAskWidgets` (questionId → `{ sessionId }`, so a server `ask_user_cancel`
+can find the owning wizard). Each **step** is either `{type:"single", q,
+resolved, answer}` or `{type:"group", group, questions[], scopeIdx, resolved,
+cancelled}` — an install-permission burst (questions sharing a `group` tag, see
+[internal/askuser/askuser.go](internal/askuser/askuser.go) `Question.Group`)
+folds in as **one** group step that applies a single shared Allow/Deny scope to
+every member question.
+
+`renderAskUserWidget` routes each arriving question into the session's wizard
+(`ensureWizard` + `addQuestionToWizard`); `renderWizard` rebuilds the card —
+a clickable **step rail** (`.ask-wizard-rail`, hidden when there's one step;
+current chip highlighted, resolved chips show ✓/✗), the active step's body
+(`renderSingleStepBody` reuses the per-kind `buildAskInput`; `renderGroupStepBody`
+reuses the install list + shared scope choices), and a `← Back` / `Skip` /
+`Next →`-or-`Submit` action row (`appendWizardNav`). The card element persists
+across renders (only children are replaced), so the one `keydown` Enter handler
+wired in `ensureWizard` survives — it fires `wiz._submit`, which each render
+points at the current step's primary action. **Steps resolve server-side as
+soon as answered** (`submitSingleStep` / `submitGroupStep` POST to
+`/api/sessions/:id/ask-user/:qid`), so a long wizard never lets early questions
+hit the 5-minute timeout; `afterStepResolved` auto-advances to the first
+unanswered step or `finalizeWizard`s (collapse to a stacked per-step summary,
+moved into the transcript). Revisiting a resolved step via the rail shows a
+read-only summary. On tab-hide the wizard requeues only its **unanswered**
+questions into `queuedAskWidgets` and is torn down (rebuilt fresh on reselect);
+session delete clears `askWizards`.
+
 ### Web UI split panels (VS Code-style)
 
 `#chat` is a horizontal flex **row** of one-or-more independent `.chat-pane`

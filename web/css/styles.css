@@ -2494,6 +2494,47 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 .ask-user-prompt pre code { background: none; padding: 0; }
 
+/* Multi-step ask-user wizard: a step rail above the active question body, with
+   one clickable chip per step (current highlighted, resolved steps marked). */
+.ask-wizard-rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.ask-wizard-step {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s, color 0.1s;
+}
+.ask-wizard-step:hover { border-color: var(--accent-strong); }
+.ask-wizard-step.is-done { color: var(--text); border-color: var(--accent-strong); }
+.ask-wizard-step.is-current {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+}
+.ask-wizard-count {
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+/* Push Back to the left edge of the action row; Skip/Next stay right-aligned. */
+.ask-wizard-back { margin-right: auto; }
+
 /* Grouped install card: a "what will be installed" list grouped by kind,
    above one shared set of scope choices. */
 .ask-group-items {

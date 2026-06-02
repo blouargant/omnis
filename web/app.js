@@ -2126,22 +2126,33 @@ function resolveCuratorBlock(block, data, errorMsg) {
   if (!data.skipped) block.classList.add("expanded");
 }
 
-// ─── Ask-user widget ─────────────────────────────────────────────────────────
-// Maps questionId → { card, sessionId } so ask_user_cancel can collapse it.
-// Grouped entries instead look like { grouped: true, key, sessionId }.
-const pendingAskWidgets = new Map();
-// Maps `${sessionId} ${group}` → grouped-widget state so a burst of
-// related questions (e.g. install permissions) coalesces into one card.
-const pendingAskGroups = new Map();
+// ─── Ask-user wizard ─────────────────────────────────────────────────────────
+// Multiple pending ask_user questions for a session are presented as a single
+// multi-step "wizard" card in the pane's #ask-user-slot: a clickable step rail
+// at the top, one question body shown at a time, Back/Next navigation, and
+// auto-advance to the next unanswered step after each answer. A burst of
+// install-permission prompts (questions sharing a `group` tag) folds in as a
+// single step that applies one shared Allow/Deny scope to every member question.
+//
+// Each step is resolved server-side as soon as it is answered (so a long wizard
+// never lets early questions hit the 5-minute timeout); revisiting a resolved
+// step via the rail shows a read-only summary.
 
-// renderAskUserWidget creates an interactive card for a structured question.
-// Widgets are appended to a fixed slot just above the composer (#ask-user-slot)
-// and tagged with the owning session so we can show/hide them on session switch.
+// questionId → { sessionId } so a server-side ask_user_cancel can locate the
+// owning wizard + step.
+const pendingAskWidgets = new Map();
+// sessionId → wizard state { sessionId, row, card, steps, current, busy }.
+// Each step is either { type:"single", q, resolved, answer } or
+// { type:"group", group, questions:[], scopeIdx, resolved, cancelled }.
+const askWizards = new Map();
+
+// renderAskUserWidget routes a freshly-arrived question into its session's
+// wizard, creating the wizard card on first arrival.
 function renderAskUserWidget(sessionId, q) {
   const panel = panelsForSession(sessionId)[0];
   if (!panel) {
-    // No pane currently shows this session — queue it; bindSessionToPanel
-    // flushes the queue when the session is opened in a pane.
+    // No pane currently shows this session — queue it; bindSessionToPanel /
+    // activateTab flush the queue when the session is opened in a pane.
     const list = queuedAskWidgets.get(sessionId) || [];
     if (!list.some(x => x.question_id === q.question_id)) list.push(q);
     queuedAskWidgets.set(sessionId, list);
@@ -2150,33 +2161,152 @@ function renderAskUserWidget(sessionId, q) {
   const slot = panel.els.askSlot;
   if (!slot) return;
 
-  // Coalesce questions that carry a group tag (e.g. a burst of install
-  // permission prompts) into a single combined card instead of a stack of
-  // identical radio lists.
-  if (q.group) { addToAskGroup(panel, sessionId, slot, q); return; }
+  const wiz = ensureWizard(sessionId, slot);
+  const firstRender = wiz.steps.length === 0;
+  addQuestionToWizard(wiz, q);
+  pendingAskWidgets.set(q.question_id, { sessionId });
+  // Park the view on the first unanswered step. Don't yank the user off a step
+  // they're mid-answer on, so only re-home when the current step is unset or
+  // already resolved.
+  const curResolved = wiz.current == null || wiz.steps[wiz.current]?.resolved;
+  if (curResolved) {
+    const i = firstUnansweredStep(wiz);
+    if (i >= 0) wiz.current = i;
+  }
+  // When the active step is an unresolved single question already on screen,
+  // refresh only the rail so the user's in-progress input survives the arrival
+  // of a sibling question. Otherwise (first render, re-homed, or a group step
+  // whose item list changed) rebuild the card.
+  const cur = wiz.steps[wiz.current];
+  if (!firstRender && !curResolved && cur && !cur.resolved && cur.type === "single") {
+    refreshWizardRail(wiz);
+  } else {
+    renderWizard(wiz);
+  }
+  scrollBottom(panel);
+}
 
+// ensureWizard returns the session's wizard, creating its row/card in the slot
+// on first use.
+function ensureWizard(sessionId, slot) {
+  let wiz = askWizards.get(sessionId);
+  if (wiz && wiz.row.isConnected) return wiz;
   const row = document.createElement("div");
   row.className = "ask-user-row";
-  row.setAttribute("data-ask-id", q.question_id);
   row.setAttribute("data-session-id", sessionId);
-  row._askQ = q; // kept so the widget can be re-queued when its tab is hidden
-
   const card = document.createElement("div");
-  card.className = "ask-user-card";
+  card.className = "ask-user-card ask-wizard-card";
+  row.appendChild(card);
+  slot.appendChild(row);
+  wiz = { sessionId, row, card, steps: [], current: null, busy: false, _submit: null };
+  row._askWizard = wiz; // so a tab switch can requeue unanswered questions
+  // Enter activates the current step's primary action (submit, or advance on a
+  // resolved step). Wired once; the handler reads wiz._submit, which each render
+  // keeps pointed at the live action. Ignored inside a textarea / when Shift.
+  card.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (e.target && e.target.tagName === "TEXTAREA") return;
+    e.preventDefault();
+    if (wiz._submit) wiz._submit();
+  });
+  askWizards.set(sessionId, wiz);
+  return wiz;
+}
 
-  const promptEl = document.createElement("div");
-  promptEl.className = "ask-user-prompt";
-  if (typeof marked !== "undefined" && typeof marked.parse === "function") {
-    promptEl.innerHTML = marked.parse(q.prompt || "");
-  } else {
-    promptEl.textContent = q.prompt;
+// addQuestionToWizard appends a question as a new step, or merges it into an
+// existing group step when it carries a matching group tag.
+function addQuestionToWizard(wiz, q) {
+  if (q.group) {
+    let step = wiz.steps.find(s => s.type === "group" && s.group === q.group);
+    if (!step) {
+      step = { type: "group", group: q.group, questions: [], scopeIdx: 1, resolved: false, cancelled: false };
+      wiz.steps.push(step);
+    }
+    if (!step.questions.some(x => x.question_id === q.question_id)) step.questions.push(q);
+    return;
   }
-  card.appendChild(promptEl);
+  if (wiz.steps.some(s => s.type === "single" && s.q.question_id === q.question_id)) return;
+  wiz.steps.push({ type: "single", q, resolved: false, answer: null });
+}
 
+function firstUnansweredStep(wiz) {
+  return wiz.steps.findIndex(s => !s.resolved);
+}
+
+// stepWasSkipped reports whether a resolved step was cancelled/skipped (vs
+// answered), for the rail glyph and summary icon.
+function stepWasSkipped(step) {
+  if (step.type === "group") return !!step.cancelled;
+  return !!(step.answer && step.answer.cancelled);
+}
+
+// renderWizard rebuilds the wizard card: an optional step rail plus the active
+// step's body and navigation. The card element persists across renders (only
+// its children are replaced), so listeners wired in ensureWizard survive.
+function renderWizard(wiz) {
+  const { card, steps } = wiz;
+  while (card.lastChild) card.removeChild(card.lastChild);
+  if (steps.length === 0) return;
+  if (wiz.current == null || wiz.current < 0 || wiz.current >= steps.length) {
+    const i = firstUnansweredStep(wiz);
+    wiz.current = i >= 0 ? i : 0;
+  }
+
+  const rail = buildWizardRail(wiz);
+  if (rail) card.appendChild(rail);
+
+  const step = steps[wiz.current];
+  if (step.type === "group") renderGroupStepBody(wiz, step);
+  else renderSingleStepBody(wiz, step);
+}
+
+// buildWizardRail returns the clickable step rail element, or null when there
+// is only one step (a lone question reads like the old single card).
+function buildWizardRail(wiz) {
+  const { steps } = wiz;
+  if (steps.length <= 1) return null;
+  const rail = document.createElement("div");
+  rail.className = "ask-wizard-rail";
+  steps.forEach((s, i) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "ask-wizard-step";
+    if (i === wiz.current) chip.classList.add("is-current");
+    if (s.resolved) chip.classList.add("is-done");
+    chip.textContent = s.resolved ? (stepWasSkipped(s) ? "✗" : "✓") : String(i + 1);
+    chip.setAttribute("data-tip", stepTitle(s));
+    chip.addEventListener("click", () => { if (!wiz.busy) { wiz.current = i; renderWizard(wiz); } });
+    rail.appendChild(chip);
+  });
+  const count = document.createElement("span");
+  count.className = "ask-wizard-count";
+  const done = steps.filter(s => s.resolved).length;
+  count.textContent = "Step " + (wiz.current + 1) + " of " + steps.length + (done ? " · " + done + " done" : "");
+  rail.appendChild(count);
+  return rail;
+}
+
+// refreshWizardRail swaps just the rail in place, leaving the active step body
+// untouched — used when a new question lands while the user may be mid-answer
+// on the current step, so their typed input / selection survives.
+function refreshWizardRail(wiz) {
+  const existing = wiz.card.querySelector(":scope > .ask-wizard-rail");
+  const rail = buildWizardRail(wiz);
+  if (existing) {
+    if (rail) wiz.card.replaceChild(rail, existing);
+    else existing.remove();
+  } else if (rail) {
+    wiz.card.insertBefore(rail, wiz.card.firstChild);
+  }
+}
+
+// buildAskInput builds the per-kind input controls for a single question and
+// returns the fragment plus an answer getter and a preferred focus element.
+function buildAskInput(q) {
   const kind = q.kind;
   const choices = Array.isArray(q.choices) ? q.choices : [];
-
-  let getAnswer;
+  const el = document.createDocumentFragment();
+  let getAnswer, focusEl = null;
 
   if (kind === "single" || kind === "confirm") {
     const choicesDiv = document.createElement("div");
@@ -2185,7 +2315,7 @@ function renderAskUserWidget(sessionId, q) {
     // press Enter / click Submit to accept it.
     let selectedValue = (q.default && choices.includes(q.default)) ? q.default : null;
     const labels = [];
-    const paintSelection = () => labels.forEach(l =>
+    const paint = () => labels.forEach(l =>
       l.classList.toggle("is-selected", l.dataset.choice === selectedValue));
     choices.forEach(ch => {
       const label = document.createElement("label");
@@ -2195,15 +2325,15 @@ function renderAskUserWidget(sessionId, q) {
       radio.type = "radio";
       radio.name = "ask_" + q.question_id;
       radio.value = ch;
-      if (ch === selectedValue) radio.checked = true;
-      radio.addEventListener("change", () => { selectedValue = ch; paintSelection(); });
+      if (ch === selectedValue) { radio.checked = true; focusEl = radio; }
+      radio.addEventListener("change", () => { selectedValue = ch; paint(); });
       label.appendChild(radio);
       label.appendChild(document.createTextNode(ch));
       choicesDiv.appendChild(label);
       labels.push(label);
     });
-    paintSelection();
-    card.appendChild(choicesDiv);
+    paint();
+    el.appendChild(choicesDiv);
     getAnswer = () => selectedValue ? { selected: [selectedValue], text: "", cancelled: false } : null;
   } else if (kind === "multi") {
     const choicesDiv = document.createElement("div");
@@ -2220,22 +2350,21 @@ function renderAskUserWidget(sessionId, q) {
       label.appendChild(document.createTextNode(ch));
       choicesDiv.appendChild(label);
     });
-    card.appendChild(choicesDiv);
+    el.appendChild(choicesDiv);
     let textArea = null;
     if (q.allow_text) {
       textArea = document.createElement("textarea");
       textArea.className = "ask-user-text-input";
       textArea.placeholder = "Additional notes (optional)…";
-      card.appendChild(textArea);
+      el.appendChild(textArea);
     }
     getAnswer = () => {
       const sel = checkboxes.filter(c => c.checked).map(c => c.value);
       return { selected: sel, text: textArea ? textArea.value.trim() : "", cancelled: false };
     };
   } else {
-    // text — a password-typed question gets a single-line masked
-    // input; everything else gets the regular multi-line textarea so
-    // longer free-form answers stay comfortable.
+    // text — a password-typed question gets a single-line masked input;
+    // everything else gets the regular multi-line textarea.
     let inputEl;
     if (q.password) {
       inputEl = document.createElement("input");
@@ -2247,119 +2376,66 @@ function renderAskUserWidget(sessionId, q) {
     }
     inputEl.className = "ask-user-text-input";
     inputEl.placeholder = "Your answer…";
-    card.appendChild(inputEl);
+    el.appendChild(inputEl);
+    focusEl = inputEl;
     getAnswer = () => ({ selected: [], text: inputEl.value.trim(), cancelled: false });
   }
-
-  const actions = document.createElement("div");
-  actions.className = "ask-user-actions";
-
-  const cancelBtn = document.createElement("button");
-  cancelBtn.className = "ask-user-cancel-btn";
-  cancelBtn.textContent = "Skip";
-  actions.appendChild(cancelBtn);
-
-  const submitBtn = document.createElement("button");
-  submitBtn.className = "ask-user-submit";
-  submitBtn.textContent = "Submit";
-  actions.appendChild(submitBtn);
-
-  card.appendChild(actions);
-  row.appendChild(card);
-  slot.appendChild(row);
-  pendingAskWidgets.set(q.question_id, { row, card, sessionId });
-  scrollBottom(panel);
-  // Give the card focus so the keydown handler catches Enter without a prior
-  // click — but only when its pane is focused, so we don't yank focus away
-  // from a pane the user is actively typing in.
-  if (focusedPanelId === panel.id) {
-    const checked = card.querySelector("input[type=radio]:checked");
-    (checked || submitBtn).focus();
-  }
-
-  function resolveWidget(answer) {
-    pendingAskWidgets.delete(q.question_id);
-    card.classList.add("resolved");
-    row.classList.add("resolved");
-    // Replace interactive content with a summary.
-    while (card.lastChild) card.removeChild(card.lastChild);
-    const icon = answer.cancelled ? "✗" : "✓";
-    // For password questions the entered value is a secret — never echo
-    // it back to the transcript. We still show that an answer was given
-    // so the conversation history stays coherent.
-    const maskText = t => q.password && t ? "••••••••" : t;
-    let summary;
-    if (answer.cancelled) {
-      summary = "skipped";
-    } else if (answer.selected && answer.selected.length) {
-      summary = answer.selected.join(", ");
-      if (answer.text) summary += " — " + maskText(answer.text);
-    } else {
-      summary = maskText(answer.text) || "(empty)";
-    }
-    const resolved = document.createElement("div");
-    resolved.className = "ask-user-resolved-text";
-    resolved.textContent = icon + " " + summary;
-    card.appendChild(resolved);
-    // Move out of the bottom slot into the transcript so it scrolls as history.
-    const container = getContainer(sessionId);
-    if (container) container.appendChild(row);
-    scrollBottom(panel);
-  }
-
-  submitBtn.addEventListener("click", async () => {
-    const answer = getAnswer();
-    if (!answer) return;
-    submitBtn.disabled = true;
-    cancelBtn.disabled = true;
-    try {
-      const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${q.question_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(answer),
-      });
-      if (res.ok) resolveWidget(answer);
-      else submitBtn.disabled = false;
-    } catch { submitBtn.disabled = false; }
-  });
-
-  cancelBtn.addEventListener("click", async () => {
-    submitBtn.disabled = true;
-    cancelBtn.disabled = true;
-    const answer = { selected: [], text: "", cancelled: true };
-    try {
-      const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${q.question_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(answer),
-      });
-      if (res.ok) resolveWidget(answer);
-      else { submitBtn.disabled = false; cancelBtn.disabled = false; }
-    } catch { submitBtn.disabled = false; cancelBtn.disabled = false; }
-  });
-
-  // Enter submits the (pre-selected) answer so a defaulted prompt can be
-  // accepted with a single keypress. Ignored inside a multi-line textarea
-  // (where Enter inserts a newline) and when Shift is held.
-  card.addEventListener("keydown", e => {
-    if (e.key !== "Enter" || e.shiftKey) return;
-    if (e.target && e.target.tagName === "TEXTAREA") return;
-    e.preventDefault();
-    if (!submitBtn.disabled) submitBtn.click();
-  });
+  return { el, getAnswer, focusEl };
 }
 
-// ─── Grouped ask-user widget (install bursts) ────────────────────────────────
-// Friendly plural labels per item kind for the grouped install card.
+// renderSingleStepBody renders one ordinary question step (its prompt + inputs,
+// or a read-only summary when already resolved) into the wizard card.
+function renderSingleStepBody(wiz, step) {
+  const { card } = wiz;
+  const q = step.q;
+
+  const promptEl = document.createElement("div");
+  promptEl.className = "ask-user-prompt";
+  if (typeof marked !== "undefined" && typeof marked.parse === "function") {
+    promptEl.innerHTML = marked.parse(q.prompt || "");
+  } else {
+    promptEl.textContent = q.prompt;
+  }
+  card.appendChild(promptEl);
+
+  if (step.resolved) {
+    appendStepSummary(card, step);
+    appendWizardNav(wiz, { canSubmit: false });
+    return;
+  }
+
+  const input = buildAskInput(q);
+  card.appendChild(input.el);
+
+  const nav = appendWizardNav(wiz, {
+    canSubmit: true,
+    skipLabel: "Skip",
+    onSkip: () => submitSingleStep(wiz, step, { selected: [], text: "", cancelled: true }),
+    onSubmit: () => {
+      const answer = input.getAnswer();
+      if (answer) submitSingleStep(wiz, step, answer);
+    },
+  });
+
+  // Focus the selected radio / text input (or the primary button) so Enter
+  // works without a prior click — only when this pane is focused.
+  const panel = panelsForSession(wiz.sessionId)[0];
+  if (panel && focusedPanelId === panel.id) {
+    (input.focusEl || nav.submitBtn || card).focus();
+  }
+}
+
+// ─── Wizard: group step (install bursts) ─────────────────────────────────────
+// Friendly plural labels per item kind for the grouped install step.
 const ASK_GROUP_KIND_LABELS = {
   skill: "Skills", agent: "Agents", mcp: "MCP servers", squad: "Squads",
   a2a: "A2A agents", command: "Commands", permission: "Permission rule-sets",
   item: "Items",
 };
 
-// The five permission scopes, positional in every question's `choices` array
-// ([Deny, allow-once, allow-tool-session, allow-project, allow-always]). A
-// grouped decision picks one index and applies it to every member question.
+// The five permission scopes, positional in every grouped question's `choices`
+// array ([Deny, allow-once, allow-tool-session, allow-project, allow-always]).
+// A grouped step picks one index and applies it to every member question.
 const ASK_GROUP_SCOPES = [
   { idx: 0, label: "Deny all" },
   { idx: 1, label: "Allow once" },
@@ -2368,44 +2444,26 @@ const ASK_GROUP_SCOPES = [
   { idx: 4, label: "Allow always" },
 ];
 
-function askGroupKey(sessionId, group) { return sessionId + " " + group; }
+// renderGroupStepBody renders an install-burst step: a "what will be installed"
+// list grouped by kind plus one shared set of scope choices (or a read-only
+// summary when already resolved).
+function renderGroupStepBody(wiz, step) {
+  const { card } = wiz;
+  const questions = step.questions;
 
-// addToAskGroup buffers a grouped question into a single shared card, creating
-// the card on first arrival and re-rendering it as more questions land.
-function addToAskGroup(panel, sessionId, slot, q) {
-  const key = askGroupKey(sessionId, q.group);
-  let grp = pendingAskGroups.get(key);
-  if (!grp) {
-    const row = document.createElement("div");
-    row.className = "ask-user-row";
-    row.setAttribute("data-session-id", sessionId);
-    const card = document.createElement("div");
-    card.className = "ask-user-card ask-group-card";
-    row.appendChild(card);
-    slot.appendChild(row);
-    grp = { key, sessionId, row, card, questions: [], scopeIdx: 1, busy: false };
-    row._askGroup = grp; // so a tab switch can requeue every member question
-    pendingAskGroups.set(key, grp);
-  }
-  if (!grp.questions.some(x => x.question_id === q.question_id)) grp.questions.push(q);
-  pendingAskWidgets.set(q.question_id, { grouped: true, key, sessionId });
-  renderAskGroupCard(grp);
-  scrollBottom(panel);
-}
-
-// renderAskGroupCard rebuilds the grouped card body: a "what will be installed"
-// list grouped by kind, plus one shared set of scope choices.
-function renderAskGroupCard(grp) {
-  const { card, questions } = grp;
-  while (card.lastChild) card.removeChild(card.lastChild);
-
-  const n = questions.length;
   const title = document.createElement("div");
   title.className = "ask-user-prompt";
   const strong = document.createElement("strong");
+  const n = questions.length;
   strong.textContent = "Install " + n + " item" + (n === 1 ? "" : "s") + "?";
   title.appendChild(strong);
   card.appendChild(title);
+
+  if (step.resolved) {
+    appendStepSummary(card, step);
+    appendWizardNav(wiz, { canSubmit: false });
+    return;
+  }
 
   // Group by kind, preserving first-seen order.
   const byKind = new Map();
@@ -2447,17 +2505,17 @@ function renderAskGroupCard(grp) {
   choicesDiv.className = "ask-user-choices";
   const labels = [];
   const paint = () => labels.forEach(l =>
-    l.classList.toggle("is-selected", Number(l.dataset.idx) === grp.scopeIdx));
+    l.classList.toggle("is-selected", Number(l.dataset.idx) === step.scopeIdx));
   ASK_GROUP_SCOPES.forEach(s => {
     const label = document.createElement("label");
     label.className = "ask-user-choice";
     label.dataset.idx = String(s.idx);
     const radio = document.createElement("input");
     radio.type = "radio";
-    radio.name = "askgrp_" + grp.key;
+    radio.name = "askgrp_" + wiz.sessionId + "_" + step.group;
     radio.value = String(s.idx);
-    if (s.idx === grp.scopeIdx) radio.checked = true;
-    radio.addEventListener("change", () => { grp.scopeIdx = s.idx; paint(); });
+    if (s.idx === step.scopeIdx) radio.checked = true;
+    radio.addEventListener("change", () => { step.scopeIdx = s.idx; paint(); });
     label.appendChild(radio);
     label.appendChild(document.createTextNode(s.label));
     choicesDiv.appendChild(label);
@@ -2466,121 +2524,249 @@ function renderAskGroupCard(grp) {
   paint();
   card.appendChild(choicesDiv);
 
-  const actions = document.createElement("div");
-  actions.className = "ask-user-actions";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.className = "ask-user-cancel-btn";
-  cancelBtn.textContent = "Skip all";
-  actions.appendChild(cancelBtn);
-  const submitBtn = document.createElement("button");
-  submitBtn.className = "ask-user-submit";
-  submitBtn.textContent = "Submit";
-  actions.appendChild(submitBtn);
-  card.appendChild(actions);
-
-  submitBtn.addEventListener("click", () => resolveAskGroup(grp, false));
-  cancelBtn.addEventListener("click", () => resolveAskGroup(grp, true));
-  card.addEventListener("keydown", e => {
-    if (e.key !== "Enter" || e.shiftKey) return;
-    if (e.target && e.target.tagName === "TEXTAREA") return;
-    e.preventDefault();
-    if (!submitBtn.disabled) submitBtn.click();
+  appendWizardNav(wiz, {
+    canSubmit: true,
+    skipLabel: "Skip all",
+    onSkip: () => submitGroupStep(wiz, step, true),
+    onSubmit: () => submitGroupStep(wiz, step, false),
   });
 }
 
-// resolveAskGroup resolves every member question with the shared scope (or
-// cancels them all), then collapses the card. Questions whose POST fails are
-// kept so the user can retry.
-async function resolveAskGroup(grp, cancelled) {
-  if (grp.busy) return;
-  grp.busy = true;
-  const qs = grp.questions.slice();
+// ─── Wizard: navigation, submission, finalization ────────────────────────────
+
+// appendWizardNav appends the Back / Skip / Next-or-Submit action row for the
+// current step. For an already-resolved step (canSubmit:false) it offers only
+// Back / Next navigation. Returns { submitBtn } for focus.
+function appendWizardNav(wiz, opts) {
+  const { steps, current: i } = wiz;
+  const actions = document.createElement("div");
+  actions.className = "ask-user-actions";
+
+  if (i > 0) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "ask-user-cancel-btn ask-wizard-back";
+    back.textContent = "← Back";
+    back.addEventListener("click", () => { if (!wiz.busy) { wiz.current = i - 1; renderWizard(wiz); } });
+    actions.appendChild(back);
+  }
+
+  let submitBtn = null;
+  if (opts.canSubmit) {
+    const skip = document.createElement("button");
+    skip.type = "button";
+    skip.className = "ask-user-cancel-btn";
+    skip.textContent = opts.skipLabel || "Skip";
+    skip.addEventListener("click", () => { if (!wiz.busy) opts.onSkip(); });
+    actions.appendChild(skip);
+
+    submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "ask-user-submit";
+    // "Next →" while any other step is still unanswered, otherwise "Submit".
+    const moreUnanswered = steps.some((s, j) => j !== i && !s.resolved);
+    submitBtn.textContent = moreUnanswered ? "Next →" : "Submit";
+    submitBtn.addEventListener("click", () => { if (!wiz.busy) opts.onSubmit(); });
+    actions.appendChild(submitBtn);
+    wiz._submit = () => { if (!wiz.busy && !submitBtn.disabled) opts.onSubmit(); };
+  } else if (i < steps.length - 1) {
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "ask-user-submit";
+    next.textContent = "Next →";
+    next.addEventListener("click", () => { if (!wiz.busy) { wiz.current = i + 1; renderWizard(wiz); } });
+    actions.appendChild(next);
+    wiz._submit = () => { if (!wiz.busy) { wiz.current = i + 1; renderWizard(wiz); } };
+  } else {
+    wiz._submit = null;
+  }
+
+  wiz.card.appendChild(actions);
+  return { submitBtn };
+}
+
+// resolveQuestion POSTs one answer; returns true on success.
+async function resolveQuestion(sessionId, questionId, answer) {
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${questionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(answer),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+// setWizardBusy disables/enables every button in the card during an in-flight POST.
+function setWizardBusy(wiz, busy) {
+  wiz.busy = busy;
+  wiz.card.querySelectorAll("button").forEach(b => { b.disabled = busy; });
+}
+
+// submitSingleStep resolves an ordinary step's question, then advances.
+async function submitSingleStep(wiz, step, answer) {
+  if (wiz.busy) return;
+  setWizardBusy(wiz, true);
+  const ok = await resolveQuestion(wiz.sessionId, step.q.question_id, answer);
+  setWizardBusy(wiz, false);
+  if (!ok) return; // leave the step editable so the user can retry
+  pendingAskWidgets.delete(step.q.question_id);
+  step.resolved = true;
+  step.answer = answer;
+  afterStepResolved(wiz);
+}
+
+// submitGroupStep resolves every member of a group step with the shared scope
+// (or cancels them all), then advances. Members whose POST fails are kept.
+async function submitGroupStep(wiz, step, cancelled) {
+  if (wiz.busy) return;
+  setWizardBusy(wiz, true);
+  const qs = step.questions.slice();
   const results = await Promise.all(qs.map(q => {
     let answer;
     if (cancelled) {
       answer = { selected: [], text: "", cancelled: true };
     } else {
       const choices = Array.isArray(q.choices) ? q.choices : [];
-      const choice = choices[grp.scopeIdx];
+      const choice = choices[step.scopeIdx];
       if (!choice) return Promise.resolve({ q, ok: false });
       answer = { selected: [choice], text: "", cancelled: false };
     }
-    return apiFetch(`/api/sessions/${grp.sessionId}/ask-user/${q.question_id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(answer),
-    }).then(res => ({ q, ok: res.ok })).catch(() => ({ q, ok: false }));
+    return resolveQuestion(wiz.sessionId, q.question_id, answer).then(ok => ({ q, ok }));
   }));
+  setWizardBusy(wiz, false);
   for (const r of results) if (r.ok) pendingAskWidgets.delete(r.q.question_id);
   const failed = results.filter(r => !r.ok).map(r => r.q);
   if (failed.length === 0) {
-    finalizeAskGroup(grp, cancelled, qs.length);
+    step.resolved = true;
+    step.cancelled = cancelled;
+    step.resolvedCount = qs.length;
+    afterStepResolved(wiz);
   } else {
-    grp.questions = failed;
-    grp.busy = false;
-    renderAskGroupCard(grp);
+    step.questions = failed;
+    renderWizard(wiz);
   }
 }
 
-// finalizeAskGroup collapses a fully-resolved group to a one-line summary and
-// moves it into the transcript so it scrolls as history.
-function finalizeAskGroup(grp, cancelled, count) {
-  pendingAskGroups.delete(grp.key);
-  for (const q of grp.questions) pendingAskWidgets.delete(q.question_id);
-  const { row, card, sessionId } = grp;
+// afterStepResolved moves to the next unanswered step, or finalizes the wizard
+// when every step is resolved.
+function afterStepResolved(wiz) {
+  const next = firstUnansweredStep(wiz);
+  if (next < 0) { finalizeWizard(wiz); return; }
+  wiz.current = next;
+  renderWizard(wiz);
+  const panel = panelsForSession(wiz.sessionId)[0];
+  if (panel) scrollBottom(panel);
+}
+
+// appendStepSummary appends a resolved step's one-line summary.
+function appendStepSummary(card, step) {
+  const resolved = document.createElement("div");
+  resolved.className = "ask-user-resolved-text";
+  resolved.textContent = stepSummaryText(step);
+  card.appendChild(resolved);
+}
+
+// stepSummaryText renders the read-only summary line for a resolved step.
+function stepSummaryText(step) {
+  if (step.type === "group") {
+    const count = step.resolvedCount != null ? step.resolvedCount : step.questions.length;
+    const noun = "install" + (count === 1 ? "" : "s");
+    if (step.cancelled) return "✗ skipped " + count + " " + noun;
+    const scope = ASK_GROUP_SCOPES.find(s => s.idx === step.scopeIdx);
+    return "✓ " + (scope ? scope.label : "submitted") + " — " + count + " " + noun;
+  }
+  const q = step.q, a = step.answer || {};
+  // Never echo a password answer back to the transcript.
+  const maskText = t => q.password && t ? "••••••••" : t;
+  if (a.cancelled) return "✗ skipped";
+  let summary;
+  if (a.selected && a.selected.length) {
+    summary = a.selected.join(", ");
+    if (a.text) summary += " — " + maskText(a.text);
+  } else {
+    summary = maskText(a.text) || "(empty)";
+  }
+  return "✓ " + summary;
+}
+
+// stepTitle is the rail-chip tooltip: the question prompt (plain-ish, truncated)
+// or a label for a group step.
+function stepTitle(step) {
+  if (step.type === "group") {
+    const n = step.questions.length;
+    return "Install " + n + " item" + (n === 1 ? "" : "s");
+  }
+  const t = (step.q.prompt || "").replace(/[#*_`>\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return "Question";
+  return t.length > 80 ? t.slice(0, 80) + "…" : t;
+}
+
+// finalizeWizard collapses a fully-resolved wizard to a stacked per-step summary
+// and moves it into the transcript so it scrolls as history.
+function finalizeWizard(wiz) {
+  askWizards.delete(wiz.sessionId);
+  for (const step of wiz.steps) {
+    if (step.type === "group") { for (const q of step.questions) pendingAskWidgets.delete(q.question_id); }
+    else pendingAskWidgets.delete(step.q.question_id);
+  }
+  const { row, card, sessionId } = wiz;
   card.classList.add("resolved");
   row.classList.add("resolved");
   while (card.lastChild) card.removeChild(card.lastChild);
-  const scope = ASK_GROUP_SCOPES.find(s => s.idx === grp.scopeIdx);
-  const noun = "install" + (count === 1 ? "" : "s");
-  const resolved = document.createElement("div");
-  resolved.className = "ask-user-resolved-text";
-  resolved.textContent = cancelled
-    ? "✗ skipped " + count + " " + noun
-    : "✓ " + (scope ? scope.label : "submitted") + " — " + count + " " + noun;
-  card.appendChild(resolved);
+  for (const step of wiz.steps) {
+    const line = document.createElement("div");
+    line.className = "ask-user-resolved-text";
+    line.textContent = stepSummaryText(step);
+    card.appendChild(line);
+  }
   const container = getContainer(sessionId);
   if (container) container.appendChild(row);
+  const panel = panelsForSession(sessionId)[0];
+  if (panel) scrollBottom(panel);
 }
 
-// cancelAskUserWidget collapses a pending widget when the server cancels the question.
+// cancelAskUserWidget handles a server-side ask_user_cancel: it marks the owning
+// step resolved/skipped and either re-renders or finalizes the wizard.
 function cancelAskUserWidget(questionId) {
   const entry = pendingAskWidgets.get(questionId);
   if (!entry) return;
   pendingAskWidgets.delete(questionId);
-  // Grouped member: drop it from its group; collapse the card only once the
-  // whole group has been cancelled server-side.
-  if (entry.grouped) {
-    const grp = pendingAskGroups.get(entry.key);
-    if (!grp) return;
-    grp.questions = grp.questions.filter(q => q.question_id !== questionId);
-    if (grp.questions.length === 0) {
-      pendingAskGroups.delete(grp.key);
-      grp.card.classList.add("resolved");
-      grp.row.classList.add("resolved");
-      while (grp.card.lastChild) grp.card.removeChild(grp.card.lastChild);
-      const resolved = document.createElement("div");
-      resolved.className = "ask-user-resolved-text";
-      resolved.textContent = "✗ cancelled";
-      grp.card.appendChild(resolved);
-      const container = getContainer(grp.sessionId);
-      if (container) container.appendChild(grp.row);
-    } else if (!grp.busy) {
-      renderAskGroupCard(grp);
+  const wiz = askWizards.get(entry.sessionId);
+  if (!wiz) return;
+  for (const step of wiz.steps) {
+    if (step.resolved) continue;
+    if (step.type === "single" && step.q.question_id === questionId) {
+      step.resolved = true;
+      step.answer = { selected: [], text: "", cancelled: true };
+      afterServerCancel(wiz);
+      return;
     }
-    return;
+    if (step.type === "group") {
+      const idx = step.questions.findIndex(q => q.question_id === questionId);
+      if (idx >= 0) {
+        step.questions.splice(idx, 1);
+        if (step.questions.length === 0) {
+          step.resolved = true;
+          step.cancelled = true;
+          step.resolvedCount = 0;
+        }
+        afterServerCancel(wiz);
+        return;
+      }
+    }
   }
-  const { row, card, sessionId } = entry;
-  card.classList.add("resolved");
-  row.classList.add("resolved");
-  while (card.lastChild) card.removeChild(card.lastChild);
-  const resolved = document.createElement("div");
-  resolved.className = "ask-user-resolved-text";
-  resolved.textContent = "✗ cancelled";
-  card.appendChild(resolved);
-  // Move out of the bottom slot into the transcript so it scrolls as history.
-  const container = getContainer(sessionId);
-  if (container) container.appendChild(row);
+}
+
+// afterServerCancel re-homes the view onto the first unanswered step (or
+// finalizes when none remain) without clobbering an in-flight submit.
+function afterServerCancel(wiz) {
+  if (firstUnansweredStep(wiz) < 0) { finalizeWizard(wiz); return; }
+  if (wiz.steps[wiz.current]?.resolved) {
+    const i = firstUnansweredStep(wiz);
+    if (i >= 0) wiz.current = i;
+  }
+  if (!wiz.busy) renderWizard(wiz);
 }
 
 // formatTeammateResponse returns a human-readable string for a teammate tool
@@ -2876,9 +3062,7 @@ async function deleteSession(id, li) {
     for (const [qid, entry] of pendingAskWidgets) {
       if (entry.sessionId === id) pendingAskWidgets.delete(qid);
     }
-    for (const [k, grp] of pendingAskGroups) {
-      if (grp.sessionId === id) pendingAskGroups.delete(k);
-    }
+    askWizards.delete(id);
     queuedAskWidgets.delete(id);
     // Close the session's tab in every pane that held it.
     closeTabEverywhere(id);
@@ -3064,20 +3248,20 @@ async function activateTab(panel, key) {
     for (const row of [...slot.children]) {
       const sid = row.getAttribute("data-session-id");
       if (!sid || sid === id) continue;
-      if (row._askGroup) {
-        // A grouped card requeues every member question, then is torn down so
-        // re-selecting the tab rebuilds it from the queue.
+      if (row._askWizard) {
+        // A wizard requeues every still-unanswered question, then is torn down
+        // so re-selecting the tab rebuilds a fresh wizard from the queue.
+        const wiz = row._askWizard;
         const list = queuedAskWidgets.get(sid) || [];
-        for (const q of row._askGroup.questions) {
-          if (!list.some(x => x.question_id === q.question_id)) list.push(q);
+        for (const step of wiz.steps) {
+          if (step.resolved) continue;
+          const qs = step.type === "group" ? step.questions : [step.q];
+          for (const q of qs) {
+            if (!list.some(x => x.question_id === q.question_id)) list.push(q);
+          }
         }
         queuedAskWidgets.set(sid, list);
-        pendingAskGroups.delete(row._askGroup.key);
-        row.remove();
-      } else if (row._askQ) {
-        const list = queuedAskWidgets.get(sid) || [];
-        if (!list.some(x => x.question_id === row._askQ.question_id)) list.push(row._askQ);
-        queuedAskWidgets.set(sid, list);
+        askWizards.delete(sid);
         row.remove();
       }
     }
