@@ -676,17 +676,27 @@ working directory" below): navigating the panel changes where the agent's
   [server/server.go](server/server.go)): `GET /api/sessions/:id/folder` →
   `{dir, entries:[{name,dir}]}` lists the session's current cwd (dirs first,
   then files, case-insensitive alphabetical; symlinked dirs resolved via
-  `os.Stat`); `POST /api/sessions/:id/folder` `{path}` resolves `path` against
-  the cwd (relative joined, absolute as-is, `..` walks up), validates it is a
-  directory, calls `bashCwd.set`, and returns the new listing. Read-only host
-  file access, same trust model as the `!` shell-escape and `GET /api/file`.
+  `os.Stat`). `GET …/folder?sub=<rel>` lists a sub-directory relative to the
+  cwd **without mutating** it (the tree-expansion path — returns that sub-dir's
+  `{dir, entries}`). `POST …/folder` `{path}` resolves `path` against the cwd
+  (relative joined, absolute as-is, `..` walks up), validates it is a directory,
+  calls `bashCwd.set`, and returns the new listing. Read-only host file access,
+  same trust model as the `!` shell-escape and `GET /api/file`.
 - **Client** ([web/app.js](web/app.js), styled in [web/css/styles.css](web/css/styles.css)):
   `loadFolder(path)` GETs (no `path`) or POSTs (with `path`) and `renderFolder`
-  paints the path header plus a `..` entry (hidden at filesystem root), then
-  directory rows (click → `loadFolder(name)`) and file rows (click →
-  `openFileRef` opens via `GET /api/file` in a new tab). `refreshFoldersPanel`
-  reloads when the panel is open; called from `setFocusedPanel` (active-session
-  change) and after a `!cd` mutates the cwd.
+  paints the path header plus a `..` entry (hidden at filesystem root), then a
+  **lazy expand/collapse tree** built by `buildFolderEntry(entry, rel)` (each
+  entry's clickable `.folder-entry-row` div plus, for dirs, a nested
+  `ul.folder-children`). Click discrimination is via `wireClickDblClick(el,
+  single, double)` (a ~220 ms timer the `dblclick` cancels):
+  **directory** — single click `toggleFolderExpand`s it in place (lazy-fetches
+  children via `GET …/folder?sub=<rel>`, cached with `li.dataset.loaded`),
+  double click `loadFolder(rel)` navigates into it (mutates cwd);
+  **file** — single click does nothing, double click `insertFileRef(rel)`
+  inserts `@<rel>` into the focused pane's composer at the caret (space-padded,
+  fires `input` to refresh ref highlight). `refreshFoldersPanel` reloads when the
+  panel is open; called from `setFocusedPanel` (active-session change) and after
+  a `!cd` mutates the cwd.
 
 ### Per-session tool working directory
 

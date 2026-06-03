@@ -601,7 +601,14 @@ body.resizing #sidebar { transition: none; }
   overflow-y: auto;
   max-height: 32vh;
 }
-#folders-list li {
+#folders-list ul.folder-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px; /* indent each nesting level */
+}
+/* The clickable row: a div inside each entry <li> (and the lone ".." <li>). */
+#folders-list .folder-entry-row,
+#folders-list li.folder-up {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -614,16 +621,33 @@ body.resizing #sidebar { transition: none; }
   white-space: nowrap;
   overflow: hidden;
   transition: background 0.1s, color 0.1s;
+  user-select: none;
 }
-#folders-list li:hover { background: var(--bg-raised); color: var(--text); }
-#folders-list li .folder-entry-icon { flex-shrink: 0; color: var(--text-faint); }
-#folders-list li:hover .folder-entry-icon { color: var(--text); }
-#folders-list li .folder-entry-name {
+#folders-list .folder-entry-row:hover,
+#folders-list li.folder-up:hover { background: var(--bg-raised); color: var(--text); }
+#folders-list .folder-entry-icon { flex-shrink: 0; color: var(--text-faint); }
+#folders-list .folder-entry-row:hover .folder-entry-icon,
+#folders-list li.folder-up:hover .folder-entry-icon { color: var(--text); }
+#folders-list .folder-entry-name {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+#folders-list .folder-chevron,
+#folders-list .folder-chevron-spacer {
+  flex-shrink: 0;
+  width: 10px;
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-faint);
+}
 #folders-list li.folder-up { color: var(--text-faint); }
-#folders-list li.folder-file { cursor: default; }
+#folders-list li.folder-file > .folder-entry-row { cursor: default; }
+#folders-list li.folder-loading {
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
 #folders-empty {
   padding: 4px 12px 8px;
   font-size: 12px;

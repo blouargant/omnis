@@ -125,6 +125,20 @@ func handleFolder(d serverDeps) gin.HandlerFunc {
 				bashCwd.set(id, dir)
 				d.Registry.Touch(id)
 			}
+		} else if sub := strings.TrimSpace(c.Query("sub")); sub != "" {
+			// Tree expansion: list a sub-directory relative to the cwd WITHOUT
+			// mutating the session's working directory.
+			target := sub
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(dir, target)
+			}
+			target = filepath.Clean(target)
+			info, err := os.Stat(target)
+			if err != nil || !info.IsDir() {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "not a directory"})
+				return
+			}
+			dir = target
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {

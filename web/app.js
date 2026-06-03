@@ -5155,9 +5155,112 @@ async function loadFolder(path) {
   }
 }
 
-// renderFolder paints the path header and the entry list ("..", dirs, files).
-// Clicking a directory (or "..") navigates into it via loadFolder(path); files
-// open in a new tab through the read-only /api/file route.
+// Entry icons for the Folders tree (module scope so the recursive entry builder
+// can reuse them).
+const FOLDER_SVG = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+const FOLDER_FILE_SVG = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+const FOLDER_UP_SVG = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></svg>`;
+
+// wireClickDblClick distinguishes a single click from a double click on el.
+// A single click is delayed briefly; a double click cancels the pending single
+// and fires the double handler instead.
+function wireClickDblClick(el, single, double) {
+  let timer = null;
+  el.addEventListener("click", () => {
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; single(); }, 220);
+  });
+  el.addEventListener("dblclick", () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    double();
+  });
+}
+
+// insertFileRef inserts an "@path/to/file" reference into the focused pane's
+// composer at the caret, padding with spaces so it stays a valid file ref.
+function insertFileRef(rel) {
+  const panel = focusedPanel();
+  if (!panel || !panel.els || !panel.els.prompt) return;
+  const el = panel.els.prompt;
+  const ref = "@" + rel;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  const before = el.value.slice(0, start);
+  const after = el.value.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const trail = after && !/^\s/.test(after) ? " " : (after ? "" : " ");
+  const insert = lead + ref + trail;
+  el.value = before + insert + after;
+  const caret = before.length + insert.length;
+  el.setSelectionRange(caret, caret);
+  el.focus();
+  el.dispatchEvent(new Event("input")); // refresh ref highlight + auto-grow
+}
+
+// buildFolderEntry builds one <li> for the Folders tree. Directories carry a
+// collapsible nested <ul> (lazy-loaded on first expand) and respond to a single
+// click with expand/collapse, a double click with "navigate into" (mutates the
+// session cwd). Files do nothing on single click and insert an "@rel" reference
+// on double click. `rel` is the path of this entry relative to the session cwd.
+function buildFolderEntry(e, rel) {
+  const li = document.createElement("li");
+  li.className = e.dir ? "folder-dir" : "folder-file";
+  const row = document.createElement("div");
+  row.className = "folder-entry-row";
+  const chevron = e.dir
+    ? `<span class="folder-chevron">▸</span>`
+    : `<span class="folder-chevron-spacer"></span>`;
+  row.innerHTML = `${chevron}${e.dir ? FOLDER_SVG : FOLDER_FILE_SVG}<span class="folder-entry-name"></span>`;
+  row.querySelector(".folder-entry-name").textContent = e.name;
+  row.setAttribute("data-tip", e.name);
+  li.appendChild(row);
+
+  if (e.dir) {
+    const children = document.createElement("ul");
+    children.className = "folder-children";
+    children.hidden = true;
+    li.appendChild(children);
+    wireClickDblClick(row,
+      () => toggleFolderExpand(li, row, children, rel),
+      () => loadFolder(rel));
+  } else {
+    wireClickDblClick(row, () => {}, () => insertFileRef(rel));
+  }
+  return li;
+}
+
+// toggleFolderExpand expands or collapses a directory <li> in the Folders tree,
+// lazily fetching its children (via the non-mutating ?sub= listing) on first
+// open.
+async function toggleFolderExpand(li, row, children, rel) {
+  const expanded = li.classList.toggle("expanded");
+  const chev = row.querySelector(".folder-chevron");
+  if (chev) chev.textContent = expanded ? "▾" : "▸";
+  if (!expanded) { children.hidden = true; return; }
+  children.hidden = false;
+  if (li.dataset.loaded === "1") return;
+  const sessionId = activeSessionId;
+  if (!sessionId) return;
+  children.innerHTML = `<li class="folder-loading">…</li>`;
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/folder?sub=${encodeURIComponent(rel)}`);
+    const data = await res.json();
+    children.innerHTML = "";
+    if (!res.ok) { children.innerHTML = `<li class="folder-loading">${escHtml(data.error || "error")}</li>`; return; }
+    for (const ce of (data.entries || [])) {
+      children.appendChild(buildFolderEntry(ce, rel + "/" + ce.name));
+    }
+    if (!children.children.length) children.innerHTML = `<li class="folder-loading">empty</li>`;
+    li.dataset.loaded = "1";
+  } catch {
+    children.innerHTML = `<li class="folder-loading">error</li>`;
+  }
+}
+
+// renderFolder paints the path header and the entry tree ("..", dirs, files).
+// Single-click a directory to expand/collapse it in place, double-click to
+// navigate into it (loadFolder mutates the session cwd). Single-click a file
+// does nothing; double-click inserts an "@path" reference into the composer.
 function renderFolder(data, err) {
   els.foldersList.innerHTML = "";
   if (!data) {
@@ -5175,31 +5278,17 @@ function renderFolder(data, err) {
   els.foldersPath.textContent = "‎" + foldersDir;
   els.foldersPath.setAttribute("data-tip", foldersDir);
 
-  const folderSvg = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
-  const fileSvg = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-  const upSvg = `<svg class="folder-entry-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></svg>`;
-
   // Parent ".." unless we're at the filesystem root.
   if (foldersDir && foldersDir !== "/") {
     const up = document.createElement("li");
     up.className = "folder-up";
-    up.innerHTML = `${upSvg}<span class="folder-entry-name">..</span>`;
+    up.innerHTML = `${FOLDER_UP_SVG}<span class="folder-entry-name">..</span>`;
     up.addEventListener("click", () => loadFolder(".."));
     els.foldersList.appendChild(up);
   }
 
   for (const e of (data.entries || [])) {
-    const li = document.createElement("li");
-    li.className = e.dir ? "folder-dir" : "folder-file";
-    li.innerHTML = `${e.dir ? folderSvg : fileSvg}<span class="folder-entry-name"></span>`;
-    li.querySelector(".folder-entry-name").textContent = e.name;
-    li.setAttribute("data-tip", e.name);
-    if (e.dir) {
-      li.addEventListener("click", () => loadFolder(e.name));
-    } else {
-      li.addEventListener("click", () => openFileRef(e.name, activeSessionId));
-    }
-    els.foldersList.appendChild(li);
+    els.foldersList.appendChild(buildFolderEntry(e, e.name));
   }
   if (!els.foldersList.children.length) {
     const li = document.createElement("li");
