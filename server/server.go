@@ -371,6 +371,89 @@ func newEngine(d serverDeps) *gin.Engine {
 			}
 		}
 	})
+
+	// GET /api/events — a SINGLE multiplexed SSE stream carrying push events for
+	// every session, each tagged with its session_id. The browser opens this
+	// once instead of one /sessions/:id/events connection per open session,
+	// which would otherwise exhaust the browser's ~6-per-host HTTP/1.1
+	// connection limit and stall all further requests once enough sessions are
+	// open. Delivers the same events as the per-session route (mailbox_push +
+	// ask_user / ask_user_cancel), plus a connect-time replay of every pending
+	// ask_user question.
+	auth.GET("/events", func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("Connection", "keep-alive")
+		h.Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
+		flusher, _ := c.Writer.(interface{ Flush() })
+		flush := func() {
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		flush()
+
+		var pushCh chan string
+		if d.PushEvents != nil {
+			pushCh = d.PushEvents.subscribeAll()
+			defer d.PushEvents.unsubscribeAll(pushCh)
+		} else {
+			pushCh = make(chan string)
+		}
+
+		// Live ask_user / ask_user_cancel for any session (each payload carries
+		// its own session_id, so the client routes it to the right widget).
+		var busCh chan agentBusEvent
+		if d.AgentEvents != nil {
+			busCh = d.AgentEvents.subscribe()
+			defer d.AgentEvents.unsubscribe(busCh)
+		}
+
+		// Replay every session's pending ask_user questions so a (re)connecting
+		// client renders widgets for questions asked before it connected.
+		if d.AskUserRegistry != nil && d.Registry != nil {
+			for _, meta := range d.Registry.List() {
+				for _, q := range d.AskUserRegistry.Pending(meta.ID) {
+					data, _ := json.Marshal(askuser.QuestionToPayload(q))
+					_, _ = fmt.Fprintf(c.Writer, "event: ask_user\ndata: %s\n\n", data)
+				}
+			}
+			flush()
+		}
+
+		heartbeat := time.NewTicker(30 * time.Second)
+		defer heartbeat.Stop()
+		ctx := c.Request.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sid := <-pushCh:
+				data, _ := json.Marshal(map[string]any{"session_id": sid})
+				_, _ = fmt.Fprintf(c.Writer, "event: mailbox_push\ndata: %s\n\n", data)
+				flush()
+			case be := <-busCh:
+				switch be.Event {
+				case events.EventAskUser:
+					data, _ := json.Marshal(be.Payload)
+					_, _ = fmt.Fprintf(c.Writer, "event: ask_user\ndata: %s\n\n", data)
+					flush()
+				case events.EventAskUserCancel:
+					data, _ := json.Marshal(map[string]any{
+						"question_id": be.Payload["question_id"],
+						"session_id":  be.Payload["session_id"],
+					})
+					_, _ = fmt.Fprintf(c.Writer, "event: ask_user_cancel\ndata: %s\n\n", data)
+					flush()
+				}
+			case <-heartbeat.C:
+				_, _ = io.WriteString(c.Writer, ": keepalive\n\n")
+				flush()
+			}
+		}
+	})
 	auth.PATCH("/sessions/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		var body renameRequest

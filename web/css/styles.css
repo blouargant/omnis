@@ -427,11 +427,9 @@ body.resizing #sidebar { transition: none; }
   padding: 6px;
   overflow-y: auto;
   flex: 1;
-  /* Without this, the default min-height:auto refuses to shrink the list
-     below its content height: past ~5 rows it grows instead of scrolling,
-     the sidebar's overflow:hidden clips it, and the under-constrained layout
-     leaves added/removed rows unpainted until a reflow (e.g. selecting a
-     session) forces one. min-height:0 makes it a real scroll viewport. */
+  /* Let the list shrink below its content height inside the flex column so
+     its own overflow-y scrollbar engages instead of growing and being
+     clipped by the sidebar's overflow:hidden. */
   min-height: 0;
 }
 #session-list li {

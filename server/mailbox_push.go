@@ -51,10 +51,19 @@ func (g *sessionRunGuard) tryAcquire(sessionID string) (release func(), ok bool)
 type sessionPushBroadcaster struct {
 	mu   sync.RWMutex
 	subs map[string]map[chan struct{}]struct{}
+	// all holds multiplexed subscribers that want push notifications for every
+	// session over a single connection (each receives the notifying session id).
+	// This lets one client hold ONE SSE connection for all its open sessions
+	// instead of one per session — which would otherwise exhaust the browser's
+	// ~6-per-host HTTP/1.1 connection limit and stall further requests.
+	all map[chan string]struct{}
 }
 
 func newSessionPushBroadcaster() *sessionPushBroadcaster {
-	return &sessionPushBroadcaster{subs: make(map[string]map[chan struct{}]struct{})}
+	return &sessionPushBroadcaster{
+		subs: make(map[string]map[chan struct{}]struct{}),
+		all:  make(map[chan string]struct{}),
+	}
 }
 
 func (b *sessionPushBroadcaster) subscribe(sessionID string) chan struct{} {
@@ -76,11 +85,33 @@ func (b *sessionPushBroadcaster) unsubscribe(sessionID string, ch chan struct{})
 	b.mu.Unlock()
 }
 
+// subscribeAll registers a multiplexed subscriber that receives the session id
+// of every session that fires a push. Used by the single /api/events stream.
+func (b *sessionPushBroadcaster) subscribeAll() chan string {
+	ch := make(chan string, 16)
+	b.mu.Lock()
+	b.all[ch] = struct{}{}
+	b.mu.Unlock()
+	return ch
+}
+
+func (b *sessionPushBroadcaster) unsubscribeAll(ch chan string) {
+	b.mu.Lock()
+	delete(b.all, ch)
+	b.mu.Unlock()
+}
+
 func (b *sessionPushBroadcaster) notify(sessionID string) {
 	b.mu.RLock()
 	for ch := range b.subs[sessionID] {
 		select {
 		case ch <- struct{}{}:
+		default:
+		}
+	}
+	for ch := range b.all {
+		select {
+		case ch <- sessionID:
 		default:
 		}
 	}

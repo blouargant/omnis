@@ -768,7 +768,6 @@ const sessionTitles     = new Map(); // sessionId → display title (for pane ta
 // Each open session has a persistent SSE connection to /api/sessions/:id/events
 // so background mailbox-push turns are reflected in real time.
 
-const sessionEventsCtrls = new Map(); // sessionId → AbortController
 const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
 const sessionTodos       = new Map(); // sessionId → [{ task, status }] live plan view
 const sessionTodoBlock   = new Map(); // sessionId → latest .todo-block (older ones auto-collapse)
@@ -2919,10 +2918,19 @@ function promptForToken() {
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
+// Monotonic sequence guard: bursts of session creation/deletion fire several
+// overlapping loadSessions() calls, and their GET /api/sessions responses can
+// resolve out of order. Without this, an older response (issued when fewer
+// sessions existed) could resolve last and clobber a newer one — dropping the
+// just-created session from the sidebar until the next refresh. We tag each
+// request and only render the latest one to resolve.
+let _loadSessionsSeq = 0;
 async function loadSessions() {
+  const seq = ++_loadSessionsSeq;
   try {
-    const res = await apiFetch("/api/sessions");
+    const res = await apiFetch("/api/sessions", { cache: "no-store" });
     const data = await res.json();
+    if (seq !== _loadSessionsSeq) return; // a newer load superseded this one
     renderSessions(data.sessions || []);
   } catch (e) { console.error(e); }
 }
@@ -3076,6 +3084,11 @@ async function deleteSession(id, li) {
     li.remove();
     refreshSidebarActive();
     saveLayout();
+    // Reconcile against the server: removing the <li> directly gives instant
+    // feedback, but a loadSessions() still in flight from an earlier create/
+    // delete burst could re-render and resurrect the deleted row. Issuing the
+    // latest load (seq-guarded) makes the sidebar authoritative.
+    loadSessions();
   } catch (e) {
     console.error("failed to delete session:", e);
   }
@@ -3481,39 +3494,50 @@ async function newChat(panel, squadOverride) {
 
 // ─── Background push helpers ─────────────────────────────────────────────────
 
-// subscribeSessionEvents opens a persistent SSE connection for sessionId and
-// reloads new turns whenever the server emits a mailbox_push event.
-async function subscribeSessionEvents(sessionId) {
-  if (sessionEventsCtrls.has(sessionId)) {
-    sessionEventsCtrls.get(sessionId).abort();
-  }
-  const ctrl = new AbortController();
-  sessionEventsCtrls.set(sessionId, ctrl);
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/events`, {
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return;
-    for await (const { event, data } of parseSSE(res)) {
-      if (event === "mailbox_push" && !sessionSending.has(sessionId)) {
-        await appendNewPushTurns(sessionId);
-      } else if (event === "ask_user" && data && typeof data === "object") {
-        renderAskUserWidget(sessionId, data);
-      } else if (event === "ask_user_cancel" && data && data.question_id) {
-        cancelAskUserWidget(data.question_id);
+// subscribeGlobalEvents opens ONE persistent SSE connection (/api/events) that
+// carries push events for every session, each tagged with its session_id. This
+// replaces the old one-connection-per-session model, which exhausted the
+// browser's ~6-per-host HTTP/1.1 connection limit once ~6 sessions were open —
+// after that, every further request (loadSessions, message sends, …) stalled
+// waiting for a free socket. With a single connection there is always headroom.
+// Auto-reconnects with backoff so a dropped stream (server restart, network
+// blip) re-establishes without a page reload.
+let _globalEventsCtrl = null;
+async function subscribeGlobalEvents() {
+  if (_globalEventsCtrl) _globalEventsCtrl.abort();
+  let backoff = 1000;
+  while (true) {
+    const ctrl = new AbortController();
+    _globalEventsCtrl = ctrl;
+    try {
+      const res = await apiFetch("/api/events", { signal: ctrl.signal, cache: "no-store" });
+      if (!res.ok) throw new Error("events stream " + res.status);
+      backoff = 1000; // connected — reset backoff
+      for await (const { event, data } of parseSSE(res)) {
+        const sid = data && typeof data === "object" ? data.session_id : null;
+        if (event === "mailbox_push" && sid && !sessionSending.has(sid)) {
+          await appendNewPushTurns(sid);
+        } else if (event === "ask_user" && data && typeof data === "object" && sid) {
+          renderAskUserWidget(sid, data);
+        } else if (event === "ask_user_cancel" && data && data.question_id) {
+          cancelAskUserWidget(data.question_id);
+        }
       }
+    } catch (e) {
+      if (e.name === "AbortError") return; // intentional teardown
+      console.error("global events stream error:", e);
     }
-  } catch (e) {
-    if (e.name !== "AbortError") {
-      console.error("push events error for", sessionId, e);
-    }
+    // Stream ended or errored — wait, then reconnect (capped backoff).
+    await new Promise(r => setTimeout(r, backoff));
+    backoff = Math.min(backoff * 2, 15000);
   }
 }
 
-function unsubscribeSessionEvents(sessionId) {
-  const ctrl = sessionEventsCtrls.get(sessionId);
-  if (ctrl) { ctrl.abort(); sessionEventsCtrls.delete(sessionId); }
-}
+// The per-session subscribe/unsubscribe helpers are retained as no-ops so the
+// many call sites keep working: a single /api/events stream now covers every
+// session, so there is nothing to open or close per session.
+function subscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
+function unsubscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
 
 // appendNewPushTurns fetches the full history and renders any turns that
 // arrived after the last locally-known count (background turns).
@@ -5262,6 +5286,7 @@ async function restoreLayout(rec, liveIds) {
     });
   });
   loadUserCommands(); // fire-and-forget; menu re-renders when it lands
+  subscribeGlobalEvents(); // single multiplexed push stream for all sessions
   await loadSessions();
 
   // Collect live session ids for layout validation.
