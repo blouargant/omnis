@@ -4,7 +4,7 @@
   "description": "Answers questions about yoke from its own documentation (quoting the relevant passage), and browses, inspects, and installs registry items — skills, agents, MCP servers, squads, A2A agents, and slash commands — on demand.",
   "enabled": true,
   "leader": true,
-  "model_ref": "hosted",
+  "model_ref": "balanced",
   "name": "helper",
   "skills": null,
   "softskills_dir": "",

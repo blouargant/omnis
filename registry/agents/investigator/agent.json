@@ -5,12 +5,9 @@
   "enabled": true,
   "leader": false,
   "max_instances": 5,
-  "model_ref": "hosted",
+  "model_ref": "high",
   "name": "investigator",
-  "skills": [
-    "k8s-log-investigation",
-    "k8s-triage"
-  ],
+  "skills": [],
   "softskills_dir": "",
   "tools": [
     "Bash",

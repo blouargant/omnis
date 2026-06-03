@@ -19,17 +19,17 @@
     },
     "balanced": {
       "provider_ref": "openai-compat",
-      "model": "gpt-4.1-mini-sweden",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.42,
-      "output_token_price_per_million": 1.68
+      "model": "qwen3.6-35b-a3b-scaleway",
+      "context_length": 256000,
+      "input_token_price_per_million": 0.26,
+      "output_token_price_per_million": 1.58
     },
-    "hosted": {
+    "high": {
       "provider_ref": "openai-compat",
-      "model": "test",
-      "context_length": 128000,
-      "input_token_price_per_million": 0.6,
-      "output_token_price_per_million": 3.6
+      "model": "qwen3.5-397b-a17b-scaleway",
+      "context_length": 250000,
+      "input_token_price_per_million": 0.63,
+      "output_token_price_per_million": 3.78
     },
     "imagegen": {
       "provider_ref": "openai-compat",
@@ -48,8 +48,8 @@
     },
     "simple": {
       "provider_ref": "openai-compat",
-      "model": "gpt-4o-mini-sweden",
-      "context_length": 128000,
+      "model": "gemma-4-26b-a4b-it-scaleway",
+      "context_length": 256000,
       "input_token_price_per_million": 0.17,
       "output_token_price_per_million": 0.69
     }
