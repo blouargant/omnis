@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"strconv"
 
 	"github.com/creack/pty"
 )
@@ -43,6 +44,20 @@ func (p *unixPTY) Write(b []byte) (int, error) { return p.f.Write(b) }
 
 func (p *unixPTY) Resize(cols, rows uint16) error {
 	return pty.Setsize(p.f, &pty.Winsize{Cols: cols, Rows: rows})
+}
+
+// Cwd reads the shell's current working directory from /proc/<pid>/cwd (Linux).
+// On platforms without /proc (e.g. macOS) the Readlink fails and ok is false,
+// so the cwd watcher quietly does nothing.
+func (p *unixPTY) Cwd() (string, bool) {
+	if p.cmd.Process == nil {
+		return "", false
+	}
+	dir, err := os.Readlink("/proc/" + strconv.Itoa(p.cmd.Process.Pid) + "/cwd")
+	if err != nil || dir == "" {
+		return "", false
+	}
+	return dir, true
 }
 
 func (p *unixPTY) Close() error {

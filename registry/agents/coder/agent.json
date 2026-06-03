@@ -1,0 +1,27 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Implements code changes to a given specification: writes and edits source files, runs builds/tests to confirm the change compiles and passes. The write-capable counterpart to the investigator.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "high",
+  "name": "coder",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "softskills",
+    "calc",
+    "code_search",
+    "worktree"
+  ]
+}

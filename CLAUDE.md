@@ -1610,10 +1610,11 @@ menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
   registered as `GET /api/terminal/ws` in [server/server.go](server/server.go)):
   a **WebSocket** upgraded via `gorilla/websocket` bridges to a **PTY-backed
   shell** (`creack/pty`). The PTY abstraction is `ptySession`
-  (Read/Write/Resize/Close); the real implementation is in
+  (Read/Write/Resize/**Cwd**/Close); the real implementation is in
   [server/terminal_unix.go](server/terminal_unix.go) (spawns `$SHELL` → `/bin/bash`
-  → `/bin/sh`, `TERM=xterm-256color`), and [server/terminal_windows.go](server/terminal_windows.go)
-  is an unsupported stub (no ConPTY) so cross-platform builds stay green.
+  → `/bin/sh`, `TERM=xterm-256color`; `Cwd` reads `/proc/<pid>/cwd`), and
+  [server/terminal_windows.go](server/terminal_windows.go) is an unsupported stub
+  (no ConPTY) so cross-platform builds stay green.
 - **Auth**: the route is registered on the **unauthenticated** `api` group
   because a browser can't set an `Authorization` header on a WebSocket handshake;
   `handleTerminal` validates the bearer token from the **`token` query param**
@@ -1623,8 +1624,22 @@ menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
   Folders/`!cd` cwd (`bashCwd`), else the global "no session" cwd.
 - **Wire protocol** (`runTerminalSession`): client → server **BinaryMessage** =
   raw stdin bytes, **TextMessage** = `{"cols":N,"rows":N}` resize; server →
-  client **BinaryMessage** = raw PTY output. One PTY→WS goroutine (single writer);
-  the WS read loop pumps stdin + resize. Shell exit closes the PTY which ends both.
+  client **BinaryMessage** = raw PTY output, **TextMessage** = `{"cwd":"…"}` cwd
+  control (see cwd sync below). One PTY→WS goroutine + one cwd-watcher goroutine,
+  both serialised on a write mutex; the WS read loop pumps stdin + resize. Shell
+  exit closes the PTY which ends all three.
+- **cwd sync with the Folders panel**: a watcher goroutine polls `pty.Cwd()`
+  (every 400 ms, Linux `/proc/<pid>/cwd`) and emits a `{"cwd":…}` text frame on
+  change (and once on connect). Client `onTerminalCwd` ([web/app.js](web/app.js))
+  follows it: while the terminal is the **focused pane's active tab** and the
+  Folders panel is open, it `loadFolder(dir)`s — and because a terminal tab has no
+  active chat session, that targets the **global** `/api/folder` cwd (the same dir
+  the panel shows with no session), so the panel + the global "no session"
+  environment track the shell's `cd`. `mountTerminal` re-aligns the panel to a
+  terminal's last-known cwd on (re)activation. Best-effort: where `Cwd()` is
+  unsupported (non-Linux) the watcher is a no-op and the panel simply doesn't
+  auto-sync. (One-directional: navigating the Folders panel does **not** move the
+  live shell.)
 - **Trust model**: like the `!` shell-escape and the Monaco save route, the
   terminal **bypasses the agent permission layer by design** and, unlike the Bash
   tool, has **no safety floor** — it is an explicit, token-gated, fully

@@ -3,8 +3,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,52 @@ func TestTerminalWebSocketEcho(t *testing.T) {
 		}
 	}
 	t.Fatalf("did not observe echoed marker in PTY output; got:\n%s", got.String())
+}
+
+// TestTerminalWebSocketCwdSync verifies that a `cd` inside the live shell makes
+// the watcher emit a `{"cwd":…}` control frame (so the web UI Folders panel can
+// follow). Linux-only in practice — the watcher reads /proc/<pid>/cwd.
+func TestTerminalWebSocketCwdSync(t *testing.T) {
+	target, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("evalsymlinks: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/api/terminal/ws", handleTerminal(serverDeps{Token: ""}))
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/terminal/ws"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+
+	if err := ws.WriteMessage(websocket.BinaryMessage, []byte("cd "+target+"\n")); err != nil {
+		t.Fatalf("write cd: %v", err)
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	_ = ws.SetReadDeadline(deadline)
+	for time.Now().Before(deadline) {
+		mt, data, err := ws.ReadMessage()
+		if err != nil {
+			break
+		}
+		if mt != websocket.TextMessage {
+			continue // binary = PTY output
+		}
+		var m struct {
+			Cwd string `json:"cwd"`
+		}
+		if json.Unmarshal(data, &m) == nil && m.Cwd == target {
+			return // watcher reported the new cwd
+		}
+	}
+	t.Fatalf("did not receive a cwd control frame for %q", target)
 }
 
 // TestTerminalWebSocketRejectsBadToken verifies the query-param token gate.

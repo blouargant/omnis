@@ -1400,6 +1400,22 @@ function sendTermResize(entry) {
   if (t.cols > 0 && t.rows > 0) entry.ws.send(JSON.stringify({ cols: t.cols, rows: t.rows }));
 }
 
+// onTerminalCwd handles a server-reported shell working-directory change: it
+// remembers it on the entry and, while this terminal is the visible (focused-
+// pane active) tab and the Folders panel is open, navigates the panel to follow
+// `cd`. Since a terminal tab has no active chat session, `loadFolder` targets the
+// global folder cwd (the same dir the panel shows with no session), so the panel
+// and the global "no session" environment both track the terminal.
+function onTerminalCwd(key, dir) {
+  const entry = termTabs.get(key);
+  if (entry) entry.cwd = dir;
+  const fpr = focusedPanel();
+  if (!fpr || fpr.activeTab !== key) return;     // not the visible terminal
+  if (foldersCollapsed()) return;                 // panel closed — nothing to move
+  if (!dir || dir === foldersDir) return;         // already there
+  loadFolder(dir);
+}
+
 // createTerminal builds the xterm instance + WebSocket for a term tab (once).
 async function createTerminal(key) {
   await ensureXterm();
@@ -1417,18 +1433,26 @@ async function createTerminal(key) {
   });
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
-  term.open(host);
+  // NOTE: do NOT term.open(host) here — the host is still detached, and xterm
+  // initialised on a 0×0 element renders nothing (a black pane where even the
+  // shell prompt and error text are invisible). open() happens in mountTerminal
+  // once the host is attached to the visible pane.
 
   const ws = new WebSocket(termWsUrl(opts));
   ws.binaryType = "arraybuffer";
-  const entry = { term, fit, ws, host };
+  const entry = { term, fit, ws, host, opened: false };
   termTabs.set(key, entry);
 
   const enc = new TextEncoder();
   ws.onopen = () => sendTermResize(entry);
   ws.onmessage = (ev) => {
-    if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
-    else term.write(ev.data);
+    // Binary frames are raw PTY output; text frames are control JSON (cwd sync).
+    if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return; }
+    try {
+      const m = JSON.parse(ev.data);
+      if (m && typeof m.cwd === "string") { onTerminalCwd(key, m.cwd); return; }
+    } catch (_) { /* not control JSON — fall through to write as text */ }
+    term.write(ev.data);
   };
   ws.onclose = () => term.write("\r\n\x1b[2m[terminal session ended]\x1b[0m\r\n");
   ws.onerror = () => term.write("\r\n\x1b[31m[terminal connection error]\x1b[0m\r\n");
@@ -1448,10 +1472,15 @@ async function mountTerminal(panel, key) {
   if (!hostWrap) return;
   while (hostWrap.firstChild) hostWrap.removeChild(hostWrap.firstChild);
   hostWrap.appendChild(entry.host);
+  // Open xterm only once, and only now that the host is attached + visible so the
+  // renderer measures real dimensions (see the NOTE in createTerminal).
+  if (!entry.opened) { entry.term.open(entry.host); entry.opened = true; }
   requestAnimationFrame(() => {
     try { entry.fit.fit(); } catch (_) {}
     sendTermResize(entry);
     entry.term.focus();
+    // Align the Folders panel to this terminal's last-known cwd on (re)activation.
+    if (entry.cwd && !foldersCollapsed() && entry.cwd !== foldersDir) loadFolder(entry.cwd);
   });
 }
 

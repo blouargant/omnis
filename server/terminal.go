@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -20,6 +21,11 @@ type ptySession interface {
 	Read([]byte) (int, error)
 	Write([]byte) (int, error)
 	Resize(cols, rows uint16) error
+	// Cwd reports the shell's current working directory so the web UI Folders
+	// panel can follow `cd`. Best-effort: ok is false where it can't be
+	// determined (e.g. no /proc on non-Linux), in which case the watcher is a
+	// no-op and the panel simply doesn't auto-sync.
+	Cwd() (dir string, ok bool)
 	Close() error
 }
 
@@ -119,6 +125,39 @@ func runTerminalSession(ws *websocket.Conn, dir string) {
 			}
 			if rerr != nil {
 				return
+			}
+		}
+	}()
+
+	// cwd watcher: poll the shell's working directory and report changes to the
+	// client (a `{"cwd":"…"}` text frame) so the web UI Folders panel follows
+	// `cd`. Best-effort + Linux-only (/proc); a no-op where Cwd() is unsupported.
+	// Shares writeMu with the output goroutine; stops when the shell exits.
+	go func() {
+		t := time.NewTicker(400 * time.Millisecond)
+		defer t.Stop()
+		last := ""
+		report := func() bool {
+			dir, ok := pty.Cwd()
+			if !ok || dir == "" || dir == last {
+				return true
+			}
+			last = dir
+			msg, _ := json.Marshal(map[string]string{"cwd": dir})
+			writeMu.Lock()
+			werr := ws.WriteMessage(websocket.TextMessage, msg)
+			writeMu.Unlock()
+			return werr == nil
+		}
+		report() // align the panel to the shell's starting directory
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if !report() {
+					return
+				}
 			}
 		}
 	}()
