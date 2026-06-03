@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/blouargant/yoke/internal/claudeformat"
 )
 
 // resolveSkillDeps installs the commands and permission rule-sets a skill
@@ -141,18 +143,28 @@ func (d Deps) requestReload() bool {
 // parseAgentDeps extracts the skills and mcp_servers dependency lists declared
 // in a remote agent's manifest. AgentEntry accepts both the snake_case
 // "mcp_servers" and the camelCase "mcpServers" alias, so both are read and
-// merged. A Claude-format markdown manifest (which carries no JSON deps) parses
-// to empty lists.
+// merged.
+//
+// A Claude-format markdown manifest (a .md file whose skills/mcpServers live in
+// YAML frontmatter) is not valid JSON, so the native parse fails — we then fall
+// back to the shared Claude-format parser so the dependency cascade also fires
+// for markdown agents. This mirrors the web-UI install route, which reads the
+// deps from the normalised on-disk agent.json that InstallAgent writes after
+// converting either format.
 func parseAgentDeps(raw []byte) (skills, mcpServers []string) {
 	var entry struct {
 		Skills        []string `json:"skills"`
 		MCPServers    []string `json:"mcp_servers"`
 		MCPServersAlt []string `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(raw, &entry); err != nil {
+	if err := json.Unmarshal(raw, &entry); err == nil {
+		return entry.Skills, append(entry.MCPServers, entry.MCPServersAlt...)
+	}
+	defs, err := claudeformat.Parse(raw)
+	if err != nil || len(defs) == 0 || defs[0] == nil {
 		return nil, nil
 	}
-	return entry.Skills, append(entry.MCPServers, entry.MCPServersAlt...)
+	return defs[0].Skills, defs[0].MCPServers
 }
 
 // resolveAgentDeps installs the skills and MCP servers an agent declares but

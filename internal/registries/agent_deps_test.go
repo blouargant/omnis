@@ -32,10 +32,19 @@ func TestParseAgentDeps(t *testing.T) {
 			wantMCP:   nil,
 		},
 		{
-			name:      "claude markdown is not json",
+			name:      "claude markdown without deps",
 			raw:       "---\nname: x\n---\nbody",
 			wantSkill: nil,
 			wantMCP:   nil,
+		},
+		{
+			// A Claude-format markdown agent declares its dependencies in YAML
+			// frontmatter; the cascade must read them (regression: previously the
+			// JSON-only parse failed and silently dropped the deps).
+			name:      "claude markdown with deps",
+			raw:       "---\nname: fluxcd\nskills: [gitops-knowledge, gitops-repo-audit]\nmcpServers: [flux-operator-mcp]\n---\nbody",
+			wantSkill: []string{"gitops-knowledge", "gitops-repo-audit"},
+			wantMCP:   []string{"flux-operator-mcp"},
 		},
 	}
 	for _, tc := range cases {
