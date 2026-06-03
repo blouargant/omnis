@@ -553,6 +553,12 @@ body.resizing #sidebar { transition: none; }
 }
 #folders-resize:hover { background: var(--accent, var(--border)); opacity: 0.4; }
 #folders-panel.collapsed #folders-resize { display: none; }
+/* Drag-and-drop / paste upload target highlight. */
+#folders-panel.drag-over {
+  outline: 2px dashed var(--accent-strong);
+  outline-offset: -2px;
+  background: rgba(0, 122, 204, 0.10);
+}
 #folders-header {
   display: flex;
   align-items: center;
@@ -704,6 +710,20 @@ body.resizing #sidebar { transition: none; }
   white-space: nowrap;
 }
 .folder-ctx-item:hover { background: var(--accent, #0e639c); color: #fff; }
+/* Greyed-out item: an action that doesn't apply to this entry (e.g. rename/delete
+   on the ".." parent row). Shown for context but inert. */
+.folder-ctx-item:disabled {
+  color: var(--text-faint, #777);
+  cursor: default;
+  opacity: 0.5;
+}
+.folder-ctx-item:disabled:hover { background: transparent; color: var(--text-faint, #777); }
+/* Group separator between kinds of context-menu actions. */
+.folder-ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border, #333);
+}
 
 /* ─── Archived sessions panel ──────────────────────────────── */
 #archived-panel {
@@ -2359,7 +2379,8 @@ body.resizing-composer #composer-resize { transition: none; }
 .slash-menu-item.is-user .slash-menu-cmd { color: #b48ead; }
 
 /* ─── User command modal ───────────────────────────────────── */
-#user-cmd-modal-overlay {
+#user-cmd-modal-overlay,
+.ui-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
@@ -2369,6 +2390,39 @@ body.resizing-composer #composer-resize { transition: none; }
   z-index: 200;
 }
 #user-cmd-modal-overlay[hidden] { display: none; }
+/* Generic themed prompt/confirm dialog (uiPrompt / uiConfirm). */
+.ui-modal-overlay { z-index: 1100; } /* above the folders context menu */
+.ui-modal {
+  width: min(440px, 92vw);
+  max-height: 88vh;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-modal .user-cmd-modal-header .ui-modal-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.ui-modal .user-cmd-modal-header .ui-modal-close:hover { color: var(--text); background: var(--bg-active); }
+.ui-modal-message {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.user-cmd-modal-footer button.danger {
+  background: var(--danger, #c0392b);
+  border-color: var(--danger, #c0392b);
+  color: #fff;
+}
+.user-cmd-modal-footer button.danger:hover { filter: brightness(1.1); }
 #user-cmd-modal {
   width: min(520px, 92vw);
   max-height: 88vh;

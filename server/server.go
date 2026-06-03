@@ -614,10 +614,28 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.POST("/sessions/:id/bash", handleBash(d))
 	auth.GET("/sessions/:id/folder", handleFolder(d))
 	auth.POST("/sessions/:id/folder", handleFolder(d))
+	// Upload files/folders from the local machine into the Folders-panel working
+	// directory on the host (drag-and-drop / paste).
+	auth.POST("/sessions/:id/folder/upload", handleFolderUpload(d))
+	// Filesystem Copy/Paste within the Folders panel (host-side file/dir copy).
+	auth.POST("/sessions/:id/folder/copy", handleFolderCopy(d))
+	// Standard Folders-panel filesystem ops (host-side).
+	auth.GET("/sessions/:id/folder/download", handleFolderDownload(d))
+	auth.POST("/sessions/:id/folder/delete", handleFolderDelete(d))
+	auth.POST("/sessions/:id/folder/new", handleFolderNew(d))
+	auth.POST("/sessions/:id/folder/rename", handleFolderRename(d))
+	auth.POST("/sessions/:id/folder/move", handleFolderMove(d))
 	// Global "no session" environment: browse/navigate the default working
 	// directory even when no chat session is active (e.g. a Monaco editor tab).
 	auth.GET("/folder", handleGlobalFolder(d))
 	auth.POST("/folder", handleGlobalFolder(d))
+	auth.POST("/folder/upload", handleGlobalFolderUpload(d))
+	auth.POST("/folder/copy", handleGlobalFolderCopy(d))
+	auth.GET("/folder/download", handleGlobalFolderDownload(d))
+	auth.POST("/folder/delete", handleGlobalFolderDelete(d))
+	auth.POST("/folder/new", handleGlobalFolderNew(d))
+	auth.POST("/folder/rename", handleGlobalFolderRename(d))
+	auth.POST("/folder/move", handleGlobalFolderMove(d))
 	auth.GET("/complete", handleComplete(d))
 	auth.GET("/complete-file", handleCompleteFile(d))
 	auth.POST("/fileref/resolve", handleFileRefResolve(d))

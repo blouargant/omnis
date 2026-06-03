@@ -702,6 +702,73 @@ working directory" below): navigating the panel changes where the agent's
   listing. The session-less `GET/POST /api/folder` mirror these against the
   global default cwd (`getGlobal`/`setGlobal`). Read-only host file access, same
   trust model as the `!` shell-escape and `GET /api/file`.
+- **Upload to host** ([server/uploads.go](server/uploads.go) `handleFolderUpload`
+  / `handleGlobalFolderUpload`, sharing `writeFolderUploads` + `safeJoinUnder`):
+  `POST /api/sessions/:id/folder/upload` (and session-less `POST /api/folder/upload`)
+  take a multipart form `files` and an optional `dest` sub-directory field, and
+  **write the files directly onto the host filesystem** inside the Folders-panel
+  cwd (or `dest` under it), recreating any folder structure (each file's relative
+  path is carried in its multipart filename). Distinct from `handleFileUpload`
+  (`POST …/files`), which stages chat attachments under `$YOKE_HOME/logs/uploads`.
+  `safeJoinUnder` rejects absolute paths and `../` escapes so an upload can never
+  land outside the target dir. Same token-only trust model as the Monaco Save
+  route — bypasses the agent permission layer. The web UI drives it from the
+  Folders panel via **drag-and-drop** (`collectDropEntries`/`walkDropEntry`
+  recurse dropped directories via the webkit entries API; dropping onto a folder
+  row targets that sub-dir via its `li.dataset.rel`) and **Ctrl/Cmd+V paste**
+  (gated by `foldersHover`, uploads `clipboardData.files`), both calling
+  `uploadEntriesToFolder` → `folderUploadBase()`.
+- **Copy/Paste on the host** ([server/uploads.go](server/uploads.go)
+  `handleFolderCopy` / `handleGlobalFolderCopy`, sharing `doFolderCopy` +
+  `copyPath`/`uniquePath`): `POST /api/sessions/:id/folder/copy` (and session-less
+  `POST /api/folder/copy`) take `{src, dest}` and **copy a host file/dir** (`src`)
+  into the destination directory (`dest`), both resolved against the cwd
+  (`resolveAgainstCwd`). `copyPath` recurses directories and replicates symlinks;
+  `uniquePath` auto-renames on collision ("… copy", "… copy 2"); a guard refuses
+  copying a directory into its own subtree. Same token-only trust model as the
+  upload route. The Folders-panel context menu drives it: **Copy** on any
+  file/dir stores its abs path in the in-app `folderClipboard`
+  (`setFolderClipboard`); **Paste** on a directory row (or "Paste here" on the
+  path-header / empty-list context menu) calls `folderPasteInto`. Distinct from
+  the existing **Copy path** item, which copies the path *string* to the OS
+  clipboard.
+- **Standard filesystem ops** ([server/folder_ops.go](server/folder_ops.go),
+  registered in [server/server.go](server/server.go)): each has a session route
+  and a session-less global route, sharing `sessionCwdOr404` + `resolveAgainstCwd`
+  and the host-fs trust model:
+  - `GET …/folder/download?path=` — `doFolderDownload` streams a file via
+    `c.FileAttachment`, or a directory as an on-the-fly `archive/zip` stream
+    (rooted at the dir's own name). The client (`folderDownload`) fetches with the
+    auth header and saves the blob via an object-URL `<a download>`.
+  - `POST …/folder/delete` `{path}` — `os.RemoveAll` (guards the cwd root itself).
+  - `POST …/folder/new` `{dir,name,kind}` — creates an empty file or dir
+    (`validLeafName` rejects separators / `.` / `..`; errors on collision).
+  - `POST …/folder/rename` `{src,name}` — in-place rename (errors on collision).
+  - `POST …/folder/move` `{src,dest}` — `movePath` (os.Rename with a
+    copy-then-delete fallback across filesystems); `uniquePath` auto-renames on
+    collision; refuses moving a dir into its own subtree.
+  The Folders-panel context menus drive these via `folderDownload` / `folderDelete`
+  (themed `uiConfirm`) / `folderNewEntry` / `folderRename` / `folderMoveTo` /
+  `folderCopyTo` (themed `uiPrompt`), all funnelled through `runFolderOp` →
+  `folderOpBase(op)`. **Cut** (`setFolderClipboard(…, "cut")`) + **Paste** performs
+  a move (clipboard consumed); **Copy** + **Paste** a copy.
+- **Generic themed modals** ([web/app.js](web/app.js) `uiPrompt`/`uiConfirm`,
+  built on demand reusing the `.user-cmd-modal-*` classes + `.ui-modal*` styles):
+  promise-returning prompt (string|null) and confirm (bool) dialogs with
+  Enter/Escape/backdrop handling, used by the rename/new/move/copy-to/delete flows.
+- **Context-menu grouping** — `openFolderCtxMenu` builds items grouped by kind
+  (open/download · create/paste · clipboard · mutating ops · chat/save) with a
+  `SEP` sentinel rendered by `showFolderCtxMenu` as a `.folder-ctx-sep` rule;
+  leading/trailing/duplicate separators are dropped so conditional groups never
+  leave stray rules. A menu item may carry an `opts` third element
+  (`[label, action, {disabled|hidden}]`): `disabled` renders a greyed,
+  click-inert `<button disabled>` (`.folder-ctx-item:disabled`), `hidden` omits it.
+- **".." (parent) row menu** — `openFolderUpCtxMenu` gives the ".." row its own
+  context menu. ".." is a navigable directory, so the **container** actions apply
+  to the parent dir (`parentDirAbs()`): *Open Chat here*, *Download*, *New File…*,
+  *New Folder…*, *Paste*, *Copy path*. The **entry-targeting** actions that make
+  no sense for ".." (*Cut*, *Copy*, *Rename…*, *Move to…*, *Copy to…*, *Delete*)
+  are shown **greyed/disabled** rather than active.
 - **Client** ([web/app.js](web/app.js), styled in [web/css/styles.css](web/css/styles.css)):
   `loadFolder(path)` GETs (no `path`) or POSTs (with `path`) and `renderFolder`
   paints the path header plus a `..` entry (hidden at filesystem root), then a
@@ -745,16 +812,24 @@ working directory" below): navigating the panel changes where the agent's
   click / right-click / scroll / Escape / blur / resize — the click+contextmenu+
   scroll listeners are **capture-phase** so an app handler that `stopPropagation`s
   its own click can't keep the menu open; a clicked item's action still runs
-  because the click event is already in flight to the button). Items adapt to the entry:
-  **folder** → *Open Chat here* (`newChat(null, undefined, abs)` — a new session
-  rooted at that folder, via the `dir` field on `POST /api/sessions`),
-  *Copy path* (`writeClipboard(abs)` — the absolute path, distinct from the
-  Ctrl/Cmd+C `@ref` copy), and *Add to chat editor* (`insertFileRef(rel)`, only
-  when a session is active). **file** → *Open* (`openFileInEditor`), *Copy path*,
-  *Add to chat editor* (active session only), and *Save* (only when the file is
-  open with unsaved edits — `editorDirty.get(abs)` → `saveEditor(panel, abs)`).
-  Absolute paths come from `absForRel(rel)`; `writeClipboard` is the shared
-  clipboard helper (`navigator.clipboard` + `execCommand` fallback).
+  because the click event is already in flight to the button). The render +
+  positioning + `SEP`-separator grouping are shared via `showFolderCtxMenu(ev, items)`.
+  Items adapt to the entry, grouped by kind (see "Standard filesystem ops" above
+  for the op functions):
+  **folder** → *Open Chat here* · *Download* (zip) │ *New File…* · *New Folder…* ·
+  *Paste* (when clipboard set) │ *Cut* · *Copy* · *Copy path* │ *Rename…* ·
+  *Move to…* · *Copy to…* · *Delete* │ *Add to chat editor* (session only).
+  **file** → *Open* · *Download* │ *Cut* · *Copy* · *Copy path* │ *Rename…* ·
+  *Move to…* · *Copy to…* · *Delete* │ *Add to chat editor* (session only) ·
+  *Save* (when `editorDirty.get(abs)`). The **path header** and **empty list
+  area** carry a `contextmenu` handler (`openFolderDirCtxMenu`) offering *New
+  File…* · *New Folder…* · *Paste here* (when clipboard set) │ *Download folder* ·
+  *Copy path*, all targeting the current `foldersDir`. The **".." row** has its
+  own handler (`openFolderUpCtxMenu`, see "..(parent) row menu" above). *Copy path*
+  (`writeClipboard(abs)`) copies the path *string* and is distinct from both the
+  Ctrl/Cmd+C `@ref` copy and the filesystem *Cut*/*Copy*. Absolute paths come from
+  `absForRel(rel)`; `writeClipboard` is the shared clipboard helper
+  (`navigator.clipboard` + `execCommand` fallback).
 
 ### Per-session tool working directory
 

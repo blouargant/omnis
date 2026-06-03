@@ -5426,6 +5426,297 @@ async function loadFolder(path) {
   }
 }
 
+// folderUploadBase returns the upload endpoint for the current context (active
+// session's working directory, else the global "no session" default).
+function folderUploadBase() {
+  return activeSessionId
+    ? `/api/sessions/${activeSessionId}/folder/upload`
+    : `/api/folder/upload`;
+}
+
+// collectDropEntries walks a DataTransfer into a flat list of {file, relPath},
+// recursing into dropped directories via the webkit entries API so a dropped
+// folder uploads with its structure preserved. Falls back to the flat file list
+// when the entries API is unavailable.
+function collectDropEntries(dt) {
+  const items = dt && dt.items;
+  if (items && items.length && items[0].webkitGetAsEntry) {
+    const out = [];
+    const walks = [];
+    for (const it of items) {
+      const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
+      if (entry) walks.push(walkDropEntry(entry, "", out));
+      else if (it.kind === "file") { const f = it.getAsFile(); if (f) out.push({ file: f, relPath: f.name }); }
+    }
+    return Promise.all(walks).then(() => out);
+  }
+  return Promise.resolve(Array.from((dt && dt.files) || []).map(f => ({ file: f, relPath: f.name })));
+}
+
+// walkDropEntry recurses one FileSystemEntry, appending {file, relPath} to out.
+function walkDropEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    return new Promise((res) => entry.file(
+      (f) => { out.push({ file: f, relPath: prefix + entry.name }); res(); },
+      () => res()));
+  }
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const dirPrefix = prefix + entry.name + "/";
+    return new Promise((resolve) => {
+      const pending = [];
+      // readEntries returns at most ~100 entries per call; keep reading until
+      // it yields an empty batch.
+      const readBatch = () => reader.readEntries((ents) => {
+        if (!ents.length) { Promise.all(pending).then(resolve); return; }
+        for (const e of ents) pending.push(walkDropEntry(e, dirPrefix, out));
+        readBatch();
+      }, () => resolve());
+      readBatch();
+    });
+  }
+  return Promise.resolve();
+}
+
+// uploadEntriesToFolder POSTs the collected {file, relPath} entries to the
+// host filesystem at the Folders-panel cwd (or a `dest` sub-directory of it),
+// then refreshes the listing. relPath is sent as each part's filename so the
+// server can recreate the folder structure.
+async function uploadEntriesToFolder(entries, dest) {
+  if (!entries || !entries.length) return;
+  const fd = new FormData();
+  if (dest) fd.append("dest", dest);
+  for (const { file, relPath } of entries) fd.append("files", file, relPath || file.name);
+  try {
+    const res = await apiFetch(folderUploadBase(), { method: "POST", body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { renderFolder(null, data.error || "upload failed"); return; }
+    loadFolder(); // re-list the current directory to show the new files
+  } catch {
+    renderFolder(null, "upload failed");
+  }
+}
+
+// Drag-and-drop and paste upload into the Folders panel. Dropping onto a folder
+// row targets that sub-directory; dropping elsewhere targets the current dir.
+(function wireFolderUpload() {
+  const panel = els.foldersPanel;
+  let dragCounter = 0;
+  const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  panel.addEventListener("dragenter", (e) => {
+    if (foldersCollapsed() || !hasFiles(e)) return;
+    e.preventDefault(); dragCounter++; panel.classList.add("drag-over");
+  });
+  panel.addEventListener("dragover", (e) => {
+    if (foldersCollapsed() || !hasFiles(e)) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+  });
+  panel.addEventListener("dragleave", () => {
+    dragCounter--; if (dragCounter <= 0) { dragCounter = 0; panel.classList.remove("drag-over"); }
+  });
+  panel.addEventListener("drop", async (e) => {
+    if (foldersCollapsed() || !hasFiles(e)) return;
+    e.preventDefault(); dragCounter = 0; panel.classList.remove("drag-over");
+    // If dropped onto a folder row, upload into that sub-directory.
+    const dirLi = e.target.closest && e.target.closest("li.folder-dir");
+    const dest = dirLi ? (dirLi.dataset.rel || "") : "";
+    const entries = await collectDropEntries(e.dataTransfer);
+    uploadEntriesToFolder(entries, dest);
+  });
+
+  // Ctrl/Cmd+V while the pointer is over the panel uploads files from the
+  // clipboard (e.g. files copied in the OS file manager). Only fires when the
+  // clipboard actually carries files — text/ref pastes are left untouched.
+  document.addEventListener("paste", (e) => {
+    if (!foldersHover || foldersCollapsed()) return;
+    const files = Array.from((e.clipboardData && e.clipboardData.files) || []);
+    if (!files.length) return;
+    e.preventDefault();
+    uploadEntriesToFolder(files.map(f => ({ file: f, relPath: f.name })), "");
+  });
+})();
+
+// ─── Folders panel filesystem operations ──────────────────────────────────────
+// An in-app clipboard holding the host path of a file/dir picked via the
+// context-menu Cut/Copy. Paste then copies (op:"copy") or moves (op:"cut") it
+// server-side into a target directory.
+let folderClipboard = null; // { abs, name, isDir, op } | null
+function setFolderClipboard(abs, name, isDir, op) { folderClipboard = { abs, name, isDir, op }; }
+
+// folderOpBase returns the endpoint for an op ("copy"/"move"/"delete"/"new"/
+// "rename"/"download") in the current context (active session's working dir,
+// else the global "no session" default).
+function folderOpBase(op) {
+  return activeSessionId
+    ? `/api/sessions/${activeSessionId}/folder/${op}`
+    : `/api/folder/${op}`;
+}
+
+// runFolderOp POSTs a JSON body to a folder op endpoint and refreshes the
+// listing on success; surfaces the error in the panel otherwise.
+async function runFolderOp(op, body, failMsg) {
+  try {
+    const res = await apiFetch(folderOpBase(op), { method: "POST", body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { renderFolder(null, data.error || failMsg); return false; }
+    loadFolder();
+    return true;
+  } catch {
+    renderFolder(null, failMsg);
+    return false;
+  }
+}
+
+// folderPasteInto pastes the clipboard entry into destAbs (a host directory):
+// a "cut" entry is moved (and the clipboard cleared); a "copy" entry is copied.
+async function folderPasteInto(destAbs) {
+  if (!folderClipboard) return;
+  const move = folderClipboard.op === "cut";
+  const ok = await runFolderOp(move ? "move" : "copy",
+    { src: folderClipboard.abs, dest: destAbs }, move ? "move failed" : "paste failed");
+  if (ok && move) folderClipboard = null; // a cut entry is consumed once moved
+}
+
+// folderDownload fetches a file (or a directory as a zip) with the auth header
+// and triggers a browser "Save as" via an object URL.
+async function folderDownload(abs, name, isDir) {
+  try {
+    const res = await apiFetch(`${folderOpBase("download")}?path=${encodeURIComponent(abs)}`);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); renderFolder(null, d.error || "download failed"); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = isDir ? `${name}.zip` : name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    renderFolder(null, "download failed");
+  }
+}
+
+// folderDelete removes a file/dir after confirmation.
+async function folderDelete(abs, name, isDir) {
+  const ok = await uiConfirm({
+    title: `Delete ${isDir ? "folder" : "file"}`,
+    message: `Permanently delete “${name}”${isDir ? " and all its contents" : ""}? This cannot be undone.`,
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  runFolderOp("delete", { path: abs }, "delete failed");
+}
+
+// folderNewEntry prompts for a name and creates a file or folder inside dirAbs.
+async function folderNewEntry(dirAbs, kind) {
+  const name = await uiPrompt({
+    title: kind === "dir" ? "New folder" : "New file",
+    label: "Name",
+    placeholder: kind === "dir" ? "my-folder" : "file.txt",
+    confirmText: "Create",
+  });
+  if (!name) return;
+  runFolderOp("new", { dir: dirAbs, name, kind }, "create failed");
+}
+
+// folderRename prompts for a new name and renames the entry in place.
+async function folderRename(abs, name) {
+  const next = await uiPrompt({ title: "Rename", label: "New name", value: name, confirmText: "Rename" });
+  if (!next || next === name) return;
+  runFolderOp("rename", { src: abs, name: next }, "rename failed");
+}
+
+// folderMoveTo / folderCopyTo prompt for a destination directory (prefilled with
+// the current dir) and move/copy the entry there.
+async function folderMoveTo(abs) {
+  const dest = await uiPrompt({ title: "Move to", label: "Destination directory", value: foldersDir, confirmText: "Move" });
+  if (!dest) return;
+  runFolderOp("move", { src: abs, dest }, "move failed");
+}
+async function folderCopyTo(abs) {
+  const dest = await uiPrompt({ title: "Copy to", label: "Destination directory", value: foldersDir, confirmText: "Copy" });
+  if (!dest) return;
+  runFolderOp("copy", { src: abs, dest }, "copy failed");
+}
+
+// ─── Generic themed modal helpers (prompt / confirm) ──────────────────────────
+// Lightweight overlays reusing the .user-cmd-modal-* classes, created on demand
+// and removed on close. uiPrompt resolves to the trimmed string (or null when
+// cancelled); uiConfirm resolves to a boolean.
+function uiModalShell(titleText) {
+  const overlay = document.createElement("div");
+  overlay.className = "ui-modal-overlay";
+  overlay.innerHTML = `
+    <div class="ui-modal" role="dialog" aria-modal="true">
+      <div class="user-cmd-modal-header">
+        <span class="ui-modal-title"></span>
+        <button type="button" class="ui-modal-close" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="user-cmd-modal-body"></div>
+      <div class="user-cmd-modal-footer">
+        <button type="button" class="ui-modal-cancel">Cancel</button>
+        <button type="button" class="primary ui-modal-ok"></button>
+      </div>
+    </div>`;
+  overlay.querySelector(".ui-modal-title").textContent = titleText || "";
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function uiPrompt({ title, label, value, placeholder, confirmText }) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(title);
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    body.innerHTML = `<label class="user-cmd-field"><span class="user-cmd-field-label"></span><input type="text" autocomplete="off" spellcheck="false" /></label>`;
+    body.querySelector(".user-cmd-field-label").textContent = label || "Name";
+    const input = body.querySelector("input");
+    input.value = value || "";
+    input.placeholder = placeholder || "";
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = confirmText || "OK";
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const submit = () => close(input.value.trim() || null);
+    overlay.querySelector(".ui-modal-ok").addEventListener("click", submit);
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter" && document.activeElement === input) { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+function uiConfirm({ title, message, confirmText, danger }) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(title);
+    overlay.querySelector(".user-cmd-modal-body").innerHTML = `<div class="ui-modal-message"></div>`;
+    overlay.querySelector(".ui-modal-message").textContent = message || "Are you sure?";
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = confirmText || "OK";
+    if (danger) ok.classList.add("danger");
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    ok.addEventListener("click", () => close(true));
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(false));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(false));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(false); }
+      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    setTimeout(() => ok.focus(), 0);
+  });
+}
+
 // Entry icons for the Folders tree (module scope so the recursive entry builder
 // can reuse them).
 const FOLDER_SVG = `<svg class="folder-entry-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
@@ -5602,6 +5893,70 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Right-clicking the path header (or empty list area) offers "Paste here" into
+// the current directory — the target with no folder row to right-click (e.g. the
+// root). Only shown when the in-app clipboard holds an entry.
+function openFolderDirCtxMenu(ev) {
+  if (!foldersDir) return;
+  const items = [];
+  items.push(["New File…", () => folderNewEntry(foldersDir, "file")]);
+  items.push(["New Folder…", () => folderNewEntry(foldersDir, "dir")]);
+  if (folderClipboard) {
+    items.push([`Paste${folderClipboard.name ? ` “${folderClipboard.name}” here` : " here"}`, () => folderPasteInto(foldersDir)]);
+  }
+  items.push(SEP);
+  items.push(["Download folder", () => folderDownload(foldersDir, foldersDir.split("/").filter(Boolean).pop() || "root", true)]);
+  items.push(["Copy path", () => writeClipboard(foldersDir)]);
+  showFolderCtxMenu(ev, items);
+}
+els.foldersPath.addEventListener("contextmenu", openFolderDirCtxMenu);
+els.foldersList.addEventListener("contextmenu", (ev) => {
+  // Only the empty area of the list — entry rows + the ".." row have their own
+  // handlers.
+  if (ev.target.closest(".folder-entry-row") || ev.target.closest("li.folder-up")) return;
+  openFolderDirCtxMenu(ev);
+});
+
+// parentDirAbs returns the absolute path of the current dir's parent (the ".."
+// target); clamps at the filesystem root.
+function parentDirAbs() {
+  const d = (foldersDir || "").replace(/\/+$/, "");
+  const idx = d.lastIndexOf("/");
+  return idx <= 0 ? "/" : d.slice(0, idx);
+}
+
+// Context menu for the ".." (parent) row. ".." is a navigable directory, so the
+// container actions (open / download / new / paste / copy-path) apply to the
+// parent directory, while the entry-targeting actions (cut / copy / rename /
+// move / copy-to / delete) make no sense for ".." and are shown greyed out.
+function openFolderUpCtxMenu(ev) {
+  const abs = parentDirAbs();
+  const name = abs.split("/").filter(Boolean).pop() || "root";
+  const D = { disabled: true };
+  const items = [
+    ["Open Chat here", () => newChat(null, undefined, abs)],
+    ["Download", () => folderDownload(abs, name, true)],
+    SEP,
+    ["New File…", () => folderNewEntry(abs, "file")],
+    ["New Folder…", () => folderNewEntry(abs, "dir")],
+  ];
+  if (folderClipboard) {
+    items.push([`Paste${folderClipboard.name ? ` “${folderClipboard.name}”` : ""}`, () => folderPasteInto(abs)]);
+  }
+  items.push(
+    SEP,
+    ["Cut", null, D],
+    ["Copy", null, D],
+    ["Copy path", () => writeClipboard(abs)],
+    SEP,
+    ["Rename…", null, D],
+    ["Move to…", null, D],
+    ["Copy to…", null, D],
+    ["Delete", null, D],
+  );
+  showFolderCtxMenu(ev, items);
+}
+
 // buildFolderEntry builds one <li> for the Folders tree. Directories carry a
 // collapsible nested <ul> (lazy-loaded on first expand) and respond to a single
 // click with expand/collapse, a double click with "navigate into" (mutates the
@@ -5635,36 +5990,100 @@ function ensureFolderCtxMenu() {
 }
 function hideFolderCtxMenu() { if (folderCtxMenu) folderCtxMenu.hidden = true; }
 
+// SEP is a separator sentinel for showFolderCtxMenu — renders a horizontal rule
+// that groups items like a traditional context menu.
+const SEP = "---";
+
 function openFolderCtxMenu(ev, rel, isDir, row) {
-  ev.preventDefault();
-  ev.stopPropagation();
   if (row) row.focus();
-  const m = ensureFolderCtxMenu();
-  m.innerHTML = "";
   const abs = absForRel(rel);
+  const name = rel.split("/").pop();
+  const pasteLabel = folderClipboard
+    ? `Paste${folderClipboard.name ? ` “${folderClipboard.name}”` : ""}`
+    : null;
   const items = [];
   if (isDir) {
+    // Open / download
     items.push(["Open Chat here", () => newChat(null, undefined, abs)]);
+    items.push(["Download", () => folderDownload(abs, name, true)]);
+    items.push(SEP);
+    // Create inside this folder
+    items.push(["New File…", () => folderNewEntry(abs, "file")]);
+    items.push(["New Folder…", () => folderNewEntry(abs, "dir")]);
+    if (pasteLabel) items.push([pasteLabel, () => folderPasteInto(abs)]);
+    items.push(SEP);
+    // Clipboard
+    items.push(["Cut", () => setFolderClipboard(abs, name, true, "cut")]);
+    items.push(["Copy", () => setFolderClipboard(abs, name, true, "copy")]);
     items.push(["Copy path", () => writeClipboard(abs)]);
-    if (activeSessionId) items.push(["Add to chat editor", () => insertFileRef(rel)]);
+    items.push(SEP);
+    // Mutating ops
+    items.push(["Rename…", () => folderRename(abs, name)]);
+    items.push(["Move to…", () => folderMoveTo(abs)]);
+    items.push(["Copy to…", () => folderCopyTo(abs)]);
+    items.push(["Delete", () => folderDelete(abs, name, true)]);
+    if (activeSessionId) { items.push(SEP); items.push(["Add to chat editor", () => insertFileRef(rel)]); }
   } else {
     items.push(["Open", () => openFileInEditor(rel)]);
+    items.push(["Download", () => folderDownload(abs, name, false)]);
+    items.push(SEP);
+    items.push(["Cut", () => setFolderClipboard(abs, name, false, "cut")]);
+    items.push(["Copy", () => setFolderClipboard(abs, name, false, "copy")]);
     items.push(["Copy path", () => writeClipboard(abs)]);
-    if (activeSessionId) items.push(["Add to chat editor", () => insertFileRef(rel)]);
+    items.push(SEP);
+    items.push(["Rename…", () => folderRename(abs, name)]);
+    items.push(["Move to…", () => folderMoveTo(abs)]);
+    items.push(["Copy to…", () => folderCopyTo(abs)]);
+    items.push(["Delete", () => folderDelete(abs, name, false)]);
+    const extras = [];
+    if (activeSessionId) extras.push(["Add to chat editor", () => insertFileRef(rel)]);
     if (editorDirty.get(abs)) {
       const panel = panelsWithTab(editorKey(abs))[0];
-      if (panel) items.push(["Save", () => saveEditor(panel, abs)]);
+      if (panel) extras.push(["Save", () => saveEditor(panel, abs)]);
     }
+    if (extras.length) { items.push(SEP); items.push(...extras); }
   }
-  for (const [label, action] of items) {
+  showFolderCtxMenu(ev, items);
+}
+
+// showFolderCtxMenu renders [[label, action], …] (with SEP entries as group
+// separators) into the shared context menu and positions it at the event,
+// clamped to the viewport. Leading/trailing/duplicate separators are dropped.
+function showFolderCtxMenu(ev, items) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const m = ensureFolderCtxMenu();
+  m.innerHTML = "";
+  let lastWasSep = true; // suppress a leading separator
+  for (const item of items) {
+    if (item === SEP) {
+      if (lastWasSep) continue;
+      const hr = document.createElement("div");
+      hr.className = "folder-ctx-sep";
+      m.appendChild(hr);
+      lastWasSep = true;
+      continue;
+    }
+    // [label, action] or [label, action, {disabled, hidden}] — `disabled` greys
+    // the item (no action), `hidden` omits it entirely.
+    const [label, action, opts] = item;
+    if (opts && opts.hidden) continue;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "folder-ctx-item";
     btn.textContent = label;
-    btn.addEventListener("click", (e) => { e.stopPropagation(); hideFolderCtxMenu(); action(); });
+    if (opts && opts.disabled) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener("click", (e) => { e.stopPropagation(); hideFolderCtxMenu(); action(); });
+    }
     m.appendChild(btn);
+    lastWasSep = false;
   }
-  // Show then position (clamped to the viewport).
+  // Drop a trailing separator if present.
+  while (m.lastChild && m.lastChild.classList && m.lastChild.classList.contains("folder-ctx-sep")) {
+    m.removeChild(m.lastChild);
+  }
   m.hidden = false;
   const mw = m.offsetWidth, mh = m.offsetHeight;
   const x = Math.min(ev.clientX, window.innerWidth - mw - 4);
@@ -5676,6 +6095,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
 function buildFolderEntry(e, rel) {
   const li = document.createElement("li");
   li.className = e.dir ? "folder-dir" : "folder-file";
+  if (e.dir) li.dataset.rel = rel; // drop-onto-folder upload target
   const row = document.createElement("div");
   row.className = "folder-entry-row";
   row.tabIndex = -1; // focusable on click (so Ctrl/Cmd+C targets it), not in tab order
@@ -5765,6 +6185,7 @@ function renderFolder(data, err) {
     up.className = "folder-up";
     up.innerHTML = `${FOLDER_UP_SVG}<span class="folder-entry-name">..</span>`;
     up.addEventListener("click", () => loadFolder(".."));
+    up.addEventListener("contextmenu", openFolderUpCtxMenu);
     els.foldersList.appendChild(up);
   }
 
