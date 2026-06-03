@@ -1,0 +1,21 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Reviews a diff or set of changes read-only: flags correctness bugs, security smells, and reuse/simplification opportunities, with severity and exact file:line references. Does not modify code.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "high",
+  "name": "reviewer",
+  "skills": ["review"],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Grep",
+    "Glob",
+    "Skill",
+    "mime",
+    "softskills",
+    "code_search"
+  ]
+}

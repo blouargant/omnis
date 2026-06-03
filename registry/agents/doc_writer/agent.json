@@ -1,0 +1,25 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Writes and updates documentation from code and context: READMEs, API references, usage guides, and changelogs. The write-capable complement to the summariser.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "balanced",
+  "name": "doc_writer",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "softskills",
+    "code_search"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Translates and localises documentation, UI strings, and message catalogs between languages while preserving formatting, placeholders, and catalog structure.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "balanced",
+  "name": "translator",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "softskills"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Analyses structured data and logs (CSV/JSON/TSV/log files): parses, aggregates, computes statistics, and reports findings with the numbers that back them.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "high",
+  "name": "data_analyst",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Grep",
+    "Glob",
+    "Skill",
+    "mime",
+    "softskills",
+    "calc"
+  ]
+}

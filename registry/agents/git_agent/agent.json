@@ -1,0 +1,23 @@
+{
+  "allow_file_attachments": false,
+  "builtin": false,
+  "description": "Handles git and PR hygiene: branch management, staging and committing, resolving merge conflicts, and drafting changelogs/PR descriptions from the diff.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "balanced",
+  "name": "git_agent",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "softskills",
+    "worktree"
+  ]
+}

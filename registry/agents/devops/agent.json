@@ -1,0 +1,22 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Operates infrastructure and triages incidents via CLIs and MCP servers (kubectl, docker, cloud tools): inspects cluster/service state, reads logs, and runs operational commands.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "high",
+  "name": "devops",
+  "skills": ["k8s-triage", "k8s-log-investigation"],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Grep",
+    "Glob",
+    "Skill",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc"
+  ]
+}

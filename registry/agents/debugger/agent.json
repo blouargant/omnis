@@ -1,0 +1,26 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Reproduces a reported failure, isolates the root cause by iterating (logging, bisecting, targeted runs), and proposes or applies the minimal fix.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "high",
+  "name": "debugger",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "softskills",
+    "calc",
+    "code_search",
+    "bg"
+  ]
+}

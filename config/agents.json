@@ -8,7 +8,18 @@
     "helper",
     "summariser",
     "curator",
-    "reflector"
+    "reflector",
+    "coder",
+    "reviewer",
+    "test_writer",
+    "debugger",
+    "refactorer",
+    "devops",
+    "db_agent",
+    "git_agent",
+    "doc_writer",
+    "data_analyst",
+    "translator"
   ],
   "app_name": "yoke",
   "bash_timeout_seconds": 120,
@@ -23,6 +34,51 @@
         "summariser",
         "image_generator",
         "helper"
+      ]
+    },
+    {
+      "name": "Dev",
+      "description": "Software-engineering squad: implement, review, test, debug, and refactor code. Coder/test_writer/refactorer fan out in parallel; investigator gathers read-only evidence and git_agent handles branch/commit hygiene.",
+      "leader": "leader",
+      "members": [
+        "investigator",
+        "coder",
+        "reviewer",
+        "test_writer",
+        "debugger",
+        "refactorer",
+        "git_agent"
+      ]
+    },
+    {
+      "name": "Ops",
+      "description": "Infrastructure and incident-triage squad: inspect and operate clusters/services via CLIs and MCP (devops), query and explain databases (db_agent), with the investigator for read-only evidence.",
+      "leader": "leader",
+      "members": [
+        "investigator",
+        "devops",
+        "db_agent"
+      ]
+    },
+    {
+      "name": "Docs",
+      "description": "Documentation and localisation squad: write docs grounded in code (doc_writer), condense long content (summariser), localise strings/catalogs (translator), with the web agent for reference retrieval.",
+      "leader": "leader",
+      "members": [
+        "doc_writer",
+        "summariser",
+        "translator",
+        "web_agent"
+      ]
+    },
+    {
+      "name": "Data",
+      "description": "Data-analysis squad: parse, aggregate, and report on structured data and logs (data_analyst), with the investigator for locating sources and the summariser for briefing the findings.",
+      "leader": "leader",
+      "members": [
+        "data_analyst",
+        "investigator",
+        "summariser"
       ]
     },
     {
