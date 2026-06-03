@@ -701,9 +701,10 @@ working directory" below): navigating the panel changes where the agent's
   **directory** — single click `toggleFolderExpand`s it in place (lazy-fetches
   children via `GET …/folder?sub=<rel>`, cached with `li.dataset.loaded`),
   double click `loadFolder(rel)` navigates into it (mutates cwd);
-  **file** — single click does nothing, double click `insertFileRef(rel)`
-  inserts `@<rel>` into the focused pane's composer at the caret (space-padded,
-  fires `input` to refresh ref highlight). Each entry row is `tabindex="-1"`
+  **file** — single click does nothing, double click `openFileInEditor(rel)`
+  opens the file in a **Monaco editor tab** (see "Web UI file editor" below).
+  (`insertFileRef(rel)` — insert `@<rel>` into the composer — is still available
+  via Ctrl/Cmd+C↔V below.) Each entry row is `tabindex="-1"`
   (focusable on click); **Ctrl/Cmd+C** on a focused row (file *or* directory)
   `copyFileRef`s its `@<rel>` to the system clipboard (`navigator.clipboard`
   with an `execCommand` fallback) and remembers it in `lastCopiedRef`. The
@@ -1353,9 +1354,11 @@ pane owns its own copy of the chat UI (transcript, composer, prompt, send/cancel
 status, context ring + popup, ask-user slot, attachments).
 
 **Each pane is a tab group**: `panel.tabs[]` is an ordered list of **tab keys** —
-each key is either a real sessionId or a synthetic **draft** key (`"draft#N"`, a
-pending "New Chat" tab with no session). `panel.activeTab` is the visible key;
-`panel.sessionId` mirrors it but is **null while a draft is active** (kept for the
+each key is one of three kinds: a real sessionId, a synthetic **draft** key
+(`"draft#N"`, a pending "New Chat" tab with no session), or an **editor** key
+(`"file#<absPath>"`, a Monaco file editor — see "Web UI file editor" below).
+`panel.activeTab` is the visible key;
+`panel.sessionId` mirrors it but is **null while a draft or editor tab is active** (kept for the
 many call sites that read the active session). A pane always has ≥1 tab. The tab
 strip (`.pane-tabs` in the `.pane-tabbar`, one `.pane-tab` per key — drafts get
 `.pane-tab-draft` — plus a `+` `.pane-newtab-btn`) is rebuilt by
@@ -1403,9 +1406,50 @@ A pane's toolbar has split (clones a new empty pane to the right) and close
 **new tab** in the focused pane; closing the **last** tab closes the pane (or, for
 the sole pane, falls back to the empty `.pane-picker`). An empty pane shows
 `.pane-picker` (start a new chat → `newChat(panel)`, or open an existing session).
-Layout (per-pane `tabs` + `activeId` + widths + focus) persists to
+Layout (per-pane `tabs` + `activeId`/`activeKey` + widths + focus) persists to
 `localStorage["agent_toolkit_layout"]` as a **v2** record (`saveLayout`/
 `restoreLayout`; v1 single-`sessionId` records still load), restored on boot after
-`loadSessions`, dropping dead session ids (and empty panes show the picker). The
+`loadSessions`, dropping dead session ids (editor `file#…` keys survive the
+live-session filter and reopen via the editor path). The
 Settings panel still appends to `#chat`; `#chat.chat--settings > .chat-pane`
 hides panes while it's open, and `rebuildChatDOM` preserves `#settings-panel`.
+
+### Web UI file editor (Monaco)
+
+Double-clicking a file in the **Folders** panel opens it in an embedded
+[Monaco editor](https://microsoft.github.io/monaco-editor/) as a third pane-tab
+kind — an **editor tab** keyed `"file#<absPath>"` — living next to chat-session
+and draft tabs in the same `.pane-tabs` strip (`openFileInEditor(rel)` in
+[web/app.js](web/app.js); `abs = join(foldersDir, rel)`). Opening an
+already-open file focuses its tab rather than duplicating (editor tabs, like
+sessions, live in at most one pane).
+
+- **Vendored offline.** Monaco's `min/vs` is committed under `web/monaco/vs/`
+  (served at `assets/monaco/vs/…` since `base.Static("/assets", webDir)` maps
+  `/assets` → `web/`), so it works air-gapped — no CDN at runtime, mirroring the
+  vendored [web/marked.min.js](web/marked.min.js). Re-vendor / bump with
+  `make vendor-monaco` (`MONACO_VERSION` overridable). `ensureMonaco()` lazily
+  injects the AMD `loader.js` on first file open (computing the `vs` base from
+  `document.baseURI` so a `BasePath` deployment works) and configures a
+  same-origin **blob worker** that `importScripts` the vendored `workerMain.js`
+  (no CSP header is set server-side, so `blob:` workers are allowed).
+- **Per-file model, per-pane editor.** `editorModels` (absPath → Monaco model,
+  created once from `GET /api/file`, language from `langForPath`) holds content +
+  undo history, so switching tabs preserves unsaved edits; one Monaco instance
+  per pane (`panel._editor`) `setModel`s the active file. The pane gets the
+  `.editing` class while an editor tab is active (CSS hides the chat surfaces and
+  shows `.pane-editor`); `activateTab`/`newChat`/session-open paths clear it.
+  Theme follows the app: `monacoTheme()` maps `<html>[data-theme]` → `vs`/`vs-dark`,
+  kept live by a `MutationObserver` on the attribute.
+- **Edit + save to disk.** `editorDirty` tracks unsaved changes (a `.pane-tab`
+  `.is-dirty` dot that yields to the × on hover). **Ctrl/Cmd+S** (a Monaco
+  command) or the **Save** button (`saveEditor`) `PUT /api/file`
+  `{ path, content, session }` → `handleFileWrite` ([server/fileref.go](server/fileref.go)),
+  which writes straight to the host file preserving its mode. Like `GET /api/file`
+  and the `!` shell-escape it is gated only by the API token and **bypasses the
+  agent permission layer** (the authenticated user already has host file access);
+  it edits **existing files only** (path must classify as a regular file).
+- **Lifecycle.** `closeTab` on a dirty editor tab confirms discard, then disposes
+  the model; `closePanel` disposes the pane's Monaco instance and any editor-tab
+  models it owned. Editor keys carry no push subscription, so the session-only
+  `releaseSessionIfUnviewed` is skipped for them.

@@ -609,6 +609,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.GET("/complete-file", handleCompleteFile(d))
 	auth.POST("/fileref/resolve", handleFileRefResolve(d))
 	auth.GET("/file", handleFileRefRaw(d))
+	auth.PUT("/file", handleFileWrite(d))
 	auth.POST("/sessions/:id/files", handleFileUpload(d))
 	auth.GET("/sessions/:id/media", handleMedia(d))
 	auth.POST("/sessions/:id/ask-user/:qid", handleAskUserResponse(d))

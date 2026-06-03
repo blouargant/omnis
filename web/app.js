@@ -204,6 +204,10 @@ function bindPaneEls(root) {
   e.promptHighlight = root.querySelector(".prompt-highlight");
   e.ctxRingFill = root.querySelector(".ctx-ring-fill");
   e.askSlot     = root.querySelector("#ask-user-slot");
+  e.editorWrap  = root.querySelector(".pane-editor");
+  e.editorHost  = root.querySelector(".pane-editor-host");
+  e.editorPath  = root.querySelector(".pane-editor-path");
+  e.editorSave  = root.querySelector(".pane-editor-save");
   e.toolbar     = root.querySelector(".pane-toolbar");
   e.splitBtn    = root.querySelector(".pane-split-btn");
   e.closeBtn    = root.querySelector(".pane-close-btn");
@@ -384,8 +388,13 @@ function closePanel(panel) {
     focusedPanelId = neighbor ? neighbor.id : null;
   }
   // Each tab's transcript DOM stays cached in sessionContainers (no loss); drop
-  // the push subscription of any tab not still open in another pane.
-  for (const sid of tabIds) releaseSessionIfUnviewed(sid);
+  // the push subscription of any session tab not still open in another pane, and
+  // free any editor-tab models this pane owned.
+  for (const k of tabIds) {
+    if (isEditorTab(k)) { if (panelsWithTab(k).length === 0) disposeEditor(editorPathOf(k)); }
+    else releaseSessionIfUnviewed(k);
+  }
+  if (panel._editor) { panel._editor.dispose(); panel._editor = null; }
   rebuildChatDOM();
   setFocusedPanel(focusedPanelId);
   saveLayout();
@@ -515,6 +524,12 @@ function attachPaneHandlers(panel) {
   // Toolbar: split / close.
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
+
+  // Editor Save button (Monaco editor tabs).
+  if (pe.editorSave) pe.editorSave.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (isEditorTab(panel.activeTab)) saveEditor(panel, editorPathOf(panel.activeTab));
+  });
 
   // "+" always opens a fresh "New Chat" tab showing the start picker — no
   // session is created until the user clicks "Start a new chat". Several drafts
@@ -744,9 +759,10 @@ function saveLayout() {
       const rec = {
         version: 2,
         panes: panels.map(p => ({
-          // Persist only real session tabs — draft "New Chat" tabs are ephemeral.
+          // Persist session + editor tabs — draft "New Chat" tabs are ephemeral.
           tabs: p.tabs.filter(k => !isDraft(k)),
-          activeId: p.sessionId, // null while a draft is active
+          activeId: p.sessionId,     // null while a draft/editor tab is active
+          activeKey: p.activeTab,    // the active tab key (session id or "file#<abs>")
           width: Math.round(p.width),
         })),
         focusedIndex: Math.max(0, panels.findIndex(p => p.id === focusedPanelId)),
@@ -882,21 +898,41 @@ function renderPaneTabs(panel) {
   strip.innerHTML = "";
   for (const key of panel.tabs) {
     const draft = isDraft(key);
-    const label = draft ? "New Chat" : paneTabTitle(key);
+    const editor = isEditorTab(key);
+    const abs = editor ? editorPathOf(key) : null;
+    const label = draft ? "New Chat" : editor ? baseName(abs) : paneTabTitle(key);
     const tab = document.createElement("div");
-    tab.className = "pane-tab" + (draft ? " pane-tab-draft" : "") + (key === panel.activeTab ? " active" : "");
+    tab.className = "pane-tab"
+      + (draft ? " pane-tab-draft" : "")
+      + (editor ? " pane-tab-editor" : "")
+      + (editor && editorDirty.get(abs) ? " is-dirty" : "")
+      + (key === panel.activeTab ? " active" : "");
     tab.setAttribute("role", "tab");
     tab.dataset.tab = key;
-    tab.setAttribute("data-tip", draft ? "New chat" : label);
+    tab.setAttribute("data-tip", draft ? "New chat" : editor ? abs : label);
 
-    const dot = document.createElement("span");
-    dot.className = "pane-tab-busy";
-    tab.appendChild(dot);
+    if (editor) {
+      const glyph = document.createElement("span");
+      glyph.className = "pane-tab-glyph";
+      glyph.innerHTML = fileIconSvg(baseName(abs));
+      tab.appendChild(glyph);
+    } else {
+      const dot = document.createElement("span");
+      dot.className = "pane-tab-busy";
+      tab.appendChild(dot);
+    }
 
     const name = document.createElement("span");
     name.className = "pane-tab-name";
     name.textContent = label;
     tab.appendChild(name);
+
+    // Dirty editor tabs show a dot that becomes the close button on hover.
+    if (editor) {
+      const dirty = document.createElement("span");
+      dirty.className = "pane-tab-dirty";
+      tab.appendChild(dirty);
+    }
 
     const close = document.createElement("button");
     close.type = "button";
@@ -906,7 +942,7 @@ function renderPaneTabs(panel) {
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", !draft && sessionSending.has(key));
+    tab.classList.toggle("is-busy", !draft && !editor && sessionSending.has(key));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
       if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
@@ -1099,6 +1135,186 @@ function getContainer(sessionId) {
   }
   return sessionContainers.get(sessionId);
 }
+
+// ─── Monaco editor tabs ───────────────────────────────────────────────────────
+// A third pane-tab kind ("file#<abs>") opens a file in an embedded Monaco
+// editor next to chat-session tabs. One editor instance is lazily created per
+// pane (panel._editor); a per-file model (editorModels) holds the content and
+// edit history, so switching tabs preserves unsaved edits. Files are saved to
+// disk via PUT /api/file (Ctrl+S or the Save button).
+
+const EDITOR_TAB_PREFIX = "file#";
+function isEditorTab(key) { return typeof key === "string" && key.startsWith(EDITOR_TAB_PREFIX); }
+function editorPathOf(key) { return key.slice(EDITOR_TAB_PREFIX.length); }
+function editorKey(abs) { return EDITOR_TAB_PREFIX + abs; }
+function baseName(p) { const s = String(p).replace(/\/+$/, ""); const i = s.lastIndexOf("/"); return i >= 0 ? s.slice(i + 1) : s; }
+
+const editorModels = new Map(); // absPath → monaco.ITextModel
+const editorDirty  = new Map(); // absPath → bool (unsaved changes)
+
+// extension → Monaco language id (best-effort; unknown → plaintext).
+const EDITOR_LANGS = {
+  go: "go", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+  ts: "typescript", tsx: "typescript", html: "html", htm: "html", css: "css",
+  scss: "scss", sass: "scss", less: "less", json: "json", jsonc: "json",
+  md: "markdown", markdown: "markdown", py: "python", rs: "rust", rb: "ruby",
+  java: "java", c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp",
+  php: "php", swift: "swift", kt: "kotlin", sh: "shell", bash: "shell", zsh: "shell",
+  yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini", cfg: "ini", conf: "ini",
+  sql: "sql", xml: "xml", svg: "xml", proto: "proto", lua: "lua", r: "r",
+  dockerfile: "dockerfile", makefile: "makefile", txt: "plaintext", log: "plaintext",
+};
+function langForPath(abs) {
+  const name = baseName(abs).toLowerCase();
+  if (name === "dockerfile" || name.startsWith("dockerfile.")) return "dockerfile";
+  if (name === "makefile") return "makefile";
+  if (name === "go.mod" || name === "go.sum") return "plaintext";
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return "plaintext";
+  return EDITOR_LANGS[name.slice(dot + 1)] || "plaintext";
+}
+
+// Map the active app theme (data-theme on <html>) to a Monaco theme.
+function monacoTheme() {
+  const t = (document.documentElement.getAttribute("data-theme") || "").toLowerCase();
+  return t.includes("light") ? "vs" : "vs-dark";
+}
+
+// ensureMonaco lazily injects the vendored AMD loader and resolves once
+// window.monaco is ready. Cached so it loads at most once.
+let _monacoPromise = null;
+function ensureMonaco() {
+  if (_monacoPromise) return _monacoPromise;
+  _monacoPromise = new Promise((resolve, reject) => {
+    if (window.monaco && window.monaco.editor) { resolve(window.monaco); return; }
+    const vsBase = new URL("assets/monaco/vs", document.baseURI).href.replace(/\/$/, "");
+    // Same-origin blob worker that imports the vendored workerMain (handles any
+    // BasePath; no CSP header is set server-side so blob: workers are allowed).
+    self.MonacoEnvironment = {
+      getWorkerUrl: function () {
+        const code = `self.MonacoEnvironment={baseUrl:'${vsBase}/'};importScripts('${vsBase}/base/worker/workerMain.js');`;
+        return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+      },
+    };
+    const loader = document.createElement("script");
+    loader.src = vsBase + "/loader.js";
+    loader.onload = () => {
+      try {
+        window.require.config({ paths: { vs: vsBase } });
+        window.require(["vs/editor/editor.main"], () => resolve(window.monaco));
+      } catch (e) { reject(e); }
+    };
+    loader.onerror = () => reject(new Error("failed to load Monaco loader.js"));
+    document.head.appendChild(loader);
+  });
+  return _monacoPromise;
+}
+
+// ensureEditorModel fetches a file's content (once) and returns its Monaco model.
+async function ensureEditorModel(monaco, abs) {
+  if (editorModels.has(abs)) return editorModels.get(abs);
+  const res = await apiFetch(`/api/file?path=${encodeURIComponent(abs)}&session=${encodeURIComponent(activeSessionId || "")}`);
+  const text = res.ok ? await res.text() : "";
+  const model = monaco.editor.createModel(text, langForPath(abs), monaco.Uri.file(abs));
+  editorModels.set(abs, model);
+  editorDirty.set(abs, false);
+  model.onDidChangeContent(() => {
+    if (!editorDirty.get(abs)) {
+      editorDirty.set(abs, true);
+      for (const p of panelsWithTab(editorKey(abs))) renderPaneTabs(p);
+    }
+  });
+  return model;
+}
+
+// mountEditor shows the file `abs` in `panel`'s Monaco editor, creating the
+// per-pane editor instance on first use.
+async function mountEditor(panel, abs) {
+  const monaco = await ensureMonaco();
+  // The tab may have been switched away while Monaco/content loaded.
+  if (panel.activeTab !== editorKey(abs)) return;
+  if (!panel._editor) {
+    panel._editor = monaco.editor.create(panel.els.editorHost, {
+      automaticLayout: true,
+      theme: monacoTheme(),
+      fontSize: 13,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+    });
+    panel._editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      const key = panel.activeTab;
+      if (isEditorTab(key)) saveEditor(panel, editorPathOf(key));
+    });
+  }
+  const model = await ensureEditorModel(monaco, abs);
+  if (panel.activeTab !== editorKey(abs)) return;
+  panel._editor.setModel(model);
+  panel._editor.layout();
+  if (panel.els.editorPath) {
+    panel.els.editorPath.textContent = abs;
+    panel.els.editorPath.setAttribute("data-tip", abs);
+  }
+  panel._editor.focus();
+}
+
+// saveEditor writes the model's current content to disk via PUT /api/file.
+async function saveEditor(panel, abs) {
+  const model = editorModels.get(abs);
+  if (!model) return;
+  if (panel.els.editorSave) panel.els.editorSave.classList.add("saving");
+  try {
+    const res = await apiFetch(`/api/file`, {
+      method: "PUT",
+      body: JSON.stringify({ path: abs, content: model.getValue(), session: activeSessionId || "" }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setStatus(panel, "save failed: " + (body.error || res.status));
+      return;
+    }
+    editorDirty.set(abs, false);
+    for (const p of panelsWithTab(editorKey(abs))) renderPaneTabs(p);
+    setStatus(panel, "saved " + baseName(abs));
+    setTimeout(() => { if ((sessionStatus.get(panel.sessionId) || "") === "") setStatus(panel, ""); }, 1500);
+  } catch (e) {
+    setStatus(panel, "save failed: " + e);
+  } finally {
+    if (panel.els.editorSave) panel.els.editorSave.classList.remove("saving");
+  }
+}
+
+// disposeEditor drops a closed file's model + dirty flag (called from closeTab).
+function disposeEditor(abs) {
+  const model = editorModels.get(abs);
+  if (model) model.dispose();
+  editorModels.delete(abs);
+  editorDirty.delete(abs);
+}
+
+// openFileInEditor opens a Folders-panel file (relative to foldersDir) as an
+// editor tab. If already open anywhere it focuses that tab; otherwise it opens
+// in the focused pane (replacing an active draft slot when present).
+function openFileInEditor(rel) {
+  const root = (foldersDir || "").replace(/\/+$/, "");
+  const abs = root ? root + "/" + rel : "/" + rel;
+  const key = editorKey(abs);
+  const existing = panelsWithTab(key)[0];
+  if (existing) { setFocusedPanel(existing.id); activateTab(existing, key); return; }
+  const panel = focusedPanel() || panels[0];
+  if (!panel) return;
+  if (!panel.tabs.includes(key)) {
+    const ai = panel.tabs.indexOf(panel.activeTab);
+    if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = key;
+    else panel.tabs.push(key);
+  }
+  activateTab(panel, key);
+}
+
+// Keep open editors' theme in sync with the app theme (settings.js toggles the
+// <html> data-theme attribute).
+new MutationObserver(() => {
+  if (window.monaco && window.monaco.editor) window.monaco.editor.setTheme(monacoTheme());
+}).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -3200,20 +3416,29 @@ async function bindSessionToPanel(panel, id) {
 function closeTab(panel, key) {
   const idx = panel.tabs.indexOf(key);
   if (idx === -1) return;
+  const editor = isEditorTab(key);
+  if (editor) {
+    const abs = editorPathOf(key);
+    if (editorDirty.get(abs) && !confirm(`Discard unsaved changes to ${baseName(abs)}?`)) return;
+  }
   const wasActive = panel.activeTab === key;
   panel.tabs.splice(idx, 1);
+  // Editor tabs live in at most one pane; free the model once it's gone.
+  if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
+  // Session-only cleanup (push subscription); editor keys have none.
+  const releaseIfSession = () => { if (!editor) releaseSessionIfUnviewed(key); };
 
   if (!panel.tabs.length) {
     if (panels.length > 1) {
       closePanel(panel);            // drops the pane; releases its (now empty) tabs
-      releaseSessionIfUnviewed(key);
+      releaseIfSession();
       refreshSidebarActive();
       return;
     }
     // Sole pane: never leave it tab-less — open a fresh "New Chat" draft.
     if (focusedPanelId === panel.id) activeSessionId = null;
     newDraftTab(panel);
-    releaseSessionIfUnviewed(key);
+    releaseIfSession();
     refreshSidebarActive();
     return;
   }
@@ -3225,7 +3450,7 @@ function closeTab(panel, key) {
     renderPaneTabs(panel);
     saveLayout();
   }
-  releaseSessionIfUnviewed(key);
+  releaseIfSession();
   refreshSidebarActive();
 }
 
@@ -3234,6 +3459,22 @@ function closeTab(panel, key) {
 // mounts its transcript, loads history if needed, subscribes to push events, and
 // flushes any queued ask-user widgets.
 async function activateTab(panel, key) {
+  // Editor tab — show the Monaco editor for a file, no chat session is active.
+  if (isEditorTab(key)) {
+    panel.activeTab = key;
+    panel.sessionId = null;
+    panel.root.classList.add("editing");
+    hidePanePicker(panel);
+    mountInPanel(panel, null);
+    clearPinnedPrompt(panel);
+    setFocusedPanel(panel.id);
+    renderPaneTabs(panel);
+    saveLayout();
+    mountEditor(panel, editorPathOf(key));
+    return;
+  }
+  panel.root.classList.remove("editing");
+
   // Draft tab — show the picker, no session is active.
   if (isDraft(key)) {
     panel.activeTab = key;
@@ -3491,6 +3732,7 @@ async function newChat(panel, squadOverride) {
     }
     panel.activeTab = newId;
     panel.sessionId = newId;
+    panel.root.classList.remove("editing");
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
     clearPinnedPrompt(panel);
@@ -5377,7 +5619,7 @@ function buildFolderEntry(e, rel) {
       () => toggleFolderExpand(li, row, children, rel),
       () => loadFolder(rel));
   } else {
-    wireClickDblClick(row, () => {}, () => insertFileRef(rel));
+    wireClickDblClick(row, () => {}, () => openFileInEditor(rel));
   }
   return li;
 }
@@ -5479,8 +5721,12 @@ async function restoreLayout(rec, liveIds) {
     const rawTabs = Array.isArray(pane.tabs)
       ? pane.tabs
       : (pane.sessionId ? [pane.sessionId] : []);
-    const tabs = rawTabs.filter(id => liveIds.has(id));
-    let active = pane.activeId && tabs.includes(pane.activeId) ? pane.activeId : tabs[0] || null;
+    // Keep editor tabs (file#<abs>) through the live-session filter.
+    const tabs = rawTabs.filter(k => isEditorTab(k) || liveIds.has(k));
+    const preferred = (pane.activeKey && tabs.includes(pane.activeKey))
+      ? pane.activeKey
+      : (pane.activeId && tabs.includes(pane.activeId) ? pane.activeId : null);
+    let active = preferred || tabs[0] || null;
     const panel = createPanel(null);
     panel.width = pane.width > 0 ? pane.width : 0;
     plans.push({ tabs, active });
@@ -5494,11 +5740,12 @@ async function restoreLayout(rec, liveIds) {
     const panel = panels[i];
     const { tabs, active } = plans[i];
     if (!tabs.length) { newDraftTab(panel); continue; }
-    // Register every tab on the pane, then mount the active one (loads history).
+    // Register every tab on the pane, then mount the active one (loads history /
+    // editor content). Subscribe background session tabs (editor tabs have none).
     panel.tabs = tabs.slice();
     renderPaneTabs(panel);
-    for (const id of tabs) if (id !== active) subscribeSessionEvents(id);
-    await bindSessionToPanel(panel, active);
+    for (const id of tabs) if (id !== active && !isEditorTab(id)) subscribeSessionEvents(id);
+    await activateTab(panel, active);
     bound = true;
   }
   return bound;

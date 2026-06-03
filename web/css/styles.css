@@ -825,6 +825,59 @@ body.resizing #sidebar-resize { transition: none; }
 }
 #chat.solo .chat-pane.is-focused::before { display: none; }
 
+/* ─── Monaco editor tabs ───────────────────────────────────────────────────
+ * When a pane shows an editor tab it gets the `.editing` class: the chat
+ * surfaces (prompt header, transcript, ask-user slot, composer, picker) are
+ * hidden and the Monaco editor fills the pane. */
+.chat-pane.editing #prompt-header,
+.chat-pane.editing #transcript,
+.chat-pane.editing #ask-user-slot,
+.chat-pane.editing #composer-wrap,
+.chat-pane.editing .pane-picker { display: none !important; }
+.pane-editor { display: none; }
+.chat-pane.editing .pane-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.pane-editor-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, #333);
+  background: var(--bg-raised, #2a2d2e);
+}
+.pane-editor-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;        /* keep the filename (path tail) visible */
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+.pane-editor-save {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border, #333);
+  border-radius: 5px;
+  background: var(--bg, #1e1e1e);
+  color: var(--text, #eee);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pane-editor-save:hover { background: var(--bg-raised-hover, #333); border-color: var(--accent-border-soft); }
+.pane-editor-save.saving { opacity: .6; pointer-events: none; }
+.pane-editor-host { flex: 1 1 0; min-height: 0; width: 100%; }
+
 /* Draggable vertical divider between panes. */
 .pane-divider {
   flex: 0 0 6px;
@@ -918,6 +971,29 @@ body.resizing #sidebar-resize { transition: none; }
   display: none;
 }
 .pane-tab.is-busy .pane-tab-busy { display: block; }
+
+/* Editor-tab file glyph (left of the filename). */
+.pane-tab-glyph {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.pane-tab-editor .pane-tab-name { font-style: normal; }
+/* Dirty dot — an unsaved editor tab shows a filled dot; it sits where the close
+ * button is and yields to the × on hover (VS Code behaviour). */
+.pane-tab-dirty {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text, #eee);
+  display: none;
+}
+.pane-tab.is-dirty .pane-tab-dirty { display: block; }
+.pane-tab.is-dirty:hover .pane-tab-dirty { display: none; }
+.pane-tab.is-dirty .pane-tab-close { opacity: 0; }
+.pane-tab.is-dirty:hover .pane-tab-close { opacity: .7; }
+
 /* Per-tab close button (revealed on hover / when active). */
 .pane-tab-close {
   flex-shrink: 0;

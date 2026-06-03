@@ -44,6 +44,18 @@ fmt: ## Format sources
 vet: ## Run go vet
 	$(GO) vet ./...
 
+MONACO_VERSION ?= 0.52.2
+.PHONY: vendor-monaco
+vendor-monaco: ## Vendor the Monaco Editor (min/vs) into web/monaco/vs for offline use
+	@tmp=$$(mktemp -d); \
+	echo "Fetching monaco-editor@$(MONACO_VERSION)…"; \
+	( cd $$tmp && npm pack monaco-editor@$(MONACO_VERSION) >/dev/null && \
+	  tar -xzf monaco-editor-$(MONACO_VERSION).tgz ) && \
+	rm -rf web/monaco/vs && mkdir -p web/monaco && \
+	cp -r $$tmp/package/min/vs web/monaco/vs && \
+	rm -rf $$tmp && \
+	echo "Vendored Monaco $(MONACO_VERSION) into web/monaco/vs"
+
 .PHONY: test
 test: ## Run unit tests
 	$(GO) test ./...

@@ -84,3 +84,39 @@ func handleFileRefRaw(d serverDeps) gin.HandlerFunc {
 		}
 	}
 }
+
+// handleFileWrite saves new content to an existing file (the web-UI Monaco
+// editor's Save / Ctrl+S). Like handleFileRefRaw it is gated only by the API
+// token and trusts the authenticated user with host file access — the same
+// trust model as the read route, the Read/Write tools, and the "!" shell-escape
+// (no agent permission prompt). It edits existing files only: the path must
+// classify as a regular file, so it can neither overwrite a directory nor
+// create files in arbitrary new locations. The existing file mode is preserved.
+func handleFileWrite(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+			Session string `json:"session"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+			return
+		}
+		cwd := bashCwd.get(req.Session)
+		ref := fileref.Classify(req.Path, cwd)
+		if ref.Kind != fileref.KindFile {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not an existing file"})
+			return
+		}
+		mode := os.FileMode(0o644)
+		if info, err := os.Stat(ref.Abs); err == nil {
+			mode = info.Mode().Perm()
+		}
+		if err := os.WriteFile(ref.Abs, []byte(req.Content), mode); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "path": ref.Abs})
+	}
+}
