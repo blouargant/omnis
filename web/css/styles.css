@@ -687,6 +687,9 @@ body.resizing #sidebar { transition: none; }
   flex-direction: column;
   gap: 1px;
 }
+/* The id selector above outranks the UA `[hidden]{display:none}` rule, so this
+ * explicit rule is required for `m.hidden = true` to actually hide the menu. */
+#folder-ctx-menu[hidden] { display: none; }
 .folder-ctx-item {
   display: block;
   width: 100%;
