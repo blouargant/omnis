@@ -231,6 +231,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		var body struct {
 			Squad string `json:"squad"`
 			Title string `json:"title"`
+			Dir   string `json:"dir"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		squad := strings.ToLower(strings.TrimSpace(body.Squad))
@@ -246,6 +247,14 @@ func newEngine(d serverDeps) *gin.Engine {
 			return
 		}
 		meta := d.Registry.New(squad)
+		// New sessions start at the fixed initial root (bashCwd.get falls back
+		// to it), independent of where the global Folders panel has browsed —
+		// unless the caller pins a starting folder ("Open Chat here").
+		if dir := strings.TrimSpace(body.Dir); dir != "" {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				bashCwd.set(meta.ID, dir)
+			}
+		}
 		if title := strings.TrimSpace(body.Title); title != "" {
 			d.Registry.SetTitle(meta.ID, title)
 		}
@@ -605,6 +614,10 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.POST("/sessions/:id/bash", handleBash(d))
 	auth.GET("/sessions/:id/folder", handleFolder(d))
 	auth.POST("/sessions/:id/folder", handleFolder(d))
+	// Global "no session" environment: browse/navigate the default working
+	// directory even when no chat session is active (e.g. a Monaco editor tab).
+	auth.GET("/folder", handleGlobalFolder(d))
+	auth.POST("/folder", handleGlobalFolder(d))
 	auth.GET("/complete", handleComplete(d))
 	auth.GET("/complete-file", handleCompleteFile(d))
 	auth.POST("/fileref/resolve", handleFileRefResolve(d))

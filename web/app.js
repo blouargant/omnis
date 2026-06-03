@@ -1294,9 +1294,15 @@ function disposeEditor(abs) {
 // openFileInEditor opens a Folders-panel file (relative to foldersDir) as an
 // editor tab. If already open anywhere it focuses that tab; otherwise it opens
 // in the focused pane (replacing an active draft slot when present).
-function openFileInEditor(rel) {
+// absForRel resolves a Folders-panel entry path (relative to the panel's
+// current dir) to an absolute host path.
+function absForRel(rel) {
   const root = (foldersDir || "").replace(/\/+$/, "");
-  const abs = root ? root + "/" + rel : "/" + rel;
+  return root ? root + "/" + rel : "/" + rel;
+}
+
+function openFileInEditor(rel) {
+  const abs = absForRel(rel);
   const key = editorKey(abs);
   const existing = panelsWithTab(key)[0];
   if (existing) { setFocusedPanel(existing.id); activateTab(existing, key); return; }
@@ -3702,16 +3708,20 @@ function currentSquadChoice() {
 // newChat creates a fresh session and binds it into `panel` (the focused pane
 // when omitted — e.g. the sidebar "New Chat" button). `squadOverride` picks the
 // squad for this session only (used by the empty-pane picker); when omitted the
-// globally-selected squad applies. Returns the new id.
-async function newChat(panel, squadOverride) {
+// globally-selected squad applies. `dirOverride` roots the session at a chosen
+// folder (the Folders panel's "Open Chat here"); when omitted it starts at the
+// fixed initial root. Returns the new id.
+async function newChat(panel, squadOverride, dirOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   panel = panel || fp();
   if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
   const squad = squadOverride || currentSquadChoice();
   try {
+    const body = { squad };
+    if (dirOverride) body.dir = dirOverride;
     const res = await apiFetch("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ squad }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
@@ -5392,15 +5402,22 @@ els.foldersResize.addEventListener("pointerdown", (e) => {
 // active session changes or after a "!cd" mutates the cwd.
 function refreshFoldersPanel() { if (!foldersCollapsed()) loadFolder(); }
 
-// loadFolder fetches and renders the active session's working directory listing.
+// folderApiBase returns the folder endpoint for the current context: the active
+// session's working directory when one is active, else the global "no session"
+// default environment (so browsing works while a Monaco editor / draft tab is
+// active). New chat sessions start at the global root (snapshotted server-side).
+function folderApiBase() {
+  return activeSessionId ? `/api/sessions/${activeSessionId}/folder` : `/api/folder`;
+}
+
+// loadFolder fetches and renders the current working directory listing (active
+// session's, or the global default when no session is active).
 async function loadFolder(path) {
-  const sessionId = activeSessionId;
-  if (!sessionId) { renderFolder(null); return; }
   try {
     const opts = path != null
       ? { method: "POST", body: JSON.stringify({ path }) }
       : { method: "GET" };
-    const res = await apiFetch(`/api/sessions/${sessionId}/folder`, opts);
+    const res = await apiFetch(folderApiBase(), opts);
     const data = await res.json();
     if (!res.ok) { renderFolder(null, data.error); return; }
     renderFolder(data);
@@ -5523,27 +5540,30 @@ function insertFileRef(rel) {
 // lastCopiedRef. The copied row keeps a persistent "copied" marker (cleared
 // from any previously-copied row) so the user can see which item is armed for
 // pasting; markCopiedRow re-applies it across tree re-renders.
+// writeClipboard copies text to the system clipboard, with a legacy
+// execCommand fallback for non-secure (plain-http) contexts.
+async function writeClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch { /* fall through to execCommand */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  } catch { /* clipboard unavailable */ }
+}
+
 async function copyFileRef(rel, rowEl) {
   const ref = "@" + rel;
   lastCopiedRef = ref;
-  let ok = false;
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(ref);
-      ok = true;
-    }
-  } catch { ok = false; }
-  if (!ok) {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = ref;
-      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    } catch { /* clipboard unavailable; lastCopiedRef still drives paste */ }
-  }
+  await writeClipboard(ref);
   // Clear the marker from any previously-copied row, then mark this one. A brief
   // "flash" class layers a one-shot pulse on top of the persistent highlight.
   for (const r of els.foldersList.querySelectorAll(".folder-entry-row.copied")) {
@@ -5587,6 +5607,72 @@ document.addEventListener("keydown", (e) => {
 // click with expand/collapse, a double click with "navigate into" (mutates the
 // session cwd). Files do nothing on single click and insert an "@rel" reference
 // on double click. `rel` is the path of this entry relative to the session cwd.
+// ─── Folders panel context menu ───────────────────────────────────────────────
+// Right-clicking a folder/file row opens a small themed menu (body-appended so it
+// escapes panel overflow). Items adapt to the entry kind + state:
+//   folder: Open Chat here · Copy path · [Add to chat editor]
+//   file:   Open · Copy path · [Add to chat editor] · [Save (when dirty)]
+// (bracketed items appear conditionally).
+let folderCtxMenu = null;
+function ensureFolderCtxMenu() {
+  if (folderCtxMenu) return folderCtxMenu;
+  const m = document.createElement("div");
+  m.id = "folder-ctx-menu";
+  m.hidden = true;
+  document.body.appendChild(m);
+  folderCtxMenu = m;
+  // Close on any click/right-click/scroll anywhere — in the CAPTURE phase so it
+  // fires even when an app element stops propagation on its own click handler.
+  // A menu item's own action still runs: the click event is already in flight to
+  // the button, so hiding the menu here doesn't cancel it.
+  document.addEventListener("click", () => hideFolderCtxMenu(), true);
+  document.addEventListener("contextmenu", (e) => { if (!m.contains(e.target)) hideFolderCtxMenu(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideFolderCtxMenu(); });
+  document.addEventListener("scroll", () => hideFolderCtxMenu(), true);
+  window.addEventListener("blur", () => hideFolderCtxMenu());
+  window.addEventListener("resize", () => hideFolderCtxMenu());
+  return m;
+}
+function hideFolderCtxMenu() { if (folderCtxMenu) folderCtxMenu.hidden = true; }
+
+function openFolderCtxMenu(ev, rel, isDir, row) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (row) row.focus();
+  const m = ensureFolderCtxMenu();
+  m.innerHTML = "";
+  const abs = absForRel(rel);
+  const items = [];
+  if (isDir) {
+    items.push(["Open Chat here", () => newChat(null, undefined, abs)]);
+    items.push(["Copy path", () => writeClipboard(abs)]);
+    if (activeSessionId) items.push(["Add to chat editor", () => insertFileRef(rel)]);
+  } else {
+    items.push(["Open", () => openFileInEditor(rel)]);
+    items.push(["Copy path", () => writeClipboard(abs)]);
+    if (activeSessionId) items.push(["Add to chat editor", () => insertFileRef(rel)]);
+    if (editorDirty.get(abs)) {
+      const panel = panelsWithTab(editorKey(abs))[0];
+      if (panel) items.push(["Save", () => saveEditor(panel, abs)]);
+    }
+  }
+  for (const [label, action] of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "folder-ctx-item";
+    btn.textContent = label;
+    btn.addEventListener("click", (e) => { e.stopPropagation(); hideFolderCtxMenu(); action(); });
+    m.appendChild(btn);
+  }
+  // Show then position (clamped to the viewport).
+  m.hidden = false;
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  const x = Math.min(ev.clientX, window.innerWidth - mw - 4);
+  const y = Math.min(ev.clientY, window.innerHeight - mh - 4);
+  m.style.left = Math.max(4, x) + "px";
+  m.style.top = Math.max(4, y) + "px";
+}
+
 function buildFolderEntry(e, rel) {
   const li = document.createElement("li");
   li.className = e.dir ? "folder-dir" : "folder-file";
@@ -5608,6 +5694,8 @@ function buildFolderEntry(e, rel) {
       copyFileRef(rel, row);
     }
   });
+  // Right-click → contextual menu (Open / Open Chat here / Copy path / …).
+  row.addEventListener("contextmenu", (ev) => openFolderCtxMenu(ev, rel, e.dir, row));
   li.appendChild(row);
 
   if (e.dir) {
@@ -5634,11 +5722,9 @@ async function toggleFolderExpand(li, row, children, rel) {
   if (!expanded) { children.hidden = true; return; }
   children.hidden = false;
   if (li.dataset.loaded === "1") return;
-  const sessionId = activeSessionId;
-  if (!sessionId) return;
   children.innerHTML = `<li class="folder-loading">…</li>`;
   try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/folder?sub=${encodeURIComponent(rel)}`);
+    const res = await apiFetch(`${folderApiBase()}?sub=${encodeURIComponent(rel)}`);
     const data = await res.json();
     children.innerHTML = "";
     if (!res.ok) { children.innerHTML = `<li class="folder-loading">${escHtml(data.error || "error")}</li>`; return; }
@@ -5654,8 +5740,8 @@ async function toggleFolderExpand(li, row, children, rel) {
 
 // renderFolder paints the path header and the entry tree ("..", dirs, files).
 // Single-click a directory to expand/collapse it in place, double-click to
-// navigate into it (loadFolder mutates the session cwd). Single-click a file
-// does nothing; double-click inserts an "@path" reference into the composer.
+// navigate into it (loadFolder mutates the cwd). Single-click a file does
+// nothing; double-click opens it in the Monaco editor.
 function renderFolder(data, err) {
   els.foldersList.innerHTML = "";
   if (!data) {
@@ -5663,7 +5749,7 @@ function renderFolder(data, err) {
     els.foldersPath.removeAttribute("data-tip");
     const li = document.createElement("li");
     li.id = "folders-empty";
-    li.textContent = err || (activeSessionId ? "empty" : "no active session");
+    li.textContent = err || "empty";
     els.foldersList.appendChild(li);
     return;
   }

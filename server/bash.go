@@ -19,23 +19,29 @@ import (
 // in-memory and per-process — it is intentionally not persisted (the shell
 // escape is a live convenience, not part of the conversation history).
 type bashCwdStore struct {
-	mu sync.Mutex
-	m  map[string]string
+	mu   sync.Mutex
+	m    map[string]string
+	root string // fixed initial root — where new chat sessions start
+	def  string // global "no session" browse cwd (navigable Folders panel)
 }
 
-func newBashCwdStore() *bashCwdStore { return &bashCwdStore{m: map[string]string{}} }
+func newBashCwdStore() *bashCwdStore {
+	wd, _ := os.Getwd()
+	return &bashCwdStore{m: map[string]string{}, root: wd, def: wd}
+}
 
-// get returns the stored working directory for id, falling back to the
-// process working directory (also used when id is empty, e.g. completion
-// requested from a draft tab with no session yet).
+// get returns the stored working directory for id, falling back to the fixed
+// initial root. A new (or un-navigated) session therefore starts at the root,
+// independent of where the global Folders panel has browsed — which is the
+// separate `def` cwd (getGlobal/setGlobal). `get("")` (a draft/editor tab with
+// no session) likewise resolves to the root.
 func (s *bashCwdStore) get(id string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if d, ok := s.m[id]; ok && d != "" {
 		return d
 	}
-	wd, _ := os.Getwd()
-	return wd
+	return s.root
 }
 
 func (s *bashCwdStore) set(id, dir string) {
@@ -44,6 +50,27 @@ func (s *bashCwdStore) set(id, dir string) {
 	}
 	s.mu.Lock()
 	s.m[id] = dir
+	s.mu.Unlock()
+}
+
+// getGlobal / setGlobal manage the **navigable** global browse cwd — the
+// "default environment" the Folders panel browses when no chat session is
+// active. It is deliberately distinct from the fixed `root`: browsing here lets
+// the user find and open files in the editor, but never changes where new chats
+// start (that stays the initial root; per-folder "Open Chat" is a separate
+// future feature).
+func (s *bashCwdStore) getGlobal() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.def
+}
+
+func (s *bashCwdStore) setGlobal(dir string) {
+	if dir == "" {
+		return
+	}
+	s.mu.Lock()
+	s.def = dir
 	s.mu.Unlock()
 }
 
@@ -102,73 +129,125 @@ func handleFolder(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		dir := bashCwd.get(id)
-		if c.Request.Method == http.MethodPost {
-			var req struct {
-				Path string `json:"path"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		switch c.Request.Method {
+		case http.MethodPost:
+			target, ok := resolveFolderTarget(c, dir, true)
+			if !ok {
 				return
 			}
-			target := strings.TrimSpace(req.Path)
 			if target != "" {
-				if !filepath.IsAbs(target) {
-					target = filepath.Join(dir, target)
-				}
-				target = filepath.Clean(target)
-				info, err := os.Stat(target)
-				if err != nil || !info.IsDir() {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "not a directory"})
-					return
-				}
 				dir = target
 				bashCwd.set(id, dir)
 				d.Registry.Touch(id)
 			}
-		} else if sub := strings.TrimSpace(c.Query("sub")); sub != "" {
-			// Tree expansion: list a sub-directory relative to the cwd WITHOUT
-			// mutating the session's working directory.
-			target := sub
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(dir, target)
-			}
-			target = filepath.Clean(target)
-			info, err := os.Stat(target)
-			if err != nil || !info.IsDir() {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "not a directory"})
+		default:
+			if sub, ok := resolveFolderTarget(c, dir, false); ok && sub != "" {
+				dir = sub // tree expansion: list without mutating the session cwd
+			} else if !ok {
 				return
 			}
-			dir = target
 		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		type folderEntry struct {
-			Name string `json:"name"`
-			Dir  bool   `json:"dir"`
-		}
-		out := make([]folderEntry, 0, len(entries))
-		for _, e := range entries {
-			isDir := e.IsDir()
-			// Resolve symlinks so a link to a directory is navigable.
-			if !isDir && e.Type()&os.ModeSymlink != 0 {
-				if info, err := os.Stat(filepath.Join(dir, e.Name())); err == nil && info.IsDir() {
-					isDir = true
-				}
-			}
-			out = append(out, folderEntry{Name: e.Name(), Dir: isDir})
-		}
-		// Directories first, then files, each alphabetical (case-insensitive).
-		sort.Slice(out, func(i, j int) bool {
-			if out[i].Dir != out[j].Dir {
-				return out[i].Dir
-			}
-			return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
-		})
-		c.JSON(http.StatusOK, gin.H{"dir": dir, "entries": out})
+		writeFolderListing(c, dir)
 	}
+}
+
+// handleGlobalFolder browses the **global default** working directory (the web
+// app's "no session" environment). Same shape as handleFolder but keyed on the
+// process-wide global cwd rather than a session: GET lists it (or a `?sub=`
+// child without mutating), POST `{path}` navigates it. It needs no session id,
+// so the Folders panel keeps working while a Monaco editor / draft tab is active.
+func handleGlobalFolder(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dir := bashCwd.getGlobal()
+		switch c.Request.Method {
+		case http.MethodPost:
+			target, ok := resolveFolderTarget(c, dir, true)
+			if !ok {
+				return
+			}
+			if target != "" {
+				dir = target
+				bashCwd.setGlobal(dir)
+			}
+		default:
+			if sub, ok := resolveFolderTarget(c, dir, false); ok && sub != "" {
+				dir = sub
+			} else if !ok {
+				return
+			}
+		}
+		writeFolderListing(c, dir)
+	}
+}
+
+// resolveFolderTarget resolves a navigation/expansion target against dir. When
+// post is true it reads `{path}` from the JSON body (the navigate-into target);
+// otherwise it reads the `sub` query param (the tree-expansion target). A
+// relative target is joined onto dir, absolute is used as-is, then cleaned and
+// validated to be an existing directory. Returns ("", true) when no target was
+// supplied, (abs, true) on success, and (_, false) after it has already written
+// an error response (the caller must return).
+func resolveFolderTarget(c *gin.Context, dir string, post bool) (string, bool) {
+	var raw string
+	if post {
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+			return "", false
+		}
+		raw = req.Path
+	} else {
+		raw = c.Query("sub")
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	target := raw
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	}
+	target = filepath.Clean(target)
+	info, err := os.Stat(target)
+	if err != nil || !info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not a directory"})
+		return "", false
+	}
+	return target, true
+}
+
+// writeFolderListing reads dir and writes the {dir, entries} JSON (directories
+// first, then files, each case-insensitive alphabetical; symlinked dirs
+// resolved so they stay navigable).
+func writeFolderListing(c *gin.Context, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	type folderEntry struct {
+		Name string `json:"name"`
+		Dir  bool   `json:"dir"`
+	}
+	out := make([]folderEntry, 0, len(entries))
+	for _, e := range entries {
+		isDir := e.IsDir()
+		if !isDir && e.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(filepath.Join(dir, e.Name())); err == nil && info.IsDir() {
+				isDir = true
+			}
+		}
+		out = append(out, folderEntry{Name: e.Name(), Dir: isDir})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Dir != out[j].Dir {
+			return out[i].Dir
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	c.JSON(http.StatusOK, gin.H{"dir": dir, "entries": out})
 }
 
 // handleComplete returns bash-like completion candidates for the `line` query

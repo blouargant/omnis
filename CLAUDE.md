@@ -663,25 +663,45 @@ LLM history (a convenience, like the todo widget).
 A collapsible **Folders** panel in the sidebar (`#folders-panel`, directly above
 `#archived-panel`, same look/feel — chevron + folder icon + section label,
 collapsed by default, collapse state in `localStorage["agent_folders_collapsed"]`)
-browses the **active session's working directory**. It reads and mutates the
-**same process-wide `bashCwd` store** the `!cd` shell-escape uses, so navigating
-folders here is equivalent to typing `!cd` (and vice-versa — a `!cd` refreshes the
-open panel, see `runBangCommand`).
+browses the **active session's working directory** — or, when **no session is
+active** (a Monaco editor tab or an empty draft is showing), the **global default
+environment** (see below). It reads and mutates the **same process-wide `bashCwd`
+store** the `!cd` shell-escape uses, so navigating folders here is equivalent to
+typing `!cd` (and vice-versa — a `!cd` refreshes the open panel, see
+`runBangCommand`).
+
+**Global "no session" environment.** `bashCwd` carries **two** process-wide dirs
+(both initialised to the process cwd): a **fixed initial `root`** and a
+**navigable global browse cwd `def`** (`getGlobal`/`setGlobal`). `get(id)` falls
+back to **`root`** when a session has no stored cwd, so **a new (or un-navigated)
+chat session always starts at the fixed initial root** — independent of where the
+global Folders panel has browsed. The Folders panel picks its endpoint via
+`folderApiBase()` ([web/app.js](web/app.js)): the session route when
+`activeSessionId` is set, else the session-less `GET/POST /api/folder`
+(`handleGlobalFolder`, which navigates `def`). So folder browsing — and
+double-click-to-open-in-Monaco — keep working with no chat session, and browsing
+that global panel **never** changes where new chats start. To start a session
+rooted at a specific folder, use the Folders panel's right-click **"Open Chat
+here"** (the `dir` field on `POST /api/sessions` → `bashCwd.set(meta.ID, dir)`);
+see the context-menu bullet below.
 
 **This cwd is also the agent's tool working directory** (see "Per-session tool
 working directory" below): navigating the panel changes where the agent's
 `Bash`/`Read`/`Write`/`Edit`/`Grep`/`Glob` operate, not just the `!` shell-escape.
 
-- **Server** ([server/bash.go](server/bash.go) `handleFolder`, registered in
-  [server/server.go](server/server.go)): `GET /api/sessions/:id/folder` →
-  `{dir, entries:[{name,dir}]}` lists the session's current cwd (dirs first,
-  then files, case-insensitive alphabetical; symlinked dirs resolved via
-  `os.Stat`). `GET …/folder?sub=<rel>` lists a sub-directory relative to the
-  cwd **without mutating** it (the tree-expansion path — returns that sub-dir's
-  `{dir, entries}`). `POST …/folder` `{path}` resolves `path` against the cwd
-  (relative joined, absolute as-is, `..` walks up), validates it is a directory,
-  calls `bashCwd.set`, and returns the new listing. Read-only host file access,
-  same trust model as the `!` shell-escape and `GET /api/file`.
+- **Server** ([server/bash.go](server/bash.go) `handleFolder` /
+  `handleGlobalFolder`, sharing `resolveFolderTarget` + `writeFolderListing`,
+  registered in [server/server.go](server/server.go)):
+  `GET /api/sessions/:id/folder` → `{dir, entries:[{name,dir}]}` lists the
+  session's current cwd (dirs first, then files, case-insensitive alphabetical;
+  symlinked dirs resolved via `os.Stat`). `GET …/folder?sub=<rel>` lists a
+  sub-directory relative to the cwd **without mutating** it (the tree-expansion
+  path — returns that sub-dir's `{dir, entries}`). `POST …/folder` `{path}`
+  resolves `path` against the cwd (relative joined, absolute as-is, `..` walks
+  up), validates it is a directory, calls `bashCwd.set`, and returns the new
+  listing. The session-less `GET/POST /api/folder` mirror these against the
+  global default cwd (`getGlobal`/`setGlobal`). Read-only host file access, same
+  trust model as the `!` shell-escape and `GET /api/file`.
 - **Client** ([web/app.js](web/app.js), styled in [web/css/styles.css](web/css/styles.css)):
   `loadFolder(path)` GETs (no `path`) or POSTs (with `path`) and `renderFolder`
   paints the path header plus a `..` entry (hidden at filesystem root), then a
@@ -720,6 +740,21 @@ working directory" below): navigating the panel changes where the agent's
   `insertRefIntoComposer` (shared with `insertFileRef`). `refreshFoldersPanel`
   reloads when the panel is open; called from `setFocusedPanel` (active-session
   change) and after a `!cd` mutates the cwd.
+- **Right-click context menu** (`openFolderCtxMenu` → `#folder-ctx-menu`,
+  body-appended `position:fixed` so it escapes panel overflow; dismissed on any
+  click / right-click / scroll / Escape / blur / resize — the click+contextmenu+
+  scroll listeners are **capture-phase** so an app handler that `stopPropagation`s
+  its own click can't keep the menu open; a clicked item's action still runs
+  because the click event is already in flight to the button). Items adapt to the entry:
+  **folder** → *Open Chat here* (`newChat(null, undefined, abs)` — a new session
+  rooted at that folder, via the `dir` field on `POST /api/sessions`),
+  *Copy path* (`writeClipboard(abs)` — the absolute path, distinct from the
+  Ctrl/Cmd+C `@ref` copy), and *Add to chat editor* (`insertFileRef(rel)`, only
+  when a session is active). **file** → *Open* (`openFileInEditor`), *Copy path*,
+  *Add to chat editor* (active session only), and *Save* (only when the file is
+  open with unsaved edits — `editorDirty.get(abs)` → `saveEditor(panel, abs)`).
+  Absolute paths come from `absForRel(rel)`; `writeClipboard` is the shared
+  clipboard helper (`navigator.clipboard` + `execCommand` fallback).
 
 ### Per-session tool working directory
 
