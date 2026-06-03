@@ -44,7 +44,7 @@ fmt: ## Format sources
 vet: ## Run go vet
 	$(GO) vet ./...
 
-MONACO_VERSION ?= 0.52.2
+MONACO_VERSION ?= 0.55.1
 .PHONY: vendor-monaco
 vendor-monaco: ## Vendor the Monaco Editor (min/vs) into web/monaco/vs for offline use
 	@tmp=$$(mktemp -d); \
@@ -55,6 +55,23 @@ vendor-monaco: ## Vendor the Monaco Editor (min/vs) into web/monaco/vs for offli
 	cp -r $$tmp/package/min/vs web/monaco/vs && \
 	rm -rf $$tmp && \
 	echo "Vendored Monaco $(MONACO_VERSION) into web/monaco/vs"
+
+XTERM_VERSION ?= 5.3.0
+XTERM_FIT_VERSION ?= 0.8.0
+.PHONY: vendor-xterm
+vendor-xterm: ## Vendor xterm.js + fit addon into web/xterm for offline use
+	@tmp=$$(mktemp -d); \
+	echo "Fetching xterm@$(XTERM_VERSION) + xterm-addon-fit@$(XTERM_FIT_VERSION)…"; \
+	( cd $$tmp && npm pack xterm@$(XTERM_VERSION) >/dev/null && \
+	  npm pack xterm-addon-fit@$(XTERM_FIT_VERSION) >/dev/null && \
+	  tar -xzf xterm-$(XTERM_VERSION).tgz && mv package xterm && \
+	  tar -xzf xterm-addon-fit-$(XTERM_FIT_VERSION).tgz && mv package fit ) && \
+	rm -rf web/xterm && mkdir -p web/xterm && \
+	cp $$tmp/xterm/lib/xterm.js web/xterm/xterm.js && \
+	cp $$tmp/xterm/css/xterm.css web/xterm/xterm.css && \
+	cp $$tmp/fit/lib/xterm-addon-fit.js web/xterm/xterm-addon-fit.js && \
+	rm -rf $$tmp && \
+	echo "Vendored xterm $(XTERM_VERSION) into web/xterm"
 
 .PHONY: test
 test: ## Run unit tests

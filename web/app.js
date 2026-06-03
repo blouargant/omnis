@@ -208,6 +208,9 @@ function bindPaneEls(root) {
   e.editorHost  = root.querySelector(".pane-editor-host");
   e.editorPath  = root.querySelector(".pane-editor-path");
   e.editorSave  = root.querySelector(".pane-editor-save");
+  e.terminalWrap = root.querySelector(".pane-terminal");
+  e.terminalHost = root.querySelector(".pane-terminal-host");
+  e.termBtn     = root.querySelector(".pane-term-btn");
   e.toolbar     = root.querySelector(".pane-toolbar");
   e.splitBtn    = root.querySelector(".pane-split-btn");
   e.closeBtn    = root.querySelector(".pane-close-btn");
@@ -392,6 +395,7 @@ function closePanel(panel) {
   // free any editor-tab models this pane owned.
   for (const k of tabIds) {
     if (isEditorTab(k)) { if (panelsWithTab(k).length === 0) disposeEditor(editorPathOf(k)); }
+    else if (isTermTab(k)) disposeTerminal(k);
     else releaseSessionIfUnviewed(k);
   }
   if (panel._editor) { panel._editor.dispose(); panel._editor = null; }
@@ -521,7 +525,8 @@ function attachPaneHandlers(panel) {
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   });
 
-  // Toolbar: split / close.
+  // Toolbar: terminal / split / close.
+  if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
 
@@ -759,8 +764,9 @@ function saveLayout() {
       const rec = {
         version: 2,
         panes: panels.map(p => ({
-          // Persist session + editor tabs — draft "New Chat" tabs are ephemeral.
-          tabs: p.tabs.filter(k => !isDraft(k)),
+          // Persist session + editor tabs — draft "New Chat" and terminal tabs
+          // are ephemeral (a server PTY can't survive a reload).
+          tabs: p.tabs.filter(k => !isDraft(k) && !isTermTab(k)),
           activeId: p.sessionId,     // null while a draft/editor tab is active
           activeKey: p.activeTab,    // the active tab key (session id or "file#<abs>")
           width: Math.round(p.width),
@@ -887,6 +893,7 @@ function paneTabTitle(sessionId) {
 }
 
 const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+const ICON_TERM_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
 
 // renderPaneTabs rebuilds a pane's tab strip — one button per open tab (session
 // or pending "New Chat" draft), the active one highlighted, each with a close
@@ -899,12 +906,14 @@ function renderPaneTabs(panel) {
   for (const key of panel.tabs) {
     const draft = isDraft(key);
     const editor = isEditorTab(key);
+    const term = isTermTab(key);
     const abs = editor ? editorPathOf(key) : null;
-    const label = draft ? "New Chat" : editor ? baseName(abs) : paneTabTitle(key);
+    const label = draft ? "New Chat" : editor ? baseName(abs) : term ? "Terminal" : paneTabTitle(key);
     const tab = document.createElement("div");
     tab.className = "pane-tab"
       + (draft ? " pane-tab-draft" : "")
       + (editor ? " pane-tab-editor" : "")
+      + (term ? " pane-tab-term" : "")
       + (editor && editorDirty.get(abs) ? " is-dirty" : "")
       + (key === panel.activeTab ? " active" : "");
     tab.setAttribute("role", "tab");
@@ -915,6 +924,11 @@ function renderPaneTabs(panel) {
       const glyph = document.createElement("span");
       glyph.className = "pane-tab-glyph";
       glyph.innerHTML = fileIconSvg(baseName(abs));
+      tab.appendChild(glyph);
+    } else if (term) {
+      const glyph = document.createElement("span");
+      glyph.className = "pane-tab-glyph";
+      glyph.innerHTML = ICON_TERM_GLYPH;
       tab.appendChild(glyph);
     } else {
       const dot = document.createElement("span");
@@ -942,7 +956,7 @@ function renderPaneTabs(panel) {
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", !draft && !editor && sessionSending.has(key));
+    tab.classList.toggle("is-busy", !draft && !editor && !term && sessionSending.has(key));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
       if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
@@ -1188,14 +1202,13 @@ function ensureMonaco() {
   _monacoPromise = new Promise((resolve, reject) => {
     if (window.monaco && window.monaco.editor) { resolve(window.monaco); return; }
     const vsBase = new URL("assets/monaco/vs", document.baseURI).href.replace(/\/$/, "");
-    // Same-origin blob worker that imports the vendored workerMain (handles any
-    // BasePath; no CSP header is set server-side so blob: workers are allowed).
-    self.MonacoEnvironment = {
-      getWorkerUrl: function () {
-        const code = `self.MonacoEnvironment={baseUrl:'${vsBase}/'};importScripts('${vsBase}/base/worker/workerMain.js');`;
-        return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
-      },
-    };
+    // Monaco ≥ 0.54 resolves its language workers itself (the hashed
+    // `vs/assets/<label>.worker-<hash>.js` files) via the AMD loader's `toUrl`,
+    // relative to the configured `vs` base below — already absolute + same-origin,
+    // so it works under a BasePath without the old blob-worker indirection.
+    // We must therefore NOT define a custom `MonacoEnvironment.getWorkerUrl`
+    // (the pre-0.54 `base/worker/workerMain.js` it pointed at no longer exists,
+    // and overriding it would break every language worker). Leave it undefined.
     const loader = document.createElement("script");
     loader.src = vsBase + "/loader.js";
     loader.onload = () => {
@@ -1316,11 +1329,171 @@ function openFileInEditor(rel) {
   activateTab(panel, key);
 }
 
-// Keep open editors' theme in sync with the app theme (settings.js toggles the
-// <html> data-theme attribute).
+// Keep open editors' (and terminals') theme in sync with the app theme
+// (settings.js toggles the <html> data-theme attribute).
 new MutationObserver(() => {
   if (window.monaco && window.monaco.editor) window.monaco.editor.setTheme(monacoTheme());
+  for (const entry of termTabs.values()) { try { entry.term.options.theme = xtermTheme(); } catch (_) {} }
 }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+// ─── Terminal tabs (xterm.js + PTY WebSocket) ─────────────────────────────────
+// A fourth pane-tab kind ("term#<n>") runs a real interactive shell over a
+// WebSocket to /api/terminal/ws (PTY-backed on the server). Unlike editor tabs
+// these are EPHEMERAL — stripped from the persisted layout — because the server
+// PTY does not survive a page reload. Each terminal tab owns its own xterm.js
+// instance + WebSocket + detached host element, kept alive while the tab sits in
+// the background (output keeps streaming into the scrollback buffer).
+
+const TERM_TAB_PREFIX = "term#";
+function isTermTab(key) { return typeof key === "string" && key.startsWith(TERM_TAB_PREFIX); }
+let termSeq = 0;
+function newTermKey() { return TERM_TAB_PREFIX + (++termSeq); }
+
+const termTabs = new Map(); // term key → { term, fit, ws, host }
+const termOpts = new Map(); // term key → { sid, cwd } resolved at open time
+
+// xtermTheme maps the active app theme to an xterm.js colour theme.
+function xtermTheme() {
+  const light = (document.documentElement.getAttribute("data-theme") || "").toLowerCase().includes("light");
+  return light
+    ? { background: "#ffffff", foreground: "#1e1e1e", cursor: "#1e1e1e", selectionBackground: "#bcd6f7" }
+    : { background: "#000000", foreground: "#e6e6e6", cursor: "#e6e6e6", selectionBackground: "#3a3d41" };
+}
+
+// ensureXterm lazily injects the vendored xterm.js + fit addon + stylesheet
+// (served at assets/xterm/… like the vendored Monaco). Cached so it loads once.
+let _xtermPromise = null;
+function ensureXterm() {
+  if (_xtermPromise) return _xtermPromise;
+  _xtermPromise = new Promise((resolve, reject) => {
+    if (window.Terminal && window.FitAddon) { resolve(); return; }
+    const base = new URL("assets/xterm", document.baseURI).href.replace(/\/$/, "");
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = base + "/xterm.css";
+    document.head.appendChild(css);
+    const load = (src) => new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = res; s.onerror = () => rej(new Error("failed to load " + src));
+      document.head.appendChild(s);
+    });
+    load(base + "/xterm.js")
+      .then(() => load(base + "/xterm-addon-fit.js"))
+      .then(resolve)
+      .catch(reject);
+  });
+  return _xtermPromise;
+}
+
+function termWsUrl(opts) {
+  const u = new URL("api/terminal/ws", document.baseURI);
+  u.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  if (opts && opts.sid) u.searchParams.set("session", opts.sid);
+  if (opts && opts.cwd) u.searchParams.set("cwd", opts.cwd);
+  if (token) u.searchParams.set("token", token);
+  return u.href;
+}
+
+function sendTermResize(entry) {
+  if (!entry || !entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
+  const t = entry.term;
+  if (t.cols > 0 && t.rows > 0) entry.ws.send(JSON.stringify({ cols: t.cols, rows: t.rows }));
+}
+
+// createTerminal builds the xterm instance + WebSocket for a term tab (once).
+async function createTerminal(key) {
+  await ensureXterm();
+  if (termTabs.has(key)) return termTabs.get(key);
+  const opts = termOpts.get(key) || {};
+  const host = document.createElement("div");
+  host.style.width = "100%";
+  host.style.height = "100%";
+  const term = new window.Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+    theme: xtermTheme(),
+    scrollback: 5000,
+  });
+  const fit = new window.FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(host);
+
+  const ws = new WebSocket(termWsUrl(opts));
+  ws.binaryType = "arraybuffer";
+  const entry = { term, fit, ws, host };
+  termTabs.set(key, entry);
+
+  const enc = new TextEncoder();
+  ws.onopen = () => sendTermResize(entry);
+  ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
+    else term.write(ev.data);
+  };
+  ws.onclose = () => term.write("\r\n\x1b[2m[terminal session ended]\x1b[0m\r\n");
+  ws.onerror = () => term.write("\r\n\x1b[31m[terminal connection error]\x1b[0m\r\n");
+  term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d)); });
+  term.onResize(() => sendTermResize(entry));
+  return entry;
+}
+
+// mountTerminal shows term tab `key` in `panel`, creating it on first use, and
+// moves its host element into the pane's terminal host.
+async function mountTerminal(panel, key) {
+  let entry;
+  try { entry = await createTerminal(key); }
+  catch (e) { setStatus(panel, "terminal failed to load: " + e); return; }
+  if (panel.activeTab !== key) return; // tab switched away while xterm loaded
+  const hostWrap = panel.els.terminalHost;
+  if (!hostWrap) return;
+  while (hostWrap.firstChild) hostWrap.removeChild(hostWrap.firstChild);
+  hostWrap.appendChild(entry.host);
+  requestAnimationFrame(() => {
+    try { entry.fit.fit(); } catch (_) {}
+    sendTermResize(entry);
+    entry.term.focus();
+  });
+}
+
+// refitVisibleTerminals re-fits the xterm grid of every pane currently showing
+// a terminal tab (called after a pane/window resize) and pushes the new size to
+// the PTY so server-side programs re-wrap.
+function refitVisibleTerminals() {
+  for (const panel of panels) {
+    if (!isTermTab(panel.activeTab)) continue;
+    const entry = termTabs.get(panel.activeTab);
+    if (!entry) continue;
+    try { entry.fit.fit(); } catch (_) {}
+    sendTermResize(entry);
+  }
+}
+
+function disposeTerminal(key) {
+  const entry = termTabs.get(key);
+  termOpts.delete(key);
+  if (!entry) return;
+  try { entry.ws.close(); } catch (_) {}
+  try { entry.term.dispose(); } catch (_) {}
+  if (entry.host && entry.host.parentNode) entry.host.parentNode.removeChild(entry.host);
+  termTabs.delete(key);
+}
+
+// openTerminalTab opens a new terminal tab in `panel` (default: focused pane).
+// `opts` chooses the working directory: { cwd } for an explicit dir (Folders
+// "Open Terminal here") or { sid } to inherit a chat session's cwd. When the
+// active tab is a pending draft, the terminal takes that slot in place.
+function openTerminalTab(panel, opts) {
+  panel = panel || focusedPanel() || panels[0];
+  if (!panel) return;
+  const key = newTermKey();
+  termOpts.set(key, opts || { sid: activeSessionId || "" });
+  if (!panel.tabs.includes(key)) {
+    const ai = panel.tabs.indexOf(panel.activeTab);
+    if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = key;
+    else panel.tabs.push(key);
+  }
+  activateTab(panel, key);
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -3423,6 +3596,7 @@ function closeTab(panel, key) {
   const idx = panel.tabs.indexOf(key);
   if (idx === -1) return;
   const editor = isEditorTab(key);
+  const term = isTermTab(key);
   if (editor) {
     const abs = editorPathOf(key);
     if (editorDirty.get(abs) && !confirm(`Discard unsaved changes to ${baseName(abs)}?`)) return;
@@ -3431,8 +3605,10 @@ function closeTab(panel, key) {
   panel.tabs.splice(idx, 1);
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
-  // Session-only cleanup (push subscription); editor keys have none.
-  const releaseIfSession = () => { if (!editor) releaseSessionIfUnviewed(key); };
+  // Terminal tabs are pane-local and ephemeral; tear down the shell + WebSocket.
+  if (term) disposeTerminal(key);
+  // Session-only cleanup (push subscription); editor/terminal keys have none.
+  const releaseIfSession = () => { if (!editor && !term) releaseSessionIfUnviewed(key); };
 
   if (!panel.tabs.length) {
     if (panels.length > 1) {
@@ -3470,6 +3646,7 @@ async function activateTab(panel, key) {
     panel.activeTab = key;
     panel.sessionId = null;
     panel.root.classList.add("editing");
+    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     mountInPanel(panel, null);
     clearPinnedPrompt(panel);
@@ -3479,7 +3656,24 @@ async function activateTab(panel, key) {
     mountEditor(panel, editorPathOf(key));
     return;
   }
+
+  // Terminal tab — show the interactive shell, no chat session is active.
+  if (isTermTab(key)) {
+    panel.activeTab = key;
+    panel.sessionId = null;
+    panel.root.classList.add("terminal");
+    panel.root.classList.remove("editing");
+    hidePanePicker(panel);
+    mountInPanel(panel, null);
+    clearPinnedPrompt(panel);
+    setFocusedPanel(panel.id);
+    renderPaneTabs(panel);
+    saveLayout();
+    mountTerminal(panel, key);
+    return;
+  }
   panel.root.classList.remove("editing");
+  panel.root.classList.remove("terminal");
 
   // Draft tab — show the picker, no session is active.
   if (isDraft(key)) {
@@ -3743,6 +3937,7 @@ async function newChat(panel, squadOverride, dirOverride) {
     panel.activeTab = newId;
     panel.sessionId = newId;
     panel.root.classList.remove("editing");
+    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
     clearPinnedPrompt(panel);
@@ -5302,6 +5497,7 @@ document.addEventListener("mouseup", () => {
     for (const d of els.chat.querySelectorAll(".pane-divider")) d.classList.remove("is-dragging");
     document.body.classList.remove("resizing");
     document.body.style.userSelect = "";
+    refitVisibleTerminals();
     saveLayout();
   }
 });
@@ -5899,6 +6095,8 @@ document.addEventListener("keydown", (e) => {
 function openFolderDirCtxMenu(ev) {
   if (!foldersDir) return;
   const items = [];
+  items.push(["Open Terminal here", () => openTerminalTab(null, { cwd: foldersDir })]);
+  items.push(SEP);
   items.push(["New File…", () => folderNewEntry(foldersDir, "file")]);
   items.push(["New Folder…", () => folderNewEntry(foldersDir, "dir")]);
   if (folderClipboard) {
@@ -5935,6 +6133,7 @@ function openFolderUpCtxMenu(ev) {
   const D = { disabled: true };
   const items = [
     ["Open Chat here", () => newChat(null, undefined, abs)],
+    ["Open Terminal here", () => openTerminalTab(null, { cwd: abs })],
     ["Download", () => folderDownload(abs, name, true)],
     SEP,
     ["New File…", () => folderNewEntry(abs, "file")],
@@ -6005,6 +6204,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   if (isDir) {
     // Open / download
     items.push(["Open Chat here", () => newChat(null, undefined, abs)]);
+    items.push(["Open Terminal here", () => openTerminalTab(null, { cwd: abs })]);
     items.push(["Download", () => folderDownload(abs, name, true)]);
     items.push(SEP);
     // Create inside this folder
@@ -6213,7 +6413,7 @@ document.addEventListener("click", (e) => {
 });
 
 // Re-normalize pane widths when the window resizes.
-window.addEventListener("resize", () => { layoutWidths(); });
+window.addEventListener("resize", () => { layoutWidths(); refitVisibleTerminals(); });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 

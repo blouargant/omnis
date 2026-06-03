@@ -184,6 +184,11 @@ func newEngine(d serverDeps) *gin.Engine {
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	// Interactive terminal WebSocket. Registered on the unauthenticated group
+	// because a browser cannot set an Authorization header on a WebSocket
+	// handshake; handleTerminal verifies the bearer token from the `token` query
+	// param itself (see its doc comment).
+	api.GET("/terminal/ws", handleTerminal(d))
 
 	auth := api.Group("", authMiddleware(d.Token))
 	// POST /api/admin/gc — trigger a one-shot garbage-collection sweep over

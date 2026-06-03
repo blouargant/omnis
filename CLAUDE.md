@@ -12,6 +12,34 @@ After every major change (new agent, new squad, new tool, new skill, new config 
 - Keep the configuration precedence chain and search chain accurate when either changes.
 - Keep this file as the single source of truth for AI sessions working on this project.
 
+## Vendored frontend library upkeep
+
+The web UI vendors two third-party JS libraries **offline** (no runtime CDN), each
+pinned to a version in the Makefile and committed under `web/`:
+
+| Library | Pinned var (Makefile) | Vendored into | Re-vendor command |
+|---|---|---|---|
+| Monaco Editor | `MONACO_VERSION` | `web/monaco/vs/` | `make vendor-monaco` |
+| xterm.js + fit addon | `XTERM_VERSION`, `XTERM_FIT_VERSION` | `web/xterm/` | `make vendor-xterm` |
+
+**Periodically check for upstream updates and keep these current — do not let them
+lag behind.** At the start of a session that touches the editor or terminal (and
+opportunistically otherwise), check the latest published versions and, if newer:
+
+- Monaco: `npm view monaco-editor version` — compare against `MONACO_VERSION`.
+- xterm: `npm view xterm version` and `npm view xterm-addon-fit version` — compare
+  against `XTERM_VERSION` / `XTERM_FIT_VERSION`. (Note: xterm has since moved to the
+  scoped `@xterm/xterm` + `@xterm/addon-fit` packages; when bumping across that
+  rename, update the Makefile `vendor-xterm` package names and the global names
+  used in [web/app.js](web/app.js) `ensureXterm` — classic builds expose
+  `window.Terminal` / `window.FitAddon`.)
+
+To update: bump the version var(s) in the [Makefile](Makefile), run the matching
+`make vendor-*` target, smoke-test the editor / terminal in the web UI, and commit
+the refreshed `web/monaco` or `web/xterm` files together with the Makefile bump.
+Lazy-loading is unaffected (`ensureMonaco` / `ensureXterm` resolve paths at
+runtime), so only the vendored files + the pinned version change.
+
 ## Commands
 
 ```bash
@@ -1538,11 +1566,17 @@ sessions, live in at most one pane).
   (served at `assets/monaco/vs/…` since `base.Static("/assets", webDir)` maps
   `/assets` → `web/`), so it works air-gapped — no CDN at runtime, mirroring the
   vendored [web/marked.min.js](web/marked.min.js). Re-vendor / bump with
-  `make vendor-monaco` (`MONACO_VERSION` overridable). `ensureMonaco()` lazily
-  injects the AMD `loader.js` on first file open (computing the `vs` base from
-  `document.baseURI` so a `BasePath` deployment works) and configures a
-  same-origin **blob worker** that `importScripts` the vendored `workerMain.js`
-  (no CSP header is set server-side, so `blob:` workers are allowed).
+  `make vendor-monaco` (`MONACO_VERSION` overridable, currently 0.55.1).
+  `ensureMonaco()` lazily injects the AMD `loader.js` on first file open
+  (computing the `vs` base from `document.baseURI` so a `BasePath` deployment
+  works) and `require.config({paths:{vs}})`s it. **It deliberately does NOT set a
+  custom `MonacoEnvironment.getWorkerUrl`**: Monaco ≥ 0.54 resolves its language
+  workers itself — the hashed `vs/assets/<label>.worker-<hash>.js` files, via the
+  loader's `toUrl` relative to the `vs` base, already absolute + same-origin — so
+  the pre-0.54 blob-worker indirection that `importScripts`'d `base/worker/workerMain.js`
+  is gone (that entry no longer exists; overriding it would break every language
+  worker). When bumping Monaco, re-verify worker loading (a TS/JSON/CSS edit must
+  still get diagnostics) since the worker layout is version-specific.
 - **Per-file model, per-pane editor.** `editorModels` (absPath → Monaco model,
   created once from `GET /api/file`, language from `langForPath`) holds content +
   undo history, so switching tabs preserves unsaved edits; one Monaco instance
@@ -1563,3 +1597,52 @@ sessions, live in at most one pane).
   the model; `closePanel` disposes the pane's Monaco instance and any editor-tab
   models it owned. Editor keys carry no push subscription, so the session-only
   `releaseSessionIfUnviewed` is skipped for them.
+
+### Web UI interactive terminal (xterm.js + PTY)
+
+A **fourth** pane-tab kind — a terminal tab keyed `"term#<n>"` — runs a **real
+interactive shell** (vim/top/ssh all work, full ANSI/colour) next to chat,
+draft, and editor tabs in the same `.pane-tabs` strip. Open one from the pane
+toolbar's terminal button (`openTerminalTab`) or from the Folders panel context
+menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
+
+- **Backend** ([server/terminal.go](server/terminal.go) + platform files,
+  registered as `GET /api/terminal/ws` in [server/server.go](server/server.go)):
+  a **WebSocket** upgraded via `gorilla/websocket` bridges to a **PTY-backed
+  shell** (`creack/pty`). The PTY abstraction is `ptySession`
+  (Read/Write/Resize/Close); the real implementation is in
+  [server/terminal_unix.go](server/terminal_unix.go) (spawns `$SHELL` → `/bin/bash`
+  → `/bin/sh`, `TERM=xterm-256color`), and [server/terminal_windows.go](server/terminal_windows.go)
+  is an unsupported stub (no ConPTY) so cross-platform builds stay green.
+- **Auth**: the route is registered on the **unauthenticated** `api` group
+  because a browser can't set an `Authorization` header on a WebSocket handshake;
+  `handleTerminal` validates the bearer token from the **`token` query param**
+  itself (constant-time; empty server token = unauthenticated mode). `CheckOrigin`
+  additionally restricts browser clients to same-origin.
+- **Working directory**: explicit `?cwd=` (validated dir) wins, else `?session=`'s
+  Folders/`!cd` cwd (`bashCwd`), else the global "no session" cwd.
+- **Wire protocol** (`runTerminalSession`): client → server **BinaryMessage** =
+  raw stdin bytes, **TextMessage** = `{"cols":N,"rows":N}` resize; server →
+  client **BinaryMessage** = raw PTY output. One PTY→WS goroutine (single writer);
+  the WS read loop pumps stdin + resize. Shell exit closes the PTY which ends both.
+- **Trust model**: like the `!` shell-escape and the Monaco save route, the
+  terminal **bypasses the agent permission layer by design** and, unlike the Bash
+  tool, has **no safety floor** — it is an explicit, token-gated, fully
+  interactive host shell. Output is never added to conversation/LLM history.
+- **Client** ([web/app.js](web/app.js) "Terminal tabs" section): **xterm.js** +
+  the fit addon are **vendored offline** under `web/xterm/` (served at
+  `assets/xterm/…`), re-vendored with `make vendor-xterm`; `ensureXterm()` lazily
+  injects the scripts + stylesheet on first open (mirroring `ensureMonaco`). Each
+  terminal tab owns its own `Terminal` + `FitAddon` + `WebSocket` + detached host
+  element in `termTabs` (key → entry), kept alive while backgrounded (output keeps
+  streaming into the scrollback). `mountTerminal` moves the host into the pane's
+  `.pane-terminal-host` and `fit()`s; `refitVisibleTerminals` re-fits + pushes the
+  new size on pane-divider drag and window resize. The pane gets the `.terminal`
+  class while a terminal tab is active (CSS hides the chat/editor surfaces, shows
+  the xterm host); theme follows the app theme via the existing `data-theme`
+  `MutationObserver` (`xtermTheme`).
+- **Ephemeral**: terminal tabs are **stripped from the persisted layout**
+  (`saveLayout`) — a server PTY can't survive a page reload — and torn down
+  (`disposeTerminal`: close WS + dispose term) by `closeTab`/`closePanel`. They
+  carry no push subscription, so the session-only `releaseSessionIfUnviewed` is
+  skipped, like editor tabs.
