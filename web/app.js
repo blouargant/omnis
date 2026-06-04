@@ -4327,8 +4327,13 @@ async function sendMessage(panel) {
       switch (event) {
         case "token": {
           ensureSegment();
-          if (!segHadToken) { AgentDebug.firstToken(); setSessionStatus(sessionId, "streaming…"); }
+          if (!segHadToken) AgentDebug.firstToken();
           segHadToken = true;
+          // Visible text is flowing — (re)assert the streaming label in case a
+          // prior idle heartbeat flipped it to "working…".
+          if ((sessionStatus.get(sessionId) || "") !== "streaming…") {
+            setSessionStatus(sessionId, "streaming…");
+          }
           const txt = data.text || "";
           segAcc += txt;
           AgentDebug.token(txt.length);
@@ -4339,6 +4344,21 @@ async function sendMessage(panel) {
 
         case "debug_timing": {
           AgentDebug.serverTiming(data);
+          break;
+        }
+
+        case "heartbeat": {
+          // The turn is still alive on the server but no visible chat text has
+          // arrived for a while — typically the model streaming a large
+          // tool-call argument (e.g. the AGENT.md body during /init), which the
+          // backend surfaces only once complete. Replace a frozen-looking
+          // "streaming…"/"thinking…" with a ticking "working… (Ns)" so the turn
+          // doesn't read as stuck. Leave an explicit "running <tool>…" alone.
+          const cur = sessionStatus.get(sessionId) || "";
+          if (cur === "streaming…" || cur === "thinking…" || cur.startsWith("working…")) {
+            const secs = Math.round((data.elapsed_ms || 0) / 1000);
+            setSessionStatus(sessionId, secs > 0 ? `working… (${secs}s)` : "working…");
+          }
           break;
         }
 

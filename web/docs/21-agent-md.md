@@ -31,7 +31,25 @@ unchanged.
 Run `/init` (web UI, TUI, or CLI) to have the agent inspect the repository and
 write a starter `AGENT.md` at the project root, documenting the build/test
 commands, architecture, key packages, conventions, and gotchas it finds. Review
-and edit the result like any other file.
+and edit the result like any other file. The generated document opens with a
+**self-maintenance rule** — a short instruction telling future agents to keep
+`AGENT.md` in sync as the project evolves (update it in the same change that
+renames a command, adds a component, or changes a convention), so it doesn't
+drift out of date.
+
+After writing the file, the leader delegates a **fresh-eyes review** to the
+`agentmd_reviewer` sub-agent (a member of the Default squad): it reads the new
+`AGENT.md` as a newcomer would, follows its instructions against the real
+project, and answers the one question that matters — *"if I follow this
+document, can I actually work on this project, or will it mislead me?"* It
+reports blockers (claims that are wrong or misleading), should-fixes (inaccurate,
+incomplete, or stale content), and nits, each with the offending phrase, the
+evidence, and a concrete correction. The leader then applies those
+recommendations and, if the review found substantive defects, sends the
+corrected document back for another pass until the reviewer reports no blockers.
+The reviewer is read-only — it never edits the file; the leader (its author)
+makes the corrections. When no reviewer sub-agent is available, the leader runs
+the verification pass itself.
 
 ## `#` — quick one-line memory
 

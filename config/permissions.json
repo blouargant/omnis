@@ -91,7 +91,7 @@
       "reason": "read-only semantic recall / registry discovery + inspection — no side effects (reindex_*, install_remote_*, and link_skill_to_agent still prompt)"
     },
     {
-      "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|helper)\\b",
+      "pattern": "^(investigator|web_agent|image_generator|summariser|skill_editor|helper|agentmd_reviewer)\\b",
       "reason": "sub-agent delegation — the leader always controls the outcome; no direct side-effects"
     },
     {

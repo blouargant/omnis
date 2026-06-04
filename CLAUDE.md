@@ -100,7 +100,8 @@ main.go / server/
             │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │    │    ├── web_agent           ← web search + fetch
-            │    │    └── summariser          ← condenses bulk output
+            │    │    ├── summariser          ← condenses bulk output
+            │    │    └── agentmd_reviewer     ← read-only fresh-eyes verifier for /init-generated AGENT.md
             │    └── "research"     ← leader + smaller team, selectable per session
             │         ├── leader
             │         ├── web_agent
@@ -697,7 +698,15 @@ different folders each get their own project memory.
   `GET /api/agentmd/init-prompt` for one source of truth), TUI
   ([internal/tui/tui.go](internal/tui/tui.go) `handleShortcut`), CLI
   ([internal/cli/cli.go](internal/cli/cli.go) `runRepl` + `runOneShot`). Reserved
-  in `usercommands.ReservedNames` so user commands can't shadow it.
+  in `usercommands.ReservedNames` so user commands can't shadow it. The prompt
+  has a **verify-then-refine** phase: after writing `AGENT.md` the leader
+  delegates a fresh-eyes review to the **`agentmd_reviewer`** sub-agent (a
+  read-only Default-squad member, [registry/agents/agentmd_reviewer/](registry/agents/agentmd_reviewer/)),
+  which reads the document as a newcomer, follows it against the real repo, and
+  reports blockers/should-fixes/nits answering "would a reader be misled?". The
+  leader applies the recommendations and loops until the reviewer reports no
+  blockers; the reviewer never edits the file (the creator does). The prompt
+  falls back to a self-review pass when no reviewer sub-agent is mounted.
 - **`#` shortcut** — a composer line starting with `#` appends a one-line memory
   to the **project** `AGENT.md` (git root from cwd, else cwd) via
   `agentmd.AppendMemory`, **not** sent to the agent (symmetric with `!`). Server
@@ -1447,6 +1456,24 @@ The instrumentation API is exposed on `window.AgentDebug` for ad-hoc probing
 from the browser console. Extend it by adding new fields to the object in
 [web/app.js](web/app.js) and calling `_paint()` after mutating state — keeping
 the badge as the single surface for new client-side measurements.
+
+### Streaming liveness heartbeat
+
+The model can spend a long stretch producing **no visible chat text** — most
+notably while it streams a large **tool-call argument** (e.g. the AGENT.md body
+written by `/init`), which the LLM adapter accumulates silently
+([core/llm/openai.go](core/llm/openai.go) `streamSSE` buffers tool-call argument
+fragments and only yields a completed `FunctionCall` at turn end). With nothing on
+the wire the browser's composer status would sit on a frozen `streaming…`,
+reading as a stuck turn. To keep the status honest, `streamEvents`
+([server/sse.go](server/sse.go)) runs a 2 s **heartbeat** ticker: when no
+content-bearing SSE event has been emitted for ≥ 2 s it emits a `heartbeat`
+event `{elapsed_ms}` (content emits bump `lastContentAt`; the heartbeat itself
+does not). The client ([web/app.js](web/app.js) SSE `heartbeat` case) turns a
+frozen `streaming…`/`thinking…` into a ticking `working… (Ns)`; a resumed `token`
+re-asserts `streaming…`, and an explicit `running <tool>…` (tool executing) is
+left untouched. `streamEvents` is the web-UI SSE path only (the A2A server uses a
+separate path), so no other consumer sees the event.
 
 Streaming renders in two tiers ([web/app.js](web/app.js)
 `streamMdAdvance`/`streamMdFinalize`). **Completed blocks** — anything before a

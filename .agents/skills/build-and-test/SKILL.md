@@ -77,11 +77,18 @@ Catalog: [docs/examples-catalog.md](../../docs/examples-catalog.md).
 
 ## Generated files
 
-These are created at runtime in the launcher's CWD. **Never commit
-them** (already gitignored where applicable):
+Runtime state is written under the write root `$YOKE_HOME` (default
+`$HOME/.yoke`), **not** the launcher's CWD. The per-session logs live in
+`$YOKE_HOME/logs/` (see `paths.LogsDir`):
 
-- `.agent_events.log` — JSONL of every plugin event.
-- `.agent_memory.md` — context-compression memory snapshot.
+- `agent_events_<buildTimestamp>.log` — JSONL of every plugin event.
+- `agent_memory_<user>_<session>.md` — context-compression memory snapshot.
+- `agent_tasks_<user>_<session>.json` / `agent_todo_<user>_<session>.json` — task graph + todo plan.
+
+Inter-agent mailboxes go to `$YOKE_HOME/mailboxes/` (`paths.MailboxesDir`).
+The only generated artifact at the repo root is `.mailboxes/` (the lone
+entry actually listed in `.gitignore`); do not assume `agent_events`/
+`agent_memory` are repo-root dotfiles or that they are gitignored.
 
 ## Don't do these
 

@@ -167,6 +167,11 @@ func streamEvents(
 			flusher.Flush()
 		}
 	}
+	// lastContentAt is bumped by every content-bearing emit (anything but the
+	// liveness heartbeat); the heartbeat ticker reads it to decide whether the
+	// turn has gone quiet. Touched only from the single select loop below, so no
+	// synchronisation is needed.
+	lastContentAt := time.Now()
 	emit := func(event string, payload any) {
 		data, err := json.Marshal(payload)
 		if err != nil {
@@ -174,6 +179,9 @@ func streamEvents(
 		}
 		_, _ = io.WriteString(w, "event: "+event+"\ndata: "+string(data)+"\n\n")
 		flush()
+		if event != "heartbeat" {
+			lastContentAt = time.Now()
+		}
 	}
 	emitDone := func() {
 		total := time.Since(streamStart)
@@ -338,11 +346,29 @@ func streamEvents(
 		}
 	}
 
+	// Liveness heartbeat. While a turn is running but the browser receives no
+	// visible content for a stretch — most notably while the model streams a
+	// large tool-call argument such as the AGENT.md body written by /init, which
+	// the LLM adapter accumulates silently and only surfaces as a completed
+	// FunctionCall — the client's status label would otherwise sit on a frozen
+	// "streaming…", reading as a stuck turn. A periodic heartbeat carrying the
+	// elapsed time lets the web UI show a ticking "working… (Ns)" instead. It
+	// carries no content and stops with the stream.
+	heartbeat := time.NewTicker(2 * time.Second)
+	defer heartbeat.Stop()
+
 	sawPartialText := false
 	for {
 		select {
 		case <-ctx.Done():
 			return assistantBuf.String()
+
+		case <-heartbeat.C:
+			if time.Since(lastContentAt) >= 2*time.Second {
+				emit("heartbeat", map[string]any{
+					"elapsed_ms": time.Since(streamStart).Milliseconds(),
+				})
+			}
 
 		case be := <-subCh:
 			emitBusEvent(be)

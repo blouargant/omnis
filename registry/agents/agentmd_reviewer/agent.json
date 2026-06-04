@@ -1,0 +1,19 @@
+{
+  "allow_file_attachments": false,
+  "builtin": true,
+  "description": "Reviews a generated AGENT.md with fresh eyes: reads it as a newcomer, follows its instructions against the real project, and reports where it is wrong, unverifiable, incomplete, or misleading. Recommends fixes; does not modify the file.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "high",
+  "name": "agentmd_reviewer",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Grep",
+    "Glob",
+    "mime",
+    "code_search"
+  ]
+}
