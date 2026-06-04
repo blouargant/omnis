@@ -84,6 +84,24 @@ func sessionCwd(ctx tool.Context) string {
 // tool execution in agreement.
 func CwdForContext(ctx tool.Context) string { return sessionCwd(ctx) }
 
+// CwdFor resolves the working directory from a plain context plus an explicit
+// session id — the cwd planted by WithCwd wins, otherwise the SessionID
+// resolver. It mirrors sessionCwd for callers that only hold a context.Context
+// and a session id (e.g. a BeforeModelCallback), not a tool.Context. Empty when
+// neither resolves.
+func CwdFor(ctx context.Context, sessionID string) string {
+	if c := cwdFromContext(ctx); c != "" {
+		return c
+	}
+	cwdResolverMu.RLock()
+	f := cwdResolver
+	cwdResolverMu.RUnlock()
+	if f == nil {
+		return ""
+	}
+	return f(sessionID)
+}
+
 // resolveAgainst joins a relative path onto cwd. An absolute path, an empty
 // path, or an empty cwd is returned unchanged.
 func resolveAgainst(cwd, path string) string {

@@ -6333,7 +6333,6 @@ function buildFolderEntry(e, rel) {
     : `<span class="folder-chevron-spacer"></span>`;
   row.innerHTML = `${chevron}${e.dir ? FOLDER_SVG : fileIconSvg(e.name)}<span class="folder-entry-name"></span>`;
   row.querySelector(".folder-entry-name").textContent = e.name;
-  row.setAttribute("data-tip", e.name);
   markCopiedRow(row, rel); // restore the persistent "copied" highlight if armed
   // Ctrl/Cmd+C copies the entry's "@rel" reference (file or directory) to the
   // clipboard, so a Ctrl/Cmd+V in the chat editor inserts the reference.

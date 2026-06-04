@@ -993,7 +993,9 @@ body.resizing #sidebar-resize { transition: none; }
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  height: 34px;
+  /* Match the sidebar header (Yoke title) height: 10px×2 padding + 24px
+   * toggle button + 1px border = 45px (box-sizing: border-box). */
+  height: 45px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border, #333);
   /* Sit above the empty-pane picker (z-index 4) so the tabs and the

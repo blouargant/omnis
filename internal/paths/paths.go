@@ -83,6 +83,13 @@ func systemConfigDir() string {
 	return SystemConfigDir
 }
 
+// SystemDir returns the effective system-config base directory — the
+// YOKE_SYSTEM_CONFIG_DIR override when set, otherwise the SystemConfigDir
+// package variable. Exposed so callers outside this package (e.g. the
+// AGENT.md resolver) can locate system-layer files without duplicating the
+// override logic.
+func SystemDir() string { return systemConfigDir() }
+
 // LocalDirNames returns the candidate local-dir names in precedence order.
 // `.agents/` (canonical) comes before `agents/` (alias).
 func LocalDirNames() []string { return []string{LocalDir, LocalDirAlias} }
