@@ -208,6 +208,8 @@ function bindPaneEls(root) {
   e.editorHost  = root.querySelector(".pane-editor-host");
   e.editorPath  = root.querySelector(".pane-editor-path");
   e.editorSave  = root.querySelector(".pane-editor-save");
+  e.editorStale = root.querySelector(".pane-editor-stale");
+  e.editorReload = root.querySelector(".pane-editor-reload");
   e.terminalWrap = root.querySelector(".pane-terminal");
   e.terminalHost = root.querySelector(".pane-terminal-host");
   e.termBtn     = root.querySelector(".pane-term-btn");
@@ -534,6 +536,13 @@ function attachPaneHandlers(panel) {
   if (pe.editorSave) pe.editorSave.addEventListener("click", (e) => {
     e.stopPropagation();
     if (isEditorTab(panel.activeTab)) saveEditor(panel, editorPathOf(panel.activeTab));
+  });
+
+  // "Reload from disk" on the stale banner — discard unsaved edits and load the
+  // agent's on-disk version.
+  if (pe.editorReload) pe.editorReload.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (isEditorTab(panel.activeTab)) reloadEditorFromDisk(editorPathOf(panel.activeTab));
   });
 
   // "+" always opens a fresh "New Chat" tab showing the start picker — no
@@ -1165,6 +1174,8 @@ function baseName(p) { const s = String(p).replace(/\/+$/, ""); const i = s.last
 
 const editorModels = new Map(); // absPath → monaco.ITextModel
 const editorDirty  = new Map(); // absPath → bool (unsaved changes)
+const editorStale  = new Map(); // absPath → bool (agent changed file on disk while we held unsaved edits)
+const editorApplyingExternal = new Set(); // absPaths currently being refreshed from disk (suppress dirty marking)
 
 // extension → Monaco language id (best-effort; unknown → plaintext).
 const EDITOR_LANGS = {
@@ -1232,6 +1243,7 @@ async function ensureEditorModel(monaco, abs) {
   editorModels.set(abs, model);
   editorDirty.set(abs, false);
   model.onDidChangeContent(() => {
+    if (editorApplyingExternal.has(abs)) return; // disk refresh, not a user edit
     if (!editorDirty.get(abs)) {
       editorDirty.set(abs, true);
       for (const p of panelsWithTab(editorKey(abs))) renderPaneTabs(p);
@@ -1267,6 +1279,7 @@ async function mountEditor(panel, abs) {
     panel.els.editorPath.textContent = abs;
     panel.els.editorPath.setAttribute("data-tip", abs);
   }
+  updateEditorStaleUI(panel);
   panel._editor.focus();
 }
 
@@ -1286,7 +1299,8 @@ async function saveEditor(panel, abs) {
       return;
     }
     editorDirty.set(abs, false);
-    for (const p of panelsWithTab(editorKey(abs))) renderPaneTabs(p);
+    editorStale.delete(abs);
+    for (const p of panelsWithTab(editorKey(abs))) { renderPaneTabs(p); updateEditorStaleUI(p); }
     setStatus(panel, "saved " + baseName(abs));
     setTimeout(() => { if ((sessionStatus.get(panel.sessionId) || "") === "") setStatus(panel, ""); }, 1500);
   } catch (e) {
@@ -1302,6 +1316,69 @@ function disposeEditor(abs) {
   if (model) model.dispose();
   editorModels.delete(abs);
   editorDirty.delete(abs);
+  editorStale.delete(abs);
+}
+
+// paneShowingEditor returns the pane whose Monaco instance currently displays
+// the file `abs` (its editor tab is active), or null when no pane shows it
+// (the tab may be open but backgrounded, or not open at all).
+function paneShowingEditor(abs) {
+  const key = editorKey(abs);
+  return panels.find(p => p._editor && p.activeTab === key) || null;
+}
+
+// reloadEditorFromDisk replaces an open editor model's content with the current
+// on-disk version, preserving cursor/scroll and *without* marking the tab dirty.
+// Used both for the silent auto-refresh and the manual "Reload" of a stale tab.
+async function reloadEditorFromDisk(abs) {
+  const model = editorModels.get(abs);
+  if (!model) return;
+  const res = await apiFetch(`/api/file?path=${encodeURIComponent(abs)}&session=${encodeURIComponent(activeSessionId || "")}`);
+  const text = res.ok ? await res.text() : "";
+  if (text === model.getValue()) { // no real change — just clear any stale flag
+    editorStale.delete(abs);
+    editorDirty.set(abs, false);
+    for (const p of panelsWithTab(editorKey(abs))) renderPaneTabs(p);
+    return;
+  }
+  const pane = paneShowingEditor(abs);
+  const view = pane && pane._editor ? pane._editor.saveViewState() : null;
+  editorApplyingExternal.add(abs);
+  try {
+    // Full-range replace keeps the model identity (and undo stack) rather than
+    // setValue's hard reset, so the editor reflows in place.
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  } finally {
+    editorApplyingExternal.delete(abs);
+  }
+  if (pane && pane._editor && view) pane._editor.restoreViewState(view);
+  editorDirty.set(abs, false);
+  editorStale.delete(abs);
+  for (const p of panelsWithTab(editorKey(abs))) { renderPaneTabs(p); updateEditorStaleUI(p); }
+}
+
+// onAgentFileChanged reacts to a `file_changed` SSE event (the agent wrote to a
+// file on disk). If we have that file open in an editor tab: refresh it live
+// when there are no unsaved edits, otherwise flag it stale so the user can
+// reload (or keep their edits) without us silently clobbering their work.
+function onAgentFileChanged(abs) {
+  if (!abs || !editorModels.has(abs)) return;
+  if (editorDirty.get(abs)) {
+    editorStale.set(abs, true);
+    for (const p of panelsWithTab(editorKey(abs))) updateEditorStaleUI(p);
+    return;
+  }
+  reloadEditorFromDisk(abs);
+}
+
+// updateEditorStaleUI toggles the "changed on disk" banner for a pane whose
+// active editor tab has been flagged stale (unsaved-edits collision case).
+function updateEditorStaleUI(panel) {
+  const bar = panel.els.editorStale;
+  if (!bar) return;
+  const key = panel.activeTab;
+  const stale = isEditorTab(key) && editorStale.get(editorPathOf(key));
+  bar.hidden = !stale;
 }
 
 // openFileInEditor opens a Folders-panel file (relative to foldersDir) as an
@@ -4288,6 +4365,13 @@ async function sendMessage(panel) {
           if (block) resolveToolCall(block, data.response);
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
+          break;
+        }
+
+        case "file_changed": {
+          // The agent wrote to a file on disk; live-refresh any open editor tab
+          // showing it (or flag it stale when it has unsaved edits).
+          onAgentFileChanged(data.path);
           break;
         }
 

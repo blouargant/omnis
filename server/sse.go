@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
 
 		d.Registry.Touch(meta.ID)
-		assistantText := streamEvents(ctx, c.Writer, seq, subCh)
+		assistantText := streamEvents(ctx, c.Writer, seq, subCh, bashCwd.get(meta.ID))
 		if ctx.Err() == nil && strings.TrimSpace(assistantText) != "" {
 			if err := sessions.AppendConversationTurn(meta.ID, req.Prompt, assistantText); err != nil {
 				log.Printf("server: failed to persist turn: %v", err)
@@ -151,6 +152,7 @@ func streamEvents(
 	w io.Writer,
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
+	cwd string,
 ) string {
 	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
 	streamStart := time.Now()
@@ -198,6 +200,44 @@ func streamEvents(
 		emit("done", map[string]any{})
 	}
 
+	// Track file-mutating tool calls (Write/Edit/revert) by call id so a
+	// successful completion can tell the web UI to live-refresh any open Monaco
+	// editor showing that file. The path is resolved against the session's
+	// working directory here (where the tools actually run) so the browser can
+	// match it to an editor tab keyed by absolute path.
+	pendingFileEdits := map[string]string{} // call_id → absolute path
+	noteFileTool := func(name, callID string, args map[string]any) {
+		switch strings.ToLower(name) {
+		case "write", "edit", "revert":
+		default:
+			return
+		}
+		if callID == "" || args == nil {
+			return
+		}
+		fp, _ := args["file_path"].(string)
+		if fp == "" {
+			return
+		}
+		if cwd != "" && !filepath.IsAbs(fp) {
+			fp = filepath.Join(cwd, fp)
+		}
+		pendingFileEdits[callID] = fp
+	}
+	emitFileChanged := func(callID string, resp map[string]any) {
+		path, ok := pendingFileEdits[callID]
+		if !ok {
+			return
+		}
+		delete(pendingFileEdits, callID)
+		// The file tools report failures as a result string starting with
+		// "Error " and leave the file untouched — don't refresh on those.
+		if res, _ := resp["result"].(string); strings.HasPrefix(res, "Error") {
+			return
+		}
+		emit("file_changed", map[string]any{"path": path})
+	}
+
 	// Convert the rangefunc ADK iterator to a channel so we can select on it
 	// alongside the sub-agent bus event channel.
 	type adkEvt struct {
@@ -231,6 +271,7 @@ func streamEvents(
 				"args":    args,
 				"call_id": callID,
 			})
+			noteFileTool(toolName, callID, args)
 		case events.EventAfterTool:
 			resp, _ := p["output"].(map[string]any)
 			dur, _ := p["duration"].(time.Duration)
@@ -242,6 +283,7 @@ func streamEvents(
 				"duration_ms": dur.Milliseconds(),
 				"call_id":     callID,
 			})
+			emitFileChanged(callID, resp)
 		case events.EventToolError:
 			errMsg, _ := p["error"].(string)
 			callID, _ := p["call_id"].(string)
@@ -357,6 +399,7 @@ func streamEvents(
 						"args":    p.FunctionCall.Args,
 						"call_id": p.FunctionCall.ID,
 					})
+					noteFileTool(p.FunctionCall.Name, p.FunctionCall.ID, p.FunctionCall.Args)
 					sawPartialText = false
 				}
 				if p.FunctionResponse != nil {
@@ -365,6 +408,7 @@ func streamEvents(
 						"response": p.FunctionResponse.Response,
 						"call_id":  p.FunctionResponse.ID,
 					})
+					emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
 					sawPartialText = false
 				}
 			}

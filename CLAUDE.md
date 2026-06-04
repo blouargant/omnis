@@ -1632,6 +1632,23 @@ sessions, live in at most one pane).
   and the `!` shell-escape it is gated only by the API token and **bypasses the
   agent permission layer** (the authenticated user already has host file access);
   it edits **existing files only** (path must classify as a regular file).
+- **Live-refresh on agent edits.** When the agent's `Write`/`Edit`/`revert`
+  tools mutate a file, the server emits a **`file_changed`** SSE event carrying
+  the **absolute** path — resolved against the session's working directory in
+  [server/sse.go](server/sse.go) (`streamEvents` now takes the session `cwd`;
+  `noteFileTool` records the path per `call_id` at the tool-call, `emitFileChanged`
+  fires it at the tool-result only when the result isn't an `Error …` string).
+  Both the leader (`tool_call`/`tool_result`) and sub-agent
+  (`agent_tool_call`/`agent_tool_result`) paths are wired. The client
+  ([web/app.js](web/app.js) `onAgentFileChanged`) refreshes any open editor model
+  for that abs path: when the tab has **no unsaved edits** it reloads in place
+  (`reloadEditorFromDisk` — a full-range `pushEditOperations`, preserving
+  cursor/scroll via `saveViewState`/`restoreViewState`, guarded by
+  `editorApplyingExternal` so it doesn't mark the tab dirty); when the tab **is
+  dirty** it instead flags it stale (`editorStale`) and shows the
+  `.pane-editor-stale` banner with a **Reload from disk** button — so the agent's
+  changes never silently clobber unsaved edits and vice-versa. Stale state clears
+  on save or reload.
 - **Lifecycle.** `closeTab` on a dirty editor tab confirms discard, then disposes
   the model; `closePanel` disposes the pane's Monaco instance and any editor-tab
   models it owned. Editor keys carry no push subscription, so the session-only
