@@ -8,7 +8,14 @@
 :root {
   /* Layout */
   --sidebar-w: 280px;
-  --col-w: 860px;
+  /* Chat content column width, as a % of the pane so it scales edge-to-edge
+     with the window. Leaves a margin on each side (not full-bleed). */
+  --col-w: 90%;
+  /* Per-edge scrollbar gutter reserved by #transcript (scrollbar-gutter:
+     both-edges reserves the 6px ::-webkit-scrollbar width on each side). The
+     floating prompt header lives outside the scroll container, so its wrapper
+     reserves the same gutter to keep the two prompt boxes pixel-aligned. */
+  --scroll-gutter: 6px;
 
   /* Surfaces */
   --bg: #1e1e1e;
@@ -1318,15 +1325,43 @@ body.resizing #sidebar-resize { transition: none; }
 }
 
 /* ─── Pinned user prompt (floating above transcript) ───────── */
-#prompt-header {
+/* Wrapper reserves the same per-edge scrollbar gutter as #transcript so the
+   header's percentage width resolves against the identical content width as
+   the inline .msg-row bubbles — making the floating and inline prompt boxes
+   pixel-identical in width and (being centred) in horizontal position. */
+.prompt-header-wrap {
   flex-shrink: 0;
+  padding: 0 var(--scroll-gutter);
+}
+#prompt-header {
   display: none;
   width: 100%;
   max-width: min(calc(var(--col-w) - 40px), calc(100% - 40px));
-  margin: 16px auto 0;
+  /* 18px top = #transcript padding-top (16px) + .msg-row padding-top (2px), so
+     the floating header card sits at the exact Y of the inline bubble it
+     replaces. */
+  margin: 18px auto 0;
   white-space: normal;
+  position: relative;
 }
 #prompt-header.visible { display: block; }
+
+/* Darkening fade beneath the pinned prompt: transcript content scrolling up
+   underneath the card fades into the background instead of butting hard against
+   it. Anchored to the header's bottom edge (top: 100%) and spanning exactly the
+   card's width, with the card's bottom corner radius. */
+#prompt-header.visible::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 15px;
+  border-radius: 0 0 6px 6px;
+  background: linear-gradient(to bottom, var(--bg) 15%, transparent);
+  pointer-events: none;
+  z-index: 4;
+}
 
 .pinned-prompt-text {
   display: -webkit-box;
@@ -1413,9 +1448,10 @@ body.resizing #sidebar-resize { transition: none; }
   opacity: 0.85;
 }
 
-/* Assistant content — plain text, no bubble */
+/* Assistant content — plain text, no bubble. Adapts to the column width like
+   the user/prompt boxes (min(--col-w, 100%)) instead of a fixed 700px cap. */
 .bubble-assistant {
-  max-width: 700px;
+  max-width: min(var(--col-w), 100%);
   width: 100%;
   margin-left: auto;
   margin-right: auto;
@@ -1510,7 +1546,7 @@ body.resizing #sidebar-resize { transition: none; }
 
 /* Error */
 .bubble-error {
-  max-width: 700px;
+  max-width: min(var(--col-w), 100%);
   margin-left: auto;
   margin-right: auto;
   background: #3a0d0d;
@@ -1533,7 +1569,7 @@ body.resizing #sidebar-resize { transition: none; }
 }
 
 .tool-block {
-  max-width: 700px;
+  max-width: min(var(--col-w), 100%);
   width: 100%;
   margin-left: auto;
   margin-right: auto;
