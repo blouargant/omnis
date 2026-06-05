@@ -23,7 +23,7 @@
   --bg-raised: #2a2d2e;
   --bg-raised-hover: #333436;
   --bg-active: #37373d;
-  --bg-input: #3c3c3c;
+  --bg-input: #3a3c3a;
 
   /* Borders */
   --border: #3e3e42;
@@ -49,7 +49,7 @@
 
   /* User message bubble (kept distinct so light themes can tint it
    * without forcing every input to match). */
-  --bubble-user-bg: #3c3c3c;
+  --bubble-user-bg: #3a3c3a;
   --bubble-user-border: #595959;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
 
@@ -1344,23 +1344,16 @@ body.resizing #sidebar-resize { transition: none; }
   white-space: normal;
   position: relative;
 }
-#prompt-header.visible { display: block; }
-
-/* Darkening fade beneath the pinned prompt: transcript content scrolling up
-   underneath the card fades into the background instead of butting hard against
-   it. Anchored to the header's bottom edge (top: 100%) and spanning exactly the
-   card's width, with the card's bottom corner radius. */
-#prompt-header.visible::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: 15px;
-  border-radius: 0 0 6px 6px;
-  background: linear-gradient(to bottom, var(--bg) 15%, transparent);
-  pointer-events: none;
-  z-index: 4;
+/* The pinned prompt floats above the transcript, so it gets a soft, slightly
+   stronger, downward-biased drop shadow (rather than a hard fade band beneath
+   it). The shadow follows the card's 6px radius, so its bottom corners are
+   rounded for free — it reads as the panel's own cast shadow. The tint is
+   themed via --prompt-fade: dark themes fall back to a near-black shadow; light
+   themes override it with a softer one so it never becomes a white smear. */
+#prompt-header.visible {
+  display: block;
+  box-shadow: 0 4px 12px -2px var(--prompt-fade, rgba(0, 0, 0, 0.55)),
+              0 1px 3px rgba(0, 0, 0, 0.22);
 }
 
 .pinned-prompt-text {
@@ -1480,12 +1473,13 @@ body.resizing #sidebar-resize { transition: none; }
 }
 .bubble-assistant code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13.5px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: #9cdcfe;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--bg-active);
+  border: 1px solid var(--border-strong);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-strong);
 }
 .bubble-assistant pre {
   background: var(--bg-panel);
@@ -1947,7 +1941,9 @@ body.resizing #sidebar-resize { transition: none; }
   display: flex;
   flex-direction: column;
   gap: 0;
-  height: var(--composer-h, auto);
+  /* Auto height: the panel grows to fit attachments + actions; the manual
+     resize height (--composer-h) is applied to the editor stack, not here. */
+  height: auto;
   pointer-events: none;
 }
 /* Only the real controls capture pointer events; the rest of the wrap is
@@ -2016,8 +2012,8 @@ body.resizing-composer #composer-resize { transition: none; }
   margin: 0 auto;
   padding: 10px 12px;
   width: 100%;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: var(--bubble-user-bg);
+  border: 1px solid var(--bubble-user-border);
   border-radius: 10px;
   box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
 }
@@ -2031,8 +2027,11 @@ body.resizing-composer #composer-resize { transition: none; }
   width: 100%;
   display: block;
 }
+/* Manual resize sizes the EDITOR (the prompt stack) to --composer-h, not the
+   whole wrap — so attachment chips and the action row grow the panel's total
+   height (height: auto on the wrap) instead of stealing height from the editor. */
 #composer-wrap.is-manual .prompt-stack {
-  flex: 1;
+  height: var(--composer-h);
   min-height: 0;
   display: flex;
 }
@@ -2046,7 +2045,8 @@ body.resizing-composer #composer-resize { transition: none; }
   pointer-events: none;
   overflow: hidden;
   box-sizing: border-box;
-  background: var(--bg);
+  /* Prompt editor background follows the theme (chat panel bg). */
+  background: var(--bg-panel);
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 10px 14px;
@@ -2068,7 +2068,7 @@ body.resizing-composer #composer-resize { transition: none; }
   width: 100%;
   min-height: calc(1.5em + 20px);
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: transparent;
   caret-color: var(--text);
   border-radius: 6px;
@@ -2164,7 +2164,7 @@ body.resizing-composer #composer-resize { transition: none; }
 #cancel {
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 6px 14px;
   font-size: 14px;
@@ -2180,7 +2180,7 @@ body.resizing-composer #composer-resize { transition: none; }
   padding: 0;
   border-radius: 4px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text-muted);
   font-size: 16px;
   font-weight: 600;
@@ -2206,7 +2206,7 @@ body.resizing-composer #composer-resize { transition: none; }
   padding: 0;
   border-radius: 4px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
@@ -2317,7 +2317,7 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 
 .ctx-ring-track {
-  stroke: var(--border);
+  stroke: var(--border-strong);
 }
 .ctx-ring-fill {
   stroke: #4ec9b0;

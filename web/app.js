@@ -659,7 +659,9 @@ function attachPaneHandlers(panel) {
   pe.composerResize.addEventListener("mousedown", (e) => {
     composerDragging   = true;
     composerDragStartY = e.clientY;
-    composerDragStartH = pe.composerWrap.getBoundingClientRect().height;
+    // --composer-h sizes the editor (the textarea), not the whole wrap, so start
+    // the drag from the textarea's current height for a 1:1 grab.
+    composerDragStartH = pe.prompt.getBoundingClientRect().height;
     pe.composerResize.classList.add("is-dragging");
     document.body.classList.add("resizing-composer");
     document.body.style.userSelect = "none";
@@ -2361,10 +2363,15 @@ function appendMailboxBlock(text, container) {
 }
 
 // Update the floating prompt header to show the question whose agent reply is
-// currently at the top of the viewport. That is the last question whose bubble
-// has scrolled completely above the transcript top — its reply is what the
-// reader sees first, so the header provides the matching context.
-// While a bubble is still visible no header is shown (the bubble itself is the label).
+// currently at the top of the viewport. We pin as soon as a question's bubble
+// *starts* to scroll above the transcript top (its top edge crosses the line),
+// not only once it has scrolled completely out — so the panel appears the moment
+// the user begins scrolling rather than popping in late, which read as a jump.
+// The header steals height from the transcript when it appears, so transcriptRect.top
+// shifts down by the header height once shown; that visibility-dependent line gives
+// natural hysteresis (show at the top line, hide one header-height lower) so the
+// decision can't flicker around the threshold. withStableScroll counter-scrolls the
+// height it costs, keeping the content stationary as the bubble becomes the header.
 function updatePinnedForScroll(panel) {
   const t = panel.els.transcript;
   const transcriptRect = t.getBoundingClientRect();
@@ -2372,7 +2379,7 @@ function updatePinnedForScroll(panel) {
   let activeBubble = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.bottom < transcriptRect.top) activeBubble = bubble;
+    if (rowRect.top < transcriptRect.top) activeBubble = bubble;
   }
   if (activeBubble !== null) {
     const text = activeBubble.dataset.text || "";
@@ -5506,7 +5513,11 @@ document.addEventListener("mousedown", (e) => {
 
 // ─── Composer resize ─────────────────────────────────────────────────────────
 
-const COMPOSER_MIN_H  = 116;
+// Minimum height of the EDITOR (textarea/prompt-stack) in manual-resize mode —
+// --composer-h now sizes the editor, not the whole wrap (which auto-grows for
+// attachments + actions). ~1 text lines: 1*1.5em(15px) + 20px padding + 2px
+// border + 8 px padding ≈ 45px.
+const COMPOSER_MIN_H  = 45;
 const COMPOSER_H_KEY  = "agent_toolkit_composer_h";
 const MAX_AUTO_LINES  = 10;
 

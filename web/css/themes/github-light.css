@@ -22,6 +22,7 @@
   --bubble-user-bg: #eaeef2;
   --bubble-user-border: #d0d7de;
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --prompt-fade: rgba(0, 0, 0, 0.16);
   --danger-fg: #b31d28;
   --danger-bg: rgba(179, 29, 40, 0.08);
   --danger-border: rgba(179, 29, 40, 0.30);
