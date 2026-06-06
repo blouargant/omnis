@@ -58,6 +58,7 @@ Cursor, etc.). When you paste:
 ## Tool naming
 
 The agent sees MCP tools under their server-qualified name (e.g.
-`mcp__github__list_repos`). The **Permissions** panel uses the same naming
-so you can scope `always_allow` / `ask_user` rules per-server, per-tool, or
-across all MCP traffic.
+`mcp__github__list_repos`). The **Permissions** panel uses the same naming, so
+you can scope rules per-server (`mcp__github`), per-tool
+(`mcp__github__list_repos`), or across a server's traffic (`mcp__github__*`) in
+any of the `allow` / `ask` / `deny` tiers.

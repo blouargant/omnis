@@ -44,7 +44,7 @@ yoke/
 │   ├── agentkit/              # central agent constructor + universal SystemPrompt
 │   ├── llm/                   # provider dispatcher (llm.go) + anthropic.go, openai.go, convert.go
 │   ├── tools/                 # file/bash/grep/glob/revert tools
-│   ├── permissions/           # YAML-driven permission plugin
+│   ├── permissions/           # permission plugin (Claude Code nomenclature, JSON)
 │   ├── events/                # event bus + file logger
 │   └── stream/                # streaming helpers
 ├── internal/
@@ -52,15 +52,15 @@ yoke/
 │   ├── worktree/              # git worktree isolation tools
 │   ├── teammates/             # mailbox / FSM inter-agent comms (in-mem + redis backends)
 │   ├── compress/  cache/      # plugins
-│   ├── skills/  mcp/          # loaders for skills/ and config/mcp_config.yaml
+│   ├── skills/  mcp/          # loaders for skills/ and config/mcp_config.json
 ├── skills/                    # specialisation playbooks (SKILL.md per folder)
 │   ├── review/                # generic review playbook
 │   ├── agent-builder/         # checklist for new specialist agents
 │   ├── pdf/                   # narrow tool-bound skill
 │   └── k8s-triage/            # example domain specialisation
 ├── config/
-│   ├── permissions.yaml       # safety envelope (always_deny/_allow/ask_user)
-│   └── mcp_config.yaml        # MCP servers (filesystem, k8s, postgres, github, …)
+│   ├── permissions.json       # safety envelope (Claude Code nomenclature: permissions.{allow,ask,deny})
+│   └── mcp_config.json        # MCP servers (filesystem, k8s, postgres, github, …)
 ├── doc.go                     # package-level overview for go doc
 ├── docs/                      # full markdown documentation set
 └── .agents/                   # ← these bootstrap skills (you are here)
@@ -78,15 +78,15 @@ When you need depth on something, read the matching file under
 | LLM provider configuration                 | `docs/providers.md`                 |
 | How to specialise the agent (no Go change) | `docs/specialising.md`              |
 | Authoring `skills/<name>/SKILL.md`         | `docs/skills.md`                    |
-| `permissions.yaml` + `mcp_config.yaml`     | `docs/configuration.md`             |
+| `permissions.json` + `mcp_config.json`     | `docs/configuration.md`             |
 | The 23 demo binaries                       | `docs/examples-catalog.md`               |
 | Adding tools / plugins / sub-agents        | `docs/extending.md`                 |
 
 ## When in doubt
 
 - Adding behaviour for a new domain → skill (`skills/<name>/SKILL.md`).
-- Adding a new tool surface → load via MCP (`config/mcp_config.yaml`).
-- Adding a destructive verb → pair it with a `permissions.yaml` rule.
+- Adding a new tool surface → load via MCP (`config/mcp_config.json`).
+- Adding a destructive verb → pair it with a `permissions.json` rule.
 - Adding a generic capability to the agent → new tool in `core/tools` or
   `internal/`, then wired into `main.go (root)`.
 - Touching the `SystemPrompt` → ask yourself first: is this about

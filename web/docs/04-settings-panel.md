@@ -88,16 +88,20 @@ agent.json round-trips cleanly. Saving any change triggers the standard
 
 ## Editing Permissions
 
-Permissions are evaluated in three tiers:
+yoke uses **Claude Code's permission nomenclature**. The panel shows a
+`defaultMode` selector and three rule tiers, evaluated **deny → ask → allow**
+(first match wins):
 
-1. **always_deny** — the action is rejected without prompting.
-2. **always_allow** — the action runs silently.
-3. **ask_user** — a confirmation prompt appears in the chat (handled by the
-   `ask_user` registry on the server).
+1. **deny** — the action is rejected without prompting.
+2. **ask** — a confirmation prompt appears in the chat.
+3. **allow** — the action runs silently.
 
-A rule matches by tool name plus an optional regex over the call payload.
-Skill-contributed permissions appear in a read-only block — they are owned by
-the skill file and cannot be edited from this panel.
+Each rule is a `Tool(specifier)` string — e.g. `Bash(npm run *)`, `Read(.env)`,
+`mcp__github__*`, `Agent(Explore)` — or a `/regex/` escape hatch; an object rule
+adds an optional reason and a project-scoping `cwd`. See the **Permissions**
+concept page for the full syntax and modes. Skill-contributed permissions appear
+in a read-only block — they are owned by the skill file and cannot be edited from
+this panel.
 
 ## Editing MCP
 

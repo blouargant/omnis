@@ -147,6 +147,8 @@ func run(ctx context.Context, opts options, args []string) error {
 			return runCLI(ctx, opts, args[1:])
 		case "import-agent":
 			return runImportAgent(args[1:])
+		case "permissions":
+			return runPermissions(args[1:])
 		}
 	}
 	return runCLI(ctx, opts, args)

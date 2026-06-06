@@ -95,8 +95,8 @@ needed). Permission plugin is the exception (it's safety-critical).
 
 ### Add an MCP server
 
-Don't touch this file. Edit `config/mcp_config.yaml` instead — it's
-already loaded via `mcpcfg.Load("config/mcp_config.yaml")`.
+Don't touch this file. Edit `config/mcp_config.json` instead — it's
+already loaded via `mcpcfg.Load("config/mcp_config.json")`.
 
 ### Add a skill
 

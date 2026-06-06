@@ -9,59 +9,45 @@ import (
 	"strings"
 )
 
-// persistApproval appends an always_allow rule for (toolName, input) to
-// the given user config file. The rule's CWD field, when non-empty,
-// scopes the approval to that project root. An empty cwd persists a
-// global allow rule.
-//
-// The function is idempotent: if an equivalent rule (same pattern, same
-// CWD) already exists, the file is left untouched.
+// persistApproval appends an allow rule for (toolName, input) to the given user
+// config file. cwd, when non-empty, scopes the rule to that project root.
+// Idempotent: an equivalent rule already present leaves the file untouched.
 func persistApproval(path, toolName, input, cwd string) error {
 	if path == "" {
 		return fmt.Errorf("user config path not configured")
 	}
+	rule := buildApprovalRule(toolName, input, cwd)
 
-	pattern, reason := buildApprovalRule(toolName, input, cwd)
-
-	rules := &Rules{}
+	cfg := &Config{}
 	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, rules); err != nil {
-			return fmt.Errorf("parse existing %s: %w", path, err)
+		parsed, perr := parseConfig(data)
+		if perr != nil {
+			return fmt.Errorf("parse existing %s: %w", path, perr)
 		}
+		cfg = parsed
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 
-	for _, r := range rules.AlwaysAllow {
-		if r.Pattern == pattern && r.CWD == cwd {
+	for _, r := range cfg.Permissions.Allow {
+		if r.Rule == rule.Rule && r.Regex == rule.Regex && r.CWD == rule.CWD {
 			return nil // already persisted
 		}
 	}
-
-	rules.AlwaysAllow = append(rules.AlwaysAllow, Rule{
-		Pattern: pattern,
-		Reason:  reason,
-		CWD:     cwd,
-	})
-
-	return writeRulesAtomic(path, rules)
+	cfg.Permissions.Allow = append(cfg.Permissions.Allow, rule)
+	return writeConfigAtomic(path, cfg)
 }
 
-// buildApprovalRule constructs the always_allow pattern persisted for an
-// approved tool call, plus a human-readable reason string.
+// buildApprovalRule constructs the allow Rule persisted for an approved tool
+// call. Granularity differs by tool:
 //
-// Granularity differs by tool, balancing convenience against blast radius:
-//
-//   - File tools (Read/Write/Edit/revert) broaden to "this tool on any
-//     path". A single approval therefore covers the other files the agent
-//     touches in the same task (the common "create N files, get N prompts"
-//     pain). The CWD field still scopes "Allow in this project" grants to
-//     the project tree, so the broadening only widens which paths match,
-//     not which working directories.
-//   - Bash keeps an exact-command match. A blanket "allow all shell
-//     commands" rule persisted to disk is a footgun; the ephemeral
-//     "Allow all Bash this session" outcome covers command bursts instead.
-func buildApprovalRule(toolName, input, cwd string) (string, string) {
+//   - File tools (Read/Write/Edit/revert) broaden to "this tool class on any
+//     path" via a bare new-nomenclature spec (Read / Edit), so one approval
+//     covers the other files touched in the same task. cwd still scopes
+//     "Allow in this project".
+//   - Bash keeps an exact-command match via the regex escape hatch (a literal
+//     match on the command JSON), since a blanket shell allow is a footgun.
+func buildApprovalRule(toolName, input, cwd string) Rule {
 	args := map[string]any{}
 	_ = json.Unmarshal([]byte(input), &args)
 
@@ -73,28 +59,37 @@ func buildApprovalRule(toolName, input, cwd string) (string, string) {
 	switch toolName {
 	case "Bash":
 		if cmd, ok := args["command"].(string); ok && cmd != "" {
-			return "^Bash \\{\"command\":\"" + regexp.QuoteMeta(cmd) + "\"",
-				"User-approved shell command " + scope
+			return Rule{
+				Regex:  `^Bash \{"command":"` + regexp.QuoteMeta(cmd) + `"`,
+				Reason: "User-approved shell command " + scope,
+				CWD:    cwd,
+				Tools:  []string{"Bash"},
+			}
 		}
-	case "Read", "Write", "Edit", "revert":
-		// Match any invocation of this tool, regardless of file_path.
-		return "^" + regexp.QuoteMeta(toolName) + "\\b",
-			"User-approved " + toolName + " on any file " + scope
+	case "Read":
+		return Rule{Rule: "Read", Reason: "User-approved Read on any file " + scope, CWD: cwd}
+	case "Write":
+		return Rule{Rule: "Write", Reason: "User-approved Write on any file " + scope, CWD: cwd}
+	case "Edit", "revert":
+		return Rule{Rule: "Edit", Reason: "User-approved Edit on any file " + scope, CWD: cwd}
 	}
-	// Fallback: literal probe match. Anchored to toolName + exact input.
+	// Fallback: exact-probe regex match.
 	probe := toolName + " " + input
-	return "^" + regexp.QuoteMeta(probe) + "$", "User-approved tool call " + scope
+	return Rule{
+		Regex:  "^" + regexp.QuoteMeta(probe) + "$",
+		Reason: "User-approved tool call " + scope,
+		CWD:    cwd,
+	}
 }
 
-// writeRulesAtomic marshals rules to path via a temp file + rename, so
-// concurrent readers never see a half-written file.
-func writeRulesAtomic(path string, rules *Rules) error {
+// writeConfigAtomic marshals cfg to path via a temp file + rename.
+func writeConfigAtomic(path string, cfg *Config) error {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	data, err := jsonMarshalIndent(rules)
+	data, err := jsonMarshalIndent(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}

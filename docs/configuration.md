@@ -258,60 +258,62 @@ var name, the env var value is used.
 
 ## `permissions.json`
 
-The harness's safety envelope. Patterns are Go [`regexp`] strings
-matched against the **bash command string** that is about to run (and,
-in the future, against tool names).
+The harness's safety envelope, using **Claude Code's permission nomenclature**.
+The file holds a `permissions` object with three rule tiers plus a `defaultMode`,
+evaluated **deny → ask → allow** (first match wins; deny always takes
+precedence):
 
-The file has three lists, evaluated **top to bottom**:
+| Tier    | Meaning                                                       |
+|---------|---------------------------------------------------------------|
+| `deny`  | Hard-deny. The tool call is never executed; the model sees an error. |
+| `ask`   | Prompt the user before executing.                            |
+| `allow` | Auto-allow. No prompt to the user.                           |
 
-| List           | Meaning                                                       |
-|----------------|---------------------------------------------------------------|
-| `always_deny`  | Hard-deny. The tool call is never executed; the model sees an error. |
-| `always_allow` | Auto-allow. No prompt to the user.                            |
-| `ask_user`     | Prompt the user (`y/n`) before executing.                     |
+Anything matched by **none** of the three falls through to the mode default
+(in `default` mode that is **ask** — the safe default).
 
-Anything matched by **none** of the three falls through to **ask**
-(safe default).
+Each rule is a `Tool(specifier)` string — `Bash(npm run *)`, `Read(.env)`,
+`Edit(/src/**)`, `mcp__server__tool`, `Agent(Name)`, or a bare tool name — with
+Claude Code semantics (Bash glob + compound-command splitting + wrapper
+stripping + a built-in read-only allowlist; gitignore path anchors). yoke adds
+an object form `{"rule": "...", "reason": "...", "cwd": "..."}` and a `/regex/`
+escape hatch (or `{"regex": "...", "tools": ["Bash"]}`) matched against
+`toolName <json args>`.
 
-Each rule is either a JSON string (the bare regex pattern) or an object
-`{"pattern": "...", "reason": "..."}`.
+Old-format files (top-level `always_deny`/`always_allow`/`ask_user`) are
+**auto-converted on load**, with a `.bak` backup kept. Convert manually with
+`yoke permissions convert -w permissions.json`, or import a Claude Code
+`settings.json` with `yoke permissions import settings.json`.
 
-### Default rules shipped
+### Default rules shipped (excerpt)
 
 ```json
 {
-  "always_deny": [
-    "rm -rf /",
-    "mkfs",
-    "dd if=.* of=/dev/",
-    ":(){.*};:"
-  ],
-  "always_allow": [
-    "^ls( |$)",
-    "^cat ",
-    "^pwd$",
-    "^echo ",
-    "^head ",
-    "^tail ",
-    "^grep ",
-    "^find .* -name",
-    "^go (build|test|vet|fmt)",
-    "^npm (test|run build)",
-    "^kubectl (get|describe|logs|top|explain) ",
-    "^kubectl config (current-context|get-contexts|view)",
-    "^docker (ps|images|logs|inspect) "
-  ],
-  "ask_user": [
-    "^rm ",
-    "^git push",
-    "^sudo ",
-    "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)",
-    "^docker (run|rm|rmi|exec)",
-    "^terraform (apply|destroy)",
-    "^helm (install|upgrade|uninstall)"
-  ]
+  "permissions": {
+    "defaultMode": "default",
+    "deny": [
+      {"regex": "\\bmkfs(\\.[a-z0-9]+)?\\b", "tools": ["Bash"], "reason": "creating a filesystem destroys data"},
+      "Read(.ssh/id_*)"
+    ],
+    "allow": [
+      "Read",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(npm test *)",
+      "Bash(kubectl get *)",
+      "Bash(docker ps *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(git push *)",
+      {"regex": "\\bsudo\\b", "tools": ["Bash"], "reason": "privilege escalation"}
+    ]
+  }
 }
 ```
+
+Common read-only commands (`ls`, `cat`, `grep`, `git status`, …) are allowed by
+the built-in read-only allowlist, so they need no explicit rule.
 
 ### Adding a domain
 
@@ -320,14 +322,19 @@ auto-allow + mutating ask):
 
 ```json
 {
-  "always_allow": [
-    "^psql -c \"select",
-    "^aws s3 ls"
-  ],
-  "ask_user": [
-    "^psql -c \"(insert|update|delete|alter|drop)",
-    "^aws s3 (rm|cp|mv|sync) "
-  ]
+  "permissions": {
+    "allow": [
+      "Bash(psql -c \"select*)",
+      "Bash(aws s3 ls *)"
+    ],
+    "ask": [
+      {"regex": "psql -c \"(insert|update|delete|alter|drop)", "tools": ["Bash"], "reason": "mutating SQL"},
+      "Bash(aws s3 rm *)",
+      "Bash(aws s3 cp *)",
+      "Bash(aws s3 mv *)",
+      "Bash(aws s3 sync *)"
+    ]
+  }
 }
 ```
 

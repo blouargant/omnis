@@ -53,7 +53,7 @@ The command runs on the machine the server is running on, and its output is
 shown in a green terminal-style block right in the chat.
 
 - **Permissions are bypassed.** Because you typed the command yourself, it is
-  *not* routed through the `ask_user` permission prompts. The hard **safety
+  *not* routed through the permission prompts (the `ask` tier). The hard **safety
   floor** still applies, so commands like `rm -rf /` are refused (see the
   **Permissions** section).
 - **The working directory persists per session.** `!cd somedir` affects later

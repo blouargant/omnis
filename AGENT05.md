@@ -148,7 +148,7 @@ yoke/
 | `registry/agents/<name>/agent.json` | Per-agent definition: model_ref, tools, enabled flag, leader flag |
 | `registry/agents/<name>/instruction.md` | Per-agent system prompt (falls back to `registry/agents/default.md`) |
 | `models.json` | Reusable model profiles referenced by `model_ref` in agent.json |
-| `permissions.json` | Safety envelope: always_deny / always_allow / ask_user patterns |
+| `permissions.json` | Safety envelope (Claude Code nomenclature): `permissions.{allow,ask,deny}` of `Tool(specifier)` rules + `defaultMode` |
 | `mcp_config.json` | MCP server definitions (spawned as child processes) |
 | `server.yaml` | Server listen address/port and bearer token |
 | `a2a_config.json` | Remote A2A agent endpoints |
@@ -220,7 +220,7 @@ The skill loader (`internal/skills`) searches both `<layer>/skills/` and `<layer
 - **No domain knowledge in Go.** Domain rules belong in `registry/skills/<name>/SKILL.md`, MCP server configs, or `permissions.json`. Never write `if topic == "kubernetes"` or mention domain tools (`kubectl`, `psql`, `aws`) in `.go` files under `core/` or root.
 - **The system prompt describes a method, not a domain.** `core/agentkit/agentkit.go`'s `SystemPrompt` must remain domain-agnostic. Domain rules go in skills.
 - **Sub-agents are role-based, not domain-based.** Built-in sub-agents (`investigator`, `summariser`) are generic roles. New sub-agents get a *role* instruction, never a domain instruction.
-- **Every mutating tool needs a permission rule.** Pair any tool that writes state with a pattern in `permissions.json` under `ask_user` or `always_deny`.
+- **Every mutating tool needs a permission rule.** Pair any tool that writes state with a rule in `permissions.json` under the `ask` or `deny` tier.
 - **Use `agentkit.New`, never `llmagent.New` directly.** This guarantees every agent inherits the universal `SystemPrompt`.
 - **No new LLM SDKs in `go.mod`.** Use the in-tree `core/llm/` HTTP+SSE adapters. For OpenAI-compatible providers, set `OPENAI_BASE_URL` — no code needed.
 

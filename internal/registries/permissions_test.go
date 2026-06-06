@@ -49,8 +49,10 @@ func TestMergePermissionsFileDedupes(t *testing.T) {
 		t.Errorf("added = %d, want 2", added)
 	}
 
+	// Old-format remote rules convert to regex-escape-hatch rules; their
+	// canonical keys are "regex|<tools>|<pattern>|<cwd>".
 	patterns := InstalledPermissionPatterns(base)
-	for _, want := range []string{"kubectl get", "kubectl logs", "kubectl delete"} {
+	for _, want := range []string{"regex||kubectl get|", "regex||kubectl logs|", "regex||kubectl delete|"} {
 		if !patterns[want] {
 			t.Errorf("pattern %q missing after merge", want)
 		}

@@ -31,8 +31,8 @@ If the domain procedure is repeatable, encode it first as a skill — skills are
 ## Step 3 — Wire tools and configuration
 
 1. Compose tools from existing packages — do not hand-roll new tools unless the capability genuinely does not exist.
-2. Add or extend `config/permissions.yaml` for any new tool surface introduced by this agent.
-3. If new MCP servers are required, add them to `config/mcp_config.yaml`.
+2. Add or extend `config/permissions.json` for any new tool surface introduced by this agent.
+3. If new MCP servers are required, add them to `config/mcp_config.json`.
 
 ## Step 4 — Register with the coordinator
 
@@ -49,7 +49,7 @@ Subscribe a domain-specific event handler via `events.Bus` to emit structured ev
 
 Produce the following and nothing more:
 1. `skills/<name>/SKILL.md` — the skill file.
-2. Diffs for `config/permissions.yaml` and `config/mcp_config.yaml` if changed.
+2. Diffs for `config/permissions.json` and `config/mcp_config.json` if changed.
 3. Diff for root `main.go` coordinator registration if the agent is to be reachable.
 4. One sample prompt that exercises the new agent end to end.
 
@@ -57,5 +57,5 @@ Produce the following and nothing more:
 
 - Do not create `examples/<name>/main.go`. Example binaries require a Go compiler and have no utility outside of a development environment; production deployments use the pre-built coordinator binary.
 - Do not hand-roll tools that duplicate existing packages (`fs`, `todo`, `tasks`, `worktree`, `bg`, `mailbox`). Check `core/tools/` and `internal/` before writing new code.
-- `config/permissions.yaml` is enforced at runtime — omitting a required permission will silently deny the tool call, not produce a compile error.
+- `config/permissions.json` is enforced at runtime — omitting an `allow` rule means the tool call falls through to the `ask` tier (prompts the user, or is denied non-interactively), not a compile error.
 - Skills are loaded by `name` matching the directory name exactly. A mismatch causes silent non-activation.

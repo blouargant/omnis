@@ -11,7 +11,7 @@ Before writing code, check the cheaper alternatives:
    existing tools, write a `skills/<name>/SKILL.md` instead.
 2. **Can an MCP server cover it?** If a community MCP server exists
    (filesystem, github, postgres, kubernetes, …), add it to
-   `config/mcp_config.yaml`. No Go required.
+   `config/mcp_config.json`. No Go required.
 3. **Otherwise, write a tool.** Continue below.
 
 ## Anatomy
@@ -83,18 +83,24 @@ investigator), pass it via that sub-agent's `Tools:` field too.
 
 If the tool **mutates state** (writes a file, calls a remote API with
 side effects, runs a destructive shell command), pair it with a rule in
-`config/permissions.yaml`:
+`config/permissions.json` (Claude Code nomenclature):
 
-```yaml
-ask_user:
-  - "^my_tool"            # tool-name based pattern (future)
-  - "^<bash pattern>"     # if the tool shells out
+```json
+{
+  "permissions": {
+    "ask": [
+      "my_tool",
+      "Bash(<cmd> *)",
+      {"regex": "<pattern>", "tools": ["Bash"], "reason": "..."}
+    ]
+  }
+}
 ```
 
-Currently the permission plugin matches the **bash command string**, so
-shell-based tools need bash patterns. Pure Go tools that mutate state
-should still be documented in `permissions.yaml` under a comment so the
-intent is visible.
+A bare tool name (`my_tool`) matches every call of that tool; `Bash(...)`
+specifiers match the command with Claude Code semantics; the `/regex/` /
+`{regex,tools}` escape hatch matches `toolName <json args>` for anything globs
+can't express. Put destructive cases under `deny` instead of `ask`.
 
 ## Verify
 

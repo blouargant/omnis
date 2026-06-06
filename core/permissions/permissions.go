@@ -1,11 +1,25 @@
-// Package permissions implements JSON rule-based permission governance
-// (Phase 4 / s15). Three tiers are evaluated in order against every tool
-// call: always_deny → always_allow → ask_user. Anything that matches no
-// rule falls through to ask (the safe default) so unrecognised commands
-// require explicit user confirmation.
+// Package permissions implements JSON rule-based permission governance using
+// Claude Code's permission nomenclature as yoke's default format. Rules are
+// written as Tool(specifier) strings under permissions.{allow, ask, deny}:
 //
-// The plugin returned by NewPlugin wires this into ADK as a
-// BeforeToolCallback so denial happens before the tool runs.
+//	{ "permissions": {
+//	    "defaultMode": "default",
+//	    "allow": ["Bash(npm run *)", "Read"],
+//	    "ask":   ["Bash(git push *)"],
+//	    "deny":  ["Bash(rm -rf /*)", "Read(.env)"]
+//	} }
+//
+// Precedence is deny → ask → allow (deny always wins), matching Claude Code.
+// A tool call that matches no rule falls through to the mode default (ask in
+// default mode), so unrecognised commands require explicit confirmation.
+//
+// yoke extensions over Claude syntax: an object rule {rule, reason, cwd}
+// attaches a prompt reason and a project-scoped cwd; the {regex, tools} object
+// form is the raw-regexp escape hatch (matched against "toolName <json args>")
+// that ConvertLegacy uses so an upgraded old config behaves identically.
+//
+// Old-format files (top-level always_deny/always_allow/ask_user) are detected
+// and auto-converted on load.
 package permissions
 
 import (
@@ -14,8 +28,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/plugin"
@@ -31,164 +46,456 @@ const (
 	DecisionAsk
 )
 
-// Rule is one entry in the JSON config. It may be written as a bare string
-// (just the pattern) or as an object {pattern, reason, cwd, tools}.
-//
-// CWD, when non-empty, limits the rule to invocations whose current
-// working directory is that path or a sub-directory of it. Used by
-// "Allow in this project" persisted approvals so they don't leak to
-// other projects.
-//
-// Tools, when non-empty, limits the rule to calls of those tools (matched
-// case-insensitively by tool name). An empty list matches every tool. This
-// scopes command-oriented patterns (e.g. the "mkfs"/"rm -rf" safety floor)
-// to the Bash tool so they never fire against the *content* of a Write/Edit
-// — writing a file that merely mentions "mkfs" is harmless and must not be
-// denied.
-type Rule struct {
-	Pattern string   `json:"pattern"`
-	Reason  string   `json:"reason,omitempty"`
-	CWD     string   `json:"cwd,omitempty"`
-	Tools   []string `json:"tools,omitempty"`
-	re      *regexp.Regexp
+// Mode is a permission mode (Claude Code's defaultMode). It changes the
+// behavior for tool calls that match no explicit rule, plus the absolute
+// bypass / plan shortcuts.
+type Mode int
+
+const (
+	ModeDefault Mode = iota
+	ModeAcceptEdits
+	ModePlan
+	ModeAuto
+	ModeDontAsk
+	ModeBypass
+)
+
+var modeNames = map[Mode]string{
+	ModeDefault:     "default",
+	ModeAcceptEdits: "acceptEdits",
+	ModePlan:        "plan",
+	ModeAuto:        "auto",
+	ModeDontAsk:     "dontAsk",
+	ModeBypass:      "bypassPermissions",
 }
 
-// UnmarshalJSON accepts either a JSON string (the pattern) or an object
-// with explicit pattern/reason fields.
-func (r *Rule) UnmarshalJSON(data []byte) error {
-	if len(data) > 0 && data[0] == '"' {
-		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
-			return err
+// ParseMode maps a defaultMode string to a Mode (unknown ⇒ ModeDefault).
+func ParseMode(s string) Mode {
+	for m, name := range modeNames {
+		if strings.EqualFold(name, s) {
+			return m
 		}
-		r.Pattern = s
-		return nil
 	}
-	type raw Rule
-	var tmp raw
-	if err := json.Unmarshal(data, &tmp); err != nil {
+	return ModeDefault
+}
+
+func (m Mode) String() string { return modeNames[m] }
+
+func (m Mode) MarshalJSON() ([]byte, error) { return json.Marshal(m.String()) }
+
+func (m *Mode) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	*r = Rule(tmp)
+	*m = ParseMode(s)
 	return nil
 }
 
-// Rules is the parsed permissions config.
-type Rules struct {
-	AlwaysDeny  []Rule `json:"always_deny"`
-	AlwaysAllow []Rule `json:"always_allow"`
-	AskUser     []Rule `json:"ask_user"`
+// PermSet is the allow/ask/deny rule set plus mode + additional directories,
+// mirroring Claude Code's "permissions" object.
+type PermSet struct {
+	DefaultMode           Mode     `json:"defaultMode,omitempty"`
+	Allow                 []Rule   `json:"allow"`
+	Ask                   []Rule   `json:"ask"`
+	Deny                  []Rule   `json:"deny"`
+	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+}
+
+// Config is the top-level permissions.json document.
+type Config struct {
+	Permissions PermSet `json:"permissions"`
 }
 
 // HasRules reports whether any tier contains at least one rule.
-func (r *Rules) HasRules() bool {
-	return len(r.AlwaysDeny) > 0 || len(r.AlwaysAllow) > 0 || len(r.AskUser) > 0
+func (c *Config) HasRules() bool {
+	p := &c.Permissions
+	return len(p.Allow) > 0 || len(p.Ask) > 0 || len(p.Deny) > 0
 }
 
-// Merge returns a new Rules combining base with each overlay appended in order.
-// Base rules are evaluated first within each tier; overlay rules follow.
-// The compiled regexps from each source are preserved.
-func Merge(base *Rules, overlays ...*Rules) *Rules {
-	merged := &Rules{
-		AlwaysDeny:  make([]Rule, len(base.AlwaysDeny)),
-		AlwaysAllow: make([]Rule, len(base.AlwaysAllow)),
-		AskUser:     make([]Rule, len(base.AskUser)),
+// compile parses/compiles every rule. Invalid rules are skipped (dropped) so a
+// single bad entry never disables the whole rule set.
+func (c *Config) compile() {
+	for _, set := range []*[]Rule{&c.Permissions.Allow, &c.Permissions.Ask, &c.Permissions.Deny} {
+		out := make([]Rule, 0, len(*set))
+		for i := range *set {
+			r := (*set)[i]
+			if err := r.compile(); err == nil {
+				out = append(out, r)
+			}
+		}
+		*set = out
 	}
-	copy(merged.AlwaysDeny, base.AlwaysDeny)
-	copy(merged.AlwaysAllow, base.AlwaysAllow)
-	copy(merged.AskUser, base.AskUser)
+}
+
+// Merge returns a new Config combining base with each overlay appended in
+// order (base rules first within each tier). DefaultMode/AdditionalDirectories
+// come from base unless empty, in which case the first overlay that sets them
+// wins.
+func Merge(base *Config, overlays ...*Config) *Config {
+	merged := &Config{Permissions: PermSet{
+		DefaultMode:           base.Permissions.DefaultMode,
+		AdditionalDirectories: append([]string(nil), base.Permissions.AdditionalDirectories...),
+		Allow:                 append([]Rule(nil), base.Permissions.Allow...),
+		Ask:                   append([]Rule(nil), base.Permissions.Ask...),
+		Deny:                  append([]Rule(nil), base.Permissions.Deny...),
+	}}
 	for _, o := range overlays {
-		merged.AlwaysDeny = append(merged.AlwaysDeny, o.AlwaysDeny...)
-		merged.AlwaysAllow = append(merged.AlwaysAllow, o.AlwaysAllow...)
-		merged.AskUser = append(merged.AskUser, o.AskUser...)
+		if o == nil {
+			continue
+		}
+		merged.Permissions.Allow = append(merged.Permissions.Allow, o.Permissions.Allow...)
+		merged.Permissions.Ask = append(merged.Permissions.Ask, o.Permissions.Ask...)
+		merged.Permissions.Deny = append(merged.Permissions.Deny, o.Permissions.Deny...)
+		merged.Permissions.AdditionalDirectories = append(merged.Permissions.AdditionalDirectories, o.Permissions.AdditionalDirectories...)
+		if merged.Permissions.DefaultMode == ModeDefault {
+			merged.Permissions.DefaultMode = o.Permissions.DefaultMode
+		}
 	}
 	return merged
 }
 
-// Load reads and compiles a JSON rules file. Missing file yields an empty
-// rule set (everything allowed).
-func Load(path string) (*Rules, error) {
+// Load reads, converts (if old-format), and compiles a permissions config.
+// A missing file yields an empty config (everything falls through to ask).
+func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Rules{}, nil
+			return &Config{}, nil
 		}
 		return nil, err
 	}
-	var r Rules
-	if err := json.Unmarshal(data, &r); err != nil {
+	cfg, err := parseConfig(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if err := r.compile(); err != nil {
+	cfg.compile()
+	return cfg, nil
+}
+
+// parseConfig parses bytes into a Config, accepting three shapes: the nested
+// {permissions:{…}}, a bare permissions object {allow,ask,deny,…}, and the old
+// {always_deny,…} format (auto-converted).
+func parseConfig(data []byte) (*Config, error) {
+	if isLegacyFormat(data) {
+		legacy, err := parseLegacy(data)
+		if err != nil {
+			return nil, err
+		}
+		cfg, _ := ConvertLegacy(legacy)
+		return cfg, nil
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
 		return nil, err
 	}
-	return &r, nil
+	if _, ok := probe["permissions"]; ok {
+		var cfg Config
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
+		return &cfg, nil
+	}
+	// Bare permissions object.
+	var ps PermSet
+	if err := json.Unmarshal(data, &ps); err != nil {
+		return nil, err
+	}
+	return &Config{Permissions: ps}, nil
 }
 
-func (r *Rules) compile() error {
-	sets := []*[]Rule{&r.AlwaysDeny, &r.AlwaysAllow, &r.AskUser}
-	for _, set := range sets {
-		for i := range *set {
-			re, err := regexp.Compile("(?i)" + (*set)[i].Pattern)
-			if err != nil {
-				return fmt.Errorf("invalid pattern %q: %w", (*set)[i].Pattern, err)
+// matchCtx carries the resolved fields a single Check consults.
+type matchCtx struct {
+	toolName    string
+	probe       string // "toolName <json args>" (legacy regex probe)
+	command     string // Bash command arg
+	filePath    string // file_path arg
+	url         string // url arg (WebFetch)
+	cwd         string
+	projectRoot string
+	home        string
+}
+
+// Check evaluates a tool call against the rule set. input is the JSON-marshaled
+// tool args (legacy compatibility); CheckArgs is preferred where the structured
+// args map is available.
+func (c *Config) Check(toolName, input, cwd string) (Decision, string) {
+	args := map[string]any{}
+	_ = json.Unmarshal([]byte(input), &args)
+	return c.CheckArgs(toolName, args, cwd)
+}
+
+// CheckArgs evaluates a tool call against the rule set with structured args.
+func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (Decision, string) {
+	ps := &c.Permissions
+	ctx := matchCtx{
+		toolName:    toolName,
+		probe:       toolName + " " + flattenArgs(args),
+		command:     stringArg(args, "command"),
+		filePath:    stringArg(args, "file_path"),
+		url:         stringArg(args, "url"),
+		cwd:         cwd,
+		projectRoot: findProjectRoot(cwd),
+		home:        userHome(),
+	}
+	mode := ps.DefaultMode
+
+	// 1. Explicit deny always wins.
+	if rl, ok := firstMatch(ps.Deny, ctx); ok {
+		return DecisionDeny, reasonOr(rl, "denied by rule")
+	}
+	// 2. bypassPermissions: allow everything else (the hard safety floor in
+	//    core/tools/bash.go remains the circuit breaker).
+	if mode == ModeBypass {
+		return DecisionAllow, "bypassPermissions mode"
+	}
+	// 3. plan mode is authoritative: reads allowed, edits / non-read-only
+	//    shell denied.
+	if mode == ModePlan {
+		switch {
+		case isReadTool(toolName):
+			return DecisionAllow, "plan mode (read-only)"
+		case isEditTool(toolName):
+			return DecisionDeny, "plan mode forbids edits"
+		case toolName == "Bash" && ctx.command != "" && !allReadOnly(ctx.command):
+			return DecisionDeny, "plan mode forbids non-read-only commands"
+		}
+	}
+	// 4. Explicit ask.
+	if rl, ok := firstMatch(ps.Ask, ctx); ok {
+		return DecisionAsk, reasonOr(rl, defaultAskReason)
+	}
+	// 5. Built-in read-only Bash commands run without prompting (overridable
+	//    by deny/ask above).
+	if toolName == "Bash" && ctx.command != "" && allReadOnly(ctx.command) {
+		return DecisionAllow, "read-only command"
+	}
+	// 6. acceptEdits auto-allows edits in the working dir + common fs commands.
+	if mode == ModeAcceptEdits {
+		if isEditTool(toolName) && underWorkingDir(ctx.filePath, cwd, ps) {
+			return DecisionAllow, "acceptEdits mode"
+		}
+		if toolName == "Bash" && ctx.command != "" && isCommonFsCommand(ctx.command) {
+			return DecisionAllow, "acceptEdits mode"
+		}
+	}
+	// 7. Explicit allow.
+	if toolName == "Bash" && ctx.command != "" {
+		if bashAllowed(ps.Allow, ctx) {
+			return DecisionAllow, "allowed by rule"
+		}
+	} else if rl, ok := firstMatch(ps.Allow, ctx); ok {
+		return DecisionAllow, reasonOr(rl, "allowed by rule")
+	}
+	// 8. Mode-based default.
+	if mode == ModeDontAsk {
+		return DecisionDeny, "dontAsk mode: tool not pre-approved"
+	}
+	return DecisionAsk, defaultAskReason
+}
+
+const defaultAskReason = "command is not on the allow list — confirm before running"
+
+func reasonOr(r *Rule, fallback string) string {
+	if r != nil && r.Reason != "" {
+		return r.Reason
+	}
+	return fallback
+}
+
+// firstMatch returns the first rule in the tier that matches the call. Bash
+// specs match if ANY subcommand matches (so a deny/ask on a compound command
+// fires when any part triggers it).
+func firstMatch(rules []Rule, ctx matchCtx) (*Rule, bool) {
+	for i := range rules {
+		if ruleMatches(&rules[i], ctx) {
+			return &rules[i], true
+		}
+	}
+	return nil, false
+}
+
+// ruleMatches reports whether a single rule matches the call.
+func ruleMatches(r *Rule, ctx matchCtx) bool {
+	if r.CWD != "" && !cwdMatches(r.CWD, ctx.cwd) {
+		return false
+	}
+	// Regex escape hatch (legacy semantics): match the whole probe, scoped to
+	// the optional tools list.
+	if r.re != nil {
+		return matchesToolList(r.Tools, ctx.toolName) && r.re.MatchString(ctx.probe)
+	}
+	sp := r.spec
+	if sp == nil {
+		return false
+	}
+	if sp.IsRegex {
+		return sp.re.MatchString(ctx.probe)
+	}
+	if !specApplies(sp.Tool, ctx.toolName) {
+		return false
+	}
+	switch sp.Tool {
+	case "Bash":
+		return bashSpecMatchesAny(sp, ctx.command)
+	case "Read", "Edit", "Write":
+		return sp.pathMatch(ctx.filePath, ctx.cwd, ctx.projectRoot, ctx.home)
+	case "mcp":
+		return mcpMatch(sp.Arg, ctx.toolName)
+	case "Agent":
+		if sp.Bare {
+			return true
+		}
+		return agentMatch(sp.Arg, ctx.toolName)
+	case "WebFetch":
+		if sp.Bare {
+			return true
+		}
+		return domainMatch(sp.Arg, ctx.url)
+	default:
+		// Bare tool name whose class covers this call.
+		return sp.Bare
+	}
+}
+
+// bashSpecMatchesAny reports whether a Bash spec matches any subcommand.
+func bashSpecMatchesAny(sp *Spec, command string) bool {
+	if sp.Bare {
+		return true
+	}
+	for _, sub := range bashSubcommands(command) {
+		if sp.bashGlobMatch(sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// bashAllowed reports whether every subcommand of a compound Bash command is
+// covered by the allow tier. Legacy whole-probe regex allow rules short-circuit
+// (preserving old behavior); native glob specs are matched per-subcommand, and
+// built-in read-only commands count as covered.
+func bashAllowed(allow []Rule, ctx matchCtx) bool {
+	for i := range allow {
+		r := &allow[i]
+		if r.CWD != "" && !cwdMatches(r.CWD, ctx.cwd) {
+			continue
+		}
+		if r.re != nil && matchesToolList(r.Tools, "Bash") && r.re.MatchString(ctx.probe) {
+			return true
+		}
+		if r.spec != nil && r.spec.IsRegex && r.spec.re.MatchString(ctx.probe) {
+			return true
+		}
+	}
+	subs := bashSubcommands(ctx.command)
+	for _, sub := range subs {
+		if isReadOnlyCommand(sub) {
+			continue
+		}
+		covered := false
+		for i := range allow {
+			r := &allow[i]
+			if r.spec == nil || r.spec.Tool != "Bash" {
+				continue
 			}
-			(*set)[i].re = re
+			if r.CWD != "" && !cwdMatches(r.CWD, ctx.cwd) {
+				continue
+			}
+			if r.spec.bashGlobMatch(sub) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
 		}
 	}
-	return nil
+	return true
 }
 
-// Check evaluates a tool call against the rule set, scoped to the
-// current working directory (used to filter project-scoped rules). The
-// input is the JSON-marshaled tool args; the probe is "toolName <input>".
-func (r *Rules) Check(toolName, input, cwd string) (Decision, string) {
-	probe := toolName + " " + input
-	for _, rl := range r.AlwaysDeny {
-		if matchRule(&rl, toolName, probe, cwd) {
-			return DecisionDeny, rl.Reason
-		}
-	}
-	for _, rl := range r.AlwaysAllow {
-		if matchRule(&rl, toolName, probe, cwd) {
-			return DecisionAllow, rl.Reason
-		}
-	}
-	for _, rl := range r.AskUser {
-		if matchRule(&rl, toolName, probe, cwd) {
-			return DecisionAsk, rl.Reason
-		}
-	}
-	return DecisionAsk, "command is not on the allow list — confirm before running"
-}
-
-// matchRule reports whether r matches probe under cwd for a call of
-// toolName. A rule with a non-empty Tools list only matches when toolName
-// is one of those tools (so a Bash-scoped safety-floor rule never fires on
-// a Write's file content). A rule without a CWD constraint matches
-// anywhere; with one, the current working directory must be the configured
-// path or a sub-directory of it.
-func matchRule(r *Rule, toolName, probe, cwd string) bool {
-	if !r.matchesTool(toolName) {
+// allReadOnly reports whether every subcommand of a (possibly compound) command
+// is a recognised read-only command.
+func allReadOnly(command string) bool {
+	subs := bashSubcommands(command)
+	if len(subs) == 0 {
 		return false
 	}
-	if r.re == nil || !r.re.MatchString(probe) {
-		return false
+	for _, sub := range subs {
+		if !isReadOnlyCommand(sub) {
+			return false
+		}
 	}
-	if r.CWD == "" {
-		return true
-	}
-	return cwdMatches(r.CWD, cwd)
+	return true
 }
 
-// matchesTool reports whether the rule applies to a call of toolName. An
-// empty Tools list applies to every tool; otherwise the tool name must
-// match one of the listed names, compared case-insensitively.
-func (r *Rule) matchesTool(toolName string) bool {
-	if len(r.Tools) == 0 {
+func isReadTool(t string) bool {
+	switch t {
+	case "Read", "Grep", "Glob", "mime":
 		return true
 	}
-	for _, t := range r.Tools {
+	return false
+}
+
+func isEditTool(t string) bool {
+	switch t {
+	case "Edit", "Write", "revert":
+		return true
+	}
+	return false
+}
+
+// commonFsCommands are the filesystem commands acceptEdits mode auto-allows.
+var commonFsCommands = map[string]bool{
+	"mkdir": true, "touch": true, "mv": true, "cp": true, "rmdir": true, "ln": true,
+}
+
+func isCommonFsCommand(command string) bool {
+	subs := bashSubcommands(command)
+	if len(subs) == 0 {
+		return false
+	}
+	for _, sub := range subs {
+		f := strings.Fields(sub)
+		if len(f) == 0 || !commonFsCommands[f[0]] {
+			return false
+		}
+	}
+	return true
+}
+
+// underWorkingDir reports whether an edit's target path is inside the session
+// cwd or one of the configured additional directories.
+func underWorkingDir(filePath, cwd string, ps *PermSet) bool {
+	if filePath == "" {
+		return true // no path arg (e.g. some edit tools) — trust the mode
+	}
+	abs := resolveAbsPath(filePath, cwd)
+	if cwdMatches(cwd, abs) {
+		return true
+	}
+	for _, d := range ps.AdditionalDirectories {
+		if cwdMatches(d, abs) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringArg(args map[string]any, key string) string {
+	if v, ok := args[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// matchesToolList reports whether a tools scope (legacy regex rules) applies to
+// toolName. An empty list applies to every tool.
+func matchesToolList(tools []string, toolName string) bool {
+	if len(tools) == 0 {
+		return true
+	}
+	for _, t := range tools {
 		if strings.EqualFold(t, toolName) {
 			return true
 		}
@@ -196,62 +503,95 @@ func (r *Rule) matchesTool(toolName string) bool {
 	return false
 }
 
-// cwdMatches reports whether candidate is scope or a sub-directory of
-// scope. Both paths are cleaned for comparison; a trailing slash on
-// scope is tolerated.
+// cwdMatches reports whether candidate is scope or a sub-directory of scope.
 func cwdMatches(scope, candidate string) bool {
 	if scope == "" || candidate == "" {
 		return false
 	}
-	scope = strings.TrimRight(scope, "/")
-	candidate = strings.TrimRight(candidate, "/")
+	scope = strings.TrimRight(filepath.Clean(scope), "/")
+	candidate = strings.TrimRight(filepath.Clean(candidate), "/")
 	if scope == candidate {
 		return true
 	}
 	return strings.HasPrefix(candidate, scope+"/")
 }
 
-// AskOutcome is what an Asker returns after prompting the user. It
-// drives both the immediate decision (allow this call or reject it)
-// and any persistence side effects (write a new rule to the user's
-// permissions.json).
+var (
+	homeOnce      sync.Once
+	homeDir       string
+	projRootCache sync.Map // cwd → project root
+)
+
+func userHome() string {
+	homeOnce.Do(func() { homeDir, _ = os.UserHomeDir() })
+	return homeDir
+}
+
+// findProjectRoot walks up from cwd to the nearest directory containing a .git
+// (dir or file, for worktrees), falling back to cwd. Cached per cwd.
+func findProjectRoot(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	if v, ok := projRootCache.Load(cwd); ok {
+		return v.(string)
+	}
+	root, d := "", cwd
+	for {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			root = d
+			break
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	if root == "" {
+		root = cwd
+	}
+	projRootCache.Store(cwd, root)
+	return root
+}
+
+func flattenArgs(args map[string]any) string {
+	if len(args) == 0 {
+		return ""
+	}
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(args); err != nil {
+		return fmt.Sprintf("%v", args)
+	}
+	return strings.TrimRight(buf.String(), "\n")
+}
+
+// AskOutcome is what an Asker returns after prompting the user. It drives both
+// the immediate decision and any persistence side effects.
 type AskOutcome int
 
 const (
 	// OutcomeDeny rejects this call; the next identical call asks again.
 	OutcomeDeny AskOutcome = iota
-	// OutcomeAllowOnce permits this call only. Implementations may
-	// cache the approval for the rest of the session so identical
-	// calls don't re-prompt; nothing is persisted to disk.
+	// OutcomeAllowOnce permits this call only (session-cached, not persisted).
 	OutcomeAllowOnce
-	// OutcomeAllowToolSession permits this call and every later call of
-	// the same tool (regardless of arguments) for the rest of the
-	// session. The grant is cached in memory only — nothing is persisted
-	// to disk and it evaporates when the session ends. Lets the user
-	// approve a burst of same-tool calls (e.g. four Writes) with one
-	// click without granting a durable, cross-session rule.
+	// OutcomeAllowToolSession permits every later call of the same tool this
+	// session (in-memory only).
 	OutcomeAllowToolSession
-	// OutcomeAllowProject permits this call and persists a rule in the
-	// user permissions file scoped to the current working directory.
-	// Future identical calls in this project auto-allow; other
-	// projects still ask.
+	// OutcomeAllowProject persists a cwd-scoped allow rule.
 	OutcomeAllowProject
-	// OutcomeAllowAlways permits this call and persists a rule with no
-	// CWD scope, so identical calls from any project auto-allow.
+	// OutcomeAllowAlways persists an unscoped allow rule.
 	OutcomeAllowAlways
 )
 
-// Asker is the interface used to prompt the user when an ask_user rule
-// fires. Implementations route the prompt to whichever UI surface is
-// attached (web UI popup, TUI dialog, terminal). The tool.Context lets
-// the asker reach the owning session.
+// Asker prompts the user when an ask rule fires.
 type Asker interface {
 	Ask(tc tool.Context, toolName, input, reason string) AskOutcome
 }
 
-// StdinAsker prompts on stderr (so it doesn't pollute stdout) and reads
-// from stdin. Used by the CLI fallback path when no richer surface is
-// installed.
+// StdinAsker prompts on stderr and reads from stdin (CLI fallback).
 type StdinAsker struct{}
 
 func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome {
@@ -265,7 +605,6 @@ func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome
 	}
 	switch strings.ToLower(strings.TrimSpace(sc.Text())) {
 	case "", "o", "once", "y", "yes":
-		// A bare Enter accepts the default (allow once).
 		return OutcomeAllowOnce
 	case "s", "session", "tool":
 		return OutcomeAllowToolSession
@@ -280,80 +619,58 @@ func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome
 	}
 }
 
-// Source provides the active rule set. Implementations may swap rules
-// atomically when an underlying file changes (see Reloader).
+// Source provides the active config. Implementations may swap atomically when
+// an underlying file changes (see Reloader).
 type Source interface {
-	Snapshot() *Rules
+	Snapshot() *Config
 }
 
-// Static wraps a fixed *Rules; used in tests and when no live reload is
-// needed.
-type Static struct{ R *Rules }
+// Static wraps a fixed *Config; used in tests and when no live reload is needed.
+type Static struct{ C *Config }
 
-func (s *Static) Snapshot() *Rules { return s.R }
+func (s *Static) Snapshot() *Config { return s.C }
 
 // PluginConfig wires the permissions plugin.
 type PluginConfig struct {
-	Name string
-	// Source returns the currently active rule set on every call.
-	Source Source
-	// Asker prompts the user when the rules say "ask"; required.
-	Asker Asker
-	// UserConfigPath is where OutcomeAllowProject / OutcomeAllowAlways
-	// rules are appended. Optional; if empty, those outcomes degrade
-	// to OutcomeAllowOnce (no persistence).
+	Name           string
+	Source         Source
+	Asker          Asker
 	UserConfigPath string
-	// CWDFunc returns the current working directory for cwd-scoped
-	// rule matching and project-scoped persistence, given the tool call's
-	// context (so it can resolve the per-session working directory the user
-	// navigated to, not just the process cwd). Defaults to os.Getwd.
-	CWDFunc func(tc tool.Context) string
-	// OnPersist is called after a new rule is appended to
-	// UserConfigPath, so the caller can reload the rule set. Optional.
-	OnPersist func()
-	// Debug enables a [perms] log line per tool call that records the
-	// session id, the decision, and (when relevant) where an approval
-	// was cached or persisted. Use when diagnosing "did session B
-	// inherit session A's approval?".
-	Debug bool
+	CWDFunc        func(tc tool.Context) string
+	OnPersist      func()
+	Debug          bool
 }
 
-// SessionCleaner exposes the internal session-approval cache so the
-// surrounding agent can wipe a session's cached approvals when the
-// session ends (e.g. via EventSessionEnd). NewPluginFromConfig returns
-// one alongside the plugin.
+// SessionCleaner exposes the internal session-approval cache so the caller can
+// wipe a session's cached approvals on session end.
 type SessionCleaner interface {
 	Forget(sessionID string)
 }
 
-// NewPlugin returns an ADK plugin that enforces the rules via
-// BeforeToolCallback. It loads rules from configPath; if the file is
-// missing, the plugin is a no-op.
+// NewPlugin returns an ADK plugin enforcing the rules in configPath (missing
+// file ⇒ no-op).
 func NewPlugin(name, configPath string, asker Asker) (*plugin.Plugin, error) {
-	rules, err := Load(configPath)
+	cfg, err := Load(configPath)
 	if err != nil {
 		return nil, err
 	}
-	return NewPluginFromRules(name, rules, asker)
+	return NewPluginFromRules(name, cfg, asker)
 }
 
-// NewPluginFromRules returns an ADK plugin from a fixed Rules set. No
-// session cache, no persistence — kept for the simple call sites
-// (CLI, tests). For the full feature set use NewPluginFromConfig.
-func NewPluginFromRules(name string, rules *Rules, asker Asker) (*plugin.Plugin, error) {
+// NewPluginFromRules returns an ADK plugin from a fixed Config (no session
+// cache, no persistence). For the full feature set use NewPluginFromConfig.
+func NewPluginFromRules(name string, cfg *Config, asker Asker) (*plugin.Plugin, error) {
 	p, _, err := NewPluginFromConfig(PluginConfig{
 		Name:   name,
-		Source: &Static{R: rules},
+		Source: &Static{C: cfg},
 		Asker:  asker,
 	})
 	return p, err
 }
 
-// NewPluginFromConfig wires the permissions plugin with full support
-// for live-reloadable rules, a session-scoped approval cache, and the
-// AllowProject / AllowAlways persistence path. The returned
-// SessionCleaner exposes the internal cache so the caller can call
-// Forget(sessionID) on session-end events.
+// NewPluginFromConfig wires the permissions plugin with live-reloadable rules,
+// a session-scoped approval cache, and the AllowProject/AllowAlways persistence
+// path.
 func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, error) {
 	if cfg.Source == nil {
 		return nil, nil, fmt.Errorf("permissions: PluginConfig.Source is required")
@@ -380,9 +697,6 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 		probeKey := t.Name() + "\x00" + input
 		sid := tc.SessionID()
 
-		// Session-cached approvals short-circuit before consulting the
-		// rules: a per-tool grant ("allow all <tool> this session") wins
-		// over any per-call grant.
 		if cache.hasTool(sid, t.Name()) {
 			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
 			return nil, nil
@@ -392,7 +706,7 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 			return nil, nil
 		}
 
-		decision, reason := cfg.Source.Snapshot().Check(t.Name(), input, cwd)
+		decision, reason := cfg.Source.Snapshot().CheckArgs(t.Name(), args, cwd)
 		switch decision {
 		case DecisionDeny:
 			logf("DENY sid=%q tool=%s reason=%q", sid, t.Name(), reason)
@@ -413,11 +727,11 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 				}, nil
 			case OutcomeAllowOnce:
 				cache.add(sid, probeKey)
-				logf("user ALLOW-ONCE sid=%q tool=%s (cached; will NOT affect other sessions)", sid, t.Name())
+				logf("user ALLOW-ONCE sid=%q tool=%s", sid, t.Name())
 				return nil, nil
 			case OutcomeAllowToolSession:
 				cache.addTool(sid, t.Name())
-				logf("user ALLOW-TOOL-SESSION sid=%q tool=%s (every later %s call this session auto-allows; not persisted)", sid, t.Name(), t.Name())
+				logf("user ALLOW-TOOL-SESSION sid=%q tool=%s", sid, t.Name())
 				return nil, nil
 			case OutcomeAllowProject:
 				if err := persistApproval(cfg.UserConfigPath, t.Name(), input, cwd); err != nil {
@@ -426,7 +740,7 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 					cfg.OnPersist()
 				}
 				cache.add(sid, probeKey)
-				logf("user ALLOW-PROJECT sid=%q tool=%s cwd=%s (persisted to %s; will affect every session in this directory tree)", sid, t.Name(), cwd, cfg.UserConfigPath)
+				logf("user ALLOW-PROJECT sid=%q tool=%s cwd=%s", sid, t.Name(), cwd)
 				return nil, nil
 			case OutcomeAllowAlways:
 				if err := persistApproval(cfg.UserConfigPath, t.Name(), input, ""); err != nil {
@@ -435,7 +749,7 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 					cfg.OnPersist()
 				}
 				cache.add(sid, probeKey)
-				logf("user ALLOW-ALWAYS sid=%q tool=%s (persisted to %s; will affect every session everywhere)", sid, t.Name(), cfg.UserConfigPath)
+				logf("user ALLOW-ALWAYS sid=%q tool=%s", sid, t.Name())
 				return nil, nil
 			}
 		}
@@ -449,17 +763,4 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 		return nil, nil, err
 	}
 	return p, cache, nil
-}
-
-func flattenArgs(args map[string]any) string {
-	if len(args) == 0 {
-		return ""
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(args); err != nil {
-		return fmt.Sprintf("%v", args)
-	}
-	return strings.TrimRight(buf.String(), "\n")
 }

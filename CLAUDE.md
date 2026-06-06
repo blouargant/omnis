@@ -234,7 +234,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
 | `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor) |
-| `core/permissions/` | JSON-based permission gating: always_deny → always_allow → ask_user |
+| `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
@@ -371,7 +371,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | `registry/skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
 | `mcp_config.json` | MCP server definitions (name, command, args, env) |
 | `a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
-| `permissions.json` | Tool permission rules (always_deny / always_allow / ask_user) |
+| `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
 
@@ -579,53 +579,74 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 | `YOKE_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
 
-### Permission prompts (ask_user) and grant scopes
+### Permission nomenclature (Claude Code-style) + grant scopes
 
-When a tool call matches `ask_user` (or no rule), the permissions plugin
-([core/permissions/permissions.go](core/permissions/permissions.go))
-calls the configured `Asker`. In server/TUI mode the asker is
-[agent/permission_asker.go](agent/permission_asker.go), which renders an
-`ask_user` SSE widget; in CLI mode it's the `StdinAsker`. The user picks
-one of five scopes, ordered by increasing blast radius (`AskOutcome`):
+yoke's permission format **is Claude Code's nomenclature**
+([core/permissions/](core/permissions/)): `permissions.json` holds a
+`permissions` object with `allow`/`ask`/`deny` tiers of `Tool(specifier)`
+strings plus a `defaultMode`. Precedence is **deny → ask → allow** (first match
+wins; deny always wins), implemented by `(*Config).CheckArgs`
+([core/permissions/permissions.go](core/permissions/permissions.go)). Unmatched
+calls fall through to the mode default (ask in `default` mode).
+
+- **Rule syntax** ([spec.go](core/permissions/spec.go)): `Bash(npm run *)`,
+  `Read(.env)`, `Edit(/src/**)`, `mcp__server__tool`, `Agent(Name)`, bare `Read`.
+  Tool fan-out via `toolClasses`: `Read` rules also cover `Grep`/`Glob`/`mime`;
+  `Edit` covers `Write`/`revert`. Bash gets full Claude parity in
+  [match_bash.go](core/permissions/match_bash.go) (glob with space/`:*`
+  word-boundary, compound-command splitting, wrapper stripping, built-in
+  read-only allowlist); paths use gitignore anchors in
+  [match_path.go](core/permissions/match_path.go).
+- **Modes** (`defaultMode`): `default`/`acceptEdits`/`plan`/`dontAsk`/
+  `bypassPermissions`/`auto` — applied in `CheckArgs` (bypass & plan are
+  authoritative; the rest only change the unmatched-call default). The Bash
+  safety floor in [core/tools/bash.go](core/tools/bash.go) is the independent
+  circuit breaker, enforced even under `bypassPermissions` and the `!` escape.
+- **yoke extensions over Claude syntax**: an object rule
+  `{rule, reason, cwd}` attaches a prompt reason and a project-scoping `cwd`
+  (rules with `cwd` only apply inside that tree — `cwdMatches`); the
+  `{regex, tools}` form (or `/regex/` string) is the **raw-regexp escape hatch**
+  matched against `toolName <json args>`, scoped to `tools`. The shipped safety
+  floor uses it for catastrophic Bash patterns the glob syntax can't express,
+  tagged `"tools": ["Bash"]` so a `Write` whose *content* merely mentions
+  `mkfs` is never denied.
+- **Old-format auto-upgrade**: a file with top-level
+  `always_deny`/`always_allow`/`ask_user` is detected
+  ([legacy.go](core/permissions/legacy.go)) and converted on load
+  ([convert.go](core/permissions/convert.go) `ConvertLegacy` → regex-escape-hatch
+  rules, byte-identical behavior), and the Reloader rewrites it in the new shape
+  with a `.bak` backup ([reloader.go](core/permissions/reloader.go)
+  `upgradeIfLegacy`). CLI: `yoke permissions convert|import`
+  ([permissions_cmd.go](permissions_cmd.go); `import` ingests a Claude Code
+  `settings.json`).
+
+When a tool call needs confirmation the plugin calls the configured `Asker`
+(server/TUI: [agent/permission_asker.go](agent/permission_asker.go) SSE widget;
+CLI: `StdinAsker`). The user picks one of five scopes (`AskOutcome`):
 
 | Choice | Outcome | Effect |
 |---|---|---|
 | Deny | `OutcomeDeny` | Reject this call; next identical call asks again. |
 | Allow once (this call) | `OutcomeAllowOnce` | Cache the **exact (tool, args)** probe for the session. |
 | Allow all `<Tool>` this session | `OutcomeAllowToolSession` | Cache a **per-tool** grant for the session — every later call of that tool auto-allows regardless of args. In memory only; never persisted. |
-| Allow in this project | `OutcomeAllowProject` | Persist an `always_allow` rule with `CWD` = project dir. |
-| Allow always | `OutcomeAllowAlways` | Persist an `always_allow` rule with no `CWD`. |
+| Allow in this project | `OutcomeAllowProject` | Persist an `allow` rule with `cwd` = project dir. |
+| Allow always | `OutcomeAllowAlways` | Persist an `allow` rule with no `cwd`. |
 
 The session-approval cache ([core/permissions/cache.go](core/permissions/cache.go))
 holds two granularities: per-call (`m`) and per-tool (`tools`); a per-tool
 grant short-circuits before per-call. Both are wiped by `Forget(sessionID)`
 on `EventSessionEnd`.
 
-**Tool-scoped rules (`tools`)** — a `Rule` may carry an optional `tools` list
-(matched case-insensitively by tool name); when non-empty the rule only fires
-for those tools, when empty (the default) it matches every tool. This exists
-because `Check` builds its probe from `toolName + " " + flattenArgs(args)` — the
-**full JSON of the tool's arguments**, including a `Write`/`Edit`'s file
-`content` — so an unscoped command pattern like `\bmkfs\b` would otherwise deny a
-Write whose content merely *mentions* `mkfs` (this is exactly what broke `/init`
-writing AGENT.md, since the generated doc describes the bash safety floor). The
-shipped command-oriented deny **and** ask_user rules in `permissions.json` are
-therefore tagged `"tools": ["Bash"]` (rm/mkfs/dd/fork-bomb/curl|sh/git-flags/
-sudo/kubectl/…), while **path-based** rules (`.ssh/`, `.aws/`, `/etc/shadow`) and
-the already tool-anchored rules (`^(write|edit|revert) …`) stay unscoped so they
-keep guarding the file tools. Enforced in `matchRule`/`matchesTool`
-([core/permissions/permissions.go](core/permissions/permissions.go)). The web UI
-Permissions form preserves `tools`/`cwd` on edited rules
-([web/settings.js](web/settings.js) `renderPermRule` `commit` spreads the prior
-object) so a UI save never drops a rule's tool scope.
-
 **Persisted-rule breadth** ([core/permissions/persist.go](core/permissions/persist.go)
 `buildApprovalRule`) differs by tool: file tools (`Read`/`Write`/`Edit`/`revert`)
-broaden to "this tool on **any** path" (`^Write\b`), so approving the first
-of N file writes covers the rest — the `CWD` field still scopes "Allow in
-this project" to the project tree. `Bash` keeps an **exact-command** match
-(a blanket persisted shell allow is a footgun; use the ephemeral
-"Allow all Bash this session" grant for command bursts instead).
+broaden to a bare class spec (`Edit`, `Read`, `Write`) so approving the first of
+N file writes covers the rest — the `cwd` field still scopes "Allow in this
+project". `Bash` keeps an **exact-command** match via the regex escape hatch (a
+blanket persisted shell allow is a footgun; use the ephemeral "Allow all Bash
+this session" grant for command bursts instead). The web UI Permissions form
+([web/settings.js](web/settings.js) `renderPermissionsForm`/`renderPermRule`)
+edits the `deny`/`ask`/`allow` tiers + `defaultMode`, preserving `cwd`/`tools`
+on edited rules.
 
 ### Session isolation
 
@@ -1264,8 +1285,8 @@ other config), and the same set of provider adapters in
 Each entry has a `kind` field: `skills` (default when missing — legacy),
 `agents`, `both` (skills + agents), `mcp`, `a2a`, `squads`, `commands`, or
 `permissions`. A **permissions** registry item is a directory holding a
-`permissions.json` (same `always_deny`/`always_allow`/`ask_user` shape as the
-local file); installing **merges** its rules into the user's `permissions.json`
+`permissions.json` (same `permissions.{allow,ask,deny}` shape as the
+local file; old `always_*` files auto-convert); installing **merges** its rules into the user's `permissions.json`
 deduped by pattern (`registries.MergePermissionsFile`), rather than copying a
 file. The Settings → Registries hub exposes a **Permissions** kind alongside
 the others.
@@ -1326,9 +1347,9 @@ repo/path/to/commands/
 ```
 
 Remote layout — permissions: one directory per rule-set, each holding a
-`permissions.json` (same `always_deny`/`always_allow`/`ask_user` shape as the
-local file). The directory leaf is the rule-set name; install **merges** the
-rules into `permissions.json` rather than copying a file.
+`permissions.json` (same `permissions.{allow,ask,deny}` shape as the local file;
+old `always_*` files auto-convert on install). The directory leaf is the rule-set
+name; install **merges** the rules into `permissions.json` rather than copying a file.
 
 ```
 repo/path/to/permissions/

@@ -11,8 +11,8 @@ in order; do not skip.
 ## Pre-flight (before writing code)
 
 - [ ] **Does this change add a domain?** If yes → it belongs in
-      `skills/<name>/SKILL.md`, `config/mcp_config.yaml`, or
-      `config/permissions.yaml`, **not** in Go code. Re-check
+      `skills/<name>/SKILL.md`, `config/mcp_config.json`, or
+      `config/permissions.json`, **not** in Go code. Re-check
       [project-overview](../project-overview/SKILL.md).
 - [ ] **Does an existing tool/MCP server already cover the capability?**
       If yes, prefer a skill over new Go code.
@@ -27,7 +27,7 @@ in order; do not skip.
 - [ ] Every new sub-agent has a **role-based** instruction, not a
       domain-based one.
 - [ ] Every mutating tool has a matching pattern in
-      `config/permissions.yaml`.
+      `config/permissions.json`.
 - [ ] No third-party LLM SDK was added to `go.mod`.
 - [ ] No domain keyword (`kubectl`, `psql`, `aws`, `docker`, …) appears
       in `core/agentkit/agentkit.go` or in any sub-agent's
@@ -45,7 +45,7 @@ PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
       starts and the agent enumerates the new tool/skill on demand.
 - [ ] If you touched `core/llm/`: pick one provider, set its env var,
       and confirm `BeforeModel` appears in `.agent_events.log`.
-- [ ] If you touched `config/permissions.yaml`: at least one denied
+- [ ] If you touched `config/permissions.json`: at least one denied
       mutation is rejected and at least one allowed read still works.
 - [ ] If you added a `SKILL.md`: the `description` includes the trigger
       keywords a user is likely to type.

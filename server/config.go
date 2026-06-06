@@ -565,15 +565,19 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			Reason  string `json:"reason,omitempty"`
 		}
 		type contribution struct {
-			Skill       string    `json:"skill"`
-			AlwaysDeny  []ruleDTO `json:"always_deny"`
-			AlwaysAllow []ruleDTO `json:"always_allow"`
-			AskUser     []ruleDTO `json:"ask_user"`
+			Skill string    `json:"skill"`
+			Deny  []ruleDTO `json:"deny"`
+			Allow []ruleDTO `json:"allow"`
+			Ask   []ruleDTO `json:"ask"`
 		}
 		toDTO := func(rs []permissions.Rule) []ruleDTO {
 			out := make([]ruleDTO, len(rs))
 			for i, r := range rs {
-				out[i] = ruleDTO{Pattern: r.Pattern, Reason: r.Reason}
+				pat := r.Rule
+				if r.Regex != "" {
+					pat = "/" + r.Regex + "/"
+				}
+				out[i] = ruleDTO{Pattern: pat, Reason: r.Reason}
 			}
 			return out
 		}
@@ -624,10 +628,10 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					continue
 				}
 				contributions = append(contributions, contribution{
-					Skill:       skillName,
-					AlwaysDeny:  toDTO(r.AlwaysDeny),
-					AlwaysAllow: toDTO(r.AlwaysAllow),
-					AskUser:     toDTO(r.AskUser),
+					Skill: skillName,
+					Deny:  toDTO(r.Permissions.Deny),
+					Allow: toDTO(r.Permissions.Allow),
+					Ask:   toDTO(r.Permissions.Ask),
 				})
 			}
 		}

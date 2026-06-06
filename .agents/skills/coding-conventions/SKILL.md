@@ -8,7 +8,7 @@ description: Go coding conventions, architectural rules and anti-patterns for th
 ## Architectural rules (non-negotiable)
 
 1. **No domain knowledge in Go.** Domain knowledge belongs in
-   `skills/<name>/SKILL.md`, MCP servers, or `permissions.yaml`. If you
+   `skills/<name>/SKILL.md`, MCP servers, or `permissions.json`. If you
    are tempted to write `if topic == "kubernetes"` or to mention
    `kubectl` / `psql` / `aws` in a Go string literal under `core/` or
    `./`, **stop**. Move it to a skill.
@@ -25,8 +25,8 @@ description: Go coding conventions, architectural rules and anti-patterns for th
    pg-bot, …).
 
 4. **Every mutating tool needs a permission rule.** When adding any
-   tool that writes state, also add a matching pattern to
-   `config/permissions.yaml` under `ask_user` (or `always_deny` for
+   tool that writes state, also add a matching rule to
+   `config/permissions.json` under the `ask` tier (or `deny` for
    destructive ones).
 
 5. **Use `agentkit.New`, never `llmagent.New` directly.** That guarantees
@@ -68,7 +68,7 @@ description: Go coding conventions, architectural rules and anti-patterns for th
 | One sub-agent per domain                                     | One generic role-based sub-agent + many skills                 |
 | Calling `llmagent.New` directly                              | Call `agentkit.New(AgentConfig{...})`                          |
 | Adding a third-party LLM SDK to `go.mod`                     | Extend `core/llm/` with a small HTTP+SSE adapter               |
-| Mutating tool without a permission rule                      | Pair it with an `ask_user` pattern in `permissions.yaml`       |
+| Mutating tool without a permission rule                      | Pair it with an `ask`-tier rule in `permissions.json`          |
 | Documenting domain rules in a Go comment                     | Move them into the relevant `SKILL.md`                         |
 | Refactoring code unrelated to the requested change           | Make the smallest change that satisfies the request            |
 | Adding docstrings/comments to code you didn't change         | Don't                                                          |

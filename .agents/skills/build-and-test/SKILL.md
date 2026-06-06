@@ -73,7 +73,7 @@ Catalog: [docs/examples-catalog.md](../../docs/examples-catalog.md).
 | `agentkit.NewModel: llm: ANTHROPIC_API_KEY required` | Set the right env var for `YOKE_PROVIDER`.                       |
 | `mailbox backend: …`                                 | `REDIS_URL` set but unreachable, or unset & expected redis backend. |
 | MCP server fails at startup                          | Logged and skipped; agent continues. Check `npx`/`uvx` availability.|
-| Permission prompt loops                              | Add an explicit `always_allow` rule in `config/permissions.yaml`.   |
+| Permission prompt loops                              | Add an explicit `allow` rule (e.g. `Bash(<cmd> *)`) in `config/permissions.json`. |
 
 ## Generated files
 

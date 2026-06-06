@@ -780,7 +780,7 @@ const BASE_PATH = window.BASE_PATH || "";
   function defaultDataFor(id) {
     if (id === "agent") return { agents: [] };
     if (id === "models") return { providers: {}, models: {} };
-    if (id === "permissions") return { always_deny: [], always_allow: [], ask_user: [] };
+    if (id === "permissions") return { permissions: { defaultMode: "default", allow: [], ask: [], deny: [] } };
     if (id === "mcp") return { servers: {}, inputs: [] };
     if (id === "a2a") return { agents: {}, inputs: [] };
     return {};
@@ -3241,16 +3241,38 @@ const BASE_PATH = window.BASE_PATH || "";
     detailPanel.appendChild(body);
   }
 
-  // ── permissions.json form ──
+  // ── permissions.json form (Claude Code nomenclature) ──
+  // Tiers are deny → ask → allow (precedence order). Each rule is a
+  // Tool(specifier) string, e.g. Bash(npm run *), Read(.env), mcp__srv__tool,
+  // Agent(Explore) — or a /regex/ escape hatch. Object rules carry an optional
+  // reason and a project-scoping cwd (yoke extensions).
+  const PERM_TIERS = ["deny", "ask", "allow"];
+  const PERM_MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+
+  function permData() {
+    const d = state.parsed["permissions"].value;
+    if (!d.permissions || typeof d.permissions !== "object") d.permissions = {};
+    const p = d.permissions;
+    for (const k of PERM_TIERS) if (!Array.isArray(p[k])) p[k] = [];
+    if (!p.defaultMode) p.defaultMode = "default";
+    return p;
+  }
+
   function renderPermissionsForm() {
     const id = "permissions";
-    const d = state.parsed[id].value;
-    for (const k of ["always_deny", "always_allow", "ask_user"]) {
-      if (!Array.isArray(d[k])) d[k] = [];
-    }
+    const p = permData();
     bodyEl.innerHTML = `
       <div class="settings-form">
-        ${["always_deny", "always_allow", "ask_user"].map(k => `
+        <section class="form-section">
+          <h3>Default mode</h3>
+          <div class="form-card" style="margin-bottom:0">
+            <select class="perm-mode">
+              ${PERM_MODES.map(m => `<option value="${m}"${p.defaultMode === m ? " selected" : ""}>${m}</option>`).join("")}
+            </select>
+            <p class="empty" style="margin:.4rem 0 0">Behaviour for tool calls matching no rule. Rules are evaluated deny → ask → allow (deny always wins).</p>
+          </div>
+        </section>
+        ${PERM_TIERS.map(k => `
           <section class="form-section">
             <h3>${k} <button type="button" class="add-btn" data-list="${k}">+ Add rule</button></h3>
             <div class="form-card" style="margin-bottom:0">
@@ -3264,15 +3286,17 @@ const BASE_PATH = window.BASE_PATH || "";
         </section>
       </div>
     `;
+    const modeSel = bodyEl.querySelector(".perm-mode");
+    modeSel.addEventListener("change", () => { p.defaultMode = modeSel.value; markFormDirty(id); });
     bodyEl.querySelectorAll(".add-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const k = btn.dataset.list;
-        d[k].push("");
+        p[k].push("");
         markFormDirty(id);
-        renderPermRule(d, k);
+        renderPermRule(p, k);
       });
     });
-    for (const k of ["always_deny", "always_allow", "ask_user"]) renderPermRule(d, k);
+    for (const k of PERM_TIERS) renderPermRule(p, k);
     updateFooter();
     renderSkillPermissions();
   }
@@ -3285,7 +3309,7 @@ const BASE_PATH = window.BASE_PATH || "";
         const section = bodyEl.querySelector("#skill-perms-section");
         const list = bodyEl.querySelector("#skill-perms-list");
         if (!section || !list) return;
-        const tiers = ["always_deny", "always_allow", "ask_user"];
+        const tiers = ["deny", "ask", "allow"];
         data.contributions.forEach(contrib => {
           const hasRules = tiers.some(t => contrib[t] && contrib[t].length > 0);
           if (!hasRules) return;
@@ -3320,6 +3344,16 @@ const BASE_PATH = window.BASE_PATH || "";
       .catch(() => {});
   }
 
+  // ruleDisplay renders a rule object/string into the single text field. A
+  // {regex} rule shows as /pattern/; a {rule} or bare string shows verbatim.
+  function ruleDisplay(rule) {
+    if (rule && typeof rule === "object") {
+      if (rule.regex) return "/" + rule.regex + "/";
+      return rule.rule || "";
+    }
+    return String(rule || "");
+  }
+
   function renderPermRule(d, key) {
     const el = bodyEl.querySelector(`.rule-list[data-list="${key}"]`);
     el.innerHTML = "";
@@ -3330,28 +3364,34 @@ const BASE_PATH = window.BASE_PATH || "";
       row.className = "rule-row";
       row.innerHTML = `
         <select class="rule-kind">
-          <option value="string" ${!isObj ? "selected" : ""}>pattern</option>
-          <option value="object" ${isObj ? "selected" : ""}>pattern + reason</option>
+          <option value="string" ${!isObj ? "selected" : ""}>rule</option>
+          <option value="object" ${isObj ? "selected" : ""}>rule + reason</option>
         </select>
-        <input type="text" class="rule-pattern" placeholder="regex pattern" />
+        <input type="text" class="rule-pattern" placeholder="Bash(npm run *) · Read(.env) · mcp__srv · /regex/" />
         <input type="text" class="rule-reason" placeholder="reason (optional)" />
         <button type="button" class="del-btn">Remove</button>
       `;
       const kindSel = row.querySelector(".rule-kind");
       const patIn = row.querySelector(".rule-pattern");
       const reaIn = row.querySelector(".rule-reason");
-      patIn.value = isObj ? (rule.pattern || "") : String(rule || "");
+      patIn.value = ruleDisplay(rule);
       reaIn.value = isObj ? (rule.reason || "") : "";
       reaIn.style.display = isObj ? "" : "none";
 
       const commit = () => {
+        const val = patIn.value;
+        const isRegex = val.length > 1 && val.startsWith("/") && val.endsWith("/");
         if (kindSel.value === "object") {
           // Preserve fields the form doesn't expose (cwd, tools) so editing a
-          // rule's pattern/reason never silently drops its tool scope.
+          // rule never silently drops its tool scope. Route the text into the
+          // regex field when wrapped in /…/, otherwise the rule field.
           const prev = (d[key][idx] && typeof d[key][idx] === "object") ? d[key][idx] : {};
-          d[key][idx] = { ...prev, pattern: patIn.value, reason: reaIn.value };
+          const obj = { ...prev, reason: reaIn.value };
+          if (isRegex) { obj.regex = val.slice(1, -1); delete obj.rule; }
+          else { obj.rule = val; delete obj.regex; }
+          d[key][idx] = obj;
         } else {
-          d[key][idx] = patIn.value;
+          d[key][idx] = val;
         }
         markFormDirty("permissions");
       };
@@ -7865,8 +7905,9 @@ const BASE_PATH = window.BASE_PATH || "";
         <p class="settings-hint">
           Browse and install permission rule-sets from GitHub, GitLab, or Gitea repositories.
           Each rule-set is a directory holding a <code>permissions.json</code>
-          (<code>always_deny</code> / <code>always_allow</code> / <code>ask_user</code>).
-          Installing merges its rules into your permissions.json (deduped by pattern).
+          (<code>permissions.deny</code> / <code>permissions.ask</code> / <code>permissions.allow</code>;
+          old <code>always_deny</code>/<code>always_allow</code>/<code>ask_user</code> files are auto-converted).
+          Installing merges its rules into your permissions.json (deduped by rule).
         </p>
         <div id="perm-remote-list"></div>
       </section>

@@ -131,7 +131,7 @@ func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker 
 	searchDirs := paths.SkillsAllSearchDirs()
 	seenSkill := map[string]bool{}
 	seenPerm := map[string]bool{}
-	var skillOverlays []*permissions.Rules
+	var skillOverlays []*permissions.Config
 	for _, agentCfg := range runtime.Agents {
 		skillNames := agentCfg.Skills
 		if len(skillNames) == 0 {

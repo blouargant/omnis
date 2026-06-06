@@ -66,16 +66,22 @@ Two options, freely combinable:
 ```
 
 **Option B — Bash + permissions.** Just rely on the built-in `bash`
-tool plus an entry in `permissions.json`:
+tool plus an entry in `permissions.json` (Claude Code nomenclature):
 
 ```json
 {
-  "always_allow": [
-    "^kubectl (get|describe|logs|top|explain) "
-  ],
-  "ask_user": [
-    "^kubectl (apply|delete|patch|edit|scale|rollout|drain|cordon)"
-  ]
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl logs *)",
+      "Bash(kubectl top *)",
+      "Bash(kubectl explain *)"
+    ],
+    "ask": [
+      {"regex": "\\bkubectl\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon)\\b", "tools": ["Bash"], "reason": "cluster mutation"}
+    ]
+  }
 }
 ```
 

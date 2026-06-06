@@ -129,7 +129,7 @@ func newSettingsView(app *tview.Application, pages *tview.Pages, returnFocus tvi
 		{"Models", "models.json", "Edit providers + models (provider/model/prices)."},
 		{"MCP", "mcp_config.json", "MCP server definitions (name, command, args, env)."},
 		{"A2A", "a2a_config.json", "Remote A2A peer endpoints + per-call inputs."},
-		{"Permissions", "permissions.json", "Tool permission rules: always_deny / always_allow / ask_user."},
+		{"Permissions", "permissions.json", "Tool permission rules (Claude Code nomenclature): permissions.{allow, ask, deny} + defaultMode."},
 		{"Squads", "agents.json", "Squad composition (leader + members)."},
 		{"Remotes", "remote_registries.json", "Remote skill / agent / MCP / A2A registries."},
 	}

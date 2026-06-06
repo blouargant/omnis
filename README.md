@@ -213,8 +213,9 @@ mount a different combination of:
    - `k8s-triage` — example domain specialisation (Kubernetes triage)
 2. **MCP servers** (`config/mcp_config.json`) — external tool surfaces
    (filesystem, Postgres, Kubernetes, GitHub, …).
-3. **Permissions** (`config/permissions.json`) — auto-allow read-only
-   verbs, gate mutations with `ask_user`, hard-deny destructive ones.
+3. **Permissions** (`config/permissions.json`) — Claude Code nomenclature
+   (`permissions.{allow,ask,deny}` of `Tool(specifier)` rules): auto-allow
+   read-only verbs, gate mutations with `ask`, hard-deny destructive ones.
 
 ### Example: turn the harness into a Kubernetes diagnostician
 

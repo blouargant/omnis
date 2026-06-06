@@ -101,9 +101,9 @@ type CommandInfo struct {
 
 // PermissionInfo is one permission rule-set returned when browsing a remote
 // permissions registry. Each item is a directory containing a permissions.json
-// (the same always_deny / always_allow / ask_user shape as the local
-// permissions.json); the directory leaf is the rule-set name. Installing merges
-// its rules into the user's permissions.json.
+// (the same permissions.{allow, ask, deny} shape as the local permissions.json;
+// old always_* files are auto-converted on install); the directory leaf is the
+// rule-set name. Installing merges its rules into the user's permissions.json.
 type PermissionInfo struct {
 	Name        string `json:"name"`
 	DirPath     string `json:"dir_path"`        // path to the permissions.json, relative to registry root
