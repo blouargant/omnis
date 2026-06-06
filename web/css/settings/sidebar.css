@@ -1,0 +1,115 @@
+/* Settings sidebar chrome: settings button, section labels, in-sidebar settings menu
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* Settings sidebar button */
+#settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: 1px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: inherit;
+}
+#settings-btn svg { flex-shrink: 0; opacity: 0.8; }
+#settings-btn:hover { background: var(--bg-raised); }
+#settings-btn:hover svg { opacity: 1; }
+#settings-btn.active {
+  background: var(--accent-bg-soft);
+  border-color: var(--accent-border-soft);
+  color: var(--text);
+}
+#settings-btn.active svg { opacity: 1; }
+
+/* ─── Sidebar section labels ──────────────────────────────────────────── */
+.sidebar-section-label {
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ─── In-sidebar settings menu (expands when Settings is open) ────────── */
+#settings-menu {
+  /* Shrinkable (flex-shrink:1 + min-height:0) so when the sidebar is short the
+     menu yields vertical space instead of pushing the footer off-screen; its
+     inner list keeps its own overflow-y scrollbar. */
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  max-height: 60%;
+  overflow: hidden;
+  animation: settings-menu-expand 0.18s ease-out;
+}
+#settings-menu[hidden] { display: none; }
+
+@keyframes settings-menu-expand {
+  from { max-height: 0; opacity: 0; }
+  to   { max-height: 60%; opacity: 1; }
+}
+
+#settings-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow-y: auto;
+}
+#settings-menu-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 1px;
+  border: 1px solid transparent;
+  transition: background 0.1s, color 0.1s;
+}
+#settings-menu-list li:hover { background: var(--bg-raised); color: var(--text); }
+#settings-menu-list li.active {
+  background: var(--accent-bg-soft);
+  border-color: var(--accent-border-soft);
+  color: var(--text-strong);
+}
+#settings-menu-list li svg { flex-shrink: 0; opacity: 0.85; }
+#settings-menu-list li.active svg { opacity: 1; }
+
+/* The category tab bar and Form/Raw view toggle inside the settings panel
+ * are replaced by the sidebar menu — hide them without removing from the DOM.
+ * Also collapse the now-empty toolbar so it doesn't reserve vertical space. */
+#settings-panel .settings-tabs,
+#settings-panel .settings-view-toggle,
+#settings-panel .settings-body-toolbar { display: none; }
+
+/* Raw JSON toggle: lives at the bottom of the sidebar menu and is offset
+ * with a separator so it reads as a mode switch, not a section. */
+#settings-menu-list li.settings-menu-raw {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 4px 4px;
+}
+#settings-menu-list li.settings-menu-raw.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Client-only sections (e.g. Appearance) have no Save/Discard footer
+ * and no Form/Raw toggle — hide those chrome elements. */
+.settings-panel--client-only .settings-body-toolbar,
+.settings-panel--client-only .settings-footer { display: none; }
+
+

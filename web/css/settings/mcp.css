@@ -1,0 +1,305 @@
+/* MCP server cards + MCP key/value list editor
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* MCP key/value lists */
+.kv-list { margin-top: 0.6rem; }
+.kv-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MCP server cards — mirrors the model card grid look
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.mcp-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+/* Toolbar above the Inputs / Servers sections. Hosts the Import JSON button. */
+.mcp-form-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.mcp-form-toolbar .settings-hint { margin: 0; }
+
+/* Import-JSON dialog */
+.mcp-import-dialog { min-width: 520px; max-width: 720px; width: 90%; }
+.mcp-import-textarea {
+  width: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+.mcp-import-textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+.mcp-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.mcp-card-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.mcp-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.mcp-card-title strong {
+  font-size: 0.85rem;
+  color: var(--text-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-card-body {
+  padding: 1rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+.mcp-transport-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* Section block: heading + content. Used for General Settings,
+   Execution, Connection, Arguments, Environment Variables, Headers. */
+.mcp-section { display: flex; flex-direction: column; gap: 0.55rem; }
+.mcp-section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+/* Title-case labels above each input (e.g. "Name", "Command"). The
+   default model-field-label is uppercase + spaced; this variant keeps
+   the readable mixed-case used in the new layout. */
+.model-field-label--title {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* Arguments: list of single text inputs with a trash icon on the end. */
+.mcp-arg-rows { display: flex; flex-direction: column; gap: 0.4rem; }
+.mcp-arg-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.mcp-arg-row input {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+.mcp-arg-row input:focus { outline: none; border-color: var(--accent); }
+
+/* Environment variables / Headers: column-aligned (key | value | trash).
+   Both rows share the same grid template so the column header strip
+   stays in lockstep with the editor inputs below it. */
+.mcp-kv-grid { display: flex; flex-direction: column; gap: 0.4rem; }
+.mcp-kv-headers,
+.mcp-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 32px;
+  gap: 0.5rem;
+  align-items: center;
+}
+.mcp-kv-headers { padding-bottom: 0.1rem; }
+.mcp-kv-row input,
+.mcp-kv-row select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 0;
+}
+.mcp-kv-row input:focus,
+.mcp-kv-row select:focus { outline: none; border-color: var(--accent); }
+.mcp-kv-row select { cursor: pointer; }
+
+/* Trash icon button: square, transparent, only colors on hover. Sized
+   to align with the row inputs (28-32px feels right against 0.45rem
+   padded inputs). */
+.mcp-trash {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.mcp-trash:hover {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+}
+
+/* Full-width "Add …" call-to-action button at the bottom of each list
+   section. Uses the same green family as the status dot (#4ec94e) so
+   it reads as a primary, additive action distinct from danger /
+   accent-blue buttons elsewhere in the panel. */
+.mcp-add-full {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  background: rgba(78, 201, 78, 0.18);
+  color: #4ec94e;
+  border: 1px solid rgba(78, 201, 78, 0.45);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  letter-spacing: 0.01em;
+}
+.mcp-add-full:hover {
+  background: rgba(78, 201, 78, 0.28);
+  border-color: #4ec94e;
+}
+.mcp-add-full-icon { font-size: 1.05rem; line-height: 1; }
+
+/* Inputs editor: compact chip row above the servers list. Each chip
+   represents one declared input; click to edit, × to remove. */
+.mcp-input-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.mcp-input-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 26px;
+  padding: 0 0.35rem 0 0.55rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+.mcp-input-chip:hover { background: var(--bg-raised-hover); border-color: var(--accent); }
+.mcp-input-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.mcp-input-chip[data-kind="secret"] { color: #e8c47a; border-color: rgba(232, 196, 122, 0.4); }
+.mcp-input-chip[data-kind="pick"]   { color: #7fb5ff; border-color: rgba(127, 181, 255, 0.4); }
+.mcp-input-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.mcp-input-chip-label {
+  line-height: 1;
+  white-space: nowrap;
+}
+.mcp-input-chip-close {
+  background: transparent;
+  border: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-left: 0.15rem;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.mcp-input-chip-close:hover { background: rgba(255,90,90,0.18); color: #ff6b6b; }
+.mcp-input-chip-add {
+  background: transparent;
+  border: 1px dashed var(--border-strong, var(--border));
+  color: var(--text-muted);
+  padding-right: 0.7rem;
+}
+.mcp-input-chip-add:hover { color: var(--text); border-color: var(--accent); background: var(--bg-raised); }
+.mcp-input-chip-add .mcp-input-chip-icon { font-size: 0.95rem; line-height: 1; }
+
+.mcp-input-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.mcp-input-checkbox input { accent-color: var(--accent); }
+
+/* Edit-input dialog */
+.mcp-input-dialog { min-width: 480px; max-width: 560px; width: 90%; }
+.mcp-input-dialog-form { display: flex; flex-direction: column; gap: 0.85rem; }
+.mcp-input-dialog-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #ff6b6b;
+}
+
+.mcp-card-empty {
+  border-style: dashed;
+  background: transparent;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+

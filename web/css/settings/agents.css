@@ -1,0 +1,528 @@
+/* Agents panel — master-detail split
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Agents panel — master-detail split
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.agent-split-layout {
+  display: flex;
+  min-height: 580px;
+  height: 100%;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Fleet list (left) */
+.agent-fleet-panel {
+  width: 240px;
+  flex: 0 0 240px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+}
+.agent-fleet-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.agent-fleet-title {
+  flex: 1;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+.agent-fleet-add,
+.agent-fleet-import {
+  width: 22px; height: 22px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.agent-fleet-add:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.agent-fleet-import { font-size: 0.95rem; }
+.agent-fleet-import:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Reindex button in the Registries hub fleet header — compact so it fits the
+   240px panel next to the REGISTRIES title. */
+#registries-reindex-btn {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.45rem;
+  white-space: nowrap;
+}
+#registries-reindex-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* The hub right panel reuses per-kind renderers: form-section-based kinds
+   (skills/mcp/a2a/commands) and the skills browse/detail views need outer
+   spacing + a scroll container, while the agents/squads .remote-kind-list-wrap
+   manages its own full-height scroll. */
+#registries-right-panel { overflow-y: auto; }
+#registries-right-panel > .form-section { margin: 1rem 1.25rem; }
+#registries-right-panel > .settings-form { padding: 1rem 1.25rem; }
+
+.agent-fleet-list { flex: 1; overflow-y: auto; }
+
+.agent-fleet-section-header {
+  padding: 0.6rem 0.85rem 0.4rem;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+.agent-fleet-section-header:first-child {
+  border-top: none;
+}
+.section-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.agent-fleet-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.agent-fleet-item:hover { background: var(--bg-raised); }
+.agent-fleet-item.active { background: var(--accent-bg-soft); border-left: 2px solid var(--accent); }
+
+.agent-fleet-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.dot-live { background: #4ec94e; box-shadow: 0 0 4px #4ec94e88; }
+.dot-off  { background: #555; }
+
+.agent-fleet-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.agent-fleet-name { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.agent-fleet-model { font-size: 0.75rem; color: var(--text-muted); }
+.agent-fleet-model-recommended {
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-style: italic;
+}
+.agent-model-recommendation {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.65;
+  font-style: italic;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Detail panel (right) */
+.agent-detail-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.agent-detail-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+.agent-detail-title-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.agent-detail-title-right {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.agent-detail-name {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-strong);
+}
+.agent-live-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.15em 0.5em;
+  border-radius: 3px;
+  background: rgba(78,201,78,0.15);
+  color: #4ec94e;
+  border: 1px solid rgba(78,201,78,0.3);
+}
+
+/* Source-layer badges: shown on skills and agents to indicate where they live
+   in the config search chain (.agents/ = local, $HOME/.yoke/ = user, /etc/yoke = system) */
+.source-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  line-height: 1.6;
+}
+.source-badge-local {
+  background: rgba(99, 179, 237, 0.15);
+  color: #63b3ed;
+  border: 1px solid rgba(99, 179, 237, 0.3);
+}
+
+/* Active-state toggle switch */
+.agent-active-toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+.agent-active-toggle-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.agent-toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+.agent-toggle-input  { opacity: 0; width: 0; height: 0; position: absolute; }
+.agent-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 20px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+.agent-toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px; height: 14px;
+  top: 3px; left: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.agent-toggle-input:checked + .agent-toggle-slider { background: var(--accent); }
+.agent-toggle-input:checked + .agent-toggle-slider::before { transform: translateX(16px); }
+.agent-toggle-input:disabled + .agent-toggle-slider { opacity: 0.5; cursor: not-allowed; }
+
+/* Streaming toggle in the model-card header (right of the name + ACTIVE badge) */
+.model-stream-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1.5rem;
+}
+.model-stream-label {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #999);
+}
+/* Smaller pill for the model-card header streaming toggle */
+.model-stream-toggle { width: 28px; height: 16px; flex: 0 0 auto; }
+.model-stream-toggle .agent-toggle-slider::before { width: 10px; height: 10px; top: 3px; left: 3px; }
+.model-stream-toggle .agent-toggle-input:checked + .agent-toggle-slider::before { transform: translateX(12px); }
+
+/* Detail body */
+.agent-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.agent-detail-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.agent-detail-section.section-inactive {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.agent-detail-section.section-inactive .agent-section-hdr { opacity: 0.85; }
+
+.agent-section-hdr {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.agent-section-hdr h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.agent-section-hdr svg { color: var(--text-muted); flex-shrink: 0; }
+
+/* General Settings grid */
+.agent-gen-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+  padding: 0.85rem;
+}
+.agent-gen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.agent-gen-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.agent-gen-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+.agent-gen-input:focus { outline: none; border-color: var(--accent); }
+.agent-gen-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.agent-gen-input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+.agent-gen-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+/* Small info badge next to a label that carries an app tooltip (data-tip). */
+.agent-gen-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+.agent-gen-info:hover { color: var(--text); border-color: #555; }
+
+/* Custom number stepper — themed +/- controls in place of the native browser
+   spinner, matching the rest of the settings UI. */
+.num-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+.num-stepper .num-stepper-input {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.num-stepper .num-stepper-input::-webkit-outer-spin-button,
+.num-stepper .num-stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-stepper-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.num-stepper-btn:first-child { border-radius: 4px 0 0 4px; }
+.num-stepper-btn:last-child { border-radius: 0 4px 4px 0; }
+.num-stepper-btn:hover:not(:disabled) { background: var(--bg-raised-hover); border-color: #555; }
+.num-stepper-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Available Tools grid */
+.agent-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+  padding: 0.85rem;
+}
+.agent-tool-card {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.agent-tool-card:hover { border-color: #555; }
+.agent-tool-card.tool-on { border-color: var(--accent); background: var(--accent-bg-soft); }
+.agent-tool-card.tool-disabled { opacity: 0.4; cursor: not-allowed; }
+
+.agent-tool-icon { flex: 0 0 auto; color: var(--text-muted); }
+.agent-tool-card.tool-on .agent-tool-icon { color: var(--accent); }
+
+.agent-tool-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.05rem; }
+.agent-tool-name { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+.agent-tool-desc { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.agent-tool-toggle-pill {
+  flex: 0 0 auto;
+  width: 28px; height: 14px;
+  border-radius: 7px;
+  transition: background 0.15s;
+  position: relative;
+}
+.agent-tool-toggle-pill::after {
+  content: "";
+  position: absolute;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  top: 2px;
+  background: #fff;
+  transition: left 0.15s;
+}
+.pill-off { background: var(--border); }
+.pill-off::after { left: 2px; }
+.pill-on  { background: var(--accent); }
+.pill-on::after { left: 16px; }
+
+/* Instruction Set */
+.agent-instr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.85rem;
+}
+.agent-instr-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.agent-instr-label { font-size: 0.78rem; font-weight: 500; color: var(--text-muted); }
+.agent-instr-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.agent-instr-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.agent-instr-textarea {
+  width: 100%;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.agent-instr-textarea:focus { outline: none; border-color: var(--accent); }
+.agent-instr-textarea:disabled,
+.agent-builtin-readonly {
+  opacity: 0.75;
+  cursor: not-allowed;
+  background: var(--bg-raised);
+}
+.agent-builtin-tag {
+  margin-left: 0.5rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  background: rgba(78,201,78,0.12);
+  color: #4ec94e;
+  border: 1px solid rgba(78,201,78,0.25);
+  vertical-align: middle;
+}
+
+/* Advanced paths */
+.agent-advanced {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.agent-advanced-summary {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+}
+.agent-advanced-summary::before {
+  content: "▶";
+  font-size: 0.65rem;
+  margin-right: 0.45rem;
+  transition: transform 0.15s;
+}
+details[open] > .agent-advanced-summary::before { transform: rotate(90deg); }
+.agent-advanced .agent-gen-grid { padding: 0.85rem; }
+
+/* Detail actions */
+.agent-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Override subtab-body to not apply gap when inside split layout */
+.settings-subtab-body:has(.agent-split-layout) {
+  gap: 0;
+  flex: 1;
+  min-height: 500px;
+}
+
+

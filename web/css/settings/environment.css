@@ -1,0 +1,121 @@
+/* Global Environment panel
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Global Environment panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.env-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.env-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.env-section-hdr {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.env-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.env-section-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.15rem 0 0;
+}
+
+.env-section-body {
+  padding: 1rem;
+}
+
+.env-section-keys .env-field { max-width: 480px; }
+
+.env-opt-chip { width: fit-content; }
+.env-opt-chip .agent-tool-toggle-pill { margin-left: 0.6rem; }
+
+.env-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem 1.25rem;
+}
+
+.env-id-row {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.env-id-row .env-field { flex: 1 1 280px; }
+
+.env-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.env-field-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.env-field-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+.env-field-input:focus { outline: none; border-color: var(--accent); }
+
+.env-check-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 1.4rem;
+  white-space: nowrap;
+}
+.env-check-wrap input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+.env-check-wrap label { font-size: 0.85rem; color: var(--text); cursor: pointer; }
+
+.env-secret-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  position: relative;
+}
+.env-secret-wrap .env-field-input,
+.env-secret-wrap .model-field-input { flex: 1; min-width: 0; }
+
+.env-secret-eye {
+  flex: 0 0 auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.3rem 0.45rem;
+  display: flex;
+  align-items: center;
+}
+.env-secret-eye:hover { background: var(--bg-raised-hover); color: var(--text); }
+
+

@@ -1,0 +1,157 @@
+/* Reload/restart lifecycle: restart banner, reload spinner, generation pill, restart overlay
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* Restart-required banner. Lives in #chat-area (the flex column) above #chat,
+ * so it is a full-width top bar; flex:none keeps it at its natural height while
+ * the max-height transition below animates it open/closed. */
+#restart-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn-fg);
+  font-size: 0.85rem;
+  /* Animate height + opacity so removal feels smooth rather than a snap. */
+  max-height: 4rem;
+  overflow: hidden;
+  transition:
+    opacity 250ms ease,
+    max-height 250ms ease,
+    padding 250ms ease,
+    border-color 250ms ease;
+}
+#restart-banner.is-fading-out {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-color: transparent;
+}
+#restart-banner.is-loading {
+  /* Subtle pulse on the bar while the request is in flight. */
+  animation: restart-banner-pulse 1.4s ease-in-out infinite;
+}
+/* The id selector outranks the user-agent [hidden] rule, so without this
+   override `banner.hidden = true` leaves display:flex in place and the
+   fade-out class removal animates the banner back into view. */
+#restart-banner[hidden] { display: none; }
+@keyframes restart-banner-pulse {
+  0%, 100% { background: var(--warn-bg); }
+  50%      { background: var(--warn-action-hover, rgba(255,255,255,0.04)); }
+}
+#restart-banner .restart-banner-text { flex: 1; }
+#restart-banner button {
+  background: var(--warn-action-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+#restart-banner button:hover { background: var(--warn-action-hover); }
+#restart-banner #restart-banner-dismiss {
+  background: transparent;
+  color: var(--warn-fg);
+  font-size: 1rem;
+  padding: 0 0.3rem;
+}
+#restart-banner #restart-banner-dismiss:hover { background: rgba(255,255,255,0.05); }
+#restart-banner button.reload-primary {
+  background: var(--accent, #4a90e2);
+  border-color: var(--accent, #4a90e2);
+  color: #fff;
+  font-weight: 500;
+}
+#restart-banner button.reload-primary:hover { filter: brightness(1.1); }
+#restart-banner button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* Tiny spinner used inside the Reload button while the request is
+   in flight. Inherits the button's foreground colour so it works on
+   both the primary and secondary button variants. */
+.reload-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.45em;
+  vertical-align: -0.15em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: reload-spinner-spin 0.7s linear infinite;
+}
+@keyframes reload-spinner-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #restart-banner,
+  #restart-banner.is-loading,
+  .reload-spinner {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Generation pill — floating badge shown while sessions are draining on
+   a previous agent generation after a hot-reload. Position is fixed so the
+   pill is unaffected by wherever in the DOM it gets attached (the poll can
+   run before the settings panel — and its <header> — exists). */
+.generation-pill {
+  position: fixed;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 100;
+  padding: 0.2rem 0.55rem;
+  border-radius: 10px;
+  background: var(--warn-action-bg, #4a3a1a);
+  color: var(--warn-fg, #f1c40f);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--warn-border, #6e5b27);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.generation-pill[hidden] { display: none; }
+
+/* Full-page restart overlay */
+#restart-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  color: var(--warn-fg);
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+#restart-overlay[hidden] { display: none; }
+#restart-overlay-spinner {
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 3px solid color-mix(in srgb, var(--warn-fg) 25%, transparent);
+  border-top-color: var(--warn-fg);
+  border-radius: 50%;
+  animation: restart-spin 0.8s linear infinite;
+}
+@keyframes restart-spin {
+  to { transform: rotate(360deg); }
+}
+#restart-overlay-msg {
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+

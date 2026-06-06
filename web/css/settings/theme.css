@@ -1,0 +1,208 @@
+/* Theme picker
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ─── Theme picker ────────────────────────────────────────────────────── */
+.theme-group-label {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.theme-group-label:first-of-type { margin-top: 0; }
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.theme-card:hover { border-color: var(--accent); }
+.theme-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-card-preview {
+  display: flex;
+  gap: 0.3rem;
+  height: 32px;
+  align-items: stretch;
+}
+.theme-swatch {
+  flex: 1 1 0;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.theme-card-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.theme-card-check {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 11px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.theme-card.active .theme-card-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* When the settings panel is open, hide the chat panes (and their dividers)
+ * entirely so #settings-panel (flex:1) fills the chat area. The toggle is a
+ * single class on #chat (set by Settings.open/close) so we never fight with
+ * app.js over inline display styles. */
+#chat.chat--settings > .chat-pane,
+#chat.chat--settings > .pane-divider {
+  display: none;
+}
+
+/* Scrollbar polish to match the chat dark theme. */
+.settings-body-content::-webkit-scrollbar,
+.raw-editor::-webkit-scrollbar { width: 10px; height: 10px; }
+.settings-body-content::-webkit-scrollbar-track,
+.raw-editor::-webkit-scrollbar-track { background: var(--bg); }
+.settings-body-content::-webkit-scrollbar-thumb,
+.raw-editor::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+.settings-body-content::-webkit-scrollbar-thumb:hover,
+.raw-editor::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+
+/* In-app confirmation / prompt dialog */
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.app-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  min-width: 320px;
+  max-width: 460px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.app-dialog-msg {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.app-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.app-dialog-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.app-dialog-actions button {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--text);
+}
+.app-dialog-actions button:hover { background: var(--bg-raised-hover); }
+.app-dialog-actions .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.app-dialog-actions .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Registry toggle row (label left, checkbox right) */
+.registry-dialog-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+.registry-dialog-toggle span { flex: 1; }
+.registry-dialog-toggle input[type="checkbox"] {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Registry multi-field dialog */
+.registry-dialog { min-width: 420px; max-width: 520px; }
+.registry-dialog-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.registry-dialog-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.registry-dialog-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.registry-dialog-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+.registry-dialog-field input,
+.registry-dialog-field select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+.registry-dialog-field input:focus,
+.registry-dialog-field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+

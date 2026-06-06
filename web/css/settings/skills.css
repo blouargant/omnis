@@ -1,0 +1,370 @@
+/* Skills panel
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ─── Skills panel ─────────────────────────────────────────────────────── */
+
+.skills-subtab-body { padding-top: 0.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+
+/* Registry cards — legacy (kept for agent blocks) */
+.skill-card-desc {
+  margin: 0.25rem 0 0.1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.skill-card-links { margin: 0.15rem 0 0; font-size: 0.8rem; }
+.skills-unlinked { opacity: 0.55; }
+.skill-upload-label { display: inline-flex; align-items: center; }
+
+/* Marketplace-style skill cards */
+.skill-marketplace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.9rem;
+  padding: 0.25rem 0 0.5rem;
+}
+.skill-mkt-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  cursor: pointer;
+}
+.skill-mkt-card:hover { border-color: var(--accent); }
+
+/* Terminal-style header bar */
+.skill-mkt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.skill-mkt-dots { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.dot-red    { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green  { background: #28c840; }
+.skill-mkt-filename {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-mkt-filename svg { stroke: var(--accent); flex-shrink: 0; }
+
+/* Card body */
+.skill-mkt-body {
+  flex: 1;
+  padding: 0.65rem 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.skill-mkt-author {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+.skill-mkt-author-icon {
+  font-size: 0.65rem;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.skill-mkt-author-name {
+  color: var(--accent);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-mkt-desc {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--text);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skill-mkt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+.skill-mkt-tag {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* Remote agent card meta rows: tools / skills / mcp / model declared in
+   the agent's manifest. Each row is "label: <chips>" laid out compactly so
+   several rows still fit alongside the description. */
+.remote-agent-meta-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.remote-agent-meta-label {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-top: 0.1rem;
+}
+.remote-agent-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.remote-agent-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.remote-agent-chip-mcp {
+  border-style: dashed;
+}
+.remote-agent-chip-model {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Card footer */
+.skill-mkt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--border);
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.skill-mkt-date { font-size: 0.75rem; color: var(--text-muted); flex-shrink: 0; }
+.skill-mkt-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.skill-mkt-linked { font-size: 0.75rem; color: var(--text-muted); }
+.skill-mkt-unlinked { font-size: 0.75rem; opacity: 0.45; }
+.skill-mkt-del-btn { padding: 0.15rem 0.5rem !important; font-size: 0.75rem !important; height: auto !important; width: auto !important; }
+.skill-detail-footer .del-btn { width: auto; height: auto; padding: 0.4rem 0.9rem; font-size: 0.85rem; background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-fg); }
+.skill-detail-footer .del-btn:hover { background: var(--danger-bg-hover); }
+
+/* Drop-zone active overlay */
+.drop-active { outline: 2px dashed var(--accent); outline-offset: -4px; }
+
+/* Detail view */
+.skill-detail-view {}
+.agent-detail-panel .skill-detail-view {
+  padding: 1rem 1.25rem;
+}
+.skill-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+.skill-back-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.skill-back-btn:hover { background: var(--bg-raised); color: var(--text); }
+.skill-detail-name { font-weight: 600; font-size: 1rem; }
+.skill-detail-desc { margin: 0 0 0.4rem; }
+.skill-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+}
+.skill-frontmatter-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.skill-fm-row { display: flex; align-items: baseline; gap: 0.75rem; }
+.skill-fm-key { color: var(--accent); flex-shrink: 0; min-width: 90px; }
+.skill-fm-value { color: var(--text); }
+.skill-fm-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.skill-content-wrap { display: flex; flex-direction: column; }
+.skill-content-wrap .settings-subtabs { margin-bottom: 0; }
+.skill-md-editor { min-height: 520px; resize: vertical; border-top-left-radius: 0; }
+
+.skill-md-preview {
+  border-top-left-radius: 0;
+  min-height: 520px;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  overflow-y: auto;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--text);
+}
+.skill-md-preview h1, .skill-md-preview h2, .skill-md-preview h3,
+.skill-md-preview h4, .skill-md-preview h5, .skill-md-preview h6 {
+  color: var(--text);
+  margin: 1.1em 0 0.4em;
+  font-weight: 600;
+}
+.skill-md-preview h1 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.skill-md-preview h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.skill-md-preview p  { margin: 0.5em 0; }
+.skill-md-preview ul, .skill-md-preview ol { margin: 0.4em 0; padding-left: 1.5em; }
+.skill-md-preview li { margin: 0.2em 0; }
+.skill-md-preview code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--bg-raised);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.skill-md-preview pre {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.skill-md-preview pre code { background: none; padding: 0; }
+.skill-md-preview blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5em 0;
+  padding: 0.2em 0.75em;
+  color: var(--text-muted);
+}
+.skill-md-preview strong { color: var(--text); }
+.skill-md-preview a { color: var(--accent); }
+.skill-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+.skill-save-status { font-size: 0.85rem; color: var(--text-muted); }
+.skill-save-status.success { color: var(--success, #4caf50); }
+.skill-save-status.error { color: var(--error, #f44336); }
+
+/* Skill checkbox grid (registry → per-agent and agent card) */
+.skills-check-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.25rem 0;
+}
+.skills-check-item {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.skills-check-item:hover { background: var(--bg-raised); }
+.skills-check-item input { margin-right: 0.4rem; cursor: pointer; }
+.skills-check-name { font-weight: 500; }
+.skills-check-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+/* Action row under the grid */
+.skills-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0 0.2rem;
+}
+.skills-manage-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  margin-left: auto;
+}
+.skills-manage-link:hover { color: var(--accent-hover); }
+
+/* Warnings inside skill blocks */
+.skills-tool-warning {
+  font-size: 0.8rem;
+  color: var(--warning, #ff9800);
+  margin: 0.25rem 0;
+  padding: 0.3rem 0.5rem;
+  border-left: 2px solid var(--warning, #ff9800);
+}
+.skills-broken-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--error, #f44336);
+  margin: 0.25rem 0;
+  padding: 0.3rem 0.5rem;
+  border-left: 2px solid var(--error, #f44336);
+  flex-wrap: wrap;
+}
+
+/* Skills block inside agent card */
+.skills-agent-body {
+  padding: 0.75rem;
+  overflow: hidden;
+}
+
+

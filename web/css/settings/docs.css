@@ -1,0 +1,163 @@
+/* Documentation viewer
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ─── Documentation viewer ─────────────────────────────────────────────── */
+.docs-viewer {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 2rem;
+  align-items: start;
+  width: 100%;
+}
+
+.docs-toc {
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+}
+.docs-toc-group + .docs-toc-group { margin-top: 1.25rem; }
+.docs-toc-group-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 0.4rem;
+  padding: 0 0.5rem;
+}
+.docs-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.docs-toc-item {
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  border-left: 2px solid transparent;
+}
+.docs-toc-item:hover { background: var(--bg-raised); color: var(--text); }
+.docs-toc-item.active {
+  background: var(--bg-active, var(--bg-raised));
+  color: var(--text-strong);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+
+.docs-article {
+  padding: 0 0.5rem 2rem;
+  min-width: 0;
+  width: 100%;
+}
+.docs-article:focus { outline: none; }
+.docs-article-body {
+  width: 100%;
+  max-width: 960px;
+  color: var(--text);
+  font-size: 14.5px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+.docs-article-body h1,
+.docs-article-body h2,
+.docs-article-body h3,
+.docs-article-body h4 {
+  color: var(--text-strong);
+  margin: 1.4em 0 0.5em;
+  font-weight: 600;
+}
+.docs-article-body h1:first-child,
+.docs-article-body h2:first-child { margin-top: 0; }
+.docs-article-body h1 {
+  font-size: 1.6rem;
+  letter-spacing: -0.005em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+.docs-article-body h2 { font-size: 1.2rem; }
+.docs-article-body h3 { font-size: 1rem; }
+.docs-article-body p { margin: 0 0 0.85em; }
+.docs-article-body ul,
+.docs-article-body ol { margin: 0 0 0.85em; padding-left: 1.4em; }
+.docs-article-body li { margin-bottom: 0.25em; }
+.docs-article-body li > p { margin-bottom: 0.3em; }
+.docs-article-body a { color: var(--accent); text-decoration: none; }
+.docs-article-body a:hover { text-decoration: underline; }
+.docs-article-body strong { color: var(--text-strong); font-weight: 600; }
+.docs-article-body code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+  color: var(--text-strong);
+}
+.docs-article-body pre {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 0.9em;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.docs-article-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--text);
+}
+.docs-article-body blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.5em 0 0.9em;
+  padding: 0.1em 0.9em;
+  color: var(--text-muted);
+}
+.docs-article-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  font-size: 0.9em;
+}
+.docs-article-body th,
+.docs-article-body td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.docs-article-body th {
+  background: var(--bg-panel);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.docs-article-body hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.4em 0;
+}
+
+@media (max-width: 800px) {
+  .docs-viewer { grid-template-columns: 1fr; }
+  .docs-toc {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 0.75rem;
+  }
+}
+
+

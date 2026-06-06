@@ -1,0 +1,259 @@
+/* Models panel + add-model dialog + model cards
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ─── Add-model dialog ─────────────────────────────────────────────────── */
+.model-dialog { min-width: 460px; max-width: 560px; }
+/* Streaming toggle row above the field grid. */
+.model-dialog-stream {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.6rem;
+}
+.model-dialog-err {
+  font-size: 0.78rem;
+  color: var(--danger, #e06c75);
+  min-height: 0.9rem;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Models panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.model-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.model-panel-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin: 0 0 0.3rem;
+}
+.model-panel-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 560px;
+}
+.model-add-btn {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.model-add-btn:hover { background: var(--accent-hover); }
+
+.model-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.model-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.model-card-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: 8px 8px 0 0;
+}
+.model-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.model-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+/* Themed hover tooltip for the model "in use" dot. Uses app surface/border
+   tokens so it tracks the active theme; native `title` is intentionally not
+   used so the styling matches the rest of the UI. */
+.model-status-dot[data-tip] { cursor: help; position: relative; }
+.model-status-dot[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -4px;
+  white-space: nowrap;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 50;
+}
+/* Small arrow pointing down at the dot. */
+.model-status-dot[data-tip]::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: rotate(45deg) translateY(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 51;
+}
+.model-status-dot[data-tip]:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+.model-status-dot[data-tip]:hover::before {
+  opacity: 1;
+  transform: rotate(45deg) translateY(0);
+}
+.dot-active  { background: #4ec94e; box-shadow: 0 0 4px #4ec94e88; }
+.dot-standby { background: #555; }
+.model-card-title strong { font-size: 0.85rem; color: var(--text-strong); letter-spacing: 0.04em; }
+
+.model-remove-link {
+  font-size: 0.75rem;
+  color: var(--danger-fg);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.model-remove-link:hover { opacity: 1; background: var(--danger-bg-soft); }
+
+.model-test-link {
+  font-size: 0.75rem;
+  color: var(--accent-fg, var(--fg));
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  margin-right: 0.25rem;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.model-test-link:hover {
+  opacity: 1;
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+}
+.model-test-link:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
+
+.model-card-body { padding: 0.85rem; }
+
+.model-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
+.model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.model-field-full { grid-column: 1 / -1; }
+.model-field-sep {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+  margin: 0.25rem 0;
+}
+
+.model-field-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.model-field-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+.model-field-input:focus { outline: none; border-color: var(--accent); }
+
+/* Internal-embedding-model selector card sits above the model grid */
+.embed-select-card { margin-bottom: 1rem; }
+
+/* Embedding pill toggle inside a model card: align the switch under its label
+   with a little breathing room, matching the agent "Active State" toggle. */
+.model-field .agent-toggle-switch { margin-top: 0.3rem; }
+
+/* Combo field inside model card */
+.model-field-combo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.model-field-combo .combo-wrap { width: 100%; }
+.model-field-combo .combo-wrap input { width: 100%; }
+
+/* DIM field: number input + detect button share a flex row like the combo. */
+.model-field-dim .combo-wrap { width: 100%; }
+.model-field-dim .combo-wrap input[type="number"] { flex: 1 1 auto; min-width: 0; width: auto; }
+
+.model-card-empty {
+  border-style: dashed;
+  background: transparent;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.model-card-empty-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 1.5rem;
+  color: var(--text-muted);
+  width: 100%;
+}
+.model-card-empty-btn:hover { color: var(--text); }
+.model-card-empty-icon { font-size: 1.6rem; opacity: 0.4; }
+.model-card-empty-label { font-size: 0.9rem; font-weight: 600; }
+.model-card-empty-sub { font-size: 0.78rem; }
+
+

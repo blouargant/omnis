@@ -1,0 +1,83 @@
+/* User Commands settings
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+/* ─── User Commands settings ───────────────────────────────── */
+.user-cmd-settings .cmd-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 0.75rem;
+}
+.user-cmd-settings .cmd-section-header h3 { font-size: 0.95rem; color: var(--text); }
+.user-cmd-settings .cmd-section-header button.primary {
+  background: var(--accent, #0e639c);
+  border: 1px solid var(--accent, #0e639c);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.user-cmd-settings .cmd-section-header button.primary:hover { filter: brightness(1.1); }
+.user-cmd-settings .cmd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.user-cmd-settings .cmd-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.5rem;
+}
+.user-cmd-settings .cmd-table td {
+  padding: 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--bg-raised);
+  vertical-align: middle;
+}
+.user-cmd-settings .cmd-table tr:last-child td { border-bottom: none; }
+.user-cmd-settings .cmd-name {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #4fc1ff;
+  white-space: nowrap;
+}
+.user-cmd-settings .cmd-args {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #ce9178;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.user-cmd-settings .cmd-desc { color: var(--text); }
+.user-cmd-settings .cmd-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.user-cmd-settings .cmd-actions button {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-left: 0.3rem;
+}
+.user-cmd-settings .cmd-actions button:hover { background: var(--bg-raised-hover); }
+.user-cmd-settings .cmd-actions .btn-del:hover {
+  border-color: #f48771;
+  color: #f48771;
+}
+.user-cmd-settings .cmd-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 1rem;
+}
+.user-cmd-settings .settings-hint code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: var(--bg-raised);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
