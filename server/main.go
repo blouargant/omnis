@@ -113,6 +113,10 @@ func run() error {
 		// mailbox in the background and injects incoming messages as synthetic
 		// turns. Suppress the leader's redundant per-turn teammate_check poll.
 		BackgroundMailboxDelivery: true,
+		// The web UI keeps ask-user and permission cards on screen and simply
+		// waits for the user, so disarm the registry's 5-minute question
+		// timeout — only a turn abort (context cancellation) ends the wait.
+		DisableAskUserTimeout: true,
 	}
 
 	log.Printf("server: yoke home: %s", paths.Home())

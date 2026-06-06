@@ -879,11 +879,15 @@ working directory" below): navigating the panel changes where the agent's
   (`[label, action, {disabled|hidden}]`): `disabled` renders a greyed,
   click-inert `<button disabled>` (`.folder-ctx-item:disabled`), `hidden` omits it.
 - **".." (parent) row menu** — `openFolderUpCtxMenu` gives the ".." row its own
-  context menu. ".." is a navigable directory, so the **container** actions apply
-  to the parent dir (`parentDirAbs()`): *Open Chat here*, *Download*, *New File…*,
-  *New Folder…*, *Paste*, *Copy path*. The **entry-targeting** actions that make
-  no sense for ".." (*Cut*, *Copy*, *Rename…*, *Move to…*, *Copy to…*, *Delete*)
-  are shown **greyed/disabled** rather than active.
+  context menu. ".." is a navigable directory, so the **filesystem container**
+  actions apply to the parent dir (`parentDirAbs()`): *Download*, *New File…*,
+  *New Folder…*, *Paste*, *Copy path*. **Exception:** *Open Chat here* /
+  *Open Terminal here* root at the **currently displayed** folder (`foldersDir`),
+  **not** the parent — users read "here" as "the folder I'm looking at", and the
+  parent surprised them by landing on the app root when they'd navigated just one
+  level down. The **entry-targeting** actions that make no sense for ".."
+  (*Cut*, *Copy*, *Rename…*, *Move to…*, *Copy to…*, *Delete*) are shown
+  **greyed/disabled** rather than active.
 - **Client** ([web/app.js](web/app.js), styled in [web/css/styles.css](web/css/styles.css)):
   `loadFolder(path)` GETs (no `path`) or POSTs (with `path`) and `renderFolder`
   paints the path header plus a `..` entry (hidden at filesystem root), then a

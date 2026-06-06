@@ -1384,6 +1384,15 @@ body.resizing #sidebar-resize { transition: none; }
    * sideways shift when the scrollbar appears/disappears. */
   scrollbar-gutter: stable both-edges;
 }
+/* When an ask-user / permission card is showing it sits in-flow between the
+   transcript and the floating composer, so the transcript no longer needs to
+   reserve the composer's clearance (52px + overlay-h) — the card provides the
+   bottom boundary, and chat scrolling behind the card is occluded by the card's
+   own solid background. Collapsing that padding removes the large empty gap that
+   otherwise opens between the last chat line and the card. */
+.chat-pane:has(#ask-user-slot:not(:empty)) #transcript {
+  padding-bottom: 12px;
+}
 
 /* ─── Message rows ─────────────────────────────────────────── */
 .msg-row {
@@ -2894,9 +2903,28 @@ body.resizing-composer #composer-resize { transition: none; }
 /* Only reserve space ABOVE the floating composer when the slot actually holds a
    question — otherwise (the normal, empty case) it must take zero height so the
    transcript fills the whole pane behind the floating composer and fades. When
-   active, lift the ask-user card above the composer + its fade. */
+   active, sit the ask-user card just above the editor (small 6px gap), not above
+   the composer's 52px fade — and lift the slot ABOVE the composer-wrap (z-index 4
+   > 3) so the card's solid background occludes that fade instead of letting the
+   gradient wash out the card's bottom (options + the Submit row). The slot's box
+   ends above the editor, so raising it never covers the editor itself. */
 #ask-user-slot:not(:empty) {
-  margin-bottom: calc(var(--composer-overlay-h, 0px) + 56px);
+  /* Clear the floating composer AND its 52px upward fade (#composer-wrap::before),
+     so the card sits fully above the editor — not merely above the editor box.
+     (Relying on z-index alone to occlude the fade left a sliver of the card's
+     bottom slipping under the editor; the extra 52px is the robust fix.) The +8
+     is a small breathing gap on top of that. */
+  margin-bottom: calc(var(--composer-overlay-h, 0px) + 60px);
+  position: relative;
+  z-index: 4;
+  /* Content-sized (base flex:0 1 auto): the slot takes exactly the card's height
+     and #transcript keeps the rest, so the transcript is NOT squished while a
+     question is pending. The card's own length-based max-height (below) is what
+     bounds it to the space above the composer — not a slot grow, which would
+     either grab half the pane (squishing the command out) or leave the card
+     without a definite parent. min-height:0 lets it shrink + scroll in a tiny
+     window. */
+  min-height: 0;
 }
 
 .ask-user-row {
@@ -2904,6 +2932,14 @@ body.resizing-composer #composer-resize { transition: none; }
   padding: 6px 20px 8px;
   width: 100%;
   margin: 0;
+}
+/* The active (unresolved) question row is content-sized (it wraps the card), so
+   the slot above takes only the card's height and the transcript keeps the rest.
+   The card's own max-height bounds it above the composer. */
+.ask-user-row:not(.resolved) {
+  flex: 0 1 auto;
+  min-height: 0;
+  align-items: flex-start;
 }
 
 .ask-user-card {
@@ -2916,6 +2952,31 @@ body.resizing-composer #composer-resize { transition: none; }
   background: var(--bg-panel);
   padding: 14px 16px 12px;
   font-size: 14px;
+}
+/* Active card: a flex column bounded by a LENGTH max-height — the viewport minus
+   the floating composer minus the top chrome (tab bar + pinned prompt header +
+   gaps). A length cap needs no definite parent (unlike max-height:100%), so it
+   reliably keeps the whole card — command, all options, Submit — above the
+   composer. In a normal window the card's natural content height is well under
+   the cap, so everything shows with no scroll; only in a genuinely short window
+   does it cap out and scroll the command/prompt internally while the options +
+   action row stay pinned (flex:0 0 auto). */
+.ask-user-card:not(.resolved) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - var(--composer-overlay-h, 0px) - 214px);
+}
+.ask-user-card:not(.resolved) > .ask-wizard-rail,
+.ask-user-card:not(.resolved) > .ask-user-choices,
+.ask-user-card:not(.resolved) > .ask-group-items,
+.ask-user-card:not(.resolved) > .ask-user-text-input,
+.ask-user-card:not(.resolved) > .ask-user-actions { flex: 0 0 auto; }
+.ask-user-card:not(.resolved) > .ask-user-prompt {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .ask-user-row.resolved {

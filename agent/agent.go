@@ -132,6 +132,14 @@ type Options struct {
 	// inbox. Left false in CLI/TUI where no background drainer runs, so the
 	// leader keeps teammate_check as its only delivery path.
 	BackgroundMailboxDelivery bool
+	// DisableAskUserTimeout removes the default per-question timeout on the
+	// shared ask_user registry (used by both the ask_user tool and the
+	// permission asker). When true, an unanswered ask-user / permission card
+	// waits indefinitely for a user response instead of being dropped after
+	// the default 5 minutes — context cancellation (turn abort) still ends the
+	// wait. Set by the server (the web UI keeps the card up and just waits);
+	// left false in CLI/TUI, which keep the bounded timeout.
+	DisableAskUserTimeout bool
 }
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {

@@ -6399,16 +6399,21 @@ function parentDirAbs() {
 }
 
 // Context menu for the ".." (parent) row. ".." is a navigable directory, so the
-// container actions (open / download / new / paste / copy-path) apply to the
+// filesystem container actions (download / new / paste / copy-path) apply to the
 // parent directory, while the entry-targeting actions (cut / copy / rename /
 // move / copy-to / delete) make no sense for ".." and are shown greyed out.
+// EXCEPTION: "Open Chat here" / "Open Terminal here" root at the *currently
+// displayed* folder (foldersDir), not the parent — users read "here" as "the
+// folder I'm looking at", and the parent surprised them by landing on the app
+// root when they'd navigated just one level down.
 function openFolderUpCtxMenu(ev) {
   const abs = parentDirAbs();
+  const cur = foldersDir; // the folder currently shown in the panel
   const name = abs.split("/").filter(Boolean).pop() || "root";
   const D = { disabled: true };
   const items = [
-    ["Open Chat here", () => newChat(null, undefined, abs)],
-    ["Open Terminal here", () => openTerminalTab(null, { cwd: abs })],
+    ["Open Chat here", () => newChat(null, undefined, cur)],
+    ["Open Terminal here", () => openTerminalTab(null, { cwd: cur })],
     ["Download", () => folderDownload(abs, name, true)],
     SEP,
     ["New File…", () => folderNewEntry(abs, "file")],

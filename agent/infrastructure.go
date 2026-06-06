@@ -100,7 +100,14 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 	}
 	reg := teammates.NewSessionRegistry(paths.MailboxesDir())
 	bus := events.NewBus()
-	askUserReg := askuser.NewRegistry()
+	var askUserOpts []askuser.RegistryOption
+	if opts.DisableAskUserTimeout {
+		// Web UI surfaces keep the ask-user / permission card up and wait for
+		// the user; a timeout of 0 disarms the per-question timer (context
+		// cancellation on turn abort still ends the wait).
+		askUserOpts = append(askUserOpts, askuser.WithDefaultTimeout(0))
+	}
+	askUserReg := askuser.NewRegistry(askUserOpts...)
 
 	// Wire ask_user registry notifications through the event bus so server
 	// and TUI surfaces receive questions and cancellations as bus events.
