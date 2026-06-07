@@ -64,6 +64,44 @@ the skill is loaded and unmerged when the session ends. The **Permissions**
 panel shows them in a separate, read-only block so they cannot be silently
 overwritten.
 
+A skill ships its permission rules in a **`permissions.json`** file next to its
+`SKILL.md` (same `permissions.{allow,ask,deny}` shape as the global file).
+
+## Tool dependencies (auto-install)
+
+A skill that drives an external command-line tool can declare it as a
+**dependency**, and yoke makes sure it is installed before the skill runs —
+rather than leaving it to the model to remember to check. Dependencies are
+listed in a **`requires.json`** file next to `SKILL.md`:
+
+```json
+{
+  "requires": [
+    { "command": "lit", "label": "LiteParse", "install": "pipx install liteparse" }
+  ]
+}
+```
+
+- `command` — the program that must be available (checked on your `PATH`).
+- `install` — how to install it. Either a single command, or a per-OS object
+  so the right one runs on each platform:
+  `{ "linux": "apt-get install -y poppler-utils", "darwin": "brew install poppler" }`.
+- `label` — optional friendly name shown in the prompt.
+
+**What you'll see.** When the leader loads a skill whose tool is missing, an
+**install prompt** appears in the session ("Install LiteParse? — `pip install
+liteparse`"). Approve it and yoke runs the install (through the same Bash safety
+floor as any command), then continues. The shipped `liteparse` skill works this
+way, with the `pdf` skill (`pdftotext`) declared as its fallback.
+
+**If you decline** — or the install fails — yoke does not pretend the tool ran:
+it tells the leader the dependency is unavailable so it uses the skill's
+documented fallback (or reports that the tool is required). Nothing is installed
+without your approval.
+
+> The same `requires` mechanism is available for **MCP servers** — see
+> [MCP Servers](12-mcp.md).
+
 ## Skills vs. soft-skills
 
 Both are markdown playbooks. The difference is provenance:

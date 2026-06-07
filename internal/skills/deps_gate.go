@@ -13,7 +13,6 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/genai"
-	"gopkg.in/yaml.v3"
 
 	"github.com/blouargant/yoke/internal/deps"
 	"github.com/blouargant/yoke/internal/paths"
@@ -51,35 +50,46 @@ func depGate() DepGate {
 	return depGateFn
 }
 
-// RequiresFor returns the runtime dependencies declared in the `requires:`
-// frontmatter of the named skill's SKILL.md, resolved across the skills search
-// chain (first match wins, matching the loader's precedence). Returns nil when
-// the skill or the field is absent.
+// RequiresFor returns the runtime dependencies declared by the named skill,
+// resolved across the skills search chain (first layer whose SKILL.md exists
+// wins, matching the loader's precedence). Returns nil when the skill or the
+// declaration is absent.
+//
+// Dependencies live in a `requires.json` sidecar next to SKILL.md — NOT in the
+// SKILL.md frontmatter — because ADK's skill loader parses that frontmatter
+// with KnownFields(true) and rejects any field it doesn't know (name,
+// description, license, compatibility, metadata, allowed-tools). The sidecar
+// mirrors the per-skill permissions.json pattern. Shape:
+//
+//	{ "requires": [ { "command": "lit", "label": "LiteParse",
+//	                  "install": "pip install liteparse" } ] }
+//
+// `install` accepts a string or a per-OS object ({linux:…, darwin:…}).
 func RequiresFor(name string) ([]deps.Requirement, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, nil
 	}
 	for _, dir := range paths.SkillsAllSearchDirs() {
-		b, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md"))
-		if err != nil {
-			continue
+		skillDir := filepath.Join(dir, name)
+		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+			continue // this layer doesn't own the skill; keep first-match precedence
 		}
-		return parseRequires(b), nil
+		b, err := os.ReadFile(filepath.Join(skillDir, "requires.json"))
+		if err != nil {
+			return nil, nil // skill exists here but declares no dependencies
+		}
+		return parseRequiresJSON(b)
 	}
 	return nil, nil
 }
 
-func parseRequires(content []byte) []deps.Requirement {
-	fm := frontmatterBlock(content)
-	if fm == "" {
-		return nil
-	}
+func parseRequiresJSON(b []byte) ([]deps.Requirement, error) {
 	var doc struct {
-		Requires []deps.Requirement `yaml:"requires"`
+		Requires []deps.Requirement `json:"requires"`
 	}
-	if err := yaml.Unmarshal([]byte(fm), &doc); err != nil {
-		return nil
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, err
 	}
 	out := make([]deps.Requirement, 0, len(doc.Requires))
 	for _, r := range doc.Requires {
@@ -87,21 +97,7 @@ func parseRequires(content []byte) []deps.Requirement {
 			out = append(out, r)
 		}
 	}
-	return out
-}
-
-// frontmatterBlock returns the YAML between the leading `---` fences, or "".
-func frontmatterBlock(content []byte) string {
-	s := strings.TrimLeft(string(content), "\r\n")
-	if !strings.HasPrefix(s, "---") {
-		return ""
-	}
-	rest := s[3:]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return ""
-	}
-	return rest[:end]
+	return out, nil
 }
 
 // gatedSkillToolset wraps the upstream skilltoolset so the load_skill tool runs

@@ -1,0 +1,9 @@
+{
+  "requires": [
+    {
+      "command": "lit",
+      "label": "LiteParse",
+      "install": "pipx install liteparse"
+    }
+  ]
+}

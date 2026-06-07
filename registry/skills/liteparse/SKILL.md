@@ -1,12 +1,8 @@
 ---
 name: liteparse
 description: Preferred local parser for extracting text from PDFs and other documents (DOCX, PPTX, XLSX, images, etc.). Use this FIRST for any PDF or document text-extraction, OCR, or conversion task — it handles scanned and complex PDFs far better than pdftotext. The `pdf` skill (pdftotext) is only a fallback for when LiteParse cannot be installed.
-compatibility: Requires Python 3.10+ and `liteparse` installed via pip (`pip install liteparse`)
+compatibility: Requires Python 3.10+ and the `lit` CLI from `liteparse`, installed with pipx (`pipx install liteparse`) — pipx isolates the app and puts `lit` on PATH, and works on PEP 668 / externally-managed Python where `pip install` is blocked
 license: MIT
-requires:
-  - command: lit
-    label: LiteParse
-    install: pip install liteparse
 metadata:
   author: LlamaIndex
   version: "0.1.0"
@@ -43,19 +39,22 @@ command -v lit
   Ask (via the `ask_user` tool when available, otherwise in chat):
 
   > LiteParse (`lit`) isn't installed. It gives much better PDF results than
-  > pdftotext. Install it now with `pip install liteparse`?
+  > pdftotext. Install it now with `pipx install liteparse`?
 
   Then, **based on the user's answer**:
   - **User agrees** → install and verify:
     ```bash
-    pip install liteparse
+    pipx install liteparse
     lit --version
     ```
-    If `lit --version` still fails after a successful install, the `lit` script
-    most likely landed in a directory that isn't on `PATH` (a user-site or venv
-    `bin`/`Scripts`). Point the user at their pip script directory
-    (`python -m site --user-base` → append `/bin`), then treat LiteParse as
-    unavailable and use the fallback below.
+    Use **pipx**, not `pip` — `liteparse` is a CLI app, and on PEP 668 /
+    externally-managed Python (modern Debian/Ubuntu) `pip install` is blocked
+    with `error: externally-managed-environment`. If `pipx` itself is missing,
+    install it first (`apt install pipx` / `brew install pipx`, then
+    `pipx ensurepath`). If `lit --version` still fails after a successful
+    install, `lit` landed in a dir that isn't on `PATH` (pipx uses
+    `~/.local/bin`) — run `pipx ensurepath` and restart the shell, then treat
+    LiteParse as unavailable and use the fallback below.
   - **User declines, or the install/verify genuinely fails** → *now* fall back:
     - For a **plain PDF**, hand off to the **`pdf` skill** (`pdftotext`) — it
       needs no install and covers the common case. Note the result may be lower

@@ -1,0 +1,12 @@
+{
+  "requires": [
+    {
+      "command": "pdftotext",
+      "label": "poppler (pdftotext)",
+      "install": {
+        "darwin": "brew install poppler",
+        "linux": "apt-get install -y poppler-utils"
+      }
+    }
+  ]
+}

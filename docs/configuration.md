@@ -312,8 +312,10 @@ Old-format files (top-level `always_deny`/`always_allow`/`ask_user`) are
 }
 ```
 
-Common read-only commands (`ls`, `cat`, `grep`, `git status`, …) are allowed by
-the built-in read-only allowlist, so they need no explicit rule.
+Common read-only commands (`ls`, `cat`, `grep`, `git status`, `which`,
+`command -v`/`command -V`, …) are allowed by the built-in read-only allowlist,
+so they need no explicit rule. (`command` counts as read-only only with a
+`-v`/`-V` lookup flag; `command <prog> …` executes `<prog>` and is still gated.)
 
 ### Adding a domain
 
@@ -351,54 +353,74 @@ UI (web modal, Slack DM, etc.).
 Wires external [Model Context Protocol] servers as ADK toolsets. Each
 entry spawns a child process and exposes its tools to the agent.
 
+Servers are a map keyed by name:
+
 ```json
 {
-  "servers": [
-    {
-      "name": "filesystem",
+  "servers": {
+    "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
     },
-    {
-      "name": "kubernetes",
+    "kubernetes": {
       "command": "npx",
       "args": ["-y", "mcp-server-kubernetes"],
       "env": {"KUBECONFIG": "/home/you/.kube/config"}
     },
-    {
-      "name": "postgres",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "postgresql://reader:pw@localhost/app"
-      ]
-    },
-    {
-      "name": "github",
+    "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"},
+      "requires": [
+        { "command": "npx", "label": "Node.js / npx",
+          "install": {"darwin": "brew install node", "linux": "apt-get install -y nodejs npm"} }
+      ]
     }
-  ]
+  }
 }
 ```
 
 ### Fields
 
-| Field     | Required | Notes                                                |
-|-----------|----------|------------------------------------------------------|
-| `name`    | yes      | Used as the toolset prefix in the agent.             |
-| `command` | yes      | Executable to spawn (must be on `PATH`).             |
-| `args`    | no       | Arguments passed to the command.                     |
-| `env`     | no       | Environment variables added to the child process.    |
+| Field      | Required | Notes                                                                 |
+|------------|----------|-----------------------------------------------------------------------|
+| (map key)  | yes      | The server name — used as the toolset prefix in the agent.            |
+| `command`  | yes      | Executable to spawn (must be on `PATH`, or declared in `requires`).   |
+| `args`     | no       | Arguments passed to the command.                                      |
+| `env`      | no       | Environment variables added to the child process.                    |
+| `requires` | no       | Runtime dependencies (binary + install command) installed with user consent at first connect — see below. |
 
 ### Lifecycle
 
-- Servers spawn at startup. If a server fails to start, it is logged
-  and skipped — the agent continues with the rest.
+- Servers without interactive `${input:id}` references or `requires` connect
+  eagerly. If such a server fails to start it is logged and skipped — the agent
+  continues with the rest.
+- Servers with `${input:id}` references **or** `requires` connect **lazily at
+  first tool use**, so the credential prompt / dependency install can be shown
+  in a live session rather than at boot.
 - Servers are killed when the root binary exits.
 - Tool names are namespaced as `<server>/<tool>` to prevent collisions.
+
+### Dependencies (`requires`)
+
+A server may declare runtime dependencies — a binary that must be on `PATH` plus
+how to install it — that the host enforces with user consent rather than letting
+the server fail silently:
+
+```json
+"requires": [
+  { "command": "uvx", "label": "uv", "install": "pip install uv" }
+]
+```
+
+`install` is a string or a per-OS object keyed by `GOOS`
+(`{linux, darwin, windows, default}`). At first tool use each missing binary
+prompts the user to install; on approval the install runs through the Bash
+safety floor and is re-checked. On decline or failure the server reports as
+unavailable (a sticky connect error) instead of hanging. The same field — same
+shape — backs skill dependencies via a `requires.json` sidecar (see
+[skills.md](skills.md)). Implementation: `internal/deps` (`Ensure`) +
+`internal/mcp` (`Server.Requires`).
 
 ### Security
 

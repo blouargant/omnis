@@ -7,18 +7,17 @@ function calls.
 
 ## Configuring servers
 
-Servers are defined in `mcp_config.json`:
+Servers are defined in `mcp_config.json` as a map keyed by server name:
 
 ```json
 {
-  "servers": [
-    {
-      "name": "github",
+  "servers": {
+    "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env": { "GITHUB_TOKEN": "GITHUB_TOKEN" }
     }
-  ]
+  }
 }
 ```
 
@@ -34,6 +33,35 @@ the literal sentinel `ASK_USER` in an `env` slot. At call time the agent emits
 an `ask_user` event; the Web UI surfaces a prompt in the chat, caches the
 answer for the rest of the session, and coalesces concurrent requests for the
 same input. The answer is never persisted to disk.
+
+## Server dependencies (auto-install)
+
+A stdio server depends on its `command` being installed (often a runner such as
+`npx` or `uvx`). Declare those as **dependencies** so yoke installs them — with
+your approval — instead of the server silently failing to start. Add a
+`requires` array to the server entry:
+
+```json
+{
+  "servers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "requires": [
+        { "command": "uvx", "label": "uv", "install": "pip install uv" }
+      ]
+    }
+  }
+}
+```
+
+The check fires at the server's **first use** (the first time the agent calls
+one of its tools) — the same lazy point as `ASK_USER` inputs, so there is a
+session to show the install prompt in. If you decline, or the install fails, the
+server reports as unavailable (its tools error and the agent can fall back)
+rather than the host hanging at startup. `install` accepts a single command or a
+per-OS object (`{ "linux": …, "darwin": … }`), exactly like the skill
+[`requires.json`](11-skills.md).
 
 ## Subprocess pool
 

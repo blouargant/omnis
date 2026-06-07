@@ -39,8 +39,11 @@ matching Claude Code's tool fan-out.
 **Bash parity:** compound commands are split on `&&`, `||`, `;`, `|` and each
 part is matched independently (a deny on any part denies the whole); process
 wrappers (`timeout`, `nice`, `xargs`, …) are stripped before matching; and
-built-in read-only commands (`ls`, `cat`, `grep`, `git status`, …) run without a
-prompt unless an `ask`/`deny` rule says otherwise.
+built-in read-only commands (`ls`, `cat`, `grep`, `git status`, `which`,
+`command -v`/`command -V`, …) run without a prompt unless an `ask`/`deny` rule
+says otherwise. (`command` is only treated as read-only with a `-v`/`-V` lookup
+flag — `command rm …` still goes through the rules, since it *executes* its
+argument.)
 
 ### yoke extensions
 
@@ -95,9 +98,12 @@ authorised it. The hard safety floor still applies.
 
 ## Skill-contributed permissions
 
-When a skill is loaded, the permission rules it declares are merged in
-**read-only**. They appear in their own block in the Permissions panel so you
-can audit them; edit the skill file to change them.
+When a skill is loaded, the permission rules it declares (in a `permissions.json`
+file next to its `SKILL.md`, same `permissions.{allow,ask,deny}` shape) are
+merged in **read-only**. They appear in their own block in the Permissions panel
+so you can audit them; edit the skill's `permissions.json` to change them. The
+shipped `liteparse` / `pdf` skills use this to pre-allow their `lit` / `pdftotext`
+commands — see [Skills](11-skills.md).
 
 ## Editing from the panel
 

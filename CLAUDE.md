@@ -1189,18 +1189,21 @@ Skills and MCP servers can declare runtime **tool dependencies** that the host
 install it, running the install, and re-checking — rather than relying on the
 model to follow a prompt. Backed by [internal/deps/](internal/deps/) (`Ensure`).
 
-- **Declaration.** A `requires:` list (each `{command, install, label}`); the
+- **Declaration.** A `requires` list (each `{command, install, label}`); the
   `install` value is either a single string or a per-OS map keyed by `GOOS`
-  (`{default, linux, darwin, windows}`):
-  ```yaml
-  requires:
-    - command: lit
-      label: LiteParse
-      install: pip install liteparse
-  ```
-  Skills put it in SKILL.md frontmatter ([internal/skills/](internal/skills/)
-  `RequiresFor`); MCP servers put it on the server entry in `mcp_config.json`
-  (`Server.Requires`, [internal/mcp/mcp.go](internal/mcp/mcp.go)).
+  (`{default, linux, darwin, windows}`).
+  - **Skills** declare it in a **`requires.json` sidecar** next to SKILL.md
+    (mirroring the per-skill `permissions.json`), read by
+    [internal/skills/](internal/skills/) `RequiresFor`. It must **not** go in
+    the SKILL.md frontmatter — ADK's skill loader parses that with
+    `KnownFields(true)` and rejects any field outside `name, description,
+    license, compatibility, metadata, allowed-tools`.
+    ```json
+    { "requires": [ { "command": "lit", "label": "LiteParse",
+                      "install": "pipx install liteparse" } ] }
+    ```
+  - **MCP servers** put it on the server entry in `mcp_config.json`
+    (`Server.Requires`, [internal/mcp/mcp.go](internal/mcp/mcp.go)).
 - **Skill enforcement point** = `load_skill`. A process-wide gate
   (`skills.SetDepGate`, installed from the ask-user registry in
   [agent/infrastructure.go](agent/infrastructure.go) via `newSkillDepGate`,

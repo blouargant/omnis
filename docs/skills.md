@@ -57,6 +57,14 @@ Example (bad — no triggers):
 description: Helps with Kubernetes.
 ```
 
+> **Frontmatter is strict.** The skill loader parses the YAML block with
+> known-fields checking and rejects anything outside `name`, `description`,
+> `license`, `compatibility`, `metadata`, and `allowed-tools` (an unknown field
+> fails the whole skill with `field <x> not found in type skill.Frontmatter`).
+> Yoke-specific configuration therefore lives in **sidecar files** next to
+> `SKILL.md`, never in the frontmatter: `permissions.json` (skill-scoped
+> permission rules) and `requires.json` (tool dependencies — see below).
+
 ## Body conventions
 
 The four sections below produce skills that compose well with the
@@ -83,13 +91,70 @@ the agent:
 The lead's system prompt instructs it to prefer skills over ad-hoc
 reasoning when one matches.
 
+## Tool dependencies (`requires.json`)
+
+A skill that shells out to an external CLI can declare it as a **runtime
+dependency**, and the harness enforces installation *in code* — it checks the
+binary is on `PATH`, asks the user to install it, runs the install, and
+re-checks — instead of trusting the model to follow a "first check it's
+installed" instruction (which it sometimes skips).
+
+Declare dependencies in a **`requires.json`** sidecar next to `SKILL.md` (the
+field cannot live in the frontmatter — see the strictness note above):
+
+```json
+{
+  "requires": [
+    { "command": "lit", "label": "LiteParse", "install": "pipx install liteparse" }
+  ]
+}
+```
+
+| Field     | Meaning                                                                                  |
+|-----------|------------------------------------------------------------------------------------------|
+| `command` | The binary that must resolve on `PATH` (`exec.LookPath`).                                 |
+| `install` | The install command — a string, or a per-OS object keyed by `GOOS` (`{"linux": …, "darwin": …, "windows": …, "default": …}`). |
+| `label`   | Optional friendly name shown in the install prompt (defaults to `command`).              |
+
+> **Pick an install command that works in a clean environment.** For a Python
+> CLI app prefer `pipx install <pkg>` over `pip install <pkg>`: `pip` into the
+> system interpreter fails on PEP 668 / externally-managed Python (modern
+> Debian/Ubuntu) with `error: externally-managed-environment`, whereas pipx
+> isolates the app in its own venv and puts its entry-point on `PATH`. Use a
+> per-OS `install` map for native packages (`brew` vs `apt`).
+
+**When it fires.** The check runs when the skill is loaded (`load_skill`). For
+each missing binary the user is asked, in the active session, to approve the
+install; on approval the install runs through the **Bash safety floor** (so
+catastrophic commands are still blocked even though the install was approved),
+then the binary is re-checked.
+
+**On decline or failure** the behaviour is *report unavailable, not block*: the
+`load_skill` result carries a `dependency_status` notice back to the model, so
+the skill's own documented fallback applies (e.g. `liteparse` falls back to the
+`pdf`/`pdftotext` skill). Enforcement guarantees the install is never silently
+skipped once a dependency-bearing skill is engaged — it does **not** change
+which skill the lead picks in the first place (that stays prompt-driven).
+
+> The same mechanism applies to **MCP servers** via a `requires` array on the
+> server entry in `mcp_config.json`; there the check fires at the server's first
+> connect (where a session exists to prompt). See
+> [configuration.md](configuration.md).
+
+Implementation: [internal/deps](../internal/deps) (the `Ensure` gate), the
+`load_skill` wrapper in
+[internal/skills/deps_gate.go](../internal/skills/deps_gate.go), wired from the
+process-wide ask-user registry in
+[agent/infrastructure.go](../agent/infrastructure.go).
+
 ## Examples shipped in the repo
 
 | Skill            | What it demonstrates                                                  |
 |------------------|-----------------------------------------------------------------------|
 | `review`         | A truly generic review/audit playbook. Works on any artefact.         |
 | `agent-builder`  | Meta-skill: how to scaffold a new specialist agent.                   |
-| `pdf`            | A narrow, tool-bound skill (uses an external PDF extraction CLI).     |
+| `liteparse`      | A tool-bound skill with a `requires.json` (the `lit` CLI, `pipx install liteparse`) and a `permissions.json` allowlist. |
+| `pdf`            | The `pdftotext` fallback for `liteparse`; per-OS `requires.json` (brew/apt). |
 | `k8s-triage`     | A full domain specialisation example (Kubernetes incident triage).    |
 
 ## Tips

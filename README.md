@@ -222,14 +222,13 @@ mount a different combination of:
 ```json
 // config/mcp_config.json
 {
-  "servers": [
-    {
-      "name": "kubernetes",
+  "servers": {
+    "kubernetes": {
       "command": "npx",
       "args": ["-y", "mcp-server-kubernetes"],
       "env": {"KUBECONFIG": "/home/you/.kube/config"}
     }
-  ]
+  }
 }
 ```
 

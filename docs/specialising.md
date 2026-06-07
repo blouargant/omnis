@@ -54,14 +54,13 @@ Two options, freely combinable:
 
 ```json
 {
-  "servers": [
-    {
-      "name": "kubernetes",
+  "servers": {
+    "kubernetes": {
       "command": "npx",
       "args": ["-y", "mcp-server-kubernetes"],
       "env": {"KUBECONFIG": "/home/you/.kube/config"}
     }
-  ]
+  }
 }
 ```
 
@@ -115,9 +114,8 @@ diagnostician with no Go change.
 ```json
 // mcp_config.json
 {
-  "servers": [
-    {
-      "name": "postgres",
+  "servers": {
+    "postgres": {
       "command": "npx",
       "args": [
         "-y",
@@ -125,7 +123,7 @@ diagnostician with no Go change.
         "postgresql://reader:pw@localhost/app?sslmode=require"
       ]
     }
-  ]
+  }
 }
 ```
 
@@ -156,14 +154,13 @@ Done — same binary, new specialist.
 
 ```json
 {
-  "servers": [
-    {
-      "name": "github",
+  "servers": {
+    "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}
     }
-  ]
+  }
 }
 ```
 

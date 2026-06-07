@@ -1,12 +1,6 @@
 ---
 name: pdf
 description: Fallback PDF text extractor using pdftotext (poppler). Use ONLY when the preferred `liteparse` skill is unavailable or for a quick plain-text dump of a simple text PDF — for the best PDF parsing (scanned, multi-column, layout-heavy, or non-PDF formats) prefer the `liteparse` skill.
-requires:
-  - command: pdftotext
-    label: poppler (pdftotext)
-    install:
-      darwin: brew install poppler
-      linux: apt-get install -y poppler-utils
 metadata:
   author: blouargant@chapsvision.com
   tags: "file, pdf, text extraction, fallback"
