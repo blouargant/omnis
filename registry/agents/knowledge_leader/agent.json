@@ -1,11 +1,11 @@
 {
-  "allow_file_attachments": false,
+  "allow_file_attachments": true,
   "builtin": false,
-  "description": "Generic coordinator agent.",
+  "description": "Information retrieval & document creation coordinator. Researches questions via the web_agent, extracts text from documents and converts/generates files via the doc_agent (liteparse/pandoc/pdf), and condenses bulk material via the summariser.",
   "enabled": true,
   "leader": true,
   "model_ref": "premium",
-  "name": "leader",
+  "name": "knowledge_leader",
   "skills": [
     "ask-user",
     "review"

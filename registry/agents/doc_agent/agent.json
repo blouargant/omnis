@@ -1,0 +1,29 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Document parsing & format-conversion specialist. Extracts text from PDFs/DOCX/PPTX/XLSX/images (liteparse, with pdf as fallback) and converts or generates documents across formats with pandoc.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 3,
+  "model_ref": "high",
+  "name": "doc_agent",
+  "skills": [
+    "liteparse",
+    "pandoc",
+    "pdf"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "softskills",
+    "calc"
+  ]
+}

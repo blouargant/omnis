@@ -1,14 +1,14 @@
 {
-  "allow_file_attachments": false,
+  "allow_file_attachments": true,
   "builtin": false,
-  "description": "Generic coordinator agent.",
+  "description": "Kubernetes management & triage coordinator. Diagnoses unhealthy workloads (crash-looping pods, deployments not ready, services unreachable) by delegating read-only kubectl evidence gathering to the k8s_investigator and following the k8s-triage playbook.",
   "enabled": true,
   "leader": true,
   "model_ref": "premium",
-  "name": "leader",
+  "name": "k8s_leader",
   "skills": [
     "ask-user",
-    "review"
+    "k8s-triage"
   ],
   "softskills_dir": "",
   "tools": [

@@ -1,0 +1,12 @@
+{
+  "requires": [
+    {
+      "command": "pandoc",
+      "label": "Pandoc",
+      "install": {
+        "darwin": "brew install pandoc",
+        "linux": "apt-get install -y pandoc"
+      }
+    }
+  ]
+}

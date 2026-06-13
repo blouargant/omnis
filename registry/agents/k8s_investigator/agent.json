@@ -1,0 +1,29 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Gathers Kubernetes evidence with read-only kubectl (get/describe/logs/top/events) and reports cited findings. Follows the k8s-triage and k8s-log-investigation playbooks; never mutates the cluster.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "high",
+  "name": "k8s_investigator",
+  "skills": [
+    "k8s-triage",
+    "k8s-log-investigation"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc"
+  ]
+}

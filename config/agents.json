@@ -10,7 +10,11 @@
     "summariser",
     "agentmd_reviewer",
     "curator",
-    "reflector"
+    "reflector",
+    "k8s_leader",
+    "k8s_investigator",
+    "knowledge_leader",
+    "doc_agent"
   ],
   "app_name": "yoke",
   "bash_timeout_seconds": 120,
@@ -26,15 +30,32 @@
     },
     {
       "name": "Default",
-      "description": "General-purpose coordinator with the full team available.",
+      "description": "General-purpose coordinator for coding and local-system tasks. Web research lives in the Knowledge squad and Kubernetes work in the Kubernetes squad.",
       "leader": "leader",
       "members": [
         "investigator",
-        "web_agent",
         "summariser",
         "image_generator",
         "helper",
         "agentmd_reviewer"
+      ]
+    },
+    {
+      "name": "Kubernetes",
+      "description": "Kubernetes management & triage specialist. Diagnoses unhealthy workloads (crash-looping pods, deployments not ready, services unreachable) and investigates pod logs via read-only kubectl. Route here for anything mentioning kubernetes, k8s, kubectl, pods, deployments, replicasets, services, namespaces, nodes, helm, or a kubectl error.",
+      "leader": "k8s_leader",
+      "members": [
+        "k8s_investigator"
+      ]
+    },
+    {
+      "name": "Knowledge",
+      "description": "Information retrieval & document creation specialist. Web research and fact-finding, extracting text from PDFs/DOCX/PPTX/XLSX/images (including OCR), and converting or generating documents across formats (Markdown, DOCX, PDF, HTML, LaTeX). Route here for research/'who is'/'what is'/'find or summarise information about…' questions, document parsing/extraction, OCR, and format conversion or generation.",
+      "leader": "knowledge_leader",
+      "members": [
+        "doc_agent",
+        "web_agent",
+        "summariser"
       ]
     },
     {
