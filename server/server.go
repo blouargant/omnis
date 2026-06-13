@@ -620,18 +620,30 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		// Simulate the rolling context to estimate API billing:
 		// each turn pays for the full accumulated context as its prompt.
+		// Separately, sum the per-turn per-agent usage that was persisted from
+		// the live `turn_usage` events, so the web UI's per-agent cost breakdown
+		// can be restored after a restart / reload (these are real billed counts,
+		// not the text estimate above).
 		var runningCtx, totalPrompt, totalOutput int
+		agents := map[string]sessions.TokenUsage{}
 		for _, turn := range turns {
 			userTok := compress.CountText(turn.UserText)
 			asstTok := compress.CountText(turn.AssistantText)
 			totalPrompt += runningCtx + userTok
 			totalOutput += asstTok
 			runningCtx += userTok + asstTok
+			for name, u := range turn.Usage {
+				agg := agents[name]
+				agg.Prompt += u.Prompt
+				agg.Output += u.Output
+				agents[name] = agg
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"tokens_used":   runningCtx,
 			"prompt_total":  totalPrompt,
 			"output_total":  totalOutput,
+			"agents":        agents,
 			"window_tokens": compress.DefaultWindowTokens,
 			"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
 			"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),

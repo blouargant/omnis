@@ -164,6 +164,11 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		}
 
 		routerSquad := d.Manager.RouterSquad()
+		// Per-agent token usage accumulated across every hop of this turn, so the
+		// web UI's per-agent cost breakdown can be restored after a server restart
+		// / page reload (it is otherwise built only from the live `turn_usage`
+		// events and lost on reload). Persisted on the turn below.
+		usageAccum := map[string]sessions.TokenUsage{}
 		// runHop streams one squad turn (one Runner.Run) and returns its
 		// assistant text. The Omnis dispatch loop calls it once per hop.
 		//
@@ -182,9 +187,9 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
 			isRouter := routerSquad != "" && squadName == routerSquad
 			if !isRouter {
-				return streamEvents(rctx, c.Writer, seq, subCh, cwd, false)
+				return streamEvents(rctx, c.Writer, seq, subCh, cwd, false, usageAccum)
 			}
-			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, true /*suppressText*/)
+			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, true /*suppressText*/, usageAccum)
 			if err != nil {
 				return text, err
 			}
@@ -222,7 +227,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// keep only the non-empty check so an aborted turn with no output is not
 		// persisted as a blank exchange.
 		if strings.TrimSpace(assistantText) != "" {
-			if err := sessions.AppendConversationTurn(meta.ID, req.Prompt, assistantText); err != nil {
+			if err := sessions.AppendConversationTurnWithUsage(meta.ID, req.Prompt, assistantText, usageAccum); err != nil {
 				log.Printf("server: failed to persist turn: %v", err)
 			}
 		}
@@ -241,6 +246,11 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 // router hop uses it so its routing chatter never reaches the chat — the caller
 // decides afterwards (via Manager.PendingRoute) whether the buffered text was a
 // route (discard) or a genuine reply (flush).
+// usageAccum, when non-nil, accumulates the per-agent token usage emitted as
+// `turn_usage` events during this hop (agent name → counts), so the caller can
+// persist it on the turn and the web UI's per-agent cost breakdown survives a
+// restart / reload. It is fed from the exact same data as the live events, so
+// persisted totals match what the browser accumulated live.
 func streamEvents(
 	ctx context.Context,
 	w io.Writer,
@@ -248,8 +258,18 @@ func streamEvents(
 	subCh <-chan agentBusEvent,
 	cwd string,
 	suppressText bool,
+	usageAccum map[string]sessions.TokenUsage,
 ) (string, error) {
 	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
+	addUsage := func(agent string, prompt, output int64) {
+		if usageAccum == nil || agent == "" {
+			return
+		}
+		u := usageAccum[agent]
+		u.Prompt += prompt
+		u.Output += output
+		usageAccum[agent] = u
+	}
 	streamStart := time.Now()
 	var firstTokenAt time.Time
 	var tokenCount int
@@ -425,6 +445,9 @@ func streamEvents(
 			if usage == nil {
 				return
 			}
+			prompt, _ := usage["prompt_tokens"].(int64)
+			output, _ := usage["candidates_tokens"].(int64)
+			addUsage(agentName, prompt, output)
 			emit("turn_usage", map[string]any{
 				"agent":         agentName,
 				"prompt_tokens": usage["prompt_tokens"],
@@ -544,6 +567,7 @@ func streamEvents(
 				sawPartialText = false
 				// Emit leader token counts so the browser can accumulate session cost.
 				if u := ev.LLMResponse.UsageMetadata; u != nil {
+					addUsage("leader", int64(u.PromptTokenCount), int64(u.CandidatesTokenCount))
 					emit("turn_usage", map[string]any{
 						"agent":         "leader",
 						"prompt_tokens": int64(u.PromptTokenCount),

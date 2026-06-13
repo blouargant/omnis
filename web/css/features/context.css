@@ -25,6 +25,10 @@
 #ctx-ring-wrap:hover { opacity: 1; }
 #ctx-ring-wrap.has-data { opacity: 0.75; }
 #ctx-ring-wrap.has-data:hover { opacity: 1; }
+/* While the popup is open, keep the wrap fully opaque even when the mouse
+   leaves the ring — opacity affects descendants, so a dimmed wrap would make
+   the open popup translucent. */
+#ctx-ring-wrap:has(#ctx-popup:not([hidden])) { opacity: 1; }
 
 #ctx-ring-svg {
   transform-origin: center;

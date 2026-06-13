@@ -1170,7 +1170,20 @@ async function fetchUsageEstimate(sessionId) {
         output: data.output_total || 0,
       });
     }
-    for (const p of panelsForSession(sessionId)) renderCtxRing(p);
+    // Restore the per-agent cost breakdown (lost on reload otherwise, since it
+    // is built only from live turn_usage events). The server replays the
+    // persisted per-turn usage here.
+    if (data.agents && !sessionAgentTokens.has(sessionId)) {
+      const m = new Map();
+      for (const [name, u] of Object.entries(data.agents)) {
+        m.set(name, { prompt: u.prompt || 0, output: u.output || 0 });
+      }
+      if (m.size > 0) sessionAgentTokens.set(sessionId, m);
+    }
+    for (const p of panelsForSession(sessionId)) {
+      renderCtxRing(p);
+      if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+    }
   } catch (e) {
     console.error("failed to fetch usage estimate:", e);
   }

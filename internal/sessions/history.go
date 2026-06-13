@@ -33,10 +33,22 @@ func convLock(sessionID string) *sync.Mutex {
 }
 
 // ConversationTurn is one user→assistant exchange persisted to disk.
+// TokenUsage records the token counts one agent contributed to a turn.
+type TokenUsage struct {
+	Prompt int64 `json:"prompt"`
+	Output int64 `json:"output"`
+}
+
 type ConversationTurn struct {
 	UserText      string    `json:"user_text"`
 	AssistantText string    `json:"assistant_text"`
 	At            time.Time `json:"at"`
+	// Usage is the per-agent token breakdown for this turn (agent name →
+	// counts), captured from the same data that drives the live `turn_usage`
+	// SSE events. Persisting it lets the web UI's per-agent cost breakdown
+	// survive a server restart / page reload. Omitted (nil) for legacy turns
+	// and turns where no usage was captured.
+	Usage map[string]TokenUsage `json:"usage,omitempty"`
 }
 
 // ConversationFile is the on-disk format for a session's history.
@@ -209,11 +221,22 @@ func LoadConversationTurns(sessionID string) ([]ConversationTurn, error) {
 // AppendConversationTurn appends one user→assistant exchange and clears
 // the Harvested flag so a fresh idle scan re-evaluates the session.
 func AppendConversationTurn(sessionID, userText, assistantText string) error {
+	return AppendConversationTurnWithUsage(sessionID, userText, assistantText, nil)
+}
+
+// AppendConversationTurnWithUsage is AppendConversationTurn plus the per-agent
+// token usage captured during the turn (agent name → counts). A nil/empty map
+// behaves exactly like AppendConversationTurn.
+func AppendConversationTurnWithUsage(sessionID, userText, assistantText string, usage map[string]TokenUsage) error {
+	if len(usage) == 0 {
+		usage = nil // keep the on-disk field omitted when there's nothing to store
+	}
 	return mutateConversation(sessionID, func(f *ConversationFile) {
 		f.Turns = append(f.Turns, ConversationTurn{
 			UserText:      userText,
 			AssistantText: assistantText,
 			At:            time.Now(),
+			Usage:         usage,
 		})
 		f.Harvested = false // new activity resets the harvest flag
 	})
