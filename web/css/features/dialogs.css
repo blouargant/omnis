@@ -264,19 +264,25 @@
   padding: 14px 16px 12px;
   font-size: 14px;
 }
-/* Active card: a flex column bounded by a LENGTH max-height — the viewport minus
-   the floating composer minus the top chrome (tab bar + pinned prompt header +
-   gaps). A length cap needs no definite parent (unlike max-height:100%), so it
-   reliably keeps the whole card — command, all options, Submit — above the
-   composer. In a normal window the card's natural content height is well under
-   the cap, so everything shows with no scroll; only in a genuinely short window
-   does it cap out and scroll the command/prompt internally while the options +
-   action row stay pinned (flex:0 0 auto). */
+/* Active card: a flex column bounded by a LENGTH max-height — the exact space
+   between the bottom of the top chrome (tab bar + pinned prompt header) and the
+   top of the floating composer. That distance is MEASURED per-pane into
+   --ask-card-max-h by updateAskCardBounds() in app.js, because the pinned prompt
+   header's height is variable (up to 3 lines) and a config banner can push the
+   pane down — a fixed `100vh - 170px` guess underestimated the chrome and let the
+   card's bottom (the Submit/Skip row) slip under the composer or collide with the
+   pinned prompt. A length cap needs no definite parent (unlike max-height:100%),
+   so it reliably keeps the whole card — command, all options, Submit — above the
+   composer. The `100vh - 170px` calc stays only as the pre-JS fallback. In a
+   normal window the card's natural content height is well under the cap, so
+   everything shows with no scroll; only in a genuinely short window does it cap
+   out and scroll the command/prompt internally while the options + action row
+   stay pinned (flex:0 0 auto). */
 .ask-user-card:not(.resolved) {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: calc(100vh - var(--composer-overlay-h, 0px) - 170px);
+  max-height: var(--ask-card-max-h, calc(100vh - var(--composer-overlay-h, 0px) - 170px));
 }
 .ask-user-card:not(.resolved) > .ask-wizard-rail,
 .ask-user-card:not(.resolved) > .ask-user-choices,

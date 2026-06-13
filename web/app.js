@@ -686,15 +686,44 @@ function attachPaneHandlers(panel) {
   // --composer-overlay-h on the pane root: #transcript's bottom padding and the
   // ask-user slot's bottom margin track it so content always clears the card.
   // Re-pin to bottom while stuck so a growing composer never hides the last line.
+  // The same observer keeps --ask-card-max-h current (see updateAskCardBounds):
+  // it must be recomputed whenever the composer, the top chrome (tab bar +
+  // pinned prompt header, whose height varies with the prompt length), or the
+  // pane itself changes size.
   if (window.ResizeObserver) {
     const ro = new ResizeObserver(() => {
       const h = pe.composerWrap.offsetHeight || 0;
       panel.root.style.setProperty("--composer-overlay-h", h + "px");
+      updateAskCardBounds(panel);
       if (panel._stick) scrollBottom(panel);
     });
     ro.observe(pe.composerWrap);
+    if (pe.promptHeader && pe.promptHeader.parentElement) ro.observe(pe.promptHeader.parentElement);
+    ro.observe(panel.root);
     panel._composerRO = ro;
   }
+}
+
+// updateAskCardBounds publishes --ask-card-max-h on the pane root: the exact
+// pixel height the ask-user card may occupy between the bottom of the top chrome
+// (tab bar + the variable-height pinned prompt header) and the top of the
+// floating composer. Measuring it — rather than the old fixed `100vh - 170px`
+// guess — keeps the whole card (prompt, options AND the Submit/Skip row) visible
+// regardless of the pinned prompt's height or a config banner pushing the pane
+// down; only in a genuinely short window does the card cap out and scroll its
+// prompt internally while the action row stays pinned. The transcript's top edge
+// is anchored just below the chrome and the composer's top is anchored to the
+// pane bottom, so neither moves when the card appears — no measurement feedback
+// loop. A min clamp guards against transient negative values mid-layout.
+function updateAskCardBounds(panel) {
+  const pe = panel && panel.els;
+  if (!pe || !pe.transcript || !pe.composerWrap) return;
+  const top = pe.transcript.getBoundingClientRect().top;
+  const bottom = pe.composerWrap.getBoundingClientRect().top;
+  const avail = Math.max(120, Math.round(bottom - top - 12));
+  if (panel._askMaxH === avail) return;
+  panel._askMaxH = avail;
+  panel.root.style.setProperty("--ask-card-max-h", avail + "px");
 }
 
 // uploadPickedFiles uploads files to a pane's session (creating one if the
@@ -2740,6 +2769,9 @@ function renderAskUserWidget(sessionId, q) {
   } else {
     renderWizard(wiz);
   }
+  // Size the card to the real space above the composer now, so its bottom (the
+  // Submit/Skip row) is never clipped on the first paint before the observer fires.
+  updateAskCardBounds(panel);
   scrollBottom(panel);
 }
 
