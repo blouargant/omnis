@@ -185,11 +185,18 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			seq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
 				&genai.Content{Role: "user", Parts: hopParts},
 				agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+			// The hop's runner-root agent name (squad leader, or the single member
+			// of a leaderless squad). Used to attribute the root's usage correctly
+			// and suppress its duplicate bus events.
+			rootAgent := ""
+			if hopSq.Leader != nil {
+				rootAgent = hopSq.Leader.Name()
+			}
 			isRouter := routerSquad != "" && squadName == routerSquad
 			if !isRouter {
-				return streamEvents(rctx, c.Writer, seq, subCh, cwd, false, usageAccum)
+				return streamEvents(rctx, c.Writer, seq, subCh, cwd, rootAgent, false, usageAccum)
 			}
-			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, true /*suppressText*/, usageAccum)
+			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum)
 			if err != nil {
 				return text, err
 			}
@@ -251,15 +258,26 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 // persist it on the turn and the web UI's per-agent cost breakdown survives a
 // restart / reload. It is fed from the exact same data as the live events, so
 // persisted totals match what the browser accumulated live.
+// rootAgent is the name of this hop's runner-root agent (the squad leader, or
+// the single member of a leaderless squad). The ADK event stream surfaces the
+// root's text, tool calls, and usage; the runner-level events plugin ALSO fires
+// tool/model callbacks for that same root, so we drop the root's duplicate bus
+// events here (keyed on rootAgent) and attribute the ADK-stream usage to it —
+// otherwise a squad root named e.g. "omnis"/"knowledge_leader" (which slips past
+// the broadcaster's legacy "leader"-only filter) gets counted twice.
 func streamEvents(
 	ctx context.Context,
 	w io.Writer,
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
 	cwd string,
+	rootAgent string,
 	suppressText bool,
 	usageAccum map[string]sessions.TokenUsage,
 ) (string, error) {
+	if rootAgent == "" {
+		rootAgent = "leader"
+	}
 	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
 	addUsage := func(agent string, prompt, output int64) {
 		if usageAccum == nil || agent == "" {
@@ -385,6 +403,18 @@ func streamEvents(
 		p := be.Payload
 		agentName, _ := p["agent"].(string)
 		toolName, _ := p["tool"].(string)
+		// The runner-level events plugin fires tool/model callbacks for the
+		// runner's ROOT agent too. The ADK event stream already surfaces those
+		// (tool_call/tool_result frames + the turn_usage emitted below), so drop
+		// the root's duplicates here. Scoped to tool/model events so ask_user /
+		// compression events (no/other agent) are never affected.
+		if agentName != "" && agentName == rootAgent {
+			switch be.Event {
+			case events.EventBeforeTool, events.EventAfterTool,
+				events.EventToolError, events.EventAfterModel:
+				return
+			}
+		}
 		switch be.Event {
 		case events.EventBeforeTool:
 			args, _ := p["input"].(map[string]any)
@@ -440,7 +470,10 @@ func streamEvents(
 				"window_tokens": window,
 			})
 		case events.EventAfterModel:
-			// Sub-agent model call (leader is handled via the ADK event stream below).
+			// Sub-agent model usage. The runner-root's own EventAfterModel is
+			// dropped above (agentName == rootAgent); the root's usage is emitted
+			// from the ADK event stream instead, so this only reaches here for
+			// genuine sub-agents.
 			usage, _ := p["usage"].(map[string]any)
 			if usage == nil {
 				return
@@ -567,9 +600,9 @@ func streamEvents(
 				sawPartialText = false
 				// Emit leader token counts so the browser can accumulate session cost.
 				if u := ev.LLMResponse.UsageMetadata; u != nil {
-					addUsage("leader", int64(u.PromptTokenCount), int64(u.CandidatesTokenCount))
+					addUsage(rootAgent, int64(u.PromptTokenCount), int64(u.CandidatesTokenCount))
 					emit("turn_usage", map[string]any{
-						"agent":         "leader",
+						"agent":         rootAgent,
 						"prompt_tokens": int64(u.PromptTokenCount),
 						"output_tokens": int64(u.CandidatesTokenCount),
 					})

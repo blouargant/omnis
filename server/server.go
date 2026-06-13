@@ -109,7 +109,11 @@ func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 		b.mu.RUnlock()
 	}
 	forward := func(ev string, p map[string]any) {
-		// Skip leader events — they are already surfaced by the ADK event stream.
+		// Skip the default leader's events — they are already surfaced by the ADK
+		// event stream. NOTE: squad roots are named e.g. "omnis"/"knowledge_leader",
+		// not "leader", so they slip past this name-based filter; streamEvents drops
+		// each hop's actual root by name (rootAgent) so the root is never counted /
+		// displayed twice. This filter is just an early-out for the common case.
 		if agent, _ := p["agent"].(string); agent == "leader" {
 			return
 		}
@@ -118,7 +122,7 @@ func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 	bus.On(events.EventBeforeTool, forward)
 	bus.On(events.EventAfterTool, forward)
 	bus.On(events.EventToolError, forward)
-	bus.On(events.EventAfterModel, forward) // sub-agent model calls only; leader is in ADK stream
+	bus.On(events.EventAfterModel, forward) // root deduped per-hop in streamEvents
 	bus.On(events.EventCompressionSkipped, broadcast)
 	bus.On(events.EventCompressionEnd, broadcast)
 	// ask_user events are forwarded verbatim to all active SSE streams so
