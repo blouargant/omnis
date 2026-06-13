@@ -1,5 +1,6 @@
 {
   "agents": [
+    "omnis",
     "leader",
     "investigator",
     "web_agent",
@@ -13,7 +14,16 @@
   ],
   "app_name": "yoke",
   "bash_timeout_seconds": 120,
+  "router_squad": "omnis",
   "squads": [
+    {
+      "name": "Omnis",
+      "description": "Router squad (default for new chats): hands each request to the squad best suited to handle it. Leaderless — the Omnis agent runs directly and only routes.",
+      "leader": "none",
+      "members": [
+        "omnis"
+      ]
+    },
     {
       "name": "Default",
       "description": "General-purpose coordinator with the full team available.",
@@ -39,7 +49,7 @@
     },
     {
       "name": "Helper",
-      "description": "Focused on answering questions about yoke from its documentation and crawling remote registries to find, inspect, and install items on demand. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
+      "description": "Answers questions about yoke and its capabilities, and finds/inspects/installs registry items (skills, agents, MCP servers, squads, A2A peers, commands) on demand. Use this whenever the user asks whether an agent/skill/tool/MCP server exists for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, or asks what yoke can do or how it works. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
       "leader": "none",
       "members": [
         "helper"

@@ -527,7 +527,14 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			c.JSON(http.StatusOK, out)
 			return
 		}
+		// The "default" reported to the UI is the squad new chats start on: the
+		// Omnis router squad when routing is enabled, else the default squad.
+		// This preselects Omnis in the new-chat picker and suppresses a
+		// redundant squad badge on router-default sessions.
 		out.Default = inst.DefaultName
+		if inst.RouterName != "" {
+			out.Default = inst.RouterName
+		}
 		settings := inst.Settings
 		// Build a quick name → description lookup so the UI can render the
 		// member list without a second round-trip.

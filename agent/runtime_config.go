@@ -125,6 +125,11 @@ type runtimeConfigFile struct {
 	EmbedModelRef string       `json:"embed_model_ref,omitempty"`
 	Agents        []string     `json:"agents"`
 	Squads        []SquadEntry `json:"squads"`
+	// RouterSquad names the squad that acts as the Omnis router — the default
+	// agent for new chats, which routes each request to the best-suited squad.
+	// A pointer so we can distinguish absent (nil → default to "omnis") from an
+	// explicit opt-out ("none"/""). Overridable by YOKE_ROUTER_SQUAD.
+	RouterSquad *string `json:"router_squad,omitempty"`
 	// Models is no longer a supported field in agents.json. It is detected
 	// here only to produce a clear migration error. Move the block to
 	// models.json (see RuntimeSettings.ModelsConfigPath).
@@ -235,6 +240,11 @@ type RuntimeSettings struct {
 	// Squads is the normalised list of named agent groups. Always contains
 	// at least one entry named DefaultSquadName.
 	Squads []RuntimeSquadConfig
+	// RouterSquad is the resolved name of the Omnis router squad (the default
+	// agent for new chats). Empty means routing is disabled (opt-out). The
+	// router agent + leaderless squad are injected by ensureRouterSquad in the
+	// build path when missing.
+	RouterSquad string
 	// Curator gate thresholds (YOKE_CURATOR_MIN_TURNS / YOKE_CURATOR_MIN_SUB_AGENT_CALLS).
 	// Zero values fall back to the defaults in CuratorGateConfig.
 	CuratorMinTurns         int
@@ -927,6 +937,12 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if err != nil {
 		return RuntimeSettings{}, err
 	}
+
+	// Resolve the router squad name (config → YOKE_ROUTER_SQUAD env; absent
+	// defaults to "omnis", "none" disables). The router agent + leaderless
+	// squad are injected by ensureRouterSquad in the build path, not here, so
+	// config-only tests see an unmodified squad list.
+	out.RouterSquad = resolveRouterSquadName(cfg.RouterSquad)
 
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
 	out.ModelsConfigPath = filepath.Clean(out.ModelsConfigPath)

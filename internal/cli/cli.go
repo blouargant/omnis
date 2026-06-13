@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,10 +24,12 @@ import (
 
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/runner"
+	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
 	"golang.org/x/term"
 
+	toolkitagent "github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/agentmd"
 	"github.com/blouargant/yoke/internal/askuser"
@@ -35,8 +38,17 @@ import (
 
 // Config bundles everything the CLI needs to run.
 type Config struct {
-	// Runner is the ADK runner driving the lead agent.
+	// Runner is the ADK runner driving the lead agent. Used as the sole runner
+	// when Manager is nil (e.g. examples that build a bare runner).
 	Runner *runner.Runner
+	// Manager, when set, enables the Omnis routing dispatch loop: each turn runs
+	// through Manager.RunWithRouting so the router can hand control to the
+	// best-suited squad (and squads can hand back). When nil the CLI runs the
+	// single Runner above with no routing.
+	Manager *toolkitagent.Manager
+	// Squad is the starting squad for the session (the router squad when routing
+	// is enabled). Only consulted when Manager is set.
+	Squad string
 	// Bus is the optional shared event bus. Currently unused inside the
 	// CLI, but reserved so callers can wire trace overlays in the future
 	// without changing the constructor signature.
@@ -137,7 +149,8 @@ func runOneShot(ctx context.Context, cfg Config, prompt string) error {
 	}
 	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return runTurn(turnCtx, cfg, prompt, false /*showTrace*/)
+	_, err := runTurn(turnCtx, cfg, prompt, false /*showTrace*/, cfg.Squad)
+	return err
 }
 
 // runRepl is the interactive read-eval-print loop. Each turn gets its own
@@ -148,6 +161,11 @@ func runRepl(ctx context.Context, cfg Config) error {
 
 	reader := bufio.NewReader(cfg.Stdin)
 	var readMu sync.Mutex // serializes goroutine reads across iterations
+
+	// currentSquad tracks which squad the session is on across turns so the
+	// Omnis router's routing persists (and a squad keeps its context when the
+	// conversation returns to it). Starts on the router squad when routing is on.
+	currentSquad := cfg.Squad
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -192,7 +210,7 @@ func runRepl(ctx context.Context, cfg Config) error {
 		}
 
 		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-		err = runTurn(turnCtx, cfg, prompt, true /*showTrace*/)
+		currentSquad, err = runTurn(turnCtx, cfg, prompt, true /*showTrace*/, currentSquad)
 		cancel()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return err
@@ -224,56 +242,121 @@ func readLineCtx(ctx context.Context, mu *sync.Mutex, r *bufio.Reader) (string, 
 	}
 }
 
-// runTurn streams one runner.Run invocation to cfg.Stdout. When showTrace is
-// true, tool calls and responses are echoed dimly to cfg.Stderr so the user
-// sees the agent's activity in interactive mode. In one-shot mode the trace
-// is suppressed so piped output stays clean.
-func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool) error {
+// runTurn streams one user turn to cfg.Stdout and returns the squad the turn
+// ended on (so the REPL can resume there). When showTrace is true, tool calls
+// and responses are echoed dimly to cfg.Stderr so the user sees the agent's
+// activity in interactive mode. In one-shot mode the trace is suppressed so
+// piped output stays clean.
+//
+// When cfg.Manager is set the turn runs through the Omnis routing dispatch
+// loop (the router can hand control to the best-suited squad, and squads can
+// hand back); otherwise it runs the single cfg.Runner with no routing.
+func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, startSquad string) (string, error) {
 	parts := []*genai.Part{{Text: prompt}}
 	// Inline the content of any "@path" file references in the prompt, resolved
 	// against the process working directory.
 	if note := fileref.Context(prompt, ""); note != "" {
 		parts = append(parts, &genai.Part{Text: note})
 	}
-	seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
-		&genai.Content{Role: "user", Parts: parts},
-		adkagent.RunConfig{})
+	// The router only needs the user's words to pick a squad — not the inlined
+	// @file contents — so it gets a prompt-only view; the answering squad still
+	// receives the full `parts` (with the inlined file content).
+	routerParts := []*genai.Part{{Text: prompt}}
 
-	wroteText := false
-	for ev, err := range seq {
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				fmt.Fprintln(cfg.Stderr, "\n(cancelled)")
-				return nil
+	// stream renders one ADK event sequence: assistant text to stdout, tool
+	// activity (when showTrace) to stderr. Returns the assistant text produced.
+	// When quiet, the assistant text is accumulated but NOT written to stdout —
+	// the router hop uses this to withhold its routing chatter until we know
+	// whether it routed.
+	stream := func(seq iter.Seq2[*session.Event, error], quiet bool) (string, error) {
+		var text strings.Builder
+		for ev, err := range seq {
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					fmt.Fprintln(cfg.Stderr, "\n(cancelled)")
+					return text.String(), nil
+				}
+				return text.String(), fmt.Errorf("run: %w", err)
 			}
-			return fmt.Errorf("run: %w", err)
-		}
-		if ev == nil || ev.Content == nil {
-			continue
-		}
-		for _, p := range ev.Content.Parts {
-			if p == nil {
+			if ev == nil || ev.Content == nil {
 				continue
 			}
-			switch {
-			case p.Text != "":
-				fmt.Fprint(cfg.Stdout, p.Text)
-				wroteText = true
-			case p.FunctionCall != nil:
-				if showTrace {
-					fmt.Fprintf(cfg.Stderr, "\n\x1b[2m→ %s\x1b[0m\n", p.FunctionCall.Name)
+			for _, p := range ev.Content.Parts {
+				if p == nil {
+					continue
 				}
-			case p.FunctionResponse != nil:
-				if showTrace {
-					fmt.Fprintf(cfg.Stderr, "\x1b[2m✓ %s\x1b[0m\n", p.FunctionResponse.Name)
+				switch {
+				case p.Text != "":
+					if !quiet {
+						fmt.Fprint(cfg.Stdout, p.Text)
+					}
+					text.WriteString(p.Text)
+				case p.FunctionCall != nil:
+					if showTrace {
+						fmt.Fprintf(cfg.Stderr, "\n\x1b[2m→ %s\x1b[0m\n", p.FunctionCall.Name)
+					}
+				case p.FunctionResponse != nil:
+					if showTrace {
+						fmt.Fprintf(cfg.Stderr, "\x1b[2m✓ %s\x1b[0m\n", p.FunctionResponse.Name)
+					}
 				}
 			}
 		}
+		return text.String(), nil
 	}
-	if wroteText {
+
+	// No manager → single-runner path (back-compat for examples).
+	if cfg.Manager == nil {
+		seq := cfg.Runner.Run(ctx, cfg.UserID, cfg.SessionID,
+			&genai.Content{Role: "user", Parts: parts},
+			adkagent.RunConfig{})
+		text, err := stream(seq, false)
+		if strings.TrimSpace(text) != "" {
+			fmt.Fprintln(cfg.Stdout)
+		}
+		return startSquad, err
+	}
+
+	routerSquad := cfg.Manager.RouterSquad()
+	// Routing path: each hop streams one squad turn; control returns here
+	// between hops so a topic switch routes to another squad seamlessly.
+	//
+	// The router hop is suppressed: the model often narrates ("Routed to the
+	// default squad…") despite the instruction. We accumulate its text quietly
+	// and print it only if the router did not route (a clarifying question); a
+	// route discards it. The "── routed to X squad ──" trace (notify) is the only
+	// routing signal.
+	runHop := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+		seq := sq.Runner.Run(rctx, cfg.UserID, cfg.SessionID,
+			&genai.Content{Role: "user", Parts: hopParts},
+			adkagent.RunConfig{})
+		isRouter := routerSquad != "" && squadName == routerSquad
+		if !isRouter {
+			return stream(seq, false)
+		}
+		text, err := stream(seq, true /*quiet*/)
+		if err != nil {
+			return text, err
+		}
+		if cfg.Manager.PendingRoute(cfg.SessionID) {
+			return "", nil // routed → discard the router's chatter
+		}
+		// Router chose to talk to the user (no route): print its reply now.
+		if strings.TrimSpace(text) != "" {
+			fmt.Fprint(cfg.Stdout, text)
+		}
+		return text, nil
+	}
+	notify := func(from, to, reason string) {
+		if showTrace {
+			fmt.Fprintf(cfg.Stderr, "\n\x1b[2m── routed to %s squad ──\x1b[0m\n", to)
+		}
+	}
+	finalSquad, text, err := cfg.Manager.RunWithRouting(ctx, cfg.UserID, cfg.SessionID, startSquad, parts, routerParts, runHop, notify)
+	if strings.TrimSpace(text) != "" {
 		fmt.Fprintln(cfg.Stdout)
 	}
-	return nil
+	return finalSquad, err
 }
 
 // handleSlash dispatches REPL-only slash commands. Returns true when the

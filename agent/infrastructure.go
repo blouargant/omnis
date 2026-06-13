@@ -37,6 +37,12 @@ type Infrastructure struct {
 	Bus             *events.Bus
 	AskUserRegistry *askuser.Registry
 
+	// RouteDirectives holds the pending Omnis routing directive per session.
+	// Written by the route_to_squad / handoff_to_router tools during a turn and
+	// consumed by Manager.RunWithRouting after the turn's runner finishes.
+	// Process-wide so it survives hot-reload (directives are transient per turn).
+	RouteDirectives *RouteRegistry
+
 	// Session-scoped state holders. Each is a process-singleton that lazily
 	// creates per-(userID, sessionID) entries on disk, so they trivially
 	// outlive any single Instance.
@@ -159,6 +165,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		BgQueues:        bgQueues,
 		TodoStore:       todoStore,
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
+		RouteDirectives: NewRouteRegistry(),
 	}, nil
 }
 

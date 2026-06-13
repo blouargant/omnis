@@ -1,0 +1,12 @@
+{
+  "allow_file_attachments": false,
+  "builtin": true,
+  "description": "Omnis router — the default agent for new chats. Routes each request to the squad best suited to handle it, then hands over control of the conversation.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "balanced",
+  "name": "omnis",
+  "skills": null,
+  "softskills_dir": "",
+  "tools": []
+}

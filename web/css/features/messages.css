@@ -257,4 +257,23 @@
   white-space: pre-wrap;
 }
 
+/* Omnis routing notice — centred pill shown when the router hands the
+   conversation to another squad mid-turn. */
+.msg-row.routing {
+  justify-content: center;
+}
+.routing-chip {
+  display: inline-block;
+  margin: 2px auto;
+  padding: 3px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+
 

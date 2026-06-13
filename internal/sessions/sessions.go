@@ -236,6 +236,29 @@ func (r *Registry) SetArchived(id string, v bool) bool {
 	return true
 }
 
+// SetSquad updates the squad a session is bound to (in-memory + persisted to
+// the conversation file asynchronously, mirroring SetArchived). Called by the
+// Omnis routing dispatch loop when control moves to a different squad mid-turn
+// so the session resumes on that squad on the next turn and survives a restart.
+// Returns true when a session was found.
+func (r *Registry) SetSquad(id, squad string) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.Squad = squad
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationSquad(id, squad); err != nil {
+			log.Printf("sessions: failed to persist squad for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
 // Delete removes the session and its conversation file. Returns true
 // when a session was found and removed.
 func (r *Registry) Delete(id string) bool {

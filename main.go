@@ -158,27 +158,67 @@ func run(ctx context.Context, opts options, args []string) error {
 // non-empty they are joined as the one-shot prompt; otherwise the CLI
 // auto-detects between REPL (TTY) and stdin-piped one-shot.
 func runCLI(ctx context.Context, opts options, promptArgs []string) error {
-	result, err := buildAgent(ctx, opts)
+	// Build the same Infrastructure+Manager combo the TUI/server use (rather
+	// than a bare runner) so the CLI gets the Omnis routing dispatch loop:
+	// the router routes each request to the best-suited squad and squads can
+	// hand control back. The default-squad runner is still passed for
+	// back-compat with examples that build a bare runner.
+	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
 	if err != nil {
 		return err
 	}
-	r, err := runner.New(result.RunnerConfig)
+	agentOpts := agent.Options{
+		SoftSkillsDir:    opts.softSkillsDir,
+		AppName:          opts.appName,
+		ConfigPath:       opts.configPath,
+		ConfigPathStrict: opts.configPath != "",
+		CuratorEnabled:   curatorEnabled,
+		DebugLogging:     opts.debug,
+	}
+	infra, err := agent.BuildInfrastructure(ctx, agentOpts)
+	if err != nil {
+		return err
+	}
+	defer infra.Close()
+	if agentOpts.Repo == "" {
+		agentOpts.Repo = infra.Repo
+	}
+	if agentOpts.AppName == "" {
+		agentOpts.AppName = infra.AppName
+	}
+	inst, err := agent.BuildInstance(ctx, infra, agentOpts, 1)
+	if err != nil {
+		return err
+	}
+	manager := agent.NewManager(infra, inst)
+	defer manager.Close()
+
+	r, err := runner.New(inst.RunnerConfig)
 	if err != nil {
 		return fmt.Errorf("cli runner: %w", err)
 	}
 
 	prompt := strings.TrimSpace(strings.Join(promptArgs, " "))
 
-	if result.EventBus != nil {
-		result.EventBus.Emit(events.EventSessionStart, map[string]any{})
-		defer result.EventBus.Emit(events.EventSessionEnd, map[string]any{})
+	if infra.Bus != nil {
+		infra.Bus.Emit(events.EventSessionStart, map[string]any{})
+		defer infra.Bus.Emit(events.EventSessionEnd, map[string]any{})
+	}
+
+	// New CLI sessions start on the Omnis router squad when routing is enabled;
+	// otherwise the default squad.
+	squad := agent.DefaultSquadName
+	if rs := manager.RouterSquad(); rs != "" {
+		squad = rs
 	}
 
 	return cli.Run(ctx, cli.Config{
 		Runner:          r,
-		Bus:             result.EventBus,
-		AskUserRegistry: result.AskUserRegistry,
-		AppName:         result.RunnerConfig.AppName,
+		Manager:         manager,
+		Squad:           squad,
+		Bus:             infra.Bus,
+		AskUserRegistry: infra.AskUserRegistry,
+		AppName:         inst.RunnerConfig.AppName,
 		Prompt:          prompt,
 	})
 }

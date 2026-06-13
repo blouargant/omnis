@@ -35,6 +35,34 @@ func TestLoadMissingReturnsEmptyAndAsks(t *testing.T) {
 	}
 }
 
+func TestRoutingToolsAlwaysAllowed(t *testing.T) {
+	t.Parallel()
+	// Even with a deny rule whose regex would match the routing tool's
+	// natural-language prompt args, the Omnis control-flow tools must be
+	// allowed without prompting (exempted before the deny tier) so routing is
+	// completely transparent.
+	cfg := cfgFromJSON(t, `{"permissions":{
+		"defaultMode":"default",
+		"deny":["/\\.ssh/id_rsa/","/rm -rf/"]
+	}}`)
+	args := map[string]any{
+		"squad":  "default",
+		"prompt": "help me with my ~/.ssh/id_rsa file and rm -rf cleanup",
+		"reason": "user request",
+	}
+	for _, name := range []string{"route_to_squad", "handoff_to_router", "ask_squad"} {
+		if d, _ := cfg.CheckArgs(name, args, ""); d != DecisionAllow {
+			t.Fatalf("%s: want DecisionAllow (transparent), got %v", name, d)
+		}
+	}
+	// Contrast: a non-routing tool with the SAME args is denied by the .ssh
+	// rule — proving the deny is live and the routing exemption specifically
+	// bypassed it (rather than the args simply being harmless).
+	if d, _ := cfg.CheckArgs("some_other_tool", args, ""); d != DecisionDeny {
+		t.Fatalf("non-routing tool should be denied by the .ssh rule, got %v", d)
+	}
+}
+
 func TestPrecedenceDenyAskAllow(t *testing.T) {
 	t.Parallel()
 	cfg := cfgFromJSON(t, `{"permissions":{

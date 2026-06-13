@@ -991,7 +991,12 @@ func Run(ctx context.Context, cfg Config) error {
 
 	createSession := func(squad string) {
 		if squad == "" {
+			// New chats default to the Omnis router squad when routing is
+			// enabled; otherwise the default squad.
 			squad = toolkitagent.DefaultSquadName
+			if rs := cfg.Manager.RouterSquad(); rs != "" {
+				squad = rs
+			}
 		}
 		meta := cfg.Sessions.New(squad)
 		_ = sessions.SetConversationSquad(meta.ID, squad)
@@ -1033,7 +1038,7 @@ func Run(ctx context.Context, cfg Config) error {
 		if len(remaining) > 0 {
 			switchSession(remaining[0].ID)
 		} else {
-			createSession(toolkitagent.DefaultSquadName)
+			createSession("") // "" → router squad when routing enabled
 		}
 	}
 
@@ -1056,7 +1061,7 @@ func Run(ctx context.Context, cfg Config) error {
 			if next != "" {
 				switchSession(next)
 			} else {
-				createSession(toolkitagent.DefaultSquadName)
+				createSession("") // "" → router squad when routing enabled
 			}
 		} else {
 			refreshSessions()
@@ -1484,68 +1489,121 @@ func Run(ctx context.Context, cfg Config) error {
 			if note := fileref.Context(prompt, getBashCwd(sessionID)); note != "" {
 				parts = append(parts, &genai.Part{Text: note})
 			}
-			seq := squadInst.Runner.Run(ctx, cfg.UserID, sessionID,
-				&genai.Content{Role: "user", Parts: parts},
-				adkagent.RunConfig{})
+			routerSquad := cfg.Manager.RouterSquad()
+			// runHop streams one squad turn (one Runner.Run), rendering as it
+			// arrives, and returns the assistant text for that hop. The Omnis
+			// dispatch loop calls it once per hop; control returns here between
+			// hops so a topic switch can route to a different squad seamlessly.
+			//
+			// The router hop is suppressed: the model often narrates ("Routed to
+			// the default squad…") and emits routing tool calls despite the
+			// instruction. We render nothing for it during the stream, accumulate
+			// its text, and after the hop show that text ONLY if the router did not
+			// route (a clarifying question); a route discards it. The "── routed to
+			// X squad ──" line (notify) is the only visible routing signal.
+			runHop := func(rctx context.Context, hopSq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+				seq := hopSq.Runner.Run(rctx, cfg.UserID, sessionID,
+					&genai.Content{Role: "user", Parts: hopParts},
+					adkagent.RunConfig{})
 
-			// Buffer assistant text per turn; flush as rendered markdown
-			// either when a non-text part arrives (tool call/response)
-			// or when the stream completes. Also accumulate the plain
-			// assistant text so we can persist the turn at the end.
-			var mdBuf strings.Builder
-			var assistantText strings.Builder
-			var subAgentStack []string
-			currentSubAgent := func() string {
-				if len(subAgentStack) == 0 {
-					return ""
+				isRouter := routerSquad != "" && squadName == routerSquad
+
+				// Buffer assistant text per turn; flush as rendered markdown
+				// either when a non-text part arrives (tool call/response)
+				// or when the stream completes. Also accumulate the plain
+				// assistant text so we can persist the turn at the end.
+				var mdBuf strings.Builder
+				var assistantText strings.Builder
+				var subAgentStack []string
+				currentSubAgent := func() string {
+					if len(subAgentStack) == 0 {
+						return ""
+					}
+					return subAgentStack[len(subAgentStack)-1]
 				}
-				return subAgentStack[len(subAgentStack)-1]
-			}
-			for ev, err := range seq {
-				if err != nil {
+				// On the router hop, mid-stream rendering is suppressed (mdBuf still
+				// accumulates so we can decide what to show afterwards).
+				flush := func() {
+					if isRouter {
+						return
+					}
 					flushMarkdown(&mdBuf, currentSubAgent())
-					appendChat("\n[red]error: %v[-]\n", err)
-					return
 				}
-				if ev == nil || ev.Content == nil {
-					continue
+				chat := func(format string, args ...any) {
+					if isRouter {
+						return
+					}
+					appendChat(format, args...)
 				}
-				for _, p := range ev.Content.Parts {
-					if p == nil {
+				for ev, err := range seq {
+					if err != nil {
+						flush()
+						chat("\n[red]error: %v[-]\n", err)
+						return assistantText.String(), err
+					}
+					if ev == nil || ev.Content == nil {
 						continue
 					}
-					switch {
-					case p.Text != "":
-						clean := stripTerminalControlSequences(p.Text)
-						mdBuf.WriteString(clean)
-						assistantText.WriteString(clean)
-					case p.FunctionCall != nil:
-						flushMarkdown(&mdBuf, currentSubAgent())
-						if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(p.FunctionCall.Name))]; ok {
-							subAgentStack = append(subAgentStack, p.FunctionCall.Name)
-							appendChat("[yellow][::b]--- entering sub-agent: %s ---[-]\n", p.FunctionCall.Name)
+					for _, p := range ev.Content.Parts {
+						if p == nil {
+							continue
 						}
-						appendChat("[aqua]⚙ %s[-] %s\n",
-							p.FunctionCall.Name, shortArgs(p.FunctionCall.Args))
-					case p.FunctionResponse != nil:
-						flushMarkdown(&mdBuf, currentSubAgent())
-						appendChat("[gray]↳ %s[-]\n", p.FunctionResponse.Name)
-						if len(subAgentStack) > 0 && subAgentStack[len(subAgentStack)-1] == p.FunctionResponse.Name {
-							appendChat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", p.FunctionResponse.Name)
-							subAgentStack = subAgentStack[:len(subAgentStack)-1]
+						switch {
+						case p.Text != "":
+							clean := stripTerminalControlSequences(p.Text)
+							mdBuf.WriteString(clean)
+							assistantText.WriteString(clean)
+						case p.FunctionCall != nil:
+							flush()
+							if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(p.FunctionCall.Name))]; ok {
+								subAgentStack = append(subAgentStack, p.FunctionCall.Name)
+								chat("[yellow][::b]--- entering sub-agent: %s ---[-]\n", p.FunctionCall.Name)
+							}
+							chat("[aqua]⚙ %s[-] %s\n",
+								p.FunctionCall.Name, shortArgs(p.FunctionCall.Args))
+						case p.FunctionResponse != nil:
+							flush()
+							chat("[gray]↳ %s[-]\n", p.FunctionResponse.Name)
+							if len(subAgentStack) > 0 && subAgentStack[len(subAgentStack)-1] == p.FunctionResponse.Name {
+								chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", p.FunctionResponse.Name)
+								subAgentStack = subAgentStack[:len(subAgentStack)-1]
+							}
 						}
 					}
 				}
+				for i := len(subAgentStack) - 1; i >= 0; i-- {
+					chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", subAgentStack[i])
+				}
+				flush()
+
+				if isRouter {
+					if cfg.Manager.PendingRoute(sessionID) {
+						return "", nil // routed → discard the router's chatter
+					}
+					// Router chose to talk to the user (no route): render its reply.
+					flushMarkdown(&mdBuf, "")
+					return assistantText.String(), nil
+				}
+				return assistantText.String(), nil
 			}
-			for i := len(subAgentStack) - 1; i >= 0; i-- {
-				appendChat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", subAgentStack[i])
+			// notify prints the routing transition and re-points the session at
+			// the new squad so the next turn resumes there.
+			notify := func(from, to, reason string) {
+				cfg.Sessions.SetSquad(sessionID, to)
+				if c := current.Load(); c != nil && c.ID == sessionID {
+					current.Store(&sessionState{ID: sessionID, Squad: to})
+				}
+				appendChat("[gray]── routed to %s squad ──[-]\n", to)
 			}
-			flushMarkdown(&mdBuf, currentSubAgent())
+
+			// TUI turns are text-only, so nil routerParts feeds the router the
+			// same (clean) text parts as the answering squad.
+			_, fullText, _ := cfg.Manager.RunWithRouting(ctx, cfg.UserID, sessionID, cur.Squad, parts, nil, runHop, notify)
 
 			// Persist the turn to the conversation file and refresh the
 			// sidebar so the LastUsedAt / turn count update.
 			cfg.Sessions.Touch(sessionID)
-			if err := sessions.AppendConversationTurn(sessionID, prompt, assistantText.String()); err != nil {
+			if err := sessions.AppendConversationTurn(sessionID, prompt, fullText); err != nil {
 				appendChat("[red]persist turn: %v[-]\n", err)
 			}
 			app.QueueUpdateDraw(func() {
@@ -1945,6 +2003,9 @@ func pickInitialSession(cfg Config) *sessionState {
 		return &sessionState{ID: latest.ID, Squad: squad}
 	}
 	squad := toolkitagent.DefaultSquadName
+	if rs := cfg.Manager.RouterSquad(); rs != "" {
+		squad = rs
+	}
 	meta := cfg.Sessions.New(squad)
 	_ = sessions.SetConversationSquad(meta.ID, squad)
 	return &sessionState{ID: meta.ID, Squad: squad}

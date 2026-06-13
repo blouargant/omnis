@@ -2506,6 +2506,20 @@ function appendErrorBubble(text, container) {
   scrollBottom(paneOfNode(row));
 }
 
+// appendRoutingChip drops a centred "→ routed to <squad>" note into the
+// transcript when the Omnis router hands control to another squad mid-turn.
+function appendRoutingChip(container, to, reason) {
+  const row = document.createElement("div");
+  row.className = "msg-row routing";
+  const chip = document.createElement("div");
+  chip.className = "routing-chip";
+  chip.textContent = "→ routed to " + (to || "?") + " squad";
+  if (reason) chip.setAttribute("data-tip", reason);
+  row.appendChild(chip);
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
+}
+
 // buildToolBlock creates the shared DOM structure for both top-level and nested
 // tool call blocks. Returns the block element; the caller appends it.
 function buildToolBlock(name, args) {
@@ -2577,6 +2591,21 @@ const TODO_STATUS_ICON = {
 
 function isTodoTool(name) {
   return /^todo_/.test((name || "").toLowerCase());
+}
+
+// isRoutingTool reports whether a tool is part of the Omnis router's internal
+// control flow (squad routing, hand-back, and the hidden capability probe).
+// These never render as tool blocks in the transcript — the routing transition
+// shows as a `routing` chip instead, and the probe negotiation stays hidden.
+function isRoutingTool(name) {
+  switch ((name || "").toLowerCase()) {
+    case "route_to_squad":
+    case "handoff_to_router":
+    case "ask_squad":
+      return true;
+    default:
+      return false;
+  }
 }
 
 // applyTodoEvent folds a todo tool call into the session's plan state and
@@ -4495,6 +4524,15 @@ async function sendMessage(panel) {
         case "tool_call": {
           // Seal the preceding text segment before showing the tool.
           finalizeSegment();
+          // Omnis routing/probe tools are internal control flow — never shown as
+          // tool blocks (the `routing` chip is the visible signal; the capability
+          // probe stays hidden). Their tool_result has no pending block, so it's
+          // a no-op below.
+          if (isRoutingTool(data.name)) {
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, "thinking…");
+            break;
+          }
           // The todo_* tools render as a live, always-expanded checklist
           // instead of an opaque collapsed block. Their tool_result carries
           // no extra signal, so we don't track them in pendingTools.
@@ -4586,6 +4624,17 @@ async function sendMessage(panel) {
 
         case "ask_user_cancel": {
           cancelAskUserWidget(data.question_id);
+          break;
+        }
+
+        case "routing": {
+          // The Omnis router handed control to another squad mid-turn. Close the
+          // current text segment, drop a chip, and refresh the sidebar so the
+          // session's squad badge reflects the new squad (the server already
+          // persisted it before emitting this frame).
+          finalizeSegment();
+          appendRoutingChip(container, data.to, data.reason);
+          loadSessions();
           break;
         }
 

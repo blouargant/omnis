@@ -126,8 +126,10 @@ Built on [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk) for t
 main.go / server/
     └── agent.NewAgent()            ← single wiring entry point
             ├── Squads              ← one wired tree per squad in agent.json
-            │    ├── "default"      ← leader + full team (used when a session omits a squad)
-            │    │    ├── leader              ← coordinator (fs tools + planning + mailbox)
+            │    ├── "omnis"        ← Omnis ROUTER squad (default for new chats) — leaderless
+            │    │    └── omnis              ← routes each request to the best squad (route_to_squad), then steps out
+            │    ├── "default"      ← leader + full team (used when a session omits a squad / routed to)
+            │    │    ├── leader              ← coordinator (fs tools + planning + mailbox + handoff_to_router)
             │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │    │    ├── web_agent           ← web search + fetch
@@ -160,6 +162,108 @@ leader; the default squad always has one. ([agent/squad.go](agent/squad.go)
 keys on `RuntimeSquadConfig.Leader == ""`; `resolveSquadEntries` in
 [agent/runtime_config.go](agent/runtime_config.go) normalises `"none"`→`""`
 and enforces the one-member rule.)
+
+### Omnis router (default chat routing)
+
+**Omnis** is a special **leaderless squad** (single member: the `omnis` agent)
+that is the **default agent for every new chat**. Unlike a squad leader — which
+orchestrates its own members and keeps control — the router *transfers control
+of the conversation*: it reads the user's request, picks the squad best able to
+handle it, and hands over; that squad's leader then answers directly. When the
+user later changes topic to something outside the active squad's scope, the
+squad hands control **back** to the router, which re-routes. When intent is
+unclear and no squad fits, Omnis converses with the user instead of routing.
+
+The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent/routing.go)):
+
+- **Two tools, gated in [agent/squad.go](agent/squad.go) `buildSquadInstance`.**
+  `route_to_squad(squad, reason)` is mounted **only** on the router root
+  (and validates `squad` against the non-router squad catalogue, which is also
+  injected into the router's instruction). `handoff_to_router(reason)` is
+  mounted as an **always-on** tool on **every non-router squad root** when routing
+  is enabled (a short "hand back if out of scope" block is appended to those
+  leaders' instructions). Both tools only **record a per-session directive**
+  (target + reason) in the process-wide `RouteRegistry` on `Infrastructure`
+  (`RouteDirectives`); they never run another runner themselves. Note they carry
+  **no `prompt`** — the squad always receives the user's verbatim message (see
+  dispatch loop), so the router cannot paraphrase or twist the request.
+- **Capability probe (`ask_squad`)** — also router-only. When the router is
+  *unsure* which squad fits, it privately checks a candidate before committing:
+  `ask_squad(squad, request)` ([agent/routing.go](agent/routing.go)
+  `askSquadTool`/`probeSquadCapability`) resolves that squad's lead from the
+  `runtime` snapshot and makes **one isolated, non-streamed
+  `model.LLM.GenerateContent` call** (lead's own model + instruction, **no
+  runner/tools/sub-agents/event bus** — the one-off-LLM pattern from
+  [internal/compress/statelog.go](internal/compress/statelog.go) `extractStateLog`),
+  returning the lead's `CAN_HANDLE`/`CANNOT_HANDLE` verdict
+  (`parseCapabilityVerdict`). Because it touches neither the SSE stream nor the
+  shared bus it is **hidden by construction**; it does not hand over control
+  (only `route_to_squad` does). The router probes the next candidate on a
+  decline and, when all plausible squads decline, asks the user instead of
+  force-routing. It's a *scope judgment only* — the probed squad never runs its
+  tools. Confident routes skip the probe entirely. The router's own routing/probe
+  tool-call frames (`route_to_squad`/`handoff_to_router`/`ask_squad`) are
+  suppressed in the web UI by `isRoutingTool` ([web/app.js](web/app.js), mirroring
+  the `isTodoTool` special-case) so the negotiation stays hidden — the `routing`
+  chip is the only visible signal.
+- **Dispatch loop** = `Manager.RunWithRouting(ctx, user, session, startSquad,
+  initialParts, routerParts, run, notify)`. It runs the starting squad via the
+  surface-supplied `run` callback (which streams/echoes the hop), then `Take`s the
+  directive: a `route` switches to the named squad, a `handoff` switches back to
+  the router; it re-dispatches and repeats, up to `routerMaxHops` (4) — the
+  directives decide *where* control goes, never *what* the squad receives.
+  **Two part-views**: every **answering (non-router) hop** gets the user's
+  **original turn input (`initialParts` — verbatim text + any attached files)
+  unchanged**, so attachments always reach the answering squad and the request
+  can't be twisted; the **router hop** instead gets `routerParts`, a **clean
+  text-only view** the surface builds (the user's prompt + a one-line "a file is
+  attached" note when relevant). The router has **no file tools**, so it must not
+  be fed the inline attachment blobs or the "use the `mime`/`read` tools"
+  attachment note baked into `initialParts` — doing so made it try to "read" an
+  attached PDF and then hallucinate an "update your plan?" `ask_user` step. Pass
+  `nil` for `routerParts` to feed the router the original parts too (the loop
+  keys router-view vs. original on `squadName == routerSquad`). `notify(from,to,
+  reason)` lets the surface show the transition and persist the new squad. All
+  three surfaces use it — server ([server/sse.go](server/sse.go) `handleMessages`,
+  building `routerParts` from `req.Prompt` + file count, emitting a `routing` SSE
+  event + `Registry.SetSquad`), TUI ([internal/tui/tui.go](internal/tui/tui.go)
+  send path, `routerParts == nil` since TUI turns are text-only), and CLI
+  ([internal/cli/cli.go](internal/cli/cli.go) `runTurn`, `routerParts` = the
+  prompt only, so the router never sees inlined `@file` contents; `runCLI`
+  re-wired through `Infrastructure`+`Manager` like the TUI).
+- **Router-hop text is suppressed (host-side, not just by instruction).** The
+  router model often narrates ("Routed to the default squad; it will take over…")
+  alongside its `route_to_squad` call despite the instruction telling it to stay
+  silent — instructions can't *guarantee* silence. So each surface **withholds the
+  router hop's assistant text** during the stream and decides afterwards via
+  `Manager.PendingRoute(sessionID)` (a non-clearing `RouteRegistry.Peek` of the
+  pending directive): **a route is pending ⇒ the text was chatter — discard it
+  from both the chat and the persisted turn** (the `run` callback returns `""`);
+  **no route ⇒ the text is a genuine reply** (a clarifying question) and is flushed
+  to the user. The only visible routing signal is the `routing` chip / "── routed
+  to X squad ──" line from `notify`. Server: `streamEvents` gained a `suppressText`
+  arg (withholds `token`/`message` frames, still streams tool calls / `ask_user` /
+  bus events, still accumulates the text for the return value); `runHop` flushes a
+  single `message` frame on the no-route path. TUI/CLI mirror it (TUI suppresses
+  mid-stream `flushMarkdown`/`appendChat` and renders only on no-route; CLI's
+  `stream(seq, quiet)` withholds stdout text). Routing tool-call frames are
+  *additionally* hidden in the web UI by `isRoutingTool`.
+- **Per-squad context is retained within a session.** Because each
+  `SquadInstance` owns a private `session.InMemoryService` and is stable across
+  turns within a pinned generation, going squad A → B → A returns the **same** A
+  runner whose history still holds A's earlier turns (the loop only re-resolves
+  runners via `Manager.LookupSquad`, never rebuilds them; the user turn is
+  appended, not a reset). Retention does not survive a hot-reload (fresh
+  in-memory sessions) — same boundary as a single-squad session today.
+- **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
+  `YOKE_ROUTER_SQUAD`) names the router squad; **absent ⇒ defaults to `omnis`**,
+  `"none"` disables. `ensureRouterSquad` ([agent/routing.go](agent/routing.go)),
+  called in `BuildInstance` (not `ResolveRuntimeSettings`, so config-only tests
+  are untouched), **injects** the `omnis` agent (registry def if present, else the
+  built-in `defaultRouterInstruction`, inheriting the leader's model) and a
+  leaderless `omnis` squad when a config doesn't already declare them. New
+  sessions default to `Manager.RouterSquad()` on every surface; when routing is
+  disabled the path is byte-identical to before (no tools mounted, single hop).
 
 **Config-driven root tools** — both a coordinating leader and a leaderless
 root build their tools from the root agent's declared `tools` groups via
@@ -404,7 +508,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 
 | File | Purpose |
 |---|---|
-| `agents.json` | List of enabled agent names, squad composition, global paths |
+| `agents.json` | List of enabled agent names, squad composition, global paths, and `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables) |
 | `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
@@ -597,6 +701,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_MODEL` | Provider-specific model ID |
 | `YOKE_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
 | `YOKE_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
+| `YOKE_ROUTER_SQUAD` | Overrides `router_squad` from `agents.json` — names the Omnis router squad; `"none"` disables routing (new chats then use the default squad) |
 | `YOKE_EMBED_PROVIDER` | Embedder provider for semantic recall (default: `YOKE_PROVIDER`, else `openai_compat`). `anthropic` unsupported — use Voyage/OpenAI via `openai_compat` |
 | `YOKE_EMBED_MODEL` | Embedding model id (default `text-embedding-3-small`) |
 | `YOKE_EMBED_BASE_URL` | Embeddings endpoint (default `YOKE_BASE_URL`/`OPENAI_BASE_URL`) |

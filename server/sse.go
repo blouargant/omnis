@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
+	toolkitagent "github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/fileref"
@@ -90,8 +92,11 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// idle-rebind scanner releases it, which can be many seconds).
 		d.Manager.MigrateToCurrent(meta.ID)
 
-		// Resolve the session's squad inside the (now-current) generation.
-		sq := d.Manager.LookupSquad(meta.ID, meta.Squad)
+		// Resolve the starting squad inside the (now-current) generation — both
+		// to decide attachment handling and as the entry point for the Omnis
+		// routing dispatch loop below.
+		startSquad := meta.Squad
+		sq := d.Manager.LookupSquad(meta.ID, startSquad)
 		if sq == nil || sq.Runner == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent generation not available"})
 			return
@@ -130,12 +135,84 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			parts = append(parts, &genai.Part{Text: note})
 		}
 
-		seq := sq.Runner.Run(ctx, meta.UserID, meta.ID,
-			&genai.Content{Role: "user", Parts: parts},
-			agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+		// The router's clean view: just the user's words plus, when files are
+		// attached, a neutral one-line note that an attachment exists. The router
+		// has no file tools, so it must NOT be shown the "use the mime/read tools"
+		// attachment note baked into `parts` (that made it try to "read" the PDF
+		// and then hallucinate an "update your plan?" step) nor the inlined
+		// @file/image payloads. The full `parts` still forward to the answering
+		// squad via RunWithRouting.
+		routerParts := []*genai.Part{{Text: req.Prompt}}
+		if len(req.Files) > 0 {
+			routerParts = append(routerParts, &genai.Part{
+				Text: fmt.Sprintf("\n\n[The user attached %d file(s). You cannot open attachments yourself — treat this as a signal to route to a squad that can read documents/images.]", len(req.Files)),
+			})
+		}
 
 		d.Registry.Touch(meta.ID)
-		assistantText := streamEvents(ctx, c.Writer, seq, subCh, bashCwd.get(meta.ID))
+
+		cwd := bashCwd.get(meta.ID)
+		emitFrame := func(event string, payload any) {
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			_, _ = io.WriteString(c.Writer, "event: "+event+"\ndata: "+string(data)+"\n\n")
+			if f, ok := c.Writer.(interface{ Flush() }); ok {
+				f.Flush()
+			}
+		}
+
+		routerSquad := d.Manager.RouterSquad()
+		// runHop streams one squad turn (one Runner.Run) and returns its
+		// assistant text. The Omnis dispatch loop calls it once per hop.
+		//
+		// The router hop is special: the model often emits chatter ("Routed to the
+		// default squad; it will take over…") alongside its route_to_squad call,
+		// despite the instruction telling it not to. Instructions can't guarantee
+		// silence, so we suppress the router hop's text at the stream level and
+		// decide afterwards: if it recorded a route (Manager.PendingRoute), the
+		// text was chatter — discard it from BOTH the chat and the persisted turn
+		// (return ""); if it did NOT route, the text is a genuine reply to the user
+		// (a clarifying question), so flush it now. Routing is signalled to the user
+		// only by the `routing` chip (notify) and the answering squad's reply.
+		runHop := func(rctx context.Context, hopSq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+			seq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
+				&genai.Content{Role: "user", Parts: hopParts},
+				agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+			isRouter := routerSquad != "" && squadName == routerSquad
+			if !isRouter {
+				return streamEvents(rctx, c.Writer, seq, subCh, cwd, false)
+			}
+			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, true /*suppressText*/)
+			if err != nil {
+				return text, err
+			}
+			if d.Manager.PendingRoute(meta.ID) {
+				return "", nil // routed → drop the router's chatter entirely
+			}
+			// Router chose to talk to the user (no route): show its reply now.
+			if strings.TrimSpace(text) != "" {
+				emitFrame("message", map[string]string{"text": text})
+			}
+			return text, nil
+		}
+		// notify fires when control moves to another squad: persist the new
+		// squad on the session (so the next turn resumes there and it survives a
+		// restart) and tell the browser so it can update the squad label live.
+		notify := func(from, to, reason string) {
+			d.Registry.SetSquad(meta.ID, to)
+			emitFrame("routing", map[string]any{"from": from, "to": to, "reason": reason})
+		}
+
+		_, assistantText, runErr := d.Manager.RunWithRouting(ctx, meta.UserID, meta.ID, startSquad, parts, routerParts, runHop, notify)
+		if runErr != nil {
+			log.Printf("server: routing run error: %v", runErr)
+		}
+		// Terminal event for the (possibly multi-hop) turn — streamEvents no
+		// longer emits it per hop.
+		emitFrame("done", map[string]any{})
+
 		// Persist whatever assistant text was streamed, even when the request
 		// context was cancelled (browser tab closed, or a reverse proxy cutting
 		// the SSE stream before the turn finished). The old ctx.Err() == nil guard
@@ -153,15 +230,25 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 }
 
 // streamEvents adapts an ADK event iterator into SSE frames written to w,
-// interleaved with sub-agent tool events from the shared event bus.
-// It returns the full assistant text produced during the turn.
+// interleaved with sub-agent tool events from the shared event bus. It streams
+// ONE squad turn (one Runner.Run); the caller emits the terminal "done" event
+// once, after the routing dispatch loop finishes, so a multi-hop turn is not
+// prematurely closed. It returns the assistant text produced this hop and a
+// non-nil error when the ADK stream itself errored (so the dispatch loop stops).
+// suppressText, when true, withholds the assistant text frames ("token" /
+// "message") from the client while still accumulating the text into the returned
+// string (and still streaming tool calls, ask_user, bus events, and timing). The
+// router hop uses it so its routing chatter never reaches the chat — the caller
+// decides afterwards (via Manager.PendingRoute) whether the buffered text was a
+// route (discard) or a genuine reply (flush).
 func streamEvents(
 	ctx context.Context,
 	w io.Writer,
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
 	cwd string,
-) string {
+	suppressText bool,
+) (string, error) {
 	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
 	streamStart := time.Now()
 	var firstTokenAt time.Time
@@ -191,7 +278,9 @@ func streamEvents(
 			lastContentAt = time.Now()
 		}
 	}
-	emitDone := func() {
+	// emitTiming emits the per-hop debug_timing frame. The terminal "done" event
+	// is emitted by the caller once the whole (possibly multi-hop) turn finishes.
+	emitTiming := func() {
 		total := time.Since(streamStart)
 		var ttfbMs int64
 		var tokPerSec float64
@@ -213,7 +302,6 @@ func streamEvents(
 			log.Printf("server: stream timing ttfb=%dms total=%dms tokens=%d bytes=%d tok/s=%.1f",
 				ttfbMs, total.Milliseconds(), tokenCount, tokenBytes, tokPerSec)
 		}
-		emit("done", map[string]any{})
 	}
 
 	// Track file-mutating tool calls (Write/Edit/revert) by call id so a
@@ -369,7 +457,9 @@ func streamEvents(
 	for {
 		select {
 		case <-ctx.Done():
-			return assistantBuf.String()
+			// Client disconnect / turn abort: stop this hop. Returning nil ends
+			// the dispatch loop cleanly (no directive to follow).
+			return assistantBuf.String(), nil
 
 		case <-heartbeat.C:
 			if time.Since(lastContentAt) >= 2*time.Second {
@@ -389,16 +479,16 @@ func streamEvents(
 					case be := <-subCh:
 						emitBusEvent(be)
 					default:
-						emitDone()
+						emitTiming()
 						log.Printf("server: stream complete")
-						return assistantBuf.String()
+						return assistantBuf.String(), nil
 					}
 				}
 			}
 			if aev.err != nil {
 				emit("error", map[string]string{"message": aev.err.Error()})
-				emitDone()
-				return assistantBuf.String()
+				emitTiming()
+				return assistantBuf.String(), aev.err
 			}
 			ev := aev.ev
 			if ev == nil || ev.Content == nil {
@@ -419,11 +509,15 @@ func streamEvents(
 						}
 						tokenCount++
 						tokenBytes += len(p.Text)
-						emit("token", map[string]string{"text": p.Text})
+						if !suppressText {
+							emit("token", map[string]string{"text": p.Text})
+						}
 						assistantBuf.WriteString(p.Text)
 						sawPartialText = true
 					} else {
-						emit("message", map[string]string{"text": p.Text})
+						if !suppressText {
+							emit("message", map[string]string{"text": p.Text})
+						}
 						assistantBuf.WriteString(p.Text)
 					}
 				}

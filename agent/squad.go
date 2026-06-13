@@ -175,6 +175,24 @@ func buildSquadInstance(
 	leadMailbox.SuppressInboxPolling = opts.BackgroundMailboxDelivery
 	leadTools = append(leadTools, leadMailbox.Tools()...)
 
+	// ── Omnis routing tools (gated on routing being enabled) ──
+	// The router root gets route_to_squad (hand control to another squad); every
+	// other squad root gets handoff_to_router (hand control back when a request
+	// is out of scope). Both record a per-session directive the host dispatch
+	// loop (Manager.RunWithRouting) consumes after the turn finishes.
+	routingEnabled := runtime.RouterSquad != ""
+	isRouter := routingEnabled && squad.Name == runtime.RouterSquad
+	if isRouter {
+		targets := routerSquadCatalogue(runtime)
+		leadTools = append(leadTools, routeToSquadTool(infra.RouteDirectives, targets))
+		// ask_squad lets the router privately check a candidate squad's scope
+		// (a hidden, tool-less LLM judgment by that squad's lead) before
+		// committing — used only when the router is unsure.
+		leadTools = append(leadTools, askSquadTool(runtime, targets))
+	} else if routingEnabled {
+		leadTools = append(leadTools, handoffToRouterTool(infra.RouteDirectives))
+	}
+
 	// ── Sub-agents + coordinator-only session tools (skipped when leaderless) ──
 	subAgentMap := map[string]adkagent.Agent{}
 	var subAgents []adkagent.Agent
@@ -235,14 +253,31 @@ func buildSquadInstance(
 	if rootInstruction == "" {
 		rootInstruction = defaultAgentInstruction(rootCfg.Name)
 	}
-	// capInstruction carries the loader protocols for the groups actually
-	// mounted (skills, soft-skills + recall, registries, MCP, A2A); prepend it
-	// so the tool docs precede the agent's own prompt.
-	rootInstruction = capInstruction + rootInstruction
-	if !leaderless {
-		// Only describe this squad's members so two squads can specialise the
-		// same agent.json by exposing different subsets.
-		rootInstruction += buildSubAgentCapabilitiesBlock(memberCfgs, runtime)
+	if isRouter {
+		// The router never coordinates members. Use the router prompt (shipped
+		// registry instruction.md if present, else the built-in) plus the squad
+		// catalogue — bypassing the generic default-agent fallback and the
+		// capability/sub-agent blocks the router doesn't use.
+		base := strings.TrimSpace(ReadAgentInstruction(rootCfg.Name))
+		if base == "" {
+			base = defaultRouterInstruction()
+		}
+		rootInstruction = routerCatalogueBlock(runtime) + base
+	} else {
+		// capInstruction carries the loader protocols for the groups actually
+		// mounted (skills, soft-skills + recall, registries, MCP, A2A); prepend it
+		// so the tool docs precede the agent's own prompt.
+		rootInstruction = capInstruction + rootInstruction
+		if !leaderless {
+			// Only describe this squad's members so two squads can specialise the
+			// same agent.json by exposing different subsets.
+			rootInstruction += buildSubAgentCapabilitiesBlock(memberCfgs, runtime)
+		}
+		if routingEnabled {
+			// Non-router squad: tell the leader to hand control back to the
+			// router when a request falls outside its scope.
+			rootInstruction += routerHandoffProtocolBlock()
+		}
 	}
 
 	lead, err := agentkit.New(agentkit.AgentConfig{

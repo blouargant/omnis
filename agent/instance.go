@@ -38,6 +38,10 @@ type Instance struct {
 	// entry named DefaultSquadName.
 	Squads      map[string]*SquadInstance
 	DefaultName string
+	// RouterName is the Omnis router squad name for this generation, or "" when
+	// routing is disabled. New chats default to this squad; the dispatch loop
+	// (Manager.RunWithRouting) routes handoffs back to it.
+	RouterName string
 
 	// Default-squad mirrors for legacy callers — populated after squads
 	// are built. New code should prefer Squads[name] or Squad(name).
@@ -111,6 +115,11 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 		return nil, err
 	}
 
+	// Inject the Omnis router agent + leaderless router squad when routing is
+	// enabled and the config does not already declare them. Done here (not in
+	// ResolveRuntimeSettings) so config-only tests see an unmodified squad list.
+	ensureRouterSquad(&runtime)
+
 	// Bash filter / timeout are process-globals; reapply on each build so a
 	// config reload picks up changes.
 	if err := fstools.ConfigureBashOutputFilter(fstools.BashOutputFilterConfig{
@@ -133,6 +142,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 		Settings:           runtime,
 		Squads:             make(map[string]*SquadInstance, len(runtime.Squads)),
 		DefaultName:        DefaultSquadName,
+		RouterName:         runtime.RouterSquad,
 		CuratorIdleTimeout: runtime.CuratorIdleTimeout,
 	}
 

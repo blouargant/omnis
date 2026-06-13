@@ -241,7 +241,15 @@ func newEngine(d serverDeps) *gin.Engine {
 		_ = c.ShouldBindJSON(&body)
 		squad := strings.ToLower(strings.TrimSpace(body.Squad))
 		if squad == "" {
+			// New chats default to the Omnis router squad when routing is
+			// enabled, so the first message is routed to the best-suited squad;
+			// fall back to the default squad when routing is disabled.
 			squad = toolkitagent.DefaultSquadName
+			if d.Manager != nil {
+				if rs := d.Manager.RouterSquad(); rs != "" {
+					squad = rs
+				}
+			}
 		}
 		// Reject unknown squad names so the client sees the misconfiguration
 		// immediately rather than silently falling back to default later.

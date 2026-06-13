@@ -235,6 +235,20 @@ func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (De
 	if toolName == "bash_background" {
 		toolName = "Bash"
 	}
+	// Internal routing control-flow tools — the Omnis router's route_to_squad
+	// and a squad leader's handoff_to_router — never prompt and are never
+	// denied. They only record a per-session routing directive consumed by the
+	// host (no filesystem/shell/network side effects), so gating them is
+	// nonsensical plumbing the user should never see. They are exempt *before*
+	// the deny tier on purpose: their args carry the user's natural-language
+	// prompt, which must not be matched against the command/path deny regexes
+	// (a prompt mentioning e.g. "~/.ssh/id_rsa" or "rm -rf" would otherwise trip
+	// a safety-floor deny and silently break routing). Names mirror
+	// agent/routing.go.
+	switch toolName {
+	case "route_to_squad", "handoff_to_router", "ask_squad":
+		return DecisionAllow, "internal routing control"
+	}
 	ctx := matchCtx{
 		toolName:    toolName,
 		probe:       toolName + " " + flattenArgs(args),
