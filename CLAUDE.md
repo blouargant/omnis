@@ -517,6 +517,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | `mcp_config.json` | MCP server definitions (name, command, args, env) |
 | `a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
+| `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). See "Lifecycle hooks" |
 | `filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
 
@@ -881,6 +882,75 @@ different folders each get their own project memory.
   ([server/agentmd.go](server/agentmd.go), same token-only host-fs trust model as
   the `!` escape / Monaco save). Web `runHashMemory`, TUI `send` `#` branch, CLI
   `runRepl`/`runOneShot` all handle it locally.
+
+### Lifecycle hooks (`hooks.json`, Claude Code-compatible)
+
+User-configured **shell commands that fire at lifecycle moments** — yoke's port
+of [Claude Code hooks](https://code.claude.com/docs/en/hooks-guide). Hooks let
+users enforce policy *in code* (block edits to protected files, run a formatter
+after every Write, inject context on every prompt) instead of relying on the
+model to follow an instruction — the same guarantee the permission layer gives
+for tool gating. The on-disk format matches Claude Code's `hooks` block verbatim,
+so an existing Claude Code config is portable.
+
+- **Config** = `hooks.json` resolved through the 3-layer search chain
+  (`paths.FindConfig("hooks.json")`), shape
+  `{ "hooks": { "<Event>": [ { "matcher": "<regex>", "hooks": [ { "type":
+  "command", "command": "...", "timeout": N } ] } ] } }`. `matcher` is a tool-name
+  regexp for PreToolUse/PostToolUse (empty/`"*"` = all), the trigger for
+  PreCompact, the sub-agent name for SubagentStop, ignored otherwise. Resolved
+  path is `RuntimeSettings.HooksConfigPath` (override `hooks_config_path` in
+  `agents.json`).
+- **Engine** = [internal/hooks/](internal/hooks/): `hooks.go` (config + `Match`),
+  `run.go` (Claude Code stdin **input** JSON + stdout/exit-code **output**
+  protocol — exit 2 = blocking error, stderr = reason; JSON `decision`/
+  `hookSpecificOutput.permissionDecision` (`allow`/`deny`/`ask`)/`additionalContext`/
+  `continue`/`systemMessage`), `reloader.go` (mtime-poll hot-reload + additive
+  `Merge` across layers, mirroring [core/permissions/reloader.go](core/permissions/reloader.go)).
+  Commands run via `fstools.RunShellCaptured` (new in [core/tools/bash.go](core/tools/bash.go))
+  — the same process-group-isolated shell + safety floor as `RunBash`, but with
+  stdout/stderr/exit-code separated for the control protocol. Like the `!`
+  shell-escape, hooks bypass the permission layer (they're user-authored config)
+  but the hard safety floor still applies.
+- **Wiring** = one process-wide engine on `Infrastructure` (`Infrastructure.Hooks(runtime)`,
+  [agent/hooks_plugin.go](agent/hooks_plugin.go)), built once (memoised `sync.Once`,
+  survives hot-reload; the Reloader hot-reloads config). It splits two ways:
+  - **Per-squad runner plugin** (`buildHooksPlugin`, appended in
+    [agent/build_plugins.go](agent/build_plugins.go) `buildPlugins`) carries the
+    **blocking/injecting** hooks: PreToolUse→`BeforeToolCallback` (a deny returns
+    a `{"output":"[BLOCKED BY HOOK] …"}` map — the identical short-circuit to the
+    permissions `DENY` path), PostToolUse→`AfterToolCallback` (a block appends the
+    reason to the tool output), UserPromptSubmit→`OnUserMessageCallback` (ADK
+    replaces the user message with the returned `*genai.Content`, so
+    additionalContext is appended; a block returns an error that aborts the turn),
+    Stop→`AfterRunCallback`. **The router squad mounts none** (`isRouterSquad`):
+    the Omnis router only routes, so hooks fire on the answering squad's hop, not
+    the router hop — this is why UserPromptSubmit fires exactly once per turn even
+    though `buildPlugins` runs per squad.
+  - **Fire-and-forget bus listeners** (`wireHookListeners`, wired **once** under the
+    `Hooks` `sync.Once` so they don't multiply per squad): `EventSubAgentEnd`→
+    SubagentStop, `EventSessionStart`→SessionStart, `EventSessionEnd`→SessionEnd,
+    `EventCompressionStart`→PreCompact, `EventAskUser`→Notification (async so a
+    permission prompt is never blocked by a slow hook). v1 ignores their outcome.
+- **Server-mode session lifecycle**: web-UI sessions never emit the bus
+  `EventSessionStart`/`EventSessionEnd` (those are CLI/TUI front-end signals, and
+  `EventSessionEnd` also drives the reflection/curation pipeline web sessions skip).
+  So the server fires those two hooks **directly** via `Infrastructure.FireHook`
+  (bypassing the bus) — SessionStart on `POST /api/sessions`, SessionEnd on
+  `DELETE /api/sessions/:id` ([server/server.go](server/server.go)), both async.
+- **Web UI**: Settings → **Hooks** panel (`renderHooksForm` in
+  [web/settings.js](web/settings.js), styled by [web/css/settings/hooks.css](web/css/settings/hooks.css))
+  — an event-grouped editor (matcher cards + command/timeout rows) reusing the
+  generic config-editor routes (`GET/PUT /api/config/parsed/hooks`); `hooks` is
+  registered in the config name-map in [server/config.go](server/config.go). No
+  new server routes.
+- **No-op contract**: an absent/empty `hooks.json` mounts an inert engine and the
+  behaviour is byte-identical to a build without hooks. **Limitations (v1):**
+  Stop/SubagentStop hooks fire as notifications but cannot force-continue; PreCompact
+  cannot rewrite the compaction instructions; SubagentStop/PreToolUse do not fire
+  for a sub-agent's *internal* tool calls (sub-agents run in agenttool's private
+  runner without the plugin — SubagentStop covers their completion); SessionEnd on
+  CLI one-shot is best-effort.
 
 ### Interactive shell-escape (`!` commands)
 

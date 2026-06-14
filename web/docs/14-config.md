@@ -11,6 +11,7 @@ single root).
 | `registry/agents/<name>/agent.json`           | Per-agent definition (model_ref, tools, builtin flag, etc.). |
 | `registry/agents/<name>/instruction.md`       | Per-agent system instruction (falls back to `registry/agents/default.md`). |
 | `permissions.json`                            | Permission rules. |
+| `hooks.json`                                  | [Lifecycle hooks](22-hooks.md) — shell commands fired on tool/prompt/session/compaction events. |
 | `mcp_config.json`                             | MCP server definitions. |
 | `a2a_config.json`                             | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
 | `filters/`                                    | Bash output filter patterns (token optimization). |
@@ -80,6 +81,7 @@ files that don't exist outside `.agents/`. Files originally in
 $HOME/.yoke/
 ├── agents.json          # editor writes — user overrides of agents/models/squads
 ├── permissions.json     # editor writes — user permission overrides
+├── hooks.json           # editor writes — user lifecycle-hook overrides
 ├── mcp_config.json      # editor writes — user MCP server overrides
 ├── logs/                # agent_tasks_*, agent_todo_*, agent_memory_*,
 │   │                    #   agent_statelog_*, agent_events_*,

@@ -78,6 +78,12 @@ type Infrastructure struct {
 	// documentation (see DocIndex). Backed by the same embedder; on-disk so it
 	// survives reloads, refreshed by the startup docs indexer.
 	docIndex docIndexCache
+
+	// hooks memoises the process-wide Claude Code-style hooks engine (a
+	// hot-reloading Reloader over hooks.json plus the fire-and-forget lifecycle
+	// bus listeners, wired exactly once). Built lazily from the first
+	// generation's runtime settings; see Hooks.
+	hooks hooksCache
 }
 
 // BuildInfrastructure constructs the shared infrastructure for the agent.

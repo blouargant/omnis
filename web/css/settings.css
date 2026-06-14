@@ -16,6 +16,7 @@
 
 /* Cross-panel pieces. */
 @import "settings/permissions.css";
+@import "settings/hooks.css";
 @import "settings/status.css";
 @import "settings/sidebar.css";
 @import "settings/theme.css";

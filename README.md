@@ -231,6 +231,10 @@ mount a different combination of:
 3. **Permissions** (`config/permissions.json`) — Claude Code nomenclature
    (`permissions.{allow,ask,deny}` of `Tool(specifier)` rules): auto-allow
    read-only verbs, gate mutations with `ask`, hard-deny destructive ones.
+4. **Hooks** (`config/hooks.json`) — Claude Code-style lifecycle hooks: shell
+   commands fired before/after a tool, on prompt submit, on stop, on session
+   start/end, before compaction. Enforce policy *in code* — e.g. a `PreToolUse`
+   hook that blocks edits to protected files, or a `PostToolUse` formatter.
 
 ### Example: turn the harness into a Kubernetes diagnostician
 
@@ -402,6 +406,7 @@ yoke/
 │   ├── teammates/               # mailbox / FSM-based inter-agent comms
 │   ├── compress/                # context compression plugin
 │   ├── cache/                   # prompt-cache stats plugin
+│   ├── hooks/                   # Claude Code-style lifecycle hooks engine
 │   ├── skills/                  # skill loader (skilltoolset wrapper)
 │   ├── softskills/              # curator-distilled procedures + reflectors (heuristic + LLM)
 │   ├── mcp/                     # MCP config loader
@@ -409,7 +414,7 @@ yoke/
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
 ├── softskills/                  # curator output (incl. _stats.json sidecar + wrap-session built-in)
-├── config/                      # agents.json, permissions.json, mcp_config.json
+├── config/                      # agents.json, permissions.json, hooks.json, mcp_config.json
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation
 ```

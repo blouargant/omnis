@@ -11,6 +11,7 @@ const BASE_PATH = window.BASE_PATH || "";
     permissions: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
     mcp: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
     a2a: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+    hooks: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg>`,
     skills: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
     appearance: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`,
     documentation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
@@ -30,6 +31,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "permissions", label: "Permissions", form: "permissions" },
     { id: "mcp",         label: "MCP",         form: "mcp" },
     { id: "a2a",         label: "A2A",         form: "a2a" },
+    { id: "hooks",       label: "Hooks",       form: "hooks" },
   ];
 
   // Sidebar menu entries (JSON configs + client-only views like Appearance).
@@ -45,6 +47,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "permissions",   label: "Permissions", title: "Permissions",               kind: "json" },
     { id: "mcp",           label: "MCP",         title: "MCP Servers",               kind: "json" },
     { id: "a2a",           label: "A2A",         title: "A2A Agents",                kind: "json" },
+    { id: "hooks",         label: "Hooks",       title: "Lifecycle Hooks",           kind: "json" },
     { id: USER_COMMANDS_ID,label: "Commands",    title: "Slash Commands",            kind: "client" },
     { id: REGISTRIES_ID,   label: "Registries",  title: "Remote Registries",         kind: "client" },
     { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
@@ -68,6 +71,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "commands",        file: "18-commands.md",        label: "Slash Commands",       group: "Core Concepts" },
     { id: "agent-md",        file: "21-agent-md.md",        label: "Project Memory (AGENT.md)", group: "Core Concepts" },
     { id: "permissions-concept", file: "13-permissions.md", label: "Permissions",     group: "Core Concepts" },
+    { id: "hooks-concept",   file: "22-hooks.md",           label: "Lifecycle Hooks", group: "Core Concepts" },
     { id: "config",          file: "14-config.md",          label: "Configuration & Filesystem", group: "Core Concepts" },
     { id: "providers",       file: "15-providers.md",       label: "Providers & Models", group: "Core Concepts" },
     { id: "env-vars",        file: "16-env-vars.md",        label: "Environment Variables", group: "Core Concepts" },
@@ -783,6 +787,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (id === "permissions") return { permissions: { defaultMode: "default", allow: [], ask: [], deny: [] } };
     if (id === "mcp") return { servers: {}, inputs: [] };
     if (id === "a2a") return { agents: {}, inputs: [] };
+    if (id === "hooks") return { hooks: {} };
     return {};
   }
 
@@ -1312,6 +1317,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (id === "permissions") return renderPermissionsForm();
     if (id === "mcp") return renderMCPForm();
     if (id === "a2a") return renderA2AForm();
+    if (id === "hooks") return renderHooksForm();
   }
 
   function markFormDirty(id) {
@@ -3414,6 +3420,143 @@ const BASE_PATH = window.BASE_PATH || "";
         renderPermRule(d, key);
       });
       el.appendChild(row);
+    });
+  }
+
+  // ── hooks.json form (Claude Code hooks schema) ───────────────────
+  // On-disk shape:
+  //   { "hooks": { "<Event>": [ { "matcher": "<regex>",
+  //       "hooks": [ { "type": "command", "command": "...", "timeout": N } ] } ] } }
+  // Events map to lifecycle moments; `matcher` is a tool-name regexp for the
+  // tool events (ignored for the others). See CLAUDE.md "Lifecycle hooks".
+  const HOOK_EVENTS = [
+    { id: "PreToolUse",       hint: "Before a tool runs. matcher = tool-name regexp (e.g. Write|Edit). Exit 2 or a {\"decision\":\"block\"} / permissionDecision \"deny\" blocks the tool." },
+    { id: "PostToolUse",      hint: "After a tool runs. matcher = tool-name regexp. A block decision feeds the reason back to the model." },
+    { id: "UserPromptSubmit", hint: "When a prompt is submitted. stdout (or additionalContext) is injected into the turn; exit 2 / block aborts it." },
+    { id: "Stop",             hint: "When the agent finishes a turn." },
+    { id: "SubagentStop",     hint: "When a sub-agent invocation finishes. matcher = sub-agent name." },
+    { id: "SessionStart",     hint: "When a session is created. stdout is injected as context." },
+    { id: "SessionEnd",       hint: "When a session ends (CLI/TUI exit, or web session delete)." },
+    { id: "PreCompact",       hint: "Before context compaction. matcher = trigger (manual / auto / hard)." },
+    { id: "Notification",     hint: "On a notification (e.g. a permission / ask-user prompt)." },
+  ];
+
+  function hooksData() {
+    const d = state.parsed["hooks"].value;
+    if (!d.hooks || typeof d.hooks !== "object") d.hooks = {};
+    return d.hooks;
+  }
+
+  function renderHooksForm() {
+    const id = "hooks";
+    if (!state.parsed[id]) {
+      bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+      loadParsed(id).then(() => renderHooksForm()).catch(e => {
+        bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
+      });
+      return;
+    }
+    const h = hooksData();
+    bodyEl.innerHTML = `
+      <div class="settings-form">
+        <p class="empty" style="margin:0 0 .6rem">
+          Shell commands run at lifecycle moments. Each command receives the event
+          as JSON on stdin and runs through the Bash safety floor. Same format as
+          Claude Code hooks.
+        </p>
+        ${HOOK_EVENTS.map(ev => `
+          <section class="form-section">
+            <h3>${ev.id}
+              <button type="button" class="add-btn" data-event="${ev.id}">+ Add matcher</button>
+            </h3>
+            <div class="form-card" style="margin-bottom:0">
+              <p class="empty" style="margin:0 0 .4rem">${escHtml(ev.hint)}</p>
+              <div class="hook-matchers" data-event="${ev.id}"></div>
+            </div>
+          </section>
+        `).join("")}
+      </div>
+    `;
+    bodyEl.querySelectorAll(".add-btn[data-event]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const ev = btn.dataset.event;
+        if (!Array.isArray(h[ev])) h[ev] = [];
+        h[ev].push({ matcher: "", hooks: [{ type: "command", command: "" }] });
+        markFormDirty(id);
+        renderHookMatchers(h, ev);
+      });
+    });
+    for (const ev of HOOK_EVENTS) renderHookMatchers(h, ev.id);
+    updateFooter();
+  }
+
+  function renderHookMatchers(h, event) {
+    const el = bodyEl.querySelector(`.hook-matchers[data-event="${event}"]`);
+    if (!el) return;
+    const list = Array.isArray(h[event]) ? h[event] : [];
+    el.innerHTML = "";
+    if (!list.length) { el.innerHTML = `<p class="empty">No hooks.</p>`; return; }
+    list.forEach((matcher, mIdx) => {
+      if (!Array.isArray(matcher.hooks)) matcher.hooks = [];
+      const card = document.createElement("div");
+      card.className = "hook-matcher-card";
+      card.innerHTML = `
+        <div class="hook-matcher-row">
+          <input type="text" class="hook-matcher" placeholder="matcher (regex; blank = all)" />
+          <button type="button" class="add-btn hook-add-cmd">+ Command</button>
+          <button type="button" class="del-btn hook-del-matcher">Remove matcher</button>
+        </div>
+        <div class="hook-commands"></div>
+      `;
+      const matchIn = card.querySelector(".hook-matcher");
+      matchIn.value = matcher.matcher || "";
+      matchIn.addEventListener("input", () => { matcher.matcher = matchIn.value; markFormDirty("hooks"); });
+      card.querySelector(".hook-del-matcher").addEventListener("click", () => {
+        list.splice(mIdx, 1);
+        markFormDirty("hooks");
+        renderHookMatchers(h, event);
+      });
+      const cmdWrap = card.querySelector(".hook-commands");
+      const paintCmds = () => {
+        cmdWrap.innerHTML = "";
+        if (!matcher.hooks.length) { cmdWrap.innerHTML = `<p class="empty">No commands.</p>`; return; }
+        matcher.hooks.forEach((cmd, cIdx) => {
+          const row = document.createElement("div");
+          row.className = "hook-cmd-row";
+          row.innerHTML = `
+            <input type="text" class="hook-cmd" placeholder="command (e.g. ./scripts/guard.sh)" />
+            <input type="number" class="hook-timeout" min="0" placeholder="timeout s" />
+            <button type="button" class="del-btn">Remove</button>
+          `;
+          const cmdIn = row.querySelector(".hook-cmd");
+          const toIn = row.querySelector(".hook-timeout");
+          cmdIn.value = cmd.command || "";
+          if (cmd.timeout) toIn.value = cmd.timeout;
+          cmdIn.addEventListener("input", () => {
+            cmd.type = "command";
+            cmd.command = cmdIn.value;
+            markFormDirty("hooks");
+          });
+          toIn.addEventListener("input", () => {
+            const n = parseInt(toIn.value, 10);
+            if (Number.isFinite(n) && n > 0) cmd.timeout = n; else delete cmd.timeout;
+            markFormDirty("hooks");
+          });
+          row.querySelector(".del-btn").addEventListener("click", () => {
+            matcher.hooks.splice(cIdx, 1);
+            markFormDirty("hooks");
+            paintCmds();
+          });
+          cmdWrap.appendChild(row);
+        });
+      };
+      card.querySelector(".hook-add-cmd").addEventListener("click", () => {
+        matcher.hooks.push({ type: "command", command: "" });
+        markFormDirty("hooks");
+        paintCmds();
+      });
+      paintCmds();
+      el.appendChild(card);
     });
   }
 

@@ -117,6 +117,14 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
   `total_tokens`) for per-call telemetry.
 - **permissions** — gates bash and tool calls against
   `permissions.json` (allow / deny / ask).
+- **hooks** — runs user-configured shell commands at lifecycle moments
+  (Claude Code-style `hooks.json`). A per-squad runner plugin carries the
+  blocking/injecting hooks (`PreToolUse` blocks a tool exactly like the
+  permissions DENY path, `PostToolUse`, `UserPromptSubmit`, `Stop`); a
+  process-wide engine on `Infrastructure` wires the fire-and-forget bus
+  listeners (`SubagentStop`, `SessionStart`/`End`, `PreCompact`,
+  `Notification`) once. See [Lifecycle hooks](../web/docs/22-hooks.md) and
+  `internal/hooks` + `agent/hooks_plugin.go`.
 - **cache** — surfaces prompt-cache stats per turn.
 - **compress** — when a session's context approaches the model window,
   extracts durable facts to a per-session
@@ -224,38 +232,45 @@ recompiling:
 | Skills      | `skills/<name>/SKILL.md`                  | `internal/skills` walks the dir at startup        |
 | MCP servers | `mcp_config.json`                  | `internal/mcp` spawns processes & adapts toolsets |
 | Permissions | `permissions.json`                 | `core/permissions` plugin                         |
+| Hooks       | `hooks.json`                       | `internal/hooks` engine + `agent/hooks_plugin.go` (per-squad plugin + bus listeners) |
 | A2A peers   | `a2a_config.json`                  | `internal/a2a.NewTools` adds one `a2a_<name>` tool per entry to the leader |
 
 ## Lifecycle of a turn
 
-1. User prompt → `runner.Run(ctx, sessionID, message)`.
+1. User prompt → `runner.Run(ctx, sessionID, message)`. ADK's
+   `OnUserMessage` runs any **`UserPromptSubmit`** hook, which can inject
+   context into the turn or abort it.
 2. ADK calls `BeforeModel` plugins (events, cache stats).
 3. Model produces a response. Each tool call is dispatched in turn:
-   - `BeforeTool` — permissions plugin may auto-allow / ask / deny.
+   - `BeforeTool` — permissions plugin may auto-allow / ask / deny, and
+     a **`PreToolUse`** hook may block the call (short-circuiting the tool
+     with a reason, the same mechanism as a permissions DENY).
      When the tool is a sub-agent wrapper, the events bus synthesises
      `EventSubAgentStart` (carrying `caller_agent`, the sub-agent name,
      and `run_id`).
    - Tool function runs. Sub-agent runs use a private ADK runner; their
      internal tool/model events still flow through the shared bus
      because `AgentCallbacks` are attached on every sub-agent.
-   - `AfterTool` — events plugin records I/O. Sub-agent wrappers fire
+   - `AfterTool` — events plugin records I/O; a **`PostToolUse`** hook may
+     feed a reason back to the model. Sub-agent wrappers fire
      `EventSubAgentEnd` with the same `run_id` (or `error` on tool
      errors).
 4. Model is re-invoked with tool results until it stops emitting calls.
 5. `AfterModel` — compress plugin checks context size; if over
    threshold, writes a memory snapshot and rewrites session.
 6. Session events are appended to the `session.Service`.
-7. `EventRunEnd` fires. The sub-agent reflection hook walks every
-   `EventSubAgentStart/End` pair seen during this `run_id`, classifies
-   the leader's reaction from its assistant text, and applies
-   `helpful` / `harmful` / `neutral` tags to `softskills/_stats.json`
-   for every soft-skill the sub-agents loaded.
+7. `AfterRun` runs any **`Stop`** hook; `EventRunEnd` fires. The
+   sub-agent reflection hook walks every `EventSubAgentStart/End` pair
+   seen during this `run_id`, classifies the leader's reaction from its
+   assistant text, and applies `helpful` / `harmful` / `neutral` tags to
+   `softskills/_stats.json` for every soft-skill the sub-agents loaded.
 
 When a real session ends (TUI quit / web UI close / idle timeout):
 
-8. `EventSessionEnd` fires. The session reflection pipeline drains its
-   buckets, computes the heuristic outcome, applies the heuristic tags
-   to `_stats.json`, and emits `EventSessionReflected`.
+8. `EventSessionEnd` fires (CLI/TUI; the server fires the `SessionEnd`
+   hook directly on session delete). The session reflection pipeline
+   drains its buckets, computes the heuristic outcome, applies the
+   heuristic tags to `_stats.json`, and emits `EventSessionReflected`.
 9. The curator hook receives `EventSessionReflected`. When a reflector
    agent is configured, it runs the LLM reflector (60-second timeout)
    to refine the tags + extract a `key_insight`, applies the deltas

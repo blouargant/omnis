@@ -1,0 +1,41 @@
+/* Lifecycle hooks editor (Settings → Hooks).
+   Part of web/css/settings.css — edit this partial, not the @import barrel. */
+
+.hook-matcher-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: var(--surface2, var(--surface));
+}
+.hook-matcher-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.hook-matcher-row .hook-matcher { flex: 1; }
+.hook-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  margin-left: 0.25rem;
+}
+.hook-cmd-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.hook-cmd-row .hook-cmd { flex: 1; }
+.hook-cmd-row .hook-timeout { max-width: 6.5rem; }
+.hook-matcher-card input {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+.hook-matcher-card input:focus { outline: none; border-color: var(--accent); }

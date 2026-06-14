@@ -35,6 +35,7 @@ Per-agent details live in `registry/agents/<name>/` — see
   "bash_output_filters_dir": ".agents/filters",
   "mcp_config_path": ".agents/mcp_config.json",
   "permissions_config_path": ".agents/permissions.json",
+  "hooks_config_path": ".agents/hooks.json",
 
   "agents": ["leader", "investigator", "web_agent", "summariser", "curator"],
 
@@ -345,6 +346,64 @@ auto-allow + mutating ask):
 The root binary uses `permissions.StdinAsker{}` which prompts on the
 terminal. Implement `permissions.Asker` to integrate with a different
 UI (web modal, Slack DM, etc.).
+
+---
+
+## `hooks.json`
+
+Claude Code-style **lifecycle hooks**: shell commands fired at fixed points
+in the agent loop. The format matches Claude Code's `hooks` block, so an
+existing config is portable. Resolved through the config search chain
+(`paths.FindConfig("hooks.json")`; override via `hooks_config_path` in
+`agents.json`).
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Write|Edit",
+        "hooks": [ { "type": "command", "command": "./scripts/guard.sh", "timeout": 30 } ] }
+    ],
+    "PostToolUse":      [ { "matcher": "Edit", "hooks": [ { "command": "gofmt -w ." } ] } ],
+    "UserPromptSubmit": [ { "hooks": [ { "command": "cat .agents/house-style.txt" } ] } ]
+  }
+}
+```
+
+### Events
+
+`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SubagentStop`,
+`SessionStart`, `SessionEnd`, `PreCompact`, `Notification`. `matcher` is a
+Go regexp on the **tool name** for the tool events (the **trigger** for
+`PreCompact`, the **sub-agent name** for `SubagentStop`, ignored otherwise);
+empty/`"*"` matches all, an invalid regexp falls back to exact equality.
+
+### Protocol
+
+Each command receives the event as JSON on **stdin** (`session_id`, `cwd`,
+`hook_event_name`, plus `tool_name`/`tool_input`/`tool_response`/`prompt`…).
+Output:
+
+- **exit 0** — proceed; plain stdout becomes `additionalContext` for
+  `UserPromptSubmit` / `SessionStart`.
+- **exit 2** — block (stderr is the reason); other non-zero exits are
+  non-blocking errors.
+- **JSON on stdout** — `decision` (`approve`/`block`), `reason`,
+  `hookSpecificOutput.permissionDecision` (`allow`/`deny`/`ask`, `PreToolUse`),
+  `additionalContext`, `systemMessage`, `continue`.
+
+### Wiring
+
+`internal/hooks` is the engine (`Config`/`Match`/`Run`, mtime-poll
+`Reloader`, additive `Merge`); commands run via `core/tools.RunShellCaptured`
+(same safety floor as the Bash tool, stdout/stderr/exit-code separated).
+`agent/hooks_plugin.go` mounts a **per-squad** runner plugin for the
+blocking/injecting events (`PreToolUse`→`BeforeTool`, `PostToolUse`→`AfterTool`,
+`UserPromptSubmit`→`OnUserMessage`, `Stop`→`AfterRun`; the Omnis router squad
+mounts none) and wires the fire-and-forget bus listeners (`SubagentStop`,
+`SessionStart`/`End`, `PreCompact`, `Notification`) **once** on
+`Infrastructure`. Like the `!` shell-escape, hooks bypass the permission layer
+but the hard safety floor still applies. An absent/empty file is a no-op.
 
 ---
 

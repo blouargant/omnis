@@ -54,6 +54,17 @@ leadTools = append(leadTools, mytool.New())
 If the tool is mutating, **also add a `permissions.json` rule** so the
 gating plugin can prompt the user.
 
+## React to the agent loop without code (hooks)
+
+Before writing a plugin, consider whether a **lifecycle hook** does the job.
+`hooks.json` lets you run a shell command at fixed points — before/after a
+tool, on prompt submit, on stop, on session start/end, before compaction —
+with no Go code and a hot-reload. A `PreToolUse` hook can block a tool
+(exit 2), and a `UserPromptSubmit` hook can inject context. See
+[Lifecycle hooks](../web/docs/22-hooks.md) and `internal/hooks` +
+`agent/hooks_plugin.go`. Reach for a plugin (below) only when you need
+in-process state or to mutate the request/response, not just react.
+
 ## Add a new plugin
 
 Plugins observe and mutate the agent loop via the `plugin.Plugin`

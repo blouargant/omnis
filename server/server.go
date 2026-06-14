@@ -19,6 +19,7 @@ import (
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/askuser"
 	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/yoke/internal/hooks"
 	"github.com/blouargant/yoke/internal/sessions"
 )
 
@@ -300,6 +301,17 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("session_created", meta.ID)
 		}
+		// Fire SessionStart hooks for this new session. Web-UI sessions never
+		// emit the bus EventSessionStart (that is a CLI/TUI front-end signal), so
+		// the server drives the hook directly via FireHook. Async so a slow hook
+		// never delays the create response.
+		if d.Manager != nil {
+			go d.Manager.Infra().FireHook(context.Background(), hooks.SessionStart, "", hooks.Input{
+				SessionID: meta.ID,
+				Cwd:       bashCwd.get(meta.ID),
+				Source:    "web",
+			})
+		}
 		c.JSON(http.StatusCreated, gin.H{
 			"session_id": meta.ID,
 			"created_at": meta.CreatedAt,
@@ -326,6 +338,16 @@ func newEngine(d serverDeps) *gin.Engine {
 		if !d.Registry.Delete(id) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
+		}
+		// Fire SessionEnd hooks. Driven directly (not via the bus EventSessionEnd,
+		// which also runs the reflection/curation pipeline that web-UI sessions
+		// deliberately skip). Async so a slow hook never delays the response.
+		if d.Manager != nil {
+			go d.Manager.Infra().FireHook(context.Background(), hooks.SessionEnd, "", hooks.Input{
+				SessionID: id,
+				Cwd:       bashCwd.get(id),
+				Reason:    "delete",
+			})
 		}
 		if d.UnregisterSession != nil && displayName != "" {
 			_ = d.UnregisterSession(displayName)

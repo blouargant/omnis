@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -260,6 +262,73 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 		s = "(no output)"
 	}
 	return truncate(s), resultCwd, nil
+}
+
+// CapturedRun is the result of RunShellCaptured: stdout and stderr separated,
+// the process exit code, and the timed-out / safety-floor-blocked flags.
+type CapturedRun struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int // process exit code; -1 when it could not start or was blocked
+	TimedOut bool
+	Blocked  bool // refused by the safety floor (Stderr carries the reason)
+}
+
+// RunShellCaptured executes command through the platform shell (the same
+// process-group-isolated shell + kill-on-timeout as RunBash) with cwd as the
+// working directory, feeding stdin to the process and capturing stdout and
+// stderr separately along with the exit code. Unlike RunBash/RunBashInteractive
+// it does not combine the streams, apply the output filter, or truncate — its
+// caller needs the raw stdout/stderr/exit-code triple to implement a control
+// protocol (the hooks engine, which speaks Claude Code's hook output schema).
+//
+// It shares RunBash's hard safety floor: a command tripping it returns with
+// Blocked=true and ExitCode=-1 without executing. timeout <= 0 uses the
+// configured default. Like the "!" shell-escape it bypasses the agent
+// permission layer (hook commands are user-authored config), but the safety
+// floor still applies.
+func RunShellCaptured(ctx context.Context, command, cwd string, stdin []byte, timeout time.Duration) CapturedRun {
+	if b, blocked := SafetyFloorBlock(command); blocked {
+		return CapturedRun{Stderr: fmt.Sprintf("command blocked by safety floor (%q)", b), ExitCode: -1, Blocked: true}
+	}
+	if timeout <= 0 {
+		bashDefaultTimeoutMu.RLock()
+		timeout = bashDefaultTimeout
+		bashDefaultTimeoutMu.RUnlock()
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := newShellCommand(cctx, command)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	if len(stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	cmd.WaitDelay = 5 * time.Second
+
+	runErr := cmd.Run()
+	res := CapturedRun{
+		Stdout:   outBuf.String(),
+		Stderr:   errBuf.String(),
+		TimedOut: errors.Is(cctx.Err(), context.DeadlineExceeded),
+	}
+	if runErr != nil {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
+			res.ExitCode = ee.ExitCode()
+		} else {
+			res.ExitCode = -1
+			if res.Stderr == "" {
+				res.Stderr = runErr.Error()
+			}
+		}
+	}
+	return res
 }
 
 // extractCapturedCwd removes the cwdSentinel line emitted by wrapCaptureCwd

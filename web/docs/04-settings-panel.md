@@ -13,6 +13,7 @@ file on disk or to a client-only view:
 | **Skills**     | `registry/skills/`             | Manage authored playbooks the agent can load on demand. |
 | **Agents**     | `agents.json` + `registry/agents/` | Roles, model profiles, tool wiring, global env. Per-agent details live in `registry/agents/<name>/`. |
 | **Permissions**| `permissions.json`     | What the agent may run without asking. |
+| **Hooks**      | `hooks.json`           | Shell commands fired at lifecycle moments (before/after a tool, on prompt/session/compaction). |
 | **MCP**        | `mcp_config.json`      | External tool servers (Model Context Protocol). |
 | **A2A**        | `a2a_config.json`      | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader. |
 | **Commands**   | (client only)                 | Custom slash command templates that expand to a prompt. |
@@ -102,6 +103,19 @@ adds an optional reason and a project-scoping `cwd`. See the **Permissions**
 concept page for the full syntax and modes. Skill-contributed permissions appear
 in a read-only block — they are owned by the skill file and cannot be edited from
 this panel.
+
+## Editing Hooks
+
+**Settings → Hooks** edits `hooks.json` — shell commands that fire at lifecycle
+moments. The panel lists every event (PreToolUse, PostToolUse, UserPromptSubmit,
+Stop, SubagentStop, SessionStart, SessionEnd, PreCompact, Notification); under
+each you add **matcher cards** with a tool-name regexp (or blank for "all") and a
+list of `command` + `timeout` rows. Edits hot-reload within a few seconds.
+
+Hooks run **outside the permission layer** (you authored them) but still hit the
+hard safety floor, and they receive the event as JSON on stdin — a `PreToolUse`
+hook can block a tool by exiting `2`. See the **[Lifecycle Hooks](22-hooks.md)**
+concept page for the input/output protocol and examples.
 
 ## Editing MCP
 

@@ -260,6 +260,36 @@ func TestParsedRoundTrip(t *testing.T) {
 	}
 }
 
+// hooks.json is exposed through the generic config editor routes (it is just
+// another whitelisted name), so the Settings → Hooks form can read/write it.
+func TestHooksParsedRoundTrip(t *testing.T) {
+	p := seedConfigFile(t, "hooks.json", "{\"hooks\":{}}\n")
+	r := newTestEngine(t, editorFiles())
+
+	w := do(t, r, http.MethodGet, "/api/config/parsed/hooks", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get: want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	w = do(t, r, http.MethodPut, "/api/config/parsed/hooks", map[string]any{
+		"data": map[string]any{
+			"hooks": map[string]any{
+				"PreToolUse": []any{map[string]any{
+					"matcher": "Write",
+					"hooks":   []any{map[string]any{"type": "command", "command": "./guard.sh"}},
+				}},
+			},
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("put: want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	out, _ := os.ReadFile(p)
+	if !strings.Contains(string(out), "./guard.sh") {
+		t.Fatalf("hooks.json not persisted: %q", out)
+	}
+}
+
 // localProjectSetup chdirs into a fresh temp dir, creates a project-local
 // configuration directory there (.agents/ or agents/, per dirName), and pins
 // $YOKE_HOME at a separate temp so the editor's read/write resolution can

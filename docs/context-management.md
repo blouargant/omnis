@@ -181,6 +181,9 @@ Three new events were added so any subscriber — the TUI, the file logger, exte
 | `compression_end` | After pipeline completes | `trigger`, `tokens_before`, `tokens_after`, `passes`, `duration_ms` |
 | `compression_skipped` | Token count below both thresholds | `tokens`, `soft`, `hard` |
 
+`compression_start` is also what fires the **`PreCompact`** [lifecycle hook](../web/docs/22-hooks.md)
+(`trigger` becomes the hook matcher), so a hook can run just before context is compressed.
+
 Wire via:
 
 ```go

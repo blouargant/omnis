@@ -117,6 +117,7 @@ type runtimeConfigFile struct {
 	BashTimeoutSeconds    int    `json:"bash_timeout_seconds"`
 	MCPConfigPath         string `json:"mcp_config_path"`
 	PermissionsConfigPath string `json:"permissions_config_path"`
+	HooksConfigPath       string `json:"hooks_config_path"`
 	SerpAPIKey            string `json:"serpapi_key"`
 	// EmbedModelRef names the model in models.json used for internal semantic
 	// embedding (softskill/precedent/codebase recall). It must reference a
@@ -227,6 +228,10 @@ type RuntimeSettings struct {
 	BashTimeoutSeconds      int
 	MCPConfigPath           string
 	PermissionsConfigPath   string
+	// HooksConfigPath is the resolved path to hooks.json, defining Claude
+	// Code-style lifecycle hooks (shell commands fired before/after tools, on
+	// prompt submit, on stop, etc.). Empty/missing means no hooks.
+	HooksConfigPath string
 	// A2AConfigPath is the resolved path to a2a_config.json, defining remote
 	// A2A agent endpoints that any agent's `a2a_agents` list can reference.
 	A2AConfigPath string
@@ -795,6 +800,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		BashTimeoutSeconds:      120,
 		MCPConfigPath:           paths.FindConfig("mcp_config.json"),
 		PermissionsConfigPath:   paths.FindConfig("permissions.json"),
+		HooksConfigPath:         paths.FindConfig("hooks.json"),
 		A2AConfigPath:           paths.FindConfig("a2a_config.json"),
 		Providers:               map[string]RuntimeProviderConfig{},
 		Models:                  map[string]RuntimeModelConfig{},
@@ -857,6 +863,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(cfg.PermissionsConfigPath)
+	}
+	if strings.TrimSpace(cfg.HooksConfigPath) != "" {
+		out.HooksConfigPath = strings.TrimSpace(cfg.HooksConfigPath)
 	}
 	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
 		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))

@@ -15,6 +15,7 @@ import (
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/cache"
 	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/yoke/internal/hooks"
 	"github.com/blouargant/yoke/internal/paths"
 )
 
@@ -38,6 +39,8 @@ func buildPlugins(
 	suffix func(userID, sessionID string) string,
 	buildTimestamp string,
 	asker permissions.Asker,
+	hooksEngine *hooks.Reloader,
+	isRouterSquad bool,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	logsDir := paths.LogsDir()
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -79,6 +82,14 @@ func buildPlugins(
 	}
 	if perms, err := buildPermissionsPlugin(permsCtx, runtime, asker, bus); err == nil {
 		plugins = append(plugins, perms)
+	}
+	// Claude Code-style lifecycle hooks. The per-squad runner plugin carries the
+	// blocking/injecting hooks (PreToolUse/PostToolUse/UserPromptSubmit/Stop) and
+	// reads the shared hot-reloading engine; the fire-and-forget lifecycle
+	// listeners are wired once on the bus by Infrastructure.Hooks. The router
+	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
+	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
+		plugins = append(plugins, hp)
 	}
 	if _, cp, err := cache.Plugin("cache"); err == nil {
 		plugins = append(plugins, cp)

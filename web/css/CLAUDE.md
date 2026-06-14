@@ -76,6 +76,7 @@ same colour/size in multiple partials.
 |---|---|
 | `core.css` | **Settings shell:** `#settings-panel`, header, breadcrumb, hint, tabs, view-toggle, body, footer, raw editor, forms, sub-tabs, combobox |
 | `permissions.css` | Permission-rule editor + skill-contributed (read-only) permissions |
+| `hooks.css` | Lifecycle hooks editor (Settings → Hooks): matcher cards + command rows |
 | `status.css` | Restart-required banner, reload spinner, generation pill, full-page restart overlay |
 | `sidebar.css` | Settings **sidebar chrome**: the gear button, section labels, the in-sidebar settings menu that expands when Settings is open |
 | `theme.css` | Theme picker |

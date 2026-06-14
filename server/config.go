@@ -89,6 +89,7 @@ type configFiles struct {
 	Permissions string // config/permissions.json
 	MCP         string // config/mcp_config.json
 	A2A         string // config/a2a_config.json
+	Hooks       string // config/hooks.json
 }
 
 // path returns the **read** path for a whitelisted name. Resolved at
@@ -135,6 +136,12 @@ func (c configFiles) path(name string) (string, bool) {
 				return c.A2A, true
 			}
 		}
+	case "hooks":
+		if c.Hooks != "" {
+			if st, err := os.Stat(c.Hooks); err == nil && !st.IsDir() {
+				return c.Hooks, true
+			}
+		}
 	}
 	return paths.FindConfig(filename), true
 }
@@ -176,6 +183,7 @@ var configFileNames = map[string]string{
 	"permissions": "permissions.json",
 	"mcp":         "mcp_config.json",
 	"a2a":         "a2a_config.json",
+	"hooks":       "hooks.json",
 }
 
 // resolveConfigFiles determines the absolute paths of the JSON files that
@@ -193,6 +201,7 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	findConfigModels := paths.FindConfig("models.json")
 	findConfigPermissions := paths.FindConfig("permissions.json")
 	findConfigMCP := paths.FindConfig("mcp_config.json")
+	findConfigHooks := paths.FindConfig("hooks.json")
 
 	out := configFiles{}
 	if v := strings.TrimSpace(opts.ConfigPath); v != "" && v != findConfigAgent {
@@ -215,8 +224,11 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 		if v := strings.TrimSpace(settings.MCPConfigPath); v != "" && v != findConfigMCP {
 			out.MCP = v
 		}
+		if v := strings.TrimSpace(settings.HooksConfigPath); v != "" && v != findConfigHooks {
+			out.Hooks = v
+		}
 	}
-	for _, p := range []*string{&out.Agent, &out.Models, &out.Permissions, &out.MCP, &out.A2A} {
+	for _, p := range []*string{&out.Agent, &out.Models, &out.Permissions, &out.MCP, &out.A2A, &out.Hooks} {
 		if *p == "" {
 			continue
 		}
@@ -341,12 +353,14 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		permissionsPath, _ := files.path("permissions")
 		mcpPath, _ := files.path("mcp")
 		a2aPath, _ := files.path("a2a")
+		hooksPath, _ := files.path("hooks")
 		out := []configFileInfo{
 			describeConfigFile("agent", agentPath),
 			describeConfigFile("models", modelsPath),
 			describeConfigFile("permissions", permissionsPath),
 			describeConfigFile("mcp", mcpPath),
 			describeConfigFile("a2a", a2aPath),
+			describeConfigFile("hooks", hooksPath),
 		}
 		c.JSON(http.StatusOK, gin.H{"files": out})
 	})

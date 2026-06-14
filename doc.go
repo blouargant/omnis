@@ -15,6 +15,8 @@
 //   - Skills    — Markdown playbooks under skills/<name>/SKILL.md, loaded
 //     lazily via the load_skill tool
 //   - MCP       — external servers wired in via config/mcp_config.json
+//   - Hooks     — shell commands fired at lifecycle moments via
+//     config/hooks.json (Claude Code-style; see internal/hooks)
 //
 // The same root binary becomes a code reviewer, a Kubernetes triage
 // assistant, a DBA helper, or a release engineer purely by changing what
