@@ -39,6 +39,8 @@ Per-agent details live in `registry/agents/<name>/` — see
 
   "agents": ["leader", "investigator", "web_agent", "summariser", "curator"],
 
+  "router_squad": "omnis",
+
   "squads": [
     {
       "name": "default",
@@ -55,6 +57,14 @@ Per-agent details live in `registry/agents/<name>/` — see
   ]
 }
 ```
+
+`router_squad` names the **Omnis router squad** that new chats start on
+(see [Squads](#squads--per-session-agent-groups) and the router rules
+below). It is **optional**: when absent it defaults to `omnis`, and both
+the `omnis` agent and a leaderless `omnis` squad are injected
+automatically if your config doesn't declare them. Set it to `"none"` to
+disable routing (new chats then start on `default`). The
+`YOKE_ROUTER_SQUAD` env var overrides this key.
 
 > **Migrating from older versions:** configurations that still declare a
 > top-level `"models": { … }` block inside `agents.json` are rejected at
@@ -140,15 +150,52 @@ Rules enforced at resolution time:
   or contains only non-default entries, the resolver synthesises a
   `default` from the enabled agents (everything except `curator`).
 - `leader` and every `members[i]` must reference an enabled agent.
+- A non-`"none"` `leader` must reference an agent marked `leader: true`.
+- A `leader` of `"none"` (or empty) makes the squad **leaderless** and
+  requires **exactly one member**: that agent runs directly as the runner
+  root with no coordinator, no sub-agent delegation tools, and tools
+  limited to exactly what it declares (plus the always-on mailbox and
+  `ask_user`). This is the shape used by the `helper` squad and the Omnis
+  router. Squads with two or more members need a real leader.
 - `curator` cannot be a squad member — it stays a single process-wide
   hook listening across all squads.
 - Squad names are case-insensitive and must be unique within the file.
 
 The web UI exposes a **Squads** sub-tab in Settings → Agent (leader
-dropdown, member checkboxes, description, add/delete). A picker next to
-the New Chat button selects which squad each new session uses; the
-choice is persisted on the session and survives server restarts. Hot
-reload picks up squad edits without a process restart.
+dropdown — including a `(none — run single agent directly)` option —
+member checkboxes, description, add/delete). A picker next to the New Chat
+button can pin a session to a specific squad; the choice is persisted on
+the session and survives server restarts. Hot reload picks up squad edits
+without a process restart.
+
+#### Omnis router (default chat routing)
+
+`router_squad` (top level of `agents.json`, above) names a **leaderless
+router squad** — the `omnis` agent — that is the **default squad for every
+new chat**. Rather than answering itself, the router reads the request,
+picks the squad best able to handle it, and **transfers control** of the
+conversation to that squad's leader. When the user later goes out of the
+active squad's scope, that squad hands control **back** to the router,
+which re-routes; per-squad in-session history is retained across switches.
+The whole mechanism is host-side (`agent/routing.go`):
+
+- `route_to_squad(squad, reason)` (router-only) and `handoff_to_router(reason)`
+  (mounted on every non-router squad root when routing is enabled) record a
+  per-session directive in a process-wide `RouteRegistry`; the dispatch loop
+  (`Manager.RunWithRouting`) reads it and re-dispatches the user's **verbatim**
+  turn — text *and* attachments — to the new squad (the tools carry no prompt,
+  so the request can't be paraphrased or dropped).
+- When unsure, the router privately probes a candidate with
+  `ask_squad(squad, request)` — one isolated, non-streamed model call on that
+  candidate lead's own model/instruction (no runner, tools, or event bus), so
+  the negotiation is hidden. When every plausible squad declines it asks the
+  user instead of force-routing.
+- Routing is invisible: the routing tools are exempt from the permission layer
+  (they never prompt) and each surface suppresses the router hop's narration —
+  the only visible signal is the routing chip / "── routed to X squad ──" line.
+- **Opt-out:** `router_squad: "none"` (or `YOKE_ROUTER_SQUAD=none`) disables
+  routing, making new chats start on `default` with byte-identical behaviour to
+  pre-router builds. Absent ⇒ `omnis`, auto-injected.
 
 ### Models and references
 

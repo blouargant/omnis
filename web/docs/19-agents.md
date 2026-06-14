@@ -18,11 +18,15 @@ A split view: fleet list on the left, agent detail panel on the right.
 
 Agents are grouped into two sections:
 
-- **BUILT-IN AGENTS** — shipped with yoke: `leader`, `skill_editor`,
-  `helper`, `summariser`, `curator`, `reflector`. Fields are
-  read-only where the binary bakes in defaults. The **`helper`** answers
-  questions about yoke from its bundled documentation (quoting the source via
-  `search_docs`) and browses/installs remote registry items.
+- **BUILT-IN AGENTS** — shipped with yoke: `omnis`, `leader`,
+  `skill_editor`, `helper`, `summariser`, `curator`, `reflector`. Fields
+  are read-only where the binary bakes in defaults. The **`omnis`** agent is
+  the **router** that runs at the start of every new chat and hands the
+  conversation to the best squad (see [Architecture →
+  Omnis router](10-architecture.md#omnis-router-default-chat-routing)); it
+  is auto-injected when your config doesn't declare it. The **`helper`**
+  answers questions about yoke from its bundled documentation (quoting the
+  source via `search_docs`) and browses/installs remote registry items.
 - **CUSTOM AGENTS** — user-added. All fields are editable; the agent can be
   removed or reordered.
 
@@ -135,8 +139,7 @@ the order in which they appear in squad member lists) or removed with the
 ## Squads sub-tab
 
 A **squad** is a named group `{ leader, members[] }` that a chat session
-picks at creation time. Each squad is wired as its own leader + sub-agent
-tree.
+runs on. Each squad is wired as its own leader + sub-agent tree.
 
 The sub-tab shows a list on the left and a detail panel on the right:
 
@@ -144,14 +147,27 @@ The sub-tab shows a list on the left and a detail panel on the right:
 |---|---|
 | **Name** | Case-insensitive, unique. The `default` squad name is read-only. |
 | **Description** | Shown as the tooltip in the New Chat squad picker. |
-| **Leader** | Dropdown over enabled agents (excluding `curator` and `reflector`). |
-| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` and `reflector` are always excluded (they are process-wide). |
+| **Leader** | Dropdown over enabled agents (excluding `curator` and `reflector`), plus a **`(none — run single agent directly)`** option. Picking `(none)` makes the squad **leaderless**: it must have **exactly one member**, which runs directly with no coordinator. |
+| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` and `reflector` are always excluded (they are process-wide). Leaderless squads switch this to single-select. |
 
 The `default` squad is always present. If `agents.json` doesn't declare one,
 the editor synthesises it from all enabled agents the first time the sub-tab
 is opened — saving writes it to disk.
 
 Click **Delete squad** (bottom-right) to remove a non-default squad.
+
+### The Omnis router squad
+
+By default every new chat starts on the **Omnis router** — a leaderless
+squad (single member: the `omnis` agent) that routes each request to the
+best-suited squad and hands over control (see [Architecture →
+Omnis router](10-architecture.md#omnis-router-default-chat-routing)). It is
+**not** offered in the New Chat squad picker (it is the entry point, not a
+destination) and is injected automatically when your config doesn't declare
+it. To which squad new chats route is decided by the model at runtime; to
+**disable** routing entirely, set the top-level `router_squad` to `"none"`
+in `agents.json` (or `YOKE_ROUTER_SQUAD=none`) — new chats then start on the
+`default` squad.
 
 ---
 

@@ -9,7 +9,9 @@ Yoke binary wires a fleet of agents on top of that runtime.
 ```
 agent.NewAgent()                ← single wiring entry point
     ├── Squads                  ← one wired tree per squad in agent.json
-    │    ├── "default"          ← leader + full team
+    │    ├── "omnis"            ← Omnis ROUTER squad (default for new chats)
+    │    │    └── omnis         ← routes each request to the best squad, then steps out
+    │    ├── "default"          ← leader + full team (used when routed to)
     │    │    ├── leader        ← coordinator (fs tools + planning + mailbox)
     │    │    │    └── a2a_*   ← one tool per peer in a2a_config.json
     │    │    ├── investigator  ← read-only evidence gatherer
@@ -23,19 +25,57 @@ agent.NewAgent()                ← single wiring entry point
 A **squad** is a named group `{ leader, members[] }` declared in
 `agents.json`. Each squad becomes its own wired tree inside the
 current generation; a chat session selects which squad to use when it
-is created (the `default` squad when nothing is picked) and the server
-resolves `Instance.Squad(name).Runner` per session. Two sessions on
-the same generation can therefore use different squads.
+is created and the server resolves `Instance.Squad(name).Runner` per
+session. Two sessions on the same generation can therefore use
+different squads.
+
+By default a new chat does **not** start on `default` — it starts on the
+**Omnis router** (see below), which picks the best squad for the request
+and hands over.
 
 Squads compose existing agents — they don't redefine them. Skills,
 tools and MCP servers stay on the agent definitions, so two squads
 that share a member also share its wiring (and the MCP subprocess
 pool dedups any backing process).
 
-The **leader** is the only agent you talk to. Sub-agents are wrapped via
-`agenttool.New()` and exposed as **tools** on the leader (not via the ADK
-`transfer_to_agent` mechanism). Control therefore always returns to the
-leader after a sub-agent call — there is no hand-off semantics.
+Within a squad, the **leader** is the only agent you talk to. Sub-agents
+are wrapped via `agenttool.New()` and exposed as **tools** on the leader
+(not via the ADK `transfer_to_agent` mechanism). Control therefore always
+returns to the leader after a sub-agent call — there is no hand-off
+semantics *inside* a squad. (Between squads, the Omnis router is the one
+component that does transfer control — see below.)
+
+## Omnis router (default chat routing)
+
+**Omnis** is a special **leaderless squad** (a single agent run directly,
+with no coordinator) that is the **default squad for every new chat**.
+Unlike a squad leader — which orchestrates its own members and keeps
+control — the router *transfers control of the conversation*: it reads
+your request, picks the squad best able to handle it, and hands over;
+that squad's leader then answers you directly.
+
+- **Hand-back on topic change.** If you later ask about something outside
+  the active squad's scope, that squad hands control **back** to Omnis,
+  which re-routes to a better squad. Each squad keeps its own conversation
+  history within the session, so going *kubernetes → car manual →
+  kubernetes* returns you to the first squad with its earlier context
+  intact.
+- **Verify-before-committing.** When the router is unsure which squad fits,
+  it privately asks a candidate squad's lead whether the request is in
+  scope before handing over. This negotiation is **hidden** — you only see
+  the final routing decision and the squad's answer.
+- **Talks to you when nothing fits.** If the request is ambiguous and no
+  squad fits, Omnis asks you a clarifying question instead of force-routing.
+- **Silent and faithful.** Routing is invisible except for a small
+  **routing chip** in the transcript; the router never prompts for
+  permission, never narrates ("Routed to …"), and forwards your message —
+  including any attached files — to the answering squad **verbatim** (it
+  cannot paraphrase or drop it).
+- **Opt-out.** Set `router_squad` to `"none"` in `agents.json` (or
+  `YOKE_ROUTER_SQUAD=none`) to disable routing; new chats then start on the
+  `default` squad and behave exactly as before. Absent ⇒ defaults to
+  `omnis`, which is injected automatically if your config doesn't declare
+  it.
 
 Only one sub-agent runs at a time. Concurrency is enforced by
 `newNonConcurrentTool`: a second sub-agent invocation queues until the first
@@ -152,6 +192,11 @@ Rules:
   enabled agents.
 - `leader` and every member must reference an enabled agent.
 - `curator` and `reflector` cannot be members — they are process-wide.
+- A `leader` of `"none"` (or empty) makes the squad **leaderless** and
+  requires **exactly one member**, which runs directly as the root with no
+  coordinator (the shape used by the `helper` squad and the Omnis router).
+  Squads with two or more members need a real leader.
 
 The new squad becomes selectable in the New Chat picker on the next
-hot-reload.
+hot-reload. (The router squad — `omnis` by default — is excluded from the
+picker: it is the routing entry point, not a destination you pick.)

@@ -163,11 +163,13 @@ to delegate to it (see "Add a squad" below). If no squad includes the
 new agent, no session will see it — that's how you keep an agent
 reserved for a specific squad.
 
-Built-in vs custom: the agents shipped with yoke (`leader`,
+Built-in vs custom: the agents shipped with yoke (`omnis`, `leader`,
 `skill_editor`, `helper`, `summariser`, `curator`,
 `reflector`) carry `"builtin": true` in their `agent.json`. The web UI
 displays them under a **Built-in Agents** section, separated from
 user-added **Custom Agents**. Leave the flag out for your own agents.
+(`omnis` is the Omnis router and is auto-injected when your config doesn't
+declare it — see [Add a squad](#add-a-squad).)
 
 For programmatic embedders (CLI / examples / TUI) the same registry is
 consumed when `agent.NewAgent()` runs; the lower-level constructor
@@ -207,6 +209,11 @@ Rules:
 - The squad's `leader` must point to an agent marked `"leader": true`. The
   agent literally named `leader` is auto-flagged; mark any other coordinator
   with `"leader": true` to make it eligible as a squad lead.
+- A `leader` of `"none"` (or empty) makes the squad **leaderless** — it must
+  then declare **exactly one member**, which runs directly as the runner root
+  with no coordinator and no sub-agent delegation tools (the shape used by the
+  `helper` squad and the Omnis router). Squads with two or more members need a
+  real leader.
 - `curator` and `reflector` cannot be members — they stay process-wide
   (one hook per generation, fired at `EventSessionEnd` /
   `EventSessionReflected`).
@@ -218,6 +225,14 @@ squad through the picker next to the **New Chat** button in the web UI
 the web UI's Settings → Agent panel, the **Squads** sub-tab provides a
 structured editor with leader dropdown, member checkboxes, and
 add/delete; saving triggers a hot reload.
+
+> **New chats are routed by Omnis.** Unless you pin a squad (the New Chat
+> picker / `POST /api/sessions {"squad": …}`), new chats start on the
+> **Omnis router** squad, which picks the best squad for each request and
+> hands over. Give every squad a clear `description` — that's what the
+> router matches against. Disable routing with `router_squad: "none"` in
+> `agents.json`. See
+> [configuration.md#omnis-router-default-chat-routing](configuration.md#omnis-router-default-chat-routing).
 
 ## Connect a remote A2A agent
 

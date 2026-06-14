@@ -264,6 +264,26 @@ state → classify failure → propose one dry-run fix).
 
 See [docs/specialising.md](docs/specialising.md) for the full recipe.
 
+### Squads & the Omnis router
+
+When one binary serves several *kinds* of session, declare each as a
+**squad** in `agents.json` — a named `{ leader, members[] }` group composed
+from the shared agent catalogue (no code, no forked binary).
+
+You usually don't pick a squad: by default every new chat starts on the
+**Omnis router** (a leaderless `omnis` squad, auto-injected when absent),
+which reads the request, picks the squad best able to handle it, and **hands
+over control**. If the conversation later drifts out of that squad's scope,
+the squad hands control back to Omnis and it re-routes — each squad keeping
+its own in-session history. The negotiation is silent (a routing chip is the
+only visible signal), the user's message and attachments are forwarded
+**verbatim**, and when nothing fits Omnis asks instead of guessing. Pin a
+specific squad from the New Chat picker to bypass routing, or disable it
+entirely with `router_squad: "none"` (or `YOKE_ROUTER_SQUAD=none`).
+
+See [docs/architecture.md](docs/architecture.md) (§7 Omnis router) and
+[docs/configuration.md](docs/configuration.md#omnis-router-default-chat-routing).
+
 ---
 
 ## Documentation

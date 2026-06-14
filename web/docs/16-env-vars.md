@@ -15,6 +15,12 @@ shell before launching `make run-server` (or pass through a `.env` file).
 | `OPENAI_API_KEY`       | OpenAI key. |
 | `GOOGLE_API_KEY`       | Gemini key. |
 
+## Routing
+
+| Variable             | Purpose |
+|---|---|
+| `YOKE_ROUTER_SQUAD`  | Overrides the `router_squad` key in `agents.json` — names the **Omnis** router squad that new chats start on. Absent ⇒ defaults to `omnis` (auto-injected if your config doesn't declare it). Set to `"none"` to disable routing, so new chats start directly on the picked squad (or `default`). See [Architecture → Omnis router](10-architecture.md#omnis-router-default-chat-routing). |
+
 ## Curator
 
 | Variable                          | Purpose |

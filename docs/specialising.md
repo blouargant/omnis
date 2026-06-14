@@ -180,9 +180,18 @@ When a single agent.json needs to support several different *kinds* of
 session (e.g. an interactive triage helper and a focused web-research
 flow), don't fork the binary. Declare each as a **squad** in
 `agents.json`: a named group with its own leader and member
-sub-agents picked from the shared `agents:` catalogue. A picker next to
-**New Chat** in the web UI selects which squad each new session uses;
-the recorded squad survives reloads and server restarts. See
+sub-agents picked from the shared `agents:` catalogue.
+
+Users don't have to know which squad to pick: by default every new chat
+starts on the **Omnis router** (a leaderless `omnis` squad), which reads
+the request and **routes it to the best squad automatically**, handing
+over control. Give each squad a clear `description` — the router matches
+the request against those descriptions when choosing. A picker next to
+**New Chat** still lets a user pin a specific squad (bypassing the router),
+and the recorded squad survives reloads and server restarts. Set
+`router_squad: "none"` to disable routing if you'd rather users always
+pick. See
+[configuration.md#omnis-router-default-chat-routing](configuration.md#omnis-router-default-chat-routing),
 [configuration.md#squads--per-session-agent-groups](configuration.md#squads--per-session-agent-groups)
 and [extending.md#add-a-squad](extending.md#add-a-squad).
 

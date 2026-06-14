@@ -73,11 +73,15 @@ panel on the right:
 - **Name** — case-insensitive, unique within the file. The `default`
   squad is always present and its name is read-only.
 - **Description** — surfaced as the picker tooltip.
-- **Leader** — dropdown over the enabled agents (excluding `curator` and `reflector`).
+- **Leader** — dropdown over the enabled agents (excluding `curator` and
+  `reflector`), plus a **`(none — run single agent directly)`** option that
+  makes the squad **leaderless**: it then needs exactly one member, which
+  runs directly with no coordinator (the shape used by `helper` and the
+  Omnis router).
 - **Members** — checkbox grid over the enabled agents. The squad's
   current leader is disabled in the grid (a squad can never list its
   own leader as a member). Curator and reflector are excluded — they stay
-  process-wide.
+  process-wide. A leaderless squad switches this to single-select.
 - **Delete squad** — bottom-right; the `default` squad cannot be
   deleted.
 
@@ -86,6 +90,14 @@ declare one, the editor synthesises one from the enabled agents the
 first time you open the sub-tab — saving writes it to disk so the
 agent.json round-trips cleanly. Saving any change triggers the standard
 **Reload** banner.
+
+**Omnis router.** New chats start on the **Omnis router** squad rather than
+`default` — it routes each request to the best squad and hands over (see
+[Architecture](10-architecture.md#omnis-router-default-chat-routing)). The
+router squad (`omnis` by default) is auto-injected when absent and is **not**
+listed in the New Chat picker. Choose the router squad — or disable routing —
+with the top-level `router_squad` key in `agents.json` (`"none"` disables;
+absent ⇒ `omnis`), also overridable via `YOKE_ROUTER_SQUAD`.
 
 ## Editing Permissions
 

@@ -13,12 +13,13 @@ This document maps the codebase and explains how the pieces interact.
                                         ▼
         ┌──────────────────────────────────────────────────────────┐
         │  Instance (one generation)                               │
+        │   ├─ Squad "omnis"     ← Omnis ROUTER (default new chat) │
         │   ├─ Squad "default"   ← leader + full team              │
         │   ├─ Squad "research"  ← leader + web_agent + summariser │
         │   └─ Squad "…"         ← any number, defined in agent.json│
-        │  Each chat session selects one squad at creation         │
+        │  New chats start at the router, which routes to a squad   │
         └─────────────────┬────────────────────────────────────────┘
-                          │ (per-session squad selection)
+                          │ (Omnis routes → per-session squad)
                           ▼
         ┌──────────────────────────────────────────────────────────┐
         │  Squad's lead agent                                      │
@@ -192,9 +193,12 @@ RuntimeSettings ──► resolveSquadEntries ──► RuntimeSquadConfig[]
    └─────────────────────────────────────────────────────────┘
 ```
 
-Each chat session selects one squad at creation (the `default` squad
-when none is chosen) and the server resolves
-`Manager.LookupSquad(sessionID, squadName).Runner` on every turn.
+Each chat session runs on one squad at a time and the server resolves
+`Manager.LookupSquad(sessionID, squadName).Runner` on every turn. By
+default a new session starts on the **Omnis router** squad (§7), which
+routes it to the best squad; a session can also be pinned to a specific
+squad at creation (the New Chat picker / `POST /api/sessions {"squad": …}`),
+and squads can switch mid-session via routing hand-offs.
 
 Key properties:
 
@@ -204,6 +208,12 @@ Key properties:
 - **`default` is always present.** When the user's `squads:` list is
   empty or omits a `default`, the resolver synthesises one from the
   enabled agents (excluding the curator).
+- **Leaderless squads.** A squad whose `leader` is `"none"` (or empty)
+  and that has **exactly one member** runs that single agent directly as
+  the runner root — no coordinator, no sub-agent delegation tools, tools
+  limited to exactly what the agent declares (plus the always-on mailbox
+  and `ask_user`). This is the shape used by the `helper` squad and by the
+  Omnis router (below). Squads with ≥2 members require a real leader.
 - **Curator stays process-wide.** It listens on the shared event bus
   with the union of every squad's member names — not per-squad — so
   session-end curation runs at most once per session regardless of
@@ -221,7 +231,68 @@ Key properties:
 Add a squad by editing `agents.json` (or the Squads sub-tab in
 the web UI's Agent settings); see [extending.md](extending.md#adding-a-squad).
 
-### 7. Specialisation surface
+### 7. Omnis router (default chat routing)
+
+**Omnis** is a special **leaderless squad** (single member: the `omnis`
+agent) that is the **default squad for every new chat**. Where a squad
+leader orchestrates its own members and keeps control, the router
+*transfers control of the conversation*: it reads the user's request,
+picks the squad best able to handle it, and hands over; that squad's
+leader then answers the user directly. When the user later switches to a
+topic outside the active squad's scope, that squad hands control **back**
+to the router, which re-routes. When intent is unclear and no squad fits,
+Omnis talks to the user instead of routing.
+
+The whole mechanism is host-side and config-driven (`agent/routing.go`):
+
+- **Two control tools.** `route_to_squad(squad, reason)` is mounted only
+  on the router root (and validates `squad` against the non-router squad
+  catalogue, which is also injected into the router's instruction);
+  `handoff_to_router(reason)` is mounted on every *non-router* squad root
+  when routing is enabled. Both only record a per-session **directive** in
+  a process-wide `RouteRegistry` on Infrastructure — they never run another
+  runner. They carry **no prompt**: the answering squad always receives the
+  user's verbatim turn, so the router cannot paraphrase, twist, or drop the
+  request (or its attachments).
+- **Capability probe (`ask_squad`).** When the router is *unsure* which
+  squad fits, it privately checks a candidate before committing:
+  `ask_squad(squad, request)` makes **one isolated, non-streamed
+  `model.LLM.GenerateContent` call** using that candidate lead's own model
+  + instruction (no runner, tools, sub-agents, or event bus — the one-off
+  LLM pattern from `internal/compress`), returning the lead's `CAN_HANDLE`
+  / `CANNOT_HANDLE` verdict. Because it touches neither the SSE stream nor
+  the shared bus it is hidden by construction; it never runs the squad's
+  tools. Confident routes skip the probe; when every plausible squad
+  declines, the router asks the user instead of force-routing.
+- **Dispatch loop** = `Manager.RunWithRouting(...)`. It runs the starting
+  squad, `Take`s the recorded directive, switches squad, and re-dispatches
+  the **same** user turn — up to a 4-hop bound (`routerMaxHops`). It feeds
+  **two part-views**: every answering (non-router) hop gets the user's
+  **original parts** (verbatim text + any attached files); the router hop
+  gets a **clean text-only view** (the router has no file tools, so it must
+  not be shown attachment blobs or the "use the read/mime tools" note).
+  Per-squad in-session memory is preserved because each `SquadInstance`
+  owns a private session service and is stable across turns — A → B → A
+  returns to A's existing history; the loop only re-resolves runners, never
+  rebuilds them.
+- **Silent routing.** The routing tools are exempt from the permission
+  layer (they record an internal directive with no side effects, so they
+  must never prompt). Each surface additionally **suppresses the router
+  hop's assistant text** — the model tends to narrate ("Routed to the
+  default squad…") despite the instruction — deciding via
+  `Manager.PendingRoute`: a route is pending ⇒ discard the chatter from
+  both chat and the persisted turn; no route ⇒ the text is a genuine reply
+  (a clarifying question) and is shown. The only visible routing signal is
+  the routing chip / "── routed to X squad ──" line.
+- **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
+  `YOKE_ROUTER_SQUAD`) names the router squad — **absent ⇒ defaults to
+  `omnis`**, `"none"` disables (new chats then start on `default`). When a
+  config doesn't declare them, `ensureRouterSquad` injects the `omnis`
+  agent (registry definition if present, else a built-in instruction,
+  inheriting the leader's model) and a leaderless `omnis` squad. With
+  routing disabled the path is byte-identical to a single-squad session.
+
+### 8. Specialisation surface
 
 Three orthogonal mount points let you retarget the agent without
 recompiling:

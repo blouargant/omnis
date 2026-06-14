@@ -36,18 +36,28 @@ scoped to that session. Switching sessions never mixes state.
 - Click a session row — open it.
 - Hover a session row — rename / delete buttons appear.
 
-## Picking a squad for a new chat
+## How a new chat is routed (Omnis)
 
 A **squad** is a named group of agents (one leader plus the sub-agents
-it can delegate to). When `agent.json` declares more than one squad, a
-compact dropdown appears next to the **+** button: select the squad
-you want the next session to use. With a single-squad configuration
-the dropdown stays hidden and every new chat uses the default.
+it can delegate to). By default you don't pick a squad at all — every new
+chat starts on the **Omnis router**, which reads your first request, picks
+the squad best able to handle it, and hands the conversation over. That
+squad's leader then answers you directly; a small **routing chip** in the
+transcript shows which squad took over.
 
-A session's squad is recorded for the life of the conversation; the
-sidebar shows a small badge next to sessions running on a non-default
-squad. To change which squad a chat uses, start a new one. See the
-**Sessions** documentation page for the full lifecycle.
+If you later switch to a topic the active squad can't handle, it quietly
+hands control back to Omnis, which re-routes — each squad keeps its own
+history within the session, so coming back to an earlier topic resumes
+where it left off. When no squad fits, Omnis asks you a clarifying question
+instead of guessing.
+
+You can still **force** a starting squad: when `agents.json` declares more
+than one squad, a compact dropdown appears next to the **+** button to pin
+the next session to a specific squad (bypassing the router for that chat).
+With a single-squad configuration the dropdown stays hidden. The sidebar
+shows a small badge next to sessions running on a non-default squad. See
+the **Sessions** documentation page for the full lifecycle, and
+**Architecture** for how routing works.
 
 ## Authentication
 

@@ -26,29 +26,37 @@ the file group above (subject to garbage collection).
 - **Squad badge** appears next to sessions running on a non-default squad,
   so you can tell at a glance which configuration each conversation uses.
 
-## Squads — picking a configuration per chat
+## Squads, and the Omnis router
 
 A **squad** is a named group `{ leader, members[] }` defined in
-`agents.json`. Each chat session uses exactly one squad — the one
-selected when it was created.
+`agents.json`. A session always runs on one squad at a time, and the
+sidebar badge shows which.
 
-The compact picker next to the **New Chat** button selects which squad
-the next session will use. Single-squad setups stay tidy: the picker
-hides itself entirely when only the `default` squad is available. Your
-last choice is remembered in `localStorage` so it stays preselected
-across browser reloads.
+**By default new chats are routed, not pinned.** Each new conversation
+starts on the **Omnis router**, which picks the squad best able to handle
+your request and hands over. If you change topic to something the active
+squad can't handle, it hands control back to Omnis and the session
+**switches squads** mid-conversation (a routing chip marks each switch).
+Each squad keeps its **own history within the session**, so returning to an
+earlier topic resumes that squad's earlier context. The current squad is
+persisted in `conversation_<id>.json` and survives server restarts. See
+[Architecture → Omnis router](10-architecture.md#omnis-router-default-chat-routing).
 
-Once a session is created the squad is **fixed for the life of that
-conversation** and persisted in `conversation_<id>.json` — switching
-squads means starting a new chat. The recorded choice survives server
-restarts.
+**Forcing a starting squad.** The compact picker next to the **New Chat**
+button pins the next session to a specific squad, bypassing the router for
+that chat. Single-squad setups stay tidy: the picker hides itself when only
+the `default` squad is available, and your last choice is remembered in
+`localStorage`. A pinned squad can still hand back to the router if you go
+out of its scope.
 
 If a server reload removes or renames the squad a session was running
 on, the server falls back to the `default` squad on that session's
 next turn (and logs a warning).
 
-To define new squads, see the **Squads** sub-tab under
-Settings → Agents.
+To **disable routing** entirely, set `router_squad` to `"none"` in
+`agents.json` (or `YOKE_ROUTER_SQUAD=none`); new chats then start directly
+on the squad you pick (or `default`). To define new squads, see the
+**Squads** sub-tab under Settings → Agents.
 
 ## Session lifecycle and the curator
 
