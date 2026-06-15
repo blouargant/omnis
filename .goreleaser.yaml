@@ -297,3 +297,8 @@ release:
   # `prerelease: auto` flips the GitHub pre-release flag automatically.
   draft: false
   prerelease: auto
+  # Make re-runs idempotent: if a release for the tag already exists (e.g. a
+  # previous workflow run uploaded some/all assets, or the run was retried),
+  # delete any same-named asset before re-uploading instead of failing with
+  # `422 ... already_exists`.
+  replace_existing_artifacts: true
