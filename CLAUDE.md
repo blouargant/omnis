@@ -212,6 +212,14 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   directive: a `route` switches to the named squad, a `handoff` switches back to
   the router; it re-dispatches and repeats, up to `routerMaxHops` (4) — the
   directives decide *where* control goes, never *what* the squad receives.
+  **Handoff decline-tracking**: when a squad calls `handoff_to_router` the loop
+  records it (and its reason) in a per-turn declined set, and on the *next router
+  hop* appends a synthetic `routerDeclineNote` part to `routerParts` naming the
+  squads that already handed this request back ("Do NOT route to those squads
+  again …"). Without it the router re-saw the identical clean view and bounced
+  the request straight back to the squad that just declined it, looping until
+  `routerMaxHops` — so the note is what lets a handoff make the router pick a
+  different squad or ask the user instead.
   **Two part-views**: every **answering (non-router) hop** gets the user's
   **original turn input (`initialParts` — verbatim text + any attached files)
   unchanged**, so attachments always reach the answering squad and the request

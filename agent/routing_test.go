@@ -196,6 +196,65 @@ func TestRunWithRoutingHandoffBackToRouter(t *testing.T) {
 	}
 }
 
+func TestRunWithRoutingHandoffTellsRouterWhichSquadDeclined(t *testing.T) {
+	// When a squad hands the request back as out of scope, the router's next hop
+	// must be told which squad declined (and why) so it does NOT re-route to the
+	// same squad. This is the reported bug: Omnis routed a general-knowledge
+	// question to helper, helper handed it back, and Omnis routed it straight to
+	// helper again, bouncing until maxHops. With the decline note the router can
+	// see helper already declined and ask the user instead.
+	m, infra := routingTestManager("omnis", "omnis", "helper", "research")
+	sid := "sess-decline"
+	omnisHops := 0
+	var secondRouterParts []*genai.Part
+	run := func(_ context.Context, sq *SquadInstance, name string, parts []*genai.Part) (string, error) {
+		switch name {
+		case "omnis":
+			omnisHops++
+			if omnisHops == 1 {
+				// First decision: (mis-)route to helper.
+				infra.RouteDirectives.Set(sid, &RouteDirective{Kind: routeKindRoute, Target: "helper"})
+				return "", nil
+			}
+			// Second router hop: it was told helper declined → ask the user
+			// instead of re-routing. Capture what it saw.
+			secondRouterParts = parts
+			return "Could you clarify what you need?", nil
+		case "helper":
+			infra.RouteDirectives.Set(sid, &RouteDirective{
+				Kind:   routeKindHandoff,
+				Reason: "general programming question, not a yoke capability",
+			})
+			return "", nil
+		}
+		return "answer from " + name, nil
+	}
+	final, text, err := m.RunWithRouting(context.Background(), "u", sid, "omnis",
+		[]*genai.Part{{Text: "is there a transparent http proxy in rust?"}}, nil, run, nil)
+	if err != nil {
+		t.Fatalf("RunWithRouting err = %v", err)
+	}
+	if omnisHops != 2 {
+		t.Fatalf("omnis hops = %d, want 2 (route to helper, then ask the user)", omnisHops)
+	}
+	var joined string
+	for _, p := range secondRouterParts {
+		joined += p.Text + "\n"
+	}
+	if !strings.Contains(joined, "helper") {
+		t.Fatalf("router not told which squad declined; saw: %q", joined)
+	}
+	if !strings.Contains(joined, "general programming question, not a yoke capability") {
+		t.Fatalf("router not given the decline reason; saw: %q", joined)
+	}
+	if !strings.Contains(strings.ToLower(joined), "do not route") {
+		t.Fatalf("decline note missing the do-not-route instruction; saw: %q", joined)
+	}
+	if final != "omnis" || text != "Could you clarify what you need?" {
+		t.Fatalf("final=%q text=%q; want the router asking the user", final, text)
+	}
+}
+
 func TestRunWithRoutingBoundsHops(t *testing.T) {
 	m, infra := routingTestManager("omnis", "omnis", "a", "b")
 	sid := "sess-3"

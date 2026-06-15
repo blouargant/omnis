@@ -556,6 +556,14 @@ func (m *Manager) RunWithRouting(
 	reg.Take(sessionID)
 
 	var full strings.Builder
+	// Squads that handed this turn's request back to the router as out of scope,
+	// in first-declined order, with the reason each gave. Re-fed to the router as
+	// a synthetic note on its parts (below) so it does not bounce the request
+	// back to a squad that just declined it — the bug where a handoff made the
+	// router re-route to the same squad until routerMaxHops was exhausted.
+	declinedReason := map[string]string{}
+	var declinedOrder []string
+
 	for hop := 0; hop < routerMaxHops; hop++ {
 		sq := inst.Squad(squadName)
 		if sq == nil {
@@ -571,6 +579,13 @@ func (m *Manager) RunWithRouting(
 		hopParts := initialParts
 		if routerSquad != "" && squadName == routerSquad {
 			hopParts = routerParts
+			// Tell the router which squads already declined this turn so it
+			// re-routes elsewhere (or asks the user) instead of looping back to
+			// one that just handed the request back.
+			if len(declinedOrder) > 0 {
+				hopParts = append(append([]*genai.Part{}, routerParts...),
+					routerDeclineNote(declinedOrder, declinedReason))
+			}
 		}
 
 		text, runErr := run(ctx, sq, squadName, hopParts)
@@ -589,6 +604,15 @@ func (m *Manager) RunWithRouting(
 		case routeKindRoute:
 			next = lowerTrim(dir.Target)
 		case routeKindHandoff:
+			// The squad that just ran handed control back as out of scope.
+			// Remember it (and why) so the router hop below is told not to
+			// re-route to it.
+			if squadName != routerSquad {
+				if _, seen := declinedReason[squadName]; !seen {
+					declinedOrder = append(declinedOrder, squadName)
+				}
+				declinedReason[squadName] = dir.Reason
+			}
 			next = routerSquad
 		}
 		// Stop on a no-op or unknown target (route_to_squad already validates
@@ -611,6 +635,29 @@ func (m *Manager) RunWithRouting(
 	}
 
 	return squadName, full.String(), nil
+}
+
+// routerDeclineNote builds the synthetic part appended to the router's input
+// when one or more squads handed the current turn's request back as out of
+// scope. It names those squads (and the reason each gave) and tells the router
+// not to route to them again — so a handoff can't bounce the request straight
+// back to the squad that just declined it.
+func routerDeclineNote(order []string, reasons map[string]string) *genai.Part {
+	var b strings.Builder
+	b.WriteString("[routing context — not from the user] ")
+	b.WriteString("These squads were already tried for this request this turn and handed it back as out of scope: ")
+	for i, name := range order {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(name)
+		if r := strings.TrimSpace(reasons[name]); r != "" {
+			b.WriteString(" (reason: " + r + ")")
+		}
+	}
+	b.WriteString(". Do NOT route to those squads again. Route to a different squad only if one genuinely fits; " +
+		"otherwise ask the user a clarifying question — do not force a route.")
+	return &genai.Part{Text: b.String()}
 }
 
 // routerHandoffProtocolBlock is appended to every non-router squad leader's
@@ -667,12 +714,20 @@ Routing heuristics:
 - Match the KIND of help the user wants, not the technology they mention. A
   domain keyword alone (e.g. "fluxcd", "Kubernetes", "Postgres") is not a reason
   to pick a general-purpose squad — decide from what the user wants done.
-- Questions about yoke itself or its capabilities — "is there an agent / skill /
-  tool for X?", "can yoke do X?", "find / install an agent or skill for X",
-  "what can you do?" — go to the squad whose description covers answering
-  questions about yoke and browsing / installing registry items, EVEN when X is
-  a specialised domain. The user is asking whether a capability exists or to get
-  one, not (yet) to perform the task.
+- Questions about yoke ITSELF or its capabilities — where yoke (or "you") is the
+  subject: "is there an agent / skill / tool for X?" (meaning a yoke one), "can
+  yoke do X?", "find / install an agent or skill for X", "what can you do?" — go
+  to the squad whose description covers answering questions about yoke and
+  browsing / installing registry items, EVEN when X is a specialised domain. The
+  user is asking whether a yoke capability exists or to get one, not (yet) to
+  perform the task.
+- World-knowledge / research questions are NOT yoke-capability questions, even
+  when phrased "is there a …". "Is there a transparent HTTP proxy in Rust?",
+  "what's a good library for X?", "does language Y have a package that does Z?"
+  ask about software out in the world, not yoke's own agents/skills/tools —
+  route these to the research / fact-finding squad, never the yoke-capabilities
+  squad. The tell is the subject: yoke/you → capabilities squad; the world or a
+  programming ecosystem → research squad.
 - A general-purpose / coordinator squad is a last resort, not a catch-all: route
   there only for open-ended, hands-on work when no more specific squad fits.
 
