@@ -50,7 +50,7 @@
     },
     {
       "name": "Knowledge",
-      "description": "Information retrieval & document creation specialist. Web research and fact-finding, extracting text from PDFs/DOCX/PPTX/XLSX/images (including OCR), and converting or generating documents across formats (Markdown, DOCX, PDF, HTML, LaTeX). Route here for research/'who is'/'what is'/'find or summarise information about…' questions, document parsing/extraction, OCR, and format conversion or generation.",
+      "description": "Information retrieval & document creation specialist. Web research and fact-finding, extracting text from PDFs/DOCX/PPTX/XLSX/images (including OCR), and converting or generating documents across formats (Markdown, DOCX, PDF, HTML, LaTeX). Route here for research/'who is'/'what is'/'find or summarise information about…' questions, including whether some software/library/tool exists out in the world (e.g. 'is there a transparent HTTP proxy in Rust?'), document parsing/extraction, OCR, and format conversion or generation.",
       "leader": "knowledge_leader",
       "members": [
         "doc_agent",
@@ -70,7 +70,7 @@
     },
     {
       "name": "Helper",
-      "description": "Answers questions about yoke and its capabilities, and finds/inspects/installs registry items (skills, agents, MCP servers, squads, A2A peers, commands) on demand. Use this whenever the user asks whether an agent/skill/tool/MCP server exists for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, or asks what yoke can do or how it works. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
+      "description": "Answers questions about yoke itself and its capabilities, and finds/inspects/installs yoke registry items (skills, agents, MCP servers, squads, A2A peers, commands) on demand. Use this when the user asks whether YOKE has an agent/skill/tool/MCP server for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, or asks what yoke can do or how it works — i.e. yoke (or 'you') is the subject. NOT for general world-knowledge or research questions about whether some software/library exists (e.g. 'is there an HTTP proxy library in Rust?') — those go to the Knowledge squad. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
       "leader": "none",
       "members": [
         "helper"
