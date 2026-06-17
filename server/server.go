@@ -57,6 +57,10 @@ type serverDeps struct {
 	WatchMailbox func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
 	// RunGuard serialises runner calls per session (shared with pushManager).
 	RunGuard *sessionRunGuard
+	// LiveTurns buffers each in-flight user turn's SSE frames so the agent run
+	// survives a client disconnect and a reconnecting browser can replay what it
+	// missed. Also backs the Stop button's cancel endpoint.
+	LiveTurns *liveTurnRegistry
 	// PushMgr manages per-session background mailbox watchers.
 	PushMgr *pushManager
 	// PushEvents broadcasts push notifications to open /events SSE connections.
@@ -677,6 +681,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
+	auth.GET("/sessions/:id/messages/stream", handleMessageStream(d))
+	auth.POST("/sessions/:id/cancel", handleCancel(d))
 	auth.POST("/sessions/:id/bash", handleBash(d))
 	auth.GET("/sessions/:id/folder", handleFolder(d))
 	auth.POST("/sessions/:id/folder", handleFolder(d))

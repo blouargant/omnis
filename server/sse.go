@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,23 +66,13 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		c.Writer.WriteHeader(http.StatusOK)
 		c.Writer.Flush()
 
-		// Subscribe to sub-agent bus events before starting the run so no
-		// early events are missed.
-		subCh := d.AgentEvents.subscribe()
-		defer d.AgentEvents.unsubscribe(subCh)
-
-		ctx := c.Request.Context()
-
-		// Run the agent's file-system tools in this session's working directory
-		// (the cwd the "!cd" shell-escape and the Folders panel mutate). Carried
-		// on the context so it also reaches sub-agents, which run in a freshly
-		// created session and so can't be reached by the SessionID resolver.
-		ctx = fstools.WithCwd(ctx, bashCwd.get(meta.ID))
-
-		// Serialise with any background mailbox-push turn for this session.
+		// Serialise with any background mailbox-push turn for this session. We
+		// acquire before responding so a second user message blocks until the
+		// in-flight turn finishes; ownership of the release then passes to the
+		// producer goroutine below, which holds the guard for the whole run.
+		release := func() {}
 		if d.RunGuard != nil {
-			release := d.RunGuard.acquire(meta.ID)
-			defer release()
+			release = d.RunGuard.acquire(meta.ID)
 		}
 
 		// We hold the run-guard, so no other turn is in flight for this
@@ -98,10 +88,16 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		startSquad := meta.Squad
 		sq := d.Manager.LookupSquad(meta.ID, startSquad)
 		if sq == nil || sq.Runner == nil {
+			release()
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent generation not available"})
 			return
 		}
 		allowFileAttachments := sq.LeaderAllowFileAttachments
+
+		// The session's interactive working directory (the cwd the "!cd"
+		// shell-escape and the Folders panel mutate). Carried on the run context
+		// so it reaches the agent's file tools and any sub-agents.
+		cwd := bashCwd.get(meta.ID)
 
 		parts := []*genai.Part{{Text: req.Prompt}}
 		var toolPaths []string
@@ -149,100 +145,171 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			})
 		}
 
-		d.Registry.Touch(meta.ID)
+		// Run the turn on a background context so a client disconnect (a proxy
+		// idle-timeout, a closed tab, a Wi-Fi blip) never aborts it. Only the Stop
+		// button (the cancel endpoint, via lt.cancel) or server shutdown cancels
+		// runCtx. The turn's SSE frames are buffered in the liveTurn so a
+		// reconnecting client can replay whatever it missed.
+		runCtx, cancel := context.WithCancel(d.rootCtx)
+		runCtx = fstools.WithCwd(runCtx, cwd)
+		lt := d.LiveTurns.start(meta.ID, cancel)
 
-		cwd := bashCwd.get(meta.ID)
-		emitFrame := func(event string, payload any) {
-			data, err := json.Marshal(payload)
-			if err != nil {
-				return
-			}
-			_, _ = io.WriteString(c.Writer, "event: "+event+"\ndata: "+string(data)+"\n\n")
-			if f, ok := c.Writer.(interface{ Flush() }); ok {
-				f.Flush()
-			}
-		}
+		// Producer: drives the (possibly multi-hop) turn to completion regardless
+		// of whether any client is still attached. It owns the run-guard release.
+		go func() {
+			defer release()
+			defer cancel()
+			defer d.LiveTurns.release(meta.ID, lt)
 
-		routerSquad := d.Manager.RouterSquad()
-		// Per-agent token usage accumulated across every hop of this turn, so the
-		// web UI's per-agent cost breakdown can be restored after a server restart
-		// / page reload (it is otherwise built only from the live `turn_usage`
-		// events and lost on reload). Persisted on the turn below.
-		usageAccum := map[string]sessions.TokenUsage{}
-		// runHop streams one squad turn (one Runner.Run) and returns its
-		// assistant text. The Omnis dispatch loop calls it once per hop.
-		//
-		// The router hop is special: the model often emits chatter ("Routed to the
-		// default squad; it will take over…") alongside its route_to_squad call,
-		// despite the instruction telling it not to. Instructions can't guarantee
-		// silence, so we suppress the router hop's text at the stream level and
-		// decide afterwards: if it recorded a route (Manager.PendingRoute), the
-		// text was chatter — discard it from BOTH the chat and the persisted turn
-		// (return ""); if it did NOT route, the text is a genuine reply to the user
-		// (a clarifying question), so flush it now. Routing is signalled to the user
-		// only by the `routing` chip (notify) and the answering squad's reply.
-		runHop := func(rctx context.Context, hopSq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
-			seq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
-				&genai.Content{Role: "user", Parts: hopParts},
-				agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
-			// The hop's runner-root agent name (squad leader, or the single member
-			// of a leaderless squad). Used to attribute the root's usage correctly
-			// and suppress its duplicate bus events.
-			rootAgent := ""
-			if hopSq.Leader != nil {
-				rootAgent = hopSq.Leader.Name()
-			}
-			isRouter := routerSquad != "" && squadName == routerSquad
-			if !isRouter {
-				return streamEvents(rctx, c.Writer, seq, subCh, cwd, rootAgent, false, usageAccum)
-			}
-			text, err := streamEvents(rctx, c.Writer, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum)
-			if err != nil {
-				return text, err
-			}
-			if d.Manager.PendingRoute(meta.ID) {
-				return "", nil // routed → drop the router's chatter entirely
-			}
-			// Router chose to talk to the user (no route): show its reply now.
-			if strings.TrimSpace(text) != "" {
-				emitFrame("message", map[string]string{"text": text})
-			}
-			return text, nil
-		}
-		// notify fires when control moves to another squad: persist the new
-		// squad on the session (so the next turn resumes there and it survives a
-		// restart) and tell the browser so it can update the squad label live.
-		notify := func(from, to, reason string) {
-			d.Registry.SetSquad(meta.ID, to)
-			emitFrame("routing", map[string]any{"from": from, "to": to, "reason": reason})
-		}
+			// Subscribe to sub-agent bus events for the lifetime of the run (not
+			// the request) so no events are missed and the subscription is dropped
+			// when the run — not the client connection — ends.
+			subCh := d.AgentEvents.subscribe()
+			defer d.AgentEvents.unsubscribe(subCh)
 
-		_, assistantText, runErr := d.Manager.RunWithRouting(ctx, meta.UserID, meta.ID, startSquad, parts, routerParts, runHop, notify)
-		if runErr != nil {
-			log.Printf("server: routing run error: %v", runErr)
-		}
-		// Terminal event for the (possibly multi-hop) turn — streamEvents no
-		// longer emits it per hop.
-		emitFrame("done", map[string]any{})
+			d.Registry.Touch(meta.ID)
 
-		// Persist whatever assistant text was streamed, even when the request
-		// context was cancelled (browser tab closed, or a reverse proxy cutting
-		// the SSE stream before the turn finished). The old ctx.Err() == nil guard
-		// silently dropped the turn on any early disconnect, leaving the session
-		// listed but empty when reopened — including from another browser. Disk
-		// I/O does not depend on the request context, so the save still lands; we
-		// keep only the non-empty check so an aborted turn with no output is not
-		// persisted as a blank exchange.
-		if strings.TrimSpace(assistantText) != "" {
-			if err := sessions.AppendConversationTurnWithUsage(meta.ID, req.Prompt, assistantText, usageAccum); err != nil {
-				log.Printf("server: failed to persist turn: %v", err)
+			sink := func(event string, data []byte) { lt.emit(event, data) }
+			emitFrame := func(event string, payload any) {
+				if data, err := json.Marshal(payload); err == nil {
+					lt.emit(event, data)
+				}
 			}
-		}
+
+			routerSquad := d.Manager.RouterSquad()
+			// Per-agent token usage accumulated across every hop of this turn, so
+			// the web UI's per-agent cost breakdown can be restored after a server
+			// restart / page reload (it is otherwise built only from the live
+			// `turn_usage` events and lost on reload). Persisted on the turn below.
+			usageAccum := map[string]sessions.TokenUsage{}
+			// runHop streams one squad turn (one Runner.Run) and returns its
+			// assistant text. The Omnis dispatch loop calls it once per hop.
+			//
+			// The router hop is special: the model often emits chatter ("Routed to
+			// the default squad; it will take over…") alongside its route_to_squad
+			// call, despite the instruction telling it not to. Instructions can't
+			// guarantee silence, so we suppress the router hop's text at the stream
+			// level and decide afterwards: if it recorded a route
+			// (Manager.PendingRoute), the text was chatter — discard it from BOTH
+			// the chat and the persisted turn (return ""); if it did NOT route, the
+			// text is a genuine reply to the user (a clarifying question), so flush
+			// it now. Routing is signalled to the user only by the `routing` chip
+			// (notify) and the answering squad's reply.
+			runHop := func(rctx context.Context, hopSq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+				seq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
+					&genai.Content{Role: "user", Parts: hopParts},
+					agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+				// The hop's runner-root agent name (squad leader, or the single
+				// member of a leaderless squad). Used to attribute the root's usage
+				// correctly and suppress its duplicate bus events.
+				rootAgent := ""
+				if hopSq.Leader != nil {
+					rootAgent = hopSq.Leader.Name()
+				}
+				isRouter := routerSquad != "" && squadName == routerSquad
+				if !isRouter {
+					return streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, false, usageAccum)
+				}
+				text, err := streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum)
+				if err != nil {
+					return text, err
+				}
+				if d.Manager.PendingRoute(meta.ID) {
+					return "", nil // routed → drop the router's chatter entirely
+				}
+				// Router chose to talk to the user (no route): show its reply now.
+				if strings.TrimSpace(text) != "" {
+					emitFrame("message", map[string]string{"text": text})
+				}
+				return text, nil
+			}
+			// notify fires when control moves to another squad: persist the new
+			// squad on the session (so the next turn resumes there and it survives
+			// a restart) and tell the browser so it can update the squad label live.
+			notify := func(from, to, reason string) {
+				d.Registry.SetSquad(meta.ID, to)
+				emitFrame("routing", map[string]any{"from": from, "to": to, "reason": reason})
+			}
+
+			_, assistantText, runErr := d.Manager.RunWithRouting(runCtx, meta.UserID, meta.ID, startSquad, parts, routerParts, runHop, notify)
+			if runErr != nil {
+				log.Printf("server: routing run error: %v", runErr)
+			}
+			// Terminal event for the (possibly multi-hop) turn — streamEvents no
+			// longer emits it per hop.
+			emitFrame("done", map[string]any{})
+
+			// Persist whatever assistant text was streamed, even when the run was
+			// cancelled (Stop button) or no client is attached. Disk I/O does not
+			// depend on any request context, so the save lands regardless; we keep
+			// only the non-empty check so an aborted turn with no output is not
+			// persisted as a blank exchange. Persist BEFORE finish() so a reconnect
+			// that races completion always finds the durable turn.
+			if strings.TrimSpace(assistantText) != "" {
+				if err := sessions.AppendConversationTurnWithUsage(meta.ID, req.Prompt, assistantText, usageAccum); err != nil {
+					log.Printf("server: failed to persist turn: %v", err)
+				}
+			}
+			lt.finish()
+		}()
+
+		// Consumer: stream the buffered + live frames to THIS client until the
+		// turn finishes or the client disconnects. Returning here ends only this
+		// HTTP response — the producer goroutine keeps running, and the client can
+		// reconnect via GET /messages/stream?from=<lastSeq> to replay the rest.
+		lt.stream(c.Request.Context(), c.Writer, c.Writer.Flush, 0)
 	}
 }
 
-// streamEvents adapts an ADK event iterator into SSE frames written to w,
-// interleaved with sub-agent tool events from the shared event bus. It streams
+// handleMessageStream re-attaches a client to an in-flight turn's SSE stream
+// after its original POST connection dropped. It replays every buffered frame
+// with seq greater than the `from` query param, then streams live frames until
+// the turn finishes. When no turn is in flight (it already completed and its
+// buffer was released, or none ever started) it returns 204 so the client falls
+// back to reloading the session history.
+func handleMessageStream(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		if _, ok := d.Registry.Get(id); !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		lt := d.LiveTurns.get(id)
+		if lt == nil {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		from := 0
+		if v := c.Query("from"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				from = n
+			}
+		}
+		h := c.Writer.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("Connection", "keep-alive")
+		h.Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
+		c.Writer.Flush()
+		lt.stream(c.Request.Context(), c.Writer, c.Writer.Flush, from)
+	}
+}
+
+// handleCancel aborts the in-flight run for a session (the Stop button). It is
+// idempotent — cancelling when no turn is live is a no-op.
+func handleCancel(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		cancelled := d.LiveTurns.cancel(id)
+		c.JSON(http.StatusOK, gin.H{"cancelled": cancelled})
+	}
+}
+
+// streamEvents adapts an ADK event iterator into SSE frames pushed to sink
+// (event name + marshalled JSON), interleaved with sub-agent tool events from
+// the shared event bus. The sink buffers and fans the frames out to any attached
+// HTTP consumers (see liveTurn). It streams
 // ONE squad turn (one Runner.Run); the caller emits the terminal "done" event
 // once, after the routing dispatch loop finishes, so a multi-hop turn is not
 // prematurely closed. It returns the assistant text produced this hop and a
@@ -267,7 +334,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 // the broadcaster's legacy "leader"-only filter) gets counted twice.
 func streamEvents(
 	ctx context.Context,
-	w io.Writer,
+	sink func(event string, data []byte),
 	seq func(yield func(*session.Event, error) bool),
 	subCh <-chan agentBusEvent,
 	cwd string,
@@ -294,12 +361,6 @@ func streamEvents(
 	var tokenBytes int
 
 	var assistantBuf strings.Builder
-	flusher, _ := w.(interface{ Flush() })
-	flush := func() {
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
 	// lastContentAt is bumped by every content-bearing emit (anything but the
 	// liveness heartbeat); the heartbeat ticker reads it to decide whether the
 	// turn has gone quiet. Touched only from the single select loop below, so no
@@ -310,8 +371,7 @@ func streamEvents(
 		if err != nil {
 			return
 		}
-		_, _ = io.WriteString(w, "event: "+event+"\ndata: "+string(data)+"\n\n")
-		flush()
+		sink(event, data)
 		if event != "heartbeat" {
 			lastContentAt = time.Now()
 		}

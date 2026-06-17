@@ -618,9 +618,15 @@ function attachPaneHandlers(panel) {
     if (files.length) uploadPickedFiles(panel, files);
   });
 
-  // Cancel streaming.
+  // Cancel streaming. The run now outlives the HTTP request, so Stop must do two
+  // things: flag the intent (so the aborted fetch isn't mistaken for a network
+  // drop and auto-reconnected) and tell the server to actually abort the run.
   pe.cancel.addEventListener("click", () => {
-    const ctrl = sessionAbortCtrls.get(panel.sessionId);
+    const sid = panel.sessionId;
+    if (!sid) return;
+    sessionStopped.add(sid);
+    apiFetch(`/api/sessions/${sid}/cancel`, { method: "POST" }).catch(() => {});
+    const ctrl = sessionAbortCtrls.get(sid);
     if (ctrl) ctrl.abort();
   });
 
@@ -849,7 +855,10 @@ function loadSavedLayout() {
 
 const sessionAbortCtrls = new Map(); // sessionId → AbortController
 const sessionSending    = new Set(); // sessionIds currently streaming
+const sessionStopped    = new Set(); // sessionIds whose turn the user explicitly Stopped
 const sessionStatus     = new Map(); // sessionId → status string
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const archivedSessions  = new Set(); // sessionIds in the archived (read-only) state
 const sessionTitles     = new Map(); // sessionId → display title (for pane tabs)
 
@@ -4281,6 +4290,30 @@ async function subscribeGlobalEvents() {
 function subscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
 function unsubscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
 
+// rerenderSessionFromHistory clears a session's transcript and rebuilds it from
+// the persisted history. Used as the recovery path when a reconnect can't replay
+// the live stream cleanly (the server's frame buffer was trimmed) — it drops any
+// partially-streamed bubbles and shows the durable turns instead.
+async function rerenderSessionFromHistory(sessionId) {
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/messages`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const turns = data.turns || [];
+    const container = getContainer(sessionId);
+    container.innerHTML = "";
+    for (const t of turns) {
+      appendUserBubble(t.user_text, container);
+      const bubble = appendAssistantBubble(container);
+      renderMarkdown(bubble, t.assistant_text);
+    }
+    sessionTurnCounts.set(sessionId, turns.length);
+    for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => scrollBottom(p));
+  } catch (e) {
+    console.error("rerenderSessionFromHistory failed:", e);
+  }
+}
+
 // appendNewPushTurns fetches the full history and renders any turns that
 // arrived after the last locally-known count (background turns).
 async function appendNewPushTurns(sessionId) {
@@ -4339,14 +4372,15 @@ async function* parseSSE(res) {
     while ((idx = buf.indexOf("\n\n")) >= 0) {
       const frame = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
-      let event = "message", data = "";
+      let event = "message", data = "", id = 0;
       for (const line of frame.split("\n")) {
         if (line.startsWith("event:")) event = line.slice(6).trim();
         else if (line.startsWith("data:")) data += line.slice(5).trim();
+        else if (line.startsWith("id:")) id = parseInt(line.slice(3).trim(), 10) || 0;
       }
       let parsed = data;
       try { parsed = JSON.parse(data); } catch (_) { /* keep raw */ }
-      yield { event, data: parsed };
+      yield { event, data: parsed, id };
     }
   }
 }
@@ -4464,27 +4498,25 @@ async function sendMessage(panel) {
     return head ? head.block : null;
   };
 
-  const ctrl = new AbortController();
+  let ctrl = new AbortController();
   sessionAbortCtrls.set(sessionId, ctrl);
+  sessionStopped.delete(sessionId);
   sessionSending.add(sessionId);
   setSessionBusy(sessionId, true);
   setSessionStatus(sessionId, "thinking…");
   applySessionUI(sessionId);
 
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ prompt, ...(filePaths.length > 0 && { files: filePaths }) }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      appendErrorBubble(`error ${res.status}: ${txt}`, container);
-      return;
-    }
+  // Highest SSE frame id processed so far. On a reconnect we ask the server to
+  // replay only frames newer than this, so the transcript resumes seamlessly.
+  let lastSeq = 0;
+  // The finally below bumps the rendered-turn count by one (the normal case).
+  // The history re-render path sets that count authoritatively, so it opts out.
+  let skipTurnCount = false;
 
-    AgentDebug.start(sessionId);
-    for await (const { event, data } of parseSSE(res)) {
+  // processStreamEvent applies one decoded SSE event to the live transcript.
+  // Shared by the initial POST stream and any reconnect stream, so a dropped
+  // connection resumes rendering into the same bubbles.
+  function processStreamEvent(event, data) {
       switch (event) {
         case "token": {
           ensureSegment();
@@ -4654,12 +4686,103 @@ async function sendMessage(panel) {
         case "done":
           break;
       }
+  }
+
+  // consume drains one SSE Response, applying each event. Returns "done" when
+  // the turn completed, "reload" when the server asked us to re-sync from
+  // history (its replay buffer was trimmed), or "ended" when the stream closed
+  // without a terminal event (a dropped connection — the caller reconnects).
+  async function consume(res) {
+    for await (const { event, data, id } of parseSSE(res)) {
+      if (id > lastSeq) lastSeq = id;
+      if (event === "reload") return "reload";
+      processStreamEvent(event, data);
+      if (event === "done") return "done";
     }
-  } catch (e) {
-    if (e.name === "AbortError") {
-      appendErrorBubble("(cancelled)", container);
-    } else {
-      appendErrorBubble(String(e), container);
+    return "ended";
+  }
+
+  // reconnectStream re-attaches to an in-flight turn after the connection drops,
+  // replaying the frames it missed. It retries with capped backoff so a brief
+  // proxy/Wi-Fi blip is invisible, until the turn finishes, the server reports it
+  // already completed (204 → reload from history), the user Stops, or we give up.
+  async function reconnectStream() {
+    setSessionStatus(sessionId, "reconnecting…");
+    let delay = 1000;
+    let deadline = Date.now() + 60000; // up to ~60s of consecutive failures
+    while (!sessionStopped.has(sessionId)) {
+      await sleep(delay);
+      if (sessionStopped.has(sessionId)) return "stopped";
+      let res;
+      try {
+        ctrl = new AbortController();
+        sessionAbortCtrls.set(sessionId, ctrl);
+        res = await apiFetch(`/api/sessions/${sessionId}/messages/stream?from=${lastSeq}`, { signal: ctrl.signal });
+      } catch (e) {
+        if (sessionStopped.has(sessionId) || e.name === "AbortError") return "stopped";
+        if (Date.now() > deadline) return "exhausted";
+        delay = Math.min(delay * 2, 8000);
+        continue;
+      }
+      if (res.status === 204) return "reload";   // turn already finished server-side
+      if (!res.ok) {
+        if (Date.now() > deadline) return "exhausted";
+        delay = Math.min(delay * 2, 8000);
+        continue;
+      }
+      // Reconnected — resume streaming. Reset the backoff window so a connection
+      // that keeps making progress (even if flaky) is never abandoned.
+      delay = 1000;
+      deadline = Date.now() + 60000;
+      setSessionStatus(sessionId, "streaming…");
+      try {
+        const out = await consume(res);
+        if (out === "done" || out === "reload") return out;
+        setSessionStatus(sessionId, "reconnecting…"); // "ended": dropped again
+      } catch (e) {
+        if (sessionStopped.has(sessionId) || e.name === "AbortError") return "stopped";
+        setSessionStatus(sessionId, "reconnecting…");
+      }
+    }
+    return "stopped";
+  }
+
+  try {
+    let outcome;
+    try {
+      const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ prompt, ...(filePaths.length > 0 && { files: filePaths }) }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        appendErrorBubble(`error ${res.status}: ${txt}`, container);
+        outcome = "error";
+      } else {
+        AgentDebug.start(sessionId);
+        outcome = await consume(res);
+      }
+    } catch (e) {
+      // An AbortError means the user hit Stop (we abort our own controller).
+      // Anything else is a network/connection drop → transparently reconnect.
+      if (e.name === "AbortError" || sessionStopped.has(sessionId)) outcome = "stopped";
+      else outcome = await reconnectStream();
+    }
+    // The initial stream can also close without a terminal event (server still
+    // working, connection cut mid-flight): treat it as a drop and reconnect.
+    if (outcome === "ended") outcome = await reconnectStream();
+
+    if (outcome === "reload") {
+      finalizeSegment();
+      skipTurnCount = true;
+      await rerenderSessionFromHistory(sessionId);
+    } else if (outcome === "exhausted") {
+      finalizeSegment();
+      appendErrorBubble("⚠️ Lost connection to the server. The agent may still be finishing — reopen this chat to see its reply.", container);
+    } else if (outcome === "stopped") {
+      finalizeSegment();
+      appendErrorBubble("(stopped)", container);
     }
   } finally {
     finalizeSegment();
@@ -4670,12 +4793,14 @@ async function sendMessage(panel) {
       if (dot) dot.classList.remove("pending");
     }
     sessionAbortCtrls.delete(sessionId);
+    sessionStopped.delete(sessionId);
     sessionSending.delete(sessionId);
     setSessionBusy(sessionId, false);
     sessionStatus.delete(sessionId);
     applySessionUI(sessionId);
-    // Track turn count so appendNewPushTurns knows where to start.
-    sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
+    // Track turn count so appendNewPushTurns knows where to start. The history
+    // re-render path already set it authoritatively, so skip the bump there.
+    if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
     loadSessions();
     // Catch any filesystem changes the turn made that didn't surface a
     // `file_changed` event (e.g. folders created/removed via the Bash tool).

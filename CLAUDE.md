@@ -1769,6 +1769,59 @@ from the browser console. Extend it by adding new fields to the object in
 [web/app.js](web/app.js) and calling `_paint()` after mutating state — keeping
 the badge as the single surface for new client-side measurements.
 
+### Resilient turn streaming (disconnect-survival + reconnect)
+
+A web-UI user turn used to be bound to its HTTP request: `handleMessages`
+([server/sse.go](server/sse.go)) ran the agent on `c.Request.Context()`, so any
+interruption of the streaming `fetch()` (a reverse-proxy idle timeout, a Wi-Fi
+blip, a closed tab) cancelled the context and **aborted the run mid-work** — and
+the browser surfaced a raw `TypeError: network error`. Request-context
+cancellation also doubled as the Stop button. Both are now decoupled.
+
+- **`liveTurn` buffer** ([server/live_turn.go](server/live_turn.go)): a
+  process-wide `liveTurnRegistry` (one `*liveTurn` per session, on
+  `serverDeps.LiveTurns`, built in [server/main.go](server/main.go)) buffers
+  every SSE frame of the in-flight turn. The buffer is the single source of
+  truth: producers append via `emit(event, data)` (monotonic `seq`, 1-based) and
+  wake consumers via a **closed-channel broadcast** (`notify` closed + replaced
+  per emit); consumers read frames by `seq` from the slice, so a slow or
+  reconnecting consumer never loses a frame. A `maxBufferBytes` (8 MiB) cap trims
+  the oldest frames on a runaway turn (advancing `firstSeq`); a reconnect asking
+  for a trimmed range gets a `reload` control frame instead of a corrupt replay.
+  The turn is retained ~60 s after `finish()` so a reconnect racing completion
+  can still drain the tail, then GC'd.
+- **Producer/consumer split** in `handleMessages`: the run executes in a
+  **background goroutine** on `runCtx, cancel := context.WithCancel(d.rootCtx)`
+  (rooted on the server root, so shutdown still cancels) — **not** the request
+  context. It holds the run-guard for the whole run, emits all frames to
+  `lt.emit` (via the `sink`/`emitFrame` closures — `streamEvents` now takes a
+  `sink func(event string, data []byte)` instead of an `io.Writer`), persists the
+  turn, then `lt.finish()`. The HTTP handler is just a **consumer**: it
+  `lt.stream`s buffered+live frames to `c.Writer` until the turn finishes **or
+  the client disconnects** — and returning never cancels the run. Each frame
+  carries an `id: <seq>` line.
+- **Reconnect endpoint** `GET /api/sessions/:id/messages/stream?from=<seq>`
+  (`handleMessageStream`): re-attaches to the live turn and replays frames with
+  `seq > from`, then streams live until `done`. Returns **204** when no turn is
+  in flight (finished+GC'd or never existed) so the client reloads history.
+- **Cancel endpoint** `POST /api/sessions/:id/cancel` (`handleCancel`): the Stop
+  button. Calls `lt.cancel()` (aborts `runCtx`), so a real Stop truly aborts the
+  server-side run — distinct from a disconnect, which now keeps running.
+- **Client** ([web/app.js](web/app.js)): `parseSSE` parses the `id:` line; the
+  send path's event switch is extracted into `processStreamEvent` and driven by a
+  reusable `consume(res)` (returns `done`/`reload`/`ended`). On a network drop
+  (a non-`AbortError` throw, or an `ended` stream) `reconnectStream` retries the
+  reconnect GET with capped backoff (~60 s window), showing a subtle
+  `reconnecting…` status and resuming into the same bubbles from `lastSeq`; a
+  `204` → `reload` → `rerenderSessionFromHistory` (clean rebuild from persisted
+  history, no duplicate bubbles, sets the turn count authoritatively so the
+  `finally` skips its bump). Exhausting retries shows a friendly "Lost connection
+  … reopen this chat to see its reply" message. The Stop button flags
+  `sessionStopped` + POSTs cancel + aborts the fetch; an `AbortError` is read as
+  an intentional stop (not a reconnect trigger). Closing the tab aborts the fetch
+  **without** the flag/cancel, so the run finishes in the background and is
+  persisted.
+
 ### Streaming liveness heartbeat
 
 The model can spend a long stretch producing **no visible chat text** — most

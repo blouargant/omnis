@@ -264,6 +264,7 @@ func run() error {
 		ListSessionRegistry: infra.ListSessionRegistry,
 		WatchMailbox:        infra.WatchMailbox,
 		RunGuard:            runGuard,
+		LiveTurns:           newLiveTurnRegistry(),
 		PushMgr:             pushMgr,
 		PushEvents:          pushEvents,
 		AgentOptions:        agentOpts,
