@@ -528,6 +528,14 @@ function attachPaneHandlers(panel) {
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   });
 
+  // Model-connection warning banners (above the composer + above the new-chat
+  // picker button). Clicking either opens the fix-connection popup; their
+  // visibility is driven by the latest provider-health probe.
+  for (const b of panel.root.querySelectorAll(".provider-warn-banner")) {
+    b.addEventListener("click", (e) => { e.stopPropagation(); openProviderHealthModal(); });
+  }
+  applyProviderWarning(panel);
+
   // Toolbar: terminal / split / close.
   if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
@@ -6472,6 +6480,213 @@ function uiConfirm({ title, message, confirmText, danger }) {
   });
 }
 
+// ─── Provider connection health ──────────────────────────────────────────────
+// On boot (and after a config reload) probe every configured model provider via
+// GET /api/providers/health. When any provider can't connect, reveal the orange
+// warning banner inside each chat pane — above the composer in an active chat,
+// and above the "Start a new chat" button in an empty/draft pane. Clicking it
+// opens a popup to fix the base URL / API key and reload the agent. Best-effort:
+// any failure to reach the health endpoint itself leaves the banners hidden (no
+// false alarm).
+let providerHealthState = null; // last { ok, providers:[{ref,kind,base_url,has_api_key,ok,error}] }
+
+async function checkProviderHealth() {
+  try {
+    const res = await apiFetch("/api/providers/health");
+    if (!res.ok) return;
+    providerHealthState = await res.json();
+  } catch (_) { return; /* best-effort */ }
+  renderProviderWarning();
+}
+
+// providerWarningBad returns the providers from the last probe that failed.
+function providerWarningBad() {
+  return (providerHealthState?.providers || []).filter(p => !p.ok);
+}
+
+// applyProviderWarning toggles a single pane's warning banners (composer + picker
+// variants together — the pane-picker overlay decides which is on screen) from
+// the cached health state, so a freshly created/split pane reflects it too.
+function applyProviderWarning(panel) {
+  if (!panel || !panel.root) return;
+  const bad = providerWarningBad();
+  const show = bad.length > 0;
+  const tip = show
+    ? `Can't reach model provider${bad.length > 1 ? "s" : ""}: ${bad.map(p => p.ref).join(", ")} — click to fix`
+    : "";
+  for (const b of panel.root.querySelectorAll(".provider-warn-banner")) {
+    b.hidden = !show;
+    if (show) b.setAttribute("data-tip", tip);
+  }
+}
+
+// renderProviderWarning refreshes the warning banners across every pane.
+function renderProviderWarning() {
+  for (const p of panels) applyProviderWarning(p);
+}
+
+// openProviderHealthModal shows a popup listing the unreachable providers (or
+// all of them when none are currently failing) with editable base URL + API key
+// fields. Saving writes the raw models.json back via the config editor route
+// (preserving its on-disk shape and untouched fields), reloads the agent, and
+// re-probes so the user sees whether the fix worked.
+async function openProviderHealthModal() {
+  await checkProviderHealth(); // freshest verdict before opening
+  const health = providerHealthState || { providers: [] };
+  const failing = (health.providers || []).filter(p => !p.ok);
+  const list = failing.length ? failing : (health.providers || []);
+
+  // Load the raw models.json so edits preserve env-var references and any
+  // fields the popup doesn't touch; mtime guards against a concurrent edit.
+  let raw = {}, mtime;
+  try {
+    const res = await apiFetch("/api/config/parsed/models");
+    if (res.ok) {
+      const body = await res.json();
+      raw = body.data || {};
+      mtime = body.mtime;
+    }
+  } catch (_) { /* fall through with empty raw */ }
+  raw.providers = raw.providers || {};
+
+  const overlay = uiModalShell("Model connection");
+  overlay.classList.add("provider-health-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+
+  const intro = document.createElement("p");
+  intro.className = "provider-health-intro";
+  intro.textContent = failing.length
+    ? "These model providers couldn't be reached. Update the base URL and/or API key, then save to reload the agent."
+    : "All providers responded. You can still update a provider's base URL or API key here.";
+  body.appendChild(intro);
+
+  // Resolve a health ref (lower-cased) back to its raw models.json provider key.
+  const rawKeyFor = (ref) => {
+    const lc = String(ref).toLowerCase();
+    return Object.keys(raw.providers).find(k => k.toLowerCase() === lc) || ref;
+  };
+
+  const fields = [];
+  for (const p of list) {
+    const rk = rawKeyFor(p.ref);
+    const prov = raw.providers[rk] || {};
+    const card = document.createElement("div");
+    card.className = "provider-health-card";
+    card.innerHTML = `
+      <div class="provider-health-name">${escHtml(p.ref)} <span class="provider-health-kind">${escHtml(p.kind || "")}</span></div>
+      ${p.error ? `<div class="provider-health-error">${escHtml(p.error)}</div>` : ""}
+      <label class="user-cmd-field"><span class="user-cmd-field-label">Base URL</span>
+        <input type="text" class="ph-base" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" /></label>
+      <label class="user-cmd-field"><span class="user-cmd-field-label">API key</span>
+        <input type="password" class="ph-key" autocomplete="off" placeholder="${prov.api_key ? "leave blank to keep current" : "enter API key"}" /></label>
+      <div class="provider-health-actions">
+        <button type="button" class="ph-test">Test connection</button>
+        <span class="ph-test-status"></span>
+      </div>`;
+    card.querySelector(".ph-base").value = prov.base_url || "";
+    const errEl = card.querySelector(".provider-health-error");
+    const testBtn = card.querySelector(".ph-test");
+    const testStatus = card.querySelector(".ph-test-status");
+    const f = { ref: p.ref, kind: p.kind, rk, baseEl: card.querySelector(".ph-base"), keyEl: card.querySelector(".ph-key") };
+    testBtn.addEventListener("click", async () => {
+      testBtn.disabled = true;
+      testStatus.className = "ph-test-status";
+      testStatus.textContent = "Testing…";
+      try {
+        const res = await apiFetch("/api/providers/test", {
+          method: "POST",
+          body: JSON.stringify({ ref: f.ref, kind: f.kind, base_url: f.baseEl.value.trim(), api_key: f.keyEl.value.trim() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          testStatus.className = "ph-test-status is-ok";
+          testStatus.textContent = `✓ Connected${typeof data.model_count === "number" ? ` (${data.model_count} models)` : ""}`;
+          if (errEl) errEl.hidden = true; // stale boot-time error no longer applies
+        } else {
+          testStatus.className = "ph-test-status is-error";
+          testStatus.textContent = data.error || `HTTP ${res.status}`;
+        }
+      } catch (e) {
+        testStatus.className = "ph-test-status is-error";
+        testStatus.textContent = e.message || "test failed";
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+    body.appendChild(card);
+    fields.push(f);
+  }
+
+  const status = document.createElement("div");
+  status.className = "provider-health-status";
+  status.hidden = true;
+  body.appendChild(status);
+
+  const ok = overlay.querySelector(".ui-modal-ok");
+  ok.textContent = "Save & Reload";
+
+  let done = false;
+  const close = () => {
+    if (done) return;
+    done = true;
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+  overlay.querySelector(".ui-modal-cancel").addEventListener("click", close);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+
+  const setStatus = (text, cls) => {
+    status.hidden = false;
+    status.className = "provider-health-status" + (cls ? " " + cls : "");
+    status.textContent = text;
+  };
+
+  ok.addEventListener("click", async () => {
+    // Apply the edits onto the raw providers block.
+    for (const f of fields) {
+      const prov = raw.providers[f.rk] || (raw.providers[f.rk] = {});
+      prov.base_url = f.baseEl.value.trim();
+      const key = f.keyEl.value.trim();
+      if (key) prov.api_key = key; // blank keeps the existing value / env ref
+    }
+    ok.disabled = true;
+    setStatus("Saving…");
+    try {
+      const putRes = await apiFetch("/api/config/parsed/models", {
+        method: "PUT",
+        body: JSON.stringify({ data: raw, mtime }),
+      });
+      if (!putRes.ok) {
+        const j = await putRes.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${putRes.status}`);
+      }
+      setStatus("Reloading agent…");
+      const relRes = await apiFetch("/api/config/reload", { method: "POST" });
+      if (!relRes.ok) {
+        const j = await relRes.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${relRes.status}`);
+      }
+      const relBody = await relRes.json().catch(() => ({}));
+      window.dispatchEvent(new CustomEvent("yoke:config-reloaded", { detail: { generation: relBody.generation } }));
+      await checkProviderHealth();
+      const stillBad = (providerHealthState?.providers || []).filter(p => !p.ok);
+      if (stillBad.length) {
+        ok.disabled = false;
+        setStatus("Still can't connect: " + stillBad.map(p => p.ref).join(", ") + ". Check the values and try again.", "is-error");
+      } else {
+        setStatus("Connected — agent reloaded.", "is-ok");
+        setTimeout(close, 1000);
+      }
+    } catch (e) {
+      ok.disabled = false;
+      setStatus("Failed: " + e.message, "is-error");
+    }
+  });
+}
+
 // Entry icons for the Folders tree (module scope so the recursive entry builder
 // can reuse them).
 const FOLDER_SVG = `<svg class="folder-entry-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
@@ -7043,9 +7258,12 @@ async function restoreLayout(rec, liveIds) {
         if (!p.sessionId && p.els.picker && !p.els.picker.hidden) renderPickerSquad(p);
       }
     });
+    checkProviderHealth(); // a reload may have fixed (or broken) a connection
   });
   loadUserCommands(); // fire-and-forget; menu re-renders when it lands
   subscribeGlobalEvents(); // single multiplexed push stream for all sessions
+  // Probe model-provider connectivity and reveal the in-pane warning on failure.
+  checkProviderHealth(); // fire-and-forget; renderProviderWarning paints the panes
   await loadSessions();
 
   // Collect live session ids for layout validation.

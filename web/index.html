@@ -163,6 +163,13 @@
               <div class="pane-picker-squad-menu" role="menu" hidden></div>
             </div>
           </div>
+          <button type="button" class="provider-warn-banner is-picker" hidden data-tip="Model connection problem — click to fix">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span class="provider-warn-text">Model connection problem — click to fix</span>
+          </button>
           <button class="pane-picker-new" type="button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             <span>Start a new chat</span>
@@ -175,6 +182,13 @@
       <div id="composer-wrap">
         <div id="composer-resize" aria-hidden="true"></div>
         <div id="slash-menu" hidden></div>
+        <button type="button" class="provider-warn-banner is-composer" hidden data-tip="Model connection problem — click to fix">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span class="provider-warn-text">Model connection problem — click to fix</span>
+        </button>
         <form id="composer">
           <input type="file" id="file-input" multiple hidden />
           <div id="attachments" hidden></div>
@@ -330,7 +344,7 @@
     </div>
   </div>
 
-  <script src="assets/app.js?v=4" defer></script>
+  <script src="assets/app.js?v=7" defer></script>
   <script src="assets/settings.js?v=5" defer></script>
 </body>
 </html>

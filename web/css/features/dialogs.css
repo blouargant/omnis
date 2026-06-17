@@ -40,6 +40,115 @@
   color: var(--text);
   line-height: 1.5;
 }
+
+/* Orange "model connection problem" banner shown inside each chat pane — above
+ * the composer in an active chat, and above the "Start a new chat" button in an
+ * empty/draft pane (the pane-picker overlay decides which one is visible).
+ * Hidden until checkProviderHealth() reveals it; clicking opens the fix popup. */
+.provider-warn-banner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e8912d;
+  background: rgba(232, 145, 45, 0.12);
+  color: #e8912d;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.provider-warn-banner[hidden] { display: none; }
+.provider-warn-banner:hover { background: rgba(232, 145, 45, 0.2); }
+.provider-warn-banner svg { flex-shrink: 0; }
+/* Composer variant floats with the composer (which is position:absolute and
+ * has pointer-events disabled on the wrap), so re-enable clicks and lift it
+ * above the fade gradient, with a small gap above the prompt card. */
+.provider-warn-banner.is-composer {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  /* Match the centred prompt card (#composer: max-width 700px, centred). */
+  align-self: center;
+  width: 100%;
+  max-width: 700px;
+  margin: 0 0 8px;
+}
+
+/* ─── Provider connection (model health) popup ─────────────── */
+.provider-health-modal .ui-modal { width: min(480px, 94vw); }
+.provider-health-intro {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+.provider-health-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+}
+.provider-health-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.provider-health-kind {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.provider-health-error {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--danger-fg);
+  background: var(--danger-bg-soft);
+  border-radius: 4px;
+  padding: 5px 7px;
+  word-break: break-word;
+}
+.provider-health-status {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.provider-health-status.is-error { color: var(--danger-fg); }
+.provider-health-status.is-ok { color: #4caf6d; }
+
+.provider-health-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.provider-health-actions .ph-test {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-active);
+  color: var(--text);
+  cursor: pointer;
+}
+.provider-health-actions .ph-test:hover:not(:disabled) { border-color: var(--accent); }
+.provider-health-actions .ph-test:disabled { opacity: 0.6; cursor: default; }
+.ph-test-status {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  word-break: break-word;
+  min-width: 0;
+}
+.ph-test-status.is-ok { color: #4caf6d; }
+.ph-test-status.is-error { color: var(--danger-fg); }
 .user-cmd-modal-footer button.danger {
   background: var(--danger, #c0392b);
   border-color: var(--danger, #c0392b);

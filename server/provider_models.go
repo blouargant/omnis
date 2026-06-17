@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,13 +9,27 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/embed"
 	"github.com/gin-gonic/gin"
 )
+
+// providerHealth is the connectivity verdict for one configured provider,
+// returned by GET /providers/health. base_url is reported for display (it is
+// not a secret); the API key value is never returned — only whether one is set.
+type providerHealth struct {
+	Ref       string `json:"ref"`
+	Kind      string `json:"kind"`
+	BaseURL   string `json:"base_url,omitempty"`
+	HasAPIKey bool   `json:"has_api_key"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
 
 // providerModelInfo is a single model entry returned to the browser.
 // Pricing / context / dim / mode fields are optional and forwarded only when
@@ -85,6 +100,129 @@ func registerProviderModelsRoute(rg *gin.RouterGroup) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"dim": dim})
+	})
+
+	// GET /providers/health probes every configured provider for reachability +
+	// credential validity by listing its models (the same call that backs the
+	// Models editor's combobox), so the web UI can warn the user up-front when a
+	// model connection is broken and offer to fix the base URL / API key. Probes
+	// run concurrently, each with its own timeout. Credentials come from the live
+	// models.json catalogue (already env-resolved), so no secrets are accepted on
+	// the wire. Response: { ok, providers: [providerHealth, …] } where the
+	// top-level ok is true only when every probed provider connected.
+	rg.GET("/providers/health", func(c *gin.Context) {
+		settings, err := agent.ResolveRuntimeSettings(agent.Options{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("resolve runtime settings: %v", err)})
+			return
+		}
+
+		refs := make([]string, 0, len(settings.Providers))
+		for ref := range settings.Providers {
+			refs = append(refs, ref)
+		}
+		sort.Strings(refs)
+
+		results := make([]providerHealth, len(refs))
+		var wg sync.WaitGroup
+		for i, ref := range refs {
+			p := settings.Providers[ref]
+			results[i] = providerHealth{
+				Ref:       ref,
+				Kind:      p.Kind,
+				BaseURL:   p.BaseURL,
+				HasAPIKey: strings.TrimSpace(p.APIKey) != "",
+			}
+			wg.Add(1)
+			go func(i int, kind, apiKey, baseURL string) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
+				defer cancel()
+				if _, perr := fetchProviderModels(ctx, kind, apiKey, baseURL); perr != nil {
+					results[i].OK = false
+					results[i].Error = truncate(perr.Error(), 300)
+				} else {
+					results[i].OK = true
+				}
+			}(i, p.Kind, p.APIKey, p.BaseURL)
+		}
+		wg.Wait()
+
+		allOK := true
+		for _, h := range results {
+			if !h.OK {
+				allOK = false
+				break
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": allOK, "providers": results})
+	})
+
+	// POST /providers/test probes a single connection with the values the user
+	// is editing, without saving anything — backing the "Test" button in the
+	// connection popup. The body is { ref, kind, base_url, api_key }; any field
+	// left blank falls back to the saved provider named by ref (so a blank API
+	// key tests the real stored credentials rather than an empty one). Typed
+	// base_url / api_key are resolved as env-var names first, matching the agent
+	// config convention. A POST body (not a query string) keeps a typed key out
+	// of access logs. Response: { ok, model_count } or { ok:false, error }.
+	rg.POST("/providers/test", func(c *gin.Context) {
+		var req struct {
+			Ref     string `json:"ref"`
+			Kind    string `json:"kind"`
+			BaseURL string `json:"base_url"`
+			APIKey  string `json:"api_key"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+			return
+		}
+
+		kind := strings.TrimSpace(req.Kind)
+		baseURL := strings.TrimSpace(req.BaseURL)
+		apiKey := strings.TrimSpace(req.APIKey)
+
+		// Fall back to the saved provider for any blank field (already env-resolved).
+		var saved agent.RuntimeProviderConfig
+		hasSaved := false
+		if strings.TrimSpace(req.Ref) != "" {
+			if settings, err := agent.ResolveRuntimeSettings(agent.Options{}); err == nil {
+				if p, ok := settings.Providers[strings.ToLower(strings.TrimSpace(req.Ref))]; ok {
+					saved, hasSaved = p, true
+				}
+			}
+		}
+		if kind == "" && hasSaved {
+			kind = saved.Kind
+		}
+		if baseURL == "" {
+			if hasSaved {
+				baseURL = saved.BaseURL
+			}
+		} else {
+			baseURL = resolveEnvRef(baseURL)
+		}
+		if apiKey == "" {
+			if hasSaved {
+				apiKey = saved.APIKey
+			}
+		} else {
+			apiKey = resolveEnvRef(apiKey)
+		}
+
+		if kind == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "provider kind is required"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
+		defer cancel()
+		models, err := fetchProviderModels(ctx, kind, apiKey, baseURL)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"ok": false, "error": truncate(err.Error(), 300)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "model_count": len(models)})
 	})
 }
 
@@ -178,14 +316,15 @@ func fetchAnthropicModels(ctx context.Context, apiKey string) ([]providerModelIn
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
+	const url = "https://api.anthropic.com/v1/models"
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request to %s failed: %w", url, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("anthropic API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("anthropic API (%s) returned HTTP %d: %s", url, resp.StatusCode, truncate(string(body), 200))
 	}
 
 	var result struct {
@@ -195,7 +334,7 @@ func fetchAnthropicModels(ctx context.Context, apiKey string) ([]providerModelIn
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, explainNonJSON(url, body)
 	}
 	out := make([]providerModelInfo, len(result.Data))
 	for i, m := range result.Data {
@@ -234,12 +373,12 @@ func fetchOpenAIStyleModels(ctx context.Context, apiKey, baseURL string) ([]prov
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request to %s failed: %w", url, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("provider API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("%s returned HTTP %d: %s", url, resp.StatusCode, truncate(string(body), 200))
 	}
 
 	var result struct {
@@ -248,7 +387,7 @@ func fetchOpenAIStyleModels(ctx context.Context, apiKey, baseURL string) ([]prov
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, explainNonJSON(url, body)
 	}
 	out := make([]providerModelInfo, len(result.Data))
 	for i, m := range result.Data {
@@ -362,14 +501,16 @@ func fetchGeminiModels(ctx context.Context, apiKey string) ([]providerModelInfo,
 		return nil, err
 	}
 
+	// displayURL omits the ?key= query so the API key never leaks into an error.
+	const displayURL = "https://generativelanguage.googleapis.com/v1beta/models"
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request to %s failed: %w", displayURL, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("gemini API (%s) returned HTTP %d: %s", displayURL, resp.StatusCode, truncate(string(body), 200))
 	}
 
 	var result struct {
@@ -379,7 +520,7 @@ func fetchGeminiModels(ctx context.Context, apiKey string) ([]providerModelInfo,
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, explainNonJSON(displayURL, body)
 	}
 	out := make([]providerModelInfo, 0, len(result.Models))
 	for _, m := range result.Models {
@@ -395,4 +536,22 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// explainNonJSON turns a JSON-decode failure on a 2xx response into a
+// human-readable diagnostic. The usual cause is a base URL that points at a web
+// page or an SSO/login portal instead of the API endpoint, in which case the
+// body is HTML (starts with '<') rather than the expected JSON model list. url
+// must not contain secrets (callers pass a key-free display URL for providers
+// that put the key in the query string).
+func explainNonJSON(url string, body []byte) error {
+	trimmed := bytes.TrimSpace(body)
+	switch {
+	case len(trimmed) == 0:
+		return fmt.Errorf("%s returned an empty body where a JSON model list was expected — check the base URL points at the API endpoint", url)
+	case trimmed[0] == '<':
+		return fmt.Errorf("%s returned an HTML page, not JSON — the base URL is probably pointing at a web page or login portal instead of the API endpoint (an OpenAI-style base URL usually needs to end in /v1). First bytes: %q", url, truncate(string(trimmed), 80))
+	default:
+		return fmt.Errorf("%s returned a non-JSON response — check the base URL and API key. First bytes: %q", url, truncate(string(trimmed), 80))
+	}
 }

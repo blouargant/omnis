@@ -595,6 +595,36 @@ field via the ⟳ button beside it ([web/settings.js](web/settings.js) `dimField
 Dimension detection requires both a provider and a model id and reports the
 model's native dimension.
 
+**Provider connection health (web UI).** On boot (and after every config
+reload) the web UI probes model-provider connectivity via
+`GET /api/providers/health` ([server/provider_models.go](server/provider_models.go)),
+which resolves the live `models.json` catalogue and concurrently lists each
+configured provider's models (`fetchProviderModels`, the same call backing the
+combobox) with a 12 s per-provider timeout. It returns
+`{ ok, providers:[{ref,kind,base_url,has_api_key,ok,error}] }` — `base_url` is
+echoed for display (not a secret) and the API key value is **never** returned,
+only `has_api_key`. When any provider fails, an orange warning banner
+(`.provider-warn-banner`) is revealed **inside every chat pane** — above the
+composer in an active chat and above the "Start a new chat" button in an
+empty/draft pane (each pane carries both variants; the `.pane-picker` overlay
+decides which is on screen, and `.editing`/`.terminal` tabs hide both). The
+banners live in the pane template ([web/index.html](web/index.html)), are styled
+in [web/css/features/dialogs.css](web/css/features/dialogs.css), and are toggled
+per-pane by `renderProviderWarning`/`applyProviderWarning` ([web/app.js](web/app.js),
+also re-applied in `attachPaneHandlers` so a split/new pane reflects the state).
+Clicking a banner opens a popup (`checkProviderHealth`/`openProviderHealthModal`,
+styled `.provider-health-*` in the same CSS partial) listing the unreachable
+providers with editable base URL / API key fields. Each card has a
+**Test connection** button that probes the *edited* values without saving via
+`POST /api/providers/test` `{ref,kind,base_url,api_key}` → `{ok, model_count}` /
+`{ok:false, error}` — any blank field falls back to the saved provider named by
+`ref` (so a blank key tests the real stored credentials), and a POST body keeps
+a typed key out of access logs. Saving GETs the
+**raw** `models.json` (so env-var refs and untouched fields survive), patches the
+failing providers' `base_url`/`api_key` (a blank key keeps the existing value),
+`PUT`s it back via `/api/config/parsed/models`, then `POST`s `/api/config/reload`
+and re-probes — so a reload that fixes (or breaks) a connection updates the icon.
+
 The model list is metadata-aware for **LiteLLM** proxies (ChapsVision's gateways
 are LiteLLM): `fetchOpenAIStyleModels` first tries `GET {base}/v1/model/info`
 and, when present, maps each model's `model_info` — `max_input_tokens` →
