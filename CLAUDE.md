@@ -101,6 +101,10 @@ go run . "explain main.go"              # CLI one-shot with prompt argument
 echo "summarize repo" | go run .        # CLI one-shot reading stdin
 go run . tui                            # TUI: tview chat interface
 make run-server                         # Server: HTTP API + web UI (needs YOKE_SERVER_TOKEN)
+bin/yoke-server                         # Server in the foreground (default form)
+bin/yoke-server start [--no-browser]    # Server detached in the background (frees the terminal)
+bin/yoke-server stop                    # Stop the background server (graceful SIGTERM)
+bin/yoke-server status                  # Report whether the background server is running
 
 # Auxiliary subcommands
 go run . -d                             # debug: log full payloads (any mode)
@@ -595,6 +599,22 @@ field via the ⟳ button beside it ([web/settings.js](web/settings.js) `dimField
 Dimension detection requires both a provider and a model id and reports the
 model's native dimension.
 
+**Server boots even with an unconfigured/unreachable model.** Missing model
+credentials (no `OPENAI_BASE_URL` / `OPENAI_API_KEY`, etc.) no longer abort
+server startup — the provider-health banner below is the user-facing signal
+instead. `Options.DeferModelErrors` (set only by the server, [server/main.go](server/main.go))
+makes `buildSquadInstance`'s `modelForAgent` closure use
+`llm.NewDeferredWithSelection` ([core/llm/deferred.go](core/llm/deferred.go))
+for the leader + every sub-agent: a **valid** selection still builds eagerly
+(pure no-op), but one whose eager `NewWithSelection` fails (e.g.
+`openai_compat requires OPENAI_BASE_URL`) returns a `deferredLLM` that
+re-attempts the build at first `GenerateContent` and surfaces the real error
+**there** — so the process starts, the web UI loads, and an actual turn (not
+boot) is what fails. CLI/TUI leave `DeferModelErrors` false and keep failing
+fast (a one-shot run is useless without a working model). Curator/reflector/
+`ask_squad` model builds are unchanged (they already degrade gracefully on a
+build error).
+
 **Provider connection health (web UI).** On boot (and after every config
 reload) the web UI probes model-provider connectivity via
 `GET /api/providers/health` ([server/provider_models.go](server/provider_models.go)),
@@ -755,6 +775,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
+| `YOKE_SERVER_DAEMONIZED` | Set to `1` by `yoke-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
 | `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
 | `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke` |
 | `YOKE_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/yoke`), leaving `.agents` and `$HOME/.yoke` in the chain — unlike `YOKE_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/yoke`; Windows MSI → `C:\ProgramData\Yoke`; pip wheel launcher → the bundled `_dist/sysconf`) to relocate bundled config/registry without a rebuild |
@@ -1334,6 +1355,45 @@ and `session_deleted` with `forgetSession(sid)` (drops per-session maps + ask
 widgets + `closeTabEverywhere`) then `loadSessions()`. All three handlers are
 idempotent, so the originating browser harmlessly processes its own echoed
 broadcast. New sessions are **never auto-opened** on other browsers — only listed.
+
+### Background server (`yoke-server start` / `stop` / `status`)
+
+`yoke-server` runs in the **foreground by default** (`yoke-server [flags]`).
+Three subcommands, dispatched in `main()` before `run()`'s flag parsing
+([server/main.go](server/main.go)) and orchestrated in
+[server/daemon.go](server/daemon.go), add a background-daemon lifecycle:
+
+- **`start [flags]`** re-execs the binary **detached** (`os/exec` +
+  `SysProcAttr{Setsid: true}` on unix, so the child is its own session leader
+  and survives the parent exiting + the terminal closing), redirects its
+  stdout/stderr to `$YOKE_HOME/logs/yoke-server.log`, writes the child PID to
+  `$YOKE_HOME/yoke-server.pid`, then returns — freeing the terminal handle. The
+  child runs the **same foreground path**, so it **opens a browser exactly like
+  plain `yoke-server`** does (per `server.yaml`'s `open_browser`), pointing at
+  the *actually bound* address after any port auto-increment — `openBrowser` is
+  fire-and-forget and only needs `DISPLAY`/`WAYLAND_DISPLAY` (inherited), not a
+  terminal; pass `yoke-server start --no-browser` to suppress it. `start`
+  inherits the CWD (config search `.agents` and the default `web` dir are
+  CWD-relative, so the child must start where `start` ran), sets
+  `YOKE_SERVER_DAEMONIZED=1` on the child, refuses to start when a live PID is
+  already recorded, and does a ~400 ms liveness grace check to surface an
+  immediate failure (e.g. port already in use) instead of falsely reporting
+  success.
+- **`stop`** sends `SIGTERM` to the recorded PID (the server already traps it
+  via `signal.NotifyContext` for a graceful shutdown), waits up to 15 s for it
+  to exit, then removes the PID file. Missing/stale PID files are handled
+  gracefully (idempotent).
+- **`status`** reports running/stopped based on the PID file + a liveness probe
+  (`kill -0`).
+
+The detached child runs the **same foreground `run()` path** — there is no
+separate daemon code path. Platform support mirrors `restart_other.go`: the
+primitives (`detachSysProcAttr`, `pidAlive`, `signalTerminate`, and the
+`daemonSupported` const) live in [server/daemon_unix.go](server/daemon_unix.go)
+(real) and [server/daemon_other.go](server/daemon_other.go) (`!unix` stub that
+returns `errDaemonUnsupported` so cross-platform builds stay green). Stale PID
+files are always reconciled via the liveness probe, so a crash/self-exit never
+wedges `start`/`status`.
 
 ### Hot reload (server mode)
 

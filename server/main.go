@@ -3,6 +3,18 @@
 // one ADK runner; concurrent chats are isolated by sessionID through the
 // runner's in-memory session service.
 //
+// Invocation forms:
+//
+//	yoke-server [flags]        run the server in the foreground (default)
+//	yoke-server start [flags]  start the server detached in the background,
+//	                              recording its PID in $YOKE_HOME/yoke-server.pid
+//	                              and logging to $YOKE_HOME/logs/yoke-server.log
+//	yoke-server stop           signal the background server to shut down
+//	yoke-server status         report whether the background server is running
+//
+// The detached child started by "start" runs the same foreground path; the
+// start/stop/status orchestration lives in daemon.go.
+//
 // Optional env:
 //
 //	YOKE_SERVER_TOKEN  Bearer token checked on every /api/* call. When
@@ -52,10 +64,59 @@ import (
 )
 
 func main() {
+	// Background-daemon subcommands are dispatched before run()'s flag parsing.
+	// "start" re-execs this binary detached and frees the terminal; "stop"
+	// signals it to shut down; "status" reports liveness. Any other first arg
+	// (or none) falls through to the normal foreground server — which is also
+	// what the detached child runs.
+	if args := os.Args[1:]; len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "start":
+			fatalIf(startDaemon(args[1:]))
+			return
+		case "stop":
+			fatalIf(stopDaemon())
+			return
+		case "status":
+			fatalIf(statusDaemon())
+			return
+		case "help", "--help", "-h":
+			printServerUsage()
+			return
+		}
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
+}
+
+// fatalIf prints err and exits non-zero when err is non-nil.
+func fatalIf(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+// printServerUsage documents the yoke-server invocation forms.
+func printServerUsage() {
+	fmt.Fprint(os.Stderr, `yoke-server — HTTP API server + web UI for the yoke agent.
+
+Usage:
+  yoke-server [flags]        run the server in the foreground (default)
+  yoke-server start [flags]  start the server detached in the background
+  yoke-server stop           stop the background server
+  yoke-server status         report whether the background server is running
+  yoke-server help           show this help
+
+Flags (foreground / forwarded to the background child):
+  --no-browser   disable automatic browser launch at startup
+
+The background server logs to $YOKE_HOME/logs/yoke-server.log and records its
+PID in $YOKE_HOME/yoke-server.pid. Configuration is read from server.yaml and
+the YOKE_* environment variables (see the package doc).
+`)
 }
 
 func run() error {
@@ -117,6 +178,11 @@ func run() error {
 		// waits for the user, so disarm the registry's 5-minute question
 		// timeout — only a turn abort (context cancellation) ends the wait.
 		DisableAskUserTimeout: true,
+		// Don't abort boot when a model can't be built (e.g. OPENAI_BASE_URL /
+		// OPENAI_API_KEY unset): the server starts and the web UI's
+		// provider-health banner reports the unreachable provider; turns fail
+		// with the real error only if the user actually chats.
+		DeferModelErrors: true,
 	}
 
 	log.Printf("server: yoke home: %s", paths.Home())

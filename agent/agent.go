@@ -140,6 +140,14 @@ type Options struct {
 	// wait. Set by the server (the web UI keeps the card up and just waits);
 	// left false in CLI/TUI, which keep the bounded timeout.
 	DisableAskUserTimeout bool
+	// DeferModelErrors keeps agent build from aborting when a leader/sub-agent
+	// model can't be constructed (typically a missing API key or base URL, e.g.
+	// OPENAI_BASE_URL/OPENAI_API_KEY unset). When true, such an agent gets a
+	// deferred LLM that surfaces the error at first use instead of at build
+	// time, so the server boots and the web UI's provider-health banner reports
+	// the unreachable provider. Set by the server; left false in CLI/TUI, which
+	// fail fast (a one-shot run is useless without a working model).
+	DeferModelErrors bool
 }
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {

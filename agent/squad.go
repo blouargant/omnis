@@ -107,6 +107,13 @@ func buildSquadInstance(
 	}
 
 	modelForAgent := func(cfg RuntimeAgentConfig) (model.LLM, error) {
+		// In server mode (DeferModelErrors), a missing API key / base URL must
+		// not abort agent build — return a deferred LLM that fails at first use
+		// instead, so the server boots and the provider-health banner reports
+		// the unreachable provider. A valid selection still builds eagerly.
+		if opts.DeferModelErrors {
+			return llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg)), nil
+		}
 		m, err := newModelForAgent(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("squad %q: %w", squad.Name, err)
