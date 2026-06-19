@@ -218,6 +218,7 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		Squad:           squad,
 		Bus:             infra.Bus,
 		AskUserRegistry: infra.AskUserRegistry,
+		BgQueues:        infra.BgQueues,
 		AppName:         inst.RunnerConfig.AppName,
 		Prompt:          prompt,
 	})
@@ -282,6 +283,7 @@ func runTUI(ctx context.Context, opts options) error {
 		RegisterSession:                   infra.RegisterSession,
 		UnregisterSession:                 infra.UnregisterSession,
 		WatchMailbox:                      infra.WatchMailbox,
+		BgQueues:                          infra.BgQueues,
 		AgentOptions:                      agentOpts,
 		InputTokenPricePerMillion:         leaderCfg.InputTokenPricePerMillion,
 		OutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,

@@ -599,14 +599,17 @@ func TestBashBackgroundAliasesBash(t *testing.T) {
 		{`mkfs.ext4 /dev/sdb`, DecisionDeny},
 		{`frobnicate --now`, DecisionAsk}, // unknown command still asks, like Bash
 	}
-	for _, c := range cases {
-		got, _ := cfg.CheckArgs("bash_background", map[string]any{"command": c.cmd, "label": "x"}, "/proj")
-		bashGot, _ := cfg.CheckArgs("Bash", bash(c.cmd), "/proj")
-		if got != c.want {
-			t.Errorf("bash_background %q: want %v got %v", c.cmd, c.want, got)
-		}
-		if got != bashGot {
-			t.Errorf("bash_background %q (%v) disagrees with Bash (%v)", c.cmd, got, bashGot)
+	// Both shell-bearing aliases must behave identically to Bash.
+	for _, alias := range []string{"bash_background", "monitor"} {
+		for _, c := range cases {
+			got, _ := cfg.CheckArgs(alias, map[string]any{"command": c.cmd, "label": "x"}, "/proj")
+			bashGot, _ := cfg.CheckArgs("Bash", bash(c.cmd), "/proj")
+			if got != c.want {
+				t.Errorf("%s %q: want %v got %v", alias, c.cmd, c.want, got)
+			}
+			if got != bashGot {
+				t.Errorf("%s %q (%v) disagrees with Bash (%v)", alias, c.cmd, got, bashGot)
+			}
 		}
 	}
 }

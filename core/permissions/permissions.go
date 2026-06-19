@@ -228,11 +228,11 @@ func (c *Config) Check(toolName, input, cwd string) (Decision, string) {
 // CheckArgs evaluates a tool call against the rule set with structured args.
 func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (Decision, string) {
 	ps := &c.Permissions
-	// bash_background runs shell commands exactly like Bash (same "command"
-	// arg), so it is governed by the same Bash(...) allow/ask/deny rules,
-	// read-only handling, and the tools:["Bash"]-scoped safety-floor denies.
-	// Normalising it here is the single point that keeps the two in lock-step.
-	if toolName == "bash_background" {
+	// bash_background and monitor run shell commands exactly like Bash (same
+	// "command" arg), so they are governed by the same Bash(...) allow/ask/deny
+	// rules, read-only handling, and the tools:["Bash"]-scoped safety-floor
+	// denies. Normalising here is the single point that keeps them in lock-step.
+	if toolName == "bash_background" || toolName == "monitor" {
 		toolName = "Bash"
 	}
 	// Internal routing control-flow tools — the Omnis router's route_to_squad

@@ -2318,6 +2318,13 @@ function appendUserBubble(text, container, files) {
     appendMailboxBlock(text, container);
     return;
   }
+  // Background-task / monitor completions are injected as a synthetic "user"
+  // turn so the model reacts to them, but the "[Background …]" / "[Monitor …]"
+  // prompt is an internal message — don't render it as a user bubble. The
+  // assistant's reply that follows is the user-facing content.
+  if (typeof text === "string" && (text.startsWith("[Background ") || text.startsWith("[Monitor "))) {
+    return;
+  }
   const row = document.createElement("div");
   row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
@@ -4262,6 +4269,12 @@ async function subscribeGlobalEvents() {
         const sid = data && typeof data === "object" ? data.session_id : null;
         if (event === "mailbox_push" && sid && !sessionSending.has(sid)) {
           await appendNewPushTurns(sid);
+        } else if (event === "task_notification" && sid) {
+          // A background task / monitor produced a result. In active-wake mode
+          // the server injected a synthetic turn (picked up by appendNewPushTurns);
+          // in passive mode there is no new turn and the toast is the only signal.
+          if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
+          notifyTaskEvent(sid);
         } else if (event === "ask_user" && data && typeof data === "object" && sid) {
           renderAskUserWidget(sid, data);
         } else if (event === "ask_user_cancel" && data && data.question_id) {
@@ -4297,6 +4310,48 @@ async function subscribeGlobalEvents() {
 // session, so there is nothing to open or close per session.
 function subscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
 function unsubscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEvents */ }
+
+// notifyTaskEvent surfaces a background-task / monitor notification: an in-app
+// toast always, plus an optional OS notification (gated by the Settings toggle
+// `agent_toolkit_os_notify`) when the tab is backgrounded.
+function notifyTaskEvent(sid) {
+  showTaskToast(sid);
+  // Fire the OS notification when the user isn't actively looking at yoke:
+  // document.hidden covers a backgrounded/minimized tab; !document.hasFocus()
+  // also covers switching to another *application* (where the tab stays active
+  // but the window loses focus) — document.hidden alone misses that case.
+  const away = document.hidden || !document.hasFocus();
+  if (localStorage.getItem("agent_toolkit_os_notify") === "1" &&
+      away && "Notification" in window &&
+      Notification.permission === "granted") {
+    try {
+      const n = new Notification("Background task finished", {
+        body: "A background task or monitor reported a result.",
+        tag: "yoke-task-" + sid,
+      });
+      n.onclick = () => { window.focus(); selectSession(sid); n.close(); };
+    } catch { /* ignore */ }
+  }
+}
+
+function showTaskToast(sid) {
+  let layer = document.getElementById("task-toast-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "task-toast-layer";
+    document.body.appendChild(layer);
+  }
+  const el = document.createElement("button");
+  el.className = "task-toast";
+  el.type = "button";
+  el.innerHTML = '<span class="task-toast-dot"></span>' +
+    '<span class="task-toast-text">Background task finished</span>';
+  el.setAttribute("data-tip", "Open the session");
+  el.addEventListener("click", () => { selectSession(sid); el.remove(); });
+  layer.appendChild(el);
+  setTimeout(() => { el.classList.add("leaving"); }, 6000);
+  setTimeout(() => { el.remove(); }, 6400);
+}
 
 // rerenderSessionFromHistory clears a session's transcript and rebuilds it from
 // the persisted history. Used as the recovery path when a reconnect can't replay

@@ -248,6 +248,26 @@ func (i *Infrastructure) WatchMailbox(ctx context.Context, userID, sessionID str
 	}()
 }
 
+// WatchBackground starts a goroutine that drains the background-task queue for
+// (userID, sessionID) and calls onNotify with each batch of completed/streamed
+// notifications. A burst that lands together (one Wait + Drain) is coalesced
+// into a single batch so the host injects one synthetic turn, not many. Exits
+// when ctx is cancelled. Mirrors WatchMailbox; the two run side by side per
+// session (see server/mailbox_push.go pushManager.Watch).
+func (i *Infrastructure) WatchBackground(ctx context.Context, userID, sessionID string, onNotify func([]bg.Notification)) {
+	q := i.BgQueues.For(userID, sessionID)
+	go func() {
+		for {
+			n, ok := q.Wait(ctx)
+			if !ok {
+				return // ctx cancelled
+			}
+			batch := append([]bg.Notification{n}, q.Drain()...)
+			onNotify(batch)
+		}
+	}()
+}
+
 // Close releases shared resources held by the infrastructure. Safe to call
 // at most once; subsequent calls are no-ops at the backend level.
 func (i *Infrastructure) Close() error {

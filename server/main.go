@@ -275,7 +275,13 @@ func run() error {
 
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
-	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox)
+	// Active wake (a completed background task injects a synthetic turn) is on by
+	// default; YOKE_TASK_NOTIFY=false demotes it to a passive UI toast.
+	activeWake := true
+	if v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("YOKE_TASK_NOTIFY"))); err == nil {
+		activeWake = v
+	}
+	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox, infra.WatchBackground, activeWake)
 
 	// After a hot-reload, sessions stay pinned to their original generation
 	// until the next turn. The rebind scanner releases the pin of idle

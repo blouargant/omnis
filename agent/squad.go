@@ -165,7 +165,7 @@ func buildSquadInstance(
 		leadTools = append(leadTools, worktree.Tools(infra.Repo)...)
 	}
 	if keySet["bg"] {
-		leadTools = append(leadTools, infra.BgQueues.Tool())
+		leadTools = append(leadTools, infra.BgQueues.Tools()...)
 	}
 
 	// ── Always-on for any squad root: teammate mailbox + ask_user ──

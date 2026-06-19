@@ -33,6 +33,7 @@ import (
 	"github.com/blouargant/yoke/core/events"
 	"github.com/blouargant/yoke/internal/agentmd"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/bg"
 	"github.com/blouargant/yoke/internal/fileref"
 )
 
@@ -56,6 +57,10 @@ type Config struct {
 	// AskUserRegistry, when non-nil, gets a stdin-backed asker installed
 	// so the agent's ask_user tool prompts the user on stderr.
 	AskUserRegistry *askuser.Registry
+	// BgQueues, when non-nil, is drained before each turn so completed
+	// background-task notifications are surfaced to the model (the CLI/TUI
+	// between-turn drain — there is no server-style push goroutine here).
+	BgQueues *bg.SessionQueues
 	// UserID, SessionID default to "user" and a timestamped value.
 	UserID    string
 	SessionID string
@@ -257,6 +262,14 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 	// against the process working directory.
 	if note := fileref.Context(prompt, ""); note != "" {
 		parts = append(parts, &genai.Part{Text: note})
+	}
+	// Surface any completed background-task notifications to the model by
+	// draining the per-session queue between turns (the CLI has no push
+	// goroutine). The router only sees the prompt, so this stays off routerParts.
+	if cfg.BgQueues != nil {
+		if pending := cfg.BgQueues.For(cfg.UserID, cfg.SessionID).Drain(); len(pending) > 0 {
+			parts = append(parts, &genai.Part{Text: bg.FormatBatch(pending)})
+		}
 	}
 	// The router only needs the user's words to pick a squad — not the inlined
 	// @file contents — so it gets a prompt-only view; the answering squad still

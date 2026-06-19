@@ -158,6 +158,24 @@
 }
 .app-dialog-actions .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
+/* Appearance → Notifications: OS-notification opt-in checkbox row. */
+.settings-checkrow {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.settings-checkrow input[type="checkbox"] {
+  width: auto;
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  cursor: pointer;
+}
+
 /* Registry toggle row (label left, checkbox right) */
 .registry-dialog-toggle {
   display: flex;

@@ -260,6 +260,18 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   mid-stream `flushMarkdown`/`appendChat` and renders only on no-route; CLI's
   `stream(seq, quiet)` withholds stdout text). Routing tool-call frames are
   *additionally* hidden in the web UI by `isRoutingTool`.
+- **Hallucinated tool calls on the router hop are swallowed host-side.** The
+  router LLM sometimes pattern-matches an execution request ("run … in the
+  background") to a tool it doesn't have (`bash_background`) and calls it; ADK
+  answers with a tool-not-found error that would render as a scary `ERROR` block
+  before the router recovers and routes. On the router hop (`suppressText`),
+  `streamEvents` ([server/sse.go](server/sse.go)) drops any `tool_call` /
+  `tool_result` whose name isn't in `routerVisibleTools` (the routing/ask/teammate
+  tools the router legitimately has), so the hop stays silent and only the route
+  happens. The Omnis instruction ([registry/agents/omnis/instruction.md](registry/agents/omnis/instruction.md))
+  also explicitly tells it to treat run/execute/file requests as a routing signal
+  and never call an execution tool — but the host-side drop is the guarantee, since
+  instructions can't *prevent* the hallucination.
 - **Per-squad context is retained within a session.** Because each
   `SquadInstance` owns a private `session.InMemoryService` and is stable across
   turns within a pinned generation, going squad A → B → A returns the **same** A
@@ -385,7 +397,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
-| `internal/bg/` | Background command queue; `bash_background` + `bg_list` tools |
+| `internal/bg/` | Per-session background task queue + **task registry**: `bash_background` (one-shot), `monitor` (streaming line-matcher, [monitor.go](internal/bg/monitor.go)), and lifecycle `bg_list`/`bg_cancel`/`bg_output` ([tasks.go](internal/bg/tasks.go)) — named with a `bg_` prefix to avoid colliding with the `planning` group's task-graph `task_list`. Every launch registers a `Task{ID,Kind,Status,…}`; completions/streamed matches push a `Notification` consumed by the host (see "Background task notifications") |
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
@@ -776,6 +788,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
 | `YOKE_SERVER_DAEMONIZED` | Set to `1` by `yoke-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
+| `YOKE_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
 | `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
 | `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke` |
 | `YOKE_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/yoke`), leaving `.agents` and `$HOME/.yoke` in the chain — unlike `YOKE_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/yoke`; Windows MSI → `C:\ProgramData\Yoke`; pip wheel launcher → the bundled `_dist/sysconf`) to relocate bundled config/registry without a rebuild |
@@ -1337,6 +1350,55 @@ so `teammate_check` stays as the leader's only delivery path there.
 still reads replies from the leader's own inbox, so under background delivery
 its reply can race the drainer — a known limitation, separate from the
 per-turn `teammate_check` tax this removed.)
+
+### Background task notifications (`bash_background` / `monitor`)
+
+Completed background tasks deliver their result back into the conversation,
+reusing the **same injection rail** as mailbox delivery (above). Two sources
+feed one per-session [`bg.Queue`](internal/bg/bg.go) (`Infrastructure.BgQueues`):
+`bash_background` (one-shot command, terminal `Notification`) and `monitor`
+([internal/bg/monitor.go](internal/bg/monitor.go) — a long-lived command whose
+stdout lines are matched against a `filter` regexp and emitted as streamed
+`event` notifications, coalesced within ~200 ms). Every launch registers a
+`Task` in the queue's registry ([tasks.go](internal/bg/tasks.go)) so
+`bg_list`/`bg_cancel`/`bg_output` can see and control it (the `bg_` prefix
+avoids colliding with the `planning` group's task-graph `task_list`). All five tools
+mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
+`infra.BgQueues.Tools()`) on a squad root; `monitor` is governed by the same
+`Bash(…)` permission rules + safety floor as `bash_background` (the alias in
+[core/permissions/permissions.go](core/permissions/permissions.go) `CheckArgs`).
+
+- **Server (active wake).** [agent/infrastructure.go](agent/infrastructure.go)
+  `WatchBackground` mirrors `WatchMailbox`: a per-session goroutine `Wait`s on the
+  queue, `Drain`s any burst, and hands the coalesced batch to
+  [server/mailbox_push.go](server/mailbox_push.go) `pushManager.injectNotification`.
+  `inject` was generalised to `injectTurn(…, sseEvent)` shared by both paths;
+  the background path injects a guarded, persisted synthetic turn (so the model
+  reacts) and fires a **`task_notification`** SSE via `broadcast`. The bg watcher
+  starts inside `pushManager.Watch` alongside the mailbox watcher, so every
+  watcher start site (main.go persisted-session loop, session create, unarchive,
+  a2a auto-create) covers it with no extra wiring; `Stop` cancels both.
+- **Passive mode.** `YOKE_TASK_NOTIFY=false` demotes active wake: the watcher
+  still drains (so the buffer never wedges — a latent bug in the old orphaned
+  queue) but only fires the `task_notification` toast; the result stays readable
+  via `bg_output`. The toggle is read once in [server/main.go](server/main.go)
+  and passed to `newPushManager` as `activeWake`.
+- **Web UI.** [web/app.js](web/app.js) `subscribeGlobalEvents` handles
+  `task_notification`: it appends any injected turn (active mode) and calls
+  `notifyTaskEvent` → an in-app toast (`#task-toast-layer`,
+  [web/css/features/notifications.css](web/css/features/notifications.css)) plus an
+  optional **OS notification** when backgrounded, gated by the Settings →
+  Appearance toggle (`localStorage["agent_toolkit_os_notify"]`).
+- **CLI/TUI (between-turn drain).** No push goroutine there; instead `runTurn`
+  ([internal/cli/cli.go](internal/cli/cli.go)) and the TUI send path
+  ([internal/tui/tui.go](internal/tui/tui.go)) `Drain` the per-session queue
+  before each turn and prepend `bg.FormatBatch(...)` as an extra user-turn part
+  (mirroring `@file` inlining; off the router's prompt-only view). Both configs
+  gained a nil-safe `BgQueues` field set from `infra.BgQueues`.
+
+**No-op contract:** with no `bash_background`/`monitor` calls the queue stays
+empty and behaviour is byte-identical to before; the recall/glob fallbacks are
+untouched.
 
 ### Cross-browser session sync (`/api/events`)
 

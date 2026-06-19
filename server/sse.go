@@ -332,6 +332,23 @@ func handleCancel(d serverDeps) gin.HandlerFunc {
 // events here (keyed on rootAgent) and attribute the ADK-stream usage to it —
 // otherwise a squad root named e.g. "omnis"/"knowledge_leader" (which slips past
 // the broadcaster's legacy "leader"-only filter) gets counted twice.
+// routerVisibleTools are the only tools the Omnis router legitimately calls.
+// On the router hop (suppressText), any other tool name is an LLM hallucination
+// whose tool-call + tool-not-found error are suppressed so the hop stays silent
+// (the router still recovers and routes). The routing tools are listed for
+// completeness even though the web UI also hides them via isRoutingTool.
+var routerVisibleTools = map[string]bool{
+	"route_to_squad":    true,
+	"ask_squad":         true,
+	"handoff_to_router": true,
+	"ask_user":          true,
+	"AskUserQuestion":   true,
+	"teammate_ask":      true,
+	"teammate_tell":     true,
+	"teammate_list":     true,
+	"teammate_check":    true,
+}
+
 func streamEvents(
 	ctx context.Context,
 	sink func(event string, data []byte),
@@ -638,21 +655,31 @@ func streamEvents(
 					}
 				}
 				if p.FunctionCall != nil {
-					emit("tool_call", map[string]any{
-						"name":    p.FunctionCall.Name,
-						"args":    p.FunctionCall.Args,
-						"call_id": p.FunctionCall.ID,
-					})
-					noteFileTool(p.FunctionCall.Name, p.FunctionCall.ID, p.FunctionCall.Args)
+					// On the router hop (suppressText), the router only legitimately
+					// calls its routing/ask tools. Any other name is an LLM
+					// hallucination (e.g. it "tries" bash_background); ADK answers
+					// with a tool-not-found error that would render as a scary ERROR
+					// block before the router recovers and routes. Swallow both the
+					// call and its error response so the hop stays silent.
+					if !(suppressText && !routerVisibleTools[p.FunctionCall.Name]) {
+						emit("tool_call", map[string]any{
+							"name":    p.FunctionCall.Name,
+							"args":    p.FunctionCall.Args,
+							"call_id": p.FunctionCall.ID,
+						})
+						noteFileTool(p.FunctionCall.Name, p.FunctionCall.ID, p.FunctionCall.Args)
+					}
 					sawPartialText = false
 				}
 				if p.FunctionResponse != nil {
-					emit("tool_result", map[string]any{
-						"name":     p.FunctionResponse.Name,
-						"response": p.FunctionResponse.Response,
-						"call_id":  p.FunctionResponse.ID,
-					})
-					emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
+					if !(suppressText && !routerVisibleTools[p.FunctionResponse.Name]) {
+						emit("tool_result", map[string]any{
+							"name":     p.FunctionResponse.Name,
+							"response": p.FunctionResponse.Response,
+							"call_id":  p.FunctionResponse.ID,
+						})
+						emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
+					}
 					sawPartialText = false
 				}
 			}

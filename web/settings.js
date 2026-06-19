@@ -1045,12 +1045,23 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
     }).join("");
 
+    const osNotify = localStorage.getItem("agent_toolkit_os_notify") === "1";
     bodyEl.innerHTML = `
       <div class="settings-form">
         <p class="settings-hint" style="margin:0;">
           Pick a color palette. Applied immediately and saved on the server.
         </p>
         ${sections}
+        <section class="form-section">
+          <h3>Notifications</h3>
+          <label class="settings-checkrow">
+            <input type="checkbox" id="os-notify-toggle" ${osNotify ? "checked" : ""} />
+            <span>Show an OS notification when a background task finishes while this tab is in the background.</span>
+          </label>
+          <p class="settings-hint" style="margin:0;">
+            In-app toasts always appear; this also surfaces a desktop notification (needs browser permission).
+          </p>
+        </section>
       </div>
     `;
 
@@ -1063,6 +1074,30 @@ const BASE_PATH = window.BASE_PATH || "";
         });
       });
     });
+
+    const osToggle = bodyEl.querySelector("#os-notify-toggle");
+    if (osToggle) {
+      osToggle.addEventListener("change", async () => {
+        if (!osToggle.checked) {
+          localStorage.setItem("agent_toolkit_os_notify", "0");
+          return;
+        }
+        if (!("Notification" in window)) {
+          osToggle.checked = false;
+          alert("This browser does not support desktop notifications.");
+          return;
+        }
+        let perm = Notification.permission;
+        if (perm === "default") perm = await Notification.requestPermission();
+        if (perm === "granted") {
+          localStorage.setItem("agent_toolkit_os_notify", "1");
+        } else {
+          osToggle.checked = false;
+          localStorage.setItem("agent_toolkit_os_notify", "0");
+          alert("Desktop notifications are blocked. Enable them in your browser settings, then try again.");
+        }
+      });
+    }
   }
 
   // ─── User commands editor ──────────────────────────────────────────────

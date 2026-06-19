@@ -11,6 +11,7 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/yoke/internal/bg"
 	"github.com/blouargant/yoke/internal/sessions"
 )
 
@@ -145,23 +146,33 @@ func (b *sessionPushBroadcaster) broadcast(event, sessionID string) {
 // the leader mailbox. When a cross-session message arrives it injects a
 // synthetic runner turn so the agent can process and reply to it.
 type pushManager struct {
-	guard   *sessionRunGuard
-	bcast   *sessionPushBroadcaster
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
-	watchFn func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
+	guard     *sessionRunGuard
+	bcast     *sessionPushBroadcaster
+	mu        sync.Mutex
+	cancels   map[string]context.CancelFunc
+	watchFn   func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
+	watchBgFn func(ctx context.Context, userID, sessionID string, onNotify func([]bg.Notification))
+	// activeWake controls whether a completed background task injects a synthetic
+	// turn (model reacts) or merely fires a UI toast (passive). Set from
+	// YOKE_TASK_NOTIFY. The bg watcher always drains either way so the queue
+	// never wedges at its buffer limit.
+	activeWake bool
 }
 
 func newPushManager(
 	guard *sessionRunGuard,
 	bcast *sessionPushBroadcaster,
 	watchFn func(ctx context.Context, userID, sessionID string, onMessage func(from, body string)),
+	watchBgFn func(ctx context.Context, userID, sessionID string, onNotify func([]bg.Notification)),
+	activeWake bool,
 ) *pushManager {
 	return &pushManager{
-		guard:   guard,
-		bcast:   bcast,
-		cancels: make(map[string]context.CancelFunc),
-		watchFn: watchFn,
+		guard:      guard,
+		bcast:      bcast,
+		cancels:    make(map[string]context.CancelFunc),
+		watchFn:    watchFn,
+		watchBgFn:  watchBgFn,
+		activeWake: activeWake,
 	}
 }
 
@@ -179,6 +190,11 @@ func (pm *pushManager) Watch(rootCtx context.Context, d serverDeps, sessionID, u
 	pm.watchFn(ctx, userID, sessionID, func(from, body string) {
 		pm.inject(ctx, d, sessionID, userID, from, body)
 	})
+	if pm.watchBgFn != nil {
+		pm.watchBgFn(ctx, userID, sessionID, func(batch []bg.Notification) {
+			pm.injectNotification(ctx, d, sessionID, userID, batch)
+		})
+	}
 }
 
 // Stop cancels the watcher for sessionID (call on session deletion).
@@ -191,13 +207,36 @@ func (pm *pushManager) Stop(sessionID string) {
 	}
 }
 
-// inject runs a synthetic agent turn for the received mailbox message.
+// inject runs a synthetic agent turn for a received cross-session mailbox
+// message.
 func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, userID, from, body string) {
+	prompt := fmt.Sprintf("[mailbox] Cross-session message received:\nFrom: %s\nBody: %s", from, body)
+	pm.injectTurn(ctx, d, sessionID, userID, prompt, "mailbox_push")
+}
+
+// injectNotification delivers a batch of completed/streamed background-task
+// notifications. With active wake it injects a synthetic turn so the model
+// reacts to the result; otherwise it just fires a UI toast (the result stays
+// readable via task_output). The bg watcher has already drained the queue, so
+// either path keeps it from wedging.
+func (pm *pushManager) injectNotification(ctx context.Context, d serverDeps, sessionID, userID string, batch []bg.Notification) {
+	if ctx.Err() != nil || len(batch) == 0 {
+		return
+	}
+	if !pm.activeWake {
+		pm.bcast.broadcast("task_notification", sessionID)
+		return
+	}
+	pm.injectTurn(ctx, d, sessionID, userID, bg.FormatBatch(batch), "task_notification")
+}
+
+// injectTurn runs a synthetic, run-guarded agent turn carrying prompt, persists
+// the reply, and fires the given SSE event so open UI tabs refresh. Shared by
+// the mailbox and background-task delivery paths.
+func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, userID, prompt, sseEvent string) {
 	if ctx.Err() != nil {
 		return
 	}
-
-	prompt := fmt.Sprintf("[mailbox] Cross-session message received:\nFrom: %s\nBody: %s", from, body)
 
 	// Serialize with any concurrent user turn for this session.
 	release := pm.guard.acquire(sessionID)
@@ -258,5 +297,9 @@ func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, user
 	}
 
 	// Signal any open /events SSE connections so the UI can refresh.
-	pm.bcast.notify(sessionID)
+	if sseEvent == "mailbox_push" {
+		pm.bcast.notify(sessionID)
+	} else {
+		pm.bcast.broadcast(sseEvent, sessionID)
+	}
 }

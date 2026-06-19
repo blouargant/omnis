@@ -69,6 +69,7 @@ same colour/size in multiple partials.
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |
 | `context.css` | Context ring, context popup, context browser modal |
 | `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card |
+| `notifications.css` | Background-task / monitor toast notifications (`#task-toast-layer`, `.task-toast`) |
 
 ### `settings/` — Settings panel (barrel: `settings.css`)
 

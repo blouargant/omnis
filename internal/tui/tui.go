@@ -43,6 +43,7 @@ import (
 	"github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/agentmd"
 	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/yoke/internal/bg"
 	"github.com/blouargant/yoke/internal/fileref"
 	"github.com/blouargant/yoke/internal/paths"
 	"github.com/blouargant/yoke/internal/sessions"
@@ -241,6 +242,10 @@ type Config struct {
 	// pushes for one session. Nil-safe; when nil the TUI simply skips
 	// mailbox notifications.
 	WatchMailbox func(ctx context.Context, userID, sessionID string, onMessage func(from, body string))
+	// BgQueues, when non-nil, is drained before each turn so completed
+	// background-task notifications reach the model (the between-turn drain;
+	// the TUI has no server-style push goroutine). Nil-safe.
+	BgQueues *bg.SessionQueues
 	// AgentOptions are the Options used to build the initial Instance.
 	// The hot-reload key (Ctrl-R) hands them back to Manager.Reload so a
 	// new generation is built from the latest on-disk config.
@@ -1488,6 +1493,13 @@ func Run(ctx context.Context, cfg Config) error {
 			// against the session's interactive working directory.
 			if note := fileref.Context(prompt, getBashCwd(sessionID)); note != "" {
 				parts = append(parts, &genai.Part{Text: note})
+			}
+			// Surface completed background-task notifications by draining the
+			// per-session queue between turns (no push goroutine in the TUI).
+			if cfg.BgQueues != nil {
+				if pending := cfg.BgQueues.For(cfg.UserID, sessionID).Drain(); len(pending) > 0 {
+					parts = append(parts, &genai.Part{Text: bg.FormatBatch(pending)})
+				}
 			}
 			routerSquad := cfg.Manager.RouterSquad()
 			// runHop streams one squad turn (one Runner.Run), rendering as it
