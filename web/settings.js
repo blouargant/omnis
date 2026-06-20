@@ -83,6 +83,10 @@ const BASE_PATH = window.BASE_PATH || "";
   // (well-known community themes shipped as alternatives).
   // `tone` groups Dark/Light within a tier in the picker.
   const THEME_STORAGE_KEY = "agent_toolkit_theme";
+  // localStorage cache for the unified desktop-notification preference. The
+  // durable source of truth is the server preferences.json (user home); this
+  // cache is what the synchronous fire path in app.js reads.
+  const NOTIFY_STORAGE_KEY = "agent_toolkit_os_notify";
   const THEMES = [
     // Principal
     { id: "",                label: "VS Code Dark",    tier: "principal", tone: "Dark",  swatch: ["#1e1e1e", "#252526", "#0e639c", "#cccccc"] },
@@ -124,18 +128,53 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
-  // Pull the server-side theme once on boot and reconcile with the local
-  // cache (which the inline <head> script applied synchronously).
+  // prefsReady resolves once the boot sync below has loaded the server-side
+  // preferences (or to null on failure, so awaiters never hang). The first-run
+  // notification opt-in in app.js awaits this to decide whether to prompt.
+  let _resolvePrefs;
+  const prefsReady = new Promise((resolve) => { _resolvePrefs = resolve; });
+
+  // saveNotifications records the unified desktop-notification choice: the
+  // localStorage cache the fire path reads, plus the durable server file
+  // (merged server-side, so it doesn't clobber the theme). Returns the PUT
+  // promise so callers can await persistence.
+  function saveNotifications(enabled) {
+    localStorage.setItem(NOTIFY_STORAGE_KEY, enabled ? "1" : "0");
+    return fetch(BASE_PATH + "/api/preferences", {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ notifications: !!enabled }),
+    }).catch(() => { /* offline / unauthenticated — local cache wins */ });
+  }
+
+  // notifyBlockedHelp explains how to unblock notifications in the browser when
+  // the site-level permission is blocking them (a website can't grant it itself).
+  // Reuses app.js's themed modal when available, falling back to a plain alert.
+  function notifyBlockedHelp() {
+    if (typeof window.showNotificationBlockedHelp === "function") { window.showNotificationBlockedHelp(); return; }
+    alert("Notifications are turned on in Yoke, but your browser is blocking them. Allow notifications for this site via the site-info icon at the left of the address bar, then reload.");
+  }
+
+  // Pull the server-side preferences once on boot and reconcile with the local
+  // caches (which the inline <head> script applied synchronously for the theme).
   async function syncThemeFromServer() {
+    let prefs = null;
     try {
       const r = await fetch(BASE_PATH + "/api/preferences", { headers: authHeaders() });
-      if (!r.ok) return;
-      const p = await r.json();
-      const serverTheme = (p && typeof p.theme === "string") ? p.theme : "";
-      if (serverTheme !== getActiveTheme()) {
-        applyTheme(serverTheme, { persist: false });
+      if (r.ok) {
+        prefs = await r.json();
+        const serverTheme = (prefs && typeof prefs.theme === "string") ? prefs.theme : "";
+        if (serverTheme !== getActiveTheme()) {
+          applyTheme(serverTheme, { persist: false });
+        }
+        // Seed the notification cache from the server when a choice exists; an
+        // absent value (first run) is left untouched so the opt-in can fire.
+        if (prefs && typeof prefs.notifications === "boolean") {
+          localStorage.setItem(NOTIFY_STORAGE_KEY, prefs.notifications ? "1" : "0");
+        }
       }
     } catch (_) { /* ignore */ }
+    finally { _resolvePrefs(prefs); }
   }
 
   const RESTART_FLAG = "agent_toolkit_needs_restart";
@@ -1045,23 +1084,23 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
     }).join("");
 
-    const osNotify = localStorage.getItem("agent_toolkit_os_notify") === "1";
+    const osNotify = localStorage.getItem(NOTIFY_STORAGE_KEY) === "1";
     bodyEl.innerHTML = `
       <div class="settings-form">
-        <p class="settings-hint" style="margin:0;">
-          Pick a color palette. Applied immediately and saved on the server.
-        </p>
-        ${sections}
         <section class="form-section">
           <h3>Notifications</h3>
           <label class="settings-checkrow">
             <input type="checkbox" id="os-notify-toggle" ${osNotify ? "checked" : ""} />
-            <span>Show an OS notification when a background task finishes while this tab is in the background.</span>
+            <span>Show a desktop notification when a background task finishes, or when a chat reply finishes while you're on another session or app.</span>
           </label>
           <p class="settings-hint" style="margin:0;">
-            In-app toasts always appear; this also surfaces a desktop notification (needs browser permission).
+            In-app toasts always appear; this also surfaces a desktop notification (needs browser permission). Your choice is saved on the server.
           </p>
         </section>
+        <p class="settings-hint" style="margin:0;">
+          Pick a color palette. Applied immediately and saved on the server.
+        </p>
+        ${sections}
       </div>
     `;
 
@@ -1079,23 +1118,30 @@ const BASE_PATH = window.BASE_PATH || "";
     if (osToggle) {
       osToggle.addEventListener("change", async () => {
         if (!osToggle.checked) {
-          localStorage.setItem("agent_toolkit_os_notify", "0");
+          saveNotifications(false);
           return;
         }
         if (!("Notification" in window)) {
           osToggle.checked = false;
+          saveNotifications(false);
           alert("This browser does not support desktop notifications.");
           return;
         }
-        let perm = Notification.permission;
-        if (perm === "default") perm = await Notification.requestPermission();
-        if (perm === "granted") {
-          localStorage.setItem("agent_toolkit_os_notify", "1");
-        } else {
+        const before = Notification.permission;
+        let after = before;
+        if (before === "default") { try { after = await Notification.requestPermission(); } catch (_) {} }
+        if (after === "granted") { saveNotifications(true); return; }
+        if (before === "default" && after === "denied") {
+          // User actively chose "Block" in the native prompt — respect it.
           osToggle.checked = false;
-          localStorage.setItem("agent_toolkit_os_notify", "0");
-          alert("Desktop notifications are blocked. Enable them in your browser settings, then try again.");
+          saveNotifications(false);
+          return;
         }
+        // Opted in but the browser is still blocking. Keep the toggle on (the
+        // browser permission is a separate gate checked when a notification
+        // fires, so it works once unblocked) and explain how to allow it.
+        saveNotifications(true);
+        notifyBlockedHelp();
       });
     }
   }
@@ -8524,7 +8570,7 @@ const BASE_PATH = window.BASE_PATH || "";
   });
 
   // Expose & wire button.
-  window.Settings = { open, close, isOpen };
+  window.Settings = { open, close, isOpen, prefsReady, saveNotifications };
 
   document.addEventListener("DOMContentLoaded", () => {
     refreshBannerVisibility();

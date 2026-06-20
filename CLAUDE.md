@@ -1387,8 +1387,8 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
   `task_notification`: it appends any injected turn (active mode) and calls
   `notifyTaskEvent` → an in-app toast (`#task-toast-layer`,
   [web/css/features/notifications.css](web/css/features/notifications.css)) plus an
-  optional **OS notification** when backgrounded, gated by the Settings →
-  Appearance toggle (`localStorage["agent_toolkit_os_notify"]`).
+  optional **OS notification** when backgrounded, gated by the unified
+  desktop-notification preference (see "Desktop notifications" below).
 - **CLI/TUI (between-turn drain).** No push goroutine there; instead `runTurn`
   ([internal/cli/cli.go](internal/cli/cli.go)) and the TUI send path
   ([internal/tui/tui.go](internal/tui/tui.go)) `Drain` the per-session queue
@@ -1399,6 +1399,44 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
 **No-op contract:** with no `bash_background`/`monitor` calls the queue stays
 empty and behaviour is byte-identical to before; the recall/glob fallbacks are
 untouched.
+
+### Desktop notifications (unified preference)
+
+A **single** desktop-notification preference gates two web-UI signals: a finished
+**background task / monitor** (`notifyTaskEvent`, above) **and** a finished **chat
+reply** while the user is away (`notifyChatReply`). Both live in
+[web/app.js](web/app.js) and only fire when the user is **away** —
+`document.hidden || !document.hasFocus()` for tasks; for chat replies that **plus**
+`panelsForSession(sessionId).length === 0` (the finished session isn't the active
+tab in any visible pane, i.e. the user switched to another session). `notifyChatReply`
+is called from the send-path `finally` on `outcome === "done" || "reload"` (a real
+reply landed; `stopped`/`error`/`exhausted` don't ping).
+
+- **Source of truth.** The durable choice is the server-side **`preferences.json`**
+  ([server/preferences.go](server/preferences.go), `preferences.Notifications *bool`,
+  under `paths.ConfigWriteDir()` = the user's home), exposed via `GET/PUT
+  /api/preferences`. The PUT **merges** (load → `ShouldBindJSON` onto the loaded
+  struct → save) so a theme-only PUT no longer wipes notifications and vice-versa.
+  `localStorage["agent_toolkit_os_notify"]` is a **synchronous read-cache** the fire
+  path reads; [web/settings.js](web/settings.js) `syncThemeFromServer` seeds it from
+  the server prefs on boot and `saveNotifications(enabled)` writes both.
+- **First-run opt-in.** When `preferences.json` has **no** `notifications` value
+  (pointer is nil ⇒ omitted from JSON), `maybePromptNotifications` (run once at the
+  end of `init()`, awaiting `window.Settings.prefsReady`) shows a `uiConfirm` opt-in,
+  requests browser permission, and persists the answer — so it's asked **once per
+  home directory**, never again. The Settings → Appearance toggle changes it later.
+- **Permission is per-browser; intent is per-user.** The file records intent; the
+  browser still owns the grant, so a second browser may need permission re-granted
+  (via the Settings toggle). A website **cannot** grant its own notification
+  permission — `Notification.requestPermission()` only shows the native prompt
+  while the state is `"default"`; once `"denied"` it's a silent no-op. So opting in
+  while the browser is blocking **keeps intent on** (it fires the moment the user
+  unblocks it — the fire path re-checks `Notification.permission === "granted"`)
+  and shows browser-specific guidance (`requestDesktopNotifications` +
+  `showNotificationBlockedHelp`/`notificationUnblockHint` in [web/app.js](web/app.js)).
+  An active "Block" in the just-shown native prompt (`default → denied`) is
+  respected (intent saved off). **No-op contract:** with notifications
+  off/unsupported every path returns early, byte-identical to before.
 
 ### Cross-browser session sync (`/api/events`)
 

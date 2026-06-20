@@ -57,6 +57,17 @@
   text-overflow: ellipsis;
 }
 
+/* Generic confirmation toast (showToast): non-clickable, short-lived. */
+.task-toast.toast-info { cursor: default; }
+.task-toast.toast-info:hover { border-color: var(--border, #3a3a3a); }
+.toast-glyph {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1;
+  color: #4caf50;
+}
+.task-toast.toast-err .toast-glyph { color: var(--danger-fg, #e5534b); }
+
 @keyframes task-toast-in {
   to {
     opacity: 1;

@@ -218,29 +218,37 @@
 }
 .bubble-assistant th { background: var(--bg-panel); color: var(--text); }
 
-/* Copy button on assistant messages */
+/* Copy split-button on assistant messages: an icon (copy as Markdown) joined to
+   a caret (copy as Slack / Jira / Rich text / Plain). */
 .msg-row.assistant { position: relative; }
-.copy-msg-btn {
+.copy-msg-group {
   position: absolute;
   bottom: 4px;
   right: 4px;
   display: flex;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg-row.assistant:hover .copy-msg-group { opacity: 1; }
+.copy-msg-btn,
+.copy-msg-caret {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
   height: 26px;
   padding: 0;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 5px;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.msg-row.assistant:hover .copy-msg-btn { opacity: 1; }
-.copy-msg-btn:hover { background: var(--bg-panel); color: var(--text); }
+.copy-msg-btn { width: 26px; border-radius: 5px 0 0 5px; border-right-width: 0; }
+.copy-msg-caret { width: 18px; border-radius: 0 5px 5px 0; }
+.copy-msg-btn:hover,
+.copy-msg-caret:hover { background: var(--bg-panel); color: var(--text); }
 .copy-msg-btn.copied { color: #4caf50; border-color: #4caf50; }
+.copy-msg-btn.copied + .copy-msg-caret { border-left-color: #4caf50; }
 
 /* Error */
 .bubble-error {

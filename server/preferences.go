@@ -17,6 +17,12 @@ import (
 // from a YAML file does not belong here.
 type preferences struct {
 	Theme string `json:"theme"`
+	// Notifications records whether the user opted into desktop notifications
+	// (background-task completions and finished chat replies while away). A
+	// pointer so an absent value (never chosen — first run) is distinguishable
+	// from an explicit false; the web UI shows the first-run opt-in only while
+	// this is unset.
+	Notifications *bool `json:"notifications,omitempty"`
 }
 
 // preferencesStore persists preferences to a JSON file next to the YAML
@@ -64,15 +70,18 @@ func registerPreferencesRoutes(rg *gin.RouterGroup, store *preferencesStore) {
 		c.JSON(http.StatusOK, store.load())
 	})
 	rg.PUT("/preferences", func(c *gin.Context) {
-		var req preferences
-		if err := c.ShouldBindJSON(&req); err != nil {
+		// Merge onto the current prefs (unmarshal only sets fields present in
+		// the body) so a theme-only PUT doesn't wipe notifications, and
+		// vice-versa.
+		cur := store.load()
+		if err := c.ShouldBindJSON(&cur); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 			return
 		}
-		if err := store.save(req); err != nil {
+		if err := store.save(cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, req)
+		c.JSON(http.StatusOK, cur)
 	})
 }

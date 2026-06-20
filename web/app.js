@@ -1905,6 +1905,26 @@ function isRemoteOrInlineSrc(src) {
   return /^(https?:|data:|blob:|\/api\/|\/assets\/)/i.test(src);
 }
 
+// Recognised on-disk image extensions (mirrors imageMIME in server/media.go).
+const LOCAL_IMG_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+
+// A markdown <img> src is fetched through the authenticated media proxy only
+// when it really looks like a local image file: not a remote/inline/own-route
+// URL, not protocol-relative, no query string or fragment, and a recognised
+// image extension. This is what keeps fetched web-page images — notably
+// Next.js's site-relative `/_next/image?url=…&w=640&q=75` — from being sprayed
+// at /api/sessions/<id>/media (where they 403/404, since they are not files on
+// disk). Agent-generated images (e.g. /tmp/yoke-images/abc.png, whether given
+// as an absolute or relative path) still pass and are proxied as before.
+function looksLikeLocalImagePath(src) {
+  if (!src) return false;
+  if (isRemoteOrInlineSrc(src)) return false;
+  const path = src.replace(/^file:\/\//, "");
+  if (path.startsWith("//")) return false;            // protocol-relative remote URL
+  if (path.includes("?") || path.includes("#")) return false; // query/fragment ⇒ web URL
+  return LOCAL_IMG_EXT_RE.test(path);
+}
+
 async function fetchMediaBlobURL(sessionId, path) {
   const key = sessionId + "|" + path;
   if (mediaBlobCache.has(key)) {
@@ -1933,11 +1953,21 @@ function rewriteLocalImages(rootEl) {
   // back to the session-container map before the focused-session shim.
   const ownerPanel = paneOfNode(rootEl);
   const sessionId = (ownerPanel && ownerPanel.sessionId) || sessionIdOfNode(rootEl) || activeSessionId;
-  if (!sessionId) return;
   const imgs = rootEl.querySelectorAll("img");
   imgs.forEach(img => {
     let src = img.getAttribute("src") || "";
-    if (!src || isRemoteOrInlineSrc(src)) return;
+    if (isRemoteOrInlineSrc(src)) return; // remote/inline — the browser loads it directly
+    if (!looksLikeLocalImagePath(src)) {
+      // Neither a remote URL the browser can load nor a file we can proxy —
+      // i.e. an unresolvable site-relative URL from a fetched web page (e.g.
+      // /_next/image?url=…). Left in place it would fire a doomed direct
+      // request (404 here) and show a broken-image icon. Running synchronously
+      // right after innerHTML is set, removing it now means the browser never
+      // requests the original src at all.
+      img.remove();
+      return;
+    }
+    if (!sessionId) return;
     src = src.replace(/^file:\/\//, "");
     img.classList.add("local-media");
     fetchMediaBlobURL(sessionId, src).then(url => {
@@ -2504,6 +2534,275 @@ function fallbackCopy(text) {
   }
 }
 
+// ─── Reply export formats ────────────────────────────────────────────────────
+// The assistant-reply copy control can export the reply in several "flavors".
+// Standard markdown (what the model emits) is GitHub-Flavored and pastes fine
+// into GitHub/GitLab/Reddit/Obsidian, but renders as literal symbols in Slack,
+// Jira, Outlook/Word, etc. We convert by walking the `marked` token tree.
+
+// COPY_FORMATS drives both the default button (markdown) and the caret menu.
+const COPY_FORMATS = [
+  ["markdown", "Markdown (default)"],
+  ["slack", "Slack"],
+  ["jira", "Jira"],
+  ["html", "Rich text (HTML)"],
+  ["plain", "Plain text"],
+];
+
+// Decode the handful of HTML entities `marked` escapes in token text, so the
+// plain/Slack/Jira output carries literal characters rather than `&amp;` etc.
+function unescapeHtml(s) {
+  if (!s) return s || "";
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&#x27;/gi, "'")
+    .replace(/&amp;/g, "&");
+}
+
+// lexBlocks tokenizes markdown into `marked`'s block-token tree, tolerating both
+// the modern (`marked.lexer`) and legacy (`new marked.Lexer().lex`) APIs.
+function lexBlocks(src) {
+  try {
+    if (typeof marked === "undefined") return null;
+    if (typeof marked.lexer === "function") return marked.lexer(src || "");
+    if (marked.Lexer) return new marked.Lexer().lex(src || "");
+  } catch (_) {}
+  return null;
+}
+
+// walkInline renders a list of inline tokens using a per-format `rules` object
+// (strong/em/del/codespan/link/image). It recurses through nested emphasis.
+function walkInline(tokens, rules) {
+  if (!tokens) return "";
+  let out = "";
+  for (const t of tokens) {
+    switch (t.type) {
+      case "text": out += t.tokens ? walkInline(t.tokens, rules) : unescapeHtml(t.text); break;
+      case "escape": out += t.text; break;
+      case "strong": out += rules.strong(walkInline(t.tokens, rules)); break;
+      case "em": out += rules.em(walkInline(t.tokens, rules)); break;
+      case "del": out += rules.del(walkInline(t.tokens, rules)); break;
+      case "codespan": out += rules.codespan(unescapeHtml(t.text)); break;
+      case "br": out += "\n"; break;
+      case "link": out += rules.link(walkInline(t.tokens, rules) || unescapeHtml(t.text), t.href); break;
+      case "image": out += rules.image(t.text || "", t.href); break;
+      case "html": out += unescapeHtml(t.text || t.raw || ""); break; // keep literal, like the chat renderer
+      default: out += t.tokens ? walkInline(t.tokens, rules) : unescapeHtml(t.text || "");
+    }
+  }
+  return out;
+}
+
+// cellText renders one table cell, tolerating both modern ({tokens}) and legacy
+// (string) table-cell shapes.
+function cellText(c, f) {
+  if (c == null) return "";
+  if (typeof c === "string") return unescapeHtml(c);
+  if (c.tokens) return walkInline(c.tokens, f.inline);
+  return unescapeHtml(c.text || "");
+}
+
+function renderItem(item, f, depth, ordered, idx) {
+  const parts = [];
+  const nested = [];
+  for (const child of item.tokens || []) {
+    if (child.type === "list") nested.push(renderList(child, f, depth + 1));
+    else if (child.tokens) parts.push(walkInline(child.tokens, f.inline));
+    else if (child.text != null) parts.push(unescapeHtml(child.text));
+  }
+  const lead = parts.join(" ").trim();
+  const line = ordered ? f.ordered(depth, idx, lead) : f.bullet(depth, lead);
+  return nested.length ? line + "\n" + nested.join("\n") : line;
+}
+
+function renderList(list, f, depth) {
+  const lines = [];
+  let n = (list.ordered && Number.isInteger(list.start)) ? list.start : 1;
+  for (const item of list.items || []) {
+    lines.push(renderItem(item, f, depth, !!list.ordered, n));
+    if (list.ordered) n++;
+  }
+  return lines.join("\n");
+}
+
+// renderBlocks turns a block-token list into flavored text via the format `f`.
+function renderBlocks(tokens, f, depth) {
+  const out = [];
+  for (const t of tokens || []) {
+    switch (t.type) {
+      case "space": break;
+      case "heading": out.push(f.heading(t.depth, walkInline(t.tokens, f.inline))); break;
+      case "paragraph": out.push(f.paragraph(walkInline(t.tokens, f.inline))); break;
+      case "text": out.push(f.paragraph(t.tokens ? walkInline(t.tokens, f.inline) : unescapeHtml(t.text))); break;
+      case "code": out.push(f.code(t.text || "", t.lang || "")); break;
+      case "blockquote": out.push(f.quote(renderBlocks(t.tokens, f, depth))); break;
+      case "list": out.push(renderList(t, f, depth)); break;
+      case "hr": out.push(f.hr()); break;
+      case "table": out.push(f.table(
+        (t.header || []).map((c) => cellText(c, f)),
+        (t.rows || t.cells || []).map((r) => r.map((c) => cellText(c, f))),
+      )); break;
+      case "html": out.push(unescapeHtml(t.text || t.raw || "")); break; // keep literal, like the chat renderer
+      default:
+        if (t.tokens) out.push(walkInline(t.tokens, f.inline));
+        else if (t.text) out.push(unescapeHtml(t.text));
+    }
+  }
+  return out.filter((s) => s != null && s !== "").join("\n\n");
+}
+
+// Tab-separated table for flavors without table markup (Slack, Plain).
+function tabTable(header, rows) {
+  const lines = [];
+  if (header && header.length) lines.push(header.join("\t"));
+  for (const r of rows) lines.push(r.join("\t"));
+  return lines.join("\n");
+}
+
+// Slack "mrkdwn": *bold*, _italic_, ~strike~, `code`, <url|text> links.
+const SLACK = {
+  inline: {
+    strong: (s) => "*" + s + "*",
+    em: (s) => "_" + s + "_",
+    del: (s) => "~" + s + "~",
+    codespan: (s) => "`" + s + "`",
+    link: (text, href) => (!text || text === href) ? "<" + href + ">" : "<" + href + "|" + text + ">",
+    image: (alt, href) => alt ? "<" + href + "|" + alt + ">" : "<" + href + ">",
+  },
+  heading: (_lvl, text) => "*" + text + "*",
+  paragraph: (text) => text,
+  bullet: (depth, text) => "    ".repeat(depth) + "• " + text,
+  ordered: (depth, n, text) => "    ".repeat(depth) + n + ". " + text,
+  code: (text) => "```\n" + text + "\n```",
+  quote: (inner) => inner.split("\n").map((l) => "> " + l).join("\n"),
+  hr: () => "──────────",
+  table: tabTable,
+};
+
+// Jira wiki markup: hN. headings, *bold*, _italic_, {{code}}, {code} blocks.
+const JIRA = {
+  inline: {
+    strong: (s) => "*" + s + "*",
+    em: (s) => "_" + s + "_",
+    del: (s) => "-" + s + "-",
+    codespan: (s) => "{{" + s + "}}",
+    link: (text, href) => (!text || text === href) ? "[" + href + "]" : "[" + text + "|" + href + "]",
+    image: (_alt, href) => "!" + href + "!",
+  },
+  heading: (lvl, text) => "h" + Math.min(Math.max(lvl, 1), 6) + ". " + text,
+  paragraph: (text) => text,
+  bullet: (depth, text) => "*".repeat(depth + 1) + " " + text,
+  ordered: (depth, _n, text) => "#".repeat(depth + 1) + " " + text,
+  code: (text, lang) => "{code" + (lang ? ":" + lang : "") + "}\n" + text + "\n{code}",
+  quote: (inner) => "{quote}\n" + inner + "\n{quote}",
+  hr: () => "----",
+  table: (header, rows) => {
+    const lines = [];
+    if (header && header.length) lines.push("||" + header.join("||") + "||");
+    for (const r of rows) lines.push("|" + (r.length ? r.join("|") : " ") + "|");
+    return lines.join("\n");
+  },
+};
+
+// Plain text: strip all markup, keep structure (bullets, numbers, line breaks).
+const PLAIN = {
+  inline: {
+    strong: (s) => s,
+    em: (s) => s,
+    del: (s) => s,
+    codespan: (s) => s,
+    link: (text, href) => (!text || text === href) ? href : text,
+    image: (alt, href) => alt || href,
+  },
+  heading: (_lvl, text) => text,
+  paragraph: (text) => text,
+  bullet: (depth, text) => "  ".repeat(depth) + "- " + text,
+  ordered: (depth, n, text) => "  ".repeat(depth) + n + ". " + text,
+  code: (text) => text,
+  quote: (inner) => inner.split("\n").map((l) => "> " + l).join("\n"),
+  hr: () => "----------",
+  table: tabTable,
+};
+
+const COPY_FLAVORS = { slack: SLACK, jira: JIRA, plain: PLAIN };
+
+// convertReply renders the raw reply markdown into the named flavor. Markdown is
+// a passthrough; anything we can't tokenize falls back to the raw source.
+function convertReply(src, fmtKey) {
+  if (fmtKey === "markdown") return src || "";
+  const f = COPY_FLAVORS[fmtKey];
+  const toks = f ? lexBlocks(src) : null;
+  if (!f || !toks) return src || "";
+  return renderBlocks(toks, f, 0).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// copyRichText puts HTML on the clipboard as text/html (so pasting into
+// Outlook/Word/Gmail/Docs yields formatted text), with a plain-text alternative.
+// Falls back to a hidden contenteditable + execCommand("copy"), which preserves
+// rich text on paste in most browsers and works in insecure (LAN-HTTP) contexts.
+async function copyRichText(html, plain) {
+  try {
+    if (navigator.clipboard && window.ClipboardItem && window.isSecureContext) {
+      const item = new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([plain || ""], { type: "text/plain" }),
+      });
+      await navigator.clipboard.write([item]);
+      return true;
+    }
+  } catch (_) { /* fall through */ }
+  return fallbackCopyHtml(html);
+}
+
+function fallbackCopyHtml(html) {
+  try {
+    const div = document.createElement("div");
+    div.contentEditable = "true";
+    div.innerHTML = html;
+    div.style.position = "fixed";
+    div.style.left = "-9999px";
+    div.style.top = "0";
+    document.body.appendChild(div);
+    const range = document.createRange();
+    range.selectNodeContents(div);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    const ok = document.execCommand("copy");
+    sel.removeAllRanges();
+    document.body.removeChild(div);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Short, friendly labels for the confirmation toast (the menu labels are more
+// verbose, e.g. "Markdown (default)").
+const COPY_FORMAT_LABELS = { markdown: "Markdown", slack: "Slack", jira: "Jira", html: "Rich text", plain: "Plain text" };
+
+// copyReplyAs copies an assistant reply in the requested flavor, flashes the
+// `.copied` state on the anchor button, and pops a confirmation toast so it's
+// clear which format was copied (especially for the caret-menu choices).
+function copyReplyAs(bubble, fmtKey, anchorBtn) {
+  const src = (bubble && (bubble._rawText || bubble.textContent)) || "";
+  const done = (ok) => {
+    if (ok && anchorBtn) {
+      anchorBtn.classList.add("copied");
+      setTimeout(() => anchorBtn.classList.remove("copied"), 1500);
+    }
+    showToast(ok ? ("Copied as " + (COPY_FORMAT_LABELS[fmtKey] || "text")) : "Copy failed", ok ? "ok" : "err");
+  };
+  if (fmtKey === "html") {
+    const html = (typeof marked !== "undefined") ? marked.parse(src) : escHtml(src);
+    copyRichText(html, convertReply(src, "plain")).then(done);
+    return;
+  }
+  copyTextToClipboard(convertReply(src, fmtKey)).then(done);
+}
+
 // ─── DOM builders ───────────────────────────────────────────────────────────
 
 function appendAssistantBubble(container) {
@@ -2512,21 +2811,34 @@ function appendAssistantBubble(container) {
   const bubble = document.createElement("div");
   bubble.className = "bubble-assistant";
 
+  // Split button: the main icon copies the reply as Markdown (one click); the
+  // caret opens a menu to copy it in another flavor (Slack / Jira / HTML / …).
+  const copyGroup = document.createElement("div");
+  copyGroup.className = "copy-msg-group";
+
   const copyBtn = document.createElement("button");
   copyBtn.className = "copy-msg-btn";
-  copyBtn.dataset.tip = "Copy message";
+  copyBtn.dataset.tip = "Copy as Markdown";
   copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-  copyBtn.addEventListener("click", () => {
-    const text = bubble._rawText || bubble.textContent || "";
-    copyTextToClipboard(text).then((ok) => {
-      if (!ok) return;
-      copyBtn.classList.add("copied");
-      setTimeout(() => copyBtn.classList.remove("copied"), 1500);
+  copyBtn.addEventListener("click", () => copyReplyAs(bubble, "markdown", copyBtn));
+
+  const caretBtn = document.createElement("button");
+  caretBtn.className = "copy-msg-caret";
+  caretBtn.dataset.tip = "Copy as…";
+  caretBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+  caretBtn.addEventListener("click", (ev) => {
+    const items = [];
+    COPY_FORMATS.forEach(([key, label], i) => {
+      if (i === 1) items.push(SEP); // separate the default (Markdown) from the rest
+      items.push([label, () => copyReplyAs(bubble, key, copyBtn)]);
     });
+    showFolderCtxMenu(ev, items);
   });
 
+  copyGroup.appendChild(copyBtn);
+  copyGroup.appendChild(caretBtn);
   row.appendChild(bubble);
-  row.appendChild(copyBtn);
+  row.appendChild(copyGroup);
   (container || fpTranscript()).appendChild(row);
   scrollBottom(paneOfNode(row));
   return bubble;
@@ -4334,6 +4646,99 @@ function notifyTaskEvent(sid) {
   }
 }
 
+// notifyChatReply fires a desktop notification when a chat turn finishes while
+// the user is NOT looking at that session — they switched to another session,
+// or the window is hidden / unfocused. Gated by the same unified preference as
+// notifyTaskEvent (localStorage cache, durable choice in the server prefs file).
+function notifyChatReply(sessionId) {
+  if (localStorage.getItem("agent_toolkit_os_notify") !== "1") return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  // "Away" = the finished session is not the active tab in any visible pane
+  // (different session) OR the whole window is backgrounded / unfocused.
+  const away = document.hidden || !document.hasFocus() ||
+    panelsForSession(sessionId).length === 0;
+  if (!away) return;
+  try {
+    const n = new Notification("Reply ready", {
+      body: `“${paneTabTitle(sessionId)}” finished responding.`,
+      tag: "yoke-chat-" + sessionId,
+    });
+    n.onclick = () => { window.focus(); selectSession(sessionId); n.close(); };
+  } catch { /* ignore */ }
+}
+
+// requestDesktopNotifications asks the browser for notification permission and
+// reports the state before/after. The browser only shows its native prompt while
+// permission is still "default"; once "denied" (blocked at the site level) a
+// website CANNOT re-grant it — only the user can, through the browser's own
+// address-bar site controls. Callers use the before/after pair to tell an active
+// "Block" (default → denied) from a pre-existing block (denied → denied).
+async function requestDesktopNotifications() {
+  if (!("Notification" in window)) return { before: "unsupported", after: "unsupported" };
+  const before = Notification.permission;
+  let after = before;
+  if (before === "default") {
+    try { after = await Notification.requestPermission(); }
+    catch { after = Notification.permission; }
+  }
+  return { before, after };
+}
+
+// notificationUnblockHint returns a short, browser-specific instruction for the
+// address-bar site controls a user must use to unblock notifications.
+function notificationUnblockHint() {
+  const ua = navigator.userAgent || "";
+  if (/Firefox\//.test(ua))
+    return "Click the permissions icon at the left of the address bar and clear the “Blocked” state for Notifications (or set it to Allow), then reload.";
+  if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg|OPR/.test(ua))
+    return "Open Safari → Settings → Websites → Notifications and set this site to Allow, then reload.";
+  // Chromium family (Chrome, Edge, Brave, Opera) and anything else.
+  return "Click the site-info icon (the tune/ⓘ control just left of the address bar) → Site settings → Notifications → Allow, then reload.";
+}
+
+// showNotificationBlockedHelp explains how to allow notifications in the browser
+// when the site-level permission is blocking them — a website can't grant this
+// itself, so this is guidance, not an action.
+function showNotificationBlockedHelp() {
+  return uiConfirm({
+    title: "Allow notifications in your browser",
+    message: "Notifications are turned on in Yoke, but your browser is blocking them for this site. " +
+      notificationUnblockHint() + " A website can't grant this itself — it has to be allowed in the browser.",
+    confirmText: "Got it",
+  });
+}
+
+// maybePromptNotifications runs once on first launch: when the server prefs hold
+// no recorded notification choice, it asks the user to opt in, requests browser
+// permission, and persists the answer to the server prefs file (so they're never
+// asked again — on any browser sharing that home directory). Settings →
+// Appearance lets them change it later.
+async function maybePromptNotifications() {
+  try {
+    const S = window.Settings;
+    const prefs = await (S && S.prefsReady ? S.prefsReady : Promise.resolve(null));
+    const save = (v) => (S && S.saveNotifications ? S.saveNotifications(v) : undefined);
+    // prefs unreachable, or a choice already recorded (true/false) → no prompt.
+    if (!prefs || typeof prefs.notifications === "boolean") return;
+    if (!("Notification" in window)) { save(false); return; }
+    const ok = await uiConfirm({
+      title: "Enable desktop notifications?",
+      message: "Get a desktop notification when a chat finishes replying while you're on another session or app — and when a background task completes. You can change this any time in Settings → Appearance.",
+      confirmText: "Enable notifications",
+    });
+    if (!ok) { save(false); return; }
+    const { before, after } = await requestDesktopNotifications();
+    if (after === "granted") { save(true); return; }
+    // User actively clicked "Block" in the just-shown native prompt → respect it.
+    if (before === "default" && after === "denied") { save(false); return; }
+    // They opted in but the browser is still blocking it (pre-denied, or the
+    // prompt was suppressed/dismissed). Record the intent so it fires the moment
+    // they unblock it, and show how — a website can't grant the permission.
+    save(true);
+    await showNotificationBlockedHelp();
+  } catch (e) { console.error("notification opt-in failed:", e); }
+}
+
 function showTaskToast(sid) {
   let layer = document.getElementById("task-toast-layer");
   if (!layer) {
@@ -4351,6 +4756,26 @@ function showTaskToast(sid) {
   layer.appendChild(el);
   setTimeout(() => { el.classList.add("leaving"); }, 6000);
   setTimeout(() => { el.remove(); }, 6400);
+}
+
+// showToast pops a small, non-clickable, short-lived confirmation in the
+// bottom-right corner, reusing the task-toast layer + styling. `kind` is "ok"
+// (default, green check) or "err" (danger). Used e.g. to confirm a reply copy.
+function showToast(text, kind) {
+  let layer = document.getElementById("task-toast-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "task-toast-layer";
+    document.body.appendChild(layer);
+  }
+  const el = document.createElement("div");
+  el.className = "task-toast toast-info" + (kind === "err" ? " toast-err" : "");
+  el.innerHTML = '<span class="toast-glyph"></span><span class="task-toast-text"></span>';
+  el.querySelector(".toast-glyph").textContent = kind === "err" ? "✕" : "✓";
+  el.querySelector(".task-toast-text").textContent = text;
+  layer.appendChild(el);
+  setTimeout(() => { el.classList.add("leaving"); }, 2000);
+  setTimeout(() => { el.remove(); }, 2400);
 }
 
 // rerenderSessionFromHistory clears a session's transcript and rebuilds it from
@@ -4810,8 +5235,8 @@ async function sendMessage(panel) {
     return "stopped";
   }
 
+  let outcome;
   try {
-    let outcome;
     try {
       const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
@@ -4861,6 +5286,10 @@ async function sendMessage(panel) {
     setSessionBusy(sessionId, false);
     sessionStatus.delete(sessionId);
     applySessionUI(sessionId);
+    // A reply finished: ping the user if they navigated away (different session
+    // or backgrounded window). "done"/"reload" mean a reply is ready; "stopped",
+    // "error" and "exhausted" do not (the user was present, or there's no reply).
+    if (outcome === "done" || outcome === "reload") notifyChatReply(sessionId);
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
@@ -7344,4 +7773,8 @@ async function restoreLayout(rec, liveIds) {
     if (first) await bindSessionToPanel(fp(), first.dataset.id);
     else { newDraftTab(fp()); autoGrowPrompt(fp()); }
   }
+
+  // First-run: offer to enable desktop notifications (awaits the server prefs
+  // sync; no-op once a choice has been recorded). Fire-and-forget.
+  maybePromptNotifications();
 })();
