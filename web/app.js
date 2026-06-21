@@ -927,6 +927,43 @@ function clearAttachments(sessionId) {
   sessionAttachments.delete(sessionId);
 }
 
+// Composer text is held per tab, so switching tabs/sessions inside a pane never
+// clobbers a half-typed message: leaving a tab snapshots its composer text and
+// returning restores it. Keyed by tab key (a sessionId for chat tabs, a
+// "draft#N" key for empty draft tabs); editor/terminal tabs have no composer and
+// are skipped. In-memory only (like sessionAttachments) — a page reload starts
+// fresh. The composer is only typeable on a session tab (the opaque pane-picker
+// covers it on a draft tab), but keying by tab key keeps this correct regardless.
+const composerDrafts = new Map(); // tabKey → string
+
+function isChatTab(key) {
+  return typeof key === "string" && !isEditorTab(key) && !isTermTab(key);
+}
+
+// saveComposerDraft snapshots a pane's current composer text under the tab it is
+// showing (panel.activeTab), so the text returns when that tab is reselected.
+// Empty text drops any stored draft, so a sent/cleared composer leaves nothing
+// stale behind. No-op for editor/terminal tabs (they have no composer).
+function saveComposerDraft(panel) {
+  if (!panel || !panel.els || !panel.els.prompt) return;
+  const key = panel.activeTab;
+  if (!isChatTab(key)) return;
+  const val = panel.els.prompt.value;
+  if (val) composerDrafts.set(key, val);
+  else composerDrafts.delete(key);
+}
+
+// restoreComposerDraft loads the stored composer text for `key` into the pane's
+// composer (empty when there is none — which also clears a previous tab's text),
+// then refreshes auto-grow + the transparent "@file" highlight backdrop (without
+// firing an input event, so a restored "/…" or "!…" never pops the slash/bang
+// menu).
+function restoreComposerDraft(panel, key) {
+  if (!panel || !panel.els || !panel.els.prompt) return;
+  panel.els.prompt.value = isChatTab(key) ? (composerDrafts.get(key) || "") : "";
+  autoGrowPrompt(panel); // also repaints the @file highlight backdrop
+}
+
 // renderAttachmentsUI renders the pending-upload chips into whichever pane
 // currently shows the session (0 or 1 pane).
 function renderAttachmentsUI(sessionId) {
@@ -4302,6 +4339,7 @@ function forgetSession(id) {
   sessionAgentTokens.delete(id);
   sessionTodos.delete(id);
   sessionTodoBlock.delete(id);
+  composerDrafts.delete(id);
   // Remove any pending ask_user widgets belonging to this session from every
   // pane's slot, plus the queued/ pending maps.
   for (const p of panels) {
@@ -4506,6 +4544,10 @@ function requeueHiddenWizards(panel, activeId) {
 // mounts its transcript, loads history if needed, subscribes to push events, and
 // flushes any queued ask-user widgets.
 async function activateTab(panel, key) {
+  // Snapshot the outgoing tab's composer before we swap the shared textarea, so
+  // a half-typed message returns when that tab is reselected.
+  if (panel.activeTab !== key) saveComposerDraft(panel);
+
   // Editor tab — show the Monaco editor for a file, no chat session is active.
   if (isEditorTab(key)) {
     panel.activeTab = key;
@@ -4549,6 +4591,7 @@ async function activateTab(panel, key) {
     requeueHiddenWizards(panel, null);
     mountInPanel(panel, null);
     clearPinnedPrompt(panel);
+    restoreComposerDraft(panel, key);
     setFocusedPanel(panel.id);
     renderPaneTabs(panel);
     showPanePicker(panel);
@@ -4574,6 +4617,7 @@ async function activateTab(panel, key) {
 
   applySessionUI(id);
   renderAttachmentsUI(id);
+  restoreComposerDraft(panel, id);
 
   // Seed ring/popup with server-side estimates for sessions that have no
   // real-time SSE data yet (cold load or page refresh).
@@ -4757,6 +4801,9 @@ async function newChat(panel, squadOverride, dirOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   panel = panel || fp();
   if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
+  // Preserve the outgoing tab's half-typed message (it returns when reselected);
+  // the new session starts with an empty composer (restored below).
+  saveComposerDraft(panel);
   const squad = squadOverride || currentSquadChoice();
   try {
     const body = { squad };
@@ -4792,6 +4839,7 @@ async function newChat(panel, squadOverride, dirOverride) {
     renderPaneTabs(panel);
     mountInPanel(panel, newId);
     applySessionUI(newId);
+    restoreComposerDraft(panel, newId); // fresh session → empty composer
     subscribeSessionEvents(newId);
     saveLayout();
     await loadSessions();
@@ -5137,6 +5185,7 @@ async function sendMessage(panel) {
   if (!prompt && pendingFiles.length === 0) return;
   if (prompt.startsWith("/") && pendingFiles.length === 0) {
     panel.els.prompt.value = "";
+    composerDrafts.delete(panel.activeTab);
     hideSlashMenu();
     await handleSlashCommand(prompt, panel);
     return;
@@ -5145,6 +5194,7 @@ async function sendMessage(panel) {
   // agent (the hard safety floor still applies server-side).
   if (prompt.startsWith("!") && pendingFiles.length === 0) {
     panel.els.prompt.value = "";
+    composerDrafts.delete(panel.activeTab);
     autoGrowPrompt(panel);
     hideSlashMenu();
     await runBangCommand(prompt.slice(1), panel);
@@ -5154,6 +5204,7 @@ async function sendMessage(panel) {
   // instead of being sent to the agent (symmetric with the "!" shell-escape).
   if (prompt.startsWith("#") && pendingFiles.length === 0) {
     panel.els.prompt.value = "";
+    composerDrafts.delete(panel.activeTab);
     autoGrowPrompt(panel);
     hideSlashMenu();
     await runHashMemory(prompt.slice(1), panel);
@@ -5182,6 +5233,7 @@ async function sendMessage(panel) {
   appendUserBubble(prompt, container, files.length > 0 ? files : null, newTurnIndex);
   scrollBottom(panel, true);
   panel.els.prompt.value = "";
+  composerDrafts.delete(sessionId);
   autoGrowPrompt(panel);
   clearAttachments(sessionId);
   renderAttachmentsUI(sessionId);

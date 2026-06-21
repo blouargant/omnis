@@ -11,6 +11,15 @@ message you send to the agent.
   longer prompts.
 - The **Stop** button cancels a streaming response.
 
+## Unsent drafts are kept per session
+
+Text you have typed but not yet sent is remembered **per chat tab**. Switch to
+another session (or start a new chat) and the composer clears for that tab;
+return to the first session and your half-typed message is back, ready to keep
+editing or send. Drafts are in-memory for the browser session — they are
+dropped once the message is sent and cleared when the session is deleted, and a
+full page reload starts fresh.
+
 ## Attachments
 
 Click the paperclip to attach files in two ways:
