@@ -102,6 +102,10 @@ type ConversationTurn struct {
 	UserText      string    `json:"user_text"`
 	AssistantText string    `json:"assistant_text"`
 	At            time.Time `json:"at"`
+	// DurationMs is the wall-clock time (milliseconds) the turn took to produce
+	// its reply. Persisting it lets the web UI show the reply time next to the
+	// copy button after a reload. Omitted (0) for legacy turns.
+	DurationMs int64 `json:"duration_ms,omitempty"`
 	// Usage is the per-agent token breakdown for this turn (agent name →
 	// counts), captured from the same data that drives the live `turn_usage`
 	// SSE events. Persisting it lets the web UI's per-agent cost breakdown
@@ -287,6 +291,14 @@ func AppendConversationTurn(sessionID, userText, assistantText string) error {
 // token usage captured during the turn (agent name → counts). A nil/empty map
 // behaves exactly like AppendConversationTurn.
 func AppendConversationTurnWithUsage(sessionID, userText, assistantText string, usage map[string]TokenUsage) error {
+	return AppendConversationTurnFull(sessionID, userText, assistantText, usage, 0)
+}
+
+// AppendConversationTurnFull is AppendConversationTurnWithUsage plus the
+// wall-clock time (milliseconds) the turn took to produce its reply. A zero
+// duration is omitted on disk; a nil/empty usage map behaves like
+// AppendConversationTurn.
+func AppendConversationTurnFull(sessionID, userText, assistantText string, usage map[string]TokenUsage, durationMs int64) error {
 	if len(usage) == 0 {
 		usage = nil // keep the on-disk field omitted when there's nothing to store
 	}
@@ -295,6 +307,7 @@ func AppendConversationTurnWithUsage(sessionID, userText, assistantText string, 
 			UserText:      userText,
 			AssistantText: assistantText,
 			At:            time.Now(),
+			DurationMs:    durationMs,
 			Usage:         usage,
 		})
 		f.Harvested = false // new activity resets the harvest flag

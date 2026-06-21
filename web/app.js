@@ -2838,6 +2838,48 @@ function copyReplyAs(bubble, fmtKey, anchorBtn) {
 
 // ─── DOM builders ───────────────────────────────────────────────────────────
 
+// formatDuration renders a millisecond duration as a short human label:
+// "740ms", "1.2s", "9.8s", "42s", "1m 5s".
+function formatDuration(ms) {
+  ms = Math.max(0, Math.round(ms || 0));
+  if (ms < 1000) return ms + "ms";
+  const s = ms / 1000;
+  if (s < 10) return s.toFixed(1) + "s";
+  if (s < 60) return Math.round(s) + "s";
+  const m = Math.floor(s / 60);
+  return m + "m " + Math.round(s % 60) + "s";
+}
+
+// setReplyTime fills the per-reply timing chip next to an assistant bubble's
+// copy button. No-op when the bubble has no chip or no duration was reported.
+function setReplyTime(bubble, ms) {
+  if (!bubble || !bubble._timeEl || ms == null) return;
+  const label = formatDuration(ms);
+  bubble._timeEl.textContent = label;
+  bubble._timeEl.setAttribute("data-tip", "Reply generated in " + label);
+}
+
+// setToolTime fills a tool block's header timing chip (its own header only, not
+// a nested child's). Used for both top-level tools — including sub-agent
+// invocations — and the sub-agent's own nested tool calls.
+function setToolTime(block, ms) {
+  if (!block || ms == null) return;
+  const el = block.querySelector(":scope > .tool-header > .tool-time");
+  if (el) {
+    el.textContent = formatDuration(ms);
+    el.setAttribute("data-tip", "Took " + formatDuration(ms));
+  }
+}
+
+// lastAssistantBubbleIn returns the last rendered assistant bubble in a
+// transcript container (fallback target for a turn that ended on a tool block
+// with no trailing text segment).
+function lastAssistantBubbleIn(container) {
+  const rows = (container || document).querySelectorAll(".msg-row.assistant");
+  const row = rows[rows.length - 1];
+  return row ? row.querySelector(".bubble-assistant") : null;
+}
+
 function appendAssistantBubble(container) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
@@ -2870,8 +2912,19 @@ function appendAssistantBubble(container) {
 
   copyGroup.appendChild(copyBtn);
   copyGroup.appendChild(caretBtn);
+
+  // Bottom-right action cluster: the (always-visible) reply-time chip sits to
+  // the left of the (hover-revealed) copy split-button.
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+  const timeEl = document.createElement("span");
+  timeEl.className = "reply-time";
+  actions.appendChild(timeEl);
+  actions.appendChild(copyGroup);
+  bubble._timeEl = timeEl;
+
   row.appendChild(bubble);
-  row.appendChild(copyGroup);
+  row.appendChild(actions);
   (container || fpTranscript()).appendChild(row);
   scrollBottom(paneOfNode(row));
   return bubble;
@@ -2917,6 +2970,7 @@ function buildToolBlock(name, args) {
     <span class="tool-dot pending"></span>
     <span class="tool-badge badge-${color}">${escHtml(label)}</span>
     <span class="tool-desc">${escHtml(desc)}</span>
+    <span class="tool-time"></span>
     <span class="tool-chevron">▶</span>
   `;
   header.addEventListener("click", () => block.classList.toggle("expanded"));
@@ -3803,7 +3857,7 @@ function formatTeammateResponse(response) {
   return JSON.stringify(response, null, 2);
 }
 
-function resolveToolCall(block, response) {
+function resolveToolCall(block, response, durationMs) {
   const isError = response && typeof response === "object" && typeof response.error === "string";
   const toolName = block.dataset.toolName || "";
   const isTeammate = /^teammate/.test(toolName);
@@ -3811,6 +3865,7 @@ function resolveToolCall(block, response) {
 
   const dot = block.querySelector(".tool-dot");
   if (dot) { dot.classList.remove("pending"); dot.classList.add(isError ? "error" : "done"); }
+  setToolTime(block, durationMs);
 
   const slot = block.querySelector(".tool-out-slot");
   if (!slot) return;
@@ -4417,6 +4472,7 @@ async function activateTab(panel, key) {
       appendUserBubble(turn.user_text, container);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turn.assistant_text);
+      setReplyTime(bubble, turn.duration_ms);
     }
     scrollBottom(panel, true);
   } catch (e) {
@@ -4827,6 +4883,7 @@ async function rerenderSessionFromHistory(sessionId) {
       appendUserBubble(t.user_text, container);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, t.assistant_text);
+      setReplyTime(bubble, t.duration_ms);
     }
     sessionTurnCounts.set(sessionId, turns.length);
     for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => scrollBottom(p));
@@ -4855,6 +4912,7 @@ async function appendNewPushTurns(sessionId) {
       appendUserBubble(turns[i].user_text, container);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turns[i].assistant_text);
+      setReplyTime(bubble, turns[i].duration_ms);
     }
     sessionTurnCounts.set(sessionId, turns.length);
 
@@ -5121,7 +5179,7 @@ async function sendMessage(panel) {
 
         case "tool_result": {
           const block = takePending(pendingTools, data.call_id);
-          if (block) resolveToolCall(block, data.response);
+          if (block) resolveToolCall(block, data.response, data.duration_ms);
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
           break;
@@ -5146,7 +5204,7 @@ async function sendMessage(panel) {
 
         case "agent_tool_result": {
           const inner = takePending(innerPending, data.call_id);
-          if (inner) resolveToolCall(inner, data.response);
+          if (inner) resolveToolCall(inner, data.response, data.duration_ms);
           break;
         }
 
@@ -5217,6 +5275,13 @@ async function sendMessage(panel) {
         }
 
         case "done":
+          // Stamp the reply time onto the turn's final assistant bubble (next to
+          // its copy button). segBubble is the live final text segment; fall back
+          // to the last assistant bubble if the turn ended on a tool block.
+          if (data && data.duration_ms != null) {
+            const b = segBubble || lastAssistantBubbleIn(container);
+            if (b) setReplyTime(b, data.duration_ms);
+          }
           break;
       }
   }

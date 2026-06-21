@@ -155,6 +155,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		runCtx, cancel := context.WithCancel(d.rootCtx)
 		runCtx = fstools.WithCwd(runCtx, cwd)
 		lt := d.LiveTurns.start(meta.ID, cancel)
+		turnStart := time.Now()
 
 		// Producer: drives the (possibly multi-hop) turn to completion regardless
 		// of whether any client is still attached. It owns the run-guard release.
@@ -254,8 +255,10 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				log.Printf("server: routing run error: %v", runErr)
 			}
 			// Terminal event for the (possibly multi-hop) turn — streamEvents no
-			// longer emits it per hop.
-			emitFrame("done", map[string]any{})
+			// longer emits it per hop. Carry the wall-clock reply time so the web
+			// UI can show "time taken for this reply" next to the copy button.
+			turnDur := time.Since(turnStart)
+			emitFrame("done", map[string]any{"duration_ms": turnDur.Milliseconds()})
 
 			// Persist whatever assistant text was streamed, even when the run was
 			// cancelled (Stop button) or no client is attached. Disk I/O does not
@@ -264,7 +267,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			// persisted as a blank exchange. Persist BEFORE finish() so a reconnect
 			// that races completion always finds the durable turn.
 			if strings.TrimSpace(assistantText) != "" {
-				if err := sessions.AppendConversationTurnWithUsage(meta.ID, req.Prompt, assistantText, usageAccum); err != nil {
+				if err := sessions.AppendConversationTurnFull(meta.ID, req.Prompt, assistantText, usageAccum, turnDur.Milliseconds()); err != nil {
 					log.Printf("server: failed to persist turn: %v", err)
 				}
 			}
@@ -415,6 +418,10 @@ func streamEvents(
 	var firstTokenAt time.Time
 	var tokenCount int
 	var tokenBytes int
+	// Wall-clock start of each in-flight top-level tool call, keyed by call_id,
+	// so the matching tool_result can carry how long the tool took (this is how
+	// sub-agent invocations — which the leader sees as tools — get their timing).
+	toolStart := map[string]time.Time{}
 
 	var assistantBuf strings.Builder
 	// lastContentAt is bumped by every content-bearing emit (anything but the
@@ -721,17 +728,25 @@ func streamEvents(
 							"args":    p.FunctionCall.Args,
 							"call_id": p.FunctionCall.ID,
 						})
+						if p.FunctionCall.ID != "" {
+							toolStart[p.FunctionCall.ID] = time.Now()
+						}
 						noteFileTool(p.FunctionCall.Name, p.FunctionCall.ID, p.FunctionCall.Args)
 					}
 					sawPartialText = false
 				}
 				if p.FunctionResponse != nil {
 					if !(suppressText && !routerVisibleTools[p.FunctionResponse.Name]) {
-						emit("tool_result", map[string]any{
+						result := map[string]any{
 							"name":     p.FunctionResponse.Name,
 							"response": p.FunctionResponse.Response,
 							"call_id":  p.FunctionResponse.ID,
-						})
+						}
+						if t0, ok := toolStart[p.FunctionResponse.ID]; ok {
+							result["duration_ms"] = time.Since(t0).Milliseconds()
+							delete(toolStart, p.FunctionResponse.ID)
+						}
+						emit("tool_result", result)
 						emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
 					}
 					sawPartialText = false
