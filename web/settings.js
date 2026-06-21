@@ -2266,7 +2266,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
     fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
     fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
-    fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }));
+    fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }, "price for prompt tokens served from the provider's cache (cache read); defaults to the input price"));
+    fg.appendChild(numField("cache_creation_token_price_per_million", m.cache_creation_token_price_per_million, v => { m.cache_creation_token_price_per_million = v; onChange(); }, "price for prompt tokens written to the provider's cache (cache creation); defaults to the input price"));
     fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
 
     // Thin separator setting the embedder-specific fields (EMBEDDING MODEL +
@@ -2424,9 +2425,10 @@ const BASE_PATH = window.BASE_PATH || "";
     return f;
   }
 
-  function numField(key, val, onCh) {
+  function numField(key, val, onCh, tip) {
     const f = document.createElement("div");
     f.className = "model-field";
+    if (tip) f.setAttribute("data-tip", tip);
     const lbl = document.createElement("label");
     lbl.className = "model-field-label";
     lbl.textContent = key.toUpperCase().replace(/_/g, " ");
@@ -2616,6 +2618,7 @@ const BASE_PATH = window.BASE_PATH || "";
           setMeta("context_length", mdl.context_length);
           setMeta("input_token_price_per_million", mdl.input_token_price_per_million);
           setMeta("cached_input_token_price_per_million", mdl.cached_input_token_price_per_million);
+          setMeta("cache_creation_token_price_per_million", mdl.cache_creation_token_price_per_million);
           setMeta("output_token_price_per_million", mdl.output_token_price_per_million);
           setMeta("dim", mdl.dim);
           // An embedding-mode model selected here is, by definition, an embedder.

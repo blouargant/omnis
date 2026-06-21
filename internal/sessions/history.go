@@ -33,10 +33,69 @@ func convLock(sessionID string) *sync.Mutex {
 }
 
 // ConversationTurn is one user→assistant exchange persisted to disk.
-// TokenUsage records the token counts one agent contributed to a turn.
+// TokenUsage records the token counts one agent contributed to a turn, plus the
+// per-million prices in effect for that agent's model at the time the turn ran.
+// Freezing the prices here is what keeps a past turn's budget stable: changing an
+// agent's model (or editing a model's price) in models.json must not retroactively
+// rewrite the cost of turns that were already billed at the old rate.
+//
+// Prompt is the TOTAL prompt size and already includes CacheRead + CacheCreate
+// (adapters normalise it that way). The billed cost therefore splits the prompt
+// into three rates:
+//
+//	fresh = Prompt - CacheRead - CacheCreate  (billed at InPricePerM)
+//	cost  = fresh*InPricePerM + CacheRead*CacheReadPricePerM
+//	         + CacheCreate*CacheCreatePricePerM + Output*OutPricePerM   (/1e6)
+//
+// A cache price of 0 means "no distinct cache rate" and falls back to InPricePerM;
+// the input/output prices are omitted (zero) for legacy turns and fall back to a
+// default rate. Cache-read is typically ~0.1× input, cache-creation ~1.25×.
 type TokenUsage struct {
 	Prompt int64 `json:"prompt"`
 	Output int64 `json:"output"`
+	// CacheRead / CacheCreate are the prompt-cache token counts (a subset of
+	// Prompt): tokens served from cache, and tokens written to cache.
+	CacheRead   int64 `json:"cache_read,omitempty"`
+	CacheCreate int64 `json:"cache_create,omitempty"`
+	// InPricePerM / OutPricePerM are the input/output price per million tokens
+	// for this agent's model, captured at turn time (omitted when unknown).
+	InPricePerM  float64 `json:"in_price_per_m,omitempty"`
+	OutPricePerM float64 `json:"out_price_per_m,omitempty"`
+	// CacheReadPricePerM / CacheCreatePricePerM are the prompt-cache read/write
+	// prices per million tokens, frozen at turn time (0 ⇒ fall back to input).
+	CacheReadPricePerM   float64 `json:"cache_read_price_per_m,omitempty"`
+	CacheCreatePricePerM float64 `json:"cache_create_price_per_m,omitempty"`
+}
+
+// CostUSD prices one agent's usage in dollars. The input/output prices fall back
+// to defInPerM/defOutPerM when this turn carries no frozen rate (legacy turns);
+// the cache prices fall back to the (resolved) input rate. Prompt is the total
+// prompt and includes the cache tokens, so the fresh (full-rate) input tokens are
+// Prompt − CacheRead − CacheCreate. Mirrors the web UI's usageCostUSD and the
+// TUI's totalCostDollars. This is the single source of truth for budget math.
+func (u TokenUsage) CostUSD(defInPerM, defOutPerM float64) float64 {
+	inP, outP := u.InPricePerM, u.OutPricePerM
+	if inP <= 0 {
+		inP = defInPerM
+	}
+	if outP <= 0 {
+		outP = defOutPerM
+	}
+	cacheReadP, cacheCreateP := u.CacheReadPricePerM, u.CacheCreatePricePerM
+	if cacheReadP <= 0 {
+		cacheReadP = inP
+	}
+	if cacheCreateP <= 0 {
+		cacheCreateP = inP
+	}
+	fresh := u.Prompt - u.CacheRead - u.CacheCreate
+	if fresh < 0 {
+		fresh = 0
+	}
+	return (float64(fresh)*inP +
+		float64(u.CacheRead)*cacheReadP +
+		float64(u.CacheCreate)*cacheCreateP +
+		float64(u.Output)*outP) / 1_000_000
 }
 
 type ConversationTurn struct {

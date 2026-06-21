@@ -3,11 +3,64 @@ package sessions
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 )
+
+// TestTokenUsageCostUSD pins the budget math: the four-rate split, the cache
+// price fallback to input, and the legacy fallback to the default rate. This is
+// the single source of truth mirrored by the web UI usageCostUSD.
+func TestTokenUsageCostUSD(t *testing.T) {
+	const defIn, defOut = 3.0, 15.0
+	approx := func(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
+
+	cases := []struct {
+		name string
+		u    TokenUsage
+		want float64
+	}{
+		{
+			// Frozen prices, no cache: fresh=1000@2, output=500@10.
+			name: "frozen no cache",
+			u:    TokenUsage{Prompt: 1000, Output: 500, InPricePerM: 2, OutPricePerM: 10},
+			want: (1000*2 + 500*10) / 1e6,
+		},
+		{
+			// Prompt includes cache tokens: fresh = 1000-600-200 = 200 @2,
+			// cacheRead 600 @0.2, cacheCreate 200 @2.5, output 500 @10.
+			name: "frozen with cache",
+			u: TokenUsage{
+				Prompt: 1000, Output: 500, CacheRead: 600, CacheCreate: 200,
+				InPricePerM: 2, OutPricePerM: 10,
+				CacheReadPricePerM: 0.2, CacheCreatePricePerM: 2.5,
+			},
+			want: (200*2 + 600*0.2 + 200*2.5 + 500*10) / 1e6,
+		},
+		{
+			// Cache prices unset → fall back to input rate (2) for both.
+			name: "cache price fallback to input",
+			u: TokenUsage{
+				Prompt: 1000, Output: 0, CacheRead: 400, CacheCreate: 100,
+				InPricePerM: 2, OutPricePerM: 10,
+			},
+			want: (500*2 + 400*2 + 100*2) / 1e6, // == 1000*2/1e6 (all input-rate)
+		},
+		{
+			// Legacy turn: no frozen prices → default rate.
+			name: "legacy default rate",
+			u:    TokenUsage{Prompt: 1000, Output: 500},
+			want: (1000*defIn + 500*defOut) / 1e6,
+		},
+	}
+	for _, tc := range cases {
+		if got := tc.u.CostUSD(defIn, defOut); !approx(got, tc.want) {
+			t.Errorf("%s: CostUSD = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
 
 // TestConversationSquadRoundTrip exercises the on-disk persistence of the
 // per-session squad: writing it via SetConversationSquad and reading it

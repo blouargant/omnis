@@ -23,7 +23,30 @@ const TOKEN_KEY = "agent_toolkit_token";
 // Per-session per-agent token accumulation. Declared here (before AgentDebug)
 // so _paint() can reference it without a temporal dead zone, and so the
 // context popup can read it independently of debug mode.
-const sessionAgentTokens = new Map(); // sessionId → Map(agentName → {prompt: number, output: number})
+const sessionAgentTokens = new Map(); // sessionId → Map(agentName → {prompt, output, cost})
+
+// Default per-million token prices, used only as a fallback when a turn carries
+// no frozen price (legacy turns persisted before per-agent prices were saved).
+const DEFAULT_IN_PRICE_PER_M  = 3.0;  // $3  / M input
+const DEFAULT_OUT_PRICE_PER_M = 15.0; // $15 / M output
+// usageCostUSD prices one usage delta in dollars. `prices` carries the per-million
+// rates frozen on the turn (the agent's model rates at turn time): {in, out,
+// cacheRead, cacheCreate}; absent (≤0) input/output fall back to the defaults and
+// absent cache rates fall back to the input rate. `prompt` is the TOTAL prompt and
+// includes the cache tokens, so the fresh (full-rate) input is prompt−read−create.
+// Pricing each delta as it arrives — rather than summing tokens and applying one
+// rate — keeps the budget correct even across a mid-session model/price change.
+// Mirrors the server's TokenUsage.CostUSD (the single source of truth).
+function usageCostUSD(prompt, output, cacheRead, cacheCreate, prices) {
+  const p = prices || {};
+  const inP  = p.in  > 0 ? p.in  : DEFAULT_IN_PRICE_PER_M;
+  const outP = p.out > 0 ? p.out : DEFAULT_OUT_PRICE_PER_M;
+  const crP  = p.cacheRead   > 0 ? p.cacheRead   : inP;
+  const ccP  = p.cacheCreate > 0 ? p.cacheCreate : inP;
+  let fresh = (prompt | 0) - (cacheRead | 0) - (cacheCreate | 0);
+  if (fresh < 0) fresh = 0;
+  return (fresh * inP + (cacheRead | 0) * crP + (cacheCreate | 0) * ccP + (output | 0) * outP) / 1_000_000;
+}
 const AgentDebug = {
   enabled: new URLSearchParams(location.search).get("debug") === "1"
         || localStorage.getItem("agent_toolkit_debug") === "1",
@@ -45,13 +68,15 @@ const AgentDebug = {
   render(ms) { this.renderMs += ms; this.renderCount++; this._paint(); },
   serverTiming(d) { this.server = d; this._paint(); },
   end() { this.tEnd = performance.now(); this._paint(); },
-  addAgentUsage(sessionId, agentName, prompt, output) {
+  addAgentUsage(sessionId, agentName, prompt, output, cacheRead, cacheCreate, prices) {
     if (!sessionId || !agentName) return;
     let agents = sessionAgentTokens.get(sessionId);
     if (!agents) { agents = new Map(); sessionAgentTokens.set(sessionId, agents); }
-    const ag = agents.get(agentName) || { prompt: 0, output: 0 };
+    const ag = agents.get(agentName) || { prompt: 0, output: 0, cost: 0 };
     ag.prompt += prompt | 0;
     ag.output += output | 0;
+    // Freeze the cost at the rate that was in effect for this delta.
+    ag.cost += usageCostUSD(prompt, output, cacheRead, cacheCreate, prices);
     agents.set(agentName, ag);
   },
   _paint() {
@@ -77,20 +102,20 @@ const AgentDebug = {
     const agentMap = sessionAgentTokens.get(this.activeSession);
     if (agentMap && agentMap.size > 0) {
       const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(2)+"M" : n >= 1000 ? (n/1000).toFixed(1)+"K" : String(n);
-      const fmtCost = (p, o) => "~$" + (p * 3.0/1_000_000 + o * 15.0/1_000_000).toFixed(4);
+      const fmtCost = c => "~$" + (c || 0).toFixed(4);
       const entries = [...agentMap.entries()].sort((a, b) =>
         a[0] === "leader" ? -1 : b[0] === "leader" ? 1 : (b[1].prompt + b[1].output) - (a[1].prompt + a[1].output)
       );
       const nameW = Math.min(14, Math.max(...entries.map(([n]) => n.length)));
-      let totP = 0, totO = 0;
+      let totP = 0, totO = 0, totC = 0;
       lines.push("[agents]");
-      for (const [name, {prompt, output}] of entries) {
-        totP += prompt; totO += output;
-        lines.push(`         ${name.padEnd(nameW)}  in=${fmtTok(prompt).padStart(6)}  out=${fmtTok(output).padStart(5)}  ${fmtCost(prompt, output)}`);
+      for (const [name, {prompt, output, cost}] of entries) {
+        totP += prompt; totO += output; totC += (cost || 0);
+        lines.push(`         ${name.padEnd(nameW)}  in=${fmtTok(prompt).padStart(6)}  out=${fmtTok(output).padStart(5)}  ${fmtCost(cost)}`);
       }
       if (entries.length > 1) {
         lines.push(`         ${"─".repeat(nameW + 32)}`);
-        lines.push(`         ${"total".padEnd(nameW)}  in=${fmtTok(totP).padStart(6)}  out=${fmtTok(totO).padStart(5)}  ${fmtCost(totP, totO)}`);
+        lines.push(`         ${"total".padEnd(nameW)}  in=${fmtTok(totP).padStart(6)}  out=${fmtTok(totO).padStart(5)}  ${fmtCost(totC)}`);
       }
     }
     this.badge.textContent = lines.join("\n");
@@ -1077,11 +1102,10 @@ function setComposerReadOnly(panel, readonly) {
 
 const CTX_RING_CIRCUMFERENCE = 56.55; // 2π × r(9)
 const sessionCtxUsage  = new Map(); // sessionId → {tokens_used, soft_limit, hard_limit, window_tokens}
+// sessionTokenAccum keeps a session-wide token total only for the legacy budget
+// fallback (a session whose turns persisted no per-agent usage). The live budget
+// and per-agent rows are driven by sessionAgentTokens (frozen per-agent cost).
 const sessionTokenAccum = new Map(); // sessionId → {prompt: number, output: number}
-
-// Approximate Sonnet-class pricing used for cost estimation.
-const PRICE_INPUT_PER_TOK  = 3.0  / 1_000_000; // $3  per million input tokens
-const PRICE_OUTPUT_PER_TOK = 15.0 / 1_000_000; // $15 per million output tokens
 
 function setCtxRingSpinning(panel, spinning) {
   if (panel.els.ctxRingSvg) panel.els.ctxRingSvg.classList.toggle("spinning", spinning);
@@ -1130,14 +1154,23 @@ function renderCtxPopup(panel) {
   e.ctxPopMax.textContent  = window_tokens.toLocaleString();
   e.ctxPopPct.textContent  = `${pct}%`;
 
-  const acc  = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
-  const cost = acc.prompt * PRICE_INPUT_PER_TOK + acc.output * PRICE_OUTPUT_PER_TOK;
+  // Budget = sum of the per-agent frozen costs, so the total always equals the
+  // sum of the rows below. Each agent's cost was priced at its model's rate at
+  // turn time. Only when no per-agent usage exists (fully-legacy session) do we
+  // fall back to pricing the rolling-context text estimate at the default rate.
+  const agentMap = sessionAgentTokens.get(sessionId);
+  let cost = 0;
+  if (agentMap && agentMap.size) {
+    for (const u of agentMap.values()) cost += (u.cost || 0);
+  } else {
+    const acc = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
+    cost = usageCostUSD(acc.prompt, acc.output, 0, 0, null);
+  }
   e.ctxPopBudget.textContent = cost > 0 ? `$${cost.toFixed(4)}` : "—";
 
   // Per-agent breakdown
   const agentsEl = e.ctxPopAgents;
   if (agentsEl) {
-    const agentMap = sessionAgentTokens.get(sessionId);
     if (!agentMap || agentMap.size === 0) {
       agentsEl.hidden = true;
     } else {
@@ -1146,8 +1179,7 @@ function renderCtxPopup(panel) {
       const entries = [...agentMap.entries()].sort((a, b) =>
         a[0] === "leader" ? -1 : b[0] === "leader" ? 1 : (b[1].prompt + b[1].output) - (a[1].prompt + a[1].output)
       );
-      for (const [name, {prompt, output}] of entries) {
-        const agentCost = prompt * PRICE_INPUT_PER_TOK + output * PRICE_OUTPUT_PER_TOK;
+      for (const [name, u] of entries) {
         const row = document.createElement("div");
         row.className = "ctx-pop-agent-row";
         const nameEl = document.createElement("span");
@@ -1155,7 +1187,7 @@ function renderCtxPopup(panel) {
         nameEl.textContent = name;
         const costEl = document.createElement("span");
         costEl.className = "ctx-pop-agent-cost";
-        costEl.textContent = `$${agentCost.toFixed(4)}`;
+        costEl.textContent = `$${(u.cost || 0).toFixed(4)}`;
         row.appendChild(nameEl);
         row.appendChild(costEl);
         agentsEl.appendChild(row);
@@ -1189,11 +1221,12 @@ async function fetchUsageEstimate(sessionId) {
     }
     // Restore the per-agent cost breakdown (lost on reload otherwise, since it
     // is built only from live turn_usage events). The server replays the
-    // persisted per-turn usage here.
+    // persisted per-turn usage here, including the frozen cost (priced at each
+    // turn's own rate), so the restored budget matches what was billed.
     if (data.agents && !sessionAgentTokens.has(sessionId)) {
       const m = new Map();
       for (const [name, u] of Object.entries(data.agents)) {
-        m.set(name, { prompt: u.prompt || 0, output: u.output || 0 });
+        m.set(name, { prompt: u.prompt || 0, output: u.output || 0, cost: u.cost || 0 });
       }
       if (m.size > 0) sessionAgentTokens.set(sessionId, m);
     }
@@ -5134,8 +5167,20 @@ async function sendMessage(panel) {
           acc.prompt += (data.prompt_tokens || 0);
           acc.output += (data.output_tokens || 0);
           sessionTokenAccum.set(sessionId, acc);
-          // Always accumulate per-agent tokens (used by ctx popup and debug badge).
-          AgentDebug.addAgentUsage(sessionId, data.agent, data.prompt_tokens || 0, data.output_tokens || 0);
+          // Always accumulate per-agent tokens + frozen cost (the per-million
+          // prices the server stamped at turn time, including the prompt-cache
+          // read/creation rates). Used by the ctx popup budget and debug badge.
+          AgentDebug.addAgentUsage(
+            sessionId, data.agent,
+            data.prompt_tokens || 0, data.output_tokens || 0,
+            data.cache_read_tokens || 0, data.cache_create_tokens || 0,
+            {
+              in:          data.in_price_per_m || 0,
+              out:         data.out_price_per_m || 0,
+              cacheRead:   data.cache_read_price_per_m || 0,
+              cacheCreate: data.cache_create_price_per_m || 0,
+            },
+          );
           for (const p of panelsForSession(sessionId)) {
             if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
           }

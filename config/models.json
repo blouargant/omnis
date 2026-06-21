@@ -35,8 +35,8 @@
       "provider_ref": "openai-compat",
       "model": "Hosted",
       "context_length": 250000,
-      "input_token_price_per_million": 0.63,
-      "output_token_price_per_million": 3.78
+      "input_token_price_per_million": 0.04,
+      "output_token_price_per_million": 0.27
     },
     "imagegen": {
       "provider_ref": "openai-compat",
@@ -50,15 +50,17 @@
       "provider_ref": "openai-compat",
       "model": "Premium",
       "context_length": 200000,
-      "input_token_price_per_million": 5,
-      "output_token_price_per_million": 26
+      "input_token_price_per_million": 3.15,
+      "output_token_price_per_million": 15.75,
+      "cached_input_token_price_per_million": 0.3,
+      "cache_creation_token_price_per_million": 3.75
     },
     "simple": {
       "provider_ref": "openai-compat",
       "model": "Simple",
       "context_length": 256000,
-      "input_token_price_per_million": 0.17,
-      "output_token_price_per_million": 0.69
+      "input_token_price_per_million": 0.2625,
+      "output_token_price_per_million": 0.525
     }
   }
 }

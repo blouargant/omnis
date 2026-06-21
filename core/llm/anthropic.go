@@ -127,6 +127,25 @@ type antUsage struct {
 // look it up by modality string.
 const CacheCreationModality genai.MediaModality = "cache_creation"
 
+// CacheCounts extracts the prompt-cache token counts from a usage metadata
+// block: `read` is the number of prompt tokens served from cache
+// (CachedContentTokenCount), `create` is the number of prompt tokens written to
+// the cache for the first time (surfaced under CacheTokensDetails with
+// CacheCreationModality — see above). Both are a subset of PromptTokenCount,
+// which adapters normalise to the *total* prompt. Returns 0,0 for a nil usage.
+func CacheCounts(u *genai.GenerateContentResponseUsageMetadata) (read, create int64) {
+	if u == nil {
+		return 0, 0
+	}
+	read = int64(u.CachedContentTokenCount)
+	for _, d := range u.CacheTokensDetails {
+		if d != nil && d.Modality == CacheCreationModality {
+			create += int64(d.TokenCount)
+		}
+	}
+	return read, create
+}
+
 // anthropicUsageToGenai maps an antUsage onto the generic genai usage
 // metadata, normalising semantics to "PromptTokenCount = total prompt
 // tokens" (Anthropic's `input_tokens` is fresh-only, so we add cached read

@@ -14,11 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/adk/agent"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/yoke/agent"
 	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/yoke/core/llm"
 	fstools "github.com/blouargant/yoke/core/tools"
 	"github.com/blouargant/yoke/internal/fileref"
 	"github.com/blouargant/yoke/internal/sessions"
@@ -182,6 +184,22 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			// restart / page reload (it is otherwise built only from the live
 			// `turn_usage` events and lost on reload). Persisted on the turn below.
 			usageAccum := map[string]sessions.TokenUsage{}
+			// Resolve each agent's per-million model prices from the session's pinned
+			// generation, so the cost billed this turn is frozen onto the persisted
+			// usage (a later model/price change must not rewrite past budgets).
+			priceFor := func(string) agentPrices { return agentPrices{} }
+			if inst := d.Manager.Lookup(meta.ID); inst != nil {
+				prices := make(map[string]agentPrices, len(inst.Settings.Agents))
+				for _, a := range inst.Settings.Agents {
+					prices[a.Name] = agentPrices{
+						in:          a.InputTokenPricePerMillion,
+						out:         a.OutputTokenPricePerMillion,
+						cacheRead:   a.CachedInputTokenPricePerMillion,
+						cacheCreate: a.CacheCreationTokenPricePerMillion,
+					}
+				}
+				priceFor = func(name string) agentPrices { return prices[name] }
+			}
 			// runHop streams one squad turn (one Runner.Run) and returns its
 			// assistant text. The Omnis dispatch loop calls it once per hop.
 			//
@@ -208,9 +226,9 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				}
 				isRouter := routerSquad != "" && squadName == routerSquad
 				if !isRouter {
-					return streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, false, usageAccum)
+					return streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, false, usageAccum, priceFor)
 				}
-				text, err := streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum)
+				text, err := streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum, priceFor)
 				if err != nil {
 					return text, err
 				}
@@ -349,6 +367,13 @@ var routerVisibleTools = map[string]bool{
 	"teammate_check":    true,
 }
 
+// agentPrices is one agent's per-million token prices, resolved from its model
+// in the session's pinned generation and frozen onto each turn's usage. Zero
+// cache prices mean "no distinct cache rate" and fall back to the input rate.
+type agentPrices struct {
+	in, out, cacheRead, cacheCreate float64
+}
+
 func streamEvents(
 	ctx context.Context,
 	sink func(event string, data []byte),
@@ -358,18 +383,32 @@ func streamEvents(
 	rootAgent string,
 	suppressText bool,
 	usageAccum map[string]sessions.TokenUsage,
+	priceFor func(agent string) agentPrices,
 ) (string, error) {
 	if rootAgent == "" {
 		rootAgent = "leader"
 	}
+	if priceFor == nil {
+		priceFor = func(string) agentPrices { return agentPrices{} }
+	}
 	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
-	addUsage := func(agent string, prompt, output int64) {
+	addUsage := func(agent string, prompt, output, cacheRead, cacheCreate int64) {
 		if usageAccum == nil || agent == "" {
 			return
 		}
 		u := usageAccum[agent]
 		u.Prompt += prompt
 		u.Output += output
+		u.CacheRead += cacheRead
+		u.CacheCreate += cacheCreate
+		// Freeze the agent's model prices on the accumulated usage so the
+		// persisted turn keeps the rate it was billed at (idempotent: the price
+		// is constant for an agent within this generation). Cache prices may be 0
+		// (no distinct cache rate) — they fall back to the input rate at cost time.
+		if pr := priceFor(agent); pr.in > 0 || pr.out > 0 {
+			u.InPricePerM, u.OutPricePerM = pr.in, pr.out
+			u.CacheReadPricePerM, u.CacheCreatePricePerM = pr.cacheRead, pr.cacheCreate
+		}
 		usageAccum[agent] = u
 	}
 	streamStart := time.Now()
@@ -392,6 +431,24 @@ func streamEvents(
 		if event != "heartbeat" {
 			lastContentAt = time.Now()
 		}
+	}
+	// emitTurnUsage accumulates one model call's per-agent usage and streams the
+	// matching turn_usage frame (tokens + the frozen per-million prices) so the
+	// browser can price it live exactly as the persisted turn will be priced.
+	emitTurnUsage := func(agent string, prompt, output, cacheRead, cacheCreate int64) {
+		addUsage(agent, prompt, output, cacheRead, cacheCreate)
+		pr := priceFor(agent)
+		emit("turn_usage", map[string]any{
+			"agent":                    agent,
+			"prompt_tokens":            prompt,
+			"output_tokens":            output,
+			"cache_read_tokens":        cacheRead,
+			"cache_create_tokens":      cacheCreate,
+			"in_price_per_m":           pr.in,
+			"out_price_per_m":          pr.out,
+			"cache_read_price_per_m":   pr.cacheRead,
+			"cache_create_price_per_m": pr.cacheCreate,
+		})
 	}
 	// emitTiming emits the per-hop debug_timing frame. The terminal "done" event
 	// is emitted by the caller once the whole (possibly multi-hop) turn finishes.
@@ -550,19 +607,16 @@ func streamEvents(
 			// Sub-agent model usage. The runner-root's own EventAfterModel is
 			// dropped above (agentName == rootAgent); the root's usage is emitted
 			// from the ADK event stream instead, so this only reaches here for
-			// genuine sub-agents.
-			usage, _ := p["usage"].(map[string]any)
-			if usage == nil {
+			// genuine sub-agents. Read the full response (carried on the bus
+			// payload) so we get the cache-read/creation counts too, not just the
+			// flattened prompt/output in p["usage"].
+			resp, _ := p["response"].(*model.LLMResponse)
+			if resp == nil || resp.UsageMetadata == nil {
 				return
 			}
-			prompt, _ := usage["prompt_tokens"].(int64)
-			output, _ := usage["candidates_tokens"].(int64)
-			addUsage(agentName, prompt, output)
-			emit("turn_usage", map[string]any{
-				"agent":         agentName,
-				"prompt_tokens": usage["prompt_tokens"],
-				"output_tokens": usage["candidates_tokens"],
-			})
+			u := resp.UsageMetadata
+			cacheRead, cacheCreate := llm.CacheCounts(u)
+			emitTurnUsage(agentName, int64(u.PromptTokenCount), int64(u.CandidatesTokenCount), cacheRead, cacheCreate)
 		case events.EventAskUser:
 			// Forward the full question payload so the browser can render
 			// the question widget.
@@ -687,12 +741,8 @@ func streamEvents(
 				sawPartialText = false
 				// Emit leader token counts so the browser can accumulate session cost.
 				if u := ev.LLMResponse.UsageMetadata; u != nil {
-					addUsage(rootAgent, int64(u.PromptTokenCount), int64(u.CandidatesTokenCount))
-					emit("turn_usage", map[string]any{
-						"agent":         rootAgent,
-						"prompt_tokens": int64(u.PromptTokenCount),
-						"output_tokens": int64(u.CandidatesTokenCount),
-					})
+					cacheRead, cacheCreate := llm.CacheCounts(u)
+					emitTurnUsage(rootAgent, int64(u.PromptTokenCount), int64(u.CandidatesTokenCount), cacheRead, cacheCreate)
 				}
 			}
 		}

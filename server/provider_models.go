@@ -37,15 +37,16 @@ type providerHealth struct {
 // Plain OpenAI-style /v1/models endpoints return ids only, in which case just
 // ID is set and the UI leaves the other fields for the user to fill.
 type providerModelInfo struct {
-	ID                              string  `json:"id"`
-	DisplayName                     string  `json:"display_name,omitempty"`
-	ContextLength                   int     `json:"context_length,omitempty"`
-	InputTokenPricePerMillion       float64 `json:"input_token_price_per_million,omitempty"`
-	CachedInputTokenPricePerMillion float64 `json:"cached_input_token_price_per_million,omitempty"`
-	OutputTokenPricePerMillion      float64 `json:"output_token_price_per_million,omitempty"`
-	Dim                             int     `json:"dim,omitempty"`
-	Mode                            string  `json:"mode,omitempty"`
-	Embedding                       bool    `json:"embedding,omitempty"`
+	ID                                string  `json:"id"`
+	DisplayName                       string  `json:"display_name,omitempty"`
+	ContextLength                     int     `json:"context_length,omitempty"`
+	InputTokenPricePerMillion         float64 `json:"input_token_price_per_million,omitempty"`
+	CachedInputTokenPricePerMillion   float64 `json:"cached_input_token_price_per_million,omitempty"`
+	CacheCreationTokenPricePerMillion float64 `json:"cache_creation_token_price_per_million,omitempty"`
+	OutputTokenPricePerMillion        float64 `json:"output_token_price_per_million,omitempty"`
+	Dim                               int     `json:"dim,omitempty"`
+	Mode                              string  `json:"mode,omitempty"`
+	Embedding                         bool    `json:"embedding,omitempty"`
 }
 
 // registerProviderModelsRoute mounts GET /providers/models on the given router group.
@@ -429,13 +430,14 @@ func fetchLiteLLMModelInfo(ctx context.Context, apiKey, baseURL string) ([]provi
 		Data []struct {
 			ModelName string `json:"model_name"`
 			ModelInfo struct {
-				Mode                    string  `json:"mode"`
-				MaxInputTokens          float64 `json:"max_input_tokens"`
-				MaxTokens               float64 `json:"max_tokens"`
-				InputCostPerToken       float64 `json:"input_cost_per_token"`
-				OutputCostPerToken      float64 `json:"output_cost_per_token"`
-				CacheReadInputTokenCost float64 `json:"cache_read_input_token_cost"`
-				OutputVectorSize        float64 `json:"output_vector_size"`
+				Mode                        string  `json:"mode"`
+				MaxInputTokens              float64 `json:"max_input_tokens"`
+				MaxTokens                   float64 `json:"max_tokens"`
+				InputCostPerToken           float64 `json:"input_cost_per_token"`
+				OutputCostPerToken          float64 `json:"output_cost_per_token"`
+				CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
+				CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
+				OutputVectorSize            float64 `json:"output_vector_size"`
 			} `json:"model_info"`
 		} `json:"data"`
 	}
@@ -462,14 +464,15 @@ func fetchLiteLLMModelInfo(ctx context.Context, apiKey, baseURL string) ([]provi
 			ctxLen = mi.MaxTokens
 		}
 		out = append(out, providerModelInfo{
-			ID:                              m.ModelName,
-			ContextLength:                   int(ctxLen),
-			InputTokenPricePerMillion:       perMillion(mi.InputCostPerToken),
-			CachedInputTokenPricePerMillion: perMillion(mi.CacheReadInputTokenCost),
-			OutputTokenPricePerMillion:      perMillion(mi.OutputCostPerToken),
-			Dim:                             int(mi.OutputVectorSize),
-			Mode:                            mi.Mode,
-			Embedding:                       mi.Mode == "embedding",
+			ID:                                m.ModelName,
+			ContextLength:                     int(ctxLen),
+			InputTokenPricePerMillion:         perMillion(mi.InputCostPerToken),
+			CachedInputTokenPricePerMillion:   perMillion(mi.CacheReadInputTokenCost),
+			CacheCreationTokenPricePerMillion: perMillion(mi.CacheCreationInputTokenCost),
+			OutputTokenPricePerMillion:        perMillion(mi.OutputCostPerToken),
+			Dim:                               int(mi.OutputVectorSize),
+			Mode:                              mi.Mode,
+			Embedding:                         mi.Mode == "embedding",
 		})
 	}
 	if len(out) == 0 {

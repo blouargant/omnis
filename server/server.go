@@ -648,14 +648,24 @@ func newEngine(d serverDeps) *gin.Engine {
 			})
 			return
 		}
-		// Simulate the rolling context to estimate API billing:
-		// each turn pays for the full accumulated context as its prompt.
-		// Separately, sum the per-turn per-agent usage that was persisted from
-		// the live `turn_usage` events, so the web UI's per-agent cost breakdown
-		// can be restored after a restart / reload (these are real billed counts,
-		// not the text estimate above).
+		// runningCtx simulates the rolling context window so the context ring can
+		// show how full the window is (each turn pays for the full accumulated
+		// context as its prompt). That is a *text estimate* and is kept ONLY for
+		// the ring (`tokens_used`) + the legacy budget fallback below — it is not
+		// the billed cost.
+		//
+		// The budget is instead the sum of the per-agent per-turn usage persisted
+		// from the live `turn_usage` events (real billed counts). Each turn's cost
+		// uses the price that was frozen onto that turn, so a later model/price
+		// change never rewrites a past turn's budget. Legacy turns with no frozen
+		// price fall back to the default rate.
+		const defInPerM, defOutPerM = 3.0, 15.0
+		type agentAgg struct {
+			prompt, output int64
+			cost           float64
+		}
 		var runningCtx, totalPrompt, totalOutput int
-		agents := map[string]sessions.TokenUsage{}
+		agg := map[string]*agentAgg{}
 		for _, turn := range turns {
 			userTok := compress.CountText(turn.UserText)
 			asstTok := compress.CountText(turn.AssistantText)
@@ -663,17 +673,34 @@ func newEngine(d serverDeps) *gin.Engine {
 			totalOutput += asstTok
 			runningCtx += userTok + asstTok
 			for name, u := range turn.Usage {
-				agg := agents[name]
-				agg.Prompt += u.Prompt
-				agg.Output += u.Output
-				agents[name] = agg
+				a := agg[name]
+				if a == nil {
+					a = &agentAgg{}
+					agg[name] = a
+				}
+				a.prompt += u.Prompt
+				a.output += u.Output
+				a.cost += u.CostUSD(defInPerM, defOutPerM)
 			}
+		}
+		// Per-agent breakdown + total budget = sum of frozen per-agent costs. When
+		// no per-agent usage was ever persisted (fully-legacy session) fall back to
+		// pricing the text estimate at the default rate so the budget isn't blank.
+		agents := make(map[string]gin.H, len(agg))
+		var budget float64
+		for name, a := range agg {
+			agents[name] = gin.H{"prompt": a.prompt, "output": a.output, "cost": a.cost}
+			budget += a.cost
+		}
+		if len(agg) == 0 {
+			budget = (float64(totalPrompt)*defInPerM + float64(totalOutput)*defOutPerM) / 1_000_000
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"tokens_used":   runningCtx,
 			"prompt_total":  totalPrompt,
 			"output_total":  totalOutput,
 			"agents":        agents,
+			"budget":        budget,
 			"window_tokens": compress.DefaultWindowTokens,
 			"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
 			"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),
