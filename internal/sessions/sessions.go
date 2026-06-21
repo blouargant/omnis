@@ -272,6 +272,23 @@ func (r *Registry) Delete(id string) bool {
 	return true
 }
 
+// SetTurns overrides the in-memory turn counter (the sidebar count). Used after
+// a rewind/fork resizes a session's history, since Touch only ever increments.
+// Negative values clamp to 0. Returns true when a session was found.
+func (r *Registry) SetTurns(id string, n int) bool {
+	if n < 0 {
+		n = 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.items[id]
+	if !ok {
+		return false
+	}
+	m.Turns = n
+	return true
+}
+
 // SetTitle updates the in-memory title. The caller is responsible for
 // persisting the change via SetConversationTitle.
 func (r *Registry) SetTitle(id, title string) bool {

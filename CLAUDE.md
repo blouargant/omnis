@@ -1455,6 +1455,55 @@ and `session_deleted` with `forgetSession(sid)` (drops per-session maps + ask
 widgets + `closeTabEverywhere`) then `loadSessions()`. All three handlers are
 idempotent, so the originating browser harmlessly processes its own echoed
 broadcast. New sessions are **never auto-opened** on other browsers — only listed.
+A fourth event, **`session_rewound`**, is emitted by the rewind handler (see
+"Conversation fork & rewind" below); the client re-renders the truncated
+transcript from history for any pane showing that session.
+
+### Conversation fork & rewind (Web UI)
+
+Each user turn in the transcript carries a hover **↺ control** (top-right of the
+bubble) opening a 2-item menu: **Fork conversation from here** / **Rewind
+conversation to here**. Both branch the conversation at a turn; there is **no**
+code/action revert. Semantics: the control names a turn index `K`; the cut is
+**"to before turn K"** — keep turns `[0, K)`, drop `K…end`.
+
+A conversation lives in **two layers**, both handled:
+- **Display / persistence** — `conversation_<id>.json`
+  ([internal/sessions/history.go](internal/sessions/history.go)): `TruncateConversationTurns`
+  (rewind, in-place atomic truncate) and `ForkConversation` (copy first `K` turns
+  into a new file, inheriting the source `Squad`). `Registry.SetTurns` fixes the
+  sidebar counter (Touch only increments).
+- **Model context** — the ADK runner's in-memory `session.InMemoryService` (what
+  the model "remembers"). `Manager.ReseedSessionContext` ([agent/session_reseed.go](agent/session_reseed.go))
+  rebuilds it from the kept turns: `Delete`→`Create`→`AppendEvent` one `user` +
+  one `model` `genai.Content` event per turn, on the session's **active squad**
+  (always) plus any other squad already holding an in-memory session for the id
+  (routing-visited). The reconstruction is **text-only** — tool calls /
+  attachments from old turns are not replayed (same fidelity as a restart or
+  compression). `agent` can't import `internal/sessions` (cycle), so callers map
+  `ConversationTurn` → the local `agent.Exchange` pair type.
+
+**Routes** ([server/fork_rewind.go](server/fork_rewind.go), registered in
+[server/server.go](server/server.go)): `POST /api/sessions/:id/rewind`
+`{turn_index}` → `{turns}` + a `session_rewound` broadcast; `POST
+/api/sessions/:id/fork` `{turn_index, title?}` → `{session_id, squad,
+dropped_user_text}` and mirrors the `POST /sessions` wiring (RegisterSession,
+Pin, PushMgr.Watch, `session_created` broadcast, SessionStart hook, inherits the
+source `bashCwd`). Both reject **archived** (rewind only; forking an archived
+source is allowed since it never mutates the source) and refuse to run while a
+turn is in flight (`RunGuard.tryAcquire` → 409). A reseed failure is logged but
+never corrupts the already-truncated display history.
+
+**Web UI** ([web/app.js](web/app.js)): `appendUserBubble` takes a `turnIndex` and
+stamps it on the row (`addTurnActions` adds the control); each render site
+(`rerenderSessionFromHistory`, `appendNewPushTurns`, the live send path, the
+initial history load) passes the true turn index, so the cut point stays exact
+even with non-rendered mailbox/background turns. `forkConversation` /
+`rewindConversation` POST then re-render and **pre-fill the composer** with the
+dropped user message (only when empty) for edit-and-resend; `rewindConversation`
+gates on a `uiConfirm`. Styles: `.turn-action-btn` / `.turn-menu` in
+[web/css/features/messages.css](web/css/features/messages.css). CLI/TUI are
+untouched (no routes, no reseed callers) — byte-identical no-op there.
 
 ### Background server (`yoke-server start` / `stop` / `status`)
 

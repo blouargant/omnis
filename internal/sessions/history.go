@@ -314,6 +314,59 @@ func AppendConversationTurnFull(sessionID, userText, assistantText string, usage
 	})
 }
 
+// TruncateConversationTurns rewinds a session's history to its first `keep`
+// turns, dropping everything after, and clears the Harvested flag so a fresh
+// idle scan re-evaluates the (now shorter) session. `keep` is clamped to
+// [0, len(turns)], so a keep ≥ len is a no-op and a negative keep empties the
+// history. Returns the kept turns. The write is atomic (see SaveConversationFile).
+func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, error) {
+	var kept []ConversationTurn
+	err := mutateConversation(sessionID, func(f *ConversationFile) {
+		if keep < 0 {
+			keep = 0
+		}
+		if keep > len(f.Turns) {
+			keep = len(f.Turns)
+		}
+		f.Turns = f.Turns[:keep]
+		f.Harvested = false
+		// Copy out so the caller never aliases the slice we just wrote.
+		kept = append([]ConversationTurn(nil), f.Turns...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return kept, nil
+}
+
+// ForkConversation writes a new conversation file for dstID seeded with the
+// first `keep` turns of srcID's history (a branch point). The fork inherits the
+// source's squad so it runs on the same agents; title is set on the new file.
+// `keep` is clamped to [0, len(src.Turns)]. Returns the kept turns copied into
+// the fork. The destination is written atomically; the source is left untouched.
+func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn, error) {
+	src, err := LoadConversationFile(srcID)
+	if err != nil {
+		return nil, err
+	}
+	if keep < 0 {
+		keep = 0
+	}
+	if keep > len(src.Turns) {
+		keep = len(src.Turns)
+	}
+	kept := append([]ConversationTurn(nil), src.Turns[:keep]...)
+	dst := &ConversationFile{
+		Title: title,
+		Squad: src.Squad,
+		Turns: kept,
+	}
+	if err := SaveConversationFile(dstID, dst); err != nil {
+		return nil, err
+	}
+	return kept, nil
+}
+
 // SetConversationHarvested persists the Harvested flag to disk without
 // touching the conversation turns. Called by the idle harvester.
 func SetConversationHarvested(sessionID string, v bool) error {

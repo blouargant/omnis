@@ -710,6 +710,11 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.GET("/sessions/:id/messages/stream", handleMessageStream(d))
 	auth.POST("/sessions/:id/cancel", handleCancel(d))
+	// Conversation fork / rewind: branch a new session at a turn, or rewind the
+	// live session to before a turn. Both reseed the model's in-memory context
+	// from the kept turns (see server/fork_rewind.go).
+	auth.POST("/sessions/:id/rewind", handleRewind(d))
+	auth.POST("/sessions/:id/fork", handleFork(d))
 	auth.POST("/sessions/:id/bash", handleBash(d))
 	auth.GET("/sessions/:id/folder", handleFolder(d))
 	auth.POST("/sessions/:id/folder", handleFolder(d))

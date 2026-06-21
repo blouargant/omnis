@@ -2376,7 +2376,7 @@ async function openFileRef(token, sessionId) {
 }
 
 // Insert a user message bubble at the current end of the transcript (before streaming).
-function appendUserBubble(text, container, files) {
+function appendUserBubble(text, container, files, turnIndex) {
   if (typeof text === "string" && text.startsWith("[mailbox]")) {
     appendMailboxBlock(text, container);
     return;
@@ -2388,6 +2388,7 @@ function appendUserBubble(text, container, files) {
   if (typeof text === "string" && (text.startsWith("[Background ") || text.startsWith("[Monitor "))) {
     return;
   }
+  const sessionId = sessionIdOfNode(container) || (fp() && fp().sessionId) || activeSessionId;
   const row = document.createElement("div");
   row.className = "msg-row msg-row-user";
   const bubble = document.createElement("div");
@@ -2396,7 +2397,6 @@ function appendUserBubble(text, container, files) {
   if (text) {
     const textEl = document.createElement("div");
     textEl.className = "bubble-user-text";
-    const sessionId = sessionIdOfNode(container) || (fp() && fp().sessionId) || activeSessionId;
     renderUserText(textEl, text, sessionId);
     bubble.appendChild(textEl);
   }
@@ -2413,10 +2413,163 @@ function appendUserBubble(text, container, files) {
     bubble.appendChild(chips);
   }
   row.appendChild(bubble);
+  // A real (persisted) turn carries its index, so the per-turn fork/rewind
+  // control can name an exact cut point. Synthetic echoes (`!` shell, mailbox,
+  // background) pass no index and get no control. The index is the turn's
+  // position in the conversation file; each render site stamps the true value.
+  if (sessionId && Number.isInteger(turnIndex) && turnIndex >= 0) {
+    row.dataset.turnIndex = String(turnIndex);
+    addTurnActions(row, sessionId, turnIndex, text || "");
+  }
   (container || fpTranscript()).appendChild(row);
   // After layout, decide whether the message overflows three lines and, if so,
   // mark it truncated and add a click-to-expand affordance.
   requestAnimationFrame(() => applyUserBubbleTruncation(bubble));
+}
+
+// ICON_REWIND is the circular "go back" glyph for the per-turn control.
+const ICON_REWIND =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.3-9.3L3 7"/></svg>';
+
+// addTurnActions attaches the hover ↺ button to a user-turn row. Clicking it
+// opens the fork/rewind menu anchored to the button.
+function addTurnActions(row, sessionId, turnIndex, userText) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "turn-action-btn";
+  btn.setAttribute("data-tip", "Fork or rewind from here");
+  btn.setAttribute("aria-label", "Fork or rewind from here");
+  btn.innerHTML = ICON_REWIND;
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openTurnMenu(btn, sessionId, turnIndex, userText);
+  });
+  row.appendChild(btn);
+}
+
+// ─── Per-turn fork / rewind menu ─────────────────────────────────────────────
+// A small body-appended popup anchored to a turn's ↺ button, offering the two
+// conversation-branch actions. Dismissed on outside click / Escape / scroll /
+// resize (capture-phase so a stopPropagation'd app click can't keep it open).
+let _turnMenuEl = null;
+function closeTurnMenu() {
+  if (_turnMenuEl) { _turnMenuEl.remove(); _turnMenuEl = null; }
+  document.removeEventListener("click", _turnMenuDismiss, true);
+  document.removeEventListener("contextmenu", _turnMenuDismiss, true);
+  document.removeEventListener("keydown", _turnMenuKey, true);
+  window.removeEventListener("scroll", closeTurnMenu, true);
+  window.removeEventListener("resize", closeTurnMenu, true);
+}
+function _turnMenuDismiss(e) { if (_turnMenuEl && !_turnMenuEl.contains(e.target)) closeTurnMenu(); }
+function _turnMenuKey(e) { if (e.key === "Escape") closeTurnMenu(); }
+
+function openTurnMenu(anchor, sessionId, turnIndex, userText) {
+  closeTurnMenu();
+  const menu = document.createElement("div");
+  menu.className = "turn-menu";
+  const items = [
+    ["Fork conversation from here", () => forkConversation(sessionId, turnIndex, userText)],
+    ["Rewind conversation to here", () => rewindConversation(sessionId, turnIndex, userText)],
+  ];
+  for (const [label, action] of items) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "turn-menu-item";
+    b.textContent = label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); closeTurnMenu(); action(); });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  // Position below the button, right-aligned to it, clamped to the viewport.
+  const r = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8));
+  let top = r.bottom + 4;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+  _turnMenuEl = menu;
+  setTimeout(() => {
+    document.addEventListener("click", _turnMenuDismiss, true);
+    document.addEventListener("contextmenu", _turnMenuDismiss, true);
+    document.addEventListener("keydown", _turnMenuKey, true);
+    window.addEventListener("scroll", closeTurnMenu, true);
+    window.addEventListener("resize", closeTurnMenu, true);
+  }, 0);
+}
+
+// prefillComposer drops `text` into a pane's composer (only when it is empty, so
+// a half-typed message is never clobbered) and focuses it — used after rewind /
+// fork so the dropped user message is ready to edit & resend.
+function prefillComposer(panel, text) {
+  if (!panel || !panel.els || !panel.els.prompt || !text) return;
+  const el = panel.els.prompt;
+  if (el.value.trim()) { el.focus(); return; }
+  el.value = text;
+  el.focus();
+  el.setSelectionRange(el.value.length, el.value.length);
+  el.dispatchEvent(new Event("input")); // refresh ref highlight + auto-grow
+}
+
+// rewindConversation truncates the live session to before `turnIndex` (dropping
+// that turn and everything after), reseeds the model context server-side, then
+// re-renders the transcript and pre-fills the composer with the dropped message.
+async function rewindConversation(sessionId, turnIndex, userText) {
+  const ok = await uiConfirm({
+    title: "Rewind conversation",
+    message: "This permanently removes this turn and everything after it from this conversation. Earlier turns are kept and the model's memory is rewound to match. Continue?",
+    confirmText: "Rewind",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/rewind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turn_index: turnIndex }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || "Rewind failed", "err");
+      return;
+    }
+    await rerenderSessionFromHistory(sessionId);
+    for (const p of panelsForSession(sessionId)) prefillComposer(p, userText);
+    loadSessions(); // refresh sidebar turn counter
+  } catch (e) {
+    console.error("rewind failed:", e);
+    showToast("Rewind failed", "err");
+  }
+}
+
+// forkConversation branches a new session from before `turnIndex`, opens it in
+// the focused pane, and pre-fills its composer with the dropped message so the
+// user can try a different continuation. The source session is left untouched.
+async function forkConversation(sessionId, turnIndex, userText) {
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turn_index: turnIndex }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || "Fork failed", "err");
+      return;
+    }
+    const data = await res.json();
+    await loadSessions();
+    await selectSession(data.session_id);
+    const p = panelsWithTab(data.session_id)[0];
+    if (p) prefillComposer(p, data.dropped_user_text || userText || "");
+    showToast("Forked conversation", "info");
+  } catch (e) {
+    console.error("fork failed:", e);
+    showToast("Fork failed", "err");
+  }
 }
 
 // applyUserBubbleTruncation clamps long user messages to ~3 lines and adds a
@@ -4468,8 +4621,9 @@ async function activateTab(panel, key) {
       container.appendChild(row);
       return;
     }
-    for (const turn of turns) {
-      appendUserBubble(turn.user_text, container);
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i];
+      appendUserBubble(turn.user_text, container, null, i);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turn.assistant_text);
       setReplyTime(bubble, turn.duration_ms);
@@ -4694,6 +4848,14 @@ async function subscribeGlobalEvents() {
         } else if (event === "session_renamed" && sid) {
           // Title changed elsewhere — re-render the sidebar to pick it up.
           loadSessions();
+        } else if (event === "session_rewound" && sid) {
+          // The session was rewound (here or in another browser) — rebuild the
+          // truncated transcript from history. Idempotent on the originator,
+          // which already re-rendered after its own POST. Skip while a turn is
+          // streaming locally so we don't wipe an in-progress reply.
+          if (!sessionSending.has(sid) && panelsWithTab(sid).length > 0) {
+            rerenderSessionFromHistory(sid);
+          }
         }
       }
     } catch (e) {
@@ -4879,8 +5041,9 @@ async function rerenderSessionFromHistory(sessionId) {
     const turns = data.turns || [];
     const container = getContainer(sessionId);
     container.innerHTML = "";
-    for (const t of turns) {
-      appendUserBubble(t.user_text, container);
+    for (let i = 0; i < turns.length; i++) {
+      const t = turns[i];
+      appendUserBubble(t.user_text, container, null, i);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, t.assistant_text);
       setReplyTime(bubble, t.duration_ms);
@@ -4909,7 +5072,7 @@ async function appendNewPushTurns(sessionId) {
     if (placeholder) placeholder.remove();
 
     for (let i = rendered; i < turns.length; i++) {
-      appendUserBubble(turns[i].user_text, container);
+      appendUserBubble(turns[i].user_text, container, null, i);
       const bubble = appendAssistantBubble(container);
       renderMarkdown(bubble, turns[i].assistant_text);
       setReplyTime(bubble, turns[i].duration_ms);
@@ -5013,8 +5176,10 @@ async function sendMessage(panel) {
   // their on-disk paths if the user mentions them in the prompt).
   const filePaths = files.map(f => f.path);
 
-  // Insert the user message into the transcript before streaming starts.
-  appendUserBubble(prompt, container, files.length > 0 ? files : null);
+  // Insert the user message into the transcript before streaming starts. The
+  // new turn's index is the count of turns already persisted for this session.
+  const newTurnIndex = sessionTurnCounts.get(sessionId) ?? 0;
+  appendUserBubble(prompt, container, files.length > 0 ? files : null, newTurnIndex);
   scrollBottom(panel, true);
   panel.els.prompt.value = "";
   autoGrowPrompt(panel);

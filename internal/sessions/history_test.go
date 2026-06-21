@@ -272,6 +272,117 @@ func TestCorruptConversationFileQuarantined(t *testing.T) {
 	}
 }
 
+// TestTruncateConversationTurns rewinds a session to its first N turns and
+// verifies the dropped turns are gone on disk, the kept turns are returned, and
+// out-of-range keeps are clamped (no-op for keep≥len, empty for keep≤0).
+func TestTruncateConversationTurns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("YOKE_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	const sid = "rewind-test"
+	for i := 0; i < 5; i++ {
+		if err := AppendConversationTurn(sid, "u", "a"); err != nil {
+			t.Fatalf("AppendConversationTurn: %v", err)
+		}
+	}
+
+	// Rewind to the first 2 turns.
+	kept, err := TruncateConversationTurns(sid, 2)
+	if err != nil {
+		t.Fatalf("TruncateConversationTurns: %v", err)
+	}
+	if len(kept) != 2 {
+		t.Fatalf("returned %d kept turns, want 2", len(kept))
+	}
+	turns, err := LoadConversationTurns(sid)
+	if err != nil {
+		t.Fatalf("LoadConversationTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("on-disk turns = %d after rewind to 2, want 2", len(turns))
+	}
+
+	// keep ≥ len is a no-op.
+	if kept, _ := TruncateConversationTurns(sid, 99); len(kept) != 2 {
+		t.Fatalf("clamp high: kept %d, want 2", len(kept))
+	}
+	// keep ≤ 0 empties the history.
+	if kept, _ := TruncateConversationTurns(sid, -1); len(kept) != 0 {
+		t.Fatalf("clamp low: kept %d, want 0", len(kept))
+	}
+	if turns, _ := LoadConversationTurns(sid); len(turns) != 0 {
+		t.Fatalf("on-disk turns = %d after empty rewind, want 0", len(turns))
+	}
+}
+
+// TestForkConversation seeds a new conversation file from the first N turns of a
+// source, inheriting its squad, and verifies the source is left untouched.
+func TestForkConversation(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("YOKE_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	const src = "fork-src"
+	if err := SetConversationSquad(src, "research"); err != nil {
+		t.Fatalf("SetConversationSquad: %v", err)
+	}
+	for i := 0; i < 4; i++ {
+		if err := AppendConversationTurn(src, "u", "a"); err != nil {
+			t.Fatalf("AppendConversationTurn: %v", err)
+		}
+	}
+
+	const dst = "fork-dst"
+	kept, err := ForkConversation(src, dst, "Fork of fork-src", 3)
+	if err != nil {
+		t.Fatalf("ForkConversation: %v", err)
+	}
+	if len(kept) != 3 {
+		t.Fatalf("returned %d kept turns, want 3", len(kept))
+	}
+
+	// The fork holds 3 turns, the inherited squad, and the title.
+	f, err := LoadConversationFile(dst)
+	if err != nil {
+		t.Fatalf("LoadConversationFile(dst): %v", err)
+	}
+	if len(f.Turns) != 3 {
+		t.Fatalf("fork turns = %d, want 3", len(f.Turns))
+	}
+	if f.Squad != "research" {
+		t.Fatalf("fork squad = %q, want research", f.Squad)
+	}
+	if f.Title != "Fork of fork-src" {
+		t.Fatalf("fork title = %q", f.Title)
+	}
+
+	// The source is untouched (still 4 turns).
+	if turns, _ := LoadConversationTurns(src); len(turns) != 4 {
+		t.Fatalf("source turns = %d after fork, want 4 (untouched)", len(turns))
+	}
+}
+
+// TestRegistrySetTurns verifies the sidebar turn counter override and the
+// missing-session case returns false.
+func TestRegistrySetTurns(t *testing.T) {
+	reg := NewEmptyRegistry()
+	m := reg.New("")
+	if !reg.SetTurns(m.ID, 7) {
+		t.Fatalf("SetTurns(existing) = false, want true")
+	}
+	if got, _ := reg.Get(m.ID); got == nil || got.Turns != 7 {
+		t.Fatalf("Turns = %v, want 7", got)
+	}
+	if reg.SetTurns("does-not-exist", 1) {
+		t.Fatalf("SetTurns(missing) = true, want false")
+	}
+}
+
 // TestRegistrySetArchived verifies the in-memory flag toggles and the missing
 // session case returns false.
 func TestRegistrySetArchived(t *testing.T) {
