@@ -188,22 +188,11 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed .update-btn { display: none; }
 
 .app-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
   color: var(--text-strong);
-}
-/* The "O" of OMNIS is rendered as the app logo mark (transparent, inherits
-   the title colour via stroke="currentColor" so it adapts to every theme). */
-.app-logo {
-  width: 28px;
-  height: 28px;
-  display: block;
-  flex-shrink: 0;
 }
 
 #sidebar-toggle {
