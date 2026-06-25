@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/omnis/agent"
 )
 
 // registerAgentMetaRoutes mounts read-only endpoints that expose static

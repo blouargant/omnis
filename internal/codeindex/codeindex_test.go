@@ -48,7 +48,7 @@ func writeFile(t *testing.T, dir, rel, content string) {
 
 func TestReindexAndSearch(t *testing.T) {
 	repo := t.TempDir()
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeFile(t, repo, "mcp/pool.go", "package mcp\n// dedup mcp servers by command hash\nfunc Dedup() {}\n")
 	writeFile(t, repo, "perm/grant.go", "package perm\n// permission grant scopes\nfunc Grant() {}\n")
 
@@ -77,7 +77,7 @@ func TestReindexAndSearch(t *testing.T) {
 
 func TestIncrementalReindex(t *testing.T) {
 	repo := t.TempDir()
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeFile(t, repo, "a.go", "package a\n// mcp stuff\n")
 	idx, err := Open(repo, fakeEmbedder{})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestIncrementalReindex(t *testing.T) {
 
 func TestIndexesTextSkipsBinary(t *testing.T) {
 	repo := t.TempDir()
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	// An extension not on any allow-list (would have been skipped before) and
 	// an extensionless file: both are plain text and must be indexed.
 	writeFile(t, repo, "app.vue", "<template><!-- mcp dedup --></template>\n")

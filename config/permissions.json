@@ -71,7 +71,7 @@
         "tools": ["Bash"]
       },
       {
-        "regex": "(?i)^(write|edit|revert) .*\"file_path\"\\s*:\\s*\"(/etc/yoke/|/etc/passwd|/etc/shadow|/etc/sudoers)",
+        "regex": "(?i)^(write|edit|revert) .*\"file_path\"\\s*:\\s*\"(/etc/omnis/|/etc/passwd|/etc/shadow|/etc/sudoers)",
         "reason": "writing to system config from a tool is forbidden — use the web UI editor"
       },
       {

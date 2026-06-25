@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build per-platform ``yoke-agent`` wheels by repackaging cross-compiled binaries.
+"""Build per-platform ``omnis-agent`` wheels by repackaging cross-compiled binaries.
 
 Because the Go binaries are ``CGO_ENABLED=0`` static builds, every platform wheel
-can be produced on a single host: for each target we cross-compile ``yoke`` and
-``yoke-server``, stage them next to the bundled config/registry/web tree under
-``packaging/pip/src/yoke/_dist``, and run ``setup.py bdist_wheel --plat-name``
+can be produced on a single host: for each target we cross-compile ``omnis`` and
+``omnis-server``, stage them next to the bundled config/registry/web tree under
+``packaging/pip/src/omnis/_dist``, and run ``setup.py bdist_wheel --plat-name``
 with the matching PEP 425 platform tag. Wheels land in ``dist/wheels``.
 
 Usage:
@@ -25,7 +25,7 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PIP_DIR = os.path.join(REPO_ROOT, "packaging", "pip")
-PKG_DIR = os.path.join(PIP_DIR, "src", "yoke")
+PKG_DIR = os.path.join(PIP_DIR, "src", "omnis")
 DIST_STAGE = os.path.join(PKG_DIR, "_dist")
 WHEELS_OUT = os.path.join(REPO_ROOT, "dist", "wheels")
 
@@ -39,7 +39,7 @@ PLATFORMS = {
     "windows/arm64": "win_arm64",
 }
 
-# Config JSONs + server.yaml seeded into ~/.yoke and exposed as the system layer.
+# Config JSONs + server.yaml seeded into ~/.omnis and exposed as the system layer.
 CONFIG_FILES = [
     "agents.json",
     "models.json",
@@ -143,7 +143,7 @@ def build_binaries(goos, goarch, version, commit, date):
     ])
     env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
     ext = ".exe" if goos == "windows" else ""
-    targets = [("yoke", "."), ("yoke-server", "./server")]
+    targets = [("omnis", "."), ("omnis-server", "./server")]
     for binname, pkg in targets:
         out = os.path.join(DIST_STAGE, "bin", binname + ext)
         run(
@@ -155,9 +155,9 @@ def build_binaries(goos, goarch, version, commit, date):
 
 
 def build_wheel(plat_tag, wheel_version):
-    env = dict(os.environ, YOKE_WHEEL_VERSION=wheel_version)
+    env = dict(os.environ, OMNIS_WHEEL_VERSION=wheel_version)
     # Clean stale build state so a prior target's files can't leak in.
-    for junk in ("build", "yoke_agent.egg-info"):
+    for junk in ("build", "omnis_agent.egg-info"):
         shutil.rmtree(os.path.join(PIP_DIR, junk), ignore_errors=True)
     run(
         [
@@ -196,7 +196,7 @@ def main(argv):
 
     # Leave a clean tree behind.
     shutil.rmtree(DIST_STAGE, ignore_errors=True)
-    for junk in ("build", "yoke_agent.egg-info"):
+    for junk in ("build", "omnis_agent.egg-info"):
         shutil.rmtree(os.path.join(PIP_DIR, junk), ignore_errors=True)
 
     print(">> built {} wheel(s) into {}:".format(len(built), WHEELS_OUT))

@@ -27,7 +27,7 @@ Each agent references a model by its profile name via `model_ref` in
 
 `base_url` and `api_key` are resolved as env-var names first (see
 Configuration). Override leader credentials at runtime with
-`YOKE_PROVIDER`, `YOKE_MODEL`, `YOKE_BASE_URL`, `YOKE_API_KEY`. The
+`OMNIS_PROVIDER`, `OMNIS_MODEL`, `OMNIS_BASE_URL`, `OMNIS_API_KEY`. The
 provider-specific env vars `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `GOOGLE_API_KEY` are also recognised.
 

@@ -6,7 +6,7 @@ This document maps the codebase and explains how the pieces interact.
 
 ```
                       ┌────────────────────────────────────┐
-                      │        yoke (root)        │
+                      │        omnis (root)        │
                       │  (launcher: REPL or web UI)        │
                       └─────────────────┬──────────────────┘
                                         │ wires
@@ -55,7 +55,7 @@ This document maps the codebase and explains how the pieces interact.
 ### 1. Provider layer — `core/llm`
 
 A tiny dispatcher that selects a `model.LLM` implementation based on
-`YOKE_PROVIDER`. Adapters for Anthropic and OpenAI live in this
+`OMNIS_PROVIDER`. Adapters for Anthropic and OpenAI live in this
 package and speak HTTP+SSE directly — no third-party SDK is pulled in.
 See [providers.md](providers.md).
 
@@ -285,7 +285,7 @@ The whole mechanism is host-side and config-driven (`agent/routing.go`):
   (a clarifying question) and is shown. The only visible routing signal is
   the routing chip / "── routed to X squad ──" line.
 - **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
-  `YOKE_ROUTER_SQUAD`) names the router squad — **absent ⇒ defaults to
+  `OMNIS_ROUTER_SQUAD`) names the router squad — **absent ⇒ defaults to
   `omnis`**, `"none"` disables (new chats then start on `default`). When a
   config doesn't declare them, `ensureRouterSquad` injects the `omnis`
   agent (registry definition if present, else a built-in instruction,

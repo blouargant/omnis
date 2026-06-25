@@ -31,12 +31,12 @@ func TestSemverNewer(t *testing.T) {
 
 func TestAssetFor(t *testing.T) {
 	assets := []ghAsset{
-		{Name: "yoke_1.2.3_Linux_x86_64.deb", URL: "u-deb-amd64"},
-		{Name: "yoke_1.2.3_Linux_arm64.deb", URL: "u-deb-arm64"},
-		{Name: "yoke-1.2.3.x86_64.rpm", URL: "u-rpm-amd64"},
-		{Name: "yoke-1.2.3.aarch64.rpm", URL: "u-rpm-arm64"},
-		{Name: "yoke_1.2.3_windows_amd64.msi", URL: "u-msi"},
-		{Name: "yoke_1.2.3_Linux_x86_64.tar.gz", URL: "u-tar"},
+		{Name: "omnis_1.2.3_Linux_x86_64.deb", URL: "u-deb-amd64"},
+		{Name: "omnis_1.2.3_Linux_arm64.deb", URL: "u-deb-arm64"},
+		{Name: "omnis-1.2.3.x86_64.rpm", URL: "u-rpm-amd64"},
+		{Name: "omnis-1.2.3.aarch64.rpm", URL: "u-rpm-arm64"},
+		{Name: "omnis_1.2.3_windows_amd64.msi", URL: "u-msi"},
+		{Name: "omnis_1.2.3_Linux_x86_64.tar.gz", URL: "u-tar"},
 	}
 
 	// brew/pip have no downloadable asset.
@@ -67,7 +67,7 @@ func TestAssetFor(t *testing.T) {
 
 func TestDetectMethodPaths(t *testing.T) {
 	// pip detection is path-based and platform-independent.
-	if m := DetectMethod("/home/u/.local/lib/python3.11/site-packages/yoke/_dist/bin/yoke-server"); m != MethodPip {
+	if m := DetectMethod("/home/u/.local/lib/python3.11/site-packages/omnis/_dist/bin/omnis-server"); m != MethodPip {
 		t.Errorf("pip path detected as %v", m)
 	}
 	if m := DetectMethod(""); m != MethodUnknown {

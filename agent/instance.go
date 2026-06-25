@@ -20,7 +20,7 @@ import (
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/tool"
 
-	fstools "github.com/blouargant/yoke/core/tools"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 // Instance is one fully-wired agent generation. It owns the set of

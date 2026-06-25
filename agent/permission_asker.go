@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/permissions"
-	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/omnis/core/permissions"
+	"github.com/blouargant/omnis/internal/askuser"
 )
 
 const askUserCmdSnippetMax = 1200

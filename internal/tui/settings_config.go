@@ -11,7 +11,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // configTab is one Settings tab backed by a single JSON config file on

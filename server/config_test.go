@@ -12,19 +12,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
-// seedConfigFile pins $YOKE_HOME at a fresh temp directory and writes the
+// seedConfigFile pins $OMNIS_HOME at a fresh temp directory and writes the
 // given config under paths.ConfigWriteDir() so that the editor's read path
 // (FindConfig) and write path (ConfigWriteDir) point at the same file.
 // Returns the file's absolute path.
 func seedConfigFile(t *testing.T, filename, content string) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", home)
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", home)
 	p := filepath.Join(home, filename)
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func seedConfigFile(t *testing.T, filename, content string) string {
 	return p
 }
 
-// editorFiles returns a configFiles populated from $YOKE_HOME so editor
+// editorFiles returns a configFiles populated from $OMNIS_HOME so editor
 // handlers resolve read/write paths under the test's pinned home.
 func editorFiles() configFiles {
 	return configFiles{
@@ -45,11 +45,11 @@ func editorFiles() configFiles {
 func newTestEngine(t *testing.T, files configFiles) *gin.Engine {
 	t.Helper()
 	// Belt-and-braces: every test using the config editor gets its own
-	// $YOKE_HOME so a misaligned readPath/writePath (a regression bug)
-	// can never write into the developer's real $HOME/.yoke. seedConfigFile
+	// $OMNIS_HOME so a misaligned readPath/writePath (a regression bug)
+	// can never write into the developer's real $HOME/.omnis. seedConfigFile
 	// already does this; this defends every other test path.
-	if os.Getenv("YOKE_HOME") == "" {
-		t.Setenv("YOKE_HOME", t.TempDir())
+	if os.Getenv("OMNIS_HOME") == "" {
+		t.Setenv("OMNIS_HOME", t.TempDir())
 	}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -292,7 +292,7 @@ func TestHooksParsedRoundTrip(t *testing.T) {
 
 // localProjectSetup chdirs into a fresh temp dir, creates a project-local
 // configuration directory there (.agents/ or agents/, per dirName), and pins
-// $YOKE_HOME at a separate temp so the editor's read/write resolution can
+// $OMNIS_HOME at a separate temp so the editor's read/write resolution can
 // pick between the two layers. Returns (projectRoot, localDir, home).
 func localProjectSetup(t *testing.T, dirName string) (string, string, string) {
 	t.Helper()
@@ -310,8 +310,8 @@ func localProjectSetup(t *testing.T, dirName string) (string, string, string) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
 	return proj, local, home
 }
 
@@ -359,7 +359,7 @@ func TestLayerAwareWrite_AgentsConfigLocalOnlySkill(t *testing.T) {
 			if _, err := os.Stat(localPath); err != nil {
 				t.Fatalf("expected %s, stat err=%v", localPath, err)
 			}
-			// $YOKE_HOME must remain untouched.
+			// $OMNIS_HOME must remain untouched.
 			if _, err := os.Stat(filepath.Join(home, "agents.json")); err == nil {
 				t.Fatalf("user-layer agents.json should not exist")
 			}

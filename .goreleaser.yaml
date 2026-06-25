@@ -1,14 +1,14 @@
 version: 2
 
-project_name: yoke
+project_name: omnis
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: yoke
-    binary: yoke
+  - id: omnis
+    binary: omnis
     main: .
     env:
       - CGO_ENABLED=0
@@ -30,8 +30,8 @@ builds:
       - amd64
       - arm64
 
-  - id: yoke-server
-    binary: yoke-server
+  - id: omnis-server
+    binary: omnis-server
     main: ./server
     env:
       - CGO_ENABLED=0
@@ -56,8 +56,8 @@ builds:
 archives:
   - id: default
     ids:
-      - yoke
-      - yoke-server
+      - omnis
+      - omnis-server
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_
       {{- title .Os }}_
@@ -92,21 +92,21 @@ archives:
 
 nfpms:
   - id: linux-packages
-    package_name: yoke
+    package_name: omnis
     ids:
-      - yoke
-      - yoke-server
+      - omnis
+      - omnis-server
     file_name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else }}{{ .Arch }}{{ end }}
     vendor: Bertrand Louargant
-    homepage: https://github.com/blouargant/yoke
+    homepage: https://github.com/blouargant/omnis
     maintainer: Bertrand Louargant <blouargant@chapsvision.fr>
     description: |-
-      Yoke - multi-agent harness providing a CLI/TUI/REPL (yoke) and an
-      HTTP API + Web UI server (yoke-server). The same binary becomes a
+      Omnis - multi-agent harness providing a CLI/TUI/REPL (omnis) and an
+      HTTP API + Web UI server (omnis-server). The same binary becomes a
       code reviewer, Kubernetes triage assistant, or DBA helper purely by
       mounting different tools, skills, and MCP servers.
     license: MIT
@@ -121,91 +121,91 @@ nfpms:
 
     contents:
       # Editable configuration (preserved on upgrade).
-      # Config files install under /etc/yoke/ — the system layer of the
-      # 3-tier search chain (.agents > $HOME/.yoke > /etc/yoke). The
-      # agent/skill registries live under /etc/yoke/registry/ (see below).
+      # Config files install under /etc/omnis/ — the system layer of the
+      # 3-tier search chain (.agents > $HOME/.omnis > /etc/omnis). The
+      # agent/skill registries live under /etc/omnis/registry/ (see below).
       - src: config/agents.json
-        dst: /etc/yoke/agents.json
+        dst: /etc/omnis/agents.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/models.json
-        dst: /etc/yoke/models.json
+        dst: /etc/omnis/models.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/mcp_config.json
-        dst: /etc/yoke/mcp_config.json
+        dst: /etc/omnis/mcp_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/permissions.json
-        dst: /etc/yoke/permissions.json
+        dst: /etc/omnis/permissions.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/preferences.json
-        dst: /etc/yoke/preferences.json
+        dst: /etc/omnis/preferences.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/remote_registries.json
-        dst: /etc/yoke/remote_registries.json
+        dst: /etc/omnis/remote_registries.json
         type: "config|noreplace"
         file_info:
           mode: 0644
-      - src: packaging/etc-yoke/server.yaml
-        dst: /etc/yoke/server.yaml
+      - src: packaging/etc-omnis/server.yaml
+        dst: /etc/omnis/server.yaml
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/a2a_config.json
-        dst: /etc/yoke/a2a_config.json
+        dst: /etc/omnis/a2a_config.json
         type: "config|noreplace"
         file_info:
           mode: 0644
       - src: config/filters/*.json
-        dst: /etc/yoke/filters/
+        dst: /etc/omnis/filters/
         type: "config|noreplace"
         file_info:
           mode: 0644
 
-      # Login-shell env defaults (YOKE_CONFIG_PATH, YOKE_WEB_DIR).
-      - src: packaging/profile.d/yoke.sh
-        dst: /etc/profile.d/yoke.sh
+      # Login-shell env defaults (OMNIS_CONFIG_PATH, OMNIS_WEB_DIR).
+      - src: packaging/profile.d/omnis.sh
+        dst: /etc/profile.d/omnis.sh
         file_info:
           mode: 0644
 
       # Bundled agent definitions, skill playbooks and Web UI assets (read-only).
       # `type: tree` preserves the directory structure under src.
       - src: registry/agents
-        dst: /etc/yoke/registry/agents
+        dst: /etc/omnis/registry/agents
         type: tree
       - src: registry/skills
-        dst:  /etc/yoke/registry/skills
+        dst:  /etc/omnis/registry/skills
         type: tree
       - src: web
-        dst: /usr/share/yoke/web
+        dst: /usr/share/omnis/web
         type: tree
 
       # Mutable curator output — owned by root but world-writable so any
-      # local user running `yoke` can let the curator persist soft-skills.
-      - dst: /var/lib/yoke/softskills
+      # local user running `omnis` can let the curator persist soft-skills.
+      - dst: /var/lib/omnis/softskills
         type: dir
         file_info:
           mode: 0777
 
       # Documentation.
       - src: LICENSE
-        dst: /usr/share/doc/yoke/LICENSE
+        dst: /usr/share/doc/omnis/LICENSE
         file_info:
           mode: 0644
       - src: README.md
-        dst: /usr/share/doc/yoke/README.md
+        dst: /usr/share/doc/omnis/README.md
         file_info:
           mode: 0644
       - src: docs
-        dst: /usr/share/doc/yoke/docs
+        dst: /usr/share/doc/omnis/docs
         type: tree
 
     overrides:
@@ -217,7 +217,7 @@ nfpms:
         recommends: []
 
 brews:
-  - name: yoke
+  - name: omnis
     # Source the macOS/Linux archive (binaries + bundled config/web/registry).
     ids:
       - default
@@ -228,26 +228,26 @@ brews:
       # PAT with write access to blouargant/homebrew-tap, exposed in CI.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/blouargant/yoke"
-    description: "Multi-agent harness: CLI/TUI (yoke) + HTTP API & Web UI server (yoke-server)"
+    homepage: "https://github.com/blouargant/omnis"
+    description: "Multi-agent harness: CLI/TUI (omnis) + HTTP API & Web UI server (omnis-server)"
     license: "MIT"
     # Never publish a formula from rc/beta pre-release tags.
     skip_upload: auto
     install: |
       # Keep the real binaries in libexec; expose env-injecting wrappers on
-      # PATH so yoke finds the bundled web assets + config without the user
-      # setting anything. YOKE_SYSTEM_CONFIG_DIR relocates only the system
-      # layer of the config search chain, leaving ./.agents and ~/.yoke intact.
-      libexec.install "yoke", "yoke-server"
-      (bin/"yoke").write_env_script libexec/"yoke",
-        YOKE_WEB_DIR:           pkgshare/"web",
-        YOKE_SYSTEM_CONFIG_DIR: pkgshare
-      (bin/"yoke-server").write_env_script libexec/"yoke-server",
-        YOKE_WEB_DIR:           pkgshare/"web",
-        YOKE_SYSTEM_CONFIG_DIR: pkgshare
+      # PATH so omnis finds the bundled web assets + config without the user
+      # setting anything. OMNIS_SYSTEM_CONFIG_DIR relocates only the system
+      # layer of the config search chain, leaving ./.agents and ~/.omnis intact.
+      libexec.install "omnis", "omnis-server"
+      (bin/"omnis").write_env_script libexec/"omnis",
+        OMNIS_WEB_DIR:           pkgshare/"web",
+        OMNIS_SYSTEM_CONFIG_DIR: pkgshare
+      (bin/"omnis-server").write_env_script libexec/"omnis-server",
+        OMNIS_WEB_DIR:           pkgshare/"web",
+        OMNIS_SYSTEM_CONFIG_DIR: pkgshare
 
       # Bundled defaults, refreshed on every `brew upgrade`. User overrides
-      # live in ~/.yoke (higher precedence) so upgrades never clobber them.
+      # live in ~/.omnis (higher precedence) so upgrades never clobber them.
       pkgshare.install "web"
       pkgshare.install "registry"
       pkgshare.install Dir["config/*.json"]
@@ -255,27 +255,27 @@ brews:
       (pkgshare/"filters").install Dir["config/filters/*.json"]
     caveats: |
       Bundled agents, skills and the Web UI install under
-        #{HOMEBREW_PREFIX}/share/yoke
+        #{HOMEBREW_PREFIX}/share/omnis
       and are refreshed on every `brew upgrade`. Put your own overrides in
-        ~/.yoke   (e.g. ~/.yoke/agents.json, ~/.yoke/models.json)
+        ~/.omnis   (e.g. ~/.omnis/agents.json, ~/.omnis/models.json)
       which take precedence over the bundled defaults.
 
       Set a provider API key before first run, e.g.:
         export ANTHROPIC_API_KEY=sk-...
 
       Run the Web UI / HTTP API server (listens on :8080, unauthenticated by
-      default — set YOKE_SERVER_TOKEN to require a bearer token):
-        yoke-server
+      default — set OMNIS_SERVER_TOKEN to require a bearer token):
+        omnis-server
       or as a background service:
-        brew services start yoke
+        brew services start omnis
     service: |
-      run [opt_bin/"yoke-server"]
+      run [opt_bin/"omnis-server"]
       keep_alive true
-      log_path var/"log/yoke-server.log"
-      error_log_path var/"log/yoke-server.log"
+      log_path var/"log/omnis-server.log"
+      error_log_path var/"log/omnis-server.log"
       working_dir var
     test: |
-      system bin/"yoke", "version"
+      system bin/"omnis", "version"
 
 checksum:
   name_template: "checksums.txt"

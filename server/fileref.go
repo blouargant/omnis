@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/fileref"
-	"github.com/blouargant/yoke/internal/shellcomplete"
+	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/shellcomplete"
 )
 
 // handleCompleteFile returns filesystem completion candidates for the `path`

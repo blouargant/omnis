@@ -1,4 +1,4 @@
-/* yoke web UI — Settings panel styles.
+/* omnis web UI — Settings panel styles.
  *
  * This file is a thin barrel: the actual rules live in feature partials under
  * web/css/settings/ and are pulled in below with @import. Edit the partials,

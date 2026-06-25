@@ -9,7 +9,7 @@ import (
 func TestDefaultAgentInstructionEmbedded(t *testing.T) {
 	// Set up a temp registry with instruction files.
 	dir := t.TempDir()
-	t.Setenv("YOKE_HOME", dir)
+	t.Setenv("OMNIS_HOME", dir)
 	registryDir := filepath.Join(dir, "registry", "agents")
 	if err := os.MkdirAll(registryDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", registryDir, err)

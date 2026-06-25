@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/internal/selfupdate"
+	"github.com/blouargant/omnis/internal/selfupdate"
 	"github.com/gin-gonic/gin"
 )
 
@@ -41,12 +41,12 @@ func (u *updateState) set(st selfupdate.UpdateStatus) {
 
 // updateCheckEnabled reports whether the background poller should run. It is off
 // for "dev" builds (no real version to compare) and can be disabled explicitly
-// via YOKE_UPDATE_CHECK=false.
+// via OMNIS_UPDATE_CHECK=false.
 func updateCheckEnabled(currentVersion string) bool {
 	if currentVersion == "" || currentVersion == "dev" {
 		return false
 	}
-	if v := os.Getenv("YOKE_UPDATE_CHECK"); v != "" {
+	if v := os.Getenv("OMNIS_UPDATE_CHECK"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
@@ -55,10 +55,10 @@ func updateCheckEnabled(currentVersion string) bool {
 }
 
 // updateInterval is how often the poller re-checks GitHub. Default 6h; override
-// with YOKE_UPDATE_INTERVAL (Go duration). Values below 1m are clamped up.
+// with OMNIS_UPDATE_INTERVAL (Go duration). Values below 1m are clamped up.
 func updateInterval() time.Duration {
 	d := 6 * time.Hour
-	if v := os.Getenv("YOKE_UPDATE_INTERVAL"); v != "" {
+	if v := os.Getenv("OMNIS_UPDATE_INTERVAL"); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
 			d = parsed
 		}

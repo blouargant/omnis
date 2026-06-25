@@ -1,7 +1,7 @@
 # MCP Servers
 
 The **Model Context Protocol** (MCP) is an open standard for exposing tools
-to LLM agents over a subprocess or remote transport. Yoke can mount any MCP
+to LLM agents over a subprocess or remote transport. Omnis can mount any MCP
 server alongside its built-in tools — the agent treats them as ordinary
 function calls.
 
@@ -37,7 +37,7 @@ same input. The answer is never persisted to disk.
 ## Server dependencies (auto-install)
 
 A stdio server depends on its `command` being installed (often a runner such as
-`npx` or `uvx`). Declare those as **dependencies** so yoke installs them — with
+`npx` or `uvx`). Declare those as **dependencies** so omnis installs them — with
 your approval — instead of the server silently failing to start. Add a
 `requires` array to the server entry:
 

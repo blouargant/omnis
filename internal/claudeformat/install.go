@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 )
 
-// yokeAgentEntry mirrors the subset of agent.AgentEntry fields that the
+// omnisAgentEntry mirrors the subset of agent.AgentEntry fields that the
 // runtime config loader reads from registry/agents/<name>/agent.json.
 // Defined here so this package does not import the agent package (which
 // would create an import cycle via registries).
-type yokeAgentEntry struct {
+type omnisAgentEntry struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	Tools       []string `json:"tools,omitempty"`
@@ -34,7 +34,7 @@ func InstallAgent(def *AgentDef, agentsRegistryDir string) error {
 		return fmt.Errorf("mkdir %s: %w", agentDir, err)
 	}
 
-	entry := yokeAgentEntry{
+	entry := omnisAgentEntry{
 		Name:        def.Name,
 		Description: def.Description,
 		Tools:       def.Tools,

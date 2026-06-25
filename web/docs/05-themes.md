@@ -1,6 +1,6 @@
 # Appearance & Themes
 
-Yoke ships with a curated set of color themes, applied instantly and persisted
+Omnis ships with a curated set of color themes, applied instantly and persisted
 both client-side (`localStorage`) and server-side (`preferences.json`).
 
 ## Picking a theme

@@ -35,7 +35,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/mcptoolset"
 
-	"github.com/blouargant/yoke/internal/deps"
+	"github.com/blouargant/omnis/internal/deps"
 )
 
 // Transport kind constants for Server.Type.

@@ -4,12 +4,12 @@
       "Bash(go mod *)",
       "Bash(make build *)",
       "Bash(make test *)",
-      "Bash(cat ~/.yoke/config/mcp_config.yaml 2>&1 | head -50)",
-      "Read(//home/bertrand/.yoke/config/**)",
-      "Bash(node --check /home/bertrand/Documents/Dev/yoke/web/settings.js)",
-      "Bash(grep -r \"type Toolset\\\\|interface.*Toolset\" /home/bertrand/Documents/Dev/yoke -name \"*.go\")",
-      "Bash(git -C /home/bertrand/Documents/Dev/yoke mv internal/mcp/secrets.go internal/mcp/inputs.go)",
-      "Bash(git -C /home/bertrand/Documents/Dev/yoke mv internal/mcp/secrets_test.go internal/mcp/inputs_test.go)",
+      "Bash(cat ~/.omnis/config/mcp_config.yaml 2>&1 | head -50)",
+      "Read(//home/bertrand/.omnis/config/**)",
+      "Bash(node --check /home/bertrand/Documents/Dev/omnis/web/settings.js)",
+      "Bash(grep -r \"type Toolset\\\\|interface.*Toolset\" /home/bertrand/Documents/Dev/omnis -name \"*.go\")",
+      "Bash(git -C /home/bertrand/Documents/Dev/omnis mv internal/mcp/secrets.go internal/mcp/inputs.go)",
+      "Bash(git -C /home/bertrand/Documents/Dev/omnis mv internal/mcp/secrets_test.go internal/mcp/inputs_test.go)",
       "Bash(make fmt *)"
     ]
   }

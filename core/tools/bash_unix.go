@@ -31,5 +31,5 @@ func newShellCommand(ctx context.Context, command string) *exec.Cmd {
 // regardless of the command's exit status, and the original status is
 // preserved via the trailing `exit`.
 func wrapCaptureCwd(command string) string {
-	return command + "\n__yoke_rc=$?\nprintf '%s%s\\n' '" + cwdSentinel + "' \"$(pwd)\"\nexit $__yoke_rc"
+	return command + "\n__omnis_rc=$?\nprintf '%s%s\\n' '" + cwdSentinel + "' \"$(pwd)\"\nexit $__omnis_rc"
 }

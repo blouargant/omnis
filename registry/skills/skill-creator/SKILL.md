@@ -37,8 +37,8 @@ Do NOT use this skill when the user just wants to *run* an existing skill.
 4. **Iterate** — incorporate feedback until the user approves the draft.
 
 5. **Write** — save the file using the `Write` tool:
-   - Run `Bash` → `mkdir -p "$HOME/.yoke/registry/skills/<name>"` first.
-   - Write to `$HOME/.yoke/registry/skills/<name>/SKILL.md`.
+   - Run `Bash` → `mkdir -p "$HOME/.omnis/registry/skills/<name>"` first.
+   - Write to `$HOME/.omnis/registry/skills/<name>/SKILL.md`.
 
 6. **Confirm** — tell the user the skill is saved and that they can link it
    to an agent via Settings → Skills in the web UI (or hot-reload picks it up
@@ -50,7 +50,7 @@ Do NOT use this skill when the user just wants to *run* an existing skill.
    call `load_skill` with its name to read the current content.
    If it is not in `list_skills`, locate it via:
    ```
-   Bash: find "$HOME/.yoke/registry/skills" -name SKILL.md
+   Bash: find "$HOME/.omnis/registry/skills" -name SKILL.md
    ```
 
 2. **Show** — display the current content to the user.

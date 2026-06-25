@@ -6,9 +6,9 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
 ## Layout on a packaged Linux install
 
 ```
-/usr/bin/yoke                  CLI / REPL / TUI binary
-/usr/bin/yoke-server           HTTP API + Web UI binary
-/etc/yoke/                     editable configuration (config(noreplace))
+/usr/bin/omnis                  CLI / REPL / TUI binary
+/usr/bin/omnis-server           HTTP API + Web UI binary
+/etc/omnis/                     editable configuration (config(noreplace))
     agents.json                agent list + model profiles + squad layout
     mcp_config.json            MCP server definitions
     permissions.json           tool permission rules
@@ -19,10 +19,10 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     filters/                   bash output filter patterns
     registry/agents/           built-in agent definitions (read-only)
     registry/skills/           bundled skill playbooks (read-only)
-/usr/share/yoke/web/           static UI assets served by yoke-server
-/var/lib/yoke/softskills/      curator-managed soft-skill library (mutable)
-/etc/profile.d/yoke.sh         exports YOKE_CONFIG_PATH and YOKE_WEB_DIR
-/usr/share/doc/yoke/           LICENSE + README.md
+/usr/share/omnis/web/           static UI assets served by omnis-server
+/var/lib/omnis/softskills/      curator-managed soft-skill library (mutable)
+/etc/profile.d/omnis.sh         exports OMNIS_CONFIG_PATH and OMNIS_WEB_DIR
+/usr/share/doc/omnis/           LICENSE + README.md
 ```
 
 Windows is built. The Unix-only process-group syscalls (`Setpgid`, `Kill`)
@@ -30,21 +30,21 @@ that used to block it now live behind build tags in
 [core/tools/bash_unix.go](../core/tools/bash_unix.go); the Windows binary
 compiles its counterpart [core/tools/bash_windows.go](../core/tools/bash_windows.go)
 instead (shell via `cmd.exe /C`, process-tree kill via `taskkill /T /F`).
-`make package` therefore emits a `yoke_<version>_Windows_x86_64.zip` alongside
+`make package` therefore emits a `omnis_<version>_Windows_x86_64.zip` alongside
 the Linux/macOS archives — that zip is the artifact the (forthcoming) WiX MSI
 pipeline will unpack to source the binaries + `web/` assets.
 
 > Caveat: the Bash tool's command strings are POSIX-shell oriented. On native
 > Windows they run under `cmd.exe`, so sh builtins/pipelines may not behave
-> identically — run yoke-server under WSL or Git-Bash if you need bash
+> identically — run omnis-server under WSL or Git-Bash if you need bash
 > semantics. The server, web UI, A2A, and MCP wiring are unaffected.
 
 ## What lives where in this directory
 
-- `etc-yoke/` — the contents of `/etc/yoke/` on a packaged install. The
+- `etc-omnis/` — the contents of `/etc/omnis/` on a packaged install. The
   `agents.json` here mirrors `config/agents.json` with every relative path
   rewritten to its FHS location.
-- `profile.d/yoke.sh` — sourced by login shells; tells both binaries where
+- `profile.d/omnis.sh` — sourced by login shells; tells both binaries where
   to find the system-wide config and web assets.
 
 The `config/filters/` directory and the `skills/`, `web/`, `LICENSE`, and
@@ -58,29 +58,29 @@ macOS is distributed as a **Homebrew formula** published to the
 `.goreleaser.yaml`. Users install with:
 
 ```
-brew install blouargant/tap/yoke
+brew install blouargant/tap/omnis
 ```
 
 Layout on a `brew`-installed Mac (`$(brew --prefix)` is `/opt/homebrew` on
 Apple Silicon, `/usr/local` on Intel):
 
 ```
-$(brew --prefix)/bin/yoke              env-injecting wrapper → libexec/yoke
-$(brew --prefix)/bin/yoke-server       env-injecting wrapper → libexec/yoke-server
-$(brew --prefix)/share/yoke/web/       static Web UI assets
-$(brew --prefix)/share/yoke/registry/  bundled agents + skills
-$(brew --prefix)/share/yoke/*.json     bundled config defaults (agents.json, …)
-$(brew --prefix)/share/yoke/filters/   bash output filter patterns
+$(brew --prefix)/bin/omnis              env-injecting wrapper → libexec/omnis
+$(brew --prefix)/bin/omnis-server       env-injecting wrapper → libexec/omnis-server
+$(brew --prefix)/share/omnis/web/       static Web UI assets
+$(brew --prefix)/share/omnis/registry/  bundled agents + skills
+$(brew --prefix)/share/omnis/*.json     bundled config defaults (agents.json, …)
+$(brew --prefix)/share/omnis/filters/   bash output filter patterns
 ```
 
-Because yoke embeds no defaults (it reads config/registry from disk), the
-formula installs the bundled tree under `share/yoke` and the `bin/` wrappers
-export `YOKE_WEB_DIR` + `YOKE_SYSTEM_CONFIG_DIR` so the binaries find it. The
+Because omnis embeds no defaults (it reads config/registry from disk), the
+formula installs the bundled tree under `share/omnis` and the `bin/` wrappers
+export `OMNIS_WEB_DIR` + `OMNIS_SYSTEM_CONFIG_DIR` so the binaries find it. The
 latter relocates **only** the system layer of the config search chain — user
-overrides in `~/.yoke` (and project-local `.agents/`) keep their higher
+overrides in `~/.omnis` (and project-local `.agents/`) keep their higher
 precedence, so `brew upgrade` refreshes the bundled defaults without ever
-touching user config. `brew services start yoke` runs `yoke-server` via the
-formula's `service` block (unauthenticated unless `YOKE_SERVER_TOKEN` is set).
+touching user config. `brew services start omnis` runs `omnis-server` via the
+formula's `service` block (unauthenticated unless `OMNIS_SERVER_TOKEN` is set).
 
 > Note: `brews` is marked deprecated by goreleaser (which now nudges toward
 > `homebrew_casks`), so `make package-check` reports that deprecation. The
@@ -93,11 +93,11 @@ formula's `service` block (unauthenticated unless `YOKE_SERVER_TOKEN` is set).
 ## Windows — MSI installer
 
 Windows ships a per-machine **MSI** built with the
-[WiX Toolset](https://wixtoolset.org) from [windows/yoke.wxs](windows/yoke.wxs).
+[WiX Toolset](https://wixtoolset.org) from [windows/omnis.wxs](windows/omnis.wxs).
 goreleaser (OSS) can't build MSI, so the `msi` job in
 `.github/workflows/release.yml` runs on a `windows-latest` runner *after* the
 goreleaser `release` job: it downloads the published
-`yoke_<ver>_Windows_x86_64.zip`, stages it, and runs `wix build`. The MSI is
+`omnis_<ver>_Windows_x86_64.zip`, stages it, and runs `wix build`. The MSI is
 attached to the same GitHub Release. It builds on **stable tags only** — MSI
 `ProductVersion` is strictly numeric (`x.y.z.0`) and can't carry an
 `-rcN`/`-betaN` suffix.
@@ -106,13 +106,13 @@ Layout on a packaged Windows install (mirrors the Linux FHS split — binaries +
 static UI read-only, config under the system data dir):
 
 ```
-C:\Program Files\Yoke\yoke.exe          CLI / REPL binary
-C:\Program Files\Yoke\yoke-server.exe   HTTP API + Web UI binary
-C:\Program Files\Yoke\web\              static Web UI assets
-C:\ProgramData\Yoke\*.json             bundled config defaults (agents.json, …)
-C:\ProgramData\Yoke\server.yaml        server listen address, token, A2A settings
-C:\ProgramData\Yoke\filters\           bash output filter patterns
-C:\ProgramData\Yoke\registry\          bundled agents + skills
+C:\Program Files\Omnis\omnis.exe          CLI / REPL binary
+C:\Program Files\Omnis\omnis-server.exe   HTTP API + Web UI binary
+C:\Program Files\Omnis\web\              static Web UI assets
+C:\ProgramData\Omnis\*.json             bundled config defaults (agents.json, …)
+C:\ProgramData\Omnis\server.yaml        server listen address, token, A2A settings
+C:\ProgramData\Omnis\filters\           bash output filter patterns
+C:\ProgramData\Omnis\registry\          bundled agents + skills
 ```
 
 The installer sets three **machine** environment variables so a fresh shell
@@ -120,19 +120,19 @@ finds everything with no user setup:
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `PATH` (appended) | `C:\Program Files\Yoke\` | `yoke` / `yoke-server` on PATH |
-| `YOKE_WEB_DIR` | `C:\Program Files\Yoke\web` | locate the static Web UI |
-| `YOKE_SYSTEM_CONFIG_DIR` | `C:\ProgramData\Yoke` | system layer of the config chain |
+| `PATH` (appended) | `C:\Program Files\Omnis\` | `omnis` / `omnis-server` on PATH |
+| `OMNIS_WEB_DIR` | `C:\Program Files\Omnis\web` | locate the static Web UI |
+| `OMNIS_SYSTEM_CONFIG_DIR` | `C:\ProgramData\Omnis` | system layer of the config chain |
 
-`YOKE_SYSTEM_CONFIG_DIR` relocates **only** the system layer, so per-user
-overrides in `%USERPROFILE%\.yoke` (and project-local `.agents\`) keep their
+`OMNIS_SYSTEM_CONFIG_DIR` relocates **only** the system layer, so per-user
+overrides in `%USERPROFILE%\.omnis` (and project-local `.agents\`) keep their
 higher precedence; the `ProgramData` tree is bundled defaults refreshed on
-upgrade — same model as the Homebrew `share/yoke` tree above.
+upgrade — same model as the Homebrew `share/omnis` tree above.
 
 > Caveats / future work:
-> - **No Windows Service yet.** `yoke-server.exe` isn't SCM-aware
+> - **No Windows Service yet.** `omnis-server.exe` isn't SCM-aware
 >   (`golang.org/x/sys/windows/svc`), so the MSI installs binaries + assets +
->   PATH but doesn't register an auto-start service — run `yoke-server` from a
+>   PATH but doesn't register an auto-start service — run `omnis-server` from a
 >   terminal (or wrap it with NSSM / a Scheduled Task). Adding `svc` support +
 >   a WiX `ServiceInstall` is the natural next step.
 > - **Bash tool** runs under `cmd.exe` on native Windows (see the build-tag
@@ -145,30 +145,30 @@ upgrade — same model as the Homebrew `share/yoke` tree above.
 A per-user, no-root install for anyone with Python 3.8+:
 
 ```
-pip install yoke-agent        # or: pipx install yoke-agent
+pip install omnis-agent        # or: pipx install omnis-agent
 ```
 
-The PyPI distribution is **`yoke-agent`**; the console commands stay `yoke`
-(CLI/TUI/REPL) and `yoke-server` (HTTP API + Web UI). Unlike the `.deb`/`.rpm`
-(config in `/etc/yoke`, needs root), the pip install is per-user: the bundled
-**config + registry are seeded into `~/.yoke`** on first run, so the files are
+The PyPI distribution is **`omnis-agent`**; the console commands stay `omnis`
+(CLI/TUI/REPL) and `omnis-server` (HTTP API + Web UI). Unlike the `.deb`/`.rpm`
+(config in `/etc/omnis`, needs root), the pip install is per-user: the bundled
+**config + registry are seeded into `~/.omnis`** on first run, so the files are
 the user's to edit (and survive upgrades — existing files are never overwritten).
 
 The packaging lives under [pip/](pip/):
 
 ```
 pip/
-├── pyproject.toml            # name=yoke-agent, console scripts, metadata
+├── pyproject.toml            # name=omnis-agent, console scripts, metadata
 ├── setup.py                  # forces a py3-none-<platform> binary wheel
 ├── README.md                 # PyPI long description
-└── src/yoke/
+└── src/omnis/
     ├── __init__.py           # _dist/ path resolvers
-    ├── launcher.py           # `yoke` / `yoke-server` entry points
-    ├── seed.py               # `yoke-seed`: ~/.yoke materialisation
+    ├── launcher.py           # `omnis` / `omnis-server` entry points
+    ├── seed.py               # `omnis-seed`: ~/.omnis materialisation
     └── _dist/                # staged at build time (git-ignored)
-        ├── bin/{yoke,yoke-server}[.exe]
-        ├── sysconf/          # config JSONs + filters/ + registry/  → seeds ~/.yoke
-        └── web/              # static Web UI → YOKE_WEB_DIR
+        ├── bin/{omnis,omnis-server}[.exe]
+        ├── sysconf/          # config JSONs + filters/ + registry/  → seeds ~/.omnis
+        └── web/              # static Web UI → OMNIS_WEB_DIR
 ```
 
 How it works (no Go changes needed — it reuses the existing config search chain):
@@ -177,11 +177,11 @@ How it works (no Go changes needed — it reuses the existing config search chai
   config/registry/web tree as package data. Because the binaries are
   `CGO_ENABLED=0` static builds, **all six platform wheels cross-compile on a
   single Linux host** — there is no per-OS CI matrix.
-- The Python launcher ([pip/src/yoke/launcher.py](pip/src/yoke/launcher.py))
-  sets `YOKE_WEB_DIR` (bundled `web/`) and `YOKE_SYSTEM_CONFIG_DIR` (bundled
-  `sysconf/`) **only when unset** (user overrides win), seeds `~/.yoke`
-  ([pip/src/yoke/seed.py](pip/src/yoke/seed.py)), then `exec`s the real binary.
-- `yoke-seed --force` re-copies the pristine bundled defaults into `~/.yoke`
+- The Python launcher ([pip/src/omnis/launcher.py](pip/src/omnis/launcher.py))
+  sets `OMNIS_WEB_DIR` (bundled `web/`) and `OMNIS_SYSTEM_CONFIG_DIR` (bundled
+  `sysconf/`) **only when unset** (user overrides win), seeds `~/.omnis`
+  ([pip/src/omnis/seed.py](pip/src/omnis/seed.py)), then `exec`s the real binary.
+- `omnis-seed --force` re-copies the pristine bundled defaults into `~/.omnis`
   (or `--home <dir>`); seeding is automatic on first launch.
 
 Platform wheels built (PEP 425 tags):

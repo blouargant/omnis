@@ -34,10 +34,10 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 const (
@@ -102,7 +102,7 @@ type Index struct {
 	running bool       // an OnSave-triggered background rebuild is in flight
 }
 
-// Open opens (or creates) the registries index at $YOKE_HOME/index/registries,
+// Open opens (or creates) the registries index at $OMNIS_HOME/index/registries,
 // backed by emb. Returns (nil, nil) when emb is nil so callers skip mounting
 // the tools. The returned Index registers a save hook so web-UI registry edits
 // trigger a proactive background rebuild.

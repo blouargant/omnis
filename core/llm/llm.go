@@ -9,8 +9,8 @@
 //
 // Selection env:
 //
-//	YOKE_PROVIDER  → one of the names above (default: openai_compat)
-//	YOKE_MODEL     → provider-specific model id (defaults below)
+//	OMNIS_PROVIDER  → one of the names above (default: openai_compat)
+//	OMNIS_MODEL     → provider-specific model id (defaults below)
 //
 // Auth env (per provider):
 //
@@ -53,13 +53,13 @@ type Selection struct {
 	DisableStreaming bool
 }
 
-// New returns an ADK LLM selected by YOKE_PROVIDER.
+// New returns an ADK LLM selected by OMNIS_PROVIDER.
 func New(ctx context.Context) (model.LLM, error) {
 	return NewWithSelection(ctx, Selection{
-		Provider: os.Getenv("YOKE_PROVIDER"),
-		Model:    os.Getenv("YOKE_MODEL"),
-		BaseURL:  os.Getenv("YOKE_BASE_URL"),
-		APIKey:   os.Getenv("YOKE_API_KEY"),
+		Provider: os.Getenv("OMNIS_PROVIDER"),
+		Model:    os.Getenv("OMNIS_MODEL"),
+		BaseURL:  os.Getenv("OMNIS_BASE_URL"),
+		APIKey:   os.Getenv("OMNIS_API_KEY"),
 	})
 }
 
@@ -158,7 +158,7 @@ func resolveProviderModel(provider, modelName string) (string, string, error) {
 		modelName = defaultModel[provider]
 	}
 	if modelName == "" {
-		return "", "", fmt.Errorf("llm: YOKE_MODEL must be set for provider %q", provider)
+		return "", "", fmt.Errorf("llm: OMNIS_MODEL must be set for provider %q", provider)
 	}
 	return provider, modelName, nil
 }

@@ -23,7 +23,7 @@ import (
 
 	goturbovec "github.com/blouargant/go-turbovec"
 
-	"github.com/blouargant/yoke/core/embed"
+	"github.com/blouargant/omnis/core/embed"
 )
 
 // Item is one record to index: a stable external id, the text to embed, and
@@ -68,7 +68,7 @@ const bitWidth = 4
 // looking orthogonal rotation, not a secret one); it only needs to be fixed and
 // non-zero. The concrete seed is persisted per index, so old indexes built with
 // a random seed still load correctly and simply don't share until rebuilt.
-const indexSeed int64 = 0x796f6b65696e6478 // "yokeindx"
+const indexSeed int64 = 0x796f6b65696e6478 // "omnisindx"
 
 // Store is a persistent semantic index. It is safe for concurrent use.
 type Store struct {

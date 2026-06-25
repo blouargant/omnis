@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	wt "github.com/blouargant/yoke/internal/worktree"
+	wt "github.com/blouargant/omnis/internal/worktree"
 )
 
 func main() {

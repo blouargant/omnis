@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/agentmd"
+	"github.com/blouargant/omnis/internal/agentmd"
 )
 
 // handleAgentMDInitPrompt returns the shared "/init" bootstrap prompt so the

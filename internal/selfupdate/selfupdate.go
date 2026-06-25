@@ -1,5 +1,5 @@
-// Package selfupdate lets the running yoke-server detect a newer stable release
-// on GitHub and install it for whichever channel yoke was installed through
+// Package selfupdate lets the running omnis-server detect a newer stable release
+// on GitHub and install it for whichever channel omnis was installed through
 // (.deb/.rpm, Homebrew, Windows MSI, pip wheel, or a raw binary).
 //
 // The flow is host-side and server-only (CLI/TUI never call this): a background
@@ -26,7 +26,7 @@ import (
 )
 
 // Repo is the GitHub "owner/name" slug whose Releases drive the update check.
-const Repo = "blouargant/yoke"
+const Repo = "blouargant/omnis"
 
 // ErrNotAutoInstallable is returned by Install when the detected install method
 // has no automated path (raw binary / unknown). Callers should surface
@@ -142,7 +142,7 @@ func fetchLatestRelease(ctx context.Context, repo string) (ghRelease, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "yoke-selfupdate")
+	req.Header.Set("User-Agent", "omnis-selfupdate")
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -294,18 +294,18 @@ func DetectMethod(exePath string) Method {
 
 	// pip wheel: the launcher execs the bundled binary under the package's
 	// _dist tree inside a site-packages directory.
-	if strings.Contains(lower, "/yoke/_dist/") || strings.Contains(lower, "site-packages/") {
+	if strings.Contains(lower, "/omnis/_dist/") || strings.Contains(lower, "site-packages/") {
 		return MethodPip
 	}
 
 	switch runtime.GOOS {
 	case "windows":
-		if strings.Contains(lower, "/program files") || strings.Contains(lower, "/programdata/yoke") {
+		if strings.Contains(lower, "/program files") || strings.Contains(lower, "/programdata/omnis") {
 			return MethodMSI
 		}
 		return MethodRaw
 	case "darwin":
-		if strings.Contains(lower, "/cellar/yoke/") || strings.Contains(lower, "/homebrew/") {
+		if strings.Contains(lower, "/cellar/omnis/") || strings.Contains(lower, "/homebrew/") {
 			return MethodBrew
 		}
 		if prefix := brewPrefix(); prefix != "" && strings.HasPrefix(exePath, prefix) {
@@ -355,9 +355,9 @@ func Install(ctx context.Context, st UpdateStatus, sudoPassword string) error {
 	method := methodFromString(st.Method)
 	switch method {
 	case MethodBrew:
-		return runInstall(ctx, "", "brew", "upgrade", "yoke")
+		return runInstall(ctx, "", "brew", "upgrade", "omnis")
 	case MethodPip:
-		return runInstall(ctx, "", pipExe(), "install", "-U", "yoke-agent")
+		return runInstall(ctx, "", pipExe(), "install", "-U", "omnis-agent")
 	case MethodDeb:
 		file, cleanup, err := downloadAsset(ctx, st.AssetURL)
 		if err != nil {
@@ -453,7 +453,7 @@ func downloadAsset(ctx context.Context, url string) (string, func(), error) {
 	if err != nil {
 		return "", noop, err
 	}
-	req.Header.Set("User-Agent", "yoke-selfupdate")
+	req.Header.Set("User-Agent", "omnis-selfupdate")
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -466,9 +466,9 @@ func downloadAsset(ctx context.Context, url string) (string, func(), error) {
 
 	name := filepath.Base(url)
 	if name == "" || name == "." || name == "/" {
-		name = "yoke-update"
+		name = "omnis-update"
 	}
-	f, err := os.CreateTemp("", "yoke-update-*-"+name)
+	f, err := os.CreateTemp("", "omnis-update-*-"+name)
 	if err != nil {
 		return "", noop, err
 	}
@@ -511,11 +511,11 @@ func ManualInstructions(method Method, latest, assetName, releaseURL string) []s
 	case MethodBrew:
 		steps = []string{
 			"brew update",
-			"brew upgrade yoke",
+			"brew upgrade omnis",
 		}
 	case MethodPip:
 		steps = []string{
-			"pip install -U yoke-agent",
+			"pip install -U omnis-agent",
 		}
 	case MethodMSI:
 		steps = []string{
@@ -525,7 +525,7 @@ func ManualInstructions(method Method, latest, assetName, releaseURL string) []s
 	default: // raw / unknown
 		steps = []string{
 			"Download the archive for your platform from the release page.",
-			"Replace the existing yoke / yoke-server binaries with the extracted ones.",
+			"Replace the existing omnis / omnis-server binaries with the extracted ones.",
 		}
 	}
 	steps = append(steps, "Release page: "+releaseURL)

@@ -10,12 +10,12 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/agenttool"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/codeindex"
-	"github.com/blouargant/yoke/internal/docindex"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/regindex"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/codeindex"
+	"github.com/blouargant/omnis/internal/docindex"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/regindex"
 )
 
 // buildSubAgents constructs every enabled sub-agent (skipping leader and

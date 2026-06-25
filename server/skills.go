@@ -18,10 +18,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/registrymeta"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/registrymeta"
 )
 
 const (
@@ -37,10 +37,10 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 type skillsDeps struct {
 	RegistryDir              string   // abs path to first-existing registry/skills/ (legacy single-dir callers)
 	RegistryAllDirs          []string // abs paths of all skill directories to read, in precedence order
-	RegistryWriteDir         string   // abs path to registry/skills/ write target (always $YOKE_HOME)
+	RegistryWriteDir         string   // abs path to registry/skills/ write target (always $OMNIS_HOME)
 	AgentYAML                string   // abs path to agent.json (re-read on each request for freshness)
 	AgentsRegistryReadDir    string   // abs path to registry/agents/ (read — first-existing-wins)
-	AgentsRegistryWriteDir   string   // abs path to registry/agents/ write target (always $YOKE_HOME)
+	AgentsRegistryWriteDir   string   // abs path to registry/agents/ write target (always $OMNIS_HOME)
 	RemoteRegistriesCfgWrite string   // abs write target for remote_registries.json
 }
 
@@ -58,18 +58,18 @@ func (d skillsDeps) findSkillDir(name string) string {
 
 // resolveSkillsDeps derives skills paths from the already-resolved config files.
 // Read paths use first-existing-wins so a developer checkout stays visible.
-// Write paths always land under $YOKE_HOME — web UI saves never touch the
+// Write paths always land under $OMNIS_HOME — web UI saves never touch the
 // local checkout, mirroring the config write contract.
 func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
 	registryWriteDir := paths.SkillsRegistryWriteDir()
-	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
+	if v := os.Getenv("OMNIS_SKILLS_REGISTRY_DIR"); v != "" {
 		registryWriteDir = v
 	}
 	absWriteReg, _ := filepath.Abs(registryWriteDir)
 
 	// Build the full ordered list of skill read directories.
 	allDirs := paths.SkillsAllSearchDirs()
-	if v := os.Getenv("YOKE_SKILLS_REGISTRY_DIR"); v != "" {
+	if v := os.Getenv("OMNIS_SKILLS_REGISTRY_DIR"); v != "" {
 		// When the env var overrides the registry dir, only that dir is used.
 		absEnv, _ := filepath.Abs(v)
 		allDirs = []string{absEnv}
@@ -96,7 +96,7 @@ func resolveSkillsDeps(cfgFiles configFiles) skillsDeps {
 
 	absAgentsRead, _ := filepath.Abs(paths.AgentsRegistryDir())
 	absAgentsWrite, _ := filepath.Abs(paths.AgentsRegistryWriteDir())
-	if v := os.Getenv("YOKE_AGENTS_REGISTRY_DIR"); v != "" {
+	if v := os.Getenv("OMNIS_AGENTS_REGISTRY_DIR"); v != "" {
 		absAgentsRead, _ = filepath.Abs(v)
 		absAgentsWrite = absAgentsRead
 	}
@@ -743,7 +743,7 @@ func registerSkillsRoutes(rg *gin.RouterGroup, deps skillsDeps) {
 
 	// ── Remote registries ─────────────────────────────────────────────────
 	registerRemoteRegistryRoutes(rg, func() string {
-		// Re-resolve every request so a save into $YOKE_HOME on the
+		// Re-resolve every request so a save into $OMNIS_HOME on the
 		// previous request is visible immediately, without restart.
 		p, _ := filepath.Abs(paths.FindConfig("remote_registries.json"))
 		return p

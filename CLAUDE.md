@@ -42,46 +42,46 @@ runtime), so only the vendored files + the pinned version change.
 
 ## Distribution / packaging
 
-yoke ships through several channels, all driven by `.goreleaser.yaml` +
+omnis ships through several channels, all driven by `.goreleaser.yaml` +
 `.github/workflows/release.yml` and the assets under `packaging/`:
-goreleaser raw binaries (`make release`), `.deb`/`.rpm` (nfpms → `/etc/yoke`),
-a Homebrew formula (`brews:` → `$(brew --prefix)/share/yoke`), a Windows MSI
-([packaging/windows/yoke.wxs](packaging/windows/yoke.wxs) → `C:\ProgramData\Yoke`),
-and **pip wheels** (`make wheels`). All non-FHS wrappers rely on yoke embedding
+goreleaser raw binaries (`make release`), `.deb`/`.rpm` (nfpms → `/etc/omnis`),
+a Homebrew formula (`brews:` → `$(brew --prefix)/share/omnis`), a Windows MSI
+([packaging/windows/omnis.wxs](packaging/windows/omnis.wxs) → `C:\ProgramData\Omnis`),
+and **pip wheels** (`make wheels`). All non-FHS wrappers rely on omnis embedding
 **no** defaults — they bundle the config/registry/web tree and point the binaries
-at it via `YOKE_SYSTEM_CONFIG_DIR` + `YOKE_WEB_DIR` (see the env-var table).
+at it via `OMNIS_SYSTEM_CONFIG_DIR` + `OMNIS_WEB_DIR` (see the env-var table).
 
-**pip — `yoke-agent`** ([packaging/pip/](packaging/pip/), built by
+**pip — `omnis-agent`** ([packaging/pip/](packaging/pip/), built by
 [scripts/build_wheels.py](scripts/build_wheels.py)): per-platform binary wheels
 (`py3-none-<plat>`) that bundle the two static Go binaries + a `sysconf/`
 (config JSONs + `filters/` + `registry/`) + `web/` as package data. Because the
 binaries are `CGO_ENABLED=0` static builds, **all six platform wheels
 cross-compile on one Linux host** (no per-OS CI matrix); platform tags are
 `manylinux2014_{x86_64,aarch64}`, `macosx_{10_13_x86_64,11_0_arm64}`,
-`win_{amd64,arm64}`. The console scripts stay `yoke` / `yoke-server`; the
-distribution name is `yoke-agent`. The thin Python launcher
-([packaging/pip/src/yoke/launcher.py](packaging/pip/src/yoke/launcher.py)) sets
-`YOKE_WEB_DIR`/`YOKE_SYSTEM_CONFIG_DIR` to the bundled tree **only when unset**,
-**seeds `~/.yoke`** (config + registry, never overwriting existing files —
-[seed.py](packaging/pip/src/yoke/seed.py), also the `yoke-seed --force` command),
+`win_{amd64,arm64}`. The console scripts stay `omnis` / `omnis-server`; the
+distribution name is `omnis-agent`. The thin Python launcher
+([packaging/pip/src/omnis/launcher.py](packaging/pip/src/omnis/launcher.py)) sets
+`OMNIS_WEB_DIR`/`OMNIS_SYSTEM_CONFIG_DIR` to the bundled tree **only when unset**,
+**seeds `~/.omnis`** (config + registry, never overwriting existing files —
+[seed.py](packaging/pip/src/omnis/seed.py), also the `omnis-seed --force` command),
 then `exec`s the real binary. The build version is normalised to PEP 440
 (`v1.2.3-rc1` → `1.2.3rc1`). CI publishes via the `pypi` job (`twine upload`,
 needs a `PYPI_API_TOKEN` secret); rc/beta tags become PEP 440 pre-releases.
-This needed **no Go changes** — seeding into `~/.yoke` reuses the existing
+This needed **no Go changes** — seeding into `~/.omnis` reuses the existing
 per-user config layer (`paths.Home()`).
 
 ## Commands
 
 ```bash
 # Build (production binaries only)
-make build              # bin/yoke + bin/yoke-server (host platform)
-make build-root         # bin/yoke only
-make build-server       # bin/yoke-server (HTTP API)
+make build              # bin/omnis + bin/omnis-server (host platform)
+make build-root         # bin/omnis only
+make build-server       # bin/omnis-server (HTTP API)
 make examples          # opt-in: build all examples under bin/
 make release            # cross-platform raw binaries → dist/
 make package            # cross-platform + .deb + .rpm + .zip → dist/ (requires goreleaser)
 make package-check      # validate .goreleaser.yaml without building
-make wheels             # per-platform pip wheels (yoke-agent) → dist/wheels/ (override WHEEL_PLATFORMS=)
+make wheels             # per-platform pip wheels (omnis-agent) → dist/wheels/ (override WHEEL_PLATFORMS=)
 
 # Test
 make test               # all unit tests
@@ -100,11 +100,11 @@ go run .                                # CLI: REPL when TTY, one-shot when pipe
 go run . "explain main.go"              # CLI one-shot with prompt argument
 echo "summarize repo" | go run .        # CLI one-shot reading stdin
 go run . tui                            # TUI: tview chat interface
-make run-server                         # Server: HTTP API + web UI (needs YOKE_SERVER_TOKEN)
-bin/yoke-server                         # Server in the foreground (default form)
-bin/yoke-server start [--no-browser]    # Server detached in the background (frees the terminal)
-bin/yoke-server stop                    # Stop the background server (graceful SIGTERM)
-bin/yoke-server status                  # Report whether the background server is running
+make run-server                         # Server: HTTP API + web UI (needs OMNIS_SERVER_TOKEN)
+bin/omnis-server                         # Server in the foreground (default form)
+bin/omnis-server start [--no-browser]    # Server detached in the background (frees the terminal)
+bin/omnis-server stop                    # Stop the background server (graceful SIGTERM)
+bin/omnis-server status                  # Report whether the background server is running
 
 # Auxiliary subcommands
 go run . -d                             # debug: log full payloads (any mode)
@@ -296,7 +296,7 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   appended, not a reset). Retention does not survive a hot-reload (fresh
   in-memory sessions) — same boundary as a single-squad session today.
 - **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
-  `YOKE_ROUTER_SQUAD`) names the router squad; **absent ⇒ defaults to `omnis`**,
+  `OMNIS_ROUTER_SQUAD`) names the router squad; **absent ⇒ defaults to `omnis`**,
   `"none"` disables. `ensureRouterSquad` ([agent/routing.go](agent/routing.go)),
   called in `BuildInstance` (not `ResolveRuntimeSettings`, so config-only tests
   are untouched), **injects** the `omnis` agent (registry def if present, else the
@@ -404,7 +404,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 
 | Path | Role |
 |---|---|
-| `agent/` | `NewAgent()` — wires all components; `ResolveRuntimeSettings()` — config precedence; `ResolveEmbedder()` — builds the semantic embedder from `embed_model_ref`/`YOKE_EMBED_*` |
+| `agent/` | `NewAgent()` — wires all components; `ResolveRuntimeSettings()` — config precedence; `ResolveEmbedder()` — builds the semantic embedder from `embed_model_ref`/`OMNIS_EMBED_*` |
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
@@ -420,13 +420,13 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate and the MCP `requires` connect gate |
 | `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
-| `internal/agentmd/` | AGENT.md project memory (yoke's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
+| `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/regindex/` | Semantic index over **remote registry** items of **all seven kinds** (skills, agents, mcp, a2a, squads, commands, permissions) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
-| `internal/docindex/` | Semantic index over **yoke's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/yoke/docs`; roots from `Roots()`, override `YOKE_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
+| `internal/docindex/` | Semantic index over **omnis's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/omnis/docs`; roots from `Roots()`, override `OMNIS_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
@@ -454,10 +454,10 @@ BitWidth 4 + UnitNorm cosine):
    `EventSessionIndexNow` trigger (same hook): the idle indexer
    ([server/idle_indexer.go](server/idle_indexer.go)) fires it once a session
    has been idle ≥ 5 min (fixed threshold, independent of the curator's
-   `YOKE_CURATOR_IDLE_TIMEOUT`), and the archive handler fires it immediately on
+   `OMNIS_CURATOR_IDLE_TIMEOUT`), and the archive handler fires it immediately on
    `POST /api/sessions/:id/archive`. An in-memory `SessionMeta.Indexed` flag
    (set by `Registry.MarkIndexed`, cleared by `Touch`) stops re-indexing every
-   scan tick. Backfill via `yoke reindex-precedents`.
+   scan tick. Backfill via `omnis reindex-precedents`.
 3. **`search_code` / `reindex_code`** (investigator) —
    semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
    `git ls-files`-aware, content-hash incremental.
@@ -478,19 +478,19 @@ BitWidth 4 + UnitNorm cosine):
    changes); a `registries.OnSave` hook also rebuilds in the background after
    any web-UI/tool edit to `remote_registries.json`. Remote *content* drift
    (same URL, changed skills) is only caught by explicit `reindex_registries`.
-5. **`search_docs` / `reindex_docs`** (helper) — semantic search over **yoke's
-   own documentation** so the Helper can answer questions about yoke and quote
+5. **`search_docs` / `reindex_docs`** (helper) — semantic search over **omnis's
+   own documentation** so the Helper can answer questions about omnis and quote
    the source ([internal/docindex/](internal/docindex/)). Indexes markdown across
    every doc root from `docindex.Roots()` — the web UI user docs (`web/docs` →
-   `/usr/share/yoke/web/docs`) and the developer docs (`docs` →
-   `/usr/share/doc/yoke/docs`), override with `YOKE_DOCS_DIRS`. Mounted via the
+   `/usr/share/omnis/web/docs`) and the developer docs (`docs` →
+   `/usr/share/doc/omnis/docs`), override with `OMNIS_DOCS_DIRS`. Mounted via the
    `docs` tool group alongside the always-on glob `list_docs` / `read_doc` /
    `grep_docs` (`NewNavTools`), which are the no-embedder fallback. Chunking is
    line-window + heading-aware and content-hash incremental; each hit carries the
    source `path`, `heading`, line range and the quoted `text`. Built/refreshed in
    the background at server startup ([server/docs_indexer.go](server/docs_indexer.go)
    `startDocsIndexer`): the incremental `Reindex` builds on first boot and after
-   docs/embedder change, no-op otherwise. Backfill via `yoke reindex-docs`.
+   docs/embedder change, no-op otherwise. Backfill via `omnis reindex-docs`.
 
 The embedder and all index handles are process-wide on `Infrastructure`
 (`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()` in [agent/embedder.go](agent/embedder.go)),
@@ -498,7 +498,7 @@ built lazily and surviving hot-reload. **Contract: when no embedder resolves,
 none of the recall tools are mounted and every path falls back to glob/grep —
 behaviour is byte-identical to a build without these features.** See
 [agent/embedder.go](agent/embedder.go) `ResolveEmbedder` for the
-`embed_model_ref` → `YOKE_EMBED_*` precedence. The cached `Infrastructure.Embedder()`
+`embed_model_ref` → `OMNIS_EMBED_*` precedence. The cached `Infrastructure.Embedder()`
 accessor additionally **health-probes** a freshly-resolved embedder with one tiny
 `Embed("ping")` (`probeEmbedder`, 15s timeout, background ctx): because
 `embed.NewWithSelection` only *builds* the HTTP client and never contacts the
@@ -506,7 +506,7 @@ endpoint, a config that resolves cleanly but is rejected at request time (e.g. a
 model id the gateway answers with HTTP 400) would otherwise only fail mid-session
 on every recall call — the probe demotes it to nil so the same glob/grep fallback
 applies. The probe runs once (memoised with the embedder), so a transient blip at
-first use disables recall until restart; the explicit `yoke embed-test` /
+first use disables recall until restart; the explicit `omnis embed-test` /
 `reindex-*` CLI commands bypass the probe and surface the real build/request error.
 
 **Embedding dimension is the dominant cost lever.** go-turbovec builds, per
@@ -532,7 +532,7 @@ Two mechanisms keep the matrix cost bounded:
   instead of go-turbovec's default random seed, and go-turbovec memoises
   `rotation.New` / `quant.NewQJL` by `(dim, seed)` — so all same-dim indexes
   **share one Π and one S** (built/loaded once) rather than each allocating its
-  own pair. (Requires go-turbovec ≥ the memoised build; yoke currently pins it
+  own pair. (Requires go-turbovec ≥ the memoised build; omnis currently pins it
   via a local `replace` in `go.mod` — publish + bump for release.)
 - **Deferred load.** `semindex.Open` reads only the cheap metadata sidecar and
   marks the `.tvim` as `pendingLoad`; the expensive `LoadIdMapFile` (the QR) is
@@ -545,7 +545,7 @@ Two mechanisms keep the matrix cost bounded:
 ### Configuration files
 
 Config files are resolved through a **3-layer search chain** (high → low precedence):
-`.agents/` (or `agents/` as a dotless alias; both participate when both exist, `.agents/` first) → `$HOME/.yoke/` (per-user) → `/etc/yoke/` (system). Agent and skill registries live under `registry/agents/` and `registry/skills/` inside whichever layer you're targeting.
+`.agents/` (or `agents/` as a dotless alias; both participate when both exist, `.agents/` first) → `$HOME/.omnis/` (per-user) → `/etc/omnis/` (system). Agent and skill registries live under `registry/agents/` and `registry/skills/` inside whichever layer you're targeting.
 
 | File | Purpose |
 |---|---|
@@ -610,7 +610,7 @@ embedding model" selector and in nothing else. The top-level `models.json`
 field `"embed_model_ref"` names which embedding model is the active internal
 embedder for all semantic recall (soft-skills, precedents, codebase). It can be
 overridden by `embed_model_ref` in `agents.json` and then by the
-`YOKE_EMBED_MODEL_REF` env var; when none resolves (and no `YOKE_EMBED_*` env is
+`OMNIS_EMBED_MODEL_REF` env var; when none resolves (and no `OMNIS_EMBED_*` env is
 set) the embedder is absent and every recall feature silently falls back to its
 glob/grep path. The embedder is process-wide (built once on `Infrastructure`,
 survives hot-reload like the MCP pool); changing `embed_model_ref` needs a
@@ -685,31 +685,31 @@ Ollama / vLLM endpoints (no `/model/info`) fall back to `GET /v1/models`, which
 returns ids only.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
-`"builtin": true` flag marks agents shipped with yoke (leader,
+`"builtin": true` flag marks agents shipped with omnis (leader,
 skill_editor, helper, summariser, curator); custom agents added
 by the user omit the flag. The web UI groups them under separate
 **Built-in** and **Custom** sections in the agents list.
 
 The registry directory uses the same 3-layer lookup as config files:
 `.agents/registry/agents` (and `agents/registry/agents` when that alias dir
-exists), `$HOME/.yoke/registry/agents`, then `/etc/yoke/registry/agents`, then
+exists), `$HOME/.omnis/registry/agents`, then `/etc/omnis/registry/agents`, then
 finally the **shared Agent-Skills registry** `/etc/agentskills/agents` —
 first existing directory wins. (The registry subdirs sit one level below
-their layer's config files: e.g. system has `/etc/yoke/agents.json` next
-to `/etc/yoke/registry/agents/`.)
+their layer's config files: e.g. system has `/etc/omnis/agents.json` next
+to `/etc/omnis/registry/agents/`.)
 
 **Shared Agent-Skills registry (`/etc/agentskills`).** An extra,
 **lowest-precedence, registry-only** layer (`paths.AgentSkillsDir`, default
-`/etc/agentskills`, override/disable via `YOKE_AGENTSKILLS_DIR`). When the
-directory exists it is treated like a `/etc/yoke/registry` **root** — its
+`/etc/agentskills`, override/disable via `OMNIS_AGENTSKILLS_DIR`). When the
+directory exists it is treated like a `/etc/omnis/registry` **root** — its
 `agents/` and `skills/` subdirectories (note: no `registry/` prefix) contribute
-agent and skill definitions — letting yoke pick up an Agent-Skills registry
-installed by other tools. It sits **below** `/etc/yoke` in both the agent
+agent and skill definitions — letting omnis pick up an Agent-Skills registry
+installed by other tools. It sits **below** `/etc/omnis` in both the agent
 (`agentsRegistrySearchDirs`) and skill (`SkillsAllSearchDirs` /
-`skillsRegistrySearchDirs`) search chains, so yoke's own system registry wins on
+`skillsRegistrySearchDirs`) search chains, so omnis's own system registry wins on
 name conflicts. It is **not** in `ConfigSearchDirs` (no `agents.json` etc. read
 from there) and is **never written to** — items edited via the web UI fork into
-the user layer, exactly like `/etc/yoke` (`paths.Layer` classifies it as
+the user layer, exactly like `/etc/omnis` (`paths.Layer` classifies it as
 `system`). Absent ⇒ byte-identical no-op (consumers stat-and-skip).
 
 ### Filesystem layout
@@ -723,34 +723,34 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   1. `.agents/` (canonical) and/or `agents/` (dotless alias) — project-local
      directories (CWD-relative, highest priority). Both are accepted; when
      both exist, `.agents/` wins and `agents/` is searched right after.
-  2. `$HOME/.yoke/` — per-user state root
-  3. `/etc/yoke/` — system-wide install (lowest priority). Agent/skill
-     registries live at `/etc/yoke/registry/agents` and
-     `/etc/yoke/registry/skills`; every other config file is directly
-     under `/etc/yoke/`.
+  2. `$HOME/.omnis/` — per-user state root
+  3. `/etc/omnis/` — system-wide install (lowest priority). Agent/skill
+     registries live at `/etc/omnis/registry/agents` and
+     `/etc/omnis/registry/skills`; every other config file is directly
+     under `/etc/omnis/`.
 
   Plus one **registry-only** layer below all of the above, in the agent/skill
   search chains only (not for config files): `/etc/agentskills/`
-  (`paths.AgentSkillsDir`, `YOKE_AGENTSKILLS_DIR`) — a `/etc/yoke/registry`-shaped
+  (`paths.AgentSkillsDir`, `OMNIS_AGENTSKILLS_DIR`) — a `/etc/omnis/registry`-shaped
   root (`agents/` + `skills/` subdirs) shared with other Agent-Skills tools. See
   the "Shared Agent-Skills registry" note above.
 
-  Override the chain via `YOKE_CONFIG_DIRS` (colon-separated; replaces
+  Override the chain via `OMNIS_CONFIG_DIRS` (colon-separated; replaces
   the chain wholesale).
 
-- **Write root for state**: `$HOME/.yoke/` by default (override via `YOKE_HOME`).
+- **Write root for state**: `$HOME/.omnis/` by default (override via `OMNIS_HOME`).
   Agent runtime state (logs, mailboxes, softskills, registry installs) always
   lands here. For user-edited config (the web UI editor + the auto-install
-  helpers), yoke is **layer-aware**: when the edited file or any of its
+  helpers), omnis is **layer-aware**: when the edited file or any of its
   references already lives in the project-local `.agents/` (or `agents/`)
   layer, the save is routed back to that layer so a local-only project
-  never grows orphaned references under `$HOME/.yoke/`. Files originally
-  in `/etc/yoke` still fork into `$HOME/.yoke/` on first edit (the system
+  never grows orphaned references under `$HOME/.omnis/`. Files originally
+  in `/etc/omnis` still fork into `$HOME/.omnis/` on first edit (the system
   layer is read-only). Other state files (logs, mailboxes, softskills)
-  remain anchored under `$HOME/.yoke/` regardless of layer:
+  remain anchored under `$HOME/.omnis/` regardless of layer:
 
   ```
-  $HOME/.yoke/
+  $HOME/.omnis/
   ├── agents.json       # editor writes — user config overrides
   ├── permissions.json  # editor writes — user permission overrides
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
@@ -762,7 +762,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   ├── softskills.tvim + .meta.json   # recall_softskills index
   │   ├── precedents.tvim + .meta.json   # recall_precedents index
   │   ├── registries.tvim + .meta.json   # search_registries index (remote skills+agents)
-  │   ├── docs.tvim + .meta.json         # search_docs index (yoke's own docs)
+  │   ├── docs.tvim + .meta.json         # search_docs index (omnis's own docs)
   │   │                 #   + docs.files.json (per-file hash→chunk-ids)
   │   └── <repo-hash>/  #   per-repo code index: codebase.tvim + .meta.json
   │                     #   + codebase.files.json (per-file hash→chunk-ids)
@@ -779,8 +779,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │                                  #   answer, timestamp}. Consumed by
   │                                  #   the heuristic + LLM reflectors.
   └── registry/
-      ├── skills/       # web UI installed skills (override via YOKE_SKILLS_REGISTRY_DIR)
-      └── agents/       # web UI installed agents (override via YOKE_AGENTS_REGISTRY_DIR)
+      ├── skills/       # web UI installed skills (override via OMNIS_SKILLS_REGISTRY_DIR)
+      └── agents/       # web UI installed agents (override via OMNIS_AGENTS_REGISTRY_DIR)
   ```
 
   The web UI editor reads from the search chain and writes to the same
@@ -792,7 +792,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 
   The skill registry (`registry/skills/`) follows the same lookup as
   agent definitions: `.agents/registry/skills` (and `agents/registry/skills`
-  when present), `$HOME/.yoke/registry/skills`, `/etc/yoke/registry/skills`
+  when present), `$HOME/.omnis/registry/skills`, `/etc/omnis/registry/skills`
   — first existing directory wins. (The `registry/` sub-tree is the only
   thing that lives one level deeper than its layer's config files.)
 
@@ -806,42 +806,42 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 
 | Variable | Purpose |
 |---|---|
-| `YOKE_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
-| `YOKE_MODEL` | Provider-specific model ID |
-| `YOKE_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
-| `YOKE_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
-| `YOKE_ROUTER_SQUAD` | Overrides `router_squad` from `agents.json` — names the Omnis router squad; `"none"` disables routing (new chats then use the default squad) |
-| `YOKE_EMBED_PROVIDER` | Embedder provider for semantic recall (default: `YOKE_PROVIDER`, else `openai_compat`). `anthropic` unsupported — use Voyage/OpenAI via `openai_compat` |
-| `YOKE_EMBED_MODEL` | Embedding model id (default `text-embedding-3-small`) |
-| `YOKE_EMBED_BASE_URL` | Embeddings endpoint (default `YOKE_BASE_URL`/`OPENAI_BASE_URL`) |
-| `YOKE_EMBED_API_KEY` | Embedder API key (default `YOKE_API_KEY`/provider key) |
-| `YOKE_EMBED_DIM` | Expected embedding dimension (default `1536`, or learned from the first response) |
-| `YOKE_EMBED_MODEL_REF` | Overrides `embed_model_ref` from `models.json` — selects which catalogue model is the internal embedder |
-| `YOKE_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/yoke/web/docs`, `docs`, `/usr/share/doc/yoke/docs`) |
-| `YOKE_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
-| `YOKE_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
-| `YOKE_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |
-| `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
-| `YOKE_SERVER_TOKEN` | Bearer token required to start the HTTP server |
-| `YOKE_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
-| `YOKE_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads` (default `1h`; `0` disables) |
-| `YOKE_SERVER_DAEMONIZED` | Set to `1` by `yoke-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
-| `YOKE_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
-| `YOKE_HOME` | Per-user state root for all mutable files (default `$HOME/.yoke`) |
-| `YOKE_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$YOKE_HOME:/etc/yoke` |
-| `YOKE_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/yoke`), leaving `.agents` and `$HOME/.yoke` in the chain — unlike `YOKE_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/yoke`; Windows MSI → `C:\ProgramData\Yoke`; pip wheel launcher → the bundled `_dist/sysconf`) to relocate bundled config/registry without a rebuild |
-| `YOKE_AGENTSKILLS_DIR` | Relocates (or, set empty, **disables**) the shared Agent-Skills registry layer (`paths.AgentSkillsDir`, default `/etc/agentskills`) — a lowest-precedence, registry-only `/etc/yoke/registry`-shaped root (`agents/` + `skills/` subdirs) appended below `/etc/yoke` in the agent/skill search chains |
-| `YOKE_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
-| `YOKE_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$YOKE_HOME/registry/skills`) |
-| `YOKE_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$YOKE_HOME/registry/agents`) |
-| `YOKE_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
-| `YOKE_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
-| `YOKE_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). See "Self-update". |
-| `YOKE_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
+| `OMNIS_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
+| `OMNIS_MODEL` | Provider-specific model ID |
+| `OMNIS_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
+| `OMNIS_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
+| `OMNIS_ROUTER_SQUAD` | Overrides `router_squad` from `agents.json` — names the Omnis router squad; `"none"` disables routing (new chats then use the default squad) |
+| `OMNIS_EMBED_PROVIDER` | Embedder provider for semantic recall (default: `OMNIS_PROVIDER`, else `openai_compat`). `anthropic` unsupported — use Voyage/OpenAI via `openai_compat` |
+| `OMNIS_EMBED_MODEL` | Embedding model id (default `text-embedding-3-small`) |
+| `OMNIS_EMBED_BASE_URL` | Embeddings endpoint (default `OMNIS_BASE_URL`/`OPENAI_BASE_URL`) |
+| `OMNIS_EMBED_API_KEY` | Embedder API key (default `OMNIS_API_KEY`/provider key) |
+| `OMNIS_EMBED_DIM` | Expected embedding dimension (default `1536`, or learned from the first response) |
+| `OMNIS_EMBED_MODEL_REF` | Overrides `embed_model_ref` from `models.json` — selects which catalogue model is the internal embedder |
+| `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
+| `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
+| `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
+| `OMNIS_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |
+| `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
+| `OMNIS_SERVER_TOKEN` | Bearer token required to start the HTTP server |
+| `OMNIS_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
+| `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables) |
+| `OMNIS_SERVER_DAEMONIZED` | Set to `1` by `omnis-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
+| `OMNIS_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
+| `OMNIS_HOME` | Per-user state root for all mutable files (default `$HOME/.omnis`) |
+| `OMNIS_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$OMNIS_HOME:/etc/omnis` |
+| `OMNIS_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/omnis`), leaving `.agents` and `$HOME/.omnis` in the chain — unlike `OMNIS_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/omnis`; Windows MSI → `C:\ProgramData\Omnis`; pip wheel launcher → the bundled `_dist/sysconf`) to relocate bundled config/registry without a rebuild |
+| `OMNIS_AGENTSKILLS_DIR` | Relocates (or, set empty, **disables**) the shared Agent-Skills registry layer (`paths.AgentSkillsDir`, default `/etc/agentskills`) — a lowest-precedence, registry-only `/etc/omnis/registry`-shaped root (`agents/` + `skills/` subdirs) appended below `/etc/omnis` in the agent/skill search chains |
+| `OMNIS_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
+| `OMNIS_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$OMNIS_HOME/registry/skills`) |
+| `OMNIS_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$OMNIS_HOME/registry/agents`) |
+| `OMNIS_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
+| `OMNIS_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
+| `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). See "Self-update". |
+| `OMNIS_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
 
 ### Permission nomenclature (Claude Code-style) + grant scopes
 
-yoke's permission format **is Claude Code's nomenclature**
+omnis's permission format **is Claude Code's nomenclature**
 ([core/permissions/](core/permissions/)): `permissions.json` holds a
 `permissions` object with `allow`/`ask`/`deny` tiers of `Tool(specifier)`
 strings plus a `defaultMode`. Precedence is **deny → ask → allow** (first match
@@ -862,7 +862,7 @@ calls fall through to the mode default (ask in `default` mode).
   authoritative; the rest only change the unmatched-call default). The Bash
   safety floor in [core/tools/bash.go](core/tools/bash.go) is the independent
   circuit breaker, enforced even under `bypassPermissions` and the `!` escape.
-- **yoke extensions over Claude syntax**: an object rule
+- **omnis extensions over Claude syntax**: an object rule
   `{rule, reason, cwd}` attaches a prompt reason and a project-scoping `cwd`
   (rules with `cwd` only apply inside that tree — `cwdMatches`); the
   `{regex, tools}` form (or `/regex/` string) is the **raw-regexp escape hatch**
@@ -876,7 +876,7 @@ calls fall through to the mode default (ask in `default` mode).
   ([convert.go](core/permissions/convert.go) `ConvertLegacy` → regex-escape-hatch
   rules, byte-identical behavior), and the Reloader rewrites it in the new shape
   with a `.bak` backup ([reloader.go](core/permissions/reloader.go)
-  `upgradeIfLegacy`). CLI: `yoke permissions convert|import`
+  `upgradeIfLegacy`). CLI: `omnis permissions convert|import`
   ([permissions_cmd.go](permissions_cmd.go); `import` ingests a Claude Code
   `settings.json`).
 
@@ -910,7 +910,7 @@ on edited rules.
 
 ### Session isolation
 
-Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `$YOKE_HOME/logs/`:
+Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `$OMNIS_HOME/logs/`:
 
 - `agent_tasks_<u>_<ts>.json` — task graph
 - `agent_todo_<u>_<ts>.json` — todo plan
@@ -981,7 +981,7 @@ nothing changes for sessions that already have a title or have prior turns.
 
 ### Project memory (`AGENT.md`), `/init`, and `#`
 
-Yoke's equivalent of Claude Code's `CLAUDE.md`. `AGENT.md` files are discovered,
+Omnis's equivalent of Claude Code's `CLAUDE.md`. `AGENT.md` files are discovered,
 concatenated, and **injected into the leader/root system instruction on every
 turn**, resolved against the **session's working directory** (the same per-session
 `bashCwd` the Folders panel / `!cd` mutate) — so multiple sessions rooted in
@@ -989,7 +989,7 @@ different folders each get their own project memory.
 
 - **Discovery + injection** ([internal/agentmd/](internal/agentmd/)
   `Resolve(cwd)`): concatenates AGENT.md ascending by precedence — system
-  (`/etc/yoke`, via `paths.SystemDir()`), user (`$YOKE_HOME`), each `.agents/`
+  (`/etc/omnis`, via `paths.SystemDir()`), user (`$OMNIS_HOME`), each `.agents/`
   (and `agents/`) layer, then the project walk-up from the git/repo root down to
   `cwd` (most specific last). Wrapped in a `<project-context source="AGENT.md">`
   container; per-cwd cache keyed by contributing files' size+mtime, so per-turn
@@ -1027,7 +1027,7 @@ different folders each get their own project memory.
 
 ### Lifecycle hooks (`hooks.json`, Claude Code-compatible)
 
-User-configured **shell commands that fire at lifecycle moments** — yoke's port
+User-configured **shell commands that fire at lifecycle moments** — omnis's port
 of [Claude Code hooks](https://code.claude.com/docs/en/hooks-guide). Hooks let
 users enforce policy *in code* (block edits to protected files, run a formatter
 after every Write, inject context on every prompt) instead of relying on the
@@ -1108,7 +1108,7 @@ LLM history (a convenience, like the todo widget).
   reuses RunBash's safety floor, timeout, output filtering, and truncation, but
   takes a working directory and returns the directory **after** the command ran.
   The platform `wrapCaptureCwd` (bash_unix.go / bash_windows.go) appends a
-  `__YOKE_CWD__:` sentinel line carrying `pwd`; `extractCapturedCwd` strips it
+  `__OMNIS_CWD__:` sentinel line carrying `pwd`; `extractCapturedCwd` strips it
   and reports the new dir, so an embedded `cd` **persists per session** across
   separate `!` commands (CWD only — not env vars or shell functions, since each
   call is a fresh shell). The Unix wrapper preserves the command's exit status;
@@ -1182,7 +1182,7 @@ working directory" below): navigating the panel changes where the agent's
   **write the files directly onto the host filesystem** inside the Folders-panel
   cwd (or `dest` under it), recreating any folder structure (each file's relative
   path is carried in its multipart filename). Distinct from `handleFileUpload`
-  (`POST …/files`), which stages chat attachments under `$YOKE_HOME/logs/uploads`.
+  (`POST …/files`), which stages chat attachments under `$OMNIS_HOME/logs/uploads`.
   `safeJoinUnder` rejects absolute paths and `../` escapes so an upload can never
   land outside the target dir. Same token-only trust model as the Monaco Save
   route — bypasses the agent permission layer. The web UI drives it from the
@@ -1448,7 +1448,7 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
   starts inside `pushManager.Watch` alongside the mailbox watcher, so every
   watcher start site (main.go persisted-session loop, session create, unarchive,
   a2a auto-create) covers it with no extra wiring; `Stop` cancels both.
-- **Passive mode.** `YOKE_TASK_NOTIFY=false` demotes active wake: the watcher
+- **Passive mode.** `OMNIS_TASK_NOTIFY=false` demotes active wake: the watcher
   still drains (so the buffer never wedges — a latent bug in the old orphaned
   queue) but only fires the `task_notification` toast; the result stays readable
   via `bg_output`. The toggle is read once in [server/main.go](server/main.go)
@@ -1498,7 +1498,7 @@ current segment), so it wins; the global `chat_reply` — which previews the **f
 turn text, whose first lines may be the leader's "handing off to `<sub-agent>`"
 narration — is suppressed for that turn. The guard is an 8 s per-session window in
 `sessionNotifiedAt` (sessionId → last-fired ms; cleared in `forgetSession`); the
-shared `tag` (`yoke-chat-<sessionId>`) is a second-line coalesce. The global path
+shared `tag` (`omnis-chat-<sessionId>`) is a second-line coalesce. The global path
 remains the fallback when the initiating tab was backgrounded and its send-path
 `finally` didn't fire promptly. The away-check makes both no-ops when the user is
 present. `stopped`/`error`/`exhausted` don't ping. `notifyTaskEvent` mirrors the
@@ -1530,7 +1530,7 @@ as the SSE data field's `text` ([server/server.go](server/server.go) `/api/event
 - **Boot-time intent⇄grant reconciliation.** The server-side intent and the
   per-browser `Notification.permission` are independent: clearing a site's data /
   permissions resets the browser grant to `"default"` (or it may be `"denied"`)
-  while `preferences.json` still says **enabled** — leaving yoke "on" while the
+  while `preferences.json` still says **enabled** — leaving omnis "on" while the
   browser silently drops every notification, with no message explaining why. So when
   a recorded intent is `true` but the permission is **not** `granted`,
   `maybePromptNotifications` reconciles at startup: `"default"` ⇒ re-offer the grant
@@ -1581,9 +1581,9 @@ reveal the sidebar button (see "Self-update").
 
 ### Self-update (new-release detection + in-app install)
 
-The running **yoke-server** periodically checks GitHub for a newer **stable**
-release and surfaces a blue **Update** button next to the "Yoke" title in the
-sidebar header; clicking it installs the new package for the channel yoke was
+The running **omnis-server** periodically checks GitHub for a newer **stable**
+release and surfaces a blue **Update** button next to the "Omnis" title in the
+sidebar header; clicking it installs the new package for the channel omnis was
 installed through, with a manual-steps fallback. Server-only (CLI/TUI never poll
 or install). The logic lives in [internal/selfupdate/](internal/selfupdate/) and
 the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
@@ -1593,19 +1593,19 @@ the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
   `-X main.version` to `./server` — it was silently dropped before). A `dev`
   version disables the check entirely (developers are never nagged).
 - **Detection.** `selfupdate.DetectMethod(os.Executable())` classifies the
-  install channel at runtime: pip (exe under `…/yoke/_dist/` or `site-packages/`),
-  brew (darwin, under `brew --prefix`/`/Cellar/yoke/`), deb (`dpkg-query -S`
+  install channel at runtime: pip (exe under `…/omnis/_dist/` or `site-packages/`),
+  brew (darwin, under `brew --prefix`/`/Cellar/omnis/`), deb (`dpkg-query -S`
   succeeds), rpm (`rpm -qf` succeeds), msi (windows, under Program Files), else
   `raw`/`unknown`.
 - **Check.** `CheckLatest(ctx, Repo, version)` GETs
-  `https://api.github.com/repos/blouargant/yoke/releases/latest` (the `/latest`
+  `https://api.github.com/repos/blouargant/omnis/releases/latest` (the `/latest`
   endpoint already excludes drafts/prereleases ⇒ stable only), `semverNewer`
   gates availability (non-semver/`dev` current ⇒ never available), and `assetFor`
   picks the matching `.deb`/`.rpm`/`.msi` asset by GOOS/GOARCH. brew/pip need no
   asset (package-manager install). The result is cached in `updateState` on
   `serverDeps`.
 - **Poller.** `startUpdatePoller` runs a goroutine (15 s after boot, then every
-  `YOKE_UPDATE_INTERVAL`, default `6h`, gated by `YOKE_UPDATE_CHECK`) that
+  `OMNIS_UPDATE_INTERVAL`, default `6h`, gated by `OMNIS_UPDATE_CHECK`) that
   re-checks and, the first time an update appears, fires the `update_available`
   SSE via `PushEvents.broadcast` so open tabs light the button without polling.
 - **Routes** (auth group, registered in [server/server.go](server/server.go)):
@@ -1613,8 +1613,8 @@ the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
   asset_name, manual_steps, release_url}`, never the password),
   `POST /api/update/check` (force a re-check), and `POST /api/update/install`
   `{password?}` → runs `selfupdate.Install` (deb: `sudo -S apt-get install`,
-  rpm: `sudo -S dnf install`, brew: `brew upgrade yoke`, pip: `pip install -U
-  yoke-agent`, msi: `msiexec /i`). On success `{ok:true, restart_required:true}`;
+  rpm: `sudo -S dnf install`, brew: `brew upgrade omnis`, pip: `pip install -U
+  omnis-agent`, msi: `msiexec /i`). On success `{ok:true, restart_required:true}`;
   on failure `{ok:false, error, manual_steps}`. The password (deb/rpm only) is
   read from the body, piped to `sudo -S`, and never logged/persisted — same
   token-gated host-trust model as the terminal / Monaco-save / `!` routes.
@@ -1627,7 +1627,7 @@ the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
   Styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)
   (`.update-btn`) and [web/css/features/dialogs.css](web/css/features/dialogs.css)
   (`.update-*`).
-- **No-op contract:** a `dev` build or `YOKE_UPDATE_CHECK=false` runs no poller,
+- **No-op contract:** a `dev` build or `OMNIS_UPDATE_CHECK=false` runs no poller,
   shows no button, and is byte-identical to before.
 
 ### Conversation fork & rewind (Web UI)
@@ -1676,9 +1676,9 @@ gates on a `uiConfirm`. Styles: `.turn-action-btn` / `.turn-menu` in
 [web/css/features/messages.css](web/css/features/messages.css). CLI/TUI are
 untouched (no routes, no reseed callers) — byte-identical no-op there.
 
-### Background server (`yoke-server start` / `stop` / `status`)
+### Background server (`omnis-server start` / `stop` / `status`)
 
-`yoke-server` runs in the **foreground by default** (`yoke-server [flags]`).
+`omnis-server` runs in the **foreground by default** (`omnis-server [flags]`).
 Three subcommands, dispatched in `main()` before `run()`'s flag parsing
 ([server/main.go](server/main.go)) and orchestrated in
 [server/daemon.go](server/daemon.go), add a background-daemon lifecycle:
@@ -1686,16 +1686,16 @@ Three subcommands, dispatched in `main()` before `run()`'s flag parsing
 - **`start [flags]`** re-execs the binary **detached** (`os/exec` +
   `SysProcAttr{Setsid: true}` on unix, so the child is its own session leader
   and survives the parent exiting + the terminal closing), redirects its
-  stdout/stderr to `$YOKE_HOME/logs/yoke-server.log`, writes the child PID to
-  `$YOKE_HOME/yoke-server.pid`, then returns — freeing the terminal handle. The
+  stdout/stderr to `$OMNIS_HOME/logs/omnis-server.log`, writes the child PID to
+  `$OMNIS_HOME/omnis-server.pid`, then returns — freeing the terminal handle. The
   child runs the **same foreground path**, so it **opens a browser exactly like
-  plain `yoke-server`** does (per `server.yaml`'s `open_browser`), pointing at
+  plain `omnis-server`** does (per `server.yaml`'s `open_browser`), pointing at
   the *actually bound* address after any port auto-increment — `openBrowser` is
   fire-and-forget and only needs `DISPLAY`/`WAYLAND_DISPLAY` (inherited), not a
-  terminal; pass `yoke-server start --no-browser` to suppress it. `start`
+  terminal; pass `omnis-server start --no-browser` to suppress it. `start`
   inherits the CWD (config search `.agents` and the default `web` dir are
   CWD-relative, so the child must start where `start` ran), sets
-  `YOKE_SERVER_DAEMONIZED=1` on the child, refuses to start when a live PID is
+  `OMNIS_SERVER_DAEMONIZED=1` on the child, refuses to start when a live PID is
   already recorded, and does a ~400 ms liveness grace check to surface an
   immediate failure (e.g. port already in use) instead of falsely reporting
   success.
@@ -1772,7 +1772,7 @@ picks **one** action by mode, decided at save time:
 
 1. Create `.agents/registry/agents/<name>/agent.json` with the `AgentEntry` fields
    (`name`, `description`, `tools`, optional `model_ref`, etc.). Omit the
-   `builtin` flag for user-added agents. (Use `$HOME/.yoke/registry/agents/<name>/`
+   `builtin` flag for user-added agents. (Use `$HOME/.omnis/registry/agents/<name>/`
    for user-global agents that don't belong to a specific project.)
 2. Optionally create `registry/agents/<name>/instruction.md` to provide a
    custom system instruction. If omitted, the agent falls back to
@@ -1917,9 +1917,9 @@ A2A peers are wired via `a2a_config.json` (resolved from the config search chain
    ```json
    {
      "agents": {
-       "peer-yoke": {
+       "peer-omnis": {
          "url": "http://peer-host:8091/",
-         "description": "Secondary yoke server.",
+         "description": "Secondary omnis server.",
          "headers": { "Authorization": "Bearer ${input:peer_token}" },
          "squad": "",
          "session_name": "",
@@ -1934,11 +1934,11 @@ A2A peers are wired via `a2a_config.json` (resolved from the config search chain
 
 2. Add the peer name to `registry/agents/leader/agent.json`:
    ```json
-   { "a2a_agents": ["peer-yoke"] }
+   { "a2a_agents": ["peer-omnis"] }
    ```
 
 3. Hot-reload picks up both files (`POST /api/config/reload`). The leader
-   then sees an `a2a_peer-yoke` tool it can invoke with a `prompt`,
+   then sees an `a2a_peer-omnis` tool it can invoke with a `prompt`,
    optional `squad`, `session_name`, and `create` arguments.
 
 **Session routing** — when `session_name` is set the remote server looks up
@@ -2063,9 +2063,9 @@ repo/path/to/permissions/
 The browse view discovers `agent.json`, `SKILL.md`, or command `.md`
 files recursively under the registry URL's `tree` path. The install
 button downloads every file in the matched directory into
-`$YOKE_HOME/registry/agents/<name>/` (agents) or
-`$YOKE_HOME/registry/skills/<name>/` (skills). Commands install into
-the single per-user `$YOKE_HOME/user_commands.json` file (same store
+`$OMNIS_HOME/registry/agents/<name>/` (agents) or
+`$OMNIS_HOME/registry/skills/<name>/` (skills). Commands install into
+the single per-user `$OMNIS_HOME/user_commands.json` file (same store
 the local Slash Commands editor writes to). After installing a skill,
 add its name to the target agent's `"skills"` list in `agent.json` —
 either via the web UI Skills tab or by editing the file directly.
@@ -2146,8 +2146,8 @@ CLI/TUI leave it nil (config edits apply on next start), and the tool result's
 `reloaded` flag honestly reflects whether a reload fired. The web UI keeps its
 existing post-save Reload banner instead.
 
-Use `YOKE_AGENTS_REGISTRY_DIR` or `YOKE_SKILLS_REGISTRY_DIR` to redirect
-either install location independently of `YOKE_HOME`.
+Use `OMNIS_AGENTS_REGISTRY_DIR` or `OMNIS_SKILLS_REGISTRY_DIR` to redirect
+either install location independently of `OMNIS_HOME`.
 
 ### Web UI debug mode
 

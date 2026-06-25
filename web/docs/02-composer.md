@@ -25,7 +25,7 @@ full page reload starts fresh.
 Click the paperclip to attach files in two ways:
 
 - **Upload from computer** — multipart-uploads files to the server; they are
-  stored under `$YOKE_HOME/logs/uploads/<session>/` and the agent receives
+  stored under `$OMNIS_HOME/logs/uploads/<session>/` and the agent receives
   paths it can read with the `read` tool.
 - **Add context** — opens a file browser anchored at the server's working
   directory. The selected paths are pinned as a "context" header above the
@@ -100,7 +100,7 @@ highlighted one, and **Esc** to dismiss the menu. Pressing **Enter** with
 nothing highlighted runs the command.
 
 > The same `!` shell-escape and completion are also available in the terminal
-> UI (`yoke tui`), where it uses the input field's autocomplete dropdown.
+> UI (`omnis tui`), where it uses the input field's autocomplete dropdown.
 
 ## Context ring
 

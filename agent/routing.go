@@ -405,7 +405,7 @@ func firstNonEmptyLine(s string) string {
 // ── Router squad config injection ────────────────────────────────────────────
 
 // resolveRouterSquadName resolves the configured router squad name from the
-// config-file value (pointer: nil == absent) and the YOKE_ROUTER_SQUAD env
+// config-file value (pointer: nil == absent) and the OMNIS_ROUTER_SQUAD env
 // override. Returns "" when routing is explicitly disabled. The default
 // (absent + no env) is the built-in router squad name "omnis".
 func resolveRouterSquadName(fileValue *string) string {
@@ -413,10 +413,10 @@ func resolveRouterSquadName(fileValue *string) string {
 	if fileValue != nil {
 		name = *fileValue
 	}
-	// A non-empty YOKE_ROUTER_SQUAD overrides the config value; an empty/unset
-	// env var is ignored (consistent with yoke's other env handling). Set it to
+	// A non-empty OMNIS_ROUTER_SQUAD overrides the config value; an empty/unset
+	// env var is ignored (consistent with omnis's other env handling). Set it to
 	// "none" to disable routing from the environment.
-	if env := strings.TrimSpace(os.Getenv("YOKE_ROUTER_SQUAD")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("OMNIS_ROUTER_SQUAD")); env != "" {
 		name = env
 	}
 	switch lowerTrim(name) {
@@ -769,19 +769,19 @@ Routing heuristics:
 - Match the KIND of help the user wants, not the technology they mention. A
   domain keyword alone (e.g. "fluxcd", "Kubernetes", "Postgres") is not a reason
   to pick a general-purpose squad — decide from what the user wants done.
-- Questions about yoke ITSELF or its capabilities — where yoke (or "you") is the
-  subject: "is there an agent / skill / tool for X?" (meaning a yoke one), "can
-  yoke do X?", "find / install an agent or skill for X", "what can you do?" — go
-  to the squad whose description covers answering questions about yoke and
+- Questions about omnis ITSELF or its capabilities — where omnis (or "you") is the
+  subject: "is there an agent / skill / tool for X?" (meaning a omnis one), "can
+  omnis do X?", "find / install an agent or skill for X", "what can you do?" — go
+  to the squad whose description covers answering questions about omnis and
   browsing / installing registry items, EVEN when X is a specialised domain. The
-  user is asking whether a yoke capability exists or to get one, not (yet) to
+  user is asking whether a omnis capability exists or to get one, not (yet) to
   perform the task.
-- World-knowledge / research questions are NOT yoke-capability questions, even
+- World-knowledge / research questions are NOT omnis-capability questions, even
   when phrased "is there a …". "Is there a transparent HTTP proxy in Rust?",
   "what's a good library for X?", "does language Y have a package that does Z?"
-  ask about software out in the world, not yoke's own agents/skills/tools —
-  route these to the research / fact-finding squad, never the yoke-capabilities
-  squad. The tell is the subject: yoke/you → capabilities squad; the world or a
+  ask about software out in the world, not omnis's own agents/skills/tools —
+  route these to the research / fact-finding squad, never the omnis-capabilities
+  squad. The tell is the subject: omnis/you → capabilities squad; the world or a
   programming ecosystem → research squad.
 - A general-purpose / coordinator squad is a last resort, not a catch-all: route
   there only for open-ended, hands-on work when no more specific squad fits.

@@ -1,4 +1,4 @@
-// Package agentmd implements yoke's AGENT.md project-memory feature — the
+// Package agentmd implements omnis's AGENT.md project-memory feature — the
 // equivalent of Claude Code's CLAUDE.md. AGENT.md files are discovered across
 // the config layers and the project tree, concatenated, and injected into the
 // leader/root agent's system instruction at turn time (resolved against the
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // FileName is the project-memory filename, mirroring Claude Code's CLAUDE.md.
@@ -27,8 +27,8 @@ const FileName = "AGENT.md"
 // Files are concatenated in ascending precedence — lowest-priority first, so
 // the most specific guidance (the project file closest to cwd) appears last:
 //
-//  1. System:      <system-config-dir>/AGENT.md   (/etc/yoke by default)
-//  2. User global: $YOKE_HOME/AGENT.md
+//  1. System:      <system-config-dir>/AGENT.md   (/etc/omnis by default)
+//  2. User global: $OMNIS_HOME/AGENT.md
 //  3. .agents/:    AGENT.md in each project-local config dir
 //  4. Project:     AGENT.md from the repo root down to cwd (ancestors first)
 //

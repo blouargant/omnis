@@ -9,18 +9,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
-	internalmcp "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	internalmcp "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemoteMCPRegistryRoutes mounts /remotes endpoints scoped to "mcp" kind.
 // Shares the backing remote_registries.json with the skills and agents tabs.
 //
 // mcpConfigRead re-resolves the 3-layer config chain on each request so a
-// newly-saved override under $YOKE_HOME/config is picked up immediately.
-// mcpConfigWrite is the fixed write target under $YOKE_HOME/config.
+// newly-saved override under $OMNIS_HOME/config is picked up immediately.
+// mcpConfigWrite is the fixed write target under $OMNIS_HOME/config.
 func registerRemoteMCPRegistryRoutes(
 	rg *gin.RouterGroup,
 	readPath func() string,
@@ -175,7 +175,7 @@ func resolveMCPRoutesDeps() mcpRoutesDeps {
 	absMCPWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "mcp_config.json"))
 	skillsRead, _ := filepath.Abs(paths.SkillsRegistryDir())
 	skillsWrite, _ := filepath.Abs(paths.SkillsRegistryWriteDir())
-	if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_SKILLS_REGISTRY_DIR")); v != "" {
 		skillsRead, _ = filepath.Abs(v)
 		skillsWrite = skillsRead
 	}

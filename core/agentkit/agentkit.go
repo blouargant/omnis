@@ -18,11 +18,11 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/llm"
+	"github.com/blouargant/omnis/core/llm"
 )
 
 // DefaultModel is kept for documentation; the actual default is owned by
-// core/llm and depends on YOKE_PROVIDER.
+// core/llm and depends on OMNIS_PROVIDER.
 const DefaultModel = "gpt-4o-mini"
 
 // SystemPrompt is the harness's universal operating contract — domain-
@@ -91,7 +91,7 @@ Tool selection rules:
 If a step in this protocol references a tool you do not have, skip it
 silently rather than refusing the task.`
 
-// NewModel selects an LLM via core/llm based on YOKE_PROVIDER. See the
+// NewModel selects an LLM via core/llm based on OMNIS_PROVIDER. See the
 // llm package docs for the supported providers and required env vars.
 func NewModel(ctx context.Context) (model.LLM, error) {
 	m, err := llm.New(ctx)

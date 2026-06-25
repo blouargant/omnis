@@ -1,5 +1,5 @@
 // Package permissions implements JSON rule-based permission governance using
-// Claude Code's permission nomenclature as yoke's default format. Rules are
+// Claude Code's permission nomenclature as omnis's default format. Rules are
 // written as Tool(specifier) strings under permissions.{allow, ask, deny}:
 //
 //	{ "permissions": {
@@ -13,7 +13,7 @@
 // A tool call that matches no rule falls through to the mode default (ask in
 // default mode), so unrecognised commands require explicit confirmation.
 //
-// yoke extensions over Claude syntax: an object rule {rule, reason, cwd}
+// omnis extensions over Claude syntax: an object rule {rule, reason, cwd}
 // attaches a prompt reason and a project-scoped cwd; the {regex, tools} object
 // form is the raw-regexp escape hatch (matched against "toolName <json args>")
 // that ConvertLegacy uses so an upgraded old config behaves identically.

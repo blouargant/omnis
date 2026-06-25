@@ -25,7 +25,7 @@ removed:
 
 ## User commands
 
-User commands are stored in `$YOKE_HOME/user_commands.json` and
+User commands are stored in `$OMNIS_HOME/user_commands.json` and
 managed via the CRUD table in the panel.
 
 Each command has four fields:
@@ -60,6 +60,6 @@ Review main.go for correctness, style, and potential bugs. Summarise findings in
 
 ## Persistence
 
-User commands are written to `$YOKE_HOME/user_commands.json` on
+User commands are written to `$OMNIS_HOME/user_commands.json` on
 save and read back on every page load. They are not part of the
 hot-reload flow — changes take effect immediately without a reload.

@@ -1,7 +1,7 @@
 ---
 name: agent-builder
 description: Scaffold a new specialised agent and wire it into the harness. Use when the user says "create an agent", "add a specialist", "build a new agent", or wants to extend the harness for a new domain. Covers tool composition, skill authoring, MCP server wiring, permissions, and coordinator registration.
-compatibility: Designed for the yoke harness (github.com/blouargant/yoke).
+compatibility: Designed for the omnis harness (github.com/blouargant/omnis).
 ---
 
 # Agent Builder

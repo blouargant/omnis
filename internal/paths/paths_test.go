@@ -7,19 +7,19 @@ import (
 )
 
 func TestHomeDefault(t *testing.T) {
-	t.Setenv("YOKE_HOME", "")
+	t.Setenv("OMNIS_HOME", "")
 	h, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("no resolvable HOME")
 	}
-	if got := Home(); got != filepath.Join(h, ".yoke") {
-		t.Fatalf("Home() = %q, want %q", got, filepath.Join(h, ".yoke"))
+	if got := Home(); got != filepath.Join(h, ".omnis") {
+		t.Fatalf("Home() = %q, want %q", got, filepath.Join(h, ".omnis"))
 	}
 }
 
 func TestHomeEnvOverride(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if got := Home(); got != tmp {
 		t.Fatalf("Home() = %q, want %q", got, tmp)
 	}
@@ -27,8 +27,8 @@ func TestHomeEnvOverride(t *testing.T) {
 
 func TestConfigSearchDirsDefault(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
-	t.Setenv("YOKE_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_HOME", tmp)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
 	dirs := ConfigSearchDirs()
 	if len(dirs) != 3 {
 		t.Fatalf("ConfigSearchDirs() len = %d, want 3", len(dirs))
@@ -46,7 +46,7 @@ func TestConfigSearchDirsDefault(t *testing.T) {
 
 func TestConfigSearchDirsEnvOverride(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
-	t.Setenv("YOKE_CONFIG_DIRS", a+string(os.PathListSeparator)+b)
+	t.Setenv("OMNIS_CONFIG_DIRS", a+string(os.PathListSeparator)+b)
 	dirs := ConfigSearchDirs()
 	if len(dirs) != 2 || dirs[0] != a || dirs[1] != b {
 		t.Fatalf("ConfigSearchDirs() = %v, want [%s %s]", dirs, a, b)
@@ -56,11 +56,11 @@ func TestConfigSearchDirsEnvOverride(t *testing.T) {
 func TestConfigSearchDirsSystemOverride(t *testing.T) {
 	tmp := t.TempDir()
 	sys := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
-	t.Setenv("YOKE_CONFIG_DIRS", "")
-	t.Setenv("YOKE_SYSTEM_CONFIG_DIR", sys)
+	t.Setenv("OMNIS_HOME", tmp)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", sys)
 	dirs := ConfigSearchDirs()
-	// .agents and $HOME/.yoke layers must be preserved; only the system
+	// .agents and $HOME/.omnis layers must be preserved; only the system
 	// (lowest-precedence) layer is relocated.
 	if len(dirs) != 3 {
 		t.Fatalf("ConfigSearchDirs() len = %d, want 3", len(dirs))
@@ -80,8 +80,8 @@ func TestFindConfigPrecedence(t *testing.T) {
 	home := t.TempDir()
 	local := t.TempDir()
 	system := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", local+string(os.PathListSeparator)+home+string(os.PathListSeparator)+system)
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", local+string(os.PathListSeparator)+home+string(os.PathListSeparator)+system)
 
 	mustWrite := func(dir, name string) string {
 		t.Helper()
@@ -113,8 +113,8 @@ func TestFindConfigPrecedence(t *testing.T) {
 
 func TestFindConfigMissingReturnsWriteTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
 	want := filepath.Join(home, "nope.json")
 	if got := FindConfig("nope.json"); got != want {
 		t.Fatalf("FindConfig missing: got %q, want %q", got, want)
@@ -123,7 +123,7 @@ func TestFindConfigMissingReturnsWriteTarget(t *testing.T) {
 
 func TestConfigWriteDirIsHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	if got := ConfigWriteDir(); got != home {
 		t.Errorf("ConfigWriteDir() = %q, want %q", got, home)
 	}
@@ -131,7 +131,7 @@ func TestConfigWriteDirIsHome(t *testing.T) {
 
 func TestStateDirsUnderHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	cases := []struct {
 		name, want string
 	}{
@@ -150,8 +150,8 @@ func TestStateDirsUnderHome(t *testing.T) {
 
 func TestAgentsRegistrySearchDirs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_AGENTSKILLS_DIR", "")
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "")
 	// Run from a clean CWD so the project's own .agents/ directory doesn't
 	// participate in the chain.
 	chdirTemp(t)
@@ -174,12 +174,12 @@ func TestAgentsRegistrySearchDirs(t *testing.T) {
 // TestAgentSkillsRegistryLayer verifies that the shared /etc/agentskills
 // registry is appended as the lowest-precedence layer of both the agent and
 // skill search chains, with its agents/ and skills/ subdirs (no registry/
-// prefix), and that it can be relocated via YOKE_AGENTSKILLS_DIR.
+// prefix), and that it can be relocated via OMNIS_AGENTSKILLS_DIR.
 func TestAgentSkillsRegistryLayer(t *testing.T) {
 	home := t.TempDir()
 	extra := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_AGENTSKILLS_DIR", extra)
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", extra)
 	chdirTemp(t)
 
 	agents := AgentsRegistrySearchDirs()
@@ -189,7 +189,7 @@ func TestAgentSkillsRegistryLayer(t *testing.T) {
 	if last := agents[3]; last != filepath.Join(extra, "agents") {
 		t.Errorf("agents last layer = %q, want %q", last, filepath.Join(extra, "agents"))
 	}
-	// It must sit below /etc/yoke.
+	// It must sit below /etc/omnis.
 	if agents[2] != filepath.Join(SystemConfigDir, "registry/agents") {
 		t.Errorf("agents system layer = %q, want %q", agents[2], filepath.Join(SystemConfigDir, "registry/agents"))
 	}
@@ -201,12 +201,12 @@ func TestAgentSkillsRegistryLayer(t *testing.T) {
 }
 
 // TestAgentSkillsRegistryDisabled verifies that an explicit empty
-// YOKE_AGENTSKILLS_DIR removes the layer entirely, leaving /etc/yoke as the
+// OMNIS_AGENTSKILLS_DIR removes the layer entirely, leaving /etc/omnis as the
 // lowest-precedence registry.
 func TestAgentSkillsRegistryDisabled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_AGENTSKILLS_DIR", "")
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "")
 	chdirTemp(t)
 
 	agents := AgentsRegistrySearchDirs()
@@ -226,8 +226,8 @@ func TestAgentSkillsRegistryDisabled(t *testing.T) {
 // when no override is set.
 func TestAgentSkillsRegistryDefault(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	os.Unsetenv("YOKE_AGENTSKILLS_DIR")
+	t.Setenv("OMNIS_HOME", home)
+	os.Unsetenv("OMNIS_AGENTSKILLS_DIR")
 	chdirTemp(t)
 
 	agents := AgentsRegistrySearchDirs()
@@ -319,8 +319,8 @@ func TestConfigSearchDirsIncludesBothLocalDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
 	dirs := ConfigSearchDirs()
 	if len(dirs) != 4 {
 		t.Fatalf("ConfigSearchDirs() = %v, want 4 entries", dirs)
@@ -338,7 +338,7 @@ func TestConfigSearchDirsIncludesBothLocalDirs(t *testing.T) {
 
 func TestWriteDirForLayer(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	tmp := chdirTemp(t)
 	if err := os.Mkdir(filepath.Join(tmp, LocalDir), 0o755); err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestWriteDirForLayer(t *testing.T) {
 	if got := WriteDirForLayer("user"); got != home {
 		t.Errorf("user: got %q, want %q", got, home)
 	}
-	// "system" falls back to user — yoke never writes /etc/yoke.
+	// "system" falls back to user — omnis never writes /etc/omnis.
 	if got := WriteDirForLayer("system"); got != home {
 		t.Errorf("system: got %q, want %q", got, home)
 	}
@@ -367,7 +367,7 @@ func TestWriteDirForLayer(t *testing.T) {
 
 func TestLayerClassifiesPaths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	tmp := chdirTemp(t)
 	localAbs := filepath.Join(tmp, LocalDir)
 	if err := os.MkdirAll(filepath.Join(localAbs, "registry/agents/foo"), 0o755); err != nil {
@@ -386,7 +386,7 @@ func TestLayerClassifiesPaths(t *testing.T) {
 	if got := Layer(filepath.Join(home, "agents.json")); got != "user" {
 		t.Errorf("home path: got %q, want user", got)
 	}
-	if got := Layer("/etc/yoke/agents.json"); got != "system" {
+	if got := Layer("/etc/omnis/agents.json"); got != "system" {
 		t.Errorf("system path: got %q, want system", got)
 	}
 }

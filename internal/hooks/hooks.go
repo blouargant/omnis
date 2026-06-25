@@ -5,7 +5,7 @@
 //
 // The on-disk format is hooks.json, whose top-level "hooks" object matches
 // Claude Code's hooks block verbatim so an existing Claude Code configuration is
-// portable into yoke. The engine (run.go) speaks Claude Code's hook input
+// portable into omnis. The engine (run.go) speaks Claude Code's hook input
 // (stdin JSON) and output (exit code + optional stdout JSON) protocol.
 //
 // The package is intentionally self-contained and surface-agnostic: it is wired

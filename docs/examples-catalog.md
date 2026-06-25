@@ -9,7 +9,7 @@ with:
 go run ./examples/sNN_<name> "<your prompt>"
 ```
 
-(Set `YOKE_PROVIDER` and the appropriate API key first — see
+(Set `OMNIS_PROVIDER` and the appropriate API key first — see
 [providers.md](providers.md).)
 
 > **Single-session by design.** These demos use the back-compat

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/stream"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/stream"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 )
 
 func main() {

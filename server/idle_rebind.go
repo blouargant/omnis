@@ -9,7 +9,7 @@
 // Manager.Release; the next user turn naturally re-pins to the current
 // generation through Manager.Lookup.
 //
-// Configurable via YOKE_SESSION_REBIND_IDLE. Default 5s. Set to "0" to
+// Configurable via OMNIS_SESSION_REBIND_IDLE. Default 5s. Set to "0" to
 // disable.
 package main
 
@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 const defaultRebindIdleTimeout = 5 * time.Second
@@ -34,10 +34,10 @@ type IdleRebindConfig struct {
 	IdleTimeout time.Duration // 0 disables
 }
 
-// resolveRebindIdle parses YOKE_SESSION_REBIND_IDLE. Empty/invalid →
+// resolveRebindIdle parses OMNIS_SESSION_REBIND_IDLE. Empty/invalid →
 // defaultRebindIdleTimeout. "0" → disabled.
 func resolveRebindIdle() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("YOKE_SESSION_REBIND_IDLE"))
+	raw := strings.TrimSpace(os.Getenv("OMNIS_SESSION_REBIND_IDLE"))
 	if raw == "" {
 		return defaultRebindIdleTimeout
 	}

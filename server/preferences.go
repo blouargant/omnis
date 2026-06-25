@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // preferences holds user-visible UI preferences that should survive server
@@ -35,8 +35,8 @@ type preferencesStore struct {
 
 func newPreferencesStore(_ configFiles) *preferencesStore {
 	// User preferences are mutable state; always anchor them under the
-	// write root ($YOKE_HOME/config), never alongside a lower-precedence
-	// agent.yaml read from ./config or /etc/yoke.
+	// write root ($OMNIS_HOME/config), never alongside a lower-precedence
+	// agent.yaml read from ./config or /etc/omnis.
 	return &preferencesStore{path: filepath.Join(paths.ConfigWriteDir(), "preferences.json")}
 }
 

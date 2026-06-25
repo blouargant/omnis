@@ -36,7 +36,7 @@ import (
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/omnis/core/events"
 )
 
 // Defaults.

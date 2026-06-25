@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/permissions"
-	"github.com/blouargant/yoke/core/stream"
-	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/permissions"
+	"github.com/blouargant/omnis/core/stream"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 func main() {

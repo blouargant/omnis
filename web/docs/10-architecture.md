@@ -1,8 +1,8 @@
 # Architecture
 
-Yoke is built on top of [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk),
+Omnis is built on top of [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk),
 which provides the agent loop, session, plugin, and runner primitives. The
-Yoke binary wires a fleet of agents on top of that runtime.
+Omnis binary wires a fleet of agents on top of that runtime.
 
 ## Agent topology
 
@@ -72,7 +72,7 @@ that squad's leader then answers you directly.
   including any attached files — to the answering squad **verbatim** (it
   cannot paraphrase or drop it).
 - **Opt-out.** Set `router_squad` to `"none"` in `agents.json` (or
-  `YOKE_ROUTER_SQUAD=none`) to disable routing; new chats then start on the
+  `OMNIS_ROUTER_SQUAD=none`) to disable routing; new chats then start on the
   `default` squad and behave exactly as before. Absent ⇒ defaults to
   `omnis`, which is injected automatically if your config doesn't declare
   it.
@@ -132,7 +132,7 @@ modifying the agent itself. Three plugins ship by default:
 
 1. Create `registry/agents/<name>/agent.json` with the agent definition
    (`name`, `description`, `tools`, optional `model_ref`, etc.). Add
-   `"builtin": true` only for agents shipped with yoke — leave it out
+   `"builtin": true` only for agents shipped with omnis — leave it out
    for user-defined agents.
 2. Optionally add `registry/agents/<name>/instruction.md` for the
    agent's system prompt. If missing, it falls back to

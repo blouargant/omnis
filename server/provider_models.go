@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/embed"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/embed"
 	"github.com/gin-gonic/gin"
 )
 
@@ -265,7 +265,7 @@ func probeEmbeddingDim(ctx context.Context, providerKind, apiKey, baseURL, model
 	if err != nil {
 		return 0, err
 	}
-	vecs, err := emb.Embed(ctx, []string{"yoke embedding dimension probe"})
+	vecs, err := emb.Embed(ctx, []string{"omnis embedding dimension probe"})
 	if err != nil {
 		return 0, err
 	}

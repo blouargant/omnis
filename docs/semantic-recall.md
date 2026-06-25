@@ -1,6 +1,6 @@
 # Semantic Recall (embedder + vector indexes)
 
-Yoke turns the traces a session leaves behind — its goal, its decisions, the
+Omnis turns the traces a session leaves behind — its goal, its decisions, the
 soft-skills it loaded — into **semantically searchable memory** for future
 sessions. This document covers the embedder that powers it, the shared vector
 store, the five recall features built on top, and how cross-session **precedents**
@@ -26,8 +26,8 @@ unchanged string is free.
 
 1. `embed_model_ref` in `models.json` (or `agents.json`) → the named catalogue
    model flagged `"embedding": true`.
-2. `YOKE_EMBED_MODEL_REF`, then the `YOKE_EMBED_*` family
-   (`YOKE_EMBED_PROVIDER` / `MODEL` / `BASE_URL` / `API_KEY` / `DIM`).
+2. `OMNIS_EMBED_MODEL_REF`, then the `OMNIS_EMBED_*` family
+   (`OMNIS_EMBED_PROVIDER` / `MODEL` / `BASE_URL` / `API_KEY` / `DIM`).
 3. Nothing resolves → **no embedder**.
 
 The embedder is built **once per process** and stored on `Infrastructure`
@@ -62,7 +62,7 @@ Every recall feature is additive and individually gated: a `nil` embedder makes
   adds the new vector, and updates metadata. `Query` embeds the query and runs an
   ANN search, returning hits with score + metadata.
 
-All indexes live under `paths.IndexDir()` (`$YOKE_HOME/index/`), alongside the
+All indexes live under `paths.IndexDir()` (`$OMNIS_HOME/index/`), alongside the
 `embed_cache/` content-hash cache.
 
 ## The five recall features
@@ -81,11 +81,11 @@ built lazily and surviving hot-reload.
 
 ### Documentation search (`internal/docindex`)
 
-The documentation index lets the **Helper** answer questions about yoke itself
-("how does hot-reload work?", "what env var sets the embedder?") from yoke's own
+The documentation index lets the **Helper** answer questions about omnis itself
+("how does hot-reload work?", "what env var sets the embedder?") from omnis's own
 docs. It indexes markdown across every doc root returned by `docindex.Roots()` —
-the web UI user docs (`web/docs` → `/usr/share/yoke/web/docs`) and the developer
-docs (`docs` → `/usr/share/doc/yoke/docs`), overridable with `YOKE_DOCS_DIRS`.
+the web UI user docs (`web/docs` → `/usr/share/omnis/web/docs`) and the developer
+docs (`docs` → `/usr/share/doc/omnis/docs`), overridable with `OMNIS_DOCS_DIRS`.
 Chunking is line-window based (like code search) and content-hash incremental;
 each hit carries the source `path`, `heading`, line range, and the quoted
 `text`, so the Helper can answer and cite in one step.
@@ -94,7 +94,7 @@ Indexing runs as a background task at **server startup** (`startDocsIndexer` in
 [`server/docs_indexer.go`](../server/docs_indexer.go)): the incremental
 `Reindex` builds the index on first boot and refreshes it after the docs or the
 embedder changed, while being a no-op otherwise. Rebuild manually with
-`yoke reindex-docs`. When no embedder is configured the semantic `search_docs`
+`omnis reindex-docs`. When no embedder is configured the semantic `search_docs`
 is absent and the always-available `list_docs` / `read_doc` / `grep_docs` glob
 tools are the fallback.
 
@@ -121,7 +121,7 @@ makes the backfill idempotent.
 At session end the reflection pipeline emits `EventSessionReflected`
 (see [`agent/load_recorder.go`](../agent/load_recorder.go)).
 [`agent/precedents_hook.go`](../agent/precedents_hook.go) subscribes to it,
-reads `$YOKE_HOME/logs/agent_statelog_<key>.json`, and calls
+reads `$OMNIS_HOME/logs/agent_statelog_<key>.json`, and calls
 `store.IndexStateLog(key, sl, ts)` (timestamp = the statelog's mtime). The hook
 is registered per generation in [`agent/instance.go`](../agent/instance.go) and
 detached on hot-reload; it is wired only when an embedder resolves.
@@ -138,7 +138,7 @@ precedents (see [skills.md — Curator gating rules](skills.md#curator-gating-ru
 
 ### Backfill
 
-[`reindex_precedents.go`](../reindex_precedents.go) (`yoke reindex-precedents`)
+[`reindex_precedents.go`](../reindex_precedents.go) (`omnis reindex-precedents`)
 globs every `agent_statelog_*.json`, calls `store.Add` for each, then `Save`
 once. Because IDs are deterministic it converges to the same index on repeated
 runs; it errors out cleanly when no embedder is configured.

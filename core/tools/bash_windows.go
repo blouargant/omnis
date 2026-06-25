@@ -18,7 +18,7 @@ import (
 // NOTE: the Bash tool's command strings are POSIX-shell oriented. On native
 // Windows they execute under cmd.exe, so shell builtins, quoting, and
 // pipelines that assume /bin/sh semantics may not behave identically. Hosts
-// that need bash semantics on Windows should run yoke-server under WSL or a
+// that need bash semantics on Windows should run omnis-server under WSL or a
 // Git-Bash environment. See packaging/README.md.
 func newShellCommand(ctx context.Context, command string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "cmd.exe", "/C", command)

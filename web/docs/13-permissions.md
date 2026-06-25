@@ -1,7 +1,7 @@
 # Permissions
 
 Every tool call the agent makes — file edit, shell command, MCP invocation —
-is filtered through the permissions engine. yoke uses **Claude Code's
+is filtered through the permissions engine. omnis uses **Claude Code's
 permission nomenclature** as its native format. `permissions.json` holds a
 `permissions` object with three rule tiers plus a `defaultMode`:
 
@@ -45,7 +45,7 @@ says otherwise. (`command` is only treated as read-only with a `-v`/`-V` lookup
 flag — `command rm …` still goes through the rules, since it *executes* its
 argument.)
 
-### yoke extensions
+### omnis extensions
 
 - **Object form** — `{ "rule": "Bash(...)", "reason": "...", "cwd": "..." }`
   attaches a prompt reason and a project-scoping `cwd` (rules with a `cwd` only
@@ -82,13 +82,13 @@ becomes a regex-escape-hatch rule, so behaviour is unchanged.
 Two CLI helpers:
 
 ```bash
-yoke permissions convert -w permissions.json        # upgrade an old yoke file in place
-yoke permissions import  -o permissions.json settings.json   # convert a Claude Code settings.json
+omnis permissions convert -w permissions.json        # upgrade an old omnis file in place
+omnis permissions import  -o permissions.json settings.json   # convert a Claude Code settings.json
 ```
 
 `import` reads a Claude Code `settings.json` (or just its `permissions` block)
 and prints any rules it can't map (e.g. `WebFetch(domain:…)`, which has no gated
-yoke tool today).
+omnis tool today).
 
 ## The `!` shell-escape
 

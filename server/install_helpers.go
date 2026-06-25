@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/usercommands"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/usercommands"
 )
 
 // tryAutoInstallSkills checks which skills in skillNames are not locally installed
@@ -185,7 +185,7 @@ func tryAutoInstallAgents(agentNames []string, agentsRegistryDir string, agentsC
 						if _, instErr := registries.InstallAgent(ref, reg.Token, ag.DirPath, agentsRegistryDir); instErr == nil {
 							// If the install target sits under .agents/, route
 							// the agents.json edit there too — otherwise we'd
-							// reference a local-only agent from $HOME/.yoke.
+							// reference a local-only agent from $HOME/.omnis.
 							configWrite := agentsConfigWrite
 							if paths.Layer(agentsRegistryDir) == "local" {
 								configWrite = filepath.Join(paths.LocalWriteDir(), "agents.json")

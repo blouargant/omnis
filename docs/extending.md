@@ -163,7 +163,7 @@ to delegate to it (see "Add a squad" below). If no squad includes the
 new agent, no session will see it — that's how you keep an agent
 reserved for a specific squad.
 
-Built-in vs custom: the agents shipped with yoke (`omnis`, `leader`,
+Built-in vs custom: the agents shipped with omnis (`omnis`, `leader`,
 `skill_editor`, `helper`, `summariser`, `curator`,
 `reflector`) carry `"builtin": true` in their `agent.json`. The web UI
 displays them under a **Built-in Agents** section, separated from
@@ -236,7 +236,7 @@ add/delete; saving triggers a hot reload.
 
 ## Connect a remote A2A agent
 
-Yoke implements the [A2A protocol](https://google.github.io/A2A/) on both
+Omnis implements the [A2A protocol](https://google.github.io/A2A/) on both
 sides — it can receive tasks as a server (`server/a2a_server.go`) and
 delegate tasks to remote A2A endpoints as a client (`internal/a2a/`).
 
@@ -249,9 +249,9 @@ You **don't write Go code** to wire a peer. Add an entry to
 ```json
 {
   "agents": {
-    "peer-yoke": {
+    "peer-omnis": {
       "url": "http://peer-host:8091/",
-      "description": "Secondary yoke server specialised in database triage.",
+      "description": "Secondary omnis server specialised in database triage.",
       "headers": { "Authorization": "Bearer ${input:peer_token}" },
       "squad": "",
       "session_name": "",
@@ -262,21 +262,21 @@ You **don't write Go code** to wire a peer. Add an entry to
     {
       "id": "peer_token",
       "type": "promptString",
-      "description": "Bearer token for the peer yoke server",
+      "description": "Bearer token for the peer omnis server",
       "password": true
     }
   ]
 }
 ```
 
-The map key (`peer-yoke`) becomes the tool name suffix: the leader sees a
-tool called `a2a_peer-yoke`. Use only `[a-zA-Z0-9_-]` characters.
+The map key (`peer-omnis`) becomes the tool name suffix: the leader sees a
+tool called `a2a_peer-omnis`. Use only `[a-zA-Z0-9_-]` characters.
 
 ### 2. Add the peer name to `registry/agents/leader/agent.json`
 
 ```json
 {
-  "a2a_agents": ["peer-yoke"]
+  "a2a_agents": ["peer-omnis"]
 }
 ```
 
@@ -296,7 +296,7 @@ at call time. You can also bake defaults into the config:
 ```json
 {
   "agents": {
-    "peer-yoke": {
+    "peer-omnis": {
       "url": "http://peer-host:8091/",
       "squad": "research",
       "session_name": "teaching-kite",

@@ -16,13 +16,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/permissions"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/permissions"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // ServerConfig holds the server-specific settings loaded from config/server.yaml.
-// Fields mirror the YOKE_SERVER_* environment variables; env vars take precedence.
+// Fields mirror the OMNIS_SERVER_* environment variables; env vars take precedence.
 type ServerConfig struct {
 	// Addr is the full listen address, e.g. ":8080" or "localhost:9000".
 	// Ignored when Port is set and Addr is empty.
@@ -39,13 +39,13 @@ type ServerConfig struct {
 	A2APort int `yaml:"a2a_port,omitempty" json:"a2a_port,omitempty"`
 	// PortAutoIncrement, when true, automatically tries the next port when the
 	// configured port is already in use (up to 100 attempts). Applies to both
-	// the web server port and the A2A port. Ignored when YOKE_SERVER_ADDR is set.
+	// the web server port and the A2A port. Ignored when OMNIS_SERVER_ADDR is set.
 	PortAutoIncrement bool `yaml:"port_auto_increment,omitempty" json:"port_auto_increment,omitempty"`
 	// OpenBrowser, when true, opens the web UI in the default browser after the
 	// server starts. Silently skipped when no graphical environment is detected.
 	OpenBrowser bool `yaml:"open_browser,omitempty" json:"open_browser,omitempty"`
 	// WebDir is the directory containing the static web UI files.
-	// Overridden by YOKE_WEB_DIR. Defaults to "web" (relative to CWD).
+	// Overridden by OMNIS_WEB_DIR. Defaults to "web" (relative to CWD).
 	WebDir string `yaml:"web_dir,omitempty" json:"web_dir,omitempty"`
 	// BasePath is an optional URL path prefix under which the web UI and all
 	// API routes are served, e.g. "/my-company/myself". A leading slash is
@@ -94,7 +94,7 @@ type configFiles struct {
 
 // path returns the **read** path for a whitelisted name. Resolved at
 // every call so that after a write lands a new override under
-// $YOKE_HOME/config, subsequent GETs see the highest-precedence layer.
+// $OMNIS_HOME/config, subsequent GETs see the highest-precedence layer.
 // The boolean is false for any other name.
 func (c configFiles) path(name string) (string, bool) {
 	filename, ok := configFileNames[name]
@@ -104,7 +104,7 @@ func (c configFiles) path(name string) (string, bool) {
 	// Honour any explicit operator-supplied path (CLI flag / env var)
 	// stored in the struct fields, but only when the file actually
 	// exists at that location — otherwise fall back to the 3-layer
-	// search so writes can fork into $YOKE_HOME on first edit.
+	// search so writes can fork into $OMNIS_HOME on first edit.
 	switch name {
 	case "agent":
 		if c.Agent != "" {
@@ -149,7 +149,7 @@ func (c configFiles) path(name string) (string, bool) {
 // writePath returns the **write** target for a whitelisted name without
 // considering layer promotion — used by callers that don't have the parsed
 // content available. The layer is the source layer of the current file
-// (forks /etc/yoke → $YOKE_HOME). For content-aware promotion (agents.json
+// (forks /etc/omnis → $OMNIS_HOME). For content-aware promotion (agents.json
 // referencing local-only skills/agents), use writePathFor.
 func (c configFiles) writePath(name string) (string, bool) {
 	return c.writePathFor(name, nil)
@@ -195,7 +195,7 @@ func resolveConfigFiles(opts agent.Options) configFiles {
 	// (CLI flag, env var, or per-file path in agents.json) — detected by
 	// comparing the resolved path against the startup FindConfig default.
 	// When empty, path() falls through to paths.FindConfig at request time
-	// so a fork into $YOKE_HOME on first Save (e.g. when ~/.yoke/models.json
+	// so a fork into $OMNIS_HOME on first Save (e.g. when ~/.omnis/models.json
 	// did not exist at startup) becomes visible without restart.
 	findConfigAgent := paths.FindConfig("agents.json")
 	findConfigModels := paths.FindConfig("models.json")
@@ -270,7 +270,7 @@ type configFilePayload struct {
 
 // effectiveMtimePath returns the path that should be used for mtime checks
 // and reporting. After the first UI save (fork-on-first-edit), the write
-// target under $YOKE_HOME is authoritative; before the fork, the read source
+// target under $OMNIS_HOME is authoritative; before the fork, the read source
 // is used — ensuring GET and PUT see the same file and stay in sync.
 func effectiveMtimePath(readPath, writePath string) string {
 	if _, err := os.Stat(writePath); err == nil {
@@ -346,7 +346,7 @@ func (r *restartCoordinator) Done() <-chan struct{} { return r.ch }
 func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *restartCoordinator, manager *agent.Manager, agentOpts agent.Options) {
 	rg.GET("/config/files", func(c *gin.Context) {
 		// Resolve at request time: after a PUT lands a new override
-		// under $YOKE_HOME/config, the listing reflects it without a
+		// under $OMNIS_HOME/config, the listing reflects it without a
 		// server restart.
 		agentPath, _ := files.path("agent")
 		modelsPath, _ := files.path("models")
@@ -756,7 +756,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 
 					// Mirror the agents-side override for squads: use the resolved
 					// settings (3-layer chain) so newly-installed squads under
-					// $YOKE_HOME/config become visible even when the raw parse
+					// $OMNIS_HOME/config become visible even when the raw parse
 					// above hit a cached lower-precedence file path.
 					squads := make([]any, 0, len(settings.Squads))
 					for _, sq := range settings.Squads {
@@ -893,7 +893,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					m["agents"] = agentNames
 
 					// Sweep orphan agent dirs from every write layer we touched
-					// (and the default user layer). Built-ins under /etc/yoke
+					// (and the default user layer). Built-ins under /etc/omnis
 					// or non-write read-only locations are never deleted.
 					agentSet := make(map[string]bool, len(agentNames))
 					for _, n := range agentNames {

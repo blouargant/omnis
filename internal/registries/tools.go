@@ -15,7 +15,7 @@ import (
 // process restart.
 type Deps struct {
 	// RegistryDir returns the absolute path to the installed-skills root
-	// (typically $YOKE_HOME/registry/skills).
+	// (typically $OMNIS_HOME/registry/skills).
 	RegistryDir func() string
 	// ConfigPath returns the absolute path of remote_registries.json that
 	// reads should consume (the 3-layer search chain's top hit).
@@ -304,7 +304,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"flag. For agents, a `format` field of `\"claude\"` means the agent uses "+
 				"Claude Code markdown format (a single .md file) — this is fully supported "+
 				"and installable, not an error. Agents without a format field use native "+
-				"yoke format (agent.json + optional instruction.md). "+
+				"omnis format (agent.json + optional instruction.md). "+
 				"Arguments: `registry_id` (string, required) — from list_registries.",
 			func(_ tool.Context, in browseRegistryIn) (browseRegistryOut, error) {
 				ref, reg, token, err := resolveRef(deps, in.RegistryID)

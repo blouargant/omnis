@@ -77,7 +77,7 @@ func TestRecordFeedbackOverwrites(t *testing.T) {
 }
 
 func TestFeedbackPath(t *testing.T) {
-	got := FeedbackPath("/yoke/logs", "u1_sess-A")
+	got := FeedbackPath("/omnis/logs", "u1_sess-A")
 	if !strings.HasSuffix(got, "agent_feedback_u1_sess-A.json") {
 		t.Errorf("FeedbackPath = %q", got)
 	}

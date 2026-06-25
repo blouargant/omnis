@@ -1,11 +1,11 @@
-// Package paths centralises filesystem location resolution for yoke.
+// Package paths centralises filesystem location resolution for omnis.
 //
 // Two roots are exposed:
 //
-//   - Home(): writable state root. Defaults to $HOME/.yoke; overridable via
-//     $YOKE_HOME. Every mutable file produced by the running agent (logs,
+//   - Home(): writable state root. Defaults to $HOME/.omnis; overridable via
+//     $OMNIS_HOME. Every mutable file produced by the running agent (logs,
 //     uploads, mailboxes, soft-skills, user-edited config) is anchored
-//     here so a yoke binary started from any working directory never
+//     here so a omnis binary started from any working directory never
 //     scatters state across the filesystem.
 //
 //   - ConfigSearchDirs(): read-only search chain for configuration files,
@@ -15,27 +15,27 @@
 //     `.agents/` is the canonical name; `agents/` is accepted as a
 //     dotless alias. When both exist, `.agents/` wins; the alias is
 //     included in the chain right after.
-//     2. Home()             — per-user state root ($HOME/.yoke)
-//     3. SystemConfigDir    — /etc/yoke by default; system-wide install.
+//     2. Home()             — per-user state root ($HOME/.omnis)
+//     3. SystemConfigDir    — /etc/omnis by default; system-wide install.
 //     Agent/skill registries live under `registry/agents` and
 //     `registry/skills` in every layer.
 //
 //     One extra, registry-only layer sits BELOW all of the above in the
 //     agent/skill search chains (but not in ConfigSearchDirs, which is for
 //     config files): AgentSkillsDir (/etc/agentskills by default). When that
-//     directory exists it is treated like a /etc/yoke/registry root — its
+//     directory exists it is treated like a /etc/omnis/registry root — its
 //     `agents/` and `skills/` subdirectories contribute definitions — letting
-//     yoke share an Agent-Skills registry installed by other tools. yoke's own
-//     /etc/yoke registry wins on name conflicts; see agentSkillsDir().
+//     omnis share an Agent-Skills registry installed by other tools. omnis's own
+//     /etc/omnis registry wins on name conflicts; see agentSkillsDir().
 //
-//     The whole chain can be replaced via $YOKE_CONFIG_DIRS (a list using
+//     The whole chain can be replaced via $OMNIS_CONFIG_DIRS (a list using
 //     the OS path-list separator, ":" on Unix). FindConfig returns the
 //     first existing file in the chain, falling back to the write target
 //     under Home() when nothing exists yet — so callers can use the
 //     returned path both for reading and creating.
 //
 // All resolution is done lazily from the current environment at call time
-// so tests can set $YOKE_HOME / $YOKE_CONFIG_DIRS with t.Setenv and observe
+// so tests can set $OMNIS_HOME / $OMNIS_CONFIG_DIRS with t.Setenv and observe
 // the effect immediately, without re-running init.
 package paths
 
@@ -46,21 +46,21 @@ import (
 )
 
 const (
-	envHome       = "YOKE_HOME"
-	envConfigDirs = "YOKE_CONFIG_DIRS"
+	envHome       = "OMNIS_HOME"
+	envConfigDirs = "OMNIS_CONFIG_DIRS"
 
 	// envSystemConfigDir overrides just the system layer (SystemConfigDir)
-	// at runtime, leaving the higher-precedence .agents and $HOME/.yoke
-	// layers intact — unlike YOKE_CONFIG_DIRS, which replaces the whole
+	// at runtime, leaving the higher-precedence .agents and $HOME/.omnis
+	// layers intact — unlike OMNIS_CONFIG_DIRS, which replaces the whole
 	// chain. Distribution wrappers that install bundled config outside the
-	// FHS /etc/yoke location use this: the Homebrew formula points it at
-	// "$(brew --prefix)/etc/yoke" and the Windows MSI at "C:\ProgramData\Yoke".
-	envSystemConfigDir = "YOKE_SYSTEM_CONFIG_DIR"
+	// FHS /etc/omnis location use this: the Homebrew formula points it at
+	// "$(brew --prefix)/etc/omnis" and the Windows MSI at "C:\ProgramData\Omnis".
+	envSystemConfigDir = "OMNIS_SYSTEM_CONFIG_DIR"
 
 	// envAgentSkillsDir overrides the location of the shared, lowest-precedence
 	// Agent-Skills registry (AgentSkillsDir, default /etc/agentskills). Set it
 	// to an empty value to disable the layer entirely.
-	envAgentSkillsDir = "YOKE_AGENTSKILLS_DIR"
+	envAgentSkillsDir = "OMNIS_AGENTSKILLS_DIR"
 
 	// LocalDir is the canonical project-local configuration directory
 	// (CWD-relative). Place agents.json, permissions.json, registry/agents/,
@@ -81,12 +81,12 @@ const (
 // SystemConfigDir/registry/skills respectively. It's a package-level variable
 // so distribution packagers can override it at build time via -ldflags for
 // non-FHS targets. For runtime overrides (e.g. a package wrapper that can't
-// know the install prefix at build time) use the YOKE_SYSTEM_CONFIG_DIR env
+// know the install prefix at build time) use the OMNIS_SYSTEM_CONFIG_DIR env
 // var instead — read via systemConfigDir().
-var SystemConfigDir = "/etc/yoke"
+var SystemConfigDir = "/etc/omnis"
 
 // systemConfigDir returns the effective system-config base directory: the
-// YOKE_SYSTEM_CONFIG_DIR env override when set, otherwise the SystemConfigDir
+// OMNIS_SYSTEM_CONFIG_DIR env override when set, otherwise the SystemConfigDir
 // package variable. All internal resolution goes through this so a package
 // wrapper can relocate the system layer without recompiling.
 func systemConfigDir() string {
@@ -97,7 +97,7 @@ func systemConfigDir() string {
 }
 
 // SystemDir returns the effective system-config base directory — the
-// YOKE_SYSTEM_CONFIG_DIR override when set, otherwise the SystemConfigDir
+// OMNIS_SYSTEM_CONFIG_DIR override when set, otherwise the SystemConfigDir
 // package variable. Exposed so callers outside this package (e.g. the
 // AGENT.md resolver) can locate system-layer files without duplicating the
 // override logic.
@@ -105,17 +105,17 @@ func SystemDir() string { return systemConfigDir() }
 
 // AgentSkillsDir is an additional, lowest-precedence registry root shared with
 // other Agent-Skills-aware tools. When this directory exists it is treated like
-// /etc/yoke/registry — its agents/ and skills/ subdirectories contribute agent
-// and skill definitions to the search chains — but it sits BELOW the /etc/yoke
-// system layer, so yoke's own registry wins on name conflicts. It is never
-// written to (yoke forks edited items into the user layer, like /etc/yoke).
+// /etc/omnis/registry — its agents/ and skills/ subdirectories contribute agent
+// and skill definitions to the search chains — but it sits BELOW the /etc/omnis
+// system layer, so omnis's own registry wins on name conflicts. It is never
+// written to (omnis forks edited items into the user layer, like /etc/omnis).
 // Package-level var so distribution packagers can relocate it via -ldflags;
-// for runtime overrides use the YOKE_AGENTSKILLS_DIR env var (set it empty to
+// for runtime overrides use the OMNIS_AGENTSKILLS_DIR env var (set it empty to
 // disable the layer) via agentSkillsDir().
 var AgentSkillsDir = "/etc/agentskills"
 
 // agentSkillsDir returns the effective shared Agent-Skills registry root: the
-// YOKE_AGENTSKILLS_DIR env override when set (including an explicit empty value,
+// OMNIS_AGENTSKILLS_DIR env override when set (including an explicit empty value,
 // which disables the layer), otherwise the AgentSkillsDir package variable.
 func agentSkillsDir() string {
 	if v, ok := os.LookupEnv(envAgentSkillsDir); ok {
@@ -149,8 +149,8 @@ func LocalDirs() []string {
 // `.agents/` rather than silently creating `agents/`).
 func LocalWriteDir() string { return LocalDirs()[0] }
 
-// Home returns the directory under which all mutable yoke state lives.
-// Lookup order: $YOKE_HOME, then $HOME/.yoke. Falls back to ".yoke"
+// Home returns the directory under which all mutable omnis state lives.
+// Lookup order: $OMNIS_HOME, then $HOME/.omnis. Falls back to ".omnis"
 // relative to CWD when no home directory is resolvable, so the binary
 // still works in containers or CI environments that lack $HOME.
 func Home() string {
@@ -158,20 +158,20 @@ func Home() string {
 		return v
 	}
 	if h, err := os.UserHomeDir(); err == nil && h != "" {
-		return filepath.Join(h, ".yoke")
+		return filepath.Join(h, ".omnis")
 	}
-	return ".yoke"
+	return ".omnis"
 }
 
 // ConfigSearchDirs returns the config-file search chain in high-to-low
-// precedence. $YOKE_CONFIG_DIRS, if set, replaces the chain wholesale
+// precedence. $OMNIS_CONFIG_DIRS, if set, replaces the chain wholesale
 // (entries separated by the OS path-list separator).
 //
 // Default chain:
 //
 //  1. .agents (and `agents/` when it exists) — project-local (highest priority)
-//  2. $YOKE_HOME                              — per-user ($HOME/.yoke)
-//  3. /etc/yoke                               — system-wide (lowest priority)
+//  2. $OMNIS_HOME                              — per-user ($HOME/.omnis)
+//  3. /etc/omnis                               — system-wide (lowest priority)
 func ConfigSearchDirs() []string {
 	if v := strings.TrimSpace(os.Getenv(envConfigDirs)); v != "" {
 		parts := strings.Split(v, string(os.PathListSeparator))
@@ -215,18 +215,18 @@ func Layer(p string) string {
 	return "system"
 }
 
-// ConfigWriteDir is the default per-user write directory ($YOKE_HOME).
+// ConfigWriteDir is the default per-user write directory ($OMNIS_HOME).
 // Callers that need layer-aware writes should use WriteDirForLayer instead;
 // this remains the default for any callsite that doesn't yet care about the
 // distinction.
 func ConfigWriteDir() string { return Home() }
 
-// WriteDirForLayer returns the base directory yoke writes into for the
+// WriteDirForLayer returns the base directory omnis writes into for the
 // given config-chain layer:
 //
 //   - "local"  → LocalWriteDir() (project-local `.agents/`)
-//   - "user"   → Home() ($YOKE_HOME)
-//   - "system" → Home() (yoke never writes into /etc/yoke; fall back to user)
+//   - "user"   → Home() ($OMNIS_HOME)
+//   - "system" → Home() (omnis never writes into /etc/omnis; fall back to user)
 //
 // Any unrecognised layer falls back to Home().
 func WriteDirForLayer(layer string) string {

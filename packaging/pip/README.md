@@ -1,6 +1,6 @@
-# yoke-agent
+# omnis-agent
 
-**Yoke** is a multi-agent harness. The same binary becomes a code reviewer, a
+**Omnis** is a multi-agent harness. The same binary becomes a code reviewer, a
 Kubernetes triage assistant, or a DBA helper purely by mounting different tools,
 skills, and MCP servers — no code changes required to retarget the agent.
 
@@ -8,15 +8,15 @@ This package ships two prebuilt Go binaries inside a platform-specific wheel:
 
 | Command | What it is |
 |---|---|
-| `yoke` | CLI / TUI / REPL |
-| `yoke-server` | HTTP API + Web UI server |
+| `omnis` | CLI / TUI / REPL |
+| `omnis-server` | HTTP API + Web UI server |
 
 ## Install
 
 ```bash
-pip install yoke-agent          # into any Python 3.8+ environment
+pip install omnis-agent          # into any Python 3.8+ environment
 # or, isolated:
-pipx install yoke-agent
+pipx install omnis-agent
 ```
 
 Prebuilt wheels are published for Linux (x86_64, aarch64), macOS (Intel, Apple
@@ -25,11 +25,11 @@ default config, agent/skill registry, and Web UI assets — no Go toolchain need
 
 ## First run
 
-On first launch, `yoke` copies the bundled default **config and registry** into
+On first launch, `omnis` copies the bundled default **config and registry** into
 your per-user config home so they are yours to edit:
 
 ```
-~/.yoke/
+~/.omnis/
 ├── agents.json  models.json  mcp_config.json  permissions.json
 ├── preferences.json  remote_registries.json  a2a_config.json  server.yaml
 ├── filters/                 # bash output filter patterns
@@ -42,8 +42,8 @@ Existing files are never overwritten, so your edits survive upgrades. To refresh
 the pristine defaults at any time:
 
 ```bash
-yoke-seed --force            # re-copy bundled defaults into ~/.yoke
-yoke-seed --home /path/to/x  # seed a different config home
+omnis-seed --force            # re-copy bundled defaults into ~/.omnis
+omnis-seed --home /path/to/x  # seed a different config home
 ```
 
 The Web UI assets stay inside the installed wheel (read-only) and the launcher
@@ -54,32 +54,32 @@ points the binaries at them automatically.
 ```bash
 export ANTHROPIC_API_KEY=sk-...     # or OPENAI_API_KEY / GOOGLE_API_KEY
 
-yoke "explain this repo"            # one-shot CLI
-yoke                                # REPL (interactive TTY)
-yoke tui                            # full-screen TUI
+omnis "explain this repo"            # one-shot CLI
+omnis                                # REPL (interactive TTY)
+omnis tui                            # full-screen TUI
 
-YOKE_SERVER_TOKEN=secret yoke-server   # Web UI + API on http://localhost:8080
+OMNIS_SERVER_TOKEN=secret omnis-server   # Web UI + API on http://localhost:8080
 ```
 
 ## Configuration layering
 
-yoke resolves configuration through a search chain, highest precedence first:
+omnis resolves configuration through a search chain, highest precedence first:
 
 1. `./.agents/` — project-local (per checkout)
-2. `~/.yoke/` — per-user (what this package seeds; override with `$YOKE_HOME`)
+2. `~/.omnis/` — per-user (what this package seeds; override with `$OMNIS_HOME`)
 3. the bundled defaults inside the wheel (system layer)
 
-So a value you set in `~/.yoke/models.json` overrides the shipped default, and a
+So a value you set in `~/.omnis/models.json` overrides the shipped default, and a
 `./.agents/models.json` in a project overrides both.
 
 Useful environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `YOKE_HOME` | Per-user state + config root (default `~/.yoke`). |
-| `YOKE_WEB_DIR` | Static Web UI directory (default: the bundled assets). |
-| `YOKE_SYSTEM_CONFIG_DIR` | System config layer (default: the bundled defaults). |
-| `YOKE_SERVER_TOKEN` | Bearer token required by `yoke-server`'s API. |
+| `OMNIS_HOME` | Per-user state + config root (default `~/.omnis`). |
+| `OMNIS_WEB_DIR` | Static Web UI directory (default: the bundled assets). |
+| `OMNIS_SYSTEM_CONFIG_DIR` | System config layer (default: the bundled defaults). |
+| `OMNIS_SERVER_TOKEN` | Bearer token required by `omnis-server`'s API. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | Provider keys. |
 
-Project home and full documentation: <https://github.com/blouargant/yoke>
+Project home and full documentation: <https://github.com/blouargant/omnis>

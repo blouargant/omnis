@@ -61,7 +61,7 @@ description: Helps with Kubernetes.
 > known-fields checking and rejects anything outside `name`, `description`,
 > `license`, `compatibility`, `metadata`, and `allowed-tools` (an unknown field
 > fails the whole skill with `field <x> not found in type skill.Frontmatter`).
-> Yoke-specific configuration therefore lives in **sidecar files** next to
+> Omnis-specific configuration therefore lives in **sidecar files** next to
 > `SKILL.md`, never in the frontmatter: `permissions.json` (skill-scoped
 > permission rules) and `requires.json` (tool dependencies — see below).
 
@@ -223,7 +223,7 @@ curator can recall — see [semantic-recall.md](semantic-recall.md).
        `EventSessionEnd`; only `/learn-now` fires it immediately.
      - The **idle harvester** ([server/idle_curator.go](../server/idle_curator.go)),
        which runs every `checkInterval` and emits `EventCurateNow` for sessions idle
-       longer than `YOKE_CURATOR_IDLE_TIMEOUT`. This is the primary auto-curation path
+       longer than `OMNIS_CURATOR_IDLE_TIMEOUT`. This is the primary auto-curation path
        for the Web UI, where `EventSessionEnd` is never fired. Before emitting, the
        harvester marks the session as **Harvested** — a persistent flag stored in the
        conversation file — so the session is completely removed from future scans until
@@ -232,9 +232,9 @@ curator can recall — see [semantic-recall.md](semantic-recall.md).
 3. **Pre-flight gate** — before the curator LLM is invoked, a quick check decides
    whether the session is worth processing:
    - **Forced** (`/learn` or `/learn-now`) — bypass gate, always run.
-   - **Unforced** — run only if `TurnCount ≥ YOKE_CURATOR_MIN_TURNS` (default 3)
+   - **Unforced** — run only if `TurnCount ≥ OMNIS_CURATOR_MIN_TURNS` (default 3)
      **and** either at least one decision was recorded in the StateLog **or** total
-     sub-agent invocations `≥ YOKE_CURATOR_MIN_SUB_AGENT_CALLS` (default 2).
+     sub-agent invocations `≥ OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` (default 2).
 
    Sessions that do not pass are silently skipped without calling the LLM. The
    **Harvested** flag is set *before* the gate check, so even skipped sessions are
@@ -320,7 +320,7 @@ contributes at most one tag per skill.
 ```
 
 Keyed by `<agent>/<name>` for sub-agent skills, bare `<name>` for the
-leader. Written with file-level locking so multiple yoke processes on
+leader. Written with file-level locking so multiple omnis processes on
 the same host never corrupt the counters.
 
 ### Per-sub-agent micro-reflection
@@ -363,7 +363,7 @@ On interactive surfaces the leader is instructed to load the
 complete. The skill asks one closing question ("Anything off, or are
 we good to wrap?") and persists the answer via the
 `record_session_feedback` tool to
-`$YOKE_HOME/logs/agent_feedback_<key>.json`. Both reflectors treat the
+`$OMNIS_HOME/logs/agent_feedback_<key>.json`. Both reflectors treat the
 answer as the dominant verdict signal (positive keywords drive a
 positive verdict; negative keywords drive a negative verdict).
 
@@ -390,9 +390,9 @@ of how often the harvester runs or how many server restarts occur.
 Run the curator on demand against an existing session's files:
 
 ```bash
-yoke curate --user alice --session 2025-01-15-deploy
+omnis curate --user alice --session 2025-01-15-deploy
 # or
-yoke curate --audit .agent_memory_alice_2025...md \
+omnis curate --audit .agent_memory_alice_2025...md \
                      --statelog .agent_statelog_alice_2025...json
 ```
 

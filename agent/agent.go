@@ -1,4 +1,4 @@
-// Package agent provides a ready-to-use yoke agent that can be
+// Package agent provides a ready-to-use omnis agent that can be
 // imported and used by other Go projects.
 //
 // Usage:
@@ -22,22 +22,22 @@ import (
 	"google.golang.org/adk/tool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/core/llm"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/a2a"
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/claudeformat"
-	"github.com/blouargant/yoke/internal/codeindex"
-	"github.com/blouargant/yoke/internal/docindex"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/regindex"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/skills"
-	"github.com/blouargant/yoke/internal/softskills"
-	"github.com/blouargant/yoke/internal/usercommands"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/llm"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/a2a"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/codeindex"
+	"github.com/blouargant/omnis/internal/docindex"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/regindex"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/skills"
+	"github.com/blouargant/omnis/internal/softskills"
+	"github.com/blouargant/omnis/internal/usercommands"
 )
 
 // AgentResult holds the fully configured agent and its supporting components.
@@ -110,13 +110,13 @@ type Options struct {
 	DisableAutoCurate bool
 	// Repo is the repository root for worktree tools (default: current working directory).
 	Repo string
-	// MCPSConfigPath is the path to the MCP config file (default: resolved from .agents/mcp_config.json or $HOME/.yoke/mcp_config.json).
+	// MCPSConfigPath is the path to the MCP config file (default: resolved from .agents/mcp_config.json or $HOME/.omnis/mcp_config.json).
 	MCPSConfigPath string
-	// PermissionsConfigPath is the path to the permissions config (default: resolved from .agents/permissions.json or $HOME/.yoke/permissions.json).
+	// PermissionsConfigPath is the path to the permissions config (default: resolved from .agents/permissions.json or $HOME/.omnis/permissions.json).
 	PermissionsConfigPath string
-	// AppName is the application name for the runner (default: "yoke").
+	// AppName is the application name for the runner (default: "omnis").
 	AppName string
-	// ConfigPath is the runtime JSON configuration path (default: resolved from .agents/agents.json or $HOME/.yoke/agents.json).
+	// ConfigPath is the runtime JSON configuration path (default: resolved from .agents/agents.json or $HOME/.omnis/agents.json).
 	ConfigPath string
 	// ConfigPathStrict returns an error when ConfigPath does not exist.
 	ConfigPathStrict bool
@@ -394,7 +394,7 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 	}
 	return registries.Deps{
 		RegistryDir: func() string {
-			if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+			if v := strings.TrimSpace(os.Getenv("OMNIS_SKILLS_REGISTRY_DIR")); v != "" {
 				return v
 			}
 			return paths.SkillsRegistryDir()
@@ -405,14 +405,14 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 		},
 		AddSkillToAgent: func(agentName, skillName string) error {
 			// Preserve the agent's source layer so a local-layer agent doesn't
-			// get forked into $HOME/.yoke/ just because a skill was attached.
+			// get forked into $HOME/.omnis/ just because a skill was attached.
 			writeDir := paths.AgentsRegistryWriteDirForLayer(layerForAgent(agentName))
 			_, err := registries.AddSkillToAgent(paths.AgentsRegistryDir(), writeDir, agentName, skillName)
 			return err
 		},
 
 		AgentsRegistryDir: func() string {
-			if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+			if v := strings.TrimSpace(os.Getenv("OMNIS_AGENTS_REGISTRY_DIR")); v != "" {
 				return v
 			}
 			return paths.AgentsRegistryDir()
@@ -451,13 +451,13 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 		},
 
 		InstallAgent: func(ref registries.RepoRef, token, dirPath string, enable bool) (string, bool, error) {
-			// $YOKE_AGENTS_REGISTRY_DIR is an explicit operator override and
+			// $OMNIS_AGENTS_REGISTRY_DIR is an explicit operator override and
 			// always wins. Otherwise the install follows the layer where the
 			// project's agents.json already lives (or user when there is no
 			// project-local one).
 			layer := layerForConfigFile("agents.json")
 			agentsDir := paths.AgentsRegistryWriteDirForLayer(layer)
-			if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+			if v := strings.TrimSpace(os.Getenv("OMNIS_AGENTS_REGISTRY_DIR")); v != "" {
 				agentsDir = v
 			}
 			if err := os.MkdirAll(agentsDir, 0o755); err != nil {
@@ -686,8 +686,8 @@ func installedCommandNames() map[string]bool {
 }
 
 // layerForConfigFile returns the layer where the named config file currently
-// resides. Files that live under /etc/yoke (or that don't yet exist) fork
-// into "user" — yoke never writes back into the system layer.
+// resides. Files that live under /etc/omnis (or that don't yet exist) fork
+// into "user" — omnis never writes back into the system layer.
 func layerForConfigFile(filename string) string {
 	p := paths.FindConfig(filename)
 	if paths.Layer(p) == "local" {
@@ -837,7 +837,7 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 	var sb strings.Builder
 	sb.WriteString("\n\n# Available Sub-Agents\n\n")
 	sb.WriteString("The following sub-agents are mounted as tools. Invoke them by name — they return their findings to you automatically. Call at most one sub-agent at a time; wait for its findings before deciding whether another sub-agent call is needed. When one or more skills in a sub-agent's catalog match the user's request, delegate to that sub-agent and explicitly name EVERY applicable skill in the delegation (e.g. \"load the k8s-triage and k8s-log-investigation skills, then …\"). Skills covering the same domain are complementary, not alternatives — listing only the closest match is a delegation bug. The sub-agent retains discretion to load additional skills from its own catalog if it judges them relevant. The same applies to mounted MCP servers: when a sub-agent has an MCP server whose name or domain matches the user's request (e.g. a `github` server for repo/issue/PR questions), delegate to that sub-agent and explicitly tell it to use that server — do not try the task with bash first. Never use transfer_to_agent — it permanently hands off control.\n\n")
-	sb.WriteString("## Briefing a sub-agent\n\nA sub-agent starts in a fresh session with no transcript and no memory of this conversation — it sees ONLY the `request` string you pass. Asking a bare question (\"investigate the auth bug\") wastes the call: the sub-agent has to rediscover what you already know. Always brief it with the concrete context it needs to act:\n\n- file paths it should read (e.g. `core/auth/session.go:120-180`)\n- prior findings from earlier in this session\n- which skill to load, or which MCP server to use\n- constraints and out-of-scope items\n- the exact shape of the answer you want back\n\n**Inline vs. file brief — the ~20-line rule.** If the brief fits in roughly 20 lines, write it directly into `request`. If it would be longer (long lists of files, multi-paragraph findings, code excerpts, briefs you will reference more than once), write it to a scratch file first and reference that path in `request` instead — e.g. write `$YOKE_HOME/logs/brief_<topic>.md` (or a path under the current worktree) with the Write tool, then call the sub-agent with a short `request` like \"Read $YOKE_HOME/logs/brief_auth.md, then answer the questions at the bottom.\" This keeps the bulk of the brief out of your own transcript (you pay for tool-call args on every subsequent turn) and lets you update or extend the brief across multiple sub-agent calls.\n\n")
+	sb.WriteString("## Briefing a sub-agent\n\nA sub-agent starts in a fresh session with no transcript and no memory of this conversation — it sees ONLY the `request` string you pass. Asking a bare question (\"investigate the auth bug\") wastes the call: the sub-agent has to rediscover what you already know. Always brief it with the concrete context it needs to act:\n\n- file paths it should read (e.g. `core/auth/session.go:120-180`)\n- prior findings from earlier in this session\n- which skill to load, or which MCP server to use\n- constraints and out-of-scope items\n- the exact shape of the answer you want back\n\n**Inline vs. file brief — the ~20-line rule.** If the brief fits in roughly 20 lines, write it directly into `request`. If it would be longer (long lists of files, multi-paragraph findings, code excerpts, briefs you will reference more than once), write it to a scratch file first and reference that path in `request` instead — e.g. write `$OMNIS_HOME/logs/brief_<topic>.md` (or a path under the current worktree) with the Write tool, then call the sub-agent with a short `request` like \"Read $OMNIS_HOME/logs/brief_auth.md, then answer the questions at the bottom.\" This keeps the bulk of the brief out of your own transcript (you pay for tool-call args on every subsequent turn) and lets you update or extend the brief across multiple sub-agent calls.\n\n")
 
 	for _, cfg := range enabled {
 		desc := cfg.Description
@@ -890,7 +890,7 @@ func defaultSubAgentUsageGuidance(name string) string {
 	case "summariser":
 		return "Send oversized raw output, verbose reports, or user-requested briefs here; expect a lossy structured brief that preserves source anchors when present."
 	case "helper":
-		return "Delegate questions about yoke itself (how a feature works, what a config field or env var does) — it answers from yoke's documentation and quotes the source. Also delegate when you need to discover, inspect, install, or link an item from a remote registry; pass the topic and, when linking is needed, the target agent name."
+		return "Delegate questions about omnis itself (how a feature works, what a config field or env var does) — it answers from omnis's documentation and quotes the source. Also delegate when you need to discover, inspect, install, or link an item from a remote registry; pass the topic and, when linking is needed, the target agent name."
 	default:
 		return ""
 	}
@@ -952,7 +952,7 @@ func buildA2AInstruction(agents []a2a.Agent) string {
 	sb.WriteString("\n# Remote A2A Agents\n\n")
 	sb.WriteString("The following remote agents are reachable over the Agent-to-Agent (A2A) JSON-RPC protocol. Each is mounted as a separate tool whose name starts with `a2a_`. Call the relevant `a2a_*` tool with a single `prompt` argument describing the task; it returns the remote agent's full text response.\n\n")
 	sb.WriteString("IMPORTANT — routing rules:\n")
-	sb.WriteString("- To talk to a remote A2A agent listed below, you MUST call its `a2a_*` tool. Do NOT use `teammate_tell`, `teammate_ask`, or any other mailbox tool for these — those are for in-process session mailboxes between yoke sub-agents in this same process, which is a completely different protocol.\n")
+	sb.WriteString("- To talk to a remote A2A agent listed below, you MUST call its `a2a_*` tool. Do NOT use `teammate_tell`, `teammate_ask`, or any other mailbox tool for these — those are for in-process session mailboxes between omnis sub-agents in this same process, which is a completely different protocol.\n")
 	sb.WriteString("- When the user names one of the agents below (e.g. \"ask the X agent\", \"have new-agent do Y\", \"say hello to the a2a agent foo\"), route to its `a2a_*` tool.\n")
 	sb.WriteString("- When the user names a specific REMOTE session (e.g. \"the session called teaching-kite\", \"new-agent's session foo\"), pass that name through as the `session_name` argument to the tool. Without `session_name` the call is stateless and the remote has no memory of prior turns; with it the call targets an existing named conversation on the remote and preserves history. Do NOT guess a session name — use only what the user gave you.\n")
 	sb.WriteString("- When the user asks to CREATE a new remote session (e.g. \"start a session called foo on new-agent and ask it ...\", \"open a thread named bar with the X agent\"), pass `session_name` AND `create:true`. Session names must be lowercase-kebab-case (letters, digits, dashes — no spaces, no underscores, no uppercase). If the user supplies an invalid name, ask for one that fits the rules rather than transliterating silently.\n")
@@ -978,7 +978,7 @@ func hasTool(tools []string, key string) bool {
 	return false
 }
 
-// NewAgent creates a fully configured yoke agent that can be used
+// NewAgent creates a fully configured omnis agent that can be used
 // by other Go projects. It returns the agent, runner config, and supporting
 // components.
 //

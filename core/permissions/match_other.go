@@ -2,34 +2,34 @@ package permissions
 
 import "strings"
 
-// mcpMatch reports whether an mcp spec matches a yoke MCP tool name. Forms:
+// mcpMatch reports whether an mcp spec matches a omnis MCP tool name. Forms:
 //
 //	mcp__server            → any tool from that server (mcp__server__*)
 //	mcp__server__*         → same (explicit wildcard)
 //	mcp__server__tool      → that exact tool
-func mcpMatch(specArg, yokeTool string) bool {
+func mcpMatch(specArg, omnisTool string) bool {
 	specArg = strings.TrimSpace(specArg)
 	if specArg == "" {
 		return false
 	}
 	if strings.HasSuffix(specArg, "__*") {
 		prefix := strings.TrimSuffix(specArg, "*") // keep trailing "__"
-		return strings.HasPrefix(yokeTool, prefix)
+		return strings.HasPrefix(omnisTool, prefix)
 	}
-	if specArg == yokeTool {
+	if specArg == omnisTool {
 		return true
 	}
 	// Server-only form: matches every tool under that server.
-	return strings.HasPrefix(yokeTool, specArg+"__")
+	return strings.HasPrefix(omnisTool, specArg+"__")
 }
 
 // agentMatch reports whether an Agent(Name) spec matches a sub-agent tool name.
-func agentMatch(specArg, yokeTool string) bool {
-	return strings.EqualFold(strings.TrimSpace(specArg), yokeTool)
+func agentMatch(specArg, omnisTool string) bool {
+	return strings.EqualFold(strings.TrimSpace(specArg), omnisTool)
 }
 
 // domainMatch reports whether a WebFetch domain spec matches a URL's host.
-// yoke has no built-in WebFetch tool today (web fetch lives in the web_agent
+// omnis has no built-in WebFetch tool today (web fetch lives in the web_agent
 // sub-agent), so this is dormant — kept so the syntax parses and is ready if
 // a gated fetch tool is added.
 func domainMatch(specArg, url string) bool {

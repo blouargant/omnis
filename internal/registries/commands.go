@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/claudeformat"
 )
 
 // CommandsDir is the conventional directory name inside a remote registry

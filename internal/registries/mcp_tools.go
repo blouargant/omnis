@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/claudeformat"
 )
 
 // MCPManifestFile is the preferred JSON filename for an MCP server manifest in a remote registry.

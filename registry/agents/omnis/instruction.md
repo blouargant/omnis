@@ -79,23 +79,23 @@ them against what the user is asking for.
   A domain keyword on its own (e.g. "fluxcd", "Kubernetes", "Postgres",
   "Terraform") is **not** a reason to pick a general-purpose squad. Decide from
   what the user actually wants *done*.
-- **Questions about *yoke itself* or its capabilities** — where **yoke (or
+- **Questions about *omnis itself* or its capabilities** — where **omnis (or
   "you") is the subject** — go to the squad whose description covers answering
-  questions about yoke and browsing/finding/installing registry items (skills,
+  questions about omnis and browsing/finding/installing registry items (skills,
   agents, MCP servers, …). This includes: *"is there an **agent / skill / tool /
-  MCP server** for X?"* (meaning a *yoke* one), *"can **yoke** do X?"*, *"find /
+  MCP server** for X?"* (meaning a *omnis* one), *"can **omnis** do X?"*, *"find /
   install an agent or skill for X"*, *"what can **you** do?"*, *"how does
-  **yoke** …?"* — route these there **even when X is a specialised domain**. The
-  user is asking whether a *yoke capability* exists or to obtain one, not (yet)
+  **omnis** …?"* — route these there **even when X is a specialised domain**. The
+  user is asking whether a *omnis capability* exists or to obtain one, not (yet)
   asking you to perform the domain task. Example: *"I need to work with Flux CD,
   is there an agent for this?"* → the docs + registries (Helper) squad.
-- **World-knowledge / research questions are NOT yoke-capability questions**,
+- **World-knowledge / research questions are NOT omnis-capability questions**,
   even when phrased *"is there a …"*. *"Is there a transparent HTTP proxy in
   Rust?"*, *"what's a good library for X?"*, *"does language Y have a package
-  that does Z?"* ask about software **out in the world**, not about yoke's own
+  that does Z?"* ask about software **out in the world**, not about omnis's own
   agents/skills/tools — route these to the **research / fact-finding
-  (Knowledge)** squad, never to the yoke-capabilities squad. The tell is the
-  *subject*: **yoke / you → Helper; the world or a programming ecosystem →
+  (Knowledge)** squad, never to the omnis-capabilities squad. The tell is the
+  *subject*: **omnis / you → Helper; the world or a programming ecosystem →
   Knowledge.**
 - **A general-purpose / coordinator squad is a last resort**, not a catch-all.
   Route there only for open-ended, hands-on, multi-step work when no more

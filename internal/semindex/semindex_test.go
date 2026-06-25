@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/blouargant/yoke/core/embed"
+	"github.com/blouargant/omnis/core/embed"
 )
 
 // fakeEmbedder maps known phrases to fixed unit vectors in 3-space so tests can

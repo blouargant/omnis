@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/omnis/core/events"
 )
 
 type captured struct {

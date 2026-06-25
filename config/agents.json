@@ -16,7 +16,7 @@
     "knowledge_leader",
     "doc_agent"
   ],
-  "app_name": "yoke",
+  "app_name": "omnis",
   "bash_timeout_seconds": 120,
   "router_squad": "omnis",
   "squads": [
@@ -60,7 +60,7 @@
     },
     {
       "name": "Skill Editor",
-      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the Helper for sourcing existing skills and answering questions about yoke.",
+      "description": "Skill editing focus: Skill editor plus the web agent for research and reference retrieval, and the Helper for sourcing existing skills and answering questions about omnis.",
       "leader": "skill_editor",
       "members": [
         "web_agent",
@@ -70,7 +70,7 @@
     },
     {
       "name": "Helper",
-      "description": "Answers questions about yoke itself and its capabilities, and finds/inspects/installs yoke registry items (skills, agents, MCP servers, squads, A2A peers, commands) on demand. Use this when the user asks whether YOKE has an agent/skill/tool/MCP server for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, or asks what yoke can do or how it works — i.e. yoke (or 'you') is the subject. NOT for general world-knowledge or research questions about whether some software/library exists (e.g. 'is there an HTTP proxy library in Rust?') — those go to the Knowledge squad. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
+      "description": "Answers questions about omnis itself and its capabilities, and finds/inspects/installs omnis registry items (skills, agents, MCP servers, squads, A2A peers, commands) on demand. Use this when the user asks whether OMNIS has an agent/skill/tool/MCP server for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, or asks what omnis can do or how it works — i.e. omnis (or 'you') is the subject. NOT for general world-knowledge or research questions about whether some software/library exists (e.g. 'is there an HTTP proxy library in Rust?') — those go to the Knowledge squad. Leaderless: the Helper agent runs directly, limited to its own docs + registries tools.",
       "leader": "none",
       "members": [
         "helper"

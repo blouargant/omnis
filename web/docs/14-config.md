@@ -1,6 +1,6 @@
 # Configuration & Filesystem Layout
 
-Yoke separates **config** (read-only, lookup chain) from **state** (writable,
+Omnis separates **config** (read-only, lookup chain) from **state** (writable,
 single root).
 
 ## Config files
@@ -36,13 +36,13 @@ Each agent's definition lives in its own directory under
 holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
-yoke (`leader`, `skill_editor`, `helper`, `summariser`,
+omnis (`leader`, `skill_editor`, `helper`, `summariser`,
 `curator`, `reflector`); the Web UI displays them under a **Built-in
 Agents** section, separate from user-added **Custom Agents**.
 
 The registry directory follows the same lookup described below:
 `.agents/registry/agents` (and `agents/registry/agents` when present),
-`$HOME/.yoke/registry/agents`, then `/etc/yoke/registry/agents`.
+`$HOME/.omnis/registry/agents`, then `/etc/omnis/registry/agents`.
 
 ## Read root (config search chain)
 
@@ -53,13 +53,13 @@ this is a file-level override, not a deep merge.
 1. `.agents/` (canonical) and/or `agents/` (dotless alias) — project-local
    directories (CWD-relative, highest priority). Both are accepted; when
    both exist, `.agents/` wins and `agents/` is searched immediately after.
-2. `$HOME/.yoke/` — per-user state root.
-3. `/etc/yoke/` — system-wide install (lowest priority). Agent and skill
-   registries live one level deeper, at `/etc/yoke/registry/agents` and
-   `/etc/yoke/registry/skills`.
+2. `$HOME/.omnis/` — per-user state root.
+3. `/etc/omnis/` — system-wide install (lowest priority). Agent and skill
+   registries live one level deeper, at `/etc/omnis/registry/agents` and
+   `/etc/omnis/registry/skills`.
 
-Override the chain wholesale with `YOKE_CONFIG_DIRS` (colon-separated). Use
-`YOKE_CONFIG_PATH` to bypass the chain entirely for `agents.json`.
+Override the chain wholesale with `OMNIS_CONFIG_DIRS` (colon-separated). Use
+`OMNIS_CONFIG_PATH` to bypass the chain entirely for `agents.json`.
 
 Skills follow the same lookup against `registry/skills/` subdirectories.
 
@@ -67,7 +67,7 @@ Skills follow the same lookup against `registry/skills/` subdirectories.
 
 Runtime state — `logs/`, `uploads/`, `mailboxes/`, `softskills/`, and any
 remote-registry-driven installs into `registry/skills` or `registry/agents` —
-always lands under `$HOME/.yoke/` (override with `YOKE_HOME`).
+always lands under `$HOME/.omnis/` (override with `OMNIS_HOME`).
 
 For user-edited config (Web UI editor + auto-install helpers), writes are
 **layer-aware**: a file that already lives in the project-local layer
@@ -75,10 +75,10 @@ For user-edited config (Web UI editor + auto-install helpers), writes are
 **promoted to the local layer** when any of its referenced agents or skills
 only resolves in a local directory, so the post-save config never points at
 files that don't exist outside `.agents/`. Files originally in
-`/etc/yoke/` still fork into `$HOME/.yoke/` (the system layer is read-only).
+`/etc/omnis/` still fork into `$HOME/.omnis/` (the system layer is read-only).
 
 ```
-$HOME/.yoke/
+$HOME/.omnis/
 ├── agents.json          # editor writes — user overrides of agents/models/squads
 ├── permissions.json     # editor writes — user permission overrides
 ├── hooks.json           # editor writes — user lifecycle-hook overrides
@@ -98,8 +98,8 @@ $HOME/.yoke/
 │   ├── registries.tvim  #   search_registries index (+ .meta.json)
 │   └── <repo-hash>/     #   per-repo code index
 └── registry/
-    ├── skills/          # web UI installed skills (override: YOKE_SKILLS_REGISTRY_DIR)
-    └── agents/          # web UI installed agents (override: YOKE_AGENTS_REGISTRY_DIR)
+    ├── skills/          # web UI installed skills (override: OMNIS_SKILLS_REGISTRY_DIR)
+    └── agents/          # web UI installed agents (override: OMNIS_AGENTS_REGISTRY_DIR)
 ```
 
 ## Precedence
@@ -116,7 +116,7 @@ to reference the same key.
 
 ## Garbage collection
 
-The server periodically sweeps `$YOKE_HOME/logs` and `$YOKE_HOME/logs/uploads`
+The server periodically sweeps `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads`
 for orphan files (uploads with no conversation, conversation files whose
-session is gone, etc.). Interval is `YOKE_SERVER_GC_INTERVAL` (default `1h`,
+session is gone, etc.). Interval is `OMNIS_SERVER_GC_INTERVAL` (default `1h`,
 `0` disables). A one-shot sweep can be triggered with `POST /api/admin/gc`.

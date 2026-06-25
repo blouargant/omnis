@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/stream"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/stream"
 )
 
 func main() {

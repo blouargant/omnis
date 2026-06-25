@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 )
 
 // ResolveMCPServer fetches and parses the manifest at dirPath inside a remote

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // SquadEntry describes one named group of agents in the JSON runtime config.
@@ -105,7 +105,7 @@ type modelsConfigFile struct {
 	// EmbedModelRef names the model used as the internal semantic embedder.
 	// Lives here so the Web UI Models panel can manage the whole embedding
 	// config (the embedding model entries + which one is active) in one place.
-	// An agents.json `embed_model_ref` or YOKE_EMBED_MODEL_REF env override it.
+	// An agents.json `embed_model_ref` or OMNIS_EMBED_MODEL_REF env override it.
 	EmbedModelRef string `json:"embed_model_ref,omitempty"`
 }
 
@@ -122,14 +122,14 @@ type runtimeConfigFile struct {
 	// EmbedModelRef names the model in models.json used for internal semantic
 	// embedding (softskill/precedent/codebase recall). It must reference a
 	// model entry flagged `"embedding": true`. Empty disables semantic recall
-	// unless the YOKE_EMBED_* environment provides an embedder instead.
+	// unless the OMNIS_EMBED_* environment provides an embedder instead.
 	EmbedModelRef string       `json:"embed_model_ref,omitempty"`
 	Agents        []string     `json:"agents"`
 	Squads        []SquadEntry `json:"squads"`
 	// RouterSquad names the squad that acts as the Omnis router — the default
 	// agent for new chats, which routes each request to the best-suited squad.
 	// A pointer so we can distinguish absent (nil → default to "omnis") from an
-	// explicit opt-out ("none"/""). Overridable by YOKE_ROUTER_SQUAD.
+	// explicit opt-out ("none"/""). Overridable by OMNIS_ROUTER_SQUAD.
 	RouterSquad *string `json:"router_squad,omitempty"`
 	// Models is no longer a supported field in agents.json. It is detected
 	// here only to produce a clear migration error. Move the block to
@@ -237,7 +237,7 @@ type RuntimeSettings struct {
 	A2AConfigPath string
 	SerpAPIKey    string
 	// EmbedModelRef names the model in Models used as the internal embedder for
-	// semantic recall. Empty means no config-selected embedder (the YOKE_EMBED_*
+	// semantic recall. Empty means no config-selected embedder (the OMNIS_EMBED_*
 	// environment may still provide one).
 	EmbedModelRef string
 	Models        map[string]RuntimeModelConfig
@@ -250,12 +250,12 @@ type RuntimeSettings struct {
 	// router agent + leaderless squad are injected by ensureRouterSquad in the
 	// build path when missing.
 	RouterSquad string
-	// Curator gate thresholds (YOKE_CURATOR_MIN_TURNS / YOKE_CURATOR_MIN_SUB_AGENT_CALLS).
+	// Curator gate thresholds (OMNIS_CURATOR_MIN_TURNS / OMNIS_CURATOR_MIN_SUB_AGENT_CALLS).
 	// Zero values fall back to the defaults in CuratorGateConfig.
 	CuratorMinTurns         int
 	CuratorMinSubAgentCalls int
 	// CuratorIdleTimeout is the idle-session duration after which the Web UI
-	// server fires an automatic curation run (YOKE_CURATOR_IDLE_TIMEOUT).
+	// server fires an automatic curation run (OMNIS_CURATOR_IDLE_TIMEOUT).
 	// Zero means disabled.
 	CuratorIdleTimeout time.Duration
 }
@@ -725,7 +725,7 @@ func ensureDefaultSquad(squads []RuntimeSquadConfig, agents []RuntimeAgentConfig
 // empty, it is inferred from the directory name.
 // loadAgentFromRegistry searches registryDirs in order and returns the first
 // agent.json found. This mirrors the config 3-layer lookup so that a
-// $YOKE_HOME/registry/agents/<name>/agent.json override takes precedence over
+// $OMNIS_HOME/registry/agents/<name>/agent.json override takes precedence over
 // ./registry/agents/<name>/agent.json without hiding agents that only exist in
 // one of the layers.
 func loadAgentFromRegistry(name string, registryDirs []string) (AgentEntry, error) {
@@ -794,7 +794,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		ConfigPath:              paths.FindConfig("agents.json"),
 		ModelsConfigPath:        paths.FindConfig("models.json"),
 		SoftSkillsDir:           paths.SoftSkillsDir(),
-		AppName:                 "yoke",
+		AppName:                 "omnis",
 		BashOutputFilterEnabled: false,
 		BashOutputFiltersDir:    paths.FindConfigDir("filters"),
 		BashTimeoutSeconds:      120,
@@ -890,21 +890,21 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 
 	// ENV
-	if v, ok := parseBoolEnv("YOKE_CURATOR_ENABLED"); ok {
+	if v, ok := parseBoolEnv("OMNIS_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
 	}
-	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOKE_CURATOR_MIN_TURNS"))); err == nil && v > 0 {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_CURATOR_MIN_TURNS"))); err == nil && v > 0 {
 		out.CuratorMinTurns = v
 	}
-	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOKE_CURATOR_MIN_SUB_AGENT_CALLS"))); err == nil && v > 0 {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_CURATOR_MIN_SUB_AGENT_CALLS"))); err == nil && v > 0 {
 		out.CuratorMinSubAgentCalls = v
 	}
-	if raw := strings.TrimSpace(os.Getenv("YOKE_CURATOR_IDLE_TIMEOUT")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("OMNIS_CURATOR_IDLE_TIMEOUT")); raw != "" {
 		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
 			out.CuratorIdleTimeout = d
 		}
 	}
-	if raw := strings.TrimSpace(os.Getenv("YOKE_EMBED_MODEL_REF")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("OMNIS_EMBED_MODEL_REF")); raw != "" {
 		out.EmbedModelRef = strings.ToLower(raw)
 	}
 
@@ -947,7 +947,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		return RuntimeSettings{}, err
 	}
 
-	// Resolve the router squad name (config → YOKE_ROUTER_SQUAD env; absent
+	// Resolve the router squad name (config → OMNIS_ROUTER_SQUAD env; absent
 	// defaults to "omnis", "none" disables). The router agent + leaderless
 	// squad are injected by ensureRouterSquad in the build path, not here, so
 	// config-only tests see an unmodified squad list.

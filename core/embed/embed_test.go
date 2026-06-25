@@ -41,7 +41,7 @@ func TestEmbedsURL(t *testing.T) {
 }
 
 func TestOpenAIEmbedRoundTrip(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/embeddings" {
@@ -85,7 +85,7 @@ func TestOpenAIEmbedRoundTrip(t *testing.T) {
 }
 
 func TestAnthropicUnsupported(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	_, err := NewWithSelection(context.Background(), Selection{Provider: "anthropic", APIKey: "x"})
 	if err == nil {
 		t.Fatal("expected ErrUnsupported for anthropic")
@@ -93,7 +93,7 @@ func TestAnthropicUnsupported(t *testing.T) {
 }
 
 func TestCacheAvoidsResecondCall(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

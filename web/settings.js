@@ -1,4 +1,4 @@
-// Settings panel — yoke configuration editor.
+// Settings panel — omnis configuration editor.
 // Loaded after app.js. Uses the same `token` and `authHeaders` defined there.
 // Exposes Settings.open() / Settings.close() / Settings.isOpen().
 
@@ -152,7 +152,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Reuses app.js's themed modal when available, falling back to a plain alert.
   function notifyBlockedHelp() {
     if (typeof window.showNotificationBlockedHelp === "function") { window.showNotificationBlockedHelp(); return; }
-    alert("Notifications are turned on in Yoke, but your browser is blocking them. Allow notifications for this site via the site-info icon at the left of the address bar, then reload.");
+    alert("Notifications are turned on in Omnis, but your browser is blocking them. Allow notifications for this site via the site-info icon at the left of the address bar, then reload.");
   }
 
   // Pull the server-side preferences once on boot and reconcile with the local
@@ -204,7 +204,7 @@ const BASE_PATH = window.BASE_PATH || "";
     web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
     registries: "Skill registry tools: list configured remote registries, browse them, fetch a SKILL.md, install a skill, and link it to an agent.",
     code_search: "Semantic code search (search_code, reindex_code): find code by meaning over the repo index. Mounted only when an embedding model is configured; otherwise the agent falls back to grep/read.",
-    docs: "Documentation tools: answer questions about yoke from its own docs. Always provides list_docs / read_doc / grep_docs; adds semantic search_docs / reindex_docs when an embedding model is configured.",
+    docs: "Documentation tools: answer questions about omnis from its own docs. Always provides list_docs / read_doc / grep_docs; adds semantic search_docs / reindex_docs when an embedding model is configured.",
   };
   // Tools that are mutually exclusive: selecting one auto-deselects the other.
   const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
@@ -486,7 +486,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (state.activeFile) renderBody();
       // Notify the main app shell so it can refresh anything cached from the
       // server side (squad picker, etc.) without a full page reload.
-      window.dispatchEvent(new CustomEvent("yoke:config-reloaded", { detail: { generation: body.generation } }));
+      window.dispatchEvent(new CustomEvent("omnis:config-reloaded", { detail: { generation: body.generation } }));
     } catch (e) {
       setLoading(false);
       if (textEl) {
@@ -532,7 +532,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function doRestart() {
-    if (!await appConfirm("Restart the yoke server now? Active streams will be interrupted.")) return;
+    if (!await appConfirm("Restart the omnis server now? Active streams will be interrupted.")) return;
     setStatus("Restarting…");
     showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
     try {
@@ -2993,7 +2993,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // code_search only mounts when a semantic embedder is configured. Mirror
     // the serpapi pattern and grey it out when no embedding model is selected
     // (agents.json override wins, else models.json embed_model_ref). Env-only
-    // (YOKE_EMBED_*) config isn't visible here — same limitation as serpapi_key.
+    // (OMNIS_EMBED_*) config isn't visible here — same limitation as serpapi_key.
     const embedRef = (d.embed_model_ref || state.parsed.models?.value?.embed_model_ref || "").toString().trim();
     const embedConfigured = !!embedRef;
 
@@ -3342,7 +3342,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Tiers are deny → ask → allow (precedence order). Each rule is a
   // Tool(specifier) string, e.g. Bash(npm run *), Read(.env), mcp__srv__tool,
   // Agent(Explore) — or a /regex/ escape hatch. Object rules carry an optional
-  // reason and a project-scoping cwd (yoke extensions).
+  // reason and a project-scoping cwd (omnis extensions).
   const PERM_TIERS = ["deny", "ask", "allow"];
   const PERM_MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 
@@ -6415,7 +6415,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       preview.innerHTML = marked.parse(stripFrontmatter(content), { breaks: false, gfm: true });
     } else {
-      // Native yoke JSON format: populate card from parsed fields, show raw JSON.
+      // Native omnis JSON format: populate card from parsed fields, show raw JSON.
       let parsed = null;
       try { parsed = JSON.parse(content); } catch (_) { parsed = null; }
       if (parsed && typeof parsed === "object") {
@@ -6493,7 +6493,7 @@ const BASE_PATH = window.BASE_PATH || "";
         <p class="app-dialog-msg">Install agent "${escHtml(agentInfo.name)}"?</p>
         <div class="registry-dialog-form">
           <p class="registry-dialog-hint">
-            Files will be written to <code>$YOKE_HOME/registry/agents/${escHtml(agentInfo.name)}/</code>.
+            Files will be written to <code>$OMNIS_HOME/registry/agents/${escHtml(agentInfo.name)}/</code>.
           </p>
           <label class="registry-dialog-toggle" for="agent-install-enable">
             <span>Enable in <code>config/agents.json</code> after install</span>

@@ -1,5 +1,5 @@
 // Package embed turns text into dense vectors using the same provider model
-// the rest of yoke already talks to. It mirrors core/llm's provider-selection
+// the rest of omnis already talks to. It mirrors core/llm's provider-selection
 // shape (Selection + NewWithSelection) but produces embeddings instead of an
 // ADK model.LLM.
 //
@@ -9,16 +9,16 @@
 //     Ollama (nomic-embed-text), vLLM, Together, Voyage and friends.
 //   - gemini: the genai EmbedContent API (text-embedding-004 and newer).
 //   - anthropic: no native embeddings endpoint — returns ErrUnsupported.
-//     Point YOKE_EMBED_* at Voyage/OpenAI via openai_compat instead.
+//     Point OMNIS_EMBED_* at Voyage/OpenAI via openai_compat instead.
 //
 // All embedders L2-normalise their output so callers (go-turbovec with
 // UnitNorm) get cosine similarity for free. Selection env:
 //
-//	YOKE_EMBED_PROVIDER → provider name (default: YOKE_PROVIDER, else openai_compat)
-//	YOKE_EMBED_MODEL    → model id     (default: text-embedding-3-small)
-//	YOKE_EMBED_BASE_URL → endpoint     (default: YOKE_BASE_URL / OPENAI_BASE_URL)
-//	YOKE_EMBED_API_KEY  → credential   (default: provider key env)
-//	YOKE_EMBED_DIM      → expected output dimension (default: 1536, or learned)
+//	OMNIS_EMBED_PROVIDER → provider name (default: OMNIS_PROVIDER, else openai_compat)
+//	OMNIS_EMBED_MODEL    → model id     (default: text-embedding-3-small)
+//	OMNIS_EMBED_BASE_URL → endpoint     (default: OMNIS_BASE_URL / OPENAI_BASE_URL)
+//	OMNIS_EMBED_API_KEY  → credential   (default: provider key env)
+//	OMNIS_EMBED_DIM      → expected output dimension (default: 1536, or learned)
 package embed
 
 import (
@@ -68,22 +68,22 @@ type Selection struct {
 	Dim      int
 }
 
-// New returns an Embedder selected from the YOKE_EMBED_* environment, falling
-// back to the YOKE_PROVIDER / YOKE_BASE_URL / YOKE_API_KEY family so a single
+// New returns an Embedder selected from the OMNIS_EMBED_* environment, falling
+// back to the OMNIS_PROVIDER / OMNIS_BASE_URL / OMNIS_API_KEY family so a single
 // generation config also drives embeddings when no embed-specific overrides
 // are present.
 func New(ctx context.Context) (Embedder, error) {
 	dim := 0
-	if raw := strings.TrimSpace(os.Getenv("YOKE_EMBED_DIM")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("OMNIS_EMBED_DIM")); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 			dim = v
 		}
 	}
 	return NewWithSelection(ctx, Selection{
-		Provider: firstNonEmpty(os.Getenv("YOKE_EMBED_PROVIDER"), os.Getenv("YOKE_PROVIDER")),
-		Model:    os.Getenv("YOKE_EMBED_MODEL"),
-		BaseURL:  firstNonEmpty(os.Getenv("YOKE_EMBED_BASE_URL"), os.Getenv("YOKE_BASE_URL")),
-		APIKey:   firstNonEmpty(os.Getenv("YOKE_EMBED_API_KEY"), os.Getenv("YOKE_API_KEY")),
+		Provider: firstNonEmpty(os.Getenv("OMNIS_EMBED_PROVIDER"), os.Getenv("OMNIS_PROVIDER")),
+		Model:    os.Getenv("OMNIS_EMBED_MODEL"),
+		BaseURL:  firstNonEmpty(os.Getenv("OMNIS_EMBED_BASE_URL"), os.Getenv("OMNIS_BASE_URL")),
+		APIKey:   firstNonEmpty(os.Getenv("OMNIS_EMBED_API_KEY"), os.Getenv("OMNIS_API_KEY")),
 		Dim:      dim,
 	})
 }
@@ -141,7 +141,7 @@ func newBase(ctx context.Context, sel Selection) (Embedder, error) {
 		return newGemini(ctx, model, apiKey, dim)
 
 	case "anthropic":
-		return nil, fmt.Errorf("%w: anthropic — use Voyage/OpenAI via openai_compat for YOKE_EMBED_*", ErrUnsupported)
+		return nil, fmt.Errorf("%w: anthropic — use Voyage/OpenAI via openai_compat for OMNIS_EMBED_*", ErrUnsupported)
 
 	case "openai":
 		if apiKey == "" {
@@ -151,7 +151,7 @@ func newBase(ctx context.Context, sel Selection) (Embedder, error) {
 
 	case "openai_compat":
 		if baseURL == "" {
-			return nil, fmt.Errorf("embed: openai_compat requires a base URL (YOKE_EMBED_BASE_URL / OPENAI_BASE_URL)")
+			return nil, fmt.Errorf("embed: openai_compat requires a base URL (OMNIS_EMBED_BASE_URL / OPENAI_BASE_URL)")
 		}
 		return newOpenAI(model, apiKey, baseURL, dim), nil
 

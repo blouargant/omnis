@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/shellcomplete"
+	"github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/shellcomplete"
 )
 
 // bashCwdStore tracks the working directory of each session's interactive "!"

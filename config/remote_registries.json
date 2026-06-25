@@ -1,38 +1,38 @@
 [
   {
     "id": "b7e3f921",
-    "name": "Yoke Skills",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/skills",
+    "name": "Omnis Skills",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/skills",
     "kind": "skills"
   },
   {
     "id": "c4d8a056",
-    "name": "Yoke Agents",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/agents",
+    "name": "Omnis Agents",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/agents",
     "kind": "agents"
   },
   {
     "id": "c4d8a059",
-    "name": "Yoke Squads",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/squads",
+    "name": "Omnis Squads",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/squads",
     "kind": "squads"
   },
   {
     "id": "c4d8a057",
-    "name": "Yoke MCP",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/mcp",
+    "name": "Omnis MCP",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/mcp",
     "kind": "mcp"
   },
   {
     "id": "c4d8a058",
-    "name": "Yoke A2A",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/a2a",
+    "name": "Omnis A2A",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/a2a",
     "kind": "a2a"
   },
   {
     "id": "c4d8a05a",
-    "name": "Yoke Commands",
-    "url": "https://github.com/blouargant/yoke-registry/tree/main/commands",
+    "name": "Omnis Commands",
+    "url": "https://github.com/blouargant/omnis-registry/tree/main/commands",
     "kind": "commands"
   },
   {

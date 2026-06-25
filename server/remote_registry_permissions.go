@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemotePermissionsRegistryRoutes mounts /remotes endpoints scoped to
@@ -18,8 +18,8 @@ import (
 // the user's permissions.json (deduped by pattern).
 //
 // permConfigRead re-resolves the 3-layer config chain on each request so a
-// newly-saved override under $YOKE_HOME/config is picked up immediately.
-// permConfigWrite is the fixed write target under $YOKE_HOME/config.
+// newly-saved override under $OMNIS_HOME/config is picked up immediately.
+// permConfigWrite is the fixed write target under $OMNIS_HOME/config.
 func registerRemotePermissionsRegistryRoutes(
 	rg *gin.RouterGroup,
 	readPath func() string,

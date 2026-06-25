@@ -12,10 +12,10 @@ vLLM, Mistral, DeepInfra, Fireworks, Azure OpenAI, …), **do not write
 code**. Just set:
 
 ```bash
-export YOKE_PROVIDER=openai_compat
+export OMNIS_PROVIDER=openai_compat
 export OPENAI_BASE_URL=https://api.example.com/v1
 export OPENAI_API_KEY=sk-…
-export YOKE_MODEL=their-model-id
+export OMNIS_MODEL=their-model-id
 ```
 
 Done. Test with `go run . console`.
@@ -56,7 +56,7 @@ Edit [`core/llm/llm.go`](../../core/llm/llm.go):
 PATH=$HOME/.local/go/bin:$PATH go build ./... && \
 PATH=$HOME/.local/go/bin:$PATH go vet ./... && echo OK
 
-export YOKE_PROVIDER=newprov
+export OMNIS_PROVIDER=newprov
 export NEWPROV_API_KEY=…
 PATH=$HOME/.local/go/bin:$PATH go run . console
 > hello, who are you?

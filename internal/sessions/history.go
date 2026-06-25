@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
-// logsDir returns the per-user logs directory ($YOKE_HOME/logs). Resolved
-// at each call so tests can redirect via t.Setenv("YOKE_HOME", ...).
+// logsDir returns the per-user logs directory ($OMNIS_HOME/logs). Resolved
+// at each call so tests can redirect via t.Setenv("OMNIS_HOME", ...).
 func logsDir() string { return paths.LogsDir() }
 
 // convLocks serialises read-modify-write access to each session's conversation
@@ -413,7 +413,7 @@ func DeleteSessionLogs(userID, sessionID string) {
 	} {
 		_ = os.Remove(filepath.Join(logsDir(), name))
 	}
-	// Delete per-session mailbox files: $YOKE_HOME/mailboxes/<suffix>:*.jsonl
+	// Delete per-session mailbox files: $OMNIS_HOME/mailboxes/<suffix>:*.jsonl
 	matches, _ := filepath.Glob(filepath.Join(paths.MailboxesDir(), suffix+":*.jsonl"))
 	for _, f := range matches {
 		_ = os.Remove(f)

@@ -57,9 +57,9 @@ func ConvertLegacy(legacy *legacyRules) (*Config, []string) {
 }
 
 // ImportClaudeSettings parses a Claude Code settings.json (or a bare
-// permissions object, or a yoke Config) into a Config, returning warnings for
-// rules that don't map onto a yoke tool. Tool names are kept verbatim — yoke's
-// tool-class fan-out (toolClasses) maps Claude's Read/Edit/Write onto yoke's
+// permissions object, or a omnis Config) into a Config, returning warnings for
+// rules that don't map onto a omnis tool. Tool names are kept verbatim — omnis's
+// tool-class fan-out (toolClasses) maps Claude's Read/Edit/Write onto omnis's
 // concrete tools at match time.
 func ImportClaudeSettings(data []byte) (*Config, []string, error) {
 	cfg, err := parseConfig(data)
@@ -78,7 +78,7 @@ func ImportClaudeSettings(data []byte) (*Config, []string, error) {
 			}
 			if sp.Tool == "WebFetch" && !seenWebFetch {
 				seenWebFetch = true
-				warnings = append(warnings, "WebFetch rules are parsed but inert — yoke has no gated WebFetch tool (web fetch runs inside the web_agent sub-agent).")
+				warnings = append(warnings, "WebFetch rules are parsed but inert — omnis has no gated WebFetch tool (web fetch runs inside the web_agent sub-agent).")
 			}
 		}
 	}

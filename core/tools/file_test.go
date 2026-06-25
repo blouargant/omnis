@@ -135,7 +135,7 @@ func TestRunEditBasic(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "world", NewString: "yoke"})
+	msg, err := RunEdit(context.Background(), EditIn{Path: path, OldString: "world", NewString: "omnis"})
 	if err != nil {
 		t.Fatalf("RunEdit() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRunEditBasic(t *testing.T) {
 		t.Fatalf("RunEdit() = %q", msg)
 	}
 	data, _ := os.ReadFile(path)
-	if string(data) != "hello yoke\n" {
+	if string(data) != "hello omnis\n" {
 		t.Fatalf("file after edit = %q", string(data))
 	}
 }

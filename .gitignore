@@ -35,16 +35,16 @@ go.work.sum
 bin/
 dist/
 logs/
-/yoke
+/omnis
 /server/server
 .tokensave
 test.txt
 tmp/
-packaging/etc-yoke/filters
-packaging/etc-yoke/*.json
+packaging/etc-omnis/filters
+packaging/etc-omnis/*.json
 
 # pip packaging build artifacts (staged binaries/assets + setuptools output)
-packaging/pip/src/yoke/_dist/
+packaging/pip/src/omnis/_dist/
 packaging/pip/build/
 packaging/pip/**/*.egg-info/
 dist/wheels/

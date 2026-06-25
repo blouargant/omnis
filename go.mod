@@ -1,4 +1,4 @@
-module github.com/blouargant/yoke
+module github.com/blouargant/omnis
 
 go 1.25.5
 

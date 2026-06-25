@@ -15,12 +15,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/hooks"
-	"github.com/blouargant/yoke/internal/sessions"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // curateSSETimeout is how long the /curate SSE stream waits for curator_end

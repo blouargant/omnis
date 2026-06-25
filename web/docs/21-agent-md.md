@@ -1,6 +1,6 @@
 # Project Memory (`AGENT.md`)
 
-`AGENT.md` is yoke's project-memory file — the equivalent of Claude Code's
+`AGENT.md` is omnis's project-memory file — the equivalent of Claude Code's
 `CLAUDE.md`. Any `AGENT.md` visible from a session's working directory is
 loaded automatically and prepended to the agent's system instruction on every
 turn, so it acts as persistent, always-on guidance rather than something you
@@ -8,7 +8,7 @@ have to paste into the chat.
 
 ## How it's loaded
 
-At each turn yoke resolves `AGENT.md` against the **session's working
+At each turn omnis resolves `AGENT.md` against the **session's working
 directory** (the same cwd the Folders panel and the `!cd` shell-escape use), so
 each session picks up the project it is actually working in — even when several
 sessions are rooted in different folders.
@@ -16,8 +16,8 @@ sessions are rooted in different folders.
 Files from every layer are **concatenated**, lowest-precedence first (the most
 specific guidance, closest to your cwd, comes last):
 
-1. **System** — `/etc/yoke/AGENT.md`
-2. **User (global)** — `$YOKE_HOME/AGENT.md` (applies to every project)
+1. **System** — `/etc/omnis/AGENT.md`
+2. **User (global)** — `$OMNIS_HOME/AGENT.md` (applies to every project)
 3. **`.agents/` layer** — `AGENT.md` inside the project-local `.agents/`
    (or `agents/`) config directory
 4. **Project** — `AGENT.md` from the repository root down to the working

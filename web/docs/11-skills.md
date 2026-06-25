@@ -26,12 +26,12 @@ three-layer lookup as config files. The first directory in this list that
 contains the skill wins:
 
 1. `.agents/registry/skills/` — project-local (highest priority).
-2. `$YOKE_HOME/registry/skills/` — per-user; written by the Web UI.
-3. `/etc/yoke/registry/skills/` — system-wide install.
+2. `$OMNIS_HOME/registry/skills/` — per-user; written by the Web UI.
+3. `/etc/omnis/registry/skills/` — system-wide install.
 
 The Web UI **Skills** section writes new and edited skills to
-`$YOKE_HOME/registry/skills/` by default (override with
-`YOKE_SKILLS_REGISTRY_DIR`). Commit them to git yourself if you want them
+`$OMNIS_HOME/registry/skills/` by default (override with
+`OMNIS_SKILLS_REGISTRY_DIR`). Commit them to git yourself if you want them
 tracked.
 
 ## Discovery
@@ -70,7 +70,7 @@ A skill ships its permission rules in a **`permissions.json`** file next to its
 ## Tool dependencies (auto-install)
 
 A skill that drives an external command-line tool can declare it as a
-**dependency**, and yoke makes sure it is installed before the skill runs —
+**dependency**, and omnis makes sure it is installed before the skill runs —
 rather than leaving it to the model to remember to check. Dependencies are
 listed in a **`requires.json`** file next to `SKILL.md`:
 
@@ -90,11 +90,11 @@ listed in a **`requires.json`** file next to `SKILL.md`:
 
 **What you'll see.** When the leader loads a skill whose tool is missing, an
 **install prompt** appears in the session ("Install LiteParse? — `pip install
-liteparse`"). Approve it and yoke runs the install (through the same Bash safety
+liteparse`"). Approve it and omnis runs the install (through the same Bash safety
 floor as any command), then continues. The shipped `liteparse` skill works this
 way, with the `pdf` skill (`pdftotext`) declared as its fallback.
 
-**If you decline** — or the install fails — yoke does not pretend the tool ran:
+**If you decline** — or the install fails — omnis does not pretend the tool ran:
 it tells the leader the dependency is unavailable so it uses the skill's
 documented fallback (or reports that the tool is required). Nothing is installed
 without your approval.
@@ -109,7 +109,7 @@ Both are markdown playbooks. The difference is provenance:
 - **Skills** are **authored**: a human writes the body, commits it.
 - **Soft-skills** are **distilled**: the curator agent extracts procedures
   from past session transcripts and writes them to
-  `$YOKE_HOME/softskills/`. The leader loads them via the analogous
+  `$OMNIS_HOME/softskills/`. The leader loads them via the analogous
   `list_softskills` / `load_softskill` tools.
 
 Soft-skills make the agent better at recurring tasks over time without
@@ -119,7 +119,7 @@ cross-session precedents index, and the embedder that powers recall.
 
 ## Post-session reflection
 
-The curator no longer judges sessions alone. At every session end yoke
+The curator no longer judges sessions alone. At every session end omnis
 runs a two-stage reflection pipeline that informs the curator's
 decisions:
 
@@ -132,7 +132,7 @@ decisions:
    heuristic with reasons and extracts a single `key_insight` worth
    distilling. The LLM wins on overlap; the heuristic fills the gaps.
 
-Tag counts live in `$YOKE_HOME/softskills/_stats.json` (keyed by
+Tag counts live in `$OMNIS_HOME/softskills/_stats.json` (keyed by
 `<agent>/<name>` for sub-agent skills, bare `<name>` for leader
 skills). The curator consults the counts plus the reflector's reasons
 to apply concrete gating rules:
@@ -172,5 +172,5 @@ via the `record_session_feedback` tool to
 answer as the dominant verdict signal.
 
 Delete `softskills/wrap-session/` (or the directory under
-`$YOKE_HOME/softskills/wrap-session/` if you forked it) to disable the
+`$OMNIS_HOME/softskills/wrap-session/` if you forked it) to disable the
 wrap-up question globally.

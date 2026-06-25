@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/hooks"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/hooks"
 )
 
 // buildHooksPlugin returns nothing for the router squad (hooks fire on the

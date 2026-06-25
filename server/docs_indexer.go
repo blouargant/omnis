@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/omnis/agent"
 )
 
 // startDocsIndexer ensures the documentation semantic index is built and up to

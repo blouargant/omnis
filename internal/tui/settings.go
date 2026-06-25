@@ -8,8 +8,8 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registrymeta"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registrymeta"
 )
 
 // settingsView is the modal-style overlay reached via Ctrl-S. It mirrors

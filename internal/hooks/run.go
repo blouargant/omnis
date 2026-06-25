@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	fstools "github.com/blouargant/yoke/core/tools"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 // Input is the JSON object piped to a hook command's stdin. Field names match

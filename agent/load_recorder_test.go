@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 func emitLoad(bus *events.Bus, agent, sessionID, name string) {
@@ -170,7 +170,7 @@ func TestLoadRecorderPicksUpExplicitFeedback(t *testing.T) {
 	// the verdict directly to Positive (no need for other signals),
 	// which tags every loaded skill helpful.
 	tdir := t.TempDir()
-	t.Setenv("YOKE_HOME", tdir)
+	t.Setenv("OMNIS_HOME", tdir)
 	logs := tdir + "/logs"
 	if err := os.MkdirAll(logs, 0o755); err != nil {
 		t.Fatal(err)

@@ -21,8 +21,8 @@ func TestResolveLayerOrderingAndWalkUp(t *testing.T) {
 	sys := t.TempDir()
 	home := t.TempDir()
 	proj := t.TempDir()
-	t.Setenv("YOKE_SYSTEM_CONFIG_DIR", sys)
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", sys)
+	t.Setenv("OMNIS_HOME", home)
 
 	write(t, filepath.Join(sys, FileName), "SYSTEM")
 	write(t, filepath.Join(home, FileName), "USER")
@@ -54,16 +54,16 @@ func TestResolveLayerOrderingAndWalkUp(t *testing.T) {
 }
 
 func TestResolveEmptyWhenNoFiles(t *testing.T) {
-	t.Setenv("YOKE_SYSTEM_CONFIG_DIR", t.TempDir())
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	if got := Resolve(t.TempDir()); got != "" {
 		t.Fatalf("want empty, got %q", got)
 	}
 }
 
 func TestResolveCacheInvalidatesOnChange(t *testing.T) {
-	t.Setenv("YOKE_SYSTEM_CONFIG_DIR", t.TempDir())
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	proj := t.TempDir()
 	f := filepath.Join(proj, FileName)
 	write(t, f, "ONE")

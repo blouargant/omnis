@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/blouargant/yoke/internal/softskills"
+import "github.com/blouargant/omnis/internal/softskills"
 
 // BuiltinAgentNames lists agents that are wired into the binary. Their
 // default descriptions and system instructions ship as embedded resources;

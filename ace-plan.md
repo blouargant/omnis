@@ -1,14 +1,14 @@
-# Implementation plan — ACE-style softskills evolution for yoke (v2)
+# Implementation plan — ACE-style softskills evolution for omnis (v2)
 
 ## Background
 
 **ACE (Agentic Context Engineering)** — paper https://arxiv.org/abs/2510.04618, reference impl at `tmp/ACE/ace/`. Three roles: **Generator** (solves task, cites used "bullets"), **Reflector** (tags bullets `helpful|harmful|neutral` from a correctness signal), **Curator** (delta-updates counters, prunes by harm, adds new bullets from `key_insight`). The no-ground-truth Reflector prompt template lives at [tmp/ACE/ace/ace/prompts/reflector.py:63-115](tmp/ACE/ace/ace/prompts/reflector.py#L63-L115).
 
-**Yoke today** — one curator agent at [internal/softskills/curator.go:147](internal/softskills/curator.go#L147), triggered at `EventSessionEnd` / `EventCurateNow` by [agent/curator_hook.go:76](agent/curator_hook.go#L76). It reads `agent_memory_<key>.md` + `agent_statelog_<key>.json` and writes `softskills/[<agent>/]<skill>/SKILL.md` via `softskill_create/update/delete/index_append` ([internal/softskills/writetool.go](internal/softskills/writetool.go)). No reflector, no success signal, no per-skill usage counters.
+**Omnis today** — one curator agent at [internal/softskills/curator.go:147](internal/softskills/curator.go#L147), triggered at `EventSessionEnd` / `EventCurateNow` by [agent/curator_hook.go:76](agent/curator_hook.go#L76). It reads `agent_memory_<key>.md` + `agent_statelog_<key>.json` and writes `softskills/[<agent>/]<skill>/SKILL.md` via `softskill_create/update/delete/index_append` ([internal/softskills/writetool.go](internal/softskills/writetool.go)). No reflector, no success signal, no per-skill usage counters.
 
 **Two-tier observability**
 
-Reflection has to happen at two scopes because yoke has two session lifecycles:
+Reflection has to happen at two scopes because omnis has two session lifecycles:
 
 | Scope | When it ends | Bus event today | What we can judge |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Both tiers feed into one stats sidecar and one curator. The curator still only f
 Counters cannot go in `SKILL.md` frontmatter (loader rejects extra fields — see comment at [internal/softskills/softskills.go:10](internal/softskills/softskills.go#L10)). They live in:
 
 ```
-$YOKE_HOME/softskills/_stats.json
+$OMNIS_HOME/softskills/_stats.json
 ```
 
 Leading underscore keeps the file out of `run_glob softskills/*/SKILL.md`. Keyed by `<agent>/<name>` (leader uses bare `<name>`):
@@ -49,7 +49,7 @@ Leading underscore keeps the file out of `run_glob softskills/*/SKILL.md`. Keyed
 Explicit user feedback (Phase 5) lives in a parallel sidecar:
 
 ```
-$YOKE_HOME/logs/agent_feedback_<key>.json   # {question, answer, timestamp}
+$OMNIS_HOME/logs/agent_feedback_<key>.json   # {question, answer, timestamp}
 ```
 
 ## Phased rollout
@@ -194,7 +194,7 @@ Six phases. Each is independently mergeable. Do **not** combine.
 
 **Files to modify**:
 
-- `agents.json` (search-chain layer in `.agents/` for dev, eventually `/etc/yoke/`) — append `"reflector"` to the `agents` array. Squads do **not** need it (not delegable from the leader).
+- `agents.json` (search-chain layer in `.agents/` for dev, eventually `/etc/omnis/`) — append `"reflector"` to the `agents` array. Squads do **not** need it (not delegable from the leader).
 - `agent/curator_hook.go`:
   1. Run heuristic (already wired in Phase 2).
   2. If curator gate fires, build a `Reflector` runner with 60-second timeout. Merge its `Outcome` with the heuristic's (LLM wins on overlapping keys).
@@ -362,9 +362,9 @@ Six phases. Each is independently mergeable. Do **not** combine.
 ## Out of scope
 
 - Bullet-level granularity inside `SKILL.md` (ACE's flat numbered bullets). Counters stay at skill level.
-- Semantic dedup via embeddings (ACE's `BulletpointAnalyzer`). Yoke's softskill corpus is small; existing curator redundancy audit suffices.
+- Semantic dedup via embeddings (ACE's `BulletpointAnalyzer`). Omnis's softskill corpus is small; existing curator redundancy audit suffices.
 - ACE applied to `internal/compress/`. Different problem.
-- Online (mid-session) playbook updates. Yoke curates strictly post-session.
+- Online (mid-session) playbook updates. Omnis curates strictly post-session.
 
 ## Recommended ordering
 

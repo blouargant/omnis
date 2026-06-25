@@ -3,7 +3,7 @@
 //
 // The wrap-session skill instructs the leader to ask one closing
 // question on interactive surfaces (TUI / Web UI). The answer is
-// persisted to `$YOKE_HOME/logs/agent_feedback_<sessionSuffix>.json`
+// persisted to `$OMNIS_HOME/logs/agent_feedback_<sessionSuffix>.json`
 // via the `record_session_feedback` tool exposed here, and the
 // downstream reflectors (heuristic + LLM) consult it before scanning
 // the implicit user-message tone.
@@ -129,7 +129,7 @@ type feedbackToolOut struct {
 // NewFeedbackTool returns the `record_session_feedback` tool. suffixFor
 // resolves the per-session filename suffix from the tool.Context
 // (UserID + SessionID); logsDir is the directory where the sidecar
-// lives ($YOKE_HOME/logs by default).
+// lives ($OMNIS_HOME/logs by default).
 //
 // Returning a single tool (rather than a toolset) keeps the wiring
 // trivial: callers append it to the leader's tool list at squad-build

@@ -29,8 +29,8 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/omnis/core/agentkit"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 // precedentsHint is appended to the curator/reflector instruction only when a

@@ -15,7 +15,7 @@ import (
 // without any new bytes before the read is aborted. A misbehaving upstream
 // (connection held open mid-stream — no further data, no `[DONE]`, no close)
 // would otherwise hang until the client's 5-minute total timeout, freezing the
-// turn "mid sentence". Override via YOKE_LLM_STREAM_STALL_TIMEOUT (a Go
+// turn "mid sentence". Override via OMNIS_LLM_STREAM_STALL_TIMEOUT (a Go
 // duration such as "20s" or "90s"); a value <= 0 disables the guard.
 const defaultStreamStallTimeout = 10 * time.Minute
 
@@ -23,7 +23,7 @@ const defaultStreamStallTimeout = 10 * time.Minute
 var errStreamStalled = errors.New("The session has been running for too long without an update")
 
 func streamStallTimeout() time.Duration {
-	if v := strings.TrimSpace(os.Getenv("YOKE_LLM_STREAM_STALL_TIMEOUT")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_LLM_STREAM_STALL_TIMEOUT")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}

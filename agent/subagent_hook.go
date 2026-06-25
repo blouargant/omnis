@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 // invocation is one buffered EventSubAgentStart→End pair seen during a

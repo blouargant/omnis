@@ -5,41 +5,41 @@
 //
 // Invocation forms:
 //
-//	yoke-server [flags]        run the server in the foreground (default)
-//	yoke-server start [flags]  start the server detached in the background,
-//	                              recording its PID in $YOKE_HOME/yoke-server.pid
-//	                              and logging to $YOKE_HOME/logs/yoke-server.log
-//	yoke-server stop           signal the background server to shut down
-//	yoke-server status         report whether the background server is running
+//	omnis-server [flags]        run the server in the foreground (default)
+//	omnis-server start [flags]  start the server detached in the background,
+//	                              recording its PID in $OMNIS_HOME/omnis-server.pid
+//	                              and logging to $OMNIS_HOME/logs/omnis-server.log
+//	omnis-server stop           signal the background server to shut down
+//	omnis-server status         report whether the background server is running
 //
 // The detached child started by "start" runs the same foreground path; the
 // start/stop/status orchestration lives in daemon.go.
 //
 // Optional env:
 //
-//	YOKE_SERVER_TOKEN  Bearer token checked on every /api/* call. When
+//	OMNIS_SERVER_TOKEN  Bearer token checked on every /api/* call. When
 //	                      empty, token validation is skipped (unauthenticated
 //	                      mode). Set it to require a Bearer token.
 //
 //
-//	YOKE_SERVER_ADDR         Listen address. Default ":8080".
-//	YOKE_HOME                Per-user state root. Default $HOME/.yoke. Every
+//	OMNIS_SERVER_ADDR         Listen address. Default ":8080".
+//	OMNIS_HOME                Per-user state root. Default $HOME/.omnis. Every
 //	                            mutable file (logs, uploads, soft-skills,
 //	                            mailboxes, user config overrides) lands here.
-//	YOKE_CONFIG_DIRS         Colon-separated config search chain (high→low
+//	OMNIS_CONFIG_DIRS         Colon-separated config search chain (high→low
 //	                            precedence). Replaces the default chain of
-//	                            .agents : $YOKE_HOME : /etc/yoke.
-//	YOKE_CONFIG_PATH         Explicit path to agent.json (forwarded to
+//	                            .agents : $OMNIS_HOME : /etc/omnis.
+//	OMNIS_CONFIG_PATH         Explicit path to agent.json (forwarded to
 //	                            agent.NewAgent; bypasses the chain).
-//	YOKE_SKILLS_DIR          Skills directory.
-//	YOKE_SOFTSKILLS_DIR      Soft-skills directory.
-//	YOKE_WEB_DIR             Static UI directory. Default "web".
-//	YOKE_DEBUG               "1"/"true" to enable debug logging on the agent.
-//	YOKE_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
+//	OMNIS_SKILLS_DIR          Skills directory.
+//	OMNIS_SOFTSKILLS_DIR      Soft-skills directory.
+//	OMNIS_WEB_DIR             Static UI directory. Default "web".
+//	OMNIS_DEBUG               "1"/"true" to enable debug logging on the agent.
+//	OMNIS_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
 //	                            files (e.g. "1h", "30m"). Default "1h". Set
 //	                            to "0" or "off" to disable.
 //
-// Plus all YOKE_* model selectors honored by core/llm.
+// Plus all OMNIS_* model selectors honored by core/llm.
 package main
 
 import (
@@ -57,10 +57,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/agent"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // Build metadata, populated via -ldflags at build time (Makefile / goreleaser
@@ -111,23 +111,23 @@ func fatalIf(err error) {
 	}
 }
 
-// printServerUsage documents the yoke-server invocation forms.
+// printServerUsage documents the omnis-server invocation forms.
 func printServerUsage() {
-	fmt.Fprint(os.Stderr, `yoke-server — HTTP API server + web UI for the yoke agent.
+	fmt.Fprint(os.Stderr, `omnis-server — HTTP API server + web UI for the omnis agent.
 
 Usage:
-  yoke-server [flags]        run the server in the foreground (default)
-  yoke-server start [flags]  start the server detached in the background
-  yoke-server stop           stop the background server
-  yoke-server status         report whether the background server is running
-  yoke-server help           show this help
+  omnis-server [flags]        run the server in the foreground (default)
+  omnis-server start [flags]  start the server detached in the background
+  omnis-server stop           stop the background server
+  omnis-server status         report whether the background server is running
+  omnis-server help           show this help
 
 Flags (foreground / forwarded to the background child):
   --no-browser   disable automatic browser launch at startup
 
-The background server logs to $YOKE_HOME/logs/yoke-server.log and records its
-PID in $YOKE_HOME/yoke-server.pid. Configuration is read from server.yaml and
-the YOKE_* environment variables (see the package doc).
+The background server logs to $OMNIS_HOME/logs/omnis-server.log and records its
+PID in $OMNIS_HOME/omnis-server.pid. Configuration is read from server.yaml and
+the OMNIS_* environment variables (see the package doc).
 `)
 }
 
@@ -138,17 +138,17 @@ func run() error {
 
 	serverCfg := loadServerConfig()
 
-	token := strings.TrimSpace(os.Getenv("YOKE_SERVER_TOKEN"))
+	token := strings.TrimSpace(os.Getenv("OMNIS_SERVER_TOKEN"))
 	if token == "" {
 		token = strings.TrimSpace(serverCfg.Token)
 	}
 	if token == "" {
-		log.Println("server: YOKE_SERVER_TOKEN not set — running without authentication")
+		log.Println("server: OMNIS_SERVER_TOKEN not set — running without authentication")
 	}
 
 	var addr string
 	var addrFromEnv bool
-	if v := os.Getenv("YOKE_SERVER_ADDR"); v != "" {
+	if v := os.Getenv("OMNIS_SERVER_ADDR"); v != "" {
 		addr = v
 		addrFromEnv = true
 	} else if serverCfg.Addr != "" {
@@ -165,22 +165,22 @@ func run() error {
 		}
 		addr = resolved
 	}
-	webDir := envOr("YOKE_WEB_DIR", serverCfg.WebDir)
+	webDir := envOr("OMNIS_WEB_DIR", serverCfg.WebDir)
 	if webDir == "" {
 		webDir = "web"
 	}
-	basePath := normalizeBasePath(envOr("YOKE_SERVER_BASE_PATH", serverCfg.BasePath))
+	basePath := normalizeBasePath(envOr("OMNIS_SERVER_BASE_PATH", serverCfg.BasePath))
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	debug, _ := strconv.ParseBool(os.Getenv("YOKE_DEBUG"))
+	debug, _ := strconv.ParseBool(os.Getenv("OMNIS_DEBUG"))
 
 	agentOpts := agent.Options{
-		ConfigPath:       os.Getenv("YOKE_CONFIG_PATH"),
-		ConfigPathStrict: os.Getenv("YOKE_CONFIG_PATH") != "",
-		SoftSkillsDir:    os.Getenv("YOKE_SOFTSKILLS_DIR"),
-		AppName:          envOr("YOKE_APP_NAME", "yoke-server"),
+		ConfigPath:       os.Getenv("OMNIS_CONFIG_PATH"),
+		ConfigPathStrict: os.Getenv("OMNIS_CONFIG_PATH") != "",
+		SoftSkillsDir:    os.Getenv("OMNIS_SOFTSKILLS_DIR"),
+		AppName:          envOr("OMNIS_APP_NAME", "omnis-server"),
 		DebugLogging:     debug,
 		// The server runs pushManager, which drains each session's leader
 		// mailbox in the background and injects incoming messages as synthetic
@@ -197,7 +197,7 @@ func run() error {
 		DeferModelErrors: true,
 	}
 
-	log.Printf("server: yoke home: %s", paths.Home())
+	log.Printf("server: omnis home: %s", paths.Home())
 	log.Printf("server: config search: %v", paths.ConfigSearchDirs())
 
 	// Resolve the JSON config files exposed by the web UI editor up-front
@@ -250,7 +250,7 @@ func run() error {
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous
 	// run are cleaned up before the server starts accepting traffic.
-	gcInterval, gcEnabled := parseGCInterval(os.Getenv("YOKE_SERVER_GC_INTERVAL"))
+	gcInterval, gcEnabled := parseGCInterval(os.Getenv("OMNIS_SERVER_GC_INTERVAL"))
 	if gcEnabled {
 		log.Printf("server: garbage collector enabled (interval=%s)", gcInterval)
 	} else {
@@ -277,7 +277,7 @@ func run() error {
 
 	// Build/refresh the documentation semantic index in the background at
 	// startup (no-op when nothing changed). Lets the Helper answer questions
-	// about yoke grounded in its own docs.
+	// about omnis grounded in its own docs.
 	startDocsIndexer(rootCtx, infra, firstInst.Settings)
 
 	// Warm the remote-registry semantic index in the background at startup so the
@@ -289,14 +289,14 @@ func run() error {
 	pushEvents := newSessionPushBroadcaster()
 
 	// Self-update: cache the latest-release check and poll GitHub in the
-	// background (no-op for "dev" builds or when YOKE_UPDATE_CHECK=false).
+	// background (no-op for "dev" builds or when OMNIS_UPDATE_CHECK=false).
 	updates := newUpdateState(version)
 	startUpdatePoller(rootCtx, updates, version, pushEvents)
 
 	// Active wake (a completed background task injects a synthetic turn) is on by
-	// default; YOKE_TASK_NOTIFY=false demotes it to a passive UI toast.
+	// default; OMNIS_TASK_NOTIFY=false demotes it to a passive UI toast.
 	activeWake := true
-	if v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("YOKE_TASK_NOTIFY"))); err == nil {
+	if v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("OMNIS_TASK_NOTIFY"))); err == nil {
 		activeWake = v
 	}
 	pushMgr := newPushManager(runGuard, pushEvents, infra.WatchMailbox, infra.WatchBackground, activeWake)

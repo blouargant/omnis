@@ -165,7 +165,7 @@ body.resizing #sidebar { transition: none; }
   margin-left: auto;
 }
 
-/* Blue "Update available" button next to the Yoke title; hidden until the
+/* Blue "Update available" button next to the Omnis title; hidden until the
    self-update check finds a newer release. */
 .update-btn {
   display: inline-flex;

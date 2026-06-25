@@ -54,24 +54,24 @@ on, the server falls back to the `default` squad on that session's
 next turn (and logs a warning).
 
 To **disable routing** entirely, set `router_squad` to `"none"` in
-`agents.json` (or `YOKE_ROUTER_SQUAD=none`); new chats then start directly
+`agents.json` (or `OMNIS_ROUTER_SQUAD=none`); new chats then start directly
 on the squad you pick (or `default`). To define new squads, see the
 **Squads** sub-tab under Settings → Agents.
 
 ## Session lifecycle and the curator
 
-When a session ends (closed, deleted, or **idle** for `YOKE_CURATOR_IDLE_TIMEOUT`),
-yoke runs a two-stage reflection pipeline followed by the curator:
+When a session ends (closed, deleted, or **idle** for `OMNIS_CURATOR_IDLE_TIMEOUT`),
+omnis runs a two-stage reflection pipeline followed by the curator:
 
 1. **Heuristic reflector** tags every soft-skill the session loaded as
    `helpful` / `harmful` / `neutral` based on the StateLog, the last
    user messages, tool errors, and any explicit wrap-up feedback. Tag
-   counts land in `$YOKE_HOME/softskills/_stats.json`.
+   counts land in `$OMNIS_HOME/softskills/_stats.json`.
 2. **LLM reflector** (the `reflector` agent, when enabled) refines the
    tags with reasons and extracts a `key_insight`.
 3. The **curator** sub-agent reads the audit + StateLog + per-skill
    stats + the reflector's verdict, and creates / updates / deletes
-   soft-skill files under `$YOKE_HOME/softskills/`. The create / delete
+   soft-skill files under `$OMNIS_HOME/softskills/`. The create / delete
    thresholds are concrete (see [11-skills.md](11-skills.md#post-session-reflection))
    so the curator skips by default.
 

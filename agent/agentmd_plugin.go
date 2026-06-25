@@ -7,8 +7,8 @@ import (
 	"google.golang.org/adk/plugin"
 	"google.golang.org/genai"
 
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/agentmd"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/agentmd"
 )
 
 // agentMDPlugin builds the runner-level plugin that injects AGENT.md project

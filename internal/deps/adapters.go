@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	bashtools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/askuser"
+	bashtools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/askuser"
 )
 
 // installTimeoutSecs bounds a single dependency install command.

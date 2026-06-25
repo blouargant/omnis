@@ -11,8 +11,8 @@ import (
 
 	"google.golang.org/adk/agent"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/stream"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/stream"
 )
 
 func main() {

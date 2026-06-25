@@ -1,19 +1,19 @@
-// yoke — the all-in-one harness binary.
+// omnis — the all-in-one harness binary.
 //
 // Usage:
 //
-//	yoke [flags] [prompt...]    # CLI mode (REPL when stdin is a TTY,
+//	omnis [flags] [prompt...]    # CLI mode (REPL when stdin is a TTY,
 //	                            # one-shot when a prompt arg or piped input
 //	                            # is provided)
-//	yoke [flags] run [prompt]   # explicit CLI form
-//	yoke [flags] tui            # tview chat UI
-//	yoke [flags] curate ...     # one-shot soft-skill curator
-//	yoke version                # print version information
+//	omnis [flags] run [prompt]   # explicit CLI form
+//	omnis [flags] tui            # tview chat UI
+//	omnis [flags] curate ...     # one-shot soft-skill curator
+//	omnis version                # print version information
 //
-// The HTTP API server lives in the separate `yoke-server` binary (see
+// The HTTP API server lives in the separate `omnis-server` binary (see
 // ./server). The 3-mode contract is intentional: command line, TUI, server.
 //
-// See `yoke --help` for the full flag reference.
+// See `omnis --help` for the full flag reference.
 package main
 
 import (
@@ -30,14 +30,14 @@ import (
 
 	"google.golang.org/adk/runner"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/claudeformat"
-	"github.com/blouargant/yoke/internal/cli"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/sessions"
-	"github.com/blouargant/yoke/internal/tui"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/cli"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/tui"
 )
 
 // Build metadata, populated via -ldflags in the Makefile:
@@ -58,10 +58,10 @@ type options struct {
 	debug         bool
 }
 
-// newFlagSet wires the global yoke flags onto opts and returns the
+// newFlagSet wires the global omnis flags onto opts and returns the
 // flag.FlagSet so callers can either Parse() or print usage.
 func newFlagSet(opts *options) *flag.FlagSet {
-	fs := flag.NewFlagSet("yoke", flag.ContinueOnError)
+	fs := flag.NewFlagSet("omnis", flag.ContinueOnError)
 	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
 	fs.StringVar(&opts.configPath, "config", "", "Path to runtime JSON config file (default: config/agents.json)")
@@ -84,24 +84,24 @@ func parseFlags(args []string) (options, []string, error) {
 }
 
 func printUsage(fs *flag.FlagSet) {
-	fmt.Fprintf(os.Stderr, `yoke — single-binary harness for the agent toolkit.
+	fmt.Fprintf(os.Stderr, `omnis — single-binary harness for the agent toolkit.
 
 Usage:
-  yoke [flags] [prompt...]      run a one-shot turn (or REPL if stdin is a TTY)
-  yoke [flags] run [prompt]     same as above; the explicit form
-  yoke [flags] tui              launch the interactive TUI
-  yoke [flags] curate ...       run the soft-skill curator one-shot
-  yoke [flags] reindex-precedents  rebuild the cross-session precedent index
-  yoke [flags] reindex-docs        rebuild the documentation semantic index
-  yoke [flags] embed-test [text]   probe the configured embedder (semantic recall)
-  yoke import-agent <file|-|URL> import a Claude Code sub-agent (.md or .json)
-  yoke version                  print version information
-  yoke help                     show this help
+  omnis [flags] [prompt...]      run a one-shot turn (or REPL if stdin is a TTY)
+  omnis [flags] run [prompt]     same as above; the explicit form
+  omnis [flags] tui              launch the interactive TUI
+  omnis [flags] curate ...       run the soft-skill curator one-shot
+  omnis [flags] reindex-precedents  rebuild the cross-session precedent index
+  omnis [flags] reindex-docs        rebuild the documentation semantic index
+  omnis [flags] embed-test [text]   probe the configured embedder (semantic recall)
+  omnis import-agent <file|-|URL> import a Claude Code sub-agent (.md or .json)
+  omnis version                  print version information
+  omnis help                     show this help
 
 Flags (must appear before any subcommand or prompt):
 `)
 	fs.PrintDefaults()
-	fmt.Fprintf(os.Stderr, "\nThe HTTP API server is a separate binary: yoke-server (see ./server).\n")
+	fmt.Fprintf(os.Stderr, "\nThe HTTP API server is a separate binary: omnis-server (see ./server).\n")
 }
 
 func main() {
@@ -111,7 +111,7 @@ func main() {
 		os.Exit(2)
 	}
 	if opts.configPath == "" {
-		opts.configPath = strings.TrimSpace(os.Getenv("YOKE_CONFIG_PATH"))
+		opts.configPath = strings.TrimSpace(os.Getenv("OMNIS_CONFIG_PATH"))
 	}
 	if err := run(ctx, opts, rest); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
@@ -127,7 +127,7 @@ func run(ctx context.Context, opts options, args []string) error {
 	if len(args) > 0 {
 		switch strings.ToLower(args[0]) {
 		case "version", "--version", "-v":
-			fmt.Printf("yoke %s (commit %s, built %s)\n", version, commit, date)
+			fmt.Printf("omnis %s (commit %s, built %s)\n", version, commit, date)
 			return nil
 		case "help", "--help", "-h":
 			var dummy options
@@ -312,12 +312,12 @@ func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
 // runImportAgent parses a Claude Code sub-agent file (markdown or JSON) and
 // installs it into the local agents registry. Pass "-" to read from stdin.
 //
-// Usage: yoke import-agent [--enable] <file.md|file.json|->
+// Usage: omnis import-agent [--enable] <file.md|file.json|->
 func runImportAgent(args []string) error {
 	fs := flag.NewFlagSet("import-agent", flag.ContinueOnError)
 	enable := fs.Bool("enable", false, "Add the imported agent(s) to config/agents.json so they load on next run")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: yoke import-agent [--enable] <file.md|file.json|->\n\nReads a Claude Code sub-agent definition and installs it into the local\nagents registry ($YOKE_HOME/registry/agents/<name>/).\n\nFlags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: omnis import-agent [--enable] <file.md|file.json|->\n\nReads a Claude Code sub-agent definition and installs it into the local\nagents registry ($OMNIS_HOME/registry/agents/<name>/).\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

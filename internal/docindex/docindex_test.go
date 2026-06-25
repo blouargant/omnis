@@ -41,8 +41,8 @@ func writeDoc(t *testing.T, dir, rel, content string) {
 
 func TestReindexAndSearch(t *testing.T) {
 	docs := t.TempDir()
-	t.Setenv("YOKE_HOME", t.TempDir())
-	t.Setenv("YOKE_DOCS_DIRS", docs)
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	t.Setenv("OMNIS_DOCS_DIRS", docs)
 	writeDoc(t, docs, "hot-reload.md", "# Hot reload\n\nThe server rebuilds the agent generation without restarting.\n")
 	writeDoc(t, docs, "embedder.md", "# Embedder\n\nSemantic recall builds a vector index from an embed model.\n")
 
@@ -77,8 +77,8 @@ func TestReindexAndSearch(t *testing.T) {
 
 func TestIncrementalReindex(t *testing.T) {
 	docs := t.TempDir()
-	t.Setenv("YOKE_HOME", t.TempDir())
-	t.Setenv("YOKE_DOCS_DIRS", docs)
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	t.Setenv("OMNIS_DOCS_DIRS", docs)
 	writeDoc(t, docs, "a.md", "# A\n\nreload notes\n")
 	idx, err := Open(fakeEmbedder{})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestNilEmbedderSkips(t *testing.T) {
 
 func TestReadDocAndTraversal(t *testing.T) {
 	docs := t.TempDir()
-	t.Setenv("YOKE_DOCS_DIRS", docs)
+	t.Setenv("OMNIS_DOCS_DIRS", docs)
 	writeDoc(t, docs, "guide.md", "line1\nline2\nline3\n")
 
 	out, err := readDoc(Roots, readIn{Path: "guide.md", Start: 2, End: 2})
@@ -139,9 +139,9 @@ func TestReadDocAndTraversal(t *testing.T) {
 
 func TestGrepDocs(t *testing.T) {
 	docs := t.TempDir()
-	t.Setenv("YOKE_DOCS_DIRS", docs)
-	writeDoc(t, docs, "x.md", "alpha\nYOKE_EMBED_MODEL controls the embedder\nbeta\n")
-	out, err := grepDocs(Roots, grepIn{Pattern: "YOKE_EMBED_MODEL"})
+	t.Setenv("OMNIS_DOCS_DIRS", docs)
+	writeDoc(t, docs, "x.md", "alpha\nOMNIS_EMBED_MODEL controls the embedder\nbeta\n")
+	out, err := grepDocs(Roots, grepIn{Pattern: "OMNIS_EMBED_MODEL"})
 	if err != nil {
 		t.Fatal(err)
 	}

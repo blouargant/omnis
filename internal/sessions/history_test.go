@@ -68,7 +68,7 @@ func TestTokenUsageCostUSD(t *testing.T) {
 // list after a server restart).
 func TestConversationSquadRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	logs := filepath.Join(tmp, "logs")
 	if err := os.MkdirAll(logs, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -139,7 +139,7 @@ func TestConversationSquadRoundTrip(t *testing.T) {
 // conversation turns. Clearing the flag (unarchive) round-trips too.
 func TestArchivedFlagRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestArchivedFlagRoundTrip(t *testing.T) {
 // the whole history). Run with -race to also catch the data race directly.
 func TestConcurrentMutatorsDoNotLoseTurns(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestConcurrentMutatorsDoNotLoseTurns(t *testing.T) {
 // session keeps working. This is the safety net behind the atomic-write fix.
 func TestCorruptConversationFileQuarantined(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	logs := filepath.Join(tmp, "logs")
 	if err := os.MkdirAll(logs, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -277,7 +277,7 @@ func TestCorruptConversationFileQuarantined(t *testing.T) {
 // out-of-range keeps are clamped (no-op for keep≥len, empty for keep≤0).
 func TestTruncateConversationTurns(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestTruncateConversationTurns(t *testing.T) {
 // source, inheriting its squad, and verifies the source is left untouched.
 func TestForkConversation(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestRegistrySetTurns(t *testing.T) {
 // session case returns false.
 func TestRegistrySetArchived(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("YOKE_HOME", tmp)
+	t.Setenv("OMNIS_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

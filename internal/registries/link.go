@@ -10,7 +10,7 @@ import (
 
 // AddSkillToAgent appends skillName to the agent's skills list in its
 // agent.json. readDir is searched for the existing file (first-existing-wins);
-// writeDir is where the updated file is saved (always $YOKE_HOME in the web
+// writeDir is where the updated file is saved (always $OMNIS_HOME in the web
 // UI, implementing fork-on-first-edit). The operation is idempotent.
 func AddSkillToAgent(readDir, writeDir, agentName, skillName string) (added bool, err error) {
 	if !SkillNameRe.MatchString(skillName) {

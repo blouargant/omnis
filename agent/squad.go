@@ -22,15 +22,15 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/core/llm"
-	fstools "github.com/blouargant/yoke/core/tools"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/softskills"
-	"github.com/blouargant/yoke/internal/teammates"
-	"github.com/blouargant/yoke/internal/worktree"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/llm"
+	fstools "github.com/blouargant/omnis/core/tools"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/softskills"
+	"github.com/blouargant/omnis/internal/teammates"
+	"github.com/blouargant/omnis/internal/worktree"
 )
 
 // newModelForAgent instantiates the LLM client for one agent configuration
@@ -242,7 +242,7 @@ func buildSquadInstance(
 		// Session-lifecycle tools belong to a coordinator that owns the session.
 		leadTools = append(leadTools, curateSessionTool())
 		// record_session_feedback persists the wrap-session answer to
-		// $YOKE_HOME/logs/agent_feedback_<suffix>.json so the post-session
+		// $OMNIS_HOME/logs/agent_feedback_<suffix>.json so the post-session
 		// reflector can treat it as the dominant verdict signal.
 		leadTools = append(leadTools, softskills.NewFeedbackTool(
 			paths.LogsDir(),

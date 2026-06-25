@@ -11,15 +11,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/bg"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/skills"
-	"github.com/blouargant/yoke/internal/tasks"
-	"github.com/blouargant/yoke/internal/teammates"
-	"github.com/blouargant/yoke/internal/todo"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/bg"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/skills"
+	"github.com/blouargant/omnis/internal/tasks"
+	"github.com/blouargant/omnis/internal/teammates"
+	"github.com/blouargant/omnis/internal/todo"
 )
 
 // Infrastructure holds the long-lived components shared across every agent
@@ -74,7 +74,7 @@ type Infrastructure struct {
 	// registry config change via registries.OnSave.
 	regIndex regIndexCache
 
-	// docIndex memoises the process-wide semantic index over yoke's own
+	// docIndex memoises the process-wide semantic index over omnis's own
 	// documentation (see DocIndex). Backed by the same embedder; on-disk so it
 	// survives reloads, refreshed by the startup docs indexer.
 	docIndex docIndexCache
@@ -102,7 +102,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 
 	appName := opts.AppName
 	if appName == "" {
-		appName = "yoke"
+		appName = "omnis"
 	}
 
 	buildTimestamp := time.Now().Format("20060102_150405")

@@ -1,6 +1,6 @@
-# AGENT.md — yoke
+# AGENT.md — omnis
 
-**yoke** is a generic, vendor-neutral AI agent harness written in Go. It turns any supported LLM into a specialist assistant by mounting tools, skills, and MCP servers — with no code changes required to retarget the agent at a new domain.
+**omnis** is a generic, vendor-neutral AI agent harness written in Go. It turns any supported LLM into a specialist assistant by mounting tools, skills, and MCP servers — with no code changes required to retarget the agent at a new domain.
 
 ---
 
@@ -25,9 +25,9 @@ export GOPATH=$HOME/.local/gopath
 ### Build
 
 ```bash
-make build              # bin/yoke + bin/yoke-server (host platform)
-make build-root         # bin/yoke only
-make build-server       # bin/yoke-server only
+make build              # bin/omnis + bin/omnis-server (host platform)
+make build-root         # bin/omnis only
+make build-server       # bin/omnis-server only
 make examples           # opt-in: build all examples under bin/
 make release            # cross-platform raw binaries → dist/ (plain Go, no goreleaser)
 make package            # .deb / .rpm / .zip / .tar.gz via goreleaser (goreleaser must be installed)
@@ -68,7 +68,7 @@ go run . "summarize the architecture"
 # TUI
 go run . tui
 
-# Web UI server (requires YOKE_SERVER_TOKEN)
+# Web UI server (requires OMNIS_SERVER_TOKEN)
 go run ./server
 # or
 make run-server
@@ -87,8 +87,8 @@ The flags defined in the current `main.go` are:
 | Flag | Default | Effect |
 |---|---|---|
 | `--softskills DIR` | _(empty)_ | Directory of curator-generated soft-skills. |
-| `--config PATH` | _(empty)_ — falls back to `YOKE_CONFIG_PATH` env var, then config search chain | Runtime JSON config path. |
-| `--curator-enabled BOOL` | _(empty)_ — inherits from `YOKE_CURATOR_ENABLED` env var | Enable/disable the auto-curator hook. |
+| `--config PATH` | _(empty)_ — falls back to `OMNIS_CONFIG_PATH` env var, then config search chain | Runtime JSON config path. |
+| `--curator-enabled BOOL` | _(empty)_ — inherits from `OMNIS_CURATOR_ENABLED` env var | Enable/disable the auto-curator hook. |
 | `--name NAME` | _(empty)_ | Application name. |
 | `-d`, `--debug` | `false` | Write full conversation/event payloads to the event log. |
 
@@ -99,9 +99,9 @@ Provider, model, and API key are set via environment variables (see the env vars
 ## Structure
 
 ```
-yoke/
+omnis/
 ├── main.go                   # Root binary entry: CLI / TUI / curate dispatch. The only wiring file.
-├── curate.go                 # `yoke curate` one-shot subcommand
+├── curate.go                 # `omnis curate` one-shot subcommand
 ├── server/                   # Separate binary: HTTP + SSE API + web UI server
 ├── web/                      # Vanilla-JS chat UI assets served by server/
 │   └── docs/                 # In-app documentation (Markdown, served to the web UI)
@@ -161,40 +161,40 @@ yoke/
 ### Config search chain (read, high → low precedence)
 
 1. `.agents/` (canonical) and/or `agents/` (dotless alias) — project-local (CWD-relative)
-2. `$HOME/.yoke/` — per-user state root (overridable via `YOKE_HOME`)
-3. `/etc/yoke/` — system-wide install (overridable via `YOKE_SYSTEM_CONFIG_DIR`)
+2. `$HOME/.omnis/` — per-user state root (overridable via `OMNIS_HOME`)
+3. `/etc/omnis/` — system-wide install (overridable via `OMNIS_SYSTEM_CONFIG_DIR`)
 
-Override the whole chain with `YOKE_CONFIG_DIRS` (colon-separated). The first layer that has a given file wins for that entire file (file-level override, not merge).
+Override the whole chain with `OMNIS_CONFIG_DIRS` (colon-separated). The first layer that has a given file wins for that entire file (file-level override, not merge).
 
 Skill and agent registries live one level deeper inside each layer:
 - Config layer root → `registry/agents/` and `registry/skills/`
 
 ### State root (write)
 
-All mutable runtime state is written under `$HOME/.yoke` (default) or `$YOKE_HOME`:
+All mutable runtime state is written under `$HOME/.omnis` (default) or `$OMNIS_HOME`:
 
-- `$YOKE_HOME/softskills/` — curator-distilled soft-skills
-- `$YOKE_HOME/registry/skills/` — skills installed via the web UI
-- `$YOKE_HOME/registry/agents/` — agents installed via the web UI
-- `$YOKE_HOME/logs/` — session event logs and feedback sidecars
+- `$OMNIS_HOME/softskills/` — curator-distilled soft-skills
+- `$OMNIS_HOME/registry/skills/` — skills installed via the web UI
+- `$OMNIS_HOME/registry/agents/` — agents installed via the web UI
+- `$OMNIS_HOME/logs/` — session event logs and feedback sidecars
 
 ### Key environment variables
 
 | Variable | Purpose |
 |---|---|
-| `YOKE_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
-| `YOKE_MODEL` | Provider-specific model ID override |
-| `YOKE_API_KEY` | Provider API key (alternative to provider-specific vars) |
+| `OMNIS_PROVIDER` | `anthropic` / `openai` / `gemini` / `openai_compat` (default) |
+| `OMNIS_MODEL` | Provider-specific model ID override |
+| `OMNIS_API_KEY` | Provider API key (alternative to provider-specific vars) |
 | `ANTHROPIC_API_KEY` | Claude key |
 | `OPENAI_API_KEY` | OpenAI key |
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Gemini key |
 | `OPENAI_BASE_URL` | API endpoint (required for `openai_compat`) |
-| `YOKE_HOME` | Per-user state root (default: `$HOME/.yoke`) |
-| `YOKE_CONFIG_DIRS` | Replaces the entire config search chain |
-| `YOKE_SERVER_TOKEN` | Bearer token required by the HTTP server |
-| `YOKE_SERVER_ADDR` | Server listen address (default: `:8080`) |
-| `YOKE_DEBUG` | Log full conversation/event payloads |
-| `YOKE_CURATOR_ENABLED` | `true` / `false` — enable auto-curator hook |
+| `OMNIS_HOME` | Per-user state root (default: `$HOME/.omnis`) |
+| `OMNIS_CONFIG_DIRS` | Replaces the entire config search chain |
+| `OMNIS_SERVER_TOKEN` | Bearer token required by the HTTP server |
+| `OMNIS_SERVER_ADDR` | Server listen address (default: `:8080`) |
+| `OMNIS_DEBUG` | Log full conversation/event payloads |
+| `OMNIS_CURATOR_ENABLED` | `true` / `false` — enable auto-curator hook |
 | `REDIS_URL` | Redis backend for mailboxes (optional; in-memory used when unset) |
 
 See `web/docs/16-env-vars.md` for the complete list.
@@ -259,7 +259,7 @@ Do **not** pass sub-agents via `SubAgents` in `agentkit.AgentConfig`. Use `agent
 The README and older skill docs reference a top-level `skills/` directory, but there is no `skills/` directory at the repository root. The skill loader searches both `<layer>/skills/` and `<layer>/registry/skills/` within each config layer. Drop new playbooks under `registry/skills/`.
 
 **Config is file-level override, not merge**
-If `.agents/agents.json` exists, it completely replaces `$HOME/.yoke/agents.json` for every field. There is no deep merge across layers. A project-local file must be self-contained.
+If `.agents/agents.json` exists, it completely replaces `$HOME/.omnis/agents.json` for every field. There is no deep merge across layers. A project-local file must be self-contained.
 
 **Go path prefix required**
 `go` is installed at `$HOME/.local/go/bin`, not on the default `PATH`. Every `go` invocation (build, vet, test, run) must be prefixed with `PATH=$HOME/.local/go/bin:$PATH` or the path must be exported once. Symptom of forgetting: `go: command not found`.
@@ -277,7 +277,7 @@ Plugin constructor failures inside `run()` should be logged, not returned as fat
 If `REDIS_URL` is set but the server is unreachable, the agent will fail to start. Leave `REDIS_URL` unset to use the in-memory backend.
 
 **`mcp_config.json` is resolved via the config search chain**
-`mcp_config.json` is found by searching the config chain (`.agents/` → `$HOME/.yoke/` → `/etc/yoke/`) — not from a hardcoded path. The project includes a template at `config/mcp_config.json` used when the config path is explicitly set to `config/agents.json`. Add or edit MCP servers in whichever layer's `mcp_config.json` applies to your context.
+`mcp_config.json` is found by searching the config chain (`.agents/` → `$HOME/.omnis/` → `/etc/omnis/`) — not from a hardcoded path. The project includes a template at `config/mcp_config.json` used when the config path is explicitly set to `config/agents.json`. Add or edit MCP servers in whichever layer's `mcp_config.json` applies to your context.
 
 **Runtime files — never commit**
 The following are generated at runtime and are gitignored: `.agent_events.log`, `.agent_memory.md`, `.mailboxes/`, `bin/`, `dist/`, `logs/`.

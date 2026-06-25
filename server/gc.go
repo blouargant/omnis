@@ -9,16 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
-// logsDir returns the per-user logs directory ($YOKE_HOME/logs). Resolved
-// at each call so tests can redirect via t.Setenv("YOKE_HOME", ...).
+// logsDir returns the per-user logs directory ($OMNIS_HOME/logs). Resolved
+// at each call so tests can redirect via t.Setenv("OMNIS_HOME", ...).
 func logsDir() string { return paths.LogsDir() }
 
-// defaultGCInterval is the period between sweeps when YOKE_SERVER_GC_INTERVAL
+// defaultGCInterval is the period between sweeps when OMNIS_SERVER_GC_INTERVAL
 // is unset. Sweeps are cheap (a few stat calls per file in logs/) so an hourly
 // cadence is conservative.
 const defaultGCInterval = time.Hour
@@ -46,7 +46,7 @@ type gcDeps struct {
 	unregister   func(displayName string) error
 }
 
-// parseGCInterval reads YOKE_SERVER_GC_INTERVAL. Returns the configured
+// parseGCInterval reads OMNIS_SERVER_GC_INTERVAL. Returns the configured
 // duration and an enabled flag. "0" or "off" disables the periodic sweep.
 // Invalid values fall back to the default with a warning.
 func parseGCInterval(raw string) (time.Duration, bool) {
@@ -59,7 +59,7 @@ func parseGCInterval(raw string) (time.Duration, bool) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		log.Printf("gc: invalid YOKE_SERVER_GC_INTERVAL=%q, using default %s", raw, defaultGCInterval)
+		log.Printf("gc: invalid OMNIS_SERVER_GC_INTERVAL=%q, using default %s", raw, defaultGCInterval)
 		return defaultGCInterval, true
 	}
 	return d, true

@@ -1,6 +1,6 @@
-"""Build glue for the ``yoke-agent`` wheels.
+"""Build glue for the ``omnis-agent`` wheels.
 
-The wheel ships the prebuilt Go binaries (``yoke`` + ``yoke-server``) plus the
+The wheel ships the prebuilt Go binaries (``omnis`` + ``omnis-server``) plus the
 bundled config/registry/web tree as package data — it is **not** a CPython
 extension. We therefore:
 
@@ -10,11 +10,11 @@ extension. We therefore:
     ``py3-none-<platform>``;
   * take the wheel's platform tag from ``--plat-name`` on the command line
     (scripts/build_wheels.py passes the right tag per Go target);
-  * compute ``package_data`` by walking the staged ``src/yoke/_dist`` tree, so
+  * compute ``package_data`` by walking the staged ``src/omnis/_dist`` tree, so
     every binary/asset is included regardless of the setuptools version's
     recursive-glob support.
 
-Version comes from the ``YOKE_WHEEL_VERSION`` env var (PEP 440 normalised by
+Version comes from the ``OMNIS_WHEEL_VERSION`` env var (PEP 440 normalised by
 the build script), defaulting to a dev version for ad-hoc local builds.
 """
 
@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover - import shim
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DIST_DIR = os.path.join(HERE, "src", "yoke", "_dist")
+DIST_DIR = os.path.join(HERE, "src", "omnis", "_dist")
 
 
 class BinaryDistribution(Distribution):
@@ -62,13 +62,13 @@ class bdist_wheel(_bdist_wheel):
 
 
 def _staged_data_files():
-    """Relative paths (under the ``yoke`` package) of every staged asset."""
+    """Relative paths (under the ``omnis`` package) of every staged asset."""
     if not os.path.isdir(DIST_DIR):
         # No payload staged yet (e.g. a metadata-only invocation). Returning an
         # empty list keeps `pip`/`build` introspection from failing; the real
         # build always stages _dist first via scripts/build_wheels.py.
         return []
-    pkg_root = os.path.join(HERE, "src", "yoke")
+    pkg_root = os.path.join(HERE, "src", "omnis")
     out = []
     for root, _dirs, files in os.walk(DIST_DIR):
         for name in files:
@@ -78,8 +78,8 @@ def _staged_data_files():
 
 
 setup(
-    version=os.environ.get("YOKE_WHEEL_VERSION", "0.0.0.dev0"),
+    version=os.environ.get("OMNIS_WHEEL_VERSION", "0.0.0.dev0"),
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": bdist_wheel},
-    package_data={"yoke": _staged_data_files()},
+    package_data={"omnis": _staged_data_files()},
 )

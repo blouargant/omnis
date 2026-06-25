@@ -15,10 +15,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/precedents"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/precedents"
 )
 
 // registerPrecedentsHook subscribes to EventSessionReflected and

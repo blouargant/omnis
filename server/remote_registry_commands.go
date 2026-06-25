@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemoteCommandsRegistryRoutes mounts /remotes endpoints scoped to

@@ -473,7 +473,7 @@ func imageURLFromMap(obj map[string]any) string {
 }
 
 // saveDataURLImage decodes a "data:<mime>;base64,..." URL and writes the bytes
-// to $TMPDIR/yoke-images/<random>.<ext>. It returns the absolute file path and
+// to $TMPDIR/omnis-images/<random>.<ext>. It returns the absolute file path and
 // a human-readable line ("Generated image saved to <path>") that callers can
 // embed as a text part so downstream agents — and the Web UI's local-image
 // renderer — can reference the file. Returns ("", "") for unrecognised inputs.
@@ -499,7 +499,7 @@ func saveDataURLImage(dataURL string) (path, hint string) {
 	if err != nil {
 		return "", ""
 	}
-	dir := filepath.Join(os.TempDir(), "yoke-images")
+	dir := filepath.Join(os.TempDir(), "omnis-images")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", ""
 	}

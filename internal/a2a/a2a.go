@@ -1,6 +1,6 @@
 // Package a2a manages configuration for Agent-to-Agent (A2A) protocol
 // connections. Each entry in a2a_config.json describes one remote A2A
-// agent endpoint that Yoke can delegate work to.
+// agent endpoint that Omnis can delegate work to.
 //
 // Config format:
 //

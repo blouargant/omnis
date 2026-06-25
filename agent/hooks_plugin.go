@@ -13,10 +13,10 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/core/events"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/hooks"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/core/events"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // hookDefaultTimeout caps a single hook command when its entry sets no timeout.

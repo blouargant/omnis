@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/claudeformat"
 )
 
 // AgentManifestFile is the filename that marks an agent directory in a
@@ -16,7 +16,7 @@ import (
 const AgentManifestFile = "agent.json"
 
 // FormatClaude is the Format value set on AgentInfo entries that originate
-// from Claude Code markdown files rather than native yoke agent.json files.
+// from Claude Code markdown files rather than native omnis agent.json files.
 const FormatClaude = "claude"
 
 // agentManifest is the minimal subset of registry/agents/<name>/agent.json
@@ -100,7 +100,7 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 			continue
 		}
 
-		// --- native yoke format: .../agent.json ---
+		// --- native omnis format: .../agent.json ---
 		if strings.HasSuffix(e.Path, suffix) {
 			dirPath := strings.TrimSuffix(e.Path, suffix)
 			if dirPath == "" {
@@ -197,7 +197,7 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 }
 
 // FetchAgentJSON returns the agent definition content at dirPath inside the registry.
-// For native yoke format, dirPath is a directory and agent.json is appended.
+// For native omnis format, dirPath is a directory and agent.json is appended.
 // For Claude Code format, dirPath already points to the .md file itself.
 func FetchAgentJSON(ref RepoRef, token, dirPath string) ([]byte, error) {
 	if strings.HasSuffix(dirPath, ".md") {
@@ -223,7 +223,7 @@ func FetchAgentJSON(ref RepoRef, token, dirPath string) ([]byte, error) {
 // InstallAgent downloads and installs a remote agent. dirPath is relative to
 // the registry root. Two cases are handled:
 //
-//   - Native yoke format: dirPath is a directory containing agent.json (and
+//   - Native omnis format: dirPath is a directory containing agent.json (and
 //     optionally instruction.md and other files). All files are written under
 //     agentsRegistryDir/<agentName>/.
 //
@@ -265,7 +265,7 @@ func installClaudeFormatAgent(ref RepoRef, token, filePath, agentsRegistryDir st
 	return def.Name, nil
 }
 
-// installNativeAgent installs a directory-based yoke-native agent.
+// installNativeAgent installs a directory-based omnis-native agent.
 func installNativeAgent(ref RepoRef, token, dirPath, agentsRegistryDir string) (string, error) {
 	entries, err := ref.TreeEntries(token)
 	if err != nil {

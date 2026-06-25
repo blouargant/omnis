@@ -1,4 +1,4 @@
-# yoke
+# omnis
 
 A **generic, vendor-neutral AI agent harness** — turn any LLM into a
 specialist assistant by mounting tools, skills, and MCP servers. No
@@ -53,7 +53,7 @@ https://github.com/user-attachments/assets/187c12e0-5473-4fa7-aa78-91cdfc214242
 
 ### Helper — answering questions and discovering skills and agents
 
-Using the dedicated **Helper** squad to answer questions about yoke from its
+Using the dedicated **Helper** squad to answer questions about omnis from its
 own documentation (quoting the source), and to browse remote GitHub or Gitea
 registries for community skills and agents, then installing them directly from
 the web UI.
@@ -94,42 +94,42 @@ https://github.com/user-attachments/assets/a04c81d9-2c93-4ef6-9d82-98dc26f1f726
 **pip (any OS, no root)** — the quickest path if you have Python 3.8+:
 
 ```bash
-pip install yoke-agent          # or: pipx install yoke-agent
+pip install omnis-agent          # or: pipx install omnis-agent
 ```
 
-This installs the `yoke` and `yoke-server` commands and, on first run, seeds the
-default config + registry into `~/.yoke` (yours to edit). Prebuilt wheels cover
+This installs the `omnis` and `omnis-server` commands and, on first run, seeds the
+default config + registry into `~/.omnis` (yours to edit). Prebuilt wheels cover
 Linux (x86_64/aarch64), macOS (Intel/Apple Silicon), and Windows (x64/arm64).
 
 **OS packages** — download the package for your platform from the
-[Releases](https://github.com/blouargant/yoke/releases) page and install it:
+[Releases](https://github.com/blouargant/omnis/releases) page and install it:
 
 ```bash
 # macOS (Homebrew)
-brew install blouargant/tap/yoke
+brew install blouargant/tap/omnis
 
 # Debian / Ubuntu
-sudo dpkg -i yoke_*_linux_amd64.deb
+sudo dpkg -i omnis_*_linux_amd64.deb
 
 # Red Hat / Fedora / SUSE
-sudo rpm -i yoke_*_linux_amd64.rpm
+sudo rpm -i omnis_*_linux_amd64.rpm
 
 # Any Linux (tarball)
-tar xzf yoke_*_linux_amd64.tar.gz -C /usr/local/bin yoke yoke-server
+tar xzf omnis_*_linux_amd64.tar.gz -C /usr/local/bin omnis omnis-server
 ```
 
 Either way you get two binaries:
-- **`yoke-server`** — HTTP API + web chat UI
-- **`yoke`** — CLI / REPL / TUI
+- **`omnis-server`** — HTTP API + web chat UI
+- **`omnis`** — CLI / REPL / TUI
 
 ### 2. Configure your LLM provider
 
-Edit `~/.yoke/agents.json` (pip / Homebrew) or `/etc/yoke/agents.json`
+Edit `~/.omnis/agents.json` (pip / Homebrew) or `/etc/omnis/agents.json`
 (`.deb`/`.rpm`), or set environment variables to point at your provider. The
 fastest path is a couple of env vars:
 
 ```bash
-export YOKE_PROVIDER=anthropic          # or gemini, openai, openai_compat
+export OMNIS_PROVIDER=anthropic          # or gemini, openai, openai_compat
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
@@ -141,8 +141,8 @@ See [Choosing an LLM provider](#choosing-an-llm-provider) for all options.
 
 ```bash
 # OPTIONAL: create a auth token to access the Web UI
-# export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
-yoke-server                             # → http://localhost:8080
+# export OMNIS_SERVER_TOKEN=$(openssl rand -hex 32)
+omnis-server                             # → http://localhost:8080
 ```
 
 Open <http://localhost:8080>, paste the token when prompted, and start chatting.
@@ -150,7 +150,7 @@ Open <http://localhost:8080>, paste the token when prompted, and start chatting.
 **Terminal UI** — no token required:
 
 ```bash
-yoke tui
+omnis tui
 ```
 
 In both the web UI and the TUI, prefix a message with `/` to run a command or
@@ -161,7 +161,7 @@ bash-like Tab completion and a per-session working directory.
 
 ## Choosing an LLM provider
 
-Set `YOKE_PROVIDER` (default: `openai_compat`):
+Set `OMNIS_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|
@@ -170,19 +170,19 @@ Set `YOKE_PROVIDER` (default: `openai_compat`):
 | `openai`        | `OPENAI_API_KEY`                                 | `gpt-4o-mini`        |
 | `openai_compat` | `OPENAI_API_KEY` (optional) + `OPENAI_BASE_URL`  | `gpt-4o-mini`        |
 
-Override the model with `YOKE_MODEL`. Examples:
+Override the model with `OMNIS_MODEL`. Examples:
 
 ```bash
 # Local Ollama
-export YOKE_PROVIDER=openai_compat
+export OMNIS_PROVIDER=openai_compat
 export OPENAI_BASE_URL=http://localhost:11434/v1
-export YOKE_MODEL=llama3.1:70b
+export OMNIS_MODEL=llama3.1:70b
 
 # Groq
-export YOKE_PROVIDER=openai_compat
+export OMNIS_PROVIDER=openai_compat
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export OPENAI_API_KEY=gsk_…
-export YOKE_MODEL=llama-3.3-70b-versatile
+export OMNIS_MODEL=llama-3.3-70b-versatile
 ```
 
 See [docs/providers.md](docs/providers.md) for details.
@@ -192,25 +192,25 @@ See [docs/providers.md](docs/providers.md) for details.
 ## Running the server
 
 The web UI server exposes the agent over a JSON+SSE API and serves the
-chat interface from `/usr/share/yoke/web/` (set automatically by the
-package via `/etc/profile.d/yoke.sh`).
+chat interface from `/usr/share/omnis/web/` (set automatically by the
+package via `/etc/profile.d/omnis.sh`).
 
-A bearer token is mandatory. Set it in `/etc/yoke/server.yaml`:
+A bearer token is mandatory. Set it in `/etc/omnis/server.yaml`:
 
 ```yaml
-# /etc/yoke/server.yaml
+# /etc/omnis/server.yaml
 token: "<your-token-here>"
 ```
 
 Or pass it as an environment variable:
 
 ```bash
-export YOKE_SERVER_TOKEN=$(openssl rand -hex 32)
-yoke-server
+export OMNIS_SERVER_TOKEN=$(openssl rand -hex 32)
+omnis-server
 ```
 
 The server listens on `:8080` by default. Override with
-`YOKE_SERVER_ADDR` or the `addr` key in `server.yaml`. See
+`OMNIS_SERVER_ADDR` or the `addr` key in `server.yaml`. See
 [docs/configuration.md](docs/configuration.md) for the full reference.
 
 ---
@@ -279,7 +279,7 @@ its own in-session history. The negotiation is silent (a routing chip is the
 only visible signal), the user's message and attachments are forwarded
 **verbatim**, and when nothing fits Omnis asks instead of guessing. Pin a
 specific squad from the New Chat picker to bypass routing, or disable it
-entirely with `router_squad: "none"` (or `YOKE_ROUTER_SQUAD=none`).
+entirely with `router_squad: "none"` (or `OMNIS_ROUTER_SQUAD=none`).
 
 See [docs/architecture.md](docs/architecture.md) (§7 Omnis router) and
 [docs/configuration.md](docs/configuration.md#omnis-router-default-chat-routing).
@@ -327,8 +327,8 @@ project layout, and the examples catalog.
 Requires Go ≥ 1.25.
 
 ```bash
-git clone https://github.com/blouargant/yoke
-cd yoke
+git clone https://github.com/blouargant/omnis
+cd omnis
 go build ./...
 ```
 
@@ -336,14 +336,14 @@ go build ./...
 
 | Mode    | Invocation                            | When to use                                    |
 |---------|---------------------------------------|------------------------------------------------|
-| CLI     | `yoke [prompt…]`, `yoke run [prompt]` | REPL when stdin is a TTY; one-shot when piped or given a prompt arg. Best for scripting, CI, quick questions. |
-| TUI     | `yoke tui`                            | Interactive tview interface with live trace pane and streaming markdown. Best for sustained terminal sessions. |
-| Server  | `yoke-server` (separate binary)       | HTTP + SSE API plus the web chat UI. Best for multi-user or remote access. |
+| CLI     | `omnis [prompt…]`, `omnis run [prompt]` | REPL when stdin is a TTY; one-shot when piped or given a prompt arg. Best for scripting, CI, quick questions. |
+| TUI     | `omnis tui`                            | Interactive tview interface with live trace pane and streaming markdown. Best for sustained terminal sessions. |
+| Server  | `omnis-server` (separate binary)       | HTTP + SSE API plus the web chat UI. Best for multi-user or remote access. |
 
 CLI quick start:
 
 ```bash
-export YOKE_PROVIDER=anthropic
+export OMNIS_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-…
 
 go run .                                   # interactive REPL
@@ -364,7 +364,7 @@ go run . tui                               # TUI
 | `--base-url URL`      | _(config)_ | API endpoint override.                                                  |
 | `--api-key KEY`       | _(config/env)_| API-key override.                                                    |
 | `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
-| `--name NAME`         | `yoke`     | Application name (used in runner + session metadata).                   |
+| `--name NAME`         | `omnis`     | Application name (used in runner + session metadata).                   |
 | `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log.               |
 
 Flags must come **before** the subcommand or prompt:
@@ -377,7 +377,7 @@ go run . -d "what does main.go do?"
 ### Build commands
 
 ```bash
-make build              # bin/yoke + bin/yoke-server (host platform)
+make build              # bin/omnis + bin/omnis-server (host platform)
 make examples           # opt-in: build all examples under bin/
 make release            # cross-platform raw binaries → dist/
 make fmt && make vet    # code quality
@@ -403,9 +403,9 @@ learning path (setup in [docs/notebooks.md](docs/notebooks.md)).
 ### Project layout
 
 ```
-yoke/
+omnis/
 ├── main.go                      # root binary entry point: CLI / TUI / curate dispatch
-├── curate.go                    # `yoke curate` one-shot subcommand
+├── curate.go                    # `omnis curate` one-shot subcommand
 ├── server/                      # separate binary: HTTP + SSE API + web UI
 ├── web/                         # vanilla-JS chat UI assets served by server/
 ├── agent/                       # NewAgent() — single wiring entry point

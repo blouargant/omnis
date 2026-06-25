@@ -22,13 +22,13 @@ import (
 	"google.golang.org/adk/tool/skilltoolset/skill"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/fsutil"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/fsutil"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // DefaultDir returns the root softskills directory used when none is
-// supplied. Always anchored under $YOKE_HOME ($HOME/.yoke by default) so
+// supplied. Always anchored under $OMNIS_HOME ($HOME/.omnis by default) so
 // curator-distilled procedures land in a stable, per-user location instead
 // of beside the CWD.
 func DefaultDir() string { return paths.SoftSkillsDir() }

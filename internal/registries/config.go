@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // ConfigFileName is the basename of the remote-registry config file.

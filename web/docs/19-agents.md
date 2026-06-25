@@ -18,14 +18,14 @@ A split view: fleet list on the left, agent detail panel on the right.
 
 Agents are grouped into two sections:
 
-- **BUILT-IN AGENTS** — shipped with yoke: `omnis`, `leader`,
+- **BUILT-IN AGENTS** — shipped with omnis: `omnis`, `leader`,
   `skill_editor`, `helper`, `summariser`, `curator`, `reflector`. Fields
   are read-only where the binary bakes in defaults. The **`omnis`** agent is
   the **router** that runs at the start of every new chat and hands the
   conversation to the best squad (see [Architecture →
   Omnis router](10-architecture.md#omnis-router-default-chat-routing)); it
   is auto-injected when your config doesn't declare it. The **`helper`**
-  answers questions about yoke from its bundled documentation (quoting the
+  answers questions about omnis from its bundled documentation (quoting the
   source via `search_docs`) and browses/installs remote registry items.
 - **CUSTOM AGENTS** — user-added. All fields are editable; the agent can be
   removed or reordered.
@@ -166,7 +166,7 @@ Omnis router](10-architecture.md#omnis-router-default-chat-routing)). It is
 destination) and is injected automatically when your config doesn't declare
 it. To which squad new chats route is decided by the model at runtime; to
 **disable** routing entirely, set the top-level `router_squad` to `"none"`
-in `agents.json` (or `YOKE_ROUTER_SQUAD=none`) — new chats then start on the
+in `agents.json` (or `OMNIS_ROUTER_SQUAD=none`) — new chats then start on the
 `default` squad.
 
 ---
@@ -189,7 +189,7 @@ repo/path/
 ```
 
 Installing an agent downloads all files in the matched directory to
-`$YOKE_HOME/registry/agents/<name>/`. The install dialog offers
+`$OMNIS_HOME/registry/agents/<name>/`. The install dialog offers
 **Enable in agents.json** to wire the agent in on the next
 hot-reload.
 

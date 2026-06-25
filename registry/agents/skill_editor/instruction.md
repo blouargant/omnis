@@ -20,9 +20,9 @@ Operating method (always):
 
   3. **Locate the skill on disk**: skills live under the user's state root, never in the project checkout. Write to:
 
-         $HOME/.yoke/skills/<skill-name>/SKILL.md
+         $HOME/.omnis/skills/<skill-name>/SKILL.md
 
-     and bundled resources under `$HOME/.yoke/skills/<skill-name>/scripts/`, `references/`, or `assets/`. Use absolute paths in tool calls. Create the directory tree if it does not exist. Before writing, check whether `$HOME/.yoke/skills/<skill-name>/` already exists — if it does, read the current `SKILL.md` first and treat the operation as an **edit** (preserve license, metadata, and any references the user has hand-tuned) rather than a clean overwrite.
+     and bundled resources under `$HOME/.omnis/skills/<skill-name>/scripts/`, `references/`, or `assets/`. Use absolute paths in tool calls. Create the directory tree if it does not exist. Before writing, check whether `$HOME/.omnis/skills/<skill-name>/` already exists — if it does, read the current `SKILL.md` first and treat the operation as an **edit** (preserve license, metadata, and any references the user has hand-tuned) rather than a clean overwrite.
 
   4. **Author the SKILL.md** following the specification exactly:
 
@@ -77,6 +77,6 @@ Operating method (always):
      - If the request is to create a skill that would automate something harmful, illegal, or out of scope for the toolkit, decline and explain briefly — do not produce a partial skill.
      - If the user asks for a skill that duplicates an existing one already on disk, surface the existing path and ask the leader whether to edit it instead of creating a near-duplicate.
      - If you cannot reach the network for prior-art search (search tools fail repeatedly), proceed to author from scratch and note in your reply that prior-art search was skipped.
-     - Never write outside `$HOME/.yoke/skills/`. Do not touch the project checkout's `./skills/` directory unless the user explicitly asks.
+     - Never write outside `$HOME/.omnis/skills/`. Do not touch the project checkout's `./skills/` directory unless the user explicitly asks.
 
 You have no built-in domain expertise about the skill's *subject* — that comes from the user's brief, your prior-art search, and the conventions baked into the agentskills.io specification. Lean on those three sources; do not invent procedures from generic training knowledge.

@@ -1,0 +1,28 @@
+# Server listen address — full host:port form, e.g. "localhost:9000".
+# Leave empty to listen on all interfaces using the port below.
+addr: ""
+
+# TCP port the web UI and API listen on.
+port: 8080
+
+# When true, if the configured port is already in use the server automatically
+# tries the next port (8081, 8082, …) up to 100 increments. Applies to both
+# the web server port and the A2A port. Ignored when OMNIS_SERVER_ADDR is set.
+port_auto_increment: true
+
+# When true, the server opens the web UI in the default browser after starting.
+# Silently skipped when no graphical environment is detected (headless servers).
+open_browser: true
+
+# Bearer token required on every /api/* request.
+# Leave empty to run without authentication (not recommended in production).
+token: ""
+
+# A2A (Agent-to-Agent) protocol server.
+# When enabled, a second listener starts on a2a_port.
+a2a_enabled: false
+a2a_port: 8090
+
+# Directory containing the static web UI files (HTML, CSS, JS).
+# Override with OMNIS_WEB_DIR environment variable.
+web_dir: /usr/share/omnis/web

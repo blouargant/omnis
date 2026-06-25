@@ -17,7 +17,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // Message is one envelope on a mailbox.
@@ -42,7 +42,7 @@ type JSONLBackend struct {
 }
 
 // NewJSONLBackend creates the directory if needed. When dir is empty it
-// resolves to paths.MailboxesDir() ($YOKE_HOME/mailboxes), so JSONL
+// resolves to paths.MailboxesDir() ($OMNIS_HOME/mailboxes), so JSONL
 // inboxes are kept under the per-user state root rather than the CWD.
 func NewJSONLBackend(dir string) (*JSONLBackend, error) {
 	if dir == "" {
@@ -224,7 +224,7 @@ func (b *RedisBackend) Close() error {
 }
 
 // ChooseBackend returns Redis if REDIS_URL is set, otherwise a JSONL
-// mailbox under paths.MailboxesDir() ($YOKE_HOME/mailboxes).
+// mailbox under paths.MailboxesDir() ($OMNIS_HOME/mailboxes).
 func ChooseBackend() (Backend, error) {
 	if u := os.Getenv("REDIS_URL"); u != "" {
 		return NewRedisBackend(u)

@@ -132,7 +132,7 @@ type AgentInfo struct {
 	Builtin     bool     `json:"builtin,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Installed   bool     `json:"installed"`
-	Format      string   `json:"format,omitempty"` // "claude" for Claude Code .md format; empty for native yoke format
+	Format      string   `json:"format,omitempty"` // "claude" for Claude Code .md format; empty for native omnis format
 	// Tools/Model/Skills/MCPServers surface the same hints the agent's
 	// definition declares (agent.json or frontmatter), so the browse cards
 	// can show them next to the description before install.

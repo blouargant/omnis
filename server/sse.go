@@ -18,12 +18,12 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/core/llm"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/fileref"
-	"github.com/blouargant/yoke/internal/sessions"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/llm"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // messageRequest is the JSON body expected by POST /api/sessions/:id/messages.
@@ -434,7 +434,7 @@ func streamEvents(
 	if priceFor == nil {
 		priceFor = func(string) agentPrices { return agentPrices{} }
 	}
-	debug := strings.EqualFold(os.Getenv("YOKE_DEBUG"), "true") || os.Getenv("YOKE_DEBUG") == "1"
+	debug := strings.EqualFold(os.Getenv("OMNIS_DEBUG"), "true") || os.Getenv("OMNIS_DEBUG") == "1"
 	addUsage := func(agent string, prompt, output, cacheRead, cacheCreate int64) {
 		if usageAccum == nil || agent == "" {
 			return

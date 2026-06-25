@@ -1,12 +1,12 @@
-// Package docindex builds and queries a semantic index over yoke's own
+// Package docindex builds and queries a semantic index over omnis's own
 // documentation (the web UI user docs and the developer docs) so the Helper
-// agent can answer natural-language questions about yoke and quote the exact
+// agent can answer natural-language questions about omnis and quote the exact
 // passage that supports the answer.
 //
 // It mirrors internal/codeindex: markdown files are split into overlapping
 // line windows, re-indexing is content-hash gated per file (only changed files
 // are re-embedded, chunks of deleted files are removed), and the index is a
-// single global store under $YOKE_HOME/index/docs. Unlike codeindex it indexes
+// single global store under $OMNIS_HOME/index/docs. Unlike codeindex it indexes
 // several doc roots at once (see Roots), tracks the nearest preceding heading
 // for each chunk, and stores the chunk text in metadata so a hit carries the
 // quotable passage directly.
@@ -28,9 +28,9 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 const (
@@ -376,9 +376,9 @@ func (i *Index) Tools() []tool.Tool {
 	}
 	search, err := functiontool.New(functiontool.Config{
 		Name: SearchToolName,
-		Description: "Answer a question about yoke from its own documentation. Returns the most relevant " +
+		Description: "Answer a question about omnis from its own documentation. Returns the most relevant " +
 			"documentation passages — each with its source `path`, `heading`, line range, and the quoted " +
-			"`text` — ranked by meaning, not keyword. Use this to ground answers about yoke's features, " +
+			"`text` — ranked by meaning, not keyword. Use this to ground answers about omnis's features, " +
 			"configuration, and behaviour, then quote the returned text. Arguments: `query` (string, " +
 			"required); `k` (int, optional, default 6).",
 	}, func(_ tool.Context, in searchIn) (searchOut, error) {

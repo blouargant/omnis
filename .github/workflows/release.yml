@@ -103,7 +103,7 @@ jobs:
       # Non-blocking: goreleaser deprecated the `brews` property (it now nudges
       # toward `homebrew_casks`), so `check` exits non-zero on that deprecation
       # warning alone. The formula is kept deliberately — a cask can't inject
-      # the runtime env the binaries need to locate yoke's non-embedded config,
+      # the runtime env the binaries need to locate omnis's non-embedded config,
       # nor run a `brew services` daemon (see packaging/README.md). Keep an eye
       # on this step's log for any OTHER (real) config error.
       - name: Validate goreleaser config
@@ -132,7 +132,7 @@ jobs:
           # to the tag that actually triggered the run.
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # PAT with write access to blouargant/homebrew-tap, required to push
-          # the generated Formula/yoke.rb. Add it as a repo/org secret. Without
+          # the generated Formula/omnis.rb. Add it as a repo/org secret. Without
           # it, goreleaser fails only the brew publish, not the GitHub release.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
@@ -148,7 +148,7 @@ jobs:
             echo "Artifacts published to the GitHub Release page."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Build the per-platform pip wheels (yoke-agent) and publish to PyPI. The Go
+  # Build the per-platform pip wheels (omnis-agent) and publish to PyPI. The Go
   # binaries are static (CGO_ENABLED=0), so all platform wheels cross-compile on
   # one Linux runner — no per-OS matrix. rc/beta tags publish as PEP 440
   # pre-releases (pip ignores them by default), matching goreleaser's
@@ -218,10 +218,10 @@ jobs:
           Expand-Archive -Path $zip.FullName -DestinationPath $ex -Force
           $stage = "$env:RUNNER_TEMP\stage"
           New-Item -ItemType Directory -Force -Path "$stage\install\web","$stage\data" | Out-Null
-          # Binaries + static web UI -> Program Files\Yoke
-          Copy-Item "$ex\yoke.exe","$ex\yoke-server.exe" "$stage\install\"
+          # Binaries + static web UI -> Program Files\Omnis
+          Copy-Item "$ex\omnis.exe","$ex\omnis-server.exe" "$stage\install\"
           Copy-Item "$ex\web\*" "$stage\install\web\" -Recurse
-          # System config layer -> ProgramData\Yoke (flatten config\, keep filters\ + registry\)
+          # System config layer -> ProgramData\Omnis (flatten config\, keep filters\ + registry\)
           Copy-Item "$ex\config\*.json" "$stage\data\"
           Copy-Item "$ex\config\server.yaml" "$stage\data\"
           Copy-Item "$ex\config\filters" "$stage\data\filters" -Recurse
@@ -238,8 +238,8 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ needs.validate.outputs.version }}"
-          $out = "$env:RUNNER_TEMP\yoke_${ver}_windows_x86_64.msi"
-          wix build packaging\windows\yoke.wxs -arch x64 -d Version="$ver.0" -d StageDir="$env:STAGE" -o "$out"
+          $out = "$env:RUNNER_TEMP\omnis_${ver}_windows_x86_64.msi"
+          wix build packaging\windows\omnis.wxs -arch x64 -d Version="$ver.0" -d StageDir="$env:STAGE" -o "$out"
           "MSI=$out" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload MSI to the release

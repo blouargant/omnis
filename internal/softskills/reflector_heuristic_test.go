@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/omnis/internal/compress"
 )
 
 func TestClassifyMessage(t *testing.T) {

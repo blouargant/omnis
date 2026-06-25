@@ -1,11 +1,11 @@
-# Yoke Makefile
+# Omnis Makefile
 
-MODULE      := github.com/blouargant/yoke
+MODULE      := github.com/blouargant/omnis
 BIN_DIR     := bin
 DIST_DIR    := dist
 EXAMPLES_DIR := examples
-ROOT_BIN    := yoke
-SERVER_BIN  := yoke-server
+ROOT_BIN    := omnis
+SERVER_BIN  := omnis-server
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -93,30 +93,30 @@ a2a-smoke: ## Validate A2A protocol + client wiring against a live endpoint (A2A
 	@echo "== 1/2 protocol smoke (curl tasks/send) =="
 	@A2A_URL='$(A2A_URL)' A2A_TOKEN='$(A2A_TOKEN)' scripts/a2a_smoke.sh
 	@echo "== 2/2 client live test (a2a.SendTask) =="
-	@YOKE_A2A_TEST_URL='$(A2A_URL)' YOKE_A2A_TEST_TOKEN='$(A2A_TOKEN)' \
+	@OMNIS_A2A_TEST_URL='$(A2A_URL)' OMNIS_A2A_TEST_TOKEN='$(A2A_TOKEN)' \
 		$(GO) test -tags integration -count=1 -v -run TestLive ./internal/a2a
 
 .PHONY: all
 all: build ## Alias for `build` (root binary + server)
 
 .PHONY: build
-build: build-root build-server ## Build the production binaries (root yoke + HTTP server) for the host platform
+build: build-root build-server ## Build the production binaries (root omnis + HTTP server) for the host platform
 
 .PHONY: examples
 examples: $(addprefix build-example-,$(CMDS)) ## Build all examples (opt-in; not part of the default build target)
 
 .PHONY: build-root
-build-root: ## Build the root yoke binary
+build-root: ## Build the root omnis binary
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(ROOT_BIN) .
 
 .PHONY: build-server
-build-server: ## Build the HTTP API server (bin/yoke-server)
+build-server: ## Build the HTTP API server (bin/omnis-server)
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(SERVER_BIN) ./server
 
 .PHONY: run-server
-run-server: ## Run the HTTP API server (requires YOKE_SERVER_TOKEN)
+run-server: ## Run the HTTP API server (requires OMNIS_SERVER_TOKEN)
 	$(GO) run ./server
 
 .PHONY: build-example-%
@@ -125,7 +125,7 @@ build-example-%: ## Build a single example (e.g. make build-example-s01_loop)
 	$(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$* ./$(EXAMPLES_DIR)/$*
 
 .PHONY: release
-	release: clean ## Build cross-platform release binaries of yoke in dist/ (raw binaries — no packaging)
+	release: clean ## Build cross-platform release binaries of omnis in dist/ (raw binaries — no packaging)
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
@@ -166,7 +166,7 @@ PYTHON ?= python3
 WHEEL_PLATFORMS ?=
 
 .PHONY: wheels
-wheels: ## Build per-platform pip wheels (yoke-agent) into dist/wheels (override WHEEL_PLATFORMS="linux/amd64 ...")
+wheels: ## Build per-platform pip wheels (omnis-agent) into dist/wheels (override WHEEL_PLATFORMS="linux/amd64 ...")
 	VERSION='$(VERSION)' COMMIT='$(COMMIT)' $(PYTHON) scripts/build_wheels.py $(WHEEL_PLATFORMS)
 	@echo ">> wheel artifacts:"; ls -1 $(DIST_DIR)/wheels 2>/dev/null | grep '\.whl$$' || true
 

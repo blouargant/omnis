@@ -87,7 +87,7 @@ func LoadStats(dir string) (*Stats, error) {
 
 // Save atomically writes the stats back to dir/_stats.json. Uses temp-file
 // + rename so an interrupted write never leaves a half-file. The flock
-// blocks competing yoke processes on the same host; statsMu blocks
+// blocks competing omnis processes on the same host; statsMu blocks
 // goroutines inside this process.
 func (s *Stats) Save(dir string) error {
 	if s == nil {

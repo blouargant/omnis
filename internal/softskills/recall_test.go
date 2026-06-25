@@ -64,7 +64,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 func TestRecallerRanks(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	dir := filepath.Join(home, "softskills")
 	writeSkill(t, dir, "kube-triage", "diagnose kubernetes pod crashes")
 	writeSkill(t, dir, "db-tuning", "optimise sql database queries")
@@ -90,7 +90,7 @@ func TestRecallerRanks(t *testing.T) {
 
 func TestRecallerCorpusHashGate(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 	dir := filepath.Join(home, "softskills")
 	writeSkill(t, dir, "a", "kubernetes things")
 

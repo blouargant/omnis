@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/internal/filter"
+	"github.com/blouargant/omnis/internal/filter"
 )
 
 // alwaysBlock contains substrings that RunBash refuses outright. The
@@ -38,7 +38,7 @@ func SafetyFloorBlock(command string) (string, bool) {
 // persists across the interactive "!" shell-escape). It is unlikely to
 // collide with real command output; the parser scans from the end and takes
 // the last match. See wrapCaptureCwd in bash_unix.go / bash_windows.go.
-const cwdSentinel = "__YOKE_CWD__:"
+const cwdSentinel = "__OMNIS_CWD__:"
 
 var (
 	bashFilterMu       sync.RWMutex

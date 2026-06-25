@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/blouargant/yoke/internal/teammates"
+	"github.com/blouargant/omnis/internal/teammates"
 )
 
 func main() {

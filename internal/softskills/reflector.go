@@ -38,14 +38,14 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/omnis/core/agentkit"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 // ReflectorPrompt is the reflector's role-specific instruction. Appended
 // to the harness SystemPrompt by agentkit.New. Adapted from the no-
 // ground-truth ACE reflector prompt (tmp/ACE/ace/ace/prompts/reflector.py)
-// with yoke-specific framing.
+// with omnis-specific framing.
 const ReflectorPrompt = `You are the **reflector** sub-agent of the soft-skills system.
 
 Your mission: read one finished session, decide whether it succeeded, and tag each soft-skill the agents loaded as helpful / harmful / neutral. You do NOT write or modify any soft-skill — that is the curator's job.

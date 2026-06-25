@@ -8,7 +8,7 @@ formatter after every write, inject standing context into every prompt) instead
 of hoping the model follows an instruction — the same guarantee
 [Permissions](13-permissions.md) give for tool gating.
 
-yoke's hooks are a faithful port of **[Claude Code hooks](https://code.claude.com/docs/en/hooks-guide)**:
+omnis's hooks are a faithful port of **[Claude Code hooks](https://code.claude.com/docs/en/hooks-guide)**:
 the `hooks.json` format and the stdin/stdout protocol match, so an existing
 Claude Code hooks block is portable.
 

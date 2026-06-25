@@ -10,17 +10,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	internala2a "github.com/blouargant/yoke/internal/a2a"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	internala2a "github.com/blouargant/omnis/internal/a2a"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemoteA2ARegistryRoutes mounts /remotes endpoints scoped to "a2a" kind.
 // Shares the backing remote_registries.json with the skills, agents, and mcp tabs.
 //
 // a2aConfigRead re-resolves the 3-layer config chain on each request so a
-// newly-saved override under $YOKE_HOME/config is picked up immediately.
-// a2aConfigWrite is the fixed write target under $YOKE_HOME/config.
+// newly-saved override under $OMNIS_HOME/config is picked up immediately.
+// a2aConfigWrite is the fixed write target under $OMNIS_HOME/config.
 func registerRemoteA2ARegistryRoutes(
 	rg *gin.RouterGroup,
 	readPath func() string,

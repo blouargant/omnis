@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 // fakeEmbedder maps phrases to fixed unit vectors in 3-space so cosine ordering
@@ -30,7 +30,7 @@ func (fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error
 	return out, nil
 }
 
-// writeRegistries drops a remote_registries.json under YOKE_HOME so
+// writeRegistries drops a remote_registries.json under OMNIS_HOME so
 // LoadRegistries(ReadConfigPath()) finds it, and returns its config path.
 func writeRegistries(t *testing.T, regs ...registries.Registry) {
 	t.Helper()
@@ -60,7 +60,7 @@ func openTest(t *testing.T) *Index {
 }
 
 func TestReindexAndSearch(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeRegistries(t, registries.Registry{ID: "r1", Name: "Hub", URL: "https://github.com/x/y", Kind: registries.KindSkills})
 
 	idx := openTest(t)
@@ -97,7 +97,7 @@ func TestReindexAndSearch(t *testing.T) {
 // TestReindexAllKinds proves items of non-skill/agent kinds (mcp, command) are
 // indexed and surface in search with their kind preserved.
 func TestReindexAllKinds(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeRegistries(t,
 		registries.Registry{ID: "m1", Name: "MCP Hub", URL: "https://github.com/x/mcp", Kind: registries.KindMCP},
 		registries.Registry{ID: "c1", Name: "Cmd Hub", URL: "https://github.com/x/cmd", Kind: registries.KindCommands},
@@ -139,7 +139,7 @@ func TestReindexAllKinds(t *testing.T) {
 }
 
 func TestSearchLazyBuildsOnEmpty(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeRegistries(t, registries.Registry{ID: "r1", URL: "https://github.com/x/y", Kind: registries.KindSkills})
 
 	idx := openTest(t)
@@ -158,7 +158,7 @@ func TestSearchLazyBuildsOnEmpty(t *testing.T) {
 }
 
 func TestStaleRebuildOnRegistrySetChange(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	writeRegistries(t, registries.Registry{ID: "r1", URL: "https://github.com/x/y", Kind: registries.KindSkills})
 
 	idx := openTest(t)
@@ -231,7 +231,7 @@ func TestItemText(t *testing.T) {
 }
 
 func TestNilEmbedderSkipsMount(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	idx, err := Open(nil, Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestNilEmbedderSkipsMount(t *testing.T) {
 }
 
 func TestTools(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	idx := openTest(t)
 	tools := idx.Tools()
 	if len(tools) != 2 {
@@ -265,7 +265,7 @@ func TestTools(t *testing.T) {
 }
 
 func TestOnSaveTriggersRebuild(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	idx := openTest(t)
 	// Saving registries fires registries.OnSave, which Open wired to a
 	// background rebuild. We can't easily await the goroutine, but we can

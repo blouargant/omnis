@@ -3,14 +3,14 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "yoke-agent"
-description = "Yoke — a multi-agent harness: CLI/TUI (yoke) + HTTP API & Web UI server (yoke-server)."
+name = "omnis-agent"
+description = "Omnis — a multi-agent harness: CLI/TUI (omnis) + HTTP API & Web UI server (omnis-server)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
 authors = [{ name = "Bertrand Louargant", email = "blouargant@chapsvision.fr" }]
 keywords = ["agent", "llm", "ai", "cli", "tui", "mcp", "a2a", "harness"]
-# Version is injected at build time from the YOKE_WHEEL_VERSION environment
+# Version is injected at build time from the OMNIS_WHEEL_VERSION environment
 # variable (see setup.py); the wheel itself carries no Python dependencies —
 # it ships the prebuilt Go binaries + bundled config/registry/web as data.
 dynamic = ["version"]
@@ -30,21 +30,21 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/blouargant/yoke"
-Repository = "https://github.com/blouargant/yoke"
-Issues = "https://github.com/blouargant/yoke/issues"
+Homepage = "https://github.com/blouargant/omnis"
+Repository = "https://github.com/blouargant/omnis"
+Issues = "https://github.com/blouargant/omnis/issues"
 
-# Console commands stay `yoke` / `yoke-server` even though the PyPI
-# distribution is `yoke-agent`. `yoke-seed` re-materialises the bundled
-# defaults into ~/.yoke (the launcher seeds them automatically on first run).
+# Console commands stay `omnis` / `omnis-server` even though the PyPI
+# distribution is `omnis-agent`. `omnis-seed` re-materialises the bundled
+# defaults into ~/.omnis (the launcher seeds them automatically on first run).
 [project.scripts]
-yoke = "yoke.launcher:main_yoke"
-yoke-server = "yoke.launcher:main_server"
-yoke-seed = "yoke.seed:main"
+omnis = "omnis.launcher:main_omnis"
+omnis-server = "omnis.launcher:main_server"
+omnis-seed = "omnis.seed:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["yoke"]
+packages = ["omnis"]
 # package_data (the bundled _dist/ tree: binaries + config + registry + web)
 # is computed by walking the staged directory in setup.py, so it works across
 # setuptools versions regardless of recursive-glob support.

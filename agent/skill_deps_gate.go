@@ -6,9 +6,9 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/deps"
-	"github.com/blouargant/yoke/internal/skills"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/deps"
+	"github.com/blouargant/omnis/internal/skills"
 )
 
 // newSkillDepGate builds the process-wide skills.DepGate that enforces a loaded

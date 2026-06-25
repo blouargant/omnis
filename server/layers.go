@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // resolveSourceLayer returns "local" or "user" based on where the file currently
-// lives. Files that resolve to /etc/yoke (or are missing entirely) fork into
-// "user" — yoke never writes back into the system layer.
+// lives. Files that resolve to /etc/omnis (or are missing entirely) fork into
+// "user" — omnis never writes back into the system layer.
 func resolveSourceLayer(readPath string) string {
 	if readPath == "" {
 		return "user"
@@ -193,7 +193,7 @@ func agentTargetLayer(name string, skills []string) string {
 			return "local"
 		}
 		if l == "system" {
-			// /etc/yoke is read-only; fork into user when editing.
+			// /etc/omnis is read-only; fork into user when editing.
 			return "user"
 		}
 		return l

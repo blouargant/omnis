@@ -1,6 +1,6 @@
 # Getting Started
 
-Yoke is a configurable software-engineering agent. The same binary can act as
+Omnis is a configurable software-engineering agent. The same binary can act as
 a code reviewer, a Kubernetes triage assistant, or a DBA helper — what changes
 its behavior are the **tools**, **skills**, and **MCP servers** mounted on it,
 not the code.
@@ -61,6 +61,6 @@ the **Sessions** documentation page for the full lifecycle, and
 
 ## Authentication
 
-The Web UI is gated by a bearer token. The server requires `YOKE_SERVER_TOKEN`
+The Web UI is gated by a bearer token. The server requires `OMNIS_SERVER_TOKEN`
 at startup; the browser stores it locally. If the token changes server-side,
 you will be prompted to enter the new value before any API call succeeds.

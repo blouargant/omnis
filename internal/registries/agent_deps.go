@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/claudeformat"
 )
 
 // resolveSkillDeps installs the commands and permission rule-sets a skill

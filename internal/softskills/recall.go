@@ -17,9 +17,9 @@ import (
 	"google.golang.org/adk/tool/functiontool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 // RecallToolName is the semantic-recall counterpart to list_softskills.

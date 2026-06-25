@@ -21,10 +21,10 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 // RecallToolName is the tool the reflector/curator call to find precedents.
@@ -44,7 +44,7 @@ type Store struct {
 	s *semindex.Store
 }
 
-// Open opens (or creates) the precedents store at $YOKE_HOME/index/precedents.
+// Open opens (or creates) the precedents store at $OMNIS_HOME/index/precedents.
 // A nil embedder yields a degraded handle whose Query returns no results and
 // whose Tool reports recall is unavailable.
 func Open(emb embed.Embedder) (*Store, error) {

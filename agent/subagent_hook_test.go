@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 func TestSubAgentLoadHookRecordsLoads(t *testing.T) {

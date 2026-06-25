@@ -61,22 +61,22 @@ func TestCompletePaths(t *testing.T) {
 func TestCompleteCommandsFirstToken(t *testing.T) {
 	// Build a fake $PATH with one executable.
 	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "yoketestbin"), "#!/bin/sh\n")
-	if err := os.Chmod(filepath.Join(dir, "yoketestbin"), 0o755); err != nil {
+	mustWrite(t, filepath.Join(dir, "omnistestbin"), "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(dir, "omnistestbin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(dir, "yoketestlib"), "data") // not executable
-	if err := os.Chmod(filepath.Join(dir, "yoketestlib"), 0o644); err != nil {
+	mustWrite(t, filepath.Join(dir, "omnistestlib"), "data") // not executable
+	if err := os.Chmod(filepath.Join(dir, "omnistestlib"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
 
-	_, cands := Complete("yoketest", "")
-	if !contains(cands, "yoketestbin") {
-		t.Fatalf("expected yoketestbin in %v", cands)
+	_, cands := Complete("omnistest", "")
+	if !contains(cands, "omnistestbin") {
+		t.Fatalf("expected omnistestbin in %v", cands)
 	}
-	if contains(cands, "yoketestlib") {
-		t.Fatalf("non-executable yoketestlib should be excluded: %v", cands)
+	if contains(cands, "omnistestlib") {
+		t.Fatalf("non-executable omnistestlib should be excluded: %v", cands)
 	}
 }
 

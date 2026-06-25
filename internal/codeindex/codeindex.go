@@ -26,9 +26,9 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/semindex"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/semindex"
 )
 
 const (
@@ -203,7 +203,7 @@ func (i *Index) gitFiles() ([]string, error) {
 
 var skipDirs = map[string]bool{
 	".git": true, "node_modules": true, "vendor": true, "dist": true,
-	"bin": true, ".yoke": true, ".agents": true, "tmp": true,
+	"bin": true, ".omnis": true, ".agents": true, "tmp": true,
 }
 
 func (i *Index) walkFiles() ([]string, error) {

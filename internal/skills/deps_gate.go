@@ -14,8 +14,8 @@ import (
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/internal/deps"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/deps"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // DepGate is invoked after a skill is loaded via load_skill. It receives the

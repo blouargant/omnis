@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/omnis/internal/compress"
 )
 
 type fakeEmbedder struct{}
@@ -37,7 +37,7 @@ func has(s, sub string) bool {
 }
 
 func TestIndexAndRecall(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	st, err := Open(fakeEmbedder{})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestIndexAndRecall(t *testing.T) {
 }
 
 func TestIdempotentReindex(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	st, err := Open(fakeEmbedder{})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestIdempotentReindex(t *testing.T) {
 }
 
 func TestNilEmbedderNoCrash(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 	st, err := Open(nil)
 	if err != nil {
 		t.Fatal(err)

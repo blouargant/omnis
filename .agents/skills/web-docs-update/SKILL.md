@@ -29,7 +29,7 @@ Do NOT use this skill to make content improvements unrelated to accuracy (e.g. r
 | `web/app.js` debug overlay | `16-env-vars.md` Web UI debug section |
 | `server/config.go` → `ServerConfig` | `16-env-vars.md` Server section; `14-config.md` |
 | `server/user_commands.go` | `04-settings-panel.md` Commands row |
-| `server/main.go` env var comments | `16-env-vars.md` — every `YOKE_*` var must appear |
+| `server/main.go` env var comments | `16-env-vars.md` — every `OMNIS_*` var must appear |
 | `internal/paths/paths.go` | `11-skills.md` skill paths; `14-config.md` write root tree |
 | `registry/agents/<name>/agent.json` builtin flag | `04-settings-panel.md` built-in agents list |
 
@@ -90,7 +90,7 @@ After edits, grep for remaining stale references:
 
 ```bash
 grep -rn "Settings → Agent\b" web/docs/
-grep -rn "\$YOKE_HOME/skills/" web/docs/
+grep -rn "\$OMNIS_HOME/skills/" web/docs/
 ```
 
 Fix any that surfaced.

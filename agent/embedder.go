@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/core/embed"
-	"github.com/blouargant/yoke/internal/codeindex"
-	"github.com/blouargant/yoke/internal/docindex"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/precedents"
-	"github.com/blouargant/yoke/internal/regindex"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/core/embed"
+	"github.com/blouargant/omnis/internal/codeindex"
+	"github.com/blouargant/omnis/internal/docindex"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/precedents"
+	"github.com/blouargant/omnis/internal/regindex"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // embedderProbeTimeout bounds the one-shot startup health check so a hung or
@@ -38,12 +38,12 @@ func probeEmbedder(emb embed.Embedder) error {
 	return err
 }
 
-// embedderEnvConfigured reports whether the operator set any YOKE_EMBED_*
+// embedderEnvConfigured reports whether the operator set any OMNIS_EMBED_*
 // environment variable, signalling an environment-driven embedder.
 func embedderEnvConfigured() bool {
 	for _, k := range []string{
-		"YOKE_EMBED_PROVIDER", "YOKE_EMBED_MODEL",
-		"YOKE_EMBED_BASE_URL", "YOKE_EMBED_API_KEY",
+		"OMNIS_EMBED_PROVIDER", "OMNIS_EMBED_MODEL",
+		"OMNIS_EMBED_BASE_URL", "OMNIS_EMBED_API_KEY",
 	} {
 		if strings.TrimSpace(os.Getenv(k)) != "" {
 			return true
@@ -57,7 +57,7 @@ func embedderEnvConfigured() bool {
 //
 //  1. runtime.EmbedModelRef → the named embedding model in models.json
 //     (the Web UI "internal embedding model" selector writes this).
-//  2. YOKE_EMBED_* environment → embed.New.
+//  2. OMNIS_EMBED_* environment → embed.New.
 //  3. otherwise → (nil, nil): semantic recall is disabled and every caller
 //     falls back to its glob/grep path. This is the additive safety contract.
 func ResolveEmbedder(ctx context.Context, runtime RuntimeSettings) (embed.Embedder, error) {
@@ -196,13 +196,13 @@ func (i *Infrastructure) RegistryIndex(ctx context.Context, runtime RuntimeSetti
 		idx, err := regindex.Open(emb, regindex.Config{
 			ConfigPath: registries.ReadConfigPath,
 			SkillsDir: func() string {
-				if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+				if v := strings.TrimSpace(os.Getenv("OMNIS_SKILLS_REGISTRY_DIR")); v != "" {
 					return v
 				}
 				return paths.SkillsRegistryDir()
 			},
 			AgentsDir: func() string {
-				if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+				if v := strings.TrimSpace(os.Getenv("OMNIS_AGENTS_REGISTRY_DIR")); v != "" {
 					return v
 				}
 				return paths.AgentsRegistryDir()
@@ -232,7 +232,7 @@ type docIndexCache struct {
 	index *docindex.Index
 }
 
-// DocIndex lazily opens and caches the semantic index over yoke's own
+// DocIndex lazily opens and caches the semantic index over omnis's own
 // documentation, backed by the process-wide embedder. Returns nil when no
 // embedder is configured, so callers skip mounting search_docs and the Helper
 // falls back to list_docs / read_doc / grep_docs.

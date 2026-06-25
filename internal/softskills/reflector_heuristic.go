@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/omnis/internal/compress"
 )
 
 // Tristate carries the session-level success verdict.

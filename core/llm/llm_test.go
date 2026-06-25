@@ -7,8 +7,8 @@ import (
 )
 
 func TestNewDefaultsToOpenAICompatAndFailsWithoutBaseURL(t *testing.T) {
-	t.Setenv("YOKE_PROVIDER", "")
-	t.Setenv("YOKE_MODEL", "")
+	t.Setenv("OMNIS_PROVIDER", "")
+	t.Setenv("OMNIS_MODEL", "")
 	t.Setenv("OPENAI_BASE_URL", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
@@ -24,8 +24,8 @@ func TestNewDefaultsToOpenAICompatAndFailsWithoutBaseURL(t *testing.T) {
 }
 
 func TestNewDefaultsToOpenAICompatWhenBaseURLIsSet(t *testing.T) {
-	t.Setenv("YOKE_PROVIDER", "")
-	t.Setenv("YOKE_MODEL", "")
+	t.Setenv("OMNIS_PROVIDER", "")
+	t.Setenv("OMNIS_MODEL", "")
 	t.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
@@ -44,8 +44,8 @@ func TestNewDefaultsToOpenAICompatWhenBaseURLIsSet(t *testing.T) {
 }
 
 func TestNewWithExplicitProviderAndModel(t *testing.T) {
-	t.Setenv("YOKE_PROVIDER", "anthropic")
-	t.Setenv("YOKE_MODEL", "ignored")
+	t.Setenv("OMNIS_PROVIDER", "anthropic")
+	t.Setenv("OMNIS_MODEL", "ignored")
 	t.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
 	t.Setenv("OPENAI_API_KEY", "")
 

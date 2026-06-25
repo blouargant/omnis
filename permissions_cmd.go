@@ -7,12 +7,12 @@ import (
 	"io"
 	"os"
 
-	"github.com/blouargant/yoke/core/permissions"
+	"github.com/blouargant/omnis/core/permissions"
 )
 
-// runPermissions implements `yoke permissions <convert|import>` — the upgrade
-// path from old-format yoke permissions.json and from Claude Code settings.json
-// to yoke's new (Claude-nomenclature) permissions format.
+// runPermissions implements `omnis permissions <convert|import>` — the upgrade
+// path from old-format omnis permissions.json and from Claude Code settings.json
+// to omnis's new (Claude-nomenclature) permissions format.
 func runPermissions(args []string) error {
 	if len(args) == 0 {
 		printPermissionsUsage()
@@ -34,13 +34,13 @@ func runPermissions(args []string) error {
 
 func printPermissionsUsage() {
 	fmt.Fprint(os.Stderr, `Usage:
-  yoke permissions convert [-w] <file|->   Upgrade an old-format yoke
+  omnis permissions convert [-w] <file|->   Upgrade an old-format omnis
                                            permissions.json to the new
                                            nomenclature. -w rewrites in place
                                            (with a .bak backup).
-  yoke permissions import  [-o out] <file|->  Convert a Claude Code
+  omnis permissions import  [-o out] <file|->  Convert a Claude Code
                                            settings.json (or its permissions
-                                           block) into a yoke permissions.json.
+                                           block) into a omnis permissions.json.
 `)
 }
 

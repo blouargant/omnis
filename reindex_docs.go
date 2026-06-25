@@ -1,10 +1,10 @@
-// reindex_docs.go — `yoke reindex-docs` subcommand. Walks every markdown file
+// reindex_docs.go — `omnis reindex-docs` subcommand. Walks every markdown file
 // under the configured documentation roots (see docindex.Roots) and (re)builds
 // the documentation semantic index in one pass. Incremental and idempotent:
 // chunk ids are derived from (absolute path, line start) and only changed files
 // are re-embedded.
 //
-// Requires an embedder (models.json embed_model_ref or YOKE_EMBED_*); without
+// Requires an embedder (models.json embed_model_ref or OMNIS_EMBED_*); without
 // one there is nothing to embed and the command errors out.
 package main
 
@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/docindex"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/docindex"
 )
 
 func runReindexDocs(ctx context.Context, opts options, _ []string) error {
@@ -33,12 +33,12 @@ func runReindexDocs(ctx context.Context, opts options, _ []string) error {
 		return fmt.Errorf("embedder: %w", err)
 	}
 	if emb == nil {
-		return fmt.Errorf("no embedder configured: set an embedding model_ref in models.json (embed_model_ref) or the YOKE_EMBED_* environment")
+		return fmt.Errorf("no embedder configured: set an embedding model_ref in models.json (embed_model_ref) or the OMNIS_EMBED_* environment")
 	}
 
 	roots := docindex.Roots()
 	if len(roots) == 0 {
-		fmt.Println("no documentation roots found (set YOKE_DOCS_DIRS to override)")
+		fmt.Println("no documentation roots found (set OMNIS_DOCS_DIRS to override)")
 		return nil
 	}
 

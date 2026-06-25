@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/internal/askuser"
+	"github.com/blouargant/omnis/internal/askuser"
 )
 
 func TestAskResolveHappyPath(t *testing.T) {

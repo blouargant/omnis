@@ -32,7 +32,7 @@ precedence. Use them to shape your approach, not to override other guidance.
 ## When new soft-skills are created
 
 The curator runs **after** a session ends (event hook) or on demand
-(`yoke curate` / the `curate_session` tool). It reads the
+(`omnis curate` / the `curate_session` tool). It reads the
 session's compress audit and state log, identifies a successful multi-step
 procedure, checks for redundancy against existing skills and soft-skills,
 and only then creates a new entry.

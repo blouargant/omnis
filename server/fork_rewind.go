@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/hooks"
-	"github.com/blouargant/yoke/internal/sessions"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // reseedTimeout bounds the in-memory context rebuild so a slow session service

@@ -1,13 +1,13 @@
-// embed_test_cmd.go — `yoke embed-test` subcommand. A self-contained probe
+// embed_test_cmd.go — `omnis embed-test` subcommand. A self-contained probe
 // that resolves the SAME embedder the server uses (models.json embed_model_ref
-// / YOKE_EMBED_*), runs a few real embeddings, and reports the model, the
+// / OMNIS_EMBED_*), runs a few real embeddings, and reports the model, the
 // observed dimension, and a sanity check on cosine similarity so you can
 // confirm semantic recall is actually working end to end.
 //
 // Usage:
 //
-//	yoke embed-test                 # uses built-in sample sentences
-//	yoke embed-test "your text"     # embeds your text + prints the vector head
+//	omnis embed-test                 # uses built-in sample sentences
+//	omnis embed-test "your text"     # embeds your text + prints the vector head
 package main
 
 import (
@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/omnis/agent"
 )
 
 func runEmbedTest(ctx context.Context, opts options, args []string) error {
@@ -43,7 +43,7 @@ func runEmbedTest(ctx context.Context, opts options, args []string) error {
 		return fmt.Errorf("embedder failed to build: %w", err)
 	}
 	if emb == nil {
-		return fmt.Errorf("no embedder configured — set embed_model_ref in models.json (and mark the model \"embedding\": true) or the YOKE_EMBED_* env; semantic recall is disabled")
+		return fmt.Errorf("no embedder configured — set embed_model_ref in models.json (and mark the model \"embedding\": true) or the OMNIS_EMBED_* env; semantic recall is disabled")
 	}
 
 	// Custom text mode: embed it and show the vector head.

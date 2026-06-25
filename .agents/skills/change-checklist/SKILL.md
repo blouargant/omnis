@@ -1,6 +1,6 @@
 ---
 name: change-checklist
-description: Pre-flight and post-flight checklist for any code or configuration change in the yoke repository. Use before declaring a task complete and before committing. Mention triggers - finished, ready to commit, done, verify, sanity check, definition of done.
+description: Pre-flight and post-flight checklist for any code or configuration change in the omnis repository. Use before declaring a task complete and before committing. Mention triggers - finished, ready to commit, done, verify, sanity check, definition of done.
 ---
 
 # Change checklist

@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // prefixAll returns a copy of names with prefix prepended to each entry.
@@ -61,13 +61,13 @@ func normalizeKindInput(raw, defaultKind string) string {
 
 // registerRemoteRegistryRoutes mounts the /remotes endpoints on rg.
 // readPath is a thunk so the 3-layer config chain is re-resolved on every
-// request: after a save creates a fresh override under $YOKE_HOME/config,
+// request: after a save creates a fresh override under $OMNIS_HOME/config,
 // subsequent reads transparently pick it up. writePath is fixed under
-// $YOKE_HOME/config (the fork-on-first-edit destination).
+// $OMNIS_HOME/config (the fork-on-first-edit destination).
 // registerRemoteRegistryRoutes mounts the /remotes endpoints on rg.
 // registryReadDir is used by browse to check which skills are already installed
 // (first-existing-wins). registryWriteDir is the install target — always
-// $YOKE_HOME/registry/skills so remote installs never land in a local checkout.
+// $OMNIS_HOME/registry/skills so remote installs never land in a local checkout.
 func registerRemoteRegistryRoutes(rg *gin.RouterGroup, readPath func() string, writePath, registryReadDir, registryWriteDir string) {
 	registerRemoteRegistryCRUD(rg, readPath, writePath, registries.KindSkills)
 

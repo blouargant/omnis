@@ -1,4 +1,4 @@
-// Vanilla-JS client for the yoke HTTP API.
+// Vanilla-JS client for the omnis HTTP API.
 // Uses fetch + ReadableStream to consume SSE (EventSource doesn't allow
 // custom headers, so we use fetch with Authorization).
 
@@ -1559,7 +1559,7 @@ function openFileInEditor(rel) {
   const key = editorKey(abs);
   // Remember the Folders-panel ROOT this file was opened from, so when the
   // (sessionless) editor tab is activated the panel stays anchored to that dir
-  // instead of snapping back to the global "no session" root (where yoke-server
+  // instead of snapping back to the global "no session" root (where omnis-server
   // was started). Only set on first open — a later refocus keeps the original.
   if (!editorRoots.has(abs)) editorRoots.set(abs, foldersDir || "");
   const existing = panelsWithTab(key)[0];
@@ -1990,7 +1990,7 @@ const LOCAL_IMG_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
 // image extension. This is what keeps fetched web-page images — notably
 // Next.js's site-relative `/_next/image?url=…&w=640&q=75` — from being sprayed
 // at /api/sessions/<id>/media (where they 403/404, since they are not files on
-// disk). Agent-generated images (e.g. /tmp/yoke-images/abc.png, whether given
+// disk). Agent-generated images (e.g. /tmp/omnis-images/abc.png, whether given
 // as an absolute or relative path) still pass and are proxied as before.
 function looksLikeLocalImagePath(src) {
   if (!src) return false;
@@ -2066,10 +2066,10 @@ function rewriteLocalImages(rootEl) {
 //
 // Two extraction modes per visited string:
 //   1. The whole string IS a path (no whitespace, ends in image extension).
-//      e.g. response.image_path = "/tmp/yoke-images/abc.png".
+//      e.g. response.image_path = "/tmp/omnis-images/abc.png".
 //   2. The string is a sentence that EMBEDS a path. We pull each substring
 //      that starts with "/" (or a Windows drive) and ends in an image
-//      extension. e.g. "Generated image saved to /tmp/yoke-images/abc.png".
+//      extension. e.g. "Generated image saved to /tmp/omnis-images/abc.png".
 function collectImagePathsFromResponse(response) {
   if (!response || typeof response !== "object") return [];
   const found = new Set();
@@ -4188,7 +4188,7 @@ async function apiFetch(path, opts = {}) {
 }
 
 function promptForToken() {
-  const t = window.prompt("Enter API bearer token (YOKE_SERVER_TOKEN):", token || "");
+  const t = window.prompt("Enter API bearer token (OMNIS_SERVER_TOKEN):", token || "");
   if (t !== null) {
     token = t.trim();
     localStorage.setItem(TOKEN_KEY, token);
@@ -4947,7 +4947,7 @@ function unsubscribeSessionEvents(_sessionId) { /* covered by subscribeGlobalEve
 // `agent_toolkit_os_notify`) when the tab is backgrounded.
 function notifyTaskEvent(sid) {
   showTaskToast(sid);
-  // Fire the OS notification when the user isn't actively looking at yoke:
+  // Fire the OS notification when the user isn't actively looking at omnis:
   // document.hidden covers a backgrounded/minimized tab; !document.hasFocus()
   // also covers switching to another *application* (where the tab stays active
   // but the window loses focus) — document.hidden alone misses that case.
@@ -4958,7 +4958,7 @@ function notifyTaskEvent(sid) {
     try {
       const n = new Notification(paneTabTitle(sid), {
         body: "A background task or monitor reported a result.",
-        tag: "yoke-task-" + sid,
+        tag: "omnis-task-" + sid,
       });
       n.onclick = () => { window.focus(); selectSession(sid); n.close(); };
     } catch { /* ignore */ }
@@ -4995,7 +4995,7 @@ function notifyChatReply(sessionId, replyText) {
     const preview = notificationPreview(replyText);
     const n = new Notification(title, {
       body: preview || "Finished responding.",
-      tag: "yoke-chat-" + sessionId,
+      tag: "omnis-chat-" + sessionId,
     });
     n.onclick = () => { window.focus(); selectSession(sessionId); n.close(); };
   } catch { /* ignore */ }
@@ -5061,7 +5061,7 @@ function notificationUnblockHint() {
 function showNotificationBlockedHelp() {
   return uiConfirm({
     title: "Allow notifications in your browser",
-    message: "Notifications are turned on in Yoke, but your browser is blocking them for this site. " +
+    message: "Notifications are turned on in Omnis, but your browser is blocking them for this site. " +
       notificationUnblockHint() + " A website can't grant this itself — it has to be allowed in the browser.",
     confirmText: "Got it",
   });
@@ -5090,7 +5090,7 @@ async function offerNotificationGrant({ title, message, confirmText }, save) {
 //   2. Reconcile a recorded "enabled" intent with the per-browser permission.
 //      The server-side intent and the browser's Notification permission are
 //      independent: clearing the site's data/permissions resets the browser
-//      grant to "default" (or it can be "denied") while yoke still believes
+//      grant to "default" (or it can be "denied") while omnis still believes
 //      notifications are on — so every notification silently no-ops with no
 //      message telling the user why. When that mismatch is detected we re-offer
 //      the grant at startup (once per tab session, so we don't nag).
@@ -5122,7 +5122,7 @@ async function maybePromptNotifications() {
       // permission === "default" (e.g. site data was cleared): re-offer the grant.
       await offerNotificationGrant({
         title: "Re-enable desktop notifications?",
-        message: "Notifications are turned on in Yoke, but your browser no longer has permission for this site (this happens when the site's data or permissions are cleared). Allow them again?",
+        message: "Notifications are turned on in Omnis, but your browser no longer has permission for this site (this happens when the site's data or permissions are cleared). Allow them again?",
         confirmText: "Allow notifications",
       }, save);
       return;
@@ -7412,7 +7412,7 @@ async function checkForUpdate() {
   if (updateStatus && updateStatus.available) {
     const label = btn.querySelector(".update-btn-label");
     if (label) label.textContent = `Update → v${updateStatus.latest}`;
-    btn.setAttribute("data-tip", `yoke v${updateStatus.latest} is available (you have v${updateStatus.current || "?"}) — click to update`);
+    btn.setAttribute("data-tip", `omnis v${updateStatus.latest} is available (you have v${updateStatus.current || "?"}) — click to update`);
     btn.hidden = false;
   } else {
     btn.hidden = true;
@@ -7429,7 +7429,7 @@ function openUpdateDialog() {
   const st = updateStatus;
   if (!st || !st.available) return;
   const needsSudo = st.method === "deb" || st.method === "rpm";
-  const overlay = uiModalShell("Update yoke");
+  const overlay = uiModalShell("Update omnis");
   const body = overlay.querySelector(".user-cmd-modal-body");
   body.innerHTML = `
     <div class="update-dialog">
@@ -7715,7 +7715,7 @@ async function openProviderHealthModal() {
         throw new Error(j.error || `HTTP ${relRes.status}`);
       }
       const relBody = await relRes.json().catch(() => ({}));
-      window.dispatchEvent(new CustomEvent("yoke:config-reloaded", { detail: { generation: relBody.generation } }));
+      window.dispatchEvent(new CustomEvent("omnis:config-reloaded", { detail: { generation: relBody.generation } }));
       await checkProviderHealth();
       const stillBad = (providerHealthState?.providers || []).filter(p => !p.ok);
       if (stillBad.length) {
@@ -8296,7 +8296,7 @@ async function restoreLayout(rec, liveIds) {
   await loadSquads();
   // After a hot-reload from the Settings panel, refresh the squad picker so
   // newly installed squads show up without a page refresh.
-  window.addEventListener("yoke:config-reloaded", () => {
+  window.addEventListener("omnis:config-reloaded", () => {
     loadSquads().then(() => {
       // Refresh any open empty-pane picker so new squads show up immediately.
       for (const p of panels) {

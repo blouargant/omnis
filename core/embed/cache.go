@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // cachingEmbedder wraps a base Embedder with a content-addressed on-disk cache
 // so unchanged text is never re-embedded — embeddings are paid network calls.
-// Cache files live under $YOKE_HOME/index/embed_cache/<aa>/<sha256>.vec and
+// Cache files live under $OMNIS_HOME/index/embed_cache/<aa>/<sha256>.vec and
 // store the L2-normalised vector as little-endian float32.
 type cachingEmbedder struct {
 	base Embedder

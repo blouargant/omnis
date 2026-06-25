@@ -25,7 +25,7 @@ The notebooks use the [GoNB](https://github.com/janpfeifer/gonb) Go
 kernel for Jupyter.
 
 ```bash
-# 1. Install Go (already required for Yoke itself).
+# 1. Install Go (already required for Omnis itself).
 # 2. Install GoNB into a Jupyter kernelspec:
 go install github.com/janpfeifer/gonb@latest
 gonb --install
@@ -37,12 +37,12 @@ pipx install jupyterlab
 #    work against self-hosted models (vLLM, Ollama, LM Studio, …) with
 #    zero API spend. Swap in anthropic / openai / gemini if you have keys;
 #    full provider catalogue in docs/providers.md.
-export YOKE_PROVIDER=openai_compat
+export OMNIS_PROVIDER=openai_compat
 export OPENAI_BASE_URL=http://localhost:11434/v1
-export YOKE_MODEL=qwen2.5-coder
+export OMNIS_MODEL=qwen2.5-coder
 
 # 5. Launch jupyter from the repo root so module-relative imports resolve:
-cd /path/to/yoke
+cd /path/to/omnis
 jupyter lab
 ```
 

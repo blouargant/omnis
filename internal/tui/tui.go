@@ -37,17 +37,17 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/core/llm"
-	"github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/agentmd"
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/bg"
-	"github.com/blouargant/yoke/internal/fileref"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/sessions"
-	"github.com/blouargant/yoke/internal/shellcomplete"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/llm"
+	"github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/agentmd"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/shellcomplete"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -285,7 +285,7 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.UserID = sessions.DefaultUserID
 	}
 	if cfg.AppName == "" {
-		cfg.AppName = "yoke"
+		cfg.AppName = "omnis"
 	}
 	subAgentSet := make(map[string]struct{}, len(cfg.SubAgentNames))
 	for _, name := range cfg.SubAgentNames {
@@ -2024,7 +2024,7 @@ func pickInitialSession(cfg Config) *sessionState {
 }
 
 // stageUploadFile copies the user-supplied file into the session's
-// uploads directory under $YOKE_HOME/logs/uploads/<sessionID>/ so the
+// uploads directory under $OMNIS_HOME/logs/uploads/<sessionID>/ so the
 // agent (or its tools) can reach it from a stable path. Returns the
 // staged absolute path on success.
 func stageUploadFile(sessionID, src string) (string, error) {

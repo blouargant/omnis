@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
-	t.Setenv("YOKE_CURATOR_ENABLED", "true")
+	t.Setenv("OMNIS_CURATOR_ENABLED", "true")
 	t.Setenv("CURATOR_KEY_ENV", "resolved-curator-key")
 	t.Setenv("JSON_KEY_ENV", "resolved-json-key")
 
@@ -274,12 +274,12 @@ func TestResolveRuntimeSettingsUnknownModelRef(t *testing.T) {
 }
 
 func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
-	t.Setenv("YOKE_CURATOR_ENABLED", "")
+	t.Setenv("OMNIS_CURATOR_ENABLED", "")
 	// Pin path roots so assertions are stable regardless of the host's
 	// real $HOME or ./config layout.
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
-	t.Setenv("YOKE_CONFIG_DIRS", home)
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", home)
 
 	runtime, err := ResolveRuntimeSettings(Options{})
 	if err != nil {
@@ -288,8 +288,8 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if got, want := runtime.SoftSkillsDir, filepath.Join(home, "softskills"); got != want {
 		t.Fatalf("SoftSkillsDir = %q, want %q", got, want)
 	}
-	if got := runtime.AppName; got != "yoke" {
-		t.Fatalf("AppName = %q, want yoke", got)
+	if got := runtime.AppName; got != "omnis" {
+		t.Fatalf("AppName = %q, want omnis", got)
 	}
 	if runtime.BashOutputFilterEnabled {
 		t.Fatal("BashOutputFilterEnabled = true, want false")
@@ -361,7 +361,7 @@ func TestResolveRuntimeSettingsRequiresLeader(t *testing.T) {
 func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 	// Set up a temp registry with instruction files.
 	dir := t.TempDir()
-	t.Setenv("YOKE_HOME", dir)
+	t.Setenv("OMNIS_HOME", dir)
 	registryDir := filepath.Join(dir, "registry", "agents")
 	if err := os.MkdirAll(registryDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", registryDir, err)
@@ -485,7 +485,7 @@ func TestSubAgentCapabilitiesBlockIncludesBriefingGuidance(t *testing.T) {
 		"prior findings",
 		"20-line rule",
 		"scratch file",
-		"$YOKE_HOME/logs/brief_",
+		"$OMNIS_HOME/logs/brief_",
 	}
 	for _, s := range want {
 		if !strings.Contains(block, s) {
@@ -526,10 +526,10 @@ func ptrBool(b bool) *bool {
 
 // setupAgentsRegistry creates the registry/agents directory structure for tests.
 // It writes each agent definition to registry/agents/{name}/agent.json and
-// sets YOKE_HOME to the base directory so paths.AgentsRegistryDir() resolves correctly.
+// sets OMNIS_HOME to the base directory so paths.AgentsRegistryDir() resolves correctly.
 func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
 	t.Helper()
-	t.Setenv("YOKE_HOME", baseDir)
+	t.Setenv("OMNIS_HOME", baseDir)
 	registryDir := filepath.Join(baseDir, "registry", "agents")
 	if err := os.MkdirAll(registryDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", registryDir, err)

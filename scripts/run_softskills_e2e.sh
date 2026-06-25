@@ -3,7 +3,7 @@
 #
 # 1) Builds the binary.
 # 2) Synthesises a realistic-looking audit + statelog for a fake session.
-# 3) Runs `yoke curate --audit ... --statelog ...`.
+# 3) Runs `omnis curate --audit ... --statelog ...`.
 # 4) Prints any new files under softskills/.
 #
 # Requires .env to be configured for whatever LLM provider you use.
@@ -20,13 +20,13 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-if [[ -z "${YOKE_PROVIDER:-}" ]]; then
-  echo "YOKE_PROVIDER is not set (.env should define it)" >&2
+if [[ -z "${OMNIS_PROVIDER:-}" ]]; then
+  echo "OMNIS_PROVIDER is not set (.env should define it)" >&2
   exit 1
 fi
 
-echo "==> Building yoke"
-go build -o bin/yoke ./
+echo "==> Building omnis"
+go build -o bin/omnis ./
 
 KEY="softskills_e2e_$(date +%s)"
 AUDIT=".agent_memory_${KEY}.md"
@@ -73,7 +73,7 @@ cat > "$STATE" <<'EOF'
 EOF
 
 echo "==> Running curator"
-./bin/yoke curate \
+./bin/omnis curate \
   --audit "$AUDIT" \
   --statelog "$STATE" \
   --softskills softskills

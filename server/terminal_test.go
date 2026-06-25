@@ -37,7 +37,7 @@ func TestTerminalWebSocketEcho(t *testing.T) {
 		t.Fatalf("write resize: %v", err)
 	}
 	// Stdin (binary frame): a marker echo we can scan for in the PTY output.
-	if err := ws.WriteMessage(websocket.BinaryMessage, []byte("echo YOKE_MARKER_OK\n")); err != nil {
+	if err := ws.WriteMessage(websocket.BinaryMessage, []byte("echo OMNIS_MARKER_OK\n")); err != nil {
 		t.Fatalf("write stdin: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestTerminalWebSocketEcho(t *testing.T) {
 			// The literal command also echoes back from the TTY; the resolved
 			// echo output is the marker on its own line. Require it to appear at
 			// least twice (typed + printed) to be sure stdin reached the shell.
-			if strings.Count(got.String(), "YOKE_MARKER_OK") >= 2 {
+			if strings.Count(got.String(), "OMNIS_MARKER_OK") >= 2 {
 				return // success
 			}
 		}

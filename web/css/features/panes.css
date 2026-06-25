@@ -83,7 +83,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  /* Match the sidebar header (Yoke title) height: 10px×2 padding + 24px
+  /* Match the sidebar header (Omnis title) height: 10px×2 padding + 24px
    * toggle button + 1px border = 45px (box-sizing: border-box). */
   height: 45px;
   background: var(--bg-panel);

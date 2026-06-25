@@ -1,11 +1,11 @@
-// curate.go — `yoke curate` subcommand. Runs the soft-skills
+// curate.go — `omnis curate` subcommand. Runs the soft-skills
 // curator agent one-shot against an existing session's audit + statelog
 // files. Synchronous (unlike the EventSessionEnd hook which fires async).
 //
 // Usage:
 //
-//	yoke curate --user <id> --session <id>
-//	yoke curate --audit <path> --statelog <path>
+//	omnis curate --user <id> --session <id>
+//	omnis curate --audit <path> --statelog <path>
 //
 // At least one of (audit, statelog) must resolve to an existing file.
 package main
@@ -18,10 +18,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/llm"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/llm"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 func runCurate(ctx context.Context, opts options, args []string) error {
@@ -49,10 +49,10 @@ func runCurate(ctx context.Context, opts options, args []string) error {
 	)
 	fs.StringVar(&user, "user", "", "User ID of the session to curate")
 	fs.StringVar(&session, "session", "", "Session ID to curate")
-	fs.StringVar(&auditPath, "audit", "", "Explicit path to the per-session audit ($YOKE_HOME/logs/agent_memory_*.md)")
-	fs.StringVar(&statePath, "statelog", "", "Explicit path to the per-session State Log ($YOKE_HOME/logs/agent_statelog_*.json)")
+	fs.StringVar(&auditPath, "audit", "", "Explicit path to the per-session audit ($OMNIS_HOME/logs/agent_memory_*.md)")
+	fs.StringVar(&statePath, "statelog", "", "Explicit path to the per-session State Log ($OMNIS_HOME/logs/agent_statelog_*.json)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: yoke curate (--user <id> --session <id> | --audit <path> --statelog <path>)\n\nFlags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: omnis curate (--user <id> --session <id> | --audit <path> --statelog <path>)\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

@@ -20,8 +20,8 @@ import (
 	adksession "google.golang.org/adk/session"
 	"google.golang.org/genai"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/sessions"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // ─── A2A protocol types ───────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ func (s *a2aServer) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 		scheme = "https"
 	}
 	card := a2aAgentCard{
-		Name:    "Yoke Agent",
+		Name:    "Omnis Agent",
 		URL:     fmt.Sprintf("%s://%s/", scheme, r.Host),
 		Version: "1.0.0",
 		Capabilities: a2aCapabilities{

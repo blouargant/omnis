@@ -10,12 +10,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // uploadsBaseDir returns the per-user uploads directory
-// ($YOKE_HOME/logs/uploads). Resolved at each call so tests can redirect
-// via t.Setenv("YOKE_HOME", ...).
+// ($OMNIS_HOME/logs/uploads). Resolved at each call so tests can redirect
+// via t.Setenv("OMNIS_HOME", ...).
 func uploadsBaseDir() string { return paths.UploadsDir() }
 
 func sessionUploadDir(sessionID string) string {
@@ -91,7 +91,7 @@ func deleteSessionUploads(sessionID string) {
 // uploads preserve their relative structure: each file's multipart filename
 // carries its path within the dropped folder, and an optional `dest` form field
 // targets a sub-directory of the cwd. Unlike handleFileUpload (which stages chat
-// attachments under $YOKE_HOME/logs/uploads), this lands files on the user's
+// attachments under $OMNIS_HOME/logs/uploads), this lands files on the user's
 // system. Like the folder listing, the Monaco Save route, and the "!"
 // shell-escape it is gated only by the API token and trusts the authenticated
 // user with host file access (no agent permission prompt).

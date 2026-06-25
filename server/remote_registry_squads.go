@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemoteSquadRegistryRoutes mounts /remotes endpoints scoped to
@@ -233,7 +233,7 @@ func resolveSquadsRoutesDeps() squadsRoutesDeps {
 	absRemoteWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), registries.ConfigFileName))
 	absAgentsWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "agents.json"))
 	agentsDir := paths.AgentsRegistryWriteDir()
-	if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_AGENTS_REGISTRY_DIR")); v != "" {
 		agentsDir = v
 	}
 	absAgentsDir, _ := filepath.Abs(agentsDir)

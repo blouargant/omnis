@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/sessions"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // stubA2AServer builds an a2aServer wired to a real in-memory registry but
@@ -148,8 +148,8 @@ func TestResolveRouting_NoRegistryRejectsSessionName(t *testing.T) {
 }
 
 func TestResolveRouting_AutoCreateOnMissing(t *testing.T) {
-	// Persistence helpers below touch $YOKE_HOME — point it at a temp dir.
-	t.Setenv("YOKE_HOME", t.TempDir())
+	// Persistence helpers below touch $OMNIS_HOME — point it at a temp dir.
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	s := stubA2AServer(t)
 	got, err := s.resolveRouting(map[string]any{
@@ -175,7 +175,7 @@ func TestResolveRouting_AutoCreateOnMissing(t *testing.T) {
 }
 
 func TestResolveRouting_AutoCreateWithSquad(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	s := stubA2AServer(t)
 	got, err := s.resolveRouting(map[string]any{
@@ -192,7 +192,7 @@ func TestResolveRouting_AutoCreateWithSquad(t *testing.T) {
 }
 
 func TestResolveRouting_AutoCreateRejectsInvalidName(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	s := stubA2AServer(t)
 	_, err := s.resolveRouting(map[string]any{
@@ -224,7 +224,7 @@ func TestResolveRouting_AutoCreateAcceptsExisting(t *testing.T) {
 }
 
 func TestPersistA2ATurn_PushesSSE(t *testing.T) {
-	t.Setenv("YOKE_HOME", t.TempDir())
+	t.Setenv("OMNIS_HOME", t.TempDir())
 
 	bcast := newSessionPushBroadcaster()
 	reg := sessions.NewEmptyRegistry()

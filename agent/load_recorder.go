@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 const loadSoftSkillTool = "load_softskill"

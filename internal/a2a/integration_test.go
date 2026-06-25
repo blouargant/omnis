@@ -3,14 +3,14 @@
 // Live round-trip against a real A2A endpoint. Skipped unless the
 // `integration` build tag is set:
 //
-//	YOKE_A2A_TEST_URL=http://127.0.0.1:8091/ \
+//	OMNIS_A2A_TEST_URL=http://127.0.0.1:8091/ \
 //	  go test -tags integration -v -run TestLive ./internal/a2a
 //
 // Optional env vars:
 //
-//	YOKE_A2A_TEST_URL     endpoint base URL (required)
-//	YOKE_A2A_TEST_TOKEN   Bearer token sent in the Authorization header
-//	YOKE_A2A_TEST_PROMPT  prompt text (default "reply with the literal token PONG")
+//	OMNIS_A2A_TEST_URL     endpoint base URL (required)
+//	OMNIS_A2A_TEST_TOKEN   Bearer token sent in the Authorization header
+//	OMNIS_A2A_TEST_PROMPT  prompt text (default "reply with the literal token PONG")
 
 package a2a
 
@@ -23,18 +23,18 @@ import (
 )
 
 func TestLiveSendTaskRoundTrip(t *testing.T) {
-	url := strings.TrimSpace(os.Getenv("YOKE_A2A_TEST_URL"))
+	url := strings.TrimSpace(os.Getenv("OMNIS_A2A_TEST_URL"))
 	if url == "" {
-		t.Skip("YOKE_A2A_TEST_URL not set")
+		t.Skip("OMNIS_A2A_TEST_URL not set")
 	}
 
-	prompt := os.Getenv("YOKE_A2A_TEST_PROMPT")
+	prompt := os.Getenv("OMNIS_A2A_TEST_PROMPT")
 	if prompt == "" {
 		prompt = "reply with the literal token PONG"
 	}
 
 	agent := Agent{Name: "live", URL: url}
-	if token := strings.TrimSpace(os.Getenv("YOKE_A2A_TEST_TOKEN")); token != "" {
+	if token := strings.TrimSpace(os.Getenv("OMNIS_A2A_TEST_TOKEN")); token != "" {
 		agent.Headers = map[string]string{"Authorization": "Bearer " + token}
 	}
 

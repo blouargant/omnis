@@ -12,11 +12,11 @@ import (
 //
 //   - a bare string — the Claude-native form, e.g. "Bash(npm run *)",
 //     "Read(.env)", "Edit", "mcp__puppeteer__*", "Agent(Explore)"; or
-//   - an object {rule, reason, cwd} carrying yoke extensions: a human
+//   - an object {rule, reason, cwd} carrying omnis extensions: a human
 //     readable reason for the prompt, and a cwd that scopes the rule to a
 //     project tree (used by "Allow in this project" persisted grants —
 //     Claude Code has no equivalent); or
-//   - an object {regex, tools, reason, cwd} — the yoke regex escape hatch.
+//   - an object {regex, tools, reason, cwd} — the omnis regex escape hatch.
 //     When `regex` is set the rule matches exactly like the legacy engine:
 //     the compiled pattern is tested against the probe "toolName <json args>",
 //     optionally scoped to `tools`. This is what ConvertLegacy emits so an
@@ -175,10 +175,10 @@ func (s *Spec) compile() error {
 }
 
 // toolClasses returns the rule tool-class names that apply to a call of the
-// given yoke tool, mirroring Claude Code's fan-out ("Edit rules apply to all
+// given omnis tool, mirroring Claude Code's fan-out ("Edit rules apply to all
 // edit tools; Read rules apply to Grep/Glob").
-func toolClasses(yokeTool string) []string {
-	switch yokeTool {
+func toolClasses(omnisTool string) []string {
+	switch omnisTool {
 	case "Bash":
 		return []string{"Bash"}
 	case "Read", "Grep", "Glob", "mime":
@@ -188,7 +188,7 @@ func toolClasses(yokeTool string) []string {
 	case "Write":
 		return []string{"Write", "Edit"}
 	default:
-		if strings.HasPrefix(yokeTool, "mcp__") {
+		if strings.HasPrefix(omnisTool, "mcp__") {
 			return []string{"mcp"}
 		}
 		// Everything else (sub-agent tools, coordination tools) is matched by
@@ -197,17 +197,17 @@ func toolClasses(yokeTool string) []string {
 	}
 }
 
-// specApplies reports whether a spec's Tool class covers a call of yokeTool.
-func specApplies(specTool, yokeTool string) bool {
+// specApplies reports whether a spec's Tool class covers a call of omnisTool.
+func specApplies(specTool, omnisTool string) bool {
 	if specTool == "" { // tool-less regex sugar applies to everything
 		return true
 	}
-	for _, c := range toolClasses(yokeTool) {
+	for _, c := range toolClasses(omnisTool) {
 		if strings.EqualFold(c, specTool) {
 			return true
 		}
 	}
 	// Bare equality fallback: a rule named exactly after the tool (e.g.
 	// "summariser" or an explicit "Grep") matches that tool directly.
-	return strings.EqualFold(specTool, yokeTool)
+	return strings.EqualFold(specTool, omnisTool)
 }

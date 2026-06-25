@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/usercommands"
+	"github.com/blouargant/omnis/internal/usercommands"
 )
 
 // userCommand / errNotFound / normName / reservedNames / validateCommand are

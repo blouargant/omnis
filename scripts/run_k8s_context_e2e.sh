@@ -23,8 +23,8 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -z "${YOKE_PROVIDER:-}" ]]; then
-  echo "YOKE_PROVIDER is not set (.env should define it)" >&2
+if [[ -z "${OMNIS_PROVIDER:-}" ]]; then
+  echo "OMNIS_PROVIDER is not set (.env should define it)" >&2
   exit 1
 fi
 

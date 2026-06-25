@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // AgentInfo bundles one installed agent's on-disk record with layer

@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // DefaultRulesDir returns the rules directory used by tools. Resolved
 // through the same 3-layer config search as other config files
-// (.agents/filters → $YOKE_HOME/filters → /etc/yoke/filters), so a
+// (.agents/filters → $OMNIS_HOME/filters → /etc/omnis/filters), so a
 // packaged install and a developer checkout both work.
 func DefaultRulesDir() string { return paths.FindConfigDir("filters") }
 

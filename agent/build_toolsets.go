@@ -6,10 +6,10 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/embed"
-	mcpcfg "github.com/blouargant/yoke/internal/mcp"
-	"github.com/blouargant/yoke/internal/skills"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/core/embed"
+	mcpcfg "github.com/blouargant/omnis/internal/mcp"
+	"github.com/blouargant/omnis/internal/skills"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 // buildLeaderToolsets resolves the leader's effective skills, soft-skills

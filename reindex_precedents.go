@@ -1,9 +1,9 @@
-// reindex_precedents.go — `yoke reindex-precedents` subcommand. Walks every
-// $YOKE_HOME/logs/agent_statelog_*.json and (re)builds the cross-session
+// reindex_precedents.go — `omnis reindex-precedents` subcommand. Walks every
+// $OMNIS_HOME/logs/agent_statelog_*.json and (re)builds the cross-session
 // precedent index in one pass. Idempotent: ids are derived from
 // (session_key, kind, index), so re-running does not duplicate entries.
 //
-// Requires an embedder (models.json embed_model_ref or YOKE_EMBED_*); without
+// Requires an embedder (models.json embed_model_ref or OMNIS_EMBED_*); without
 // one there is nothing to embed and the command errors out.
 package main
 
@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/precedents"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/precedents"
 )
 
 func runReindexPrecedents(ctx context.Context, opts options, _ []string) error {
@@ -39,7 +39,7 @@ func runReindexPrecedents(ctx context.Context, opts options, _ []string) error {
 		return fmt.Errorf("embedder: %w", err)
 	}
 	if emb == nil {
-		return fmt.Errorf("no embedder configured: set an embedding model_ref in models.json (embed_model_ref) or the YOKE_EMBED_* environment")
+		return fmt.Errorf("no embedder configured: set an embedding model_ref in models.json (embed_model_ref) or the OMNIS_EMBED_* environment")
 	}
 
 	store, err := precedents.Open(emb)

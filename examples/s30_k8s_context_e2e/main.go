@@ -15,10 +15,10 @@ import (
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/runner"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/events"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/compress"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/events"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/compress"
 )
 
 type turnResult struct {

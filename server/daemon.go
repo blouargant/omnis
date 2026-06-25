@@ -10,24 +10,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // errDaemonUnsupported is returned by the start/stop/status subcommands on
 // platforms without process detachment + signalling support (see
 // daemon_other.go). Mirrors restart_other.go's posture.
-var errDaemonUnsupported = errors.New("background server (start/stop) is not supported on this platform; run yoke-server in the foreground")
+var errDaemonUnsupported = errors.New("background server (start/stop) is not supported on this platform; run omnis-server in the foreground")
 
 // pidFilePath is where the background server records its PID. Anchored under
-// $YOKE_HOME so start/stop/status agree regardless of the caller's CWD.
+// $OMNIS_HOME so start/stop/status agree regardless of the caller's CWD.
 func pidFilePath() string {
-	return filepath.Join(paths.Home(), "yoke-server.pid")
+	return filepath.Join(paths.Home(), "omnis-server.pid")
 }
 
 // daemonLogPath is where the detached child's stdout/stderr are redirected so
 // nothing is lost once the controlling terminal is freed.
 func daemonLogPath() string {
-	return filepath.Join(paths.Home(), "logs", "yoke-server.log")
+	return filepath.Join(paths.Home(), "logs", "omnis-server.log")
 }
 
 // readPID reads the PID recorded in the pid file. It returns (0, nil) when the
@@ -63,7 +63,7 @@ func startDaemon(extraArgs []string) error {
 	if pid, err := readPID(); err != nil {
 		return err
 	} else if pid > 0 && pidAlive(pid) {
-		return fmt.Errorf("yoke-server already running (pid %d) — use 'yoke-server stop' first", pid)
+		return fmt.Errorf("omnis-server already running (pid %d) — use 'omnis-server stop' first", pid)
 	}
 
 	self, err := os.Executable()
@@ -82,7 +82,7 @@ func startDaemon(extraArgs []string) error {
 	defer logFile.Close()
 
 	// Forward the operator's flags verbatim. The child runs the same
-	// foreground path, so it opens a browser exactly like "yoke-server" does
+	// foreground path, so it opens a browser exactly like "omnis-server" does
 	// (per server.yaml's open_browser) — opening the *actually bound* address
 	// after any port auto-increment. openBrowser is fire-and-forget and only
 	// needs DISPLAY/WAYLAND_DISPLAY (inherited), not a terminal. Pass
@@ -93,7 +93,7 @@ func startDaemon(extraArgs []string) error {
 	cmd.Stderr = logFile
 	// Inherit CWD: config search (.agents) and the default web dir ("web") are
 	// CWD-relative, so the child must start where "start" was invoked.
-	cmd.Env = append(os.Environ(), "YOKE_SERVER_DAEMONIZED=1")
+	cmd.Env = append(os.Environ(), "OMNIS_SERVER_DAEMONIZED=1")
 	cmd.SysProcAttr = detachSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
@@ -114,10 +114,10 @@ func startDaemon(extraArgs []string) error {
 	time.Sleep(400 * time.Millisecond)
 	if !pidAlive(pid) {
 		_ = os.Remove(pidFilePath())
-		return fmt.Errorf("yoke-server exited immediately after start — see %s", logPath)
+		return fmt.Errorf("omnis-server exited immediately after start — see %s", logPath)
 	}
 
-	fmt.Printf("yoke-server started in background (pid %d)\n", pid)
+	fmt.Printf("omnis-server started in background (pid %d)\n", pid)
 	fmt.Printf("  logs: %s\n", logPath)
 	fmt.Printf("  stop: %s stop\n", filepath.Base(self))
 	return nil
@@ -136,17 +136,17 @@ func stopDaemon() error {
 		return err
 	}
 	if pid == 0 {
-		fmt.Println("yoke-server is not running (no pid file)")
+		fmt.Println("omnis-server is not running (no pid file)")
 		return nil
 	}
 	if !pidAlive(pid) {
 		_ = os.Remove(pidFilePath())
-		fmt.Printf("yoke-server is not running (cleared stale pid %d)\n", pid)
+		fmt.Printf("omnis-server is not running (cleared stale pid %d)\n", pid)
 		return nil
 	}
 
 	if err := signalTerminate(pid); err != nil {
-		return fmt.Errorf("signal yoke-server (pid %d): %w", pid, err)
+		return fmt.Errorf("signal omnis-server (pid %d): %w", pid, err)
 	}
 
 	// The server handles SIGTERM with a graceful shutdown (see run()); give it
@@ -155,12 +155,12 @@ func stopDaemon() error {
 	for time.Now().Before(deadline) {
 		if !pidAlive(pid) {
 			_ = os.Remove(pidFilePath())
-			fmt.Printf("yoke-server stopped (pid %d)\n", pid)
+			fmt.Printf("omnis-server stopped (pid %d)\n", pid)
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("yoke-server (pid %d) did not stop within 15s; it may still be draining — re-run 'stop' or send SIGKILL manually", pid)
+	return fmt.Errorf("omnis-server (pid %d) did not stop within 15s; it may still be draining — re-run 'stop' or send SIGKILL manually", pid)
 }
 
 // statusDaemon prints whether the recorded background server is running.
@@ -170,9 +170,9 @@ func statusDaemon() error {
 		return err
 	}
 	if pid == 0 || !pidAlive(pid) {
-		fmt.Println("yoke-server: stopped")
+		fmt.Println("omnis-server: stopped")
 		return nil
 	}
-	fmt.Printf("yoke-server: running (pid %d)\n", pid)
+	fmt.Printf("omnis-server: running (pid %d)\n", pid)
 	return nil
 }

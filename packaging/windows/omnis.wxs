@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WiX v4/v5 source for the omnis Windows MSI (x64).
+
+  Built in CI on a windows-latest runner by .github/workflows/release.yml,
+  which unpacks the goreleaser-produced omnis_<ver>_Windows_x86_64.zip into a
+  staging tree and invokes:
+
+    wix build packaging\windows\omnis.wxs -arch x64 \
+      -d Version=<x.y.z.0> -d StageDir=<abs path to stage> \
+      -o omnis_<ver>_windows_x86_64.msi
+
+  Expected staging layout (produced by the workflow):
+
+    <StageDir>\install\omnis.exe
+    <StageDir>\install\omnis-server.exe
+    <StageDir>\install\web\...            -> C:\Program Files\Omnis\web
+    <StageDir>\data\agents.json, ...      -> C:\ProgramData\Omnis
+    <StageDir>\data\server.yaml
+    <StageDir>\data\filters\...
+    <StageDir>\data\registry\agents\...
+    <StageDir>\data\registry\skills\...
+
+  Install layout mirrors the Linux FHS package: binaries + static web UI under
+  Program Files (read-only); the bundled config + registry (the system layer of
+  omnis's config search chain) under ProgramData, refreshed on upgrade. User
+  overrides belong in %USERPROFILE%\.omnis, which keeps higher precedence — see
+  OMNIS_SYSTEM_CONFIG_DIR in internal/paths/paths.go.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Omnis"
+      Manufacturer="Bertrand Louargant"
+      Version="$(var.Version)"
+      UpgradeCode="615e65a6-085c-4603-80b9-7b5bc8839a0e"
+      Scope="perMachine"
+      Compressed="yes">
+
+    <SummaryInformation Description="Omnis — multi-agent harness (CLI + HTTP API/Web UI server)" />
+
+    <!-- Remove the previous version on upgrade; block downgrades. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Omnis is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Add/Remove Programs metadata. -->
+    <Property Id="ARPHELPLINK" Value="https://github.com/blouargant/omnis" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/blouargant/omnis" />
+
+    <!-- ===== Directory tree ===== -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Omnis">
+        <Directory Id="WEBDIR" Name="web" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Omnis" />
+    </StandardDirectory>
+
+    <!-- ===== Binaries + machine environment ===== -->
+    <ComponentGroup Id="Binaries" Directory="INSTALLFOLDER">
+      <Component Id="OmnisCli" Bitness="always64">
+        <File Id="omnis.exe" Source="$(var.StageDir)\install\omnis.exe" KeyPath="yes" />
+      </Component>
+
+      <Component Id="OmnisServer" Bitness="always64">
+        <File Id="omnis_server.exe" Source="$(var.StageDir)\install\omnis-server.exe" KeyPath="yes" />
+
+        <!-- A fresh shell finds the binaries on PATH, and both binaries locate
+             their bundled (non-embedded) assets without any user setup.
+             OMNIS_SYSTEM_CONFIG_DIR relocates only the system config layer, so
+             %USERPROFILE%\.omnis and .\.agents keep their higher precedence. -->
+        <Environment Id="PathAppend" Name="PATH"
+                     Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+        <Environment Id="WebDir" Name="OMNIS_WEB_DIR"
+                     Value="[INSTALLFOLDER]web" Action="set" System="yes" Permanent="no" />
+        <Environment Id="SysCfgDir" Name="OMNIS_SYSTEM_CONFIG_DIR"
+                     Value="[DATAFOLDER]" Action="set" System="yes" Permanent="no" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ===== Static web UI (read-only, under Program Files) ===== -->
+    <ComponentGroup Id="WebAssets" Directory="WEBDIR">
+      <Files Include="$(var.StageDir)\install\web\**" />
+    </ComponentGroup>
+
+    <!-- ===== Bundled config + registry (system layer, under ProgramData) ===== -->
+    <ComponentGroup Id="DataAssets" Directory="DATAFOLDER">
+      <Files Include="$(var.StageDir)\data\**" />
+    </ComponentGroup>
+
+    <!-- ===== Feature ===== -->
+    <Feature Id="Main" Title="Omnis" Level="1">
+      <ComponentGroupRef Id="Binaries" />
+      <ComponentGroupRef Id="WebAssets" />
+      <ComponentGroupRef Id="DataAssets" />
+    </Feature>
+  </Package>
+</Wix>

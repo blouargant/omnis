@@ -22,8 +22,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/deps"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/deps"
 )
 
 // inputRefRe matches "${input:id}" anywhere in a string. The id is

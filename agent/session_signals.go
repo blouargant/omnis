@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/softskills"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 // lastUserMessageCount is the number of trailing user turns the heuristic

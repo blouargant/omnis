@@ -1,4 +1,4 @@
-// Component s09 — bash output filters. Yoke ships YAML rules under
+// Component s09 — bash output filters. Omnis ships YAML rules under
 // config/filters/ that condense noisy command output (git status, kubectl
 // logs, npm install, etc.) before it reaches the model. This example runs
 // the same noisy command twice — once with the filter pipeline disabled,
@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/stream"
-	fstools "github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/stream"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 func main() {

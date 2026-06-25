@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
-// gcTestEnv points $YOKE_HOME at a fresh temp directory so logsDir(),
+// gcTestEnv points $OMNIS_HOME at a fresh temp directory so logsDir(),
 // uploadsBaseDir() and paths.MailboxesDir() all return paths under it
 // for the duration of the test.
 func gcTestEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("YOKE_HOME", dir)
+	t.Setenv("OMNIS_HOME", dir)
 	return dir
 }
 

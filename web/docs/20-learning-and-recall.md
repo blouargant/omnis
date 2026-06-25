@@ -41,7 +41,7 @@ Key properties:
   and de-duplicated. The StateLog is therefore an *accumulating* picture.
 - **Off the hot path** — the extraction runs on a detached goroutine with a
   60-second timeout, so it never blocks the live turn.
-- **Persisted** to `$YOKE_HOME/logs/agent_statelog_<session-key>.json` after each
+- **Persisted** to `$OMNIS_HOME/logs/agent_statelog_<session-key>.json` after each
   refresh. This is the same file the curator reads, and the source for the
   precedents index below.
 
@@ -62,7 +62,7 @@ before?"*
   rather than duplicates.
 - **When** — automatically at session end, on the same reflection event that
   drives curation. No manual step is required.
-- **Where** — `$YOKE_HOME/index/precedents.tvim` (the vector index) plus a
+- **Where** — `$OMNIS_HOME/index/precedents.tvim` (the vector index) plus a
   `precedents.meta.json` sidecar holding the metadata and the embedding-model
   manifest. (Changing the embedding model invalidates the manifest and rebuilds
   the index.)
@@ -77,7 +77,7 @@ To backfill the index from every existing StateLog on disk (for example after
 first configuring an embedding model), run:
 
 ```bash
-yoke reindex-precedents
+omnis reindex-precedents
 ```
 
 It walks every `agent_statelog_*.json` and rebuilds the index in one pass;
@@ -94,20 +94,20 @@ share the same vector machinery:
 | Precedent recall | `recall_precedents` | Past sessions' goals + decisions |
 | Code search | `search_code` / `reindex_code` | The current repo, semantically |
 | Registry search | `search_registries` / `reindex_registries` | Remote registry items |
-| Documentation search | `search_docs` / `reindex_docs` | Yoke's own docs (user + developer) |
+| Documentation search | `search_docs` / `reindex_docs` | Omnis's own docs (user + developer) |
 
-**Documentation search** powers the **Helper** agent: ask a question about yoke
+**Documentation search** powers the **Helper** agent: ask a question about omnis
 ("how does hot-reload work?", "what env var sets the embedder?") and the leader
 delegates to the Helper, which searches the bundled documentation and answers
 with the relevant passage quoted and its source cited. The docs index is built
 in the background at server startup and refreshed incrementally; rebuild it by
-hand with `yoke reindex-docs`. Without an embedder the Helper falls back to the
+hand with `omnis reindex-docs`. Without an embedder the Helper falls back to the
 always-available `list_docs` / `read_doc` / `grep_docs` tools.
 
 All of them depend on an **internal embedding model**. Select it in
 Settings → [Providers & Models](15-providers.md) by flagging a model as an
 embedding model and pointing `embed_model_ref` at it (overridable with the
-`YOKE_EMBED_*` variables — see [Environment Variables](16-env-vars.md#embedding--semantic-recall)).
+`OMNIS_EMBED_*` variables — see [Environment Variables](16-env-vars.md#embedding--semantic-recall)).
 The embedder is built once per process and survives hot-reload, so **changing it
 requires a server restart** (the Settings save banner will prompt for a restart
 rather than a reload when you change the embedder identity).

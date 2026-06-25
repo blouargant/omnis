@@ -10,13 +10,13 @@ import (
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/core/permissions"
-	fstools "github.com/blouargant/yoke/core/tools"
-	"github.com/blouargant/yoke/internal/cache"
-	"github.com/blouargant/yoke/internal/compress"
-	"github.com/blouargant/yoke/internal/hooks"
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/permissions"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/cache"
+	"github.com/blouargant/omnis/internal/compress"
+	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // buildPlugins wires the runner-level plugins (events bridge, permissions,
@@ -125,7 +125,7 @@ func buildPlugins(
 // sources:
 //
 //  1. the base file at runtime.PermissionsConfigPath (project config),
-//  2. the user-owned overlay at $HOME/.yoke/config/permissions.json
+//  2. the user-owned overlay at $HOME/.omnis/config/permissions.json
 //     where "Allow in this project" / "Allow always" persistence lands,
 //  3. an in-memory skill overlay aggregated from each agent's skills.
 //
@@ -136,7 +136,7 @@ func buildPlugins(
 func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus) (*plugin.Plugin, error) {
 	// Skill overlays (in-memory; do not need to be polled).
 	// Merge across every layer of the skills search chain so overlays from
-	// /etc/yoke or .agents/ are not dropped when $HOME/.yoke/registry/skills
+	// /etc/omnis or .agents/ are not dropped when $HOME/.omnis/registry/skills
 	// happens to exist (even empty). First-wins per skill name matches the
 	// runtime loader's precedence.
 	searchDirs := paths.SkillsAllSearchDirs()
@@ -208,7 +208,7 @@ func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker 
 			d, _ := os.Getwd()
 			return d
 		},
-		Debug: os.Getenv("YOKE_DEBUG") != "",
+		Debug: os.Getenv("OMNIS_DEBUG") != "",
 	})
 	if err == nil && cleaner != nil && bus != nil {
 		sub := bus.Subscribe(events.EventSessionEnd, func(_ string, payload map[string]any) {

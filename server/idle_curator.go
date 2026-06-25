@@ -23,8 +23,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // minCheckInterval caps how frequently the idle scanner runs, regardless of

@@ -1,6 +1,6 @@
 ---
 name: build-and-test
-description: How to build, vet, lint and run anything in the yoke repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, YOKE_PROVIDER, run root binary, run a demo.
+description: How to build, vet, lint and run anything in the omnis repository. Use whenever you need to compile, run a demo binary, run go vet, set up Go on this machine, or pick an LLM provider via environment variables. Mention triggers - go build, go vet, go run, OMNIS_PROVIDER, run root binary, run a demo.
 compatibility: Requires Go 1.25 installed at $HOME/.local/go (no sudo). Network access only if calling a remote LLM provider.
 ---
 
@@ -36,7 +36,7 @@ not declare a task done until you've seen this output.**
 
 ## Pick an LLM provider
 
-The harness uses `YOKE_PROVIDER` (default: `openai_compat`):
+The harness uses `OMNIS_PROVIDER` (default: `openai_compat`):
 
 | Provider        | Auth env                                         | Default model        |
 |-----------------|--------------------------------------------------|----------------------|
@@ -45,7 +45,7 @@ The harness uses `YOKE_PROVIDER` (default: `openai_compat`):
 | `openai`        | `OPENAI_API_KEY`                                 | `gpt-4o-mini`        |
 | `openai_compat` | `OPENAI_API_KEY` (optional) + `OPENAI_BASE_URL`  | `gpt-4o-mini`        |
 
-Override the model with `YOKE_MODEL`. Full reference:
+Override the model with `OMNIS_MODEL`. Full reference:
 [docs/providers.md](../../docs/providers.md).
 
 ## Run the all-in-one launcher
@@ -70,22 +70,22 @@ Catalog: [docs/examples-catalog.md](../../docs/examples-catalog.md).
 | Symptom                                              | Fix                                                                 |
 |------------------------------------------------------|---------------------------------------------------------------------|
 | `go: command not found`                              | You forgot the `PATH=$HOME/.local/go/bin:$PATH` prefix.             |
-| `agentkit.NewModel: llm: ANTHROPIC_API_KEY required` | Set the right env var for `YOKE_PROVIDER`.                       |
+| `agentkit.NewModel: llm: ANTHROPIC_API_KEY required` | Set the right env var for `OMNIS_PROVIDER`.                       |
 | `mailbox backend: …`                                 | `REDIS_URL` set but unreachable, or unset & expected redis backend. |
 | MCP server fails at startup                          | Logged and skipped; agent continues. Check `npx`/`uvx` availability.|
 | Permission prompt loops                              | Add an explicit `allow` rule (e.g. `Bash(<cmd> *)`) in `config/permissions.json`. |
 
 ## Generated files
 
-Runtime state is written under the write root `$YOKE_HOME` (default
-`$HOME/.yoke`), **not** the launcher's CWD. The per-session logs live in
-`$YOKE_HOME/logs/` (see `paths.LogsDir`):
+Runtime state is written under the write root `$OMNIS_HOME` (default
+`$HOME/.omnis`), **not** the launcher's CWD. The per-session logs live in
+`$OMNIS_HOME/logs/` (see `paths.LogsDir`):
 
 - `agent_events_<buildTimestamp>.log` — JSONL of every plugin event.
 - `agent_memory_<user>_<session>.md` — context-compression memory snapshot.
 - `agent_tasks_<user>_<session>.json` / `agent_todo_<user>_<session>.json` — task graph + todo plan.
 
-Inter-agent mailboxes go to `$YOKE_HOME/mailboxes/` (`paths.MailboxesDir`).
+Inter-agent mailboxes go to `$OMNIS_HOME/mailboxes/` (`paths.MailboxesDir`).
 The only generated artifact at the repo root is `.mailboxes/` (the lone
 entry actually listed in `.gitignore`); do not assume `agent_events`/
 `agent_memory` are repo-root dotfiles or that they are gitignored.

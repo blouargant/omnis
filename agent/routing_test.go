@@ -254,7 +254,7 @@ func TestRunWithRoutingHandoffTellsRouterWhichSquadDeclined(t *testing.T) {
 		case "helper":
 			infra.RouteDirectives.Set(sid, &RouteDirective{
 				Kind:   routeKindHandoff,
-				Reason: "general programming question, not a yoke capability",
+				Reason: "general programming question, not a omnis capability",
 			})
 			return "", nil
 		}
@@ -275,7 +275,7 @@ func TestRunWithRoutingHandoffTellsRouterWhichSquadDeclined(t *testing.T) {
 	if !strings.Contains(joined, "helper") {
 		t.Fatalf("router not told which squad declined; saw: %q", joined)
 	}
-	if !strings.Contains(joined, "general programming question, not a yoke capability") {
+	if !strings.Contains(joined, "general programming question, not a omnis capability") {
 		t.Fatalf("router not given the decline reason; saw: %q", joined)
 	}
 	if !strings.Contains(strings.ToLower(joined), "do not route") {
@@ -397,7 +397,7 @@ func TestProbeSquadCapabilityResolutionErrors(t *testing.T) {
 }
 
 func TestResolveRouterSquadName(t *testing.T) {
-	t.Setenv("YOKE_ROUTER_SQUAD", "")
+	t.Setenv("OMNIS_ROUTER_SQUAD", "")
 	// Absent (nil) → default "omnis".
 	if got := resolveRouterSquadName(nil); got != "omnis" {
 		t.Fatalf("absent → %q, want omnis", got)
@@ -417,12 +417,12 @@ func TestResolveRouterSquadName(t *testing.T) {
 }
 
 func TestResolveRouterSquadNameEnvOverride(t *testing.T) {
-	t.Setenv("YOKE_ROUTER_SQUAD", "none")
+	t.Setenv("OMNIS_ROUTER_SQUAD", "none")
 	on := "omnis"
 	if got := resolveRouterSquadName(&on); got != "" {
 		t.Fatalf("env override → %q, want disabled", got)
 	}
-	t.Setenv("YOKE_ROUTER_SQUAD", "custom")
+	t.Setenv("OMNIS_ROUTER_SQUAD", "custom")
 	if got := resolveRouterSquadName(nil); got != "custom" {
 		t.Fatalf("env override → %q, want custom", got)
 	}

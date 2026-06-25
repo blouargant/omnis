@@ -97,11 +97,11 @@ agent.json round-trips cleanly. Saving any change triggers the standard
 router squad (`omnis` by default) is auto-injected when absent and is **not**
 listed in the New Chat picker. Choose the router squad — or disable routing —
 with the top-level `router_squad` key in `agents.json` (`"none"` disables;
-absent ⇒ `omnis`), also overridable via `YOKE_ROUTER_SQUAD`.
+absent ⇒ `omnis`), also overridable via `OMNIS_ROUTER_SQUAD`.
 
 ## Editing Permissions
 
-yoke uses **Claude Code's permission nomenclature**. The panel shows a
+omnis uses **Claude Code's permission nomenclature**. The panel shows a
 `defaultMode` selector and three rule tiers, evaluated **deny → ask → allow**
 (first match wins):
 
@@ -179,5 +179,5 @@ the server-side config chain). It shows:
   template body. Template placeholders: `$1`, `$2`, … for positional
   arguments; `$*` for all arguments joined together.
 
-User commands are persisted to `$YOKE_HOME/user_commands.json` and
+User commands are persisted to `$OMNIS_HOME/user_commands.json` and
 take effect immediately — no reload required.

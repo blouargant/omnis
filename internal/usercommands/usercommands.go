@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // Command is a single user-defined slash command. Name is the lookup key
@@ -38,7 +38,7 @@ type File struct {
 var ErrNotFound = errors.New("not found")
 
 // DefaultPath returns the per-user user_commands.json path under the config
-// write dir ($YOKE_HOME). The web UI editor and the crawler both target it.
+// write dir ($OMNIS_HOME). The web UI editor and the crawler both target it.
 func DefaultPath() string {
 	return filepath.Join(paths.ConfigWriteDir(), "user_commands.json")
 }

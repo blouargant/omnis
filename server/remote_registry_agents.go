@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
 )
 
 // registerRemoteAgentRegistryRoutes mounts /remotes endpoints scoped to
@@ -19,7 +19,7 @@ import (
 // skills tab: an entry with kind="both" is visible from both sides.
 //
 // agentsRegistryDir is where installed agents land on disk
-// ($YOKE_HOME/registry/agents by default). agentsConfigRead/Write resolve
+// ($OMNIS_HOME/registry/agents by default). agentsConfigRead/Write resolve
 // config/agents.json — the runtime's enabled-agents list. The "Enable"
 // toggle in the install dialog appends the installed agent's name to that
 // list so the next hot-reload picks it up.
@@ -185,7 +185,7 @@ func readConfiguredAgentNames(configPath string) map[string]bool {
 // appendAgentToConfig adds name to the `agents` list in the runtime config
 // file (config/agents.json). The read path uses the 3-layer chain so the
 // current effective config wins; writes always fork to writePath under
-// $YOKE_HOME/config. Returns (added, error): added is false when the agent
+// $OMNIS_HOME/config. Returns (added, error): added is false when the agent
 // was already in the list (idempotent no-op).
 func appendAgentToConfig(readPath, writePath, name string) (bool, error) {
 	name = strings.TrimSpace(name)
@@ -231,22 +231,22 @@ func appendAgentToConfig(readPath, writePath, name string) (bool, error) {
 // agentsRoutesDeps bundles the resolved paths required by the agents-side
 // remote registry routes. Built once at server startup.
 type agentsRoutesDeps struct {
-	AgentsRegistryDir      string        // abs $YOKE_HOME/registry/agents (or env-override)
-	RemoteRegistriesWrite  string        // abs $YOKE_HOME/config/remote_registries.json
+	AgentsRegistryDir      string        // abs $OMNIS_HOME/registry/agents (or env-override)
+	RemoteRegistriesWrite  string        // abs $OMNIS_HOME/config/remote_registries.json
 	RemoteRegistriesRead   func() string // re-resolves the 3-layer chain on each request
 	AgentsConfigRead       func() string // re-resolves config/agents.json read path
-	AgentsConfigWrite      string        // abs $YOKE_HOME/config/agents.json
+	AgentsConfigWrite      string        // abs $OMNIS_HOME/config/agents.json
 	SkillsRegistryReadDir  string        // abs path to skills registry for dependency resolution
 	SkillsRegistryWriteDir string        // abs write target for auto-installed skills
 	MCPConfigRead          func() string // re-resolves mcp_config.json read path
-	MCPConfigWrite         string        // abs $YOKE_HOME/config/mcp_config.json write target
+	MCPConfigWrite         string        // abs $OMNIS_HOME/config/mcp_config.json write target
 }
 
 // resolveAgentsRoutesDeps mirrors resolveSkillsDeps for the agents side.
-// $YOKE_AGENTS_REGISTRY_DIR can override the on-disk install location.
+// $OMNIS_AGENTS_REGISTRY_DIR can override the on-disk install location.
 func resolveAgentsRoutesDeps() agentsRoutesDeps {
 	registryDir := paths.AgentsRegistryWriteDir()
-	if v := strings.TrimSpace(os.Getenv("YOKE_AGENTS_REGISTRY_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_AGENTS_REGISTRY_DIR")); v != "" {
 		registryDir = v
 	}
 	absRegistryDir, _ := filepath.Abs(registryDir)
@@ -255,7 +255,7 @@ func resolveAgentsRoutesDeps() agentsRoutesDeps {
 	absMCPWrite, _ := filepath.Abs(filepath.Join(paths.ConfigWriteDir(), "mcp_config.json"))
 	skillsRead, _ := filepath.Abs(paths.SkillsRegistryDir())
 	skillsWrite, _ := filepath.Abs(paths.SkillsRegistryWriteDir())
-	if v := strings.TrimSpace(os.Getenv("YOKE_SKILLS_REGISTRY_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_SKILLS_REGISTRY_DIR")); v != "" {
 		skillsRead, _ = filepath.Abs(v)
 		skillsWrite = skillsRead
 	}

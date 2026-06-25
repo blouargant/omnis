@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blouargant/yoke/core/permissions"
+	"github.com/blouargant/omnis/core/permissions"
 )
 
 // PermissionFile is the manifest filename for a permission rule-set in a remote

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/blouargant/yoke/agent"
+	"github.com/blouargant/omnis/agent"
 )
 
 // startRegistryIndexer warms the remote-registry semantic index as a one-shot

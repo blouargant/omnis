@@ -1,4 +1,4 @@
-/* yoke web UI — chat surface styles.
+/* omnis web UI — chat surface styles.
  *
  * This file is a thin barrel: the actual rules live in feature partials under
  * web/css/features/ and are pulled in below with @import. Edit the partials,

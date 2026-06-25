@@ -11,7 +11,7 @@
 package agent
 
 import (
-	"github.com/blouargant/yoke/core/events"
+	"github.com/blouargant/omnis/core/events"
 )
 
 // registerSubAgentBoundary subscribes to EventBeforeTool / EventAfterTool

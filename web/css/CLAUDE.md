@@ -1,6 +1,6 @@
 # CLAUDE.md — web/css
 
-Guidance for AI sessions (and humans) working on the yoke web UI stylesheets.
+Guidance for AI sessions (and humans) working on the omnis web UI stylesheets.
 This directory holds **all** the CSS for the web UI. It is organised as two
 **barrels** of feature **partials** plus a folder of **theme** palettes.
 

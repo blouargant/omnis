@@ -174,7 +174,7 @@
 }
 
 /* Source-layer badges: shown on skills and agents to indicate where they live
-   in the config search chain (.agents/ = local, $HOME/.yoke/ = user, /etc/yoke = system) */
+   in the config search chain (.agents/ = local, $HOME/.omnis/ = user, /etc/omnis = system) */
 .source-badge {
   display: inline-block;
   font-size: 0.6rem;

@@ -11,10 +11,10 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/blouargant/yoke/internal/claudeformat"
-	"github.com/blouargant/yoke/internal/paths"
-	"github.com/blouargant/yoke/internal/registries"
-	"github.com/blouargant/yoke/internal/registrymeta"
+	"github.com/blouargant/omnis/internal/claudeformat"
+	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/registrymeta"
 )
 
 // flashStatus writes a one-line status message to the overlay footer.
@@ -575,7 +575,7 @@ func (s *settingsView) installRemoteAgent(reg registries.Registry, ref registrie
 
 // importClaudeAgentModal asks for a local file path, runs the
 // Claude-format parser, and installs each parsed agent into the local
-// registry. Mirrors `yoke import-agent <file>` from the CLI.
+// registry. Mirrors `omnis import-agent <file>` from the CLI.
 func (s *settingsView) importClaudeAgentModal() {
 	form := tview.NewForm()
 	form.SetTitle(" Import Claude-format agent ").SetBorder(true)

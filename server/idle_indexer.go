@@ -6,7 +6,7 @@
 // with it the precedents hook) never runs for them. This scanner closes that
 // gap with a lightweight, indexing-only trigger that is independent of the
 // soft-skills curator: it runs on a fixed 5-minute staleness threshold whether
-// or not YOKE_CURATOR_IDLE_TIMEOUT is set.
+// or not OMNIS_CURATOR_IDLE_TIMEOUT is set.
 //
 // For each session it checks:
 //
@@ -25,8 +25,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // indexStaleAfter is the fixed staleness threshold after which an idle session

@@ -12,7 +12,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
-	"github.com/blouargant/yoke/core/tools"
+	"github.com/blouargant/omnis/core/tools"
 )
 
 // monitorBatchWindow coalesces matched lines arriving close together into a

@@ -614,7 +614,7 @@
 }
 
 
-/* ─── Self-update dialog (Update yoke) ─────────────────────────────────────── */
+/* ─── Self-update dialog (Update omnis) ─────────────────────────────────────── */
 .update-dialog { display: flex; flex-direction: column; gap: 12px; }
 .update-versions {
   display: flex;

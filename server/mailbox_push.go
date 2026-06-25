@@ -11,8 +11,8 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
-	"github.com/blouargant/yoke/internal/bg"
-	"github.com/blouargant/yoke/internal/sessions"
+	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/sessions"
 )
 
 // sessionRunGuard ensures at most one runner.Run call is in flight per session.
@@ -165,7 +165,7 @@ type pushManager struct {
 	watchBgFn func(ctx context.Context, userID, sessionID string, onNotify func([]bg.Notification))
 	// activeWake controls whether a completed background task injects a synthetic
 	// turn (model reacts) or merely fires a UI toast (passive). Set from
-	// YOKE_TASK_NOTIFY. The bg watcher always drains either way so the queue
+	// OMNIS_TASK_NOTIFY. The bg watcher always drains either way so the queue
 	// never wedges at its buffer limit.
 	activeWake bool
 }

@@ -5,12 +5,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/blouargant/yoke/internal/paths"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 func TestToolsetCreatesDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("YOKE_HOME", home)
+	t.Setenv("OMNIS_HOME", home)
 
 	ts, err := Toolset(context.Background(), nil)
 	if err != nil {

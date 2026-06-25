@@ -1,5 +1,5 @@
 // Package claudeformat parses Claude Code sub-agent definitions (markdown and
-// JSON) and converts them into yoke AgentEntry values.
+// JSON) and converts them into omnis AgentEntry values.
 //
 // Supported input formats:
 //
@@ -30,7 +30,7 @@
 //
 //  3. JSON object with a "name" field — a single agent as a plain object.
 //
-// Fields that have no yoke equivalent (permissionMode, maxTurns, hooks,
+// Fields that have no omnis equivalent (permissionMode, maxTurns, hooks,
 // memory, background, effort, isolation, color, initialPrompt, …) are
 // silently ignored.
 package claudeformat

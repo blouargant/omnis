@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/adk/tool"
 
-	"github.com/blouargant/yoke/core/agentkit"
-	"github.com/blouargant/yoke/core/stream"
-	"github.com/blouargant/yoke/internal/skills"
+	"github.com/blouargant/omnis/core/agentkit"
+	"github.com/blouargant/omnis/core/stream"
+	"github.com/blouargant/omnis/internal/skills"
 )
 
 func main() {

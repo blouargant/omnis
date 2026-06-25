@@ -25,7 +25,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 	var out []tool.Tool
 	if t, err := functiontool.New(functiontool.Config{
 		Name: "list_docs",
-		Description: "List yoke's documentation files (markdown) across all doc roots, each with its " +
+		Description: "List omnis's documentation files (markdown) across all doc roots, each with its " +
 			"title and root-relative path. Use it to discover what documentation exists before reading. " +
 			"No arguments.",
 	}, func(_ tool.Context, _ listIn) (listOut, error) {
@@ -35,7 +35,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 	}
 	if t, err := functiontool.New(functiontool.Config{
 		Name: "read_doc",
-		Description: "Read a yoke documentation file by its root-relative `path` (as returned by " +
+		Description: "Read a omnis documentation file by its root-relative `path` (as returned by " +
 			"list_docs or search_docs). Optional `start`/`end` 1-based line numbers read just a range. " +
 			"Only files inside the documentation roots can be read.",
 	}, func(_ tool.Context, in readIn) (readOut, error) {
@@ -45,7 +45,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 	}
 	if t, err := functiontool.New(functiontool.Config{
 		Name: "grep_docs",
-		Description: "Search yoke's documentation for a regular expression `pattern` and return matching " +
+		Description: "Search omnis's documentation for a regular expression `pattern` and return matching " +
 			"lines with their file path and line number. A literal-text fallback to search_docs when no " +
 			"embedder is configured. Optional `max` caps results (default 50).",
 	}, func(_ tool.Context, in grepIn) (grepOut, error) {

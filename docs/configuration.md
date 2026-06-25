@@ -2,14 +2,14 @@
 
 Runtime configuration is resolved through a **3-layer search chain**:
 `.agents/` (or `agents/` as a dotless alias; both participate when both
-exist, `.agents/` first) → `$HOME/.yoke/` (per-user) →
-`/etc/yoke/` (system). Agent and skill registries live one level deeper
+exist, `.agents/` first) → `$HOME/.omnis/` (per-user) →
+`/etc/omnis/` (system). Agent and skill registries live one level deeper
 inside each layer, at `registry/agents/` and `registry/skills/`.
 Each layer can hold any config file; the first existing file wins (file-level
 override, not merge). User-edited config is **layer-aware** on save: edits to
 a file that lives in (or whose content references resources from) the local
 layer are routed back to that local layer instead of forking into
-`$HOME/.yoke/`.
+`$HOME/.omnis/`.
 
 Precedence for overlapping values is:
 
@@ -30,7 +30,7 @@ Per-agent details live in `registry/agents/<name>/` — see
 {
   "skills_dir": "skills",
   "softskills_dir": "softskills",
-  "app_name": "yoke",
+  "app_name": "omnis",
   "token_optimization": false,
   "bash_output_filters_dir": ".agents/filters",
   "mcp_config_path": ".agents/mcp_config.json",
@@ -64,7 +64,7 @@ below). It is **optional**: when absent it defaults to `omnis`, and both
 the `omnis` agent and a leaderless `omnis` squad are injected
 automatically if your config doesn't declare them. Set it to `"none"` to
 disable routing (new chats then start on `default`). The
-`YOKE_ROUTER_SQUAD` env var overrides this key.
+`OMNIS_ROUTER_SQUAD` env var overrides this key.
 
 > **Migrating from older versions:** configurations that still declare a
 > top-level `"models": { … }` block inside `agents.json` are rejected at
@@ -115,7 +115,7 @@ Common fields:
 | `description` | Short summary shown in the UI and exposed to the leader as the sub-agent tool description. |
 | `enabled` | When `false`, the agent is excluded from squads and the leader's tool list. |
 | `leader` | When `true`, this agent can be selected as a squad leader. |
-| `builtin` | When `true`, marks the agent as shipped with yoke. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `helper`, `summariser`, `curator`. |
+| `builtin` | When `true`, marks the agent as shipped with omnis. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `helper`, `summariser`, `curator`. |
 | `model_ref` | References a key in `models` for provider/model/base_url/api_key. |
 | `tools` | List of tool group names mounted on this agent (`fs`, `mcp`, `web`, `skills`, `softskills`, `calc`, `registries`, ...). |
 | `skills_dir` | Optional per-agent skills directory (overrides the global one). |
@@ -126,8 +126,8 @@ the agent falls back to `registry/agents/default.md`.
 
 The registry directory uses the same 3-layer lookup as config files:
 `.agents/registry/agents` (and `agents/registry/agents` when that alias
-directory exists), `$HOME/.yoke/registry/agents`, then
-`/etc/yoke/registry/agents`. First existing directory wins.
+directory exists), `$HOME/.omnis/registry/agents`, then
+`/etc/omnis/registry/agents`. First existing directory wins.
 
 The web UI Settings → Agent panel exposes both files: agent fields in
 the form, instruction text in the **Instruction Set** block. Saving
@@ -193,7 +193,7 @@ The whole mechanism is host-side (`agent/routing.go`):
 - Routing is invisible: the routing tools are exempt from the permission layer
   (they never prompt) and each surface suppresses the router hop's narration —
   the only visible signal is the routing chip / "── routed to X squad ──" line.
-- **Opt-out:** `router_squad: "none"` (or `YOKE_ROUTER_SQUAD=none`) disables
+- **Opt-out:** `router_squad: "none"` (or `OMNIS_ROUTER_SQUAD=none`) disables
   routing, making new chats start on `default` with byte-identical behaviour to
   pre-router builds. Absent ⇒ `omnis`, auto-injected.
 
@@ -201,7 +201,7 @@ The whole mechanism is host-side (`agent/routing.go`):
 
 Model profiles live in their own `models.json` file, resolved through the
 same 3-layer search chain as the other config files (`.agents/`,
-`$YOKE_HOME`, `/etc/yoke`). The file has two top-level sections:
+`$OMNIS_HOME`, `/etc/omnis`). The file has two top-level sections:
 
 ```json
 {
@@ -280,23 +280,23 @@ var name, the env var value is used.
 
 ### CLI and env overrides
 
-- `--config` selects a runtime JSON file (default: resolved from the search chain — `.agents/agents.json`, then `$HOME/.yoke/agents.json`).
+- `--config` selects a runtime JSON file (default: resolved from the search chain — `.agents/agents.json`, then `$HOME/.omnis/agents.json`).
 - `--provider`, `--model`, `--base-url`, and `--api-key` override
   the leader agent model selection globally.
 - `--curator-enabled` (`true` or `false`) overrides the `curator`
   agent's `enabled` value.
-- `YOKE_PROVIDER`, `YOKE_MODEL`, `YOKE_BASE_URL`, and
-  `YOKE_API_KEY` override the leader agent model selection.
-- `YOKE_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
+- `OMNIS_PROVIDER`, `OMNIS_MODEL`, `OMNIS_BASE_URL`, and
+  `OMNIS_API_KEY` override the leader agent model selection.
+- `OMNIS_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
   value.
-- `YOKE_CURATOR_MIN_TURNS` — minimum number of model responses before
+- `OMNIS_CURATOR_MIN_TURNS` — minimum number of model responses before
   non-forced curation is considered (default: `3`). Sessions shorter
   than this are skipped automatically.
-- `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` — minimum total sub-agent
+- `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` — minimum total sub-agent
   invocations required when no explicit decision was recorded (default:
   `2`). Together with `MIN_TURNS`, this forms the pre-flight gate that
   avoids spinning up the curator LLM for trivial sessions.
-- `YOKE_CURATOR_IDLE_TIMEOUT` — duration (e.g. `30m`, `2h`) after
+- `OMNIS_CURATOR_IDLE_TIMEOUT` — duration (e.g. `30m`, `2h`) after
   which an idle Web UI session automatically triggers curator evaluation.
   `0` or unset disables the idle trigger (default: disabled). The Web UI
   never fires `EventSessionEnd`, so this is the primary auto-curation
@@ -323,15 +323,15 @@ Anything matched by **none** of the three falls through to the mode default
 Each rule is a `Tool(specifier)` string — `Bash(npm run *)`, `Read(.env)`,
 `Edit(/src/**)`, `mcp__server__tool`, `Agent(Name)`, or a bare tool name — with
 Claude Code semantics (Bash glob + compound-command splitting + wrapper
-stripping + a built-in read-only allowlist; gitignore path anchors). yoke adds
+stripping + a built-in read-only allowlist; gitignore path anchors). omnis adds
 an object form `{"rule": "...", "reason": "...", "cwd": "..."}` and a `/regex/`
 escape hatch (or `{"regex": "...", "tools": ["Bash"]}`) matched against
 `toolName <json args>`.
 
 Old-format files (top-level `always_deny`/`always_allow`/`ask_user`) are
 **auto-converted on load**, with a `.bak` backup kept. Convert manually with
-`yoke permissions convert -w permissions.json`, or import a Claude Code
-`settings.json` with `yoke permissions import settings.json`.
+`omnis permissions convert -w permissions.json`, or import a Claude Code
+`settings.json` with `omnis permissions import settings.json`.
 
 ### Default rules shipped (excerpt)
 
@@ -552,9 +552,9 @@ receives the remote agent's text reply.
 ```json
 {
   "agents": {
-    "peer-yoke": {
+    "peer-omnis": {
       "url": "http://peer-host:8091/",
-      "description": "Secondary yoke server specialised in database triage.",
+      "description": "Secondary omnis server specialised in database triage.",
       "headers": { "Authorization": "Bearer ${input:peer_token}" },
       "squad": "research",
       "session_name": "",
@@ -565,7 +565,7 @@ receives the remote agent's text reply.
     {
       "id": "peer_token",
       "type": "promptString",
-      "description": "Bearer token for the peer yoke server",
+      "description": "Bearer token for the peer omnis server",
       "password": true
     }
   ]
@@ -618,7 +618,7 @@ discards it.
 ### Smoke test
 
 ```bash
-# Start the remote and your local yoke-server, then:
+# Start the remote and your local omnis-server, then:
 make a2a-smoke A2A_URL=http://127.0.0.1:8091/
 ```
 
@@ -727,15 +727,15 @@ The root binary accepts a few flags, parsed **before** the launcher
 subcommand (`console`, `web webui`, ...) is dispatched.
 
 ```bash
-yoke [flags] [<launcher-command> [launcher-args]]
+omnis [flags] [<launcher-command> [launcher-args]]
 ```
 
 | Flag                | Default  | Effect                                                                                  |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
 | `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
-| `--name NAME`       | `yoke` | Application name used by the runner/UI. |
-| `--config FILE`     | resolved from `.agents/agents.json` or `$HOME/.yoke/agents.json` | Runtime JSON config file path. |
+| `--name NAME`       | `omnis` | Application name used by the runner/UI. |
+| `--config FILE`     | resolved from `.agents/agents.json` or `$HOME/.omnis/agents.json` | Runtime JSON config file path. |
 | `--provider NAME`   | from agents.json/env/defaults | Global model provider override. |
 | `--model NAME`      | from agents.json/env/defaults | Global model id override. |
 | `--base-url URL`    | from agents.json/env/defaults | Global model base URL override. |
@@ -779,14 +779,14 @@ so every model and tool invocation appears live.
 
 | Variable             | Used by               | Purpose                                          |
 |----------------------|-----------------------|--------------------------------------------------|
-| `YOKE_PROVIDER`   | `core/llm`            | Pick the LLM provider                            |
-| `YOKE_MODEL`      | `core/llm`            | Override the per-provider default model id       |
-| `YOKE_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
-| `YOKE_API_KEY`    | `core/llm`            | Override the model API key                       |
-| `YOKE_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
-| `YOKE_CURATOR_MIN_TURNS` | `agent`     | Minimum model-response count before non-forced curation (default: `3`) |
-| `YOKE_CURATOR_MIN_SUB_AGENT_CALLS` | `agent` | Minimum sub-agent calls required when no decision recorded (default: `2`) |
-| `YOKE_CURATOR_IDLE_TIMEOUT` | `server` | Idle period after which the Web UI auto-triggers curator (e.g. `30m`; `0` = disabled); session is marked Harvested after firing |
+| `OMNIS_PROVIDER`   | `core/llm`            | Pick the LLM provider                            |
+| `OMNIS_MODEL`      | `core/llm`            | Override the per-provider default model id       |
+| `OMNIS_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
+| `OMNIS_API_KEY`    | `core/llm`            | Override the model API key                       |
+| `OMNIS_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
+| `OMNIS_CURATOR_MIN_TURNS` | `agent`     | Minimum model-response count before non-forced curation (default: `3`) |
+| `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` | `agent` | Minimum sub-agent calls required when no decision recorded (default: `2`) |
+| `OMNIS_CURATOR_IDLE_TIMEOUT` | `server` | Idle period after which the Web UI auto-triggers curator (e.g. `30m`; `0` = disabled); session is marked Harvested after firing |
 | `GOOGLE_API_KEY`     | gemini provider       | Auth                                             |
 | `GEMINI_API_KEY`     | gemini provider       | Auth (alias for `GOOGLE_API_KEY`)                |
 | `ANTHROPIC_API_KEY`  | anthropic provider    | Auth                                             |

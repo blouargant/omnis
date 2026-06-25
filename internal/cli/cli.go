@@ -1,11 +1,11 @@
-// Package cli implements yoke's stdio interface: an interactive REPL when
+// Package cli implements omnis's stdio interface: an interactive REPL when
 // stdin is a terminal, or a one-shot turn when invoked with a prompt
 // argument or piped input.
 //
 // The CLI deliberately stays plain-text: ANSI dim is used for the trace of
 // tool calls in interactive mode, but markdown is not pre-rendered so output
 // remains stable when piped to files or other tools. For a styled experience,
-// use `yoke tui`; for a web UI, run the server.
+// use `omnis tui`; for a web UI, run the server.
 package cli
 
 import (
@@ -29,12 +29,12 @@ import (
 
 	"golang.org/x/term"
 
-	toolkitagent "github.com/blouargant/yoke/agent"
-	"github.com/blouargant/yoke/core/events"
-	"github.com/blouargant/yoke/internal/agentmd"
-	"github.com/blouargant/yoke/internal/askuser"
-	"github.com/blouargant/yoke/internal/bg"
-	"github.com/blouargant/yoke/internal/fileref"
+	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/agentmd"
+	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/fileref"
 )
 
 // Config bundles everything the CLI needs to run.
@@ -92,7 +92,7 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.SessionID = fmt.Sprintf("cli-%d", time.Now().Unix())
 	}
 	if cfg.AppName == "" {
-		cfg.AppName = "yoke"
+		cfg.AppName = "omnis"
 	}
 	if cfg.Stdout == nil {
 		cfg.Stdout = os.Stdout
