@@ -153,7 +153,11 @@ func steeringAwarenessBlock() string {
 		"task; (b) the sub-agent needs the new information → re-invoke it with the note " +
 		"folded into its instructions (pass back its partial work if useful); " +
 		"(c) you should handle it yourself; or (d) the note does not affect that " +
-		"sub-agent → re-invoke it to finish its original task.\n"
+		"sub-agent → re-invoke it to finish its original task.\n" +
+		"- If that sub-agent's result carries a `session` handle, you can resume it " +
+		"exactly where it left off (its prior context intact) by passing the handle " +
+		"back as `resume_session` — the cleanest way to feed it the new information " +
+		"and have it continue rather than restart.\n"
 }
 
 // injectSteering appends the steering notes to req as a user message so the model

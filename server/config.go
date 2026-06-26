@@ -738,6 +738,10 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if a.MaxInstances > 1 {
 							agentMap["max_instances"] = a.MaxInstances
 						}
+						// Only surface resumable_sessions when enabled, to keep agent.json clean.
+						if a.ResumableSessions {
+							agentMap["resumable_sessions"] = true
+						}
 						agents = append(agents, agentMap)
 					}
 					// Sort agents: built-in first, then custom
@@ -857,7 +861,8 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								k == "builtin" || k == "model_ref" || k == "provider" || k == "model" || k == "base_url" ||
 								k == "api_key" || k == "tools" || k == "skills" || k == "softskills_dir" ||
 								k == "allow_file_attachments" || k == "mcp_config_path" || k == "mcp_servers" ||
-								k == "permissions_config_path" || k == "a2a_agents" || k == "max_instances" {
+								k == "permissions_config_path" || k == "a2a_agents" || k == "max_instances" ||
+								k == "resumable_sessions" {
 								if k != "instruction" { // instruction is saved separately
 									cleanAgent[k] = v
 								}

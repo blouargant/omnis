@@ -444,6 +444,27 @@ editor save and the GET only surfaces it when `> 1` to keep agent.json clean.
 The curator stays a single per-generation hook listening across every
 squad.
 
+**Durable / re-attachable sub-agent sessions (`resumable_sessions`)** — by
+default each sub-agent call is a stateless pure function (agenttool builds a
+throwaway session per call). Setting `"resumable_sessions": true` on an agent in
+its `agent.json` swaps the inner agenttool for
+[agent/resumable_agent_tool.go](agent/resumable_agent_tool.go)
+`newResumableAgentTool`, which owns **one persistent runner + session service**
+and a `handle → session` map: each call **returns a `session` handle**, and the
+leader can pass it back as **`resume_session`** to CONTINUE that exact
+conversation (the sub-agent keeps its prior context/work) instead of starting
+fresh. It implements the same `runnableTool` interface, so it slots into the
+**same** non-concurrent / parallel wrappers — **durability composes with
+`max_instances`** because identity is the per-call handle, not the agent name:
+each parallel task mints its own handle, resume always addresses one specific
+handle (an in-use handle can't be double-resumed — guarded). Sessions are bounded
+**without any cross-session GC**: a 30-min idle TTL + 32-session LRU cap, swept
+on each call; handles are generation-scoped (a hot-reload drops them, and a stale
+handle silently falls back to a fresh session — the same retention boundary the
+leader's own sessions have). This is what lets the leader **resume** a sub-agent
+it stopped for mid-turn steering (see "Mid-turn steering") rather than re-running
+it from scratch. Off by default ⇒ byte-identical to the stateless agenttool.
+
 **Soft-skill reflection pipeline** — at `EventSessionEnd`, [agent/load_recorder.go](agent/load_recorder.go)
 drains its in-memory bucket (leader-loaded skills, tool errors), runs
 the deterministic `softskills.ReflectHeuristic`, applies the heuristic
@@ -1656,9 +1677,12 @@ The whole mechanism hangs off one process-wide store and one plugin:
   do: stop/redo the sub-agent, re-invoke it with the note folded in, handle it
   itself, or re-run it to finish (note irrelevant). `Drain` is atomic, so the note
   is delivered **exactly once** (to the leader), then folds into the turn's
-  persisted prompt via `TakeConsumed`. Trade-off: interrupting discards the
-  sub-agent's in-flight model call (partial work is handed back for salvage, but
-  not resumed) — the price of letting the leader stop/redirect a running sub-agent.
+  persisted prompt via `TakeConsumed`. Trade-off: interrupting aborts the
+  sub-agent's **in-flight model call**; its *completed* steps survive when the
+  sub-agent opts into `resumable_sessions` (the leader resumes via the returned
+  `session` handle — see "Durable / re-attachable sub-agent sessions"), otherwise
+  only its last assistant text is handed back for salvage and a re-task restarts
+  from scratch.
 - **Leader awareness (instruction).** `steeringAwarenessBlock()`
   ([agent/steer_plugin.go](agent/steer_plugin.go)) is appended to every non-router
   root instruction when steering is enabled: it tells the leader that IT (not the

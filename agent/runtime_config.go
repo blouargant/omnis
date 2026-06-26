@@ -49,6 +49,13 @@ type AgentEntry struct {
 	// run in parallel from a single tool call. <= 1 (the default) keeps the
 	// classic one-at-a-time tool; > 1 exposes a batch/fan-out tool.
 	MaxInstances int `json:"max_instances,omitempty"`
+	// ResumableSessions opts this sub-agent into durable, re-attachable sessions:
+	// each call returns a `session` handle the leader can pass back as
+	// `resume_session` to continue that exact conversation (keeping its prior
+	// context) instead of starting fresh. Off by default — the sub-agent stays a
+	// stateless pure function. Composes with MaxInstances (each parallel task
+	// gets its own handle).
+	ResumableSessions bool `json:"resumable_sessions,omitempty"`
 }
 
 // ProviderEntry describes one reusable provider profile in models.json.
@@ -206,6 +213,9 @@ type RuntimeAgentConfig struct {
 	A2AAgents []string
 	// MaxInstances is the resolved parallel-invocation cap (always >= 1).
 	MaxInstances int
+	// ResumableSessions enables durable, re-attachable sub-agent sessions (the
+	// leader can resume a prior call via its returned handle). See AgentEntry.
+	ResumableSessions bool
 }
 
 // RuntimeSquadConfig is one normalized squad: a named group composed of an
@@ -503,6 +513,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			PermissionsConfigPath:             strings.TrimSpace(e.PermissionsConfigPath),
 			A2AAgents:                         normalizeNames(e.A2AAgents),
 			MaxInstances:                      maxInstances,
+			ResumableSessions:                 e.ResumableSessions,
 		})
 	}
 	return out, nil
@@ -612,6 +623,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		PermissionsConfigPath:             strings.TrimSpace(in.PermissionsConfigPath),
 		A2AAgents:                         normalizeNames(in.A2AAgents),
 		MaxInstances:                      maxInt(in.MaxInstances, 1),
+		ResumableSessions:                 in.ResumableSessions,
 	}
 }
 

@@ -147,9 +147,24 @@ func buildSubAgentsFromConfigs(
 		subAgents = append(subAgents, sa)
 		subAgentMap[cfg.Name] = sa
 
-		wrapped, ok := agenttool.New(sa, &agenttool.Config{}).(runnableTool)
-		if !ok {
-			return nil, nil, nil, nil, fmt.Errorf("agenttool for %q is not runnable", cfg.Name)
+		// resumable_sessions swaps the throwaway per-call agenttool for one that
+		// keeps durable, re-attachable sessions (the leader resumes via a returned
+		// handle). It implements the same runnableTool interface, so the parallel /
+		// non-concurrent wrappers below are unchanged — each parallel task still
+		// gets its own handle, so durability and fan-out compose.
+		var wrapped runnableTool
+		if cfg.ResumableSessions {
+			rt, rErr := newResumableAgentTool(sa)
+			if rErr != nil {
+				return nil, nil, nil, nil, fmt.Errorf("resumable sub-agent %q: %w", cfg.Name, rErr)
+			}
+			wrapped = rt
+		} else {
+			w, ok := agenttool.New(sa, &agenttool.Config{}).(runnableTool)
+			if !ok {
+				return nil, nil, nil, nil, fmt.Errorf("agenttool for %q is not runnable", cfg.Name)
+			}
+			wrapped = w
 		}
 		// max_instances > 1 exposes a batch/fan-out tool that runs several
 		// independent invocations of this sub-agent in parallel; <= 1 keeps the
