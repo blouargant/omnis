@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/steer"
 )
 
 // Config bundles everything the CLI needs to run.
@@ -61,6 +61,11 @@ type Config struct {
 	// background-task notifications are surfaced to the model (the CLI/TUI
 	// between-turn drain — there is no server-style push goroutine here).
 	BgQueues *bg.SessionQueues
+	// SteerStore, when non-nil, enables mid-turn steering in the REPL: a line
+	// typed while a turn is running is queued (picked up by the steering plugin
+	// at the next model boundary, or run as a follow-up turn). Nil-safe — when
+	// nil the REPL ignores input typed during a turn (the old behaviour).
+	SteerStore *steer.Store
 	// UserID, SessionID default to "user" and a timestamped value.
 	UserID    string
 	SessionID string
@@ -163,88 +168,171 @@ func runOneShot(ctx context.Context, cfg Config, prompt string) error {
 // killing the REPL; Ctrl-D (EOF) or `/quit` exits cleanly.
 func runRepl(ctx context.Context, cfg Config) error {
 	fmt.Fprintf(cfg.Stdout, "%s — interactive mode. Type /help, /quit or press Ctrl-D to exit.\n", cfg.AppName)
-
-	reader := bufio.NewReader(cfg.Stdin)
-	var readMu sync.Mutex // serializes goroutine reads across iterations
+	if cfg.SteerStore != nil {
+		fmt.Fprintln(cfg.Stdout, "(Tip: type extra notes while the agent is working — they steer the running turn.)")
+	}
 
 	// currentSquad tracks which squad the session is on across turns so the
 	// Omnis router's routing persists (and a squad keeps its context when the
 	// conversation returns to it). Starts on the router squad when routing is on.
 	currentSquad := cfg.Squad
 
+	// Persistent stdin reader: always reading, so the user can type WHILE a turn
+	// is running (mid-turn steering). Each line flows on `lines`; the loop routes
+	// it as a new prompt when idle or as a steering note when a turn is in
+	// flight. Read errors (incl. EOF) flow on `readErr`.
+	lines := make(chan string)
+	readErr := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(cfg.Stdin)
+		for {
+			s, err := reader.ReadString('\n')
+			if s != "" {
+				select {
+				case lines <- s:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if err != nil {
+				select {
+				case readErr <- err:
+				case <-ctx.Done():
+				}
+				return
+			}
+		}
+	}()
+
+	type turnResult struct {
+		squad string
+		err   error
+	}
+	var (
+		turnDone   chan turnResult // non-nil while a turn is running
+		turnCancel context.CancelFunc
+		exitAfter  bool // EOF arrived mid-turn: exit once it finishes
+	)
+	showPrompt := func() {
+		if turnDone == nil {
+			fmt.Fprint(cfg.Stdout, "> ")
+		}
+	}
+	showPrompt()
+
 	for {
-		if err := ctx.Err(); err != nil {
+		select {
+		case <-ctx.Done():
 			return nil
-		}
-		fmt.Fprint(cfg.Stdout, "> ")
-		line, err := readLineCtx(ctx, &readMu, reader)
-		if err == io.EOF {
-			fmt.Fprintln(cfg.Stdout)
-			return nil
-		}
-		if err != nil {
+
+		case err := <-readErr:
+			if err == io.EOF {
+				if turnDone != nil {
+					exitAfter = true // let the running turn finish first
+					continue
+				}
+				fmt.Fprintln(cfg.Stdout)
+				return nil
+			}
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return fmt.Errorf("read input: %w", err)
-		}
 
-		prompt := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
-		if prompt == "" {
-			continue
-		}
-		// "#<text>" appends a one-line memory to the project AGENT.md instead
-		// of starting a turn — symmetric with the web UI / TUI shortcut.
-		if strings.HasPrefix(prompt, "#") {
-			if path, err := agentmd.AppendMemory("", prompt); err != nil {
-				fmt.Fprintf(cfg.Stderr, "memory: %v\n", err)
-			} else {
-				fmt.Fprintf(cfg.Stdout, "saved to %s\n", path)
+		case res := <-turnDone:
+			turnDone = nil
+			if turnCancel != nil {
+				turnCancel()
+				turnCancel = nil
 			}
-			continue
-		}
-		// "/init" expands to the AGENT.md bootstrap prompt and runs as a normal
-		// agent turn; other slash commands are REPL-only.
-		if strings.EqualFold(prompt, "/init") {
-			prompt = agentmd.InitPrompt()
-		} else if strings.HasPrefix(prompt, "/") {
-			if quit := handleSlash(cfg, prompt); quit {
+			if res.err != nil && !errors.Is(res.err, context.Canceled) {
+				return res.err
+			}
+			currentSquad = res.squad
+			if exitAfter {
+				fmt.Fprintln(cfg.Stdout)
 				return nil
 			}
-			continue
-		}
+			showPrompt()
 
-		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-		currentSquad, err = runTurn(turnCtx, cfg, prompt, true /*showTrace*/, currentSquad)
-		cancel()
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
+		case line := <-lines:
+			prompt := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+			if prompt == "" {
+				showPrompt()
+				continue
+			}
+			// A turn is running → this line is a mid-turn steering note.
+			if turnDone != nil {
+				if cfg.SteerStore != nil {
+					cfg.SteerStore.Enqueue(cfg.SessionID, prompt)
+					fmt.Fprintf(cfg.Stdout, "  \x1b[2m↳ steering queued:\x1b[0m %s\n", prompt)
+				}
+				continue
+			}
+			// "#<text>" appends a one-line memory to the project AGENT.md instead
+			// of starting a turn — symmetric with the web UI / TUI shortcut.
+			if strings.HasPrefix(prompt, "#") {
+				if path, err := agentmd.AppendMemory("", prompt); err != nil {
+					fmt.Fprintf(cfg.Stderr, "memory: %v\n", err)
+				} else {
+					fmt.Fprintf(cfg.Stdout, "saved to %s\n", path)
+				}
+				showPrompt()
+				continue
+			}
+			// "/init" expands to the AGENT.md bootstrap prompt and runs as a normal
+			// agent turn; other slash commands are REPL-only.
+			if strings.EqualFold(prompt, "/init") {
+				prompt = agentmd.InitPrompt()
+			} else if strings.HasPrefix(prompt, "/") {
+				if quit := handleSlash(cfg, prompt); quit {
+					return nil
+				}
+				showPrompt()
+				continue
+			}
+			// Run the turn in a goroutine so the reader keeps accepting steering
+			// notes while it runs. Ctrl-C cancels just this turn.
+			turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+			turnCancel = cancel
+			turnDone = make(chan turnResult, 1)
+			go func(p, sq string, tctx context.Context, done chan turnResult) {
+				squad, err := runTurnSteering(tctx, cfg, p, sq)
+				done <- turnResult{squad: squad, err: err}
+			}(prompt, currentSquad, turnCtx, turnDone)
 		}
 	}
 }
 
-// readLineCtx reads one line, returning io.EOF on EOF, ctx.Err() if ctx is
-// cancelled before the line completes. The underlying read goroutine is
-// allowed to leak briefly when ctx fires — it unblocks once the next byte
-// arrives, which is acceptable for a single-process REPL on shutdown.
-func readLineCtx(ctx context.Context, mu *sync.Mutex, r *bufio.Reader) (string, error) {
-	type result struct {
-		line string
-		err  error
+// runTurnSteering runs one user turn, then any mid-turn steering the model never
+// reached as follow-up turns — mirroring the server/TUI loop. The steering
+// plugin injects queued notes into the running turn at its model boundaries;
+// TakePending here delivers whatever it missed. With no steering it runs exactly
+// one turn.
+func runTurnSteering(ctx context.Context, cfg Config, prompt, startSquad string) (string, error) {
+	squad := startSquad
+	turnPrompt := prompt
+	const maxSteerFollowups = 16
+	for i := 0; ; i++ {
+		var err error
+		squad, err = runTurn(ctx, cfg, turnPrompt, true /*showTrace*/, squad)
+		if cfg.SteerStore != nil {
+			cfg.SteerStore.TakeConsumed(cfg.SessionID) // clear; the CLI keeps no transcript to fold into
+		}
+		if err != nil {
+			return squad, err
+		}
+		if ctx.Err() != nil || i >= maxSteerFollowups || cfg.SteerStore == nil {
+			break
+		}
+		pending := cfg.SteerStore.TakePending(cfg.SessionID)
+		if len(pending) == 0 {
+			break
+		}
+		turnPrompt = strings.Join(pending, "\n")
+		fmt.Fprintf(cfg.Stdout, "\n> %s\n", turnPrompt)
 	}
-	ch := make(chan result, 1)
-	go func() {
-		mu.Lock()
-		defer mu.Unlock()
-		s, err := r.ReadString('\n')
-		ch <- result{line: s, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case res := <-ch:
-		return res.line, res.err
-	}
+	return squad, nil
 }
 
 // runTurn streams one user turn to cfg.Stdout and returns the squad the turn
@@ -257,6 +345,9 @@ func readLineCtx(ctx context.Context, mu *sync.Mutex, r *bufio.Reader) (string, 
 // loop (the router can hand control to the best-suited squad, and squads can
 // hand back); otherwise it runs the single cfg.Runner with no routing.
 func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, startSquad string) (string, error) {
+	// Tag the run with the session id so mid-turn steering reaches sub-agents
+	// (which run under an ephemeral agenttool session id).
+	ctx = toolkitagent.WithSteerSession(ctx, cfg.SessionID)
 	parts := []*genai.Part{{Text: prompt}}
 	// Inline the content of any "@path" file references in the prompt, resolved
 	// against the process working directory.

@@ -17,6 +17,7 @@ import (
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/skills"
+	"github.com/blouargant/omnis/internal/steer"
 	"github.com/blouargant/omnis/internal/tasks"
 	"github.com/blouargant/omnis/internal/teammates"
 	"github.com/blouargant/omnis/internal/todo"
@@ -49,6 +50,13 @@ type Infrastructure struct {
 	TaskGraph *tasks.Graph
 	BgQueues  *bg.SessionQueues
 	TodoStore *todo.Store
+
+	// SteerStore holds per-session mid-turn steering notes (extra information the
+	// user types while a turn is still computing). The BeforeModelCallback
+	// steering plugin drains it into the running turn; each surface drains any
+	// leftover after the turn and runs it as the next turn. Process-wide so it
+	// survives hot-reload, like the other session-scoped holders above.
+	SteerStore *steer.Store
 
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
@@ -170,6 +178,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		TaskGraph:       taskGraph,
 		BgQueues:        bgQueues,
 		TodoStore:       todoStore,
+		SteerStore:      steer.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 	}, nil

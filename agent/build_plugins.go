@@ -17,6 +17,7 @@ import (
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/steer"
 )
 
 // buildPlugins wires the runner-level plugins (events bridge, permissions,
@@ -40,6 +41,7 @@ func buildPlugins(
 	buildTimestamp string,
 	asker permissions.Asker,
 	hooksEngine *hooks.Reloader,
+	steerStore *steer.Store,
 	isRouterSquad bool,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	logsDir := paths.LogsDir()
@@ -90,6 +92,15 @@ func buildPlugins(
 	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
 	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
+	}
+	// Mid-turn steering: inject notes the user types while a turn is computing
+	// into the running turn at its next model call. Mounted on answering squad
+	// roots only — the router never answers, so it never steers (same gating as
+	// hooks). No pending notes ⇒ no-op.
+	if !isRouterSquad && steerStore != nil {
+		if sp, serr := steerPlugin("steer", steerStore); serr == nil && sp != nil {
+			plugins = append(plugins, sp)
+		}
 	}
 	if _, cp, err := cache.Plugin("cache"); err == nil {
 		plugins = append(plugins, cp)

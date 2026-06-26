@@ -220,6 +220,7 @@ const queuedAskWidgets = new Map();
 // style every pane identically).
 const PANE_EL_IDS = {
   promptHeader: "prompt-header", transcript: "transcript",
+  steerTray: "steer-tray",
   composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
   editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
   send: "send", cancel: "cancel", status: "status",
@@ -5373,6 +5374,75 @@ async function* parseSSE(res) {
 
 // ─── Send message ────────────────────────────────────────────────────────────
 
+// ─── Mid-turn steering ────────────────────────────────────────────────────────
+// While a turn is computing, a submitted message becomes a "steering" note: it
+// is queued on the server (POST /steer) so the agent picks it up at its next
+// reasoning step, and shown as a pending chip above the composer until the turn
+// folds it in (consumed mid-turn) or runs it as a follow-up (a `steer_turn`
+// frame, which clears the tray and renders the note as a user bubble).
+
+function addSteerChip(panel, text) {
+  const tray = panel.els.steerTray;
+  if (!tray) return null;
+  const chip = document.createElement("div");
+  chip.className = "steer-chip";
+  chip.dataset.full = text;
+  chip.setAttribute("data-tip", text);
+  chip.innerHTML =
+    `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>` +
+    `<span class="steer-chip-text"></span>`;
+  chip.querySelector(".steer-chip-text").textContent =
+    text.length > 90 ? text.slice(0, 90) + "…" : text;
+  tray.appendChild(chip);
+  tray.hidden = false;
+  return chip;
+}
+
+function removeSteerChip(panel, chip) {
+  if (chip && chip.parentNode) chip.remove();
+  const tray = panel.els.steerTray;
+  if (tray && tray.children.length === 0) tray.hidden = true;
+}
+
+function clearSteerChips(panel) {
+  const tray = panel && panel.els && panel.els.steerTray;
+  if (!tray) return;
+  tray.replaceChildren();
+  tray.hidden = true;
+}
+
+// steerMessage queues `note` on the in-flight turn. If the server reports no
+// live turn (it finished in the gap between keypress and POST), it falls back to
+// sending the note as an ordinary new turn.
+async function steerMessage(panel, sessionId, note) {
+  note = (note || "").trim();
+  if (!sessionId || !note) return;
+  const chip = addSteerChip(panel, note);
+  setSessionStatus(sessionId, tr("app.steer.queued"));
+  let queued = false;
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/steer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: note }),
+    });
+    const data = await res.json().catch(() => ({}));
+    queued = !!(data && data.queued);
+  } catch (_) {
+    queued = false;
+  }
+  if (!queued) {
+    // The turn had already finished — drop the chip and send it normally.
+    removeSteerChip(panel, chip);
+    sessionSending.delete(sessionId);
+    if (!panel.els.prompt.value.trim()) {
+      panel.els.prompt.value = note;
+      autoGrowPrompt(panel);
+    }
+    await sendMessage(panel);
+  }
+}
+
 async function sendMessage(panel) {
   panel = panel || fp();
   if (!panel) return;
@@ -5408,6 +5478,21 @@ async function sendMessage(panel) {
   }
   if (!panel.sessionId) await newChat(panel);
   if (!panel.sessionId) return;
+
+  // If a turn is already streaming for this session, this submission is a
+  // mid-turn steering note (extra information, a remark, an insight) — not a new
+  // turn. Hand it to the steering path, which queues it on the server so the
+  // agent can pick it up at its next reasoning step. Attachments (if any) are
+  // left in place for a normal turn once the current one finishes.
+  if (sessionSending.has(panel.sessionId)) {
+    const note = prompt;
+    panel.els.prompt.value = "";
+    composerDrafts.delete(panel.activeTab);
+    autoGrowPrompt(panel);
+    hideSlashMenu();
+    await steerMessage(panel, panel.sessionId, note);
+    return;
+  }
 
   // Capture session identity and container. The user may switch the pane's
   // session mid-stream; these captured references keep writes flowing to the
@@ -5689,6 +5774,19 @@ async function sendMessage(panel) {
           break;
         }
 
+        case "steer_turn": {
+          // Steering the model didn't reach during the turn is run as a follow-up
+          // turn. Close the current segment, clear the queued chips (they're now
+          // represented by this note), render the note as a user bubble, and let
+          // the follow-up reply stream into a fresh segment below it.
+          finalizeSegment();
+          clearSteerChips(panel);
+          appendUserBubble(data.text || "", container, null);
+          scrollBottom(panel, true);
+          sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
+          break;
+        }
+
         case "done":
           // Stamp the reply time onto the turn's final assistant bubble (next to
           // its copy button). segBubble is the live final text segment; fall back
@@ -5799,6 +5897,10 @@ async function sendMessage(panel) {
     }
   } finally {
     finalizeSegment();
+    // Any steering chips still queued are resolved now (consumed mid-turn and
+    // folded into the prompt, or the turn ended). steer_turn already cleared
+    // chips it ran as follow-ups.
+    clearSteerChips(panel);
     AgentDebug.end();
     // Clean up any still-pending tool dots (e.g. on cancel).
     for (const b of [...pendingTools, ...innerPending]) {

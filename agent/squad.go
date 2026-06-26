@@ -228,7 +228,7 @@ func buildSquadInstance(
 		subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, berr = buildSubAgentsFromConfigs(
 			ctx, memberCfgs, runtime,
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
-			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx,
+			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, infra.SteerStore,
 		)
 		if berr != nil {
 			for _, h := range allMCPHandles {
@@ -285,6 +285,11 @@ func buildSquadInstance(
 			// router when a request falls outside its scope.
 			rootInstruction += routerHandoffProtocolBlock()
 		}
+		// Make the root aware it can be steered mid-turn and should forward a
+		// relevant note to a delegated sub-agent (see steeringAwarenessBlock).
+		if infra.SteerStore != nil {
+			rootInstruction += steeringAwarenessBlock()
+		}
 	}
 
 	lead, err := agentkit.New(agentkit.AgentConfig{
@@ -307,7 +312,7 @@ func buildSquadInstance(
 	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
 	hooksEngine := infra.Hooks(runtime)
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, asker, hooksEngine, isRouterSquad)
+	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, asker, hooksEngine, infra.SteerStore, isRouterSquad)
 	if err != nil {
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)

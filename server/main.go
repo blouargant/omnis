@@ -355,6 +355,7 @@ func run() error {
 		WatchMailbox:        infra.WatchMailbox,
 		RunGuard:            runGuard,
 		LiveTurns:           newLiveTurnRegistry(),
+		SteerStore:          infra.SteerStore,
 		PushMgr:             pushMgr,
 		PushEvents:          pushEvents,
 		AgentOptions:        agentOpts,

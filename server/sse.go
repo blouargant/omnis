@@ -190,6 +190,9 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// reconnecting client can replay whatever it missed.
 		runCtx, cancel := context.WithCancel(d.rootCtx)
 		runCtx = fstools.WithCwd(runCtx, cwd)
+		// Tag the run with the real session id so mid-turn steering reaches
+		// sub-agents (which run under an ephemeral agenttool session id).
+		runCtx = toolkitagent.WithSteerSession(runCtx, meta.ID)
 		lt := d.LiveTurns.start(meta.ID, cancel)
 		turnStart := time.Now()
 
@@ -286,35 +289,87 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				emitFrame("routing", map[string]any{"from": from, "to": to, "reason": reason})
 			}
 
-			_, assistantText, runErr := d.Manager.RunWithRouting(runCtx, meta.UserID, meta.ID, startSquad, parts, routerParts, runHop, notify)
-			if runErr != nil {
-				log.Printf("server: routing run error: %v", runErr)
-			}
-			// Terminal event for the (possibly multi-hop) turn — streamEvents no
-			// longer emits it per hop. Carry the wall-clock reply time so the web
-			// UI can show "time taken for this reply" next to the copy button.
-			turnDur := time.Since(turnStart)
-			emitFrame("done", map[string]any{"duration_ms": turnDur.Milliseconds()})
+			// Drive the user's turn — plus any mid-turn steering they add — to
+			// completion. The steering plugin injects notes the user typed into the
+			// running turn at each model boundary; whatever the user typed but no
+			// model call reached is run here as a follow-up turn, so a steering note
+			// is never lost even when the turn had no further reasoning step to
+			// absorb it. The run-guard is held across the whole loop (deferred
+			// release), so no other turn interleaves. With no steering this loops
+			// exactly once — byte-identical to a plain turn.
+			overallStart := turnStart
+			curSquad := startSquad
+			turnParts := parts
+			turnRouterParts := routerParts
+			persistPrompt := req.Prompt
+			const maxSteerFollowups = 16
+			for i := 0; ; i++ {
+				// Per-turn usage so each persisted turn carries its own cost; the
+				// runHop/streamEvents closures read this variable by reference.
+				usageAccum = map[string]sessions.TokenUsage{}
+				tStart := time.Now()
+				_, assistantText, runErr := d.Manager.RunWithRouting(runCtx, meta.UserID, meta.ID, curSquad, turnParts, turnRouterParts, runHop, notify)
+				if runErr != nil {
+					log.Printf("server: routing run error: %v", runErr)
+				}
+				tDur := time.Since(tStart)
 
-			// Persist whatever assistant text was streamed, even when the run was
-			// cancelled (Stop button) or no client is attached. Disk I/O does not
-			// depend on any request context, so the save lands regardless; we keep
-			// only the non-empty check so an aborted turn with no output is not
-			// persisted as a blank exchange. Persist BEFORE finish() so a reconnect
-			// that races completion always finds the durable turn.
-			if strings.TrimSpace(assistantText) != "" {
-				if err := sessions.AppendConversationTurnFull(meta.ID, req.Prompt, assistantText, usageAccum, turnDur.Milliseconds()); err != nil {
-					log.Printf("server: failed to persist turn: %v", err)
+				// Fold any steering the model actually saw this turn into the
+				// persisted prompt, so a reload shows what the user added mid-turn.
+				prompt := persistPrompt
+				if d.SteerStore != nil {
+					if consumed := d.SteerStore.TakeConsumed(meta.ID); len(consumed) > 0 {
+						prompt += "\n\n[Sent while working]\n" + strings.Join(consumed, "\n")
+					}
 				}
-				// Announce the completed reply on the persistent /api/events stream so
-				// any browser that is away from this session can raise an OS
-				// notification — robust to a backgrounded tab whose per-turn stream the
-				// browser suspended (the same reliable channel background-task
-				// notifications use). Carries a short preview of the answer.
-				if d.PushEvents != nil {
-					d.PushEvents.broadcastWithText("chat_reply", meta.ID, replyNotificationPreview(assistantText))
+				// Persist whatever assistant text was streamed, even when the run was
+				// cancelled (Stop button) or no client is attached. Disk I/O does not
+				// depend on any request context, so the save lands regardless; we keep
+				// only the non-empty check so an aborted turn with no output is not
+				// persisted as a blank exchange. Persist BEFORE finish() so a reconnect
+				// that races completion always finds the durable turn.
+				if strings.TrimSpace(assistantText) != "" {
+					if err := sessions.AppendConversationTurnFull(meta.ID, prompt, assistantText, usageAccum, tDur.Milliseconds()); err != nil {
+						log.Printf("server: failed to persist turn: %v", err)
+					}
+					// Announce the completed reply on the persistent /api/events stream
+					// so any browser away from this session can raise an OS
+					// notification — robust to a backgrounded tab whose per-turn stream
+					// the browser suspended (the same reliable channel background-task
+					// notifications use). Carries a short preview of the answer.
+					if d.PushEvents != nil {
+						d.PushEvents.broadcastWithText("chat_reply", meta.ID, replyNotificationPreview(assistantText))
+					}
 				}
+
+				// Stop on cancel/shutdown or the runaway backstop.
+				if runCtx.Err() != nil || i >= maxSteerFollowups {
+					break
+				}
+				// Steering the model never reached becomes the next turn.
+				var pending []string
+				if d.SteerStore != nil {
+					pending = d.SteerStore.TakePending(meta.ID)
+				}
+				if len(pending) == 0 {
+					break
+				}
+				combined := strings.Join(pending, "\n")
+				// Render the steering note as a user bubble in every attached
+				// stream (the injecting browser also clears its queued chip).
+				emitFrame("steer_turn", map[string]string{"text": combined})
+				// Routing during the turn may have moved the session's squad; the
+				// follow-up resumes from wherever it ended up.
+				if cur, ok := d.Registry.Get(meta.ID); ok && cur.Squad != "" {
+					curSquad = cur.Squad
+				}
+				turnParts = []*genai.Part{{Text: combined}}
+				turnRouterParts = []*genai.Part{{Text: combined}}
+				persistPrompt = combined
 			}
+			// Terminal event for the whole (possibly multi-turn) exchange. Carry the
+			// wall-clock time so the web UI can show "time taken" next to copy.
+			emitFrame("done", map[string]any{"duration_ms": time.Since(overallStart).Milliseconds()})
 			lt.finish()
 		}()
 
@@ -367,7 +422,59 @@ func handleCancel(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		cancelled := d.LiveTurns.cancel(id)
+		// Drop any steering the user queued but the model hadn't reached yet, so a
+		// Stop doesn't leak those notes into the next (possibly unrelated) turn.
+		if d.SteerStore != nil {
+			d.SteerStore.TakePending(id)
+		}
 		c.JSON(http.StatusOK, gin.H{"cancelled": cancelled})
+	}
+}
+
+// steerRequest is the body of POST /api/sessions/:id/steer — one mid-turn note.
+type steerRequest struct {
+	Text string `json:"text"`
+}
+
+// handleSteer queues a steering note (extra information, a remark, an insight)
+// the user typed while a turn is still computing. It is only meaningful while a
+// turn is in flight: the steering plugin injects the note into the running turn
+// at its next model boundary, and the producer loop runs any leftover as a
+// follow-up turn. When no turn is in flight it returns {queued:false} so the
+// client sends the text as an ordinary new turn instead.
+func handleSteer(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		meta, ok := d.Registry.Get(id)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		if meta.Archived {
+			c.JSON(http.StatusConflict, gin.H{"error": "session is archived; unarchive it to continue the conversation"})
+			return
+		}
+		var req steerRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+			return
+		}
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
+			return
+		}
+		// A live turn exists exactly while its producer goroutine is running
+		// (lt.get returns nil once finished + GC'd). Only then can a note be
+		// injected/looped; otherwise the caller should send it as a normal turn.
+		if d.LiveTurns == nil || d.LiveTurns.get(id) == nil {
+			c.JSON(http.StatusOK, gin.H{"queued": false})
+			return
+		}
+		if d.SteerStore != nil {
+			d.SteerStore.Enqueue(id, text)
+		}
+		c.JSON(http.StatusOK, gin.H{"queued": true})
 	}
 }
 

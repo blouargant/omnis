@@ -131,6 +131,7 @@
   "app.error.httpStatus": "Fehler {status}: {text}",
   "app.error.lostConnection": "⚠️ Verbindung zum Server verloren. Der Agent ist möglicherweise noch nicht fertig — öffnen Sie diese Unterhaltung erneut, um die Antwort zu sehen.",
   "app.error.stopped": "(gestoppt)",
+  "app.steer.queued": "Notiz in Warteschlange…",
   "app.skill.nameRequired": "Der Skill-Name ist erforderlich.",
   "app.skill.nameInvalid": "Der Name muss übereinstimmen mit: Kleinbuchstaben, Ziffern, „-“ oder „.“ (1–63 Zeichen).",
   "app.ctx.queuing": "Wird eingereiht…",

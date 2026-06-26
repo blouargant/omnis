@@ -219,6 +219,7 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		Bus:             infra.Bus,
 		AskUserRegistry: infra.AskUserRegistry,
 		BgQueues:        infra.BgQueues,
+		SteerStore:      infra.SteerStore,
 		AppName:         inst.RunnerConfig.AppName,
 		Prompt:          prompt,
 	})
@@ -284,6 +285,7 @@ func runTUI(ctx context.Context, opts options) error {
 		UnregisterSession:                 infra.UnregisterSession,
 		WatchMailbox:                      infra.WatchMailbox,
 		BgQueues:                          infra.BgQueues,
+		SteerStore:                        infra.SteerStore,
 		AgentOptions:                      agentOpts,
 		InputTokenPricePerMillion:         leaderCfg.InputTokenPricePerMillion,
 		OutputTokenPricePerMillion:        leaderCfg.OutputTokenPricePerMillion,

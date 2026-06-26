@@ -16,6 +16,7 @@ import (
 	"github.com/blouargant/omnis/internal/docindex"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/regindex"
+	"github.com/blouargant/omnis/internal/steer"
 )
 
 // buildSubAgents constructs every enabled sub-agent (skipping leader and
@@ -33,6 +34,7 @@ func buildSubAgents(
 	codeIdx *codeindex.Index,
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
+	steerStore *steer.Store,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -47,7 +49,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -76,6 +78,7 @@ func buildSubAgentsFromConfigs(
 	codeIdx *codeindex.Index,
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
+	steerStore *steer.Store,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -113,6 +116,17 @@ func buildSubAgentsFromConfigs(
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 
+		// Mid-turn steering for sub-agents: while a sub-agent runs the leader is
+		// parked, so this callback yields control BACK to the leader the moment a
+		// steering note is pending (without consuming it) — the leader, not the
+		// sub-agent, decides what to do with it. It resolves the real session id
+		// via the context value the surface planted (steerSessionID), not the
+		// ephemeral agenttool session.
+		beforeModel := []llmagent.BeforeModelCallback{callbacks.BeforeModel}
+		if steerStore != nil {
+			beforeModel = append(beforeModel, subAgentSteerYield(steerStore))
+		}
+
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                 cfg.Name,
 			Description:          desc,
@@ -123,7 +137,7 @@ func buildSubAgentsFromConfigs(
 			BeforeToolCallbacks:  []llmagent.BeforeToolCallback{callbacks.BeforeTool},
 			AfterToolCallbacks:   []llmagent.AfterToolCallback{callbacks.AfterTool},
 			OnToolErrorCallbacks: []llmagent.OnToolErrorCallback{callbacks.OnToolError},
-			BeforeModelCallbacks: []llmagent.BeforeModelCallback{callbacks.BeforeModel},
+			BeforeModelCallbacks: beforeModel,
 			AfterModelCallbacks:  []llmagent.AfterModelCallback{callbacks.AfterModel},
 		})
 		if sErr != nil {

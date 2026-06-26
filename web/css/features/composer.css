@@ -318,6 +318,36 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 #attachments[hidden] { display: none; }
 
+/* Mid-turn steering: notes the user queues while a turn is still computing.
+   Rendered as pending chips above the textarea (like attachment chips); cleared
+   when the turn folds them in or runs them as a follow-up. */
+#steer-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 2px 2px;
+}
+#steer-tray[hidden] { display: none; }
+.steer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-elev, #2a2f37);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  max-width: 320px;
+  overflow: hidden;
+}
+.steer-chip svg { flex-shrink: 0; opacity: 0.7; }
+.steer-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .attachment-chip {
   display: inline-flex;
   align-items: center;

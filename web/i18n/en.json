@@ -144,6 +144,7 @@
   "app.error.httpStatus": "error {status}: {text}",
   "app.error.lostConnection": "⚠️ Lost connection to the server. The agent may still be finishing — reopen this chat to see its reply.",
   "app.error.stopped": "(stopped)",
+  "app.steer.queued": "note queued…",
   "app.skill.nameRequired": "Skill name is required.",
   "app.skill.nameInvalid": "Name must match: lowercase letters, digits, '-' or '.' (1–63 chars).",
   "app.ctx.queuing": "Queuing…",

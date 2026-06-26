@@ -504,6 +504,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
 | `internal/bg/` | Per-session background task queue + **task registry**: `bash_background` (one-shot), `monitor` (streaming line-matcher, [monitor.go](internal/bg/monitor.go)), and lifecycle `bg_list`/`bg_cancel`/`bg_output` ([tasks.go](internal/bg/tasks.go)) — named with a `bg_` prefix to avoid colliding with the `planning` group's task-graph `task_list`. Every launch registers a `Task{ID,Kind,Status,…}`; completions/streamed matches push a `Notification` consumed by the host (see "Background task notifications") |
 | `internal/worktree/` | Git worktree isolation tools |
+| `internal/steer/` | Per-session **mid-turn steering** store (extra info the user types while a turn is computing): `Enqueue`/`Drain`/`TakeConsumed`/`TakePending`/`Forget`. Drained into the running turn by the steering plugin and looped by each surface (see "Mid-turn steering") |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
 | `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate and the MCP `requires` connect gate |
@@ -1598,6 +1599,110 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
 **No-op contract:** with no `bash_background`/`monitor` calls the queue stays
 empty and behaviour is byte-identical to before; the recall/glob fallbacks are
 untouched.
+
+### Mid-turn steering (type while computing)
+
+A user can send additional information, remarks, or insights **while a turn is
+still being computed** — the Claude Code "steer the running turn" affordance.
+Delivery is **hybrid**: a note is injected into the *running* turn at its next
+model boundary when one is reached, and otherwise run as a follow-up turn — so a
+note is never lost. Works on all three surfaces (web, TUI, CLI).
+
+The whole mechanism hangs off one process-wide store and one plugin:
+
+- **Steering store** ([internal/steer/](internal/steer/) `Store`, on
+  `Infrastructure.SteerStore`, survives hot-reload like `BgQueues`). Per session:
+  `pending` (queued, not yet shown to the model) and `consumed` (shown this turn,
+  kept only to fold into the persisted prompt). `Enqueue` adds a note; **`Drain`**
+  atomically moves pending→consumed and returns them (so a note is delivered to
+  the model **exactly once**); `TakeConsumed` / `TakePending` are the turn-end
+  drains; `Forget` clears a deleted session.
+- **`BeforeModelCallback` steering callback** ([agent/steer_plugin.go](agent/steer_plugin.go)
+  `injectSteeringCallback`). It fires before **every** model call, `Drain`s the
+  session's pending notes, and **`injectSteering`** merges them as a user message —
+  appended to the trailing `req.Contents` entry when that is already a `user` turn
+  (the common case mid-tool-loop, where the last content carries the tool results),
+  else a fresh user message. The merge avoids two consecutive user-role messages
+  (strict providers like a native Anthropic adapter reject them — omnis reaches
+  Anthropic via LiteLLM, which coalesces, but other adapters may not). It is
+  mounted **two ways**:
+  - On the **answering squad root** as a runner plugin via `steerPlugin`
+    ([agent/build_plugins.go](agent/build_plugins.go) `buildPlugins`, gated
+    `!isRouterSquad` — the router never answers, so it never steers).
+  - On **every sub-agent** as an agent-level `BeforeModelCallback`
+    (`subAgentSteerYield`, [agent/build_subagents.go](agent/build_subagents.go)) —
+    runner plugins do **not** reach sub-agents (agenttool runs them in its own
+    plugin-less runner), so the callback is attached to the sub-agent agent
+    directly. **It does NOT consume the note** (see below).
+- **Session-id propagation for sub-agents.** A sub-agent runs under a fresh,
+  ephemeral agenttool session id, so it can't key the store by `ctx.SessionID()`.
+  Each surface plants the **real** session id on the run context with
+  `agent.WithSteerSession(ctx, id)` before `Runner.Run`; `steerSessionID(ctx)`
+  reads it (the callback falls back to `ctx.SessionID()` when absent, which for the
+  leader IS the real session). The value reaches sub-agents because agenttool
+  passes the leader's tool context to its inner `runner.Run` — the same
+  propagation path `WithCwd` uses.
+- **The leader is the dispatcher (sub-agents yield, never consume).** While a
+  sub-agent runs the **leader is parked** (blocked in the synchronous agenttool
+  call), so the leader can't see a note until the sub-agent returns. To keep the
+  *leader* in charge of every note, `subAgentSteerYield` **peeks** (PendingLen,
+  no drain) and, when a note is pending, **short-circuits the sub-agent's next
+  model call with a final text response** — a no-function-call response ends the
+  agenttool run (confirmed against `Flow.Run`/`IsFinalResponse`), so the leader's
+  tool call returns a `[Interrupted: … returning control to you …]` notice plus
+  the sub-agent's partial work (`lastAssistantText`). The note stays **pending**.
+  The leader's own callback then drains+injects it at its next model step, so the
+  leader sees the interrupt notice **and** the note together and decides what to
+  do: stop/redo the sub-agent, re-invoke it with the note folded in, handle it
+  itself, or re-run it to finish (note irrelevant). `Drain` is atomic, so the note
+  is delivered **exactly once** (to the leader), then folds into the turn's
+  persisted prompt via `TakeConsumed`. Trade-off: interrupting discards the
+  sub-agent's in-flight model call (partial work is handed back for salvage, but
+  not resumed) — the price of letting the leader stop/redirect a running sub-agent.
+- **Leader awareness (instruction).** `steeringAwarenessBlock()`
+  ([agent/steer_plugin.go](agent/steer_plugin.go)) is appended to every non-router
+  root instruction when steering is enabled: it tells the leader that IT (not the
+  sub-agents) decides on each note, that a running sub-agent will hand control back
+  with an interrupt notice, and enumerates the four choices above.
+- **Surface loop (the fallback).** After each turn the surface folds
+  `TakeConsumed` into that turn's persisted prompt (a `[Sent while working]`
+  block, so a reload shows what the user added) and runs `TakePending` leftovers
+  (notes no model call reached) as a follow-up turn, looping (cap
+  `maxSteerFollowups`, 16).
+
+Surfaces:
+
+- **Web** — `POST /api/sessions/:id/steer {text}` ([server/sse.go](server/sse.go)
+  `handleSteer`): enqueues and returns `{queued:true}` when a turn is live
+  (`LiveTurns.get(id) != nil`), else `{queued:false}` so the client sends it as a
+  normal turn. The turn producer in `handleMessages` is a **loop** (not a single
+  `RunWithRouting`): fold consumed → persist → drain pending → emit a `steer_turn`
+  SSE (the follow-up's user bubble, rendered in every attached stream) → run it →
+  repeat; one terminal `done` at the very end. The run-guard is held across the
+  whole loop so no other turn interleaves. Stop (`handleCancel`) also drops
+  pending steering so a cancel doesn't leak notes into the next turn. Client
+  ([web/app.js](web/app.js)): the composer stays enabled while streaming; an Enter
+  submit during `sessionSending` routes to `steerMessage` (POST `/steer`), shows a
+  pending **chip** in the per-pane `#steer-tray` (styled in
+  [web/css/features/composer.css](web/css/features/composer.css)), and on
+  `{queued:false}` falls back to `sendMessage`. The `steer_turn` SSE clears the
+  tray + renders the note as a user bubble; the send-path `finally` clears any
+  remaining chips. i18n key `app.steer.queued`.
+- **TUI** ([internal/tui/tui.go](internal/tui/tui.go)) — while `busy`, a plain
+  Enter `Enqueue`s on `cfg.SteerStore` and echoes "steering queued"; the send
+  goroutine loops the same fold/drain/follow-up after `RunWithRouting`.
+- **CLI** ([internal/cli/cli.go](internal/cli/cli.go)) — the REPL now reads stdin
+  on a **persistent background goroutine** (a `lines` channel) instead of blocking
+  per line, so the user can type *during* a turn (the turn runs in its own
+  goroutine with a `turnDone` channel); a line typed while a turn is in flight is
+  enqueued as steering, otherwise it starts a turn. `runTurnSteering` wraps the
+  fold/drain/follow-up loop. Ctrl-C still cancels just the running turn; Ctrl-D
+  mid-turn exits once it finishes.
+
+All three configs gained a **nil-safe** `SteerStore` field set from
+`infra.SteerStore`. **No-op contract:** with nothing enqueued the store is empty,
+`Drain`/`TakePending` return nil, every surface loops exactly once, and behaviour
+is byte-identical to before.
 
 ### Desktop notifications (unified preference)
 

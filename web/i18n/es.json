@@ -131,6 +131,7 @@
   "app.error.httpStatus": "error {status}: {text}",
   "app.error.lostConnection": "⚠️ Se perdió la conexión con el servidor. Puede que el agente aún esté terminando — vuelve a abrir esta conversación para ver su respuesta.",
   "app.error.stopped": "(detenido)",
+  "app.steer.queued": "nota en cola…",
   "app.skill.nameRequired": "El nombre de la Skill es obligatorio.",
   "app.skill.nameInvalid": "El nombre debe coincidir con: minúsculas, dígitos, « - » o « . » (1 a 63 caracteres).",
   "app.ctx.queuing": "Encolando…",

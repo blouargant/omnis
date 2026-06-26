@@ -48,6 +48,7 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/blouargant/omnis/internal/shellcomplete"
+	"github.com/blouargant/omnis/internal/steer"
 )
 
 var oscColorResponseRE = regexp.MustCompile(`(?:^|\s)(?:1|10|11);rgb:[0-9A-Fa-f]+/[0-9A-Fa-f]+/[0-9A-Fa-f]+(?:\s|$)`)
@@ -246,6 +247,10 @@ type Config struct {
 	// background-task notifications reach the model (the between-turn drain;
 	// the TUI has no server-style push goroutine). Nil-safe.
 	BgQueues *bg.SessionQueues
+	// SteerStore, when non-nil, holds mid-turn steering notes the user types
+	// while a turn is computing: queued via the steering plugin's drain during
+	// the turn, with leftover run as a follow-up turn here. Nil-safe.
+	SteerStore *steer.Store
 	// AgentOptions are the Options used to build the initial Instance.
 	// The hot-reload key (Ctrl-R) hands them back to Manager.Reload so a
 	// new generation is built from the latest on-disk config.
@@ -1418,6 +1423,15 @@ func Run(ctx context.Context, cfg Config) error {
 			return
 		}
 		if busy {
+			// A turn is already streaming: this plain submission is a mid-turn
+			// steering note. Queue it so the running turn picks it up at its next
+			// reasoning step (the steering plugin) or runs it as a follow-up turn.
+			if cur := current.Load(); cur != nil && cfg.SteerStore != nil {
+				cfg.SteerStore.Enqueue(cur.ID, prompt)
+				input.SetText("")
+				note := strings.TrimSpace(prompt)
+				go appendChat("\n[gray]↳ steering queued:[-] %s\n", tview.Escape(note))
+			}
 			return
 		}
 		cur := current.Load()
@@ -1608,15 +1622,50 @@ func Run(ctx context.Context, cfg Config) error {
 				appendChat("[gray]── routed to %s squad ──[-]\n", to)
 			}
 
-			// TUI turns are text-only, so nil routerParts feeds the router the
-			// same (clean) text parts as the answering squad.
-			_, fullText, _ := cfg.Manager.RunWithRouting(ctx, cfg.UserID, sessionID, cur.Squad, parts, nil, runHop, notify)
+			// Drive the user's turn plus any mid-turn steering they add. The
+			// steering plugin injects queued notes into the running turn at its
+			// model boundaries; whatever no model call reached is run here as a
+			// follow-up turn, so a note is never lost. TUI turns are text-only, so
+			// nil routerParts feeds the router the same clean text as the squad.
+			// With no steering this loops exactly once.
+			turnParts := parts
+			turnPrompt := prompt
+			// Tag the run with the real session id so mid-turn steering reaches
+			// sub-agents (which run under an ephemeral agenttool session id).
+			steerCtx := toolkitagent.WithSteerSession(ctx, sessionID)
+			const maxSteerFollowups = 16
+			for i := 0; ; i++ {
+				startSquad := cur.Squad
+				if meta, ok := cfg.Sessions.Get(sessionID); ok && meta.Squad != "" {
+					startSquad = meta.Squad
+				}
+				_, fullText, _ := cfg.Manager.RunWithRouting(steerCtx, cfg.UserID, sessionID, startSquad, turnParts, nil, runHop, notify)
 
-			// Persist the turn to the conversation file and refresh the
-			// sidebar so the LastUsedAt / turn count update.
-			cfg.Sessions.Touch(sessionID)
-			if err := sessions.AppendConversationTurn(sessionID, prompt, fullText); err != nil {
-				appendChat("[red]persist turn: %v[-]\n", err)
+				// Persist the turn to the conversation file (folding any steering the
+				// model saw into the prompt) and refresh the sidebar.
+				cfg.Sessions.Touch(sessionID)
+				persistPrompt := turnPrompt
+				if cfg.SteerStore != nil {
+					if consumed := cfg.SteerStore.TakeConsumed(sessionID); len(consumed) > 0 {
+						persistPrompt += "\n\n[Sent while working]\n" + strings.Join(consumed, "\n")
+					}
+				}
+				if err := sessions.AppendConversationTurn(sessionID, persistPrompt, fullText); err != nil {
+					appendChat("[red]persist turn: %v[-]\n", err)
+				}
+
+				if ctx.Err() != nil || i >= maxSteerFollowups || cfg.SteerStore == nil {
+					break
+				}
+				pending := cfg.SteerStore.TakePending(sessionID)
+				if len(pending) == 0 {
+					break
+				}
+				turnPrompt = strings.Join(pending, "\n")
+				turnParts = []*genai.Part{{Text: turnPrompt}}
+				// Echo the follow-up as a fresh turn.
+				appendChat("\n[::b]you[-]\n\n%s\n", colorizeFileRefs(sanitizeInputText(turnPrompt), getBashCwd(sessionID)))
+				appendChat("[::b]assistant[-]\n")
 			}
 			app.QueueUpdateDraw(func() {
 				refreshSessions()

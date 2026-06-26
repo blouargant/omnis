@@ -21,6 +21,7 @@ import (
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/steer"
 )
 
 // curateSSETimeout is how long the /curate SSE stream waits for curator_end
@@ -61,6 +62,10 @@ type serverDeps struct {
 	// survives a client disconnect and a reconnecting browser can replay what it
 	// missed. Also backs the Stop button's cancel endpoint.
 	LiveTurns *liveTurnRegistry
+	// SteerStore holds per-session mid-turn steering notes (extra info the user
+	// types while a turn is computing). Backs the /steer endpoint; drained into
+	// the running turn by the steering plugin and folded/looped by the producer.
+	SteerStore *steer.Store
 	// PushMgr manages per-session background mailbox watchers.
 	PushMgr *pushManager
 	// PushEvents broadcasts push notifications to open /events SSE connections.
@@ -363,6 +368,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		sessions.DeleteSessionLogs(userID, id)
 		deleteSessionUploads(id)
+		if d.SteerStore != nil {
+			d.SteerStore.Forget(id)
+		}
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
 		}
@@ -719,6 +727,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.GET("/sessions/:id/messages/stream", handleMessageStream(d))
 	auth.POST("/sessions/:id/cancel", handleCancel(d))
+	auth.POST("/sessions/:id/steer", handleSteer(d))
 	// Conversation fork / rewind: branch a new session at a turn, or rewind the
 	// live session to before a turn. Both reseed the model's in-memory context
 	// from the kept turns (see server/fork_rewind.go).
