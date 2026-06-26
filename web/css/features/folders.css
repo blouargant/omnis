@@ -178,6 +178,19 @@
   white-space: nowrap;
 }
 .folder-ctx-item:hover { background: var(--accent, #0e639c); color: #fff; }
+/* Items that carry a leading icon (e.g. the session actions menu) lay the icon
+   and label out in a row; the icon inherits the item's text colour, so it turns
+   white on hover like the label. */
+.folder-ctx-item.has-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.folder-ctx-item .ctx-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
 /* Greyed-out item: an action that doesn't apply to this entry (e.g. rename/delete
    on the ".." parent row). Shown for context but inert. */
 .folder-ctx-item:disabled {

@@ -379,10 +379,12 @@ body.resizing #sidebar { transition: none; }
   padding: 6px;
   overflow-y: auto;
   flex: 1;
-  /* Let the list shrink below its content height inside the flex column so
-     its own overflow-y scrollbar engages instead of growing and being
-     clipped by the sidebar's overflow:hidden. */
-  min-height: 0;
+  /* Keep at least ~two session rows (plus a timeframe header) on screen even
+     when the folders panel is grown; the list scrolls internally past that.
+     Paired with the folder-resize cap in app.js (SESSION_LIST_MIN), which stops
+     a tall folders panel from squeezing the sessions out or clipping the footer.
+     The list still engages its own overflow-y scrollbar above this floor. */
+  min-height: 130px;
 }
 #session-list li {
   padding: 6px 10px;
@@ -394,6 +396,21 @@ body.resizing #sidebar { transition: none; }
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: var(--bg-raised); color: var(--text); }
+/* Timeframe group header (Today / Yesterday / This week / …). Non-interactive
+   (pointer-events:none) so it never hovers, selects, or routes a click. */
+#session-list li.session-group {
+  padding: 10px 8px 3px;
+  margin-bottom: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  cursor: default;
+  pointer-events: none;
+}
+#session-list li.session-group:first-child { padding-top: 4px; }
+#sidebar.collapsed #session-list li.session-group { display: none; }
 /* Open in some (non-focused) pane: a subtle highlight. */
 #session-list li.active { background: var(--bg-raised); color: var(--text); }
 /* The chat in the focused pane — the one the user is working in — stands out
@@ -471,7 +488,6 @@ body.resizing #sidebar { transition: none; }
 }
 .session-action-btn:hover,
 .session-action-btn:focus { background: none; outline: none; opacity: 1; }
-.delete-btn:hover { color: #f48771; }
 .session-rename-input {
   width: 100%;
   background: var(--bg);
@@ -551,7 +567,6 @@ body.resizing #sidebar { transition: none; }
 }
 #archived-list li:hover .session-actions,
 #archived-list li.active .session-actions { opacity: 1; }
-.unarchive-btn:hover { color: var(--accent-strong); }
 
 #sidebar-footer {
   padding: 8px 12px;

@@ -2470,11 +2470,12 @@ function appendUserBubble(text, container, files, turnIndex) {
   requestAnimationFrame(() => applyUserBubbleTruncation(bubble));
 }
 
-// ICON_REWIND is the circular "go back" glyph for the per-turn control.
+// ICON_REWIND is the U-turn "return / undo" arrow for the per-turn control: a
+// left-pointing arrowhead whose tail loops down and around the right side.
 const ICON_REWIND =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
   'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.3-9.3L3 7"/></svg>';
+  '<path d="M8 8h6a5 5 0 0 1 0 10H7"/><polyline points="8 4 4 8 8 12"/></svg>';
 
 // addTurnActions attaches the hover ↺ button to a user-turn row. Clicking it
 // opens the fork/rewind menu anchored to the button.
@@ -4214,15 +4215,19 @@ async function loadSessions() {
   } catch (e) { console.error(e); }
 }
 
-// SVG icon markup reused across session rows.
-const ICON_RENAME = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
-const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`;
-const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
+// Three-dots "kebab" trigger that opens each session row's actions menu.
+const ICON_DOTS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>`;
+// Icons shown beside the session actions-menu entries.
+const ICON_COPY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+const ICON_RENAME = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`;
+const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
+const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
 
-// buildSessionRow renders one session <li>. Active rows offer rename + archive +
-// delete; archived rows offer unarchive + delete and route a click to a
-// read-only view.
+// buildSessionRow renders one session <li>. A single ⋮ "kebab" button opens a
+// menu grouping the row's actions: Copy name + Rename (active rows only), a
+// thin separator, then Archive/Unarchive + Delete. Archived rows route a click
+// to a read-only view.
 function buildSessionRow(s, { archived }) {
   const li = document.createElement("li");
   li.dataset.id = s.id;
@@ -4241,27 +4246,18 @@ function buildSessionRow(s, { archived }) {
   const badgeHtml = showBadge
     ? `<span class="session-squad-badge" data-tip="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
     : "";
-  const topActions = archived
-    ? ""
-    : `<button class="session-action-btn rename-btn" data-tip="Rename" tabindex="-1">${ICON_RENAME}</button>`;
-  const deleteBtn = `<button class="session-action-btn delete-btn" data-tip="Delete" tabindex="-1">${ICON_DELETE}</button>`;
-  const setAsideBtn = archived
-    ? `<button class="session-action-btn unarchive-btn" data-tip="Unarchive" tabindex="-1">${ICON_UNARCHIVE}</button>`
-    : `<button class="session-action-btn archive-btn" data-tip="Archive" tabindex="-1">${ICON_ARCHIVE}</button>`;
-  // Active rows put Archive rightmost (delete → archive); archived rows keep
-  // Delete rightmost (unarchive → delete).
-  const bottomActions = archived ? `${setAsideBtn}${deleteBtn}` : `${deleteBtn}${setAsideBtn}`;
   li.innerHTML = `
     <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
       <span class="session-busy-dot"></span>
       <div class="session-name" data-tip="${escHtml(displayName)}">${escHtml(displayName)}</div>
-      <div class="session-actions">${topActions}</div>
+      <div class="session-actions">
+        <button class="session-action-btn session-menu-btn" data-tip="Actions" tabindex="-1" aria-label="Session actions">${ICON_DOTS}</button>
+      </div>
     </div>
     <div class="session-bottom-row">
       ${badgeHtml}
       <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
-      <div class="session-actions">${bottomActions}</div>
     </div>
   `;
 
@@ -4269,25 +4265,62 @@ function buildSessionRow(s, { archived }) {
     if (e.target.closest(".session-actions")) return;
     selectSession(s.id);
   });
-  const renameBtn = li.querySelector(".rename-btn");
-  if (renameBtn) renameBtn.addEventListener("click", (e) => {
+  li.querySelector(".session-menu-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    startRename(li, s.id, s.title || "");
+    openSessionCtxMenu(e, s, archived, li);
   });
-  const archiveBtn = li.querySelector(".archive-btn");
-  if (archiveBtn) archiveBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    archiveSession(s.id);
-  });
-  const unarchiveBtn = li.querySelector(".unarchive-btn");
-  if (unarchiveBtn) unarchiveBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    unarchiveSession(s.id);
-  });
-  li.querySelector(".delete-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    deleteSession(s.id, li);
-  });
+  return li;
+}
+
+// openSessionCtxMenu builds a session row's actions menu, reusing the themed
+// context-menu renderer shared with the Folders panel. A thin separator (SEP)
+// splits the benign Copy/Rename actions from the Archive/Delete ones.
+function openSessionCtxMenu(ev, s, archived, li) {
+  const displayName = s.title || s.id;
+  const items = [["Copy name", () => writeClipboard(displayName), { icon: ICON_COPY }]];
+  if (!archived) items.push(["Rename", () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
+  items.push(SEP);
+  items.push(archived
+    ? ["Unarchive", () => unarchiveSession(s.id), { icon: ICON_UNARCHIVE }]
+    : ["Archive", () => archiveSession(s.id), { icon: ICON_ARCHIVE }]);
+  items.push(["Delete", () => deleteSession(s.id, li), { icon: ICON_DELETE }]);
+  showFolderCtxMenu(ev, items);
+}
+
+// sessionTimeframe buckets a session by its last-activity date relative to
+// `now`, returning a stable `key` (used to detect group changes) and a human
+// `label`. Buckets, newest → oldest: Today, Yesterday, This week, Last week,
+// This month, then one bucket per older calendar month ("May 2026", …). Because
+// the list arrives sorted by last_used_at descending, re-touching an old session
+// bumps its last_used_at to now and it re-enters the "Today" group automatically.
+function sessionTimeframe(date, now) {
+  const t = date.getTime();
+  if (isNaN(t)) return { key: "today", label: "Today" }; // guard a bad timestamp
+  const DAY = 86400000;
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today0 = startOfDay(now);
+  const dow = (now.getDay() + 6) % 7;                 // 0 = Monday … 6 = Sunday
+  const weekStart0 = today0 - dow * DAY;              // Monday of the current week
+  const monthStart0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  if (t >= today0) return { key: "today", label: "Today" };
+  if (t >= today0 - DAY) return { key: "yesterday", label: "Yesterday" };
+  if (t >= weekStart0) return { key: "this-week", label: "This week" };
+  if (t >= weekStart0 - 7 * DAY) return { key: "last-week", label: "Last week" };
+  if (t >= monthStart0) return { key: "this-month", label: "This month" };
+  return {
+    key: `m-${date.getFullYear()}-${date.getMonth()}`,
+    label: date.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+  };
+}
+
+// buildTimeframeHeader renders a non-interactive group separator <li> for the
+// session list. It carries no data-id, so the list-iteration sites that key on
+// dataset.id (refreshSidebarActive, pane picker, layout id collection) skip it.
+function buildTimeframeHeader(label) {
+  const li = document.createElement("li");
+  li.className = "session-group";
+  li.setAttribute("aria-hidden", "true");
+  li.textContent = label;
   return li;
 }
 
@@ -4303,8 +4336,19 @@ function renderSessions(sessions) {
     sessionTitles.set(s.id, s.title || s.id);
   }
 
+  // Active sessions arrive newest-first; emit a timeframe header whenever the
+  // bucket changes so they read as Today / Yesterday / This week / … sections.
   els.list.innerHTML = "";
-  for (const s of active) els.list.appendChild(buildSessionRow(s, { archived: false }));
+  const now = new Date();
+  let curGroup = null;
+  for (const s of active) {
+    const tf = sessionTimeframe(new Date(s.last_used_at), now);
+    if (tf.key !== curGroup) {
+      curGroup = tf.key;
+      els.list.appendChild(buildTimeframeHeader(tf.label));
+    }
+    els.list.appendChild(buildSessionRow(s, { archived: false }));
+  }
 
   els.archivedList.innerHTML = "";
   for (const s of archived) els.archivedList.appendChild(buildSessionRow(s, { archived: true }));
@@ -7006,9 +7050,24 @@ els.foldersHeader.addEventListener("keydown", (e) => {
 // reloads. Dragging up grows the list, down shrinks it.
 const FOLDERS_H_KEY = "agent_folders_height";
 const FOLDERS_H_MIN = 60;
+// Reserve at least this much for the session list (~two rows + a timeframe
+// header) when capping how tall the folders panel may grow. Mirrors the
+// #session-list min-height floor in features/sidebar.css.
+const SESSION_LIST_MIN = 130;
+// foldersHeightCap is the largest the folder listing may grow to. The folder
+// listing and the session list share the sidebar's flexible space (everything
+// else is fixed chrome); we leave SESSION_LIST_MIN of it for the sessions. When
+// the panel is collapsed or not yet laid out (clientHeight 0) that measurement
+// is unreliable, so fall back to a viewport-based cap that still reserves the
+// session minimum (and the footer's room).
+function foldersHeightCap() {
+  const viewCap = Math.max(FOLDERS_H_MIN, window.innerHeight - 60 - SESSION_LIST_MIN);
+  const flexible = els.foldersList.clientHeight + els.list.clientHeight;
+  if (flexible <= SESSION_LIST_MIN + FOLDERS_H_MIN) return viewCap; // unreliable
+  return Math.max(FOLDERS_H_MIN, Math.min(viewCap, flexible - SESSION_LIST_MIN));
+}
 function applyFoldersHeight(px) {
-  const max = Math.max(FOLDERS_H_MIN, window.innerHeight - 60);
-  const h = Math.round(Math.min(max, Math.max(FOLDERS_H_MIN, px)));
+  const h = Math.round(Math.min(foldersHeightCap(), Math.max(FOLDERS_H_MIN, px)));
   els.foldersList.style.maxHeight = h + "px";
   return h;
 }
@@ -8088,14 +8147,22 @@ function showFolderCtxMenu(ev, items) {
       lastWasSep = true;
       continue;
     }
-    // [label, action] or [label, action, {disabled, hidden}] — `disabled` greys
-    // the item (no action), `hidden` omits it entirely.
+    // [label, action] or [label, action, {disabled, hidden, icon}] — `disabled`
+    // greys the item (no action), `hidden` omits it, `icon` (trusted SVG markup)
+    // prefixes the label. The label is always set via textContent (never the
+    // icon's innerHTML path) so a user-derived label can't inject markup.
     const [label, action, opts] = item;
     if (opts && opts.hidden) continue;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "folder-ctx-item";
-    btn.textContent = label;
+    if (opts && opts.icon) {
+      btn.classList.add("has-icon");
+      btn.innerHTML = `<span class="ctx-item-icon" aria-hidden="true">${opts.icon}</span><span class="ctx-item-label"></span>`;
+      btn.querySelector(".ctx-item-label").textContent = label;
+    } else {
+      btn.textContent = label;
+    }
     if (opts && opts.disabled) {
       btn.disabled = true;
     } else {
