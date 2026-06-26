@@ -158,7 +158,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Reuses app.js's themed modal when available, falling back to a plain alert.
   function notifyBlockedHelp() {
     if (typeof window.showNotificationBlockedHelp === "function") { window.showNotificationBlockedHelp(); return; }
-    alert("Notifications are turned on in Omnis, but your browser is blocking them. Allow notifications for this site via the site-info icon at the left of the address bar, then reload.");
+    alert(tr("set.appearance.notifyBlockedFallback"));
   }
 
   // Pull the server-side preferences once on boot and reconcile with the local
@@ -917,7 +917,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // ─── Rendering ─────────────────────────────────────────────────────────
   async function renderBody() {
-    bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     setStatus("");
     applyClientOnlyChrome();
     const id = state.activeFile;
@@ -957,13 +957,13 @@ const BASE_PATH = window.BASE_PATH || "";
   // unchanged. A single "Reindex" button rebuilds the semantic registry index
   // (skills + agents metadata) via POST /api/registries/reindex.
   const REGISTRY_KINDS = [
-    { id: "skills",   label: "Skills"   },
-    { id: "agents",   label: "Agents"   },
-    { id: "squads",   label: "Squads"   },
-    { id: "mcp",      label: "MCP"      },
-    { id: "a2a",      label: "A2A"      },
-    { id: "commands", label: "Commands" },
-    { id: "permissions", label: "Permissions" },
+    { id: "skills",   label: tr("settings.title.skills")   },
+    { id: "agents",   label: tr("settings.menu.agent")   },
+    { id: "squads",   label: tr("subtab.squads")   },
+    { id: "mcp",      label: tr("settings.menu.mcp")      },
+    { id: "a2a",      label: tr("settings.menu.a2a")      },
+    { id: "commands", label: tr("settings.menu.user-commands") },
+    { id: "permissions", label: tr("settings.menu.permissions") },
   ];
 
   async function renderRegistriesHub(host = bodyEl) {
@@ -977,7 +977,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <div class="agent-fleet-header">
             <span class="agent-fleet-title">REGISTRIES</span>
             <button type="button" class="add-btn" id="registries-reindex-btn"
-              data-tip="Rebuild the semantic registry index (all kinds: skills, agents, squads, MCP, A2A, commands)">⟳ Reindex</button>
+              data-tip="${escHtml(tr("set.reg.reindexTip"))}">${escHtml(tr("set.reg.reindexBtn"))}</button>
           </div>
           <div class="agent-fleet-list" id="registries-kind-list"></div>
         </div>
@@ -1048,7 +1048,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const btn = e.currentTarget;
       const original = btn.textContent;
       btn.disabled = true;
-      btn.textContent = "Reindexing…";
+      btn.textContent = tr("set.reg.reindexBtnBusy");
       setStatus(tr("set.status.reindexing"));
       try {
         const res = await skillsPost("/registries/reindex", {});
@@ -1165,7 +1165,7 @@ const BASE_PATH = window.BASE_PATH || "";
         if (!("Notification" in window)) {
           osToggle.checked = false;
           saveNotifications(false);
-          alert("This browser does not support desktop notifications.");
+          alert(tr("set.appearance.notifyUnsupported"));
           return;
         }
         const before = Notification.permission;
@@ -1345,7 +1345,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     bodyEl.innerHTML = `
       <div class="docs-viewer">
-        <aside class="docs-toc" aria-label="Documentation table of contents">
+        <aside class="docs-toc" aria-label="${escHtml(tr("set.docs.tocAria"))}">
           ${tocHTML}
         </aside>
         <article class="docs-article" tabindex="-1">
@@ -1510,8 +1510,8 @@ const BASE_PATH = window.BASE_PATH || "";
         <div class="agent-split-layout">
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
-              <span class="agent-fleet-title">SQUADS</span>
-              <button type="button" class="agent-fleet-add" id="add-squad" data-tip="Add squad">+</button>
+              <span class="agent-fleet-title">${escHtml(tr("set.fleet.squadsTitle"))}</span>
+              <button type="button" class="agent-fleet-add" id="add-squad" data-tip="${escHtml(tr("set.fleet.addSquad"))}">+</button>
             </div>
             <div class="agent-fleet-list" id="squad-list"></div>
           </div>
@@ -1534,9 +1534,9 @@ const BASE_PATH = window.BASE_PATH || "";
         <div class="agent-split-layout">
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
-              <span class="agent-fleet-title">ACTIVE FLEET</span>
-              <button type="button" class="agent-fleet-import" id="import-agent" data-tip="Import Claude Code agent (.md / .json)">&#8595;</button>
-              <button type="button" class="agent-fleet-add" id="add-agent" data-tip="Add agent">+</button>
+              <span class="agent-fleet-title">${escHtml(tr("set.fleet.activeFleet"))}</span>
+              <button type="button" class="agent-fleet-import" id="import-agent" data-tip="${escHtml(tr("set.fleet.importAgent"))}">&#8595;</button>
+              <button type="button" class="agent-fleet-add" id="add-agent" data-tip="${escHtml(tr("set.fleet.addAgent"))}">+</button>
             </div>
             <div class="agent-fleet-list" id="agent-fleet-list"></div>
           </div>
@@ -1566,7 +1566,7 @@ const BASE_PATH = window.BASE_PATH || "";
             state.activeAgentIdx = newIdx >= 0 ? newIdx : newAgents.length - 1;
             renderAgentForm();
           } else {
-            setStatus(`Imported: ${names}.`, "success");
+            setStatus(tr("set.agent.imported", { names }), "success");
           }
         } catch (e) {
           setStatus(tr("set.status.importFailed", { error: e.message }), "error");
@@ -1613,8 +1613,8 @@ const BASE_PATH = window.BASE_PATH || "";
       const isDefault = (sq.name || "").toLowerCase() === "default";
       const memberCount = Array.isArray(sq.members) ? sq.members.length : 0;
       item.innerHTML = `
-        <div class="agent-fleet-item-name">${escHtml(sq.name || "(unnamed)")} ${isDefault ? '<span class="squad-default-tag">default</span>' : ""}</div>
-        <div class="agent-fleet-item-meta">${memberCount} member${memberCount === 1 ? "" : "s"}</div>
+        <div class="agent-fleet-item-name">${escHtml(sq.name || tr("app.askuser.unnamed"))} ${isDefault ? '<span class="squad-default-tag">default</span>' : ""}</div>
+        <div class="agent-fleet-item-meta">${escHtml(trN("set.squad.memberCount", memberCount))}</div>
       `;
       item.addEventListener("click", () => { state.activeSquadIdx = idx; renderAgentSquads(d); });
       listEl.appendChild(item);
@@ -1627,12 +1627,12 @@ const BASE_PATH = window.BASE_PATH || "";
     const panel = bodyEl.querySelector("#squad-detail-panel");
     if (!panel) return;
     if (!Array.isArray(d.squads) || d.squads.length === 0) {
-      panel.innerHTML = `<div class="agent-detail-empty">No squads defined. Click + to add one.</div>`;
+      panel.innerHTML = `<div class="agent-detail-empty">${escHtml(tr("set.squad.empty"))}</div>`;
       return;
     }
     const sq = d.squads[idx];
     if (!sq) {
-      panel.innerHTML = `<div class="agent-detail-empty">Select a squad.</div>`;
+      panel.innerHTML = `<div class="agent-detail-empty">${escHtml(tr("set.squad.selectPrompt"))}</div>`;
       return;
     }
     // Leader candidates: only agents marked `leader: true` (the agent named
@@ -1669,24 +1669,24 @@ const BASE_PATH = window.BASE_PATH || "";
     panel.innerHTML = `
       <div class="agent-detail-section">
         <div class="agent-detail-field">
-          <label class="agent-detail-label">Name</label>
+          <label class="agent-detail-label">${escHtml(tr("common.name"))}</label>
           <input type="text" class="agent-detail-input" id="squad-name" value="${escHtml(sq.name || "")}" ${isDefault ? "disabled" : ""} />
-          ${isDefault ? '<div class="agent-detail-hint">The default squad is required and its name cannot be changed.</div>' : ""}
+          ${isDefault ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.defaultNameHint"))}</div>` : ""}
         </div>
         <div class="agent-detail-field">
-          <label class="agent-detail-label">Description</label>
-          <input type="text" class="agent-detail-input" id="squad-desc" value="${escHtml(sq.description || "")}" placeholder="What this squad is for" />
+          <label class="agent-detail-label">${escHtml(tr("common.description"))}</label>
+          <input type="text" class="agent-detail-input" id="squad-desc" value="${escHtml(sq.description || "")}" placeholder="${escHtml(tr("set.squad.descPlaceholder"))}" />
         </div>
         <div class="agent-detail-field">
-          <label class="agent-detail-label">Leader</label>
+          <label class="agent-detail-label">${escHtml(tr("set.squad.leader"))}</label>
           <select class="agent-detail-input" id="squad-leader">
-            ${isDefault ? "" : `<option value="none" ${leaderless ? "selected" : ""}>(none — run single agent directly)</option>`}
+            ${isDefault ? "" : `<option value="none" ${leaderless ? "selected" : ""}>${escHtml(tr("set.squad.leaderNone"))}</option>`}
             ${leaderCandidates.map(n => `<option value="${escHtml(n)}" ${!leaderless && n === sq.leader ? "selected" : ""}>${escHtml(n)}</option>`).join("")}
           </select>
-          ${leaderless ? '<div class="agent-detail-hint">Leaderless: the single selected agent runs directly with only its own declared tools (plus ask_user and the teammate mailbox). No coordinator.</div>' : ""}
+          ${leaderless ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.leaderlessHint"))}</div>` : ""}
         </div>
         <div class="agent-detail-field">
-          <label class="agent-detail-label">Members</label>
+          <label class="agent-detail-label">${escHtml(tr("set.squad.members"))}</label>
           <div class="agent-tools-grid" id="squad-members">
             ${sortedMembers.map(a => {
               const isOn = members.includes(a.name);
@@ -1704,9 +1704,9 @@ const BASE_PATH = window.BASE_PATH || "";
             `;
             }).join("")}
           </div>
-          <div class="agent-detail-hint">${leaderless ? "Pick exactly one agent — it runs as the squad on its own." : "Sub-agents the leader can delegate to (the leader itself is not selectable)."}</div>
+          <div class="agent-detail-hint">${escHtml(leaderless ? tr("set.squad.membersHintLeaderless") : tr("set.squad.membersHint"))}</div>
         </div>
-        ${!isDefault ? `<div class="squad-detail-actions"><button type="button" class="agent-detail-remove" id="squad-remove">Delete squad</button></div>` : ""}
+        ${!isDefault ? `<div class="squad-detail-actions"><button type="button" class="agent-detail-remove" id="squad-remove">${escHtml(tr("set.squad.deleteBtn"))}</button></div>` : ""}
       </div>
     `;
 
@@ -1854,7 +1854,7 @@ const BASE_PATH = window.BASE_PATH || "";
     el.innerHTML = "";
 
     // CORE DIRECTORIES
-    el.appendChild(envSection("CORE DIRECTORIES", "Path where soft-skill playbooks are stored.", body => {
+    el.appendChild(envSection(tr("set.env.coreDirectories"), tr("set.env.softskillsDesc"), body => {
       const g = document.createElement("div");
       g.className = "env-grid-2";
       g.appendChild(envText("softskills_dir"));
@@ -1862,7 +1862,7 @@ const BASE_PATH = window.BASE_PATH || "";
     }));
 
     // OPTIMIZATION
-    el.appendChild(envSection("OPTIMIZATION", null, body => {
+    el.appendChild(envSection(tr("set.env.optimization"), null, body => {
       const isOn = !!d.token_optimization;
       const chip = document.createElement("div");
       chip.className = "agent-tool-card env-opt-chip" + (isOn ? " tool-on" : "");
@@ -1870,7 +1870,7 @@ const BASE_PATH = window.BASE_PATH || "";
         <div class="agent-tool-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
         <div class="agent-tool-info">
           <span class="agent-tool-name">token_optimization</span>
-          <span class="agent-tool-desc">Reduce token usage</span>
+          <span class="agent-tool-desc">${escHtml(tr("set.env.reduceTokens"))}</span>
         </div>
         <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
       `;
@@ -1885,7 +1885,7 @@ const BASE_PATH = window.BASE_PATH || "";
     }));
 
     // RUNTIME CONFIG
-    el.appendChild(envSection("RUNTIME CONFIG", null, body => {
+    el.appendChild(envSection(tr("set.env.runtimeConfig"), null, body => {
       const g = document.createElement("div");
       g.className = "env-grid-2";
       g.appendChild(envText("bash_output_filters_dir"));
@@ -1896,7 +1896,7 @@ const BASE_PATH = window.BASE_PATH || "";
     }));
 
     // EXTERNAL API KEYS
-    el.appendChild(envSection("EXTERNAL API KEYS", null, body => {
+    el.appendChild(envSection(tr("set.env.externalApiKeys"), null, body => {
       body.className += " env-section-keys";
       const wrap = document.createElement("div");
       wrap.className = "env-field";
@@ -1913,7 +1913,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const eye = document.createElement("button");
       eye.type = "button";
       eye.className = "env-secret-eye";
-      eye.setAttribute("data-tip", "Show/hide");
+      eye.setAttribute("data-tip", tr("set.env.showHide"));
       eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
       eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
       inputWrap.appendChild(inp);
@@ -1966,10 +1966,10 @@ const BASE_PATH = window.BASE_PATH || "";
     host.innerHTML = `
       <div class="model-panel-header">
         <div>
-          <h2 class="model-panel-title">Configured Providers</h2>
-          <p class="model-panel-desc">A provider groups a kind (anthropic, openai, openai_compat, gemini) with a base URL and API key. Models reference a provider and inherit its credentials.</p>
+          <h2 class="model-panel-title">${escHtml(tr("set.model.configuredProviders"))}</h2>
+          <p class="model-panel-desc">${escHtml(tr("set.model.providersDesc"))}</p>
         </div>
-        <button type="button" class="add-btn model-add-btn" id="add-provider">+ Add provider</button>
+        <button type="button" class="add-btn model-add-btn" id="add-provider">${escHtml(tr("set.model.addProvider"))}</button>
       </div>
       <div id="providers-grid"></div>
     `;
@@ -2004,8 +2004,8 @@ const BASE_PATH = window.BASE_PATH || "";
             <strong>${escHtml(name.toUpperCase())}</strong>
           </div>
           <div>
-            <button type="button" class="model-test-link" data-tip="Fetch model list from this provider">⟳ TEST</button>
-            <button type="button" class="model-remove-link">⏷ REMOVE</button>
+            <button type="button" class="model-test-link" data-tip="${escHtml(tr("set.model.testTip"))}">${escHtml(tr("set.model.test"))}</button>
+            <button type="button" class="model-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>
           </div>
         </div>
         <div class="model-card-body"></div>
@@ -2019,7 +2019,7 @@ const BASE_PATH = window.BASE_PATH || "";
       kindF.className = "model-field";
       const kindLbl = document.createElement("label");
       kindLbl.className = "model-field-label";
-      kindLbl.textContent = "KIND";
+      kindLbl.textContent = tr("set.model.kind");
       const kindSel = document.createElement("select");
       kindSel.className = "model-field-input";
       ["anthropic", "openai", "openai_compat", "gemini"].forEach(k => {
@@ -2045,8 +2045,8 @@ const BASE_PATH = window.BASE_PATH || "";
       card.querySelector(".model-remove-link").addEventListener("click", async () => {
         const refs = Object.entries(d.models || {}).filter(([, m]) => (m.provider_ref || "").toLowerCase() === name).map(([n]) => n);
         const msg = refs.length
-          ? `Remove provider "${name}"?\n\nThese models reference it and will lose their credentials: ${refs.join(", ")}`
-          : `Remove provider "${name}"?`;
+          ? tr("set.model.removeProviderRefs", { name, refs: refs.join(", ") })
+          : tr("set.model.removeProvider", { name });
         if (!await appConfirm(msg)) return;
         delete d.providers[name];
         markFormDirty("models");
@@ -2057,11 +2057,11 @@ const BASE_PATH = window.BASE_PATH || "";
           const params = new URLSearchParams({ provider: p.kind || "openai_compat" });
           if (p.api_key) params.set("api_key", p.api_key);
           if (p.base_url) params.set("base_url", p.base_url);
-          setStatus(`Testing ${name}…`);
+          setStatus(tr("set.model.testingName", { name }));
           const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
           const j = await r.json();
           if (!r.ok) throw new Error(j.error || r.statusText);
-          setStatus(`${name}: ${j.models?.length || 0} models reachable.`, "success");
+          setStatus(tr("set.model.reachable", { name, count: j.models?.length || 0 }), "success");
         } catch (e) {
           setStatus(`${name}: ${e.message}`, "error");
         }
@@ -2075,10 +2075,10 @@ const BASE_PATH = window.BASE_PATH || "";
     host.innerHTML = `
       <div class="model-panel-header">
         <div>
-          <h2 class="model-panel-title">Configured Models</h2>
-          <p class="model-panel-desc">Each model references a provider for credentials and endpoint. Use the ⟳ button to populate the model list from the provider. Mark a model <strong>EMBEDDING</strong> to make it selectable as the internal semantic embedder.</p>
+          <h2 class="model-panel-title">${escHtml(tr("set.model.configuredModels"))}</h2>
+          <p class="model-panel-desc">${tr("set.model.modelsDesc")}</p>
         </div>
-        <button type="button" class="add-btn model-add-btn" id="add-model">+ Add model</button>
+        <button type="button" class="add-btn model-add-btn" id="add-model">${escHtml(tr("set.model.addModel"))}</button>
       </div>
       <div id="embed-select-row"></div>
       <div id="models-grid"></div>
@@ -2120,7 +2120,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const title = document.createElement("div");
     title.className = "model-card-title";
     const strong = document.createElement("strong");
-    strong.textContent = "INTERNAL EMBEDDING MODEL";
+    strong.textContent = tr("set.model.internalEmbedding");
     title.appendChild(strong);
     hdr.appendChild(title);
 
@@ -2134,8 +2134,8 @@ const BASE_PATH = window.BASE_PATH || "";
     const none = document.createElement("option");
     none.value = "";
     none.textContent = embedModels.length
-      ? "(disabled — semantic recall off)"
-      : "(no embedding models — tick EMBEDDING MODEL on a model below)";
+      ? tr("set.model.embedDisabled")
+      : tr("set.model.noEmbedModels");
     sel.appendChild(none);
     for (const n of embedModels) {
       const opt = document.createElement("option");
@@ -2150,7 +2150,7 @@ const BASE_PATH = window.BASE_PATH || "";
     });
     const desc = document.createElement("p");
     desc.className = "model-panel-desc";
-    desc.textContent = "Drives soft-skill / precedent / codebase semantic recall. Changing it rebuilds the indexes on next use; a server restart applies it.";
+    desc.textContent = tr("set.model.embedDesc");
 
     fld.appendChild(sel); fld.appendChild(desc);
     body.appendChild(fld);
@@ -2173,7 +2173,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!a || !a.model_ref) continue;
       const k = String(a.model_ref).toLowerCase();
       if (!usedBy.has(k)) usedBy.set(k, []);
-      usedBy.get(k).push(a.name || "(unnamed)");
+      usedBy.get(k).push(a.name || tr("app.askuser.unnamed"));
     }
 
     Object.keys(d.models).forEach(name => {
@@ -2184,8 +2184,8 @@ const BASE_PATH = window.BASE_PATH || "";
       const dotClass = inUse ? "dot-active" : "dot-standby";
       const MAX_TIP_AGENTS = 4;
       const dotTip = inUse
-        ? `Used by ${agents.slice(0, MAX_TIP_AGENTS).join(", ")}${agents.length > MAX_TIP_AGENTS ? ", …" : ""}`
-        : "Unused — no agent uses this model";
+        ? tr("set.model.usedBy", { agents: `${agents.slice(0, MAX_TIP_AGENTS).join(", ")}${agents.length > MAX_TIP_AGENTS ? ", …" : ""}` })
+        : tr("set.model.unused");
       const card = document.createElement("div");
       card.className = "model-card";
       card.innerHTML = `
@@ -2194,7 +2194,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <span class="model-status-dot ${dotClass}" data-tip="${escHtml(dotTip)}"></span>
             <strong>${escHtml(name.toUpperCase())}</strong>
           </div>
-          <button type="button" class="model-remove-link">⏷ REMOVE</button>
+          <button type="button" class="model-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>
         </div>
         <div class="model-card-body"></div>
       `;
@@ -2251,10 +2251,10 @@ const BASE_PATH = window.BASE_PATH || "";
     // vLLM/LiteLLM that runs away only when streamed).
     const streamWrap = document.createElement("span");
     streamWrap.className = "model-stream-wrap";
-    streamWrap.setAttribute("data-tip", "stream this model's output (off = use the non-streaming endpoint)");
+    streamWrap.setAttribute("data-tip", tr("set.model.streamTip"));
     const streamText = document.createElement("span");
     streamText.className = "model-stream-label";
-    streamText.textContent = "Streaming";
+    streamText.textContent = tr("set.model.streaming");
     const streamSwitch = document.createElement("label");
     streamSwitch.className = "agent-toggle-switch model-stream-toggle";
     const streamCb = document.createElement("input");
@@ -2277,10 +2277,10 @@ const BASE_PATH = window.BASE_PATH || "";
     // automatically and may reject the annotation).
     const cacheWrap = document.createElement("span");
     cacheWrap.className = "model-stream-wrap";
-    cacheWrap.setAttribute("data-tip", "prompt-cache this model's long-lived prefix (for a LiteLLM proxy fronting an Anthropic model; leave off for a plain OpenAI endpoint)");
+    cacheWrap.setAttribute("data-tip", tr("set.model.cacheTip"));
     const cacheText = document.createElement("span");
     cacheText.className = "model-stream-label";
-    cacheText.textContent = "Prompt cache";
+    cacheText.textContent = tr("set.model.promptCache");
     const cacheSwitch = document.createElement("label");
     cacheSwitch.className = "agent-toggle-switch model-stream-toggle";
     const cacheCb = document.createElement("input");
@@ -2304,12 +2304,12 @@ const BASE_PATH = window.BASE_PATH || "";
     provF.className = "model-field";
     const provLbl = document.createElement("label");
     provLbl.className = "model-field-label";
-    provLbl.textContent = "PROVIDER";
+    provLbl.textContent = tr("set.model.provider");
     const provSel = document.createElement("select");
     provSel.className = "model-field-input";
     if (!providerNames.length) {
       const opt = document.createElement("option");
-      opt.value = ""; opt.textContent = "(no providers — add one first)";
+      opt.value = ""; opt.textContent = tr("set.model.noProviders");
       provSel.appendChild(opt);
       provSel.disabled = true;
     } else {
@@ -2328,13 +2328,13 @@ const BASE_PATH = window.BASE_PATH || "";
     const combo = modelComboField(m, onChange, n => d.providers[n], rerender, { prefillOverwrites });
     combo.className = "model-field model-field-combo";
     const comboSpan = combo.querySelector("span");
-    if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = "MODEL"; }
+    if (comboSpan) { comboSpan.className = "model-field-label"; comboSpan.textContent = tr("set.model.model"); }
     fg.appendChild(combo);
 
     fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
     fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
-    fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }, "price for prompt tokens served from the provider's cache (cache read); defaults to the input price"));
-    fg.appendChild(numField("cache_creation_token_price_per_million", m.cache_creation_token_price_per_million, v => { m.cache_creation_token_price_per_million = v; onChange(); }, "price for prompt tokens written to the provider's cache (cache creation); defaults to the input price"));
+    fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }, tr("set.model.cachedInputTip")));
+    fg.appendChild(numField("cache_creation_token_price_per_million", m.cache_creation_token_price_per_million, v => { m.cache_creation_token_price_per_million = v; onChange(); }, tr("set.model.cacheCreationTip")));
     fg.appendChild(numField("output_token_price_per_million", m.output_token_price_per_million, v => { m.output_token_price_per_million = v; onChange(); }));
 
     // Thin separator setting the embedder-specific fields (EMBEDDING MODEL +
@@ -2348,13 +2348,13 @@ const BASE_PATH = window.BASE_PATH || "";
     // agent "Active State" toggle; the explanatory text is a tooltip.
     const embF = document.createElement("div");
     embF.className = "model-field";
-    embF.setAttribute("data-tip", "usable as internal embedder");
+    embF.setAttribute("data-tip", tr("set.model.embeddingUsable"));
     const embLbl = document.createElement("label");
     embLbl.className = "model-field-label";
-    embLbl.textContent = "EMBEDDING MODEL";
+    embLbl.textContent = tr("set.model.embeddingModel");
     const embSwitch = document.createElement("label");
     embSwitch.className = "agent-toggle-switch";
-    embSwitch.setAttribute("data-tip", "usable as internal embedder");
+    embSwitch.setAttribute("data-tip", tr("set.model.embeddingUsable"));
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.className = "agent-toggle-input";
@@ -2398,7 +2398,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const titleEl = document.createElement("p");
       titleEl.className = "app-dialog-msg";
-      titleEl.textContent = "Add Model";
+      titleEl.textContent = tr("set.model.addModelTitle");
       box.appendChild(titleEl);
 
       // NAME — kept outside the re-rendered config area so its value survives a
@@ -2407,12 +2407,12 @@ const BASE_PATH = window.BASE_PATH || "";
       nameField.className = "model-field model-field-full";
       const nameLbl = document.createElement("label");
       nameLbl.className = "model-field-label";
-      nameLbl.textContent = "NAME";
+      nameLbl.textContent = tr("set.model.name");
       const nameInp = document.createElement("input");
       nameInp.type = "text";
       nameInp.className = "model-field-input";
       nameInp.setAttribute("autocomplete", "off");
-      nameInp.placeholder = "e.g. premium, fast, embedder";
+      nameInp.placeholder = tr("set.model.namePlaceholder");
       const nameErr = document.createElement("span");
       nameErr.className = "model-dialog-err";
       nameInp.addEventListener("input", () => { nameErr.textContent = ""; });
@@ -2447,18 +2447,18 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const discardBtn = document.createElement("button");
       discardBtn.type = "button";
-      discardBtn.textContent = "Discard";
+      discardBtn.textContent = tr("settings.discard");
 
       const saveBtn = document.createElement("button");
       saveBtn.type = "button";
       saveBtn.className = "btn-primary";
-      saveBtn.textContent = "Save";
+      saveBtn.textContent = tr("common.save");
 
       const close = result => { overlay.remove(); resolve(result); };
       discardBtn.addEventListener("click", () => close(null));
       saveBtn.addEventListener("click", () => {
         const name = nameInp.value.trim().toLowerCase();
-        if (!name) { nameErr.textContent = "Name is required."; nameInp.focus(); return; }
+        if (!name) { nameErr.textContent = tr("set.model.nameRequired"); nameInp.focus(); return; }
         if (d.models[name]) { nameErr.textContent = `Model "${name}" already exists.`; nameInp.focus(); return; }
         close({ name, model: m });
       });
@@ -2524,7 +2524,7 @@ const BASE_PATH = window.BASE_PATH || "";
     f.className = "model-field model-field-dim";
     const lbl = document.createElement("label");
     lbl.className = "model-field-label";
-    lbl.textContent = "DIM";
+    lbl.textContent = tr("set.model.dim");
     const wrap = document.createElement("div");
     wrap.className = "combo-wrap";
     const inp = document.createElement("input");
@@ -2539,7 +2539,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "combo-fetch-btn";
-    btn.setAttribute("data-tip", "Detect dimension from provider");
+    btn.setAttribute("data-tip", tr("set.model.detectDimTip"));
     btn.textContent = "⟳";
     btn.addEventListener("click", async () => {
       const model = (m.model || "").trim();
@@ -2597,7 +2597,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const eye = document.createElement("button");
     eye.type = "button";
     eye.className = "env-secret-eye";
-    eye.setAttribute("data-tip", "Show/hide");
+    eye.setAttribute("data-tip", tr("set.env.showHide"));
     eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
     eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
     wrap.appendChild(inp); wrap.appendChild(eye);
@@ -2659,7 +2659,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!shown.length) {
         const li = document.createElement("li");
         li.className = "combo-empty";
-        li.textContent = q ? "No match" : "No models loaded";
+        li.textContent = q ? tr("set.model.noMatch") : tr("set.model.noModelsLoaded");
         list.appendChild(li);
         return;
       }
@@ -2719,7 +2719,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const fetchBtn = document.createElement("button");
     fetchBtn.type = "button";
     fetchBtn.className = "combo-fetch-btn";
-    fetchBtn.setAttribute("data-tip", "Load models from provider");
+    fetchBtn.setAttribute("data-tip", tr("set.model.loadModelsTip"));
     fetchBtn.textContent = "⟳";
 
     fetchBtn.addEventListener("click", async () => {
@@ -2797,12 +2797,12 @@ const BASE_PATH = window.BASE_PATH || "";
     docs: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
   };
   const TOOL_DISPLAY = {
-    Bash: "Shell", Read: "File Read", Write: "File Write", Edit: "Inline Edit",
-    Grep: "Grep", Glob: "Glob", revert: "Revert", mime: "MIME Type",
-    mcp: "Context Proto", Skill: "Core Skills",
-    softskills: "Soft Skills", calc: "Math Eng", ddg: "Web Search",
-    serpapi: "SerpAPI", web: "Browser Tool", registries: "Skill Registries",
-    code_search: "Code Search", docs: "Documentation",
+    Bash: tr("tool.display.Bash"), Read: tr("tool.display.Read"), Write: tr("tool.display.Write"), Edit: tr("tool.display.Edit"),
+    Grep: tr("tool.display.Grep"), Glob: tr("tool.display.Glob"), revert: tr("tool.display.revert"), mime: tr("tool.display.mime"),
+    mcp: tr("tool.display.mcp"), Skill: tr("tool.display.Skill"),
+    softskills: tr("tool.display.softskills"), calc: tr("tool.display.calc"), ddg: tr("tool.display.ddg"),
+    serpapi: tr("tool.display.serpapi"), web: tr("tool.display.web"), registries: tr("tool.display.registries"),
+    code_search: tr("tool.display.code_search"), docs: tr("tool.display.docs"),
   };
 
   // updateFleetModelLine syncs the model display under a fleet-list item with
@@ -2834,7 +2834,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!fleetList || !detailPanel) return;
 
     if (!d.agents.length) {
-      fleetList.innerHTML = `<p class="empty" style="padding:1rem">No agents defined.</p>`;
+      fleetList.innerHTML = `<p class="empty" style="padding:1rem">${escHtml(tr("set.fleet.noAgents"))}</p>`;
       detailPanel.innerHTML = "";
       return;
     }
@@ -2899,7 +2899,7 @@ const BASE_PATH = window.BASE_PATH || "";
         item.innerHTML = `
           <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
           <div class="agent-fleet-info">
-            <span class="agent-fleet-name">${escHtml(a.name || "(unnamed)")} ${agentSourceBadge}</span>
+            <span class="agent-fleet-name">${escHtml(a.name || tr("app.askuser.unnamed"))} ${agentSourceBadge}</span>
             ${modelHtml}
           </div>
         `;
@@ -2909,8 +2909,8 @@ const BASE_PATH = window.BASE_PATH || "";
     };
 
     // Render custom agents first (labelled simply "AGENTS"), then built-in
-    renderAgentGroup(customAgents, "AGENTS");
-    renderAgentGroup(builtinAgents, "BUILT-IN AGENTS");
+    renderAgentGroup(customAgents, tr("set.fleet.agentsLabel"));
+    renderAgentGroup(builtinAgents, tr("set.fleet.builtinAgentsLabel"));
 
     // Detail panel
     const modelsCatalog = state.parsed.models?.value?.models;
@@ -2939,19 +2939,19 @@ const BASE_PATH = window.BASE_PATH || "";
       : "";
     titleBar.innerHTML = `
       <div class="agent-detail-title-left">
-        <h2 class="agent-detail-name">${escHtml(a.name || "(unnamed)")}</h2>
+        <h2 class="agent-detail-name">${escHtml(a.name || tr("app.askuser.unnamed"))}</h2>
         ${detailSourceBadge}
         <span class="agent-live-badge">LIVE</span>
       </div>
       <div class="agent-detail-title-right">
         <label class="agent-active-toggle-wrap">
-          <span class="agent-active-toggle-label">Active State</span>
+          <span class="agent-active-toggle-label">${escHtml(tr("set.agent.activeState"))}</span>
           <span class="agent-toggle-switch">
             <input type="checkbox" class="agent-toggle-input" ${isEnabled ? "checked" : ""} ${isLeader ? "disabled" : ""}>
             <span class="agent-toggle-slider"></span>
           </span>
         </label>
-        ${isBuiltin ? "" : `<button type="button" class="model-remove-link agent-remove-link">⏷ REMOVE</button>`}
+        ${isBuiltin ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
       </div>
     `;
     titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
@@ -2979,7 +2979,7 @@ const BASE_PATH = window.BASE_PATH || "";
     genSection.className = "agent-detail-section";
     const genHdr = document.createElement("div");
     genHdr.className = "agent-section-hdr";
-    genHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><h3>General Settings</h3>`;
+    genHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><h3>${escHtml(tr("set.hdr.generalSettings"))}</h3>`;
     genSection.appendChild(genHdr);
 
     const genGrid = document.createElement("div");
@@ -2997,27 +2997,27 @@ const BASE_PATH = window.BASE_PATH || "";
     }
 
     // Agent Display Name
-    genGrid.appendChild(genField("Agent Display Name", f => {
+    genGrid.appendChild(genField(tr("set.agent.displayName"), f => {
       const inp = document.createElement("input");
       inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a.name || "";
       if (isLeader) inp.disabled = true;
       inp.addEventListener("input", () => {
         a.name = inp.value;
-        detailPanel.querySelector(".agent-detail-name").textContent = a.name || "(unnamed)";
+        detailPanel.querySelector(".agent-detail-name").textContent = a.name || tr("app.askuser.unnamed");
         const nameEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-name");
-        if (nameEl) nameEl.textContent = a.name || "(unnamed)";
+        if (nameEl) nameEl.textContent = a.name || tr("app.askuser.unnamed");
         onChange();
       });
       f.appendChild(inp);
     }));
 
     // Model Reference
-    genGrid.appendChild(genField("Model Reference", f => {
+    genGrid.appendChild(genField(tr("set.agent.modelRef"), f => {
       const sel = document.createElement("select");
       sel.className = "agent-gen-input";
       for (const o of ["", ...modelOptions]) {
         const opt = document.createElement("option");
-        opt.value = o; opt.textContent = o || "(none)";
+        opt.value = o; opt.textContent = o || tr("set.none");
         if (o === (a.model_ref || "")) opt.selected = true;
         sel.appendChild(opt);
       }
@@ -3035,7 +3035,7 @@ const BASE_PATH = window.BASE_PATH || "";
         const hint = document.createElement("span");
         hint.className = "agent-model-recommendation";
         hint.textContent = `<${a.recommended_model}>`;
-        hint.setAttribute("data-tip", "Recommended by the agent's instruction.md frontmatter (no matching entry in models.json).");
+        hint.setAttribute("data-tip", tr("set.agent.recommendedTip"));
         f.appendChild(hint);
       }
     }));
@@ -3048,7 +3048,7 @@ const BASE_PATH = window.BASE_PATH || "";
     toolSection.className = "agent-detail-section";
     const toolHdr = document.createElement("div");
     toolHdr.className = "agent-section-hdr";
-    toolHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><h3>Available Tools</h3>`;
+    toolHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><h3>${escHtml(tr("set.hdr.availableTools"))}</h3>`;
     toolSection.appendChild(toolHdr);
 
     const toolGrid = document.createElement("div");
@@ -3119,14 +3119,14 @@ const BASE_PATH = window.BASE_PATH || "";
     // locked on (cannot be unmarked).
     const featureCards = [
       {
-        key: "leader", label: "leader", desc: "Can Lead a Squad",
+        key: "leader", label: "leader", desc: tr("set.agent.canLead"),
         icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"/><path d="M5 20V8l7-4 7 4v12"/><path d="M9 20v-6h6v6"/></svg>`,
         getValue: () => isLeader ? true : !!a.leader,
         setValue: v => { a.leader = v; onChange(); },
         locked: isLeader,
       },
       {
-        key: "allow_file_attachments", label: "files", desc: "File Attachments",
+        key: "allow_file_attachments", label: "files", desc: tr("set.agent.fileAttachments"),
         icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
         getValue: () => !!a.allow_file_attachments,
         setValue: v => { a.allow_file_attachments = v; onChange(); },
@@ -3173,7 +3173,7 @@ const BASE_PATH = window.BASE_PATH || "";
       parSec.className = "agent-detail-section";
       const parHdr = document.createElement("div");
       parHdr.className = "agent-section-hdr";
-      parHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="21"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="18" y1="3" x2="18" y2="21"/></svg><h3>Parallelism</h3>`;
+      parHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="21"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="18" y1="3" x2="18" y2="21"/></svg><h3>${escHtml(tr("set.hdr.parallelism"))}</h3>`;
       parSec.appendChild(parHdr);
       const parBody = document.createElement("div");
       parBody.className = "agent-gen-grid";
@@ -3181,13 +3181,13 @@ const BASE_PATH = window.BASE_PATH || "";
       parField.className = "agent-gen-field";
       const parLbl = document.createElement("label");
       parLbl.className = "agent-gen-label";
-      parLbl.textContent = "Max parallel instances";
+      parLbl.textContent = tr("set.agent.maxInstances");
       // App tooltip (themed #tip-layer via data-tip), not the native browser
       // title bubble, to match the rest of the settings UI.
       const parInfo = document.createElement("span");
       parInfo.className = "agent-gen-info";
       parInfo.textContent = "?";
-      parInfo.setAttribute("data-tip", "1 = run one at a time (default). >1 lets the leader dispatch up to this many independent tasks to this agent in one parallel batch call.");
+      parInfo.setAttribute("data-tip", tr("set.agent.maxInstancesTip"));
       parLbl.appendChild(parInfo);
       // Custom stepper so the +/- controls match the app look & feel instead of
       // the browser's native number spinner.
@@ -3201,12 +3201,12 @@ const BASE_PATH = window.BASE_PATH || "";
       parDec.type = "button";
       parDec.className = "num-stepper-btn";
       parDec.textContent = "−";
-      parDec.setAttribute("aria-label", "Decrease");
+      parDec.setAttribute("aria-label", tr("set.agent.decrease"));
       const parInc = document.createElement("button");
       parInc.type = "button";
       parInc.className = "num-stepper-btn";
       parInc.textContent = "+";
-      parInc.setAttribute("aria-label", "Increase");
+      parInc.setAttribute("aria-label", tr("set.agent.increase"));
       const applyMax = () => {
         let n = parseInt(parInp.value, 10);
         if (!Number.isFinite(n) || n < 1) n = 1;
@@ -3230,7 +3230,7 @@ const BASE_PATH = window.BASE_PATH || "";
       parWrap.appendChild(parInc);
       const parHint = document.createElement("p");
       parHint.className = "agent-gen-hint";
-      parHint.textContent = "1 = serial (one at a time). Higher values let the leader run that many independent tasks for this agent in parallel.";
+      parHint.textContent = tr("set.agent.maxInstancesHint");
       parField.appendChild(parLbl);
       parField.appendChild(parWrap);
       parField.appendChild(parHint);
@@ -3244,7 +3244,7 @@ const BASE_PATH = window.BASE_PATH || "";
     skillsSec.className = "agent-detail-section" + (cur.has("Skill") ? "" : " section-inactive");
     const skillsHdr = document.createElement("div");
     skillsHdr.className = "agent-section-hdr";
-    skillsHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><h3>Skills</h3>`;
+    skillsHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><h3>${escHtml(tr("settings.title.skills"))}</h3>`;
     skillsSec.appendChild(skillsHdr);
     const skillsBody = document.createElement("div");
     skillsBody.className = "skills-agent-body";
@@ -3257,7 +3257,7 @@ const BASE_PATH = window.BASE_PATH || "";
     mcpSec.className = "agent-detail-section" + (cur.has("mcp") ? "" : " section-inactive");
     const mcpHdr = document.createElement("div");
     mcpHdr.className = "agent-section-hdr";
-    mcpHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/><line x1="8" y1="16" x2="8" y2="20"/><line x1="16" y1="16" x2="16" y2="20"/></svg><h3>MCP Servers</h3>`;
+    mcpHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/><line x1="8" y1="16" x2="8" y2="20"/><line x1="16" y1="16" x2="16" y2="20"/></svg><h3>${escHtml(tr("settings.title.mcp"))}</h3>`;
     mcpSec.appendChild(mcpHdr);
     const mcpBody = document.createElement("div");
     mcpBody.className = "skills-agent-body";
@@ -3270,7 +3270,7 @@ const BASE_PATH = window.BASE_PATH || "";
     a2aSec.className = "agent-detail-section";
     const a2aHdr = document.createElement("div");
     a2aHdr.className = "agent-section-hdr";
-    a2aHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg><h3>A2A Agents</h3>`;
+    a2aHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg><h3>${escHtml(tr("settings.title.a2a"))}</h3>`;
     a2aSec.appendChild(a2aHdr);
     const a2aBody = document.createElement("div");
     a2aBody.className = "skills-agent-body";
@@ -3283,7 +3283,7 @@ const BASE_PATH = window.BASE_PATH || "";
     instrSection.className = "agent-detail-section";
     const instrHdr = document.createElement("div");
     instrHdr.className = "agent-section-hdr";
-    instrHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><h3>Instruction Set</h3>`;
+    instrHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><h3>${escHtml(tr("set.hdr.instructionSet"))}</h3>`;
     instrSection.appendChild(instrHdr);
 
     const instrBody = document.createElement("div");
@@ -3294,16 +3294,16 @@ const BASE_PATH = window.BASE_PATH || "";
     descF.className = "agent-instr-field";
     const descLbl = document.createElement("label");
     descLbl.className = "agent-instr-label";
-    descLbl.textContent = "Public Description";
+    descLbl.textContent = tr("set.agent.publicDesc");
     if (isBuiltin) {
       const tag = document.createElement("span");
       tag.className = "agent-builtin-tag";
-      tag.textContent = "BUILT-IN";
+      tag.textContent = tr("set.agent.builtin");
       descLbl.appendChild(tag);
     }
     const descInp = document.createElement("input");
     descInp.type = "text"; descInp.className = "agent-gen-input";
-    descInp.placeholder = "Explain what this agent does in one sentence…";
+    descInp.placeholder = tr("set.agent.descPlaceholder");
     const descVal = isBuiltin && builtinDefaults ? (builtinDefaults.description || "") : (a.description || "");
     descInp.value = descVal;
     if (isBuiltin) {
@@ -3323,17 +3323,17 @@ const BASE_PATH = window.BASE_PATH || "";
     sysTop.className = "agent-instr-top-row";
     const sysLbl = document.createElement("label");
     sysLbl.className = "agent-instr-label";
-    sysLbl.textContent = "System Instructions";
+    sysLbl.textContent = tr("set.agent.systemInstructions");
     if (isBuiltin) {
       const tag = document.createElement("span");
       tag.className = "agent-builtin-tag";
-      tag.textContent = "BUILT-IN";
+      tag.textContent = tr("set.agent.builtin");
       sysLbl.appendChild(tag);
     }
     const sysCount = document.createElement("span");
     sysCount.className = "agent-instr-count";
     const instrVal = isBuiltin && builtinDefaults ? (builtinDefaults.instruction || "") : (a.instruction || "");
-    sysCount.textContent = Math.round(instrVal.length / 4) + " tokens used";
+    sysCount.textContent = tr("set.agent.tokensUsed", { count: Math.round(instrVal.length / 4) });
     sysTop.appendChild(sysLbl);
     sysTop.appendChild(sysCount);
     sysF.appendChild(sysTop);
@@ -3345,7 +3345,7 @@ const BASE_PATH = window.BASE_PATH || "";
     } else {
       ta.addEventListener("input", () => {
         a.instruction = ta.value;
-        sysCount.textContent = Math.round(ta.value.length / 4) + " tokens used";
+        sysCount.textContent = tr("set.agent.tokensUsed", { count: Math.round(ta.value.length / 4) });
         onChange();
       });
     }
@@ -3358,7 +3358,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // ── Advanced paths (collapsible) ──
     const adv = document.createElement("details");
     adv.className = "agent-advanced";
-    adv.innerHTML = `<summary class="agent-advanced-summary">Advanced path overrides</summary>`;
+    adv.innerHTML = `<summary class="agent-advanced-summary">${escHtml(tr("set.agent.advancedPaths"))}</summary>`;
     const advGrid = document.createElement("div");
     advGrid.className = "agent-gen-grid";
     for (const [key, label] of [
@@ -3371,7 +3371,7 @@ const BASE_PATH = window.BASE_PATH || "";
       lbl.className = "agent-gen-label"; lbl.textContent = label;
       const inp = document.createElement("input");
       inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a[key] || "";
-      if (isLeader && !a[key]) inp.placeholder = "(default)";
+      if (isLeader && !a[key]) inp.placeholder = tr("set.default");
       inp.addEventListener("input", () => { a[key] = inp.value; onChange(); });
       f.appendChild(lbl); f.appendChild(inp); advGrid.appendChild(f);
     }
@@ -3386,10 +3386,10 @@ const BASE_PATH = window.BASE_PATH || "";
       const acts = document.createElement("div");
       acts.className = "agent-detail-actions";
       const upBtn = document.createElement("button");
-      upBtn.type = "button"; upBtn.className = "up-btn"; upBtn.textContent = "▲ Move up";
+      upBtn.type = "button"; upBtn.className = "up-btn"; upBtn.textContent = tr("set.agent.moveUp");
       if (!upOk) upBtn.disabled = true;
       const dnBtn = document.createElement("button");
-      dnBtn.type = "button"; dnBtn.className = "down-btn"; dnBtn.textContent = "▼ Move down";
+      dnBtn.type = "button"; dnBtn.className = "down-btn"; dnBtn.textContent = tr("set.agent.moveDown");
       if (!downOk) dnBtn.disabled = true;
       upBtn.addEventListener("click", () => {
         [d.agents[idx - 1], d.agents[idx]] = [d.agents[idx], d.agents[idx - 1]];
@@ -3429,24 +3429,24 @@ const BASE_PATH = window.BASE_PATH || "";
     bodyEl.innerHTML = `
       <div class="settings-form">
         <section class="form-section">
-          <h3>Default mode</h3>
+          <h3>${escHtml(tr("set.hdr.defaultMode"))}</h3>
           <div class="form-card" style="margin-bottom:0">
             <select class="perm-mode">
               ${PERM_MODES.map(m => `<option value="${m}"${p.defaultMode === m ? " selected" : ""}>${m}</option>`).join("")}
             </select>
-            <p class="empty" style="margin:.4rem 0 0">Behaviour for tool calls matching no rule. Rules are evaluated deny → ask → allow (deny always wins).</p>
+            <p class="empty" style="margin:.4rem 0 0">${escHtml(tr("set.perm.modeHint"))}</p>
           </div>
         </section>
         ${PERM_TIERS.map(k => `
           <section class="form-section">
-            <h3>${k} <button type="button" class="add-btn" data-list="${k}">+ Add rule</button></h3>
+            <h3>${escHtml(tr("set.perm.tier." + k))} <button type="button" class="add-btn" data-list="${k}">${escHtml(tr("set.perm.addRule"))}</button></h3>
             <div class="form-card" style="margin-bottom:0">
               <div class="rule-list" data-list="${k}"></div>
             </div>
           </section>
         `).join("")}
         <section class="form-section" id="skill-perms-section" style="display:none">
-          <h3>From skills</h3>
+          <h3>${escHtml(tr("set.hdr.fromSkills"))}</h3>
           <div id="skill-perms-list"></div>
         </section>
       </div>
@@ -3487,7 +3487,7 @@ const BASE_PATH = window.BASE_PATH || "";
               const pat = typeof r === "string" ? r : (r.pattern || "");
               const reason = typeof r === "object" ? (r.reason || "") : "";
               return `<div class="rule-row skill-perm-row">
-                <span class="skill-perm-tier-badge">${tier}</span>
+                <span class="skill-perm-tier-badge">${escHtml(tr("set.perm.tier." + tier))}</span>
                 <code class="rule-pattern-ro">${escHtml(pat)}</code>
                 ${reason ? `<span class="rule-reason-ro">${escHtml(reason)}</span>` : ""}
               </div>`;
@@ -3522,19 +3522,19 @@ const BASE_PATH = window.BASE_PATH || "";
   function renderPermRule(d, key) {
     const el = bodyEl.querySelector(`.rule-list[data-list="${key}"]`);
     el.innerHTML = "";
-    if (!d[key].length) { el.innerHTML = `<p class="empty">No rules.</p>`; return; }
+    if (!d[key].length) { el.innerHTML = `<p class="empty">${escHtml(tr("set.perm.noRules"))}</p>`; return; }
     d[key].forEach((rule, idx) => {
       const isObj = rule && typeof rule === "object";
       const row = document.createElement("div");
       row.className = "rule-row";
       row.innerHTML = `
         <select class="rule-kind">
-          <option value="string" ${!isObj ? "selected" : ""}>rule</option>
-          <option value="object" ${isObj ? "selected" : ""}>rule + reason</option>
+          <option value="string" ${!isObj ? "selected" : ""}>${escHtml(tr("set.perm.optRule"))}</option>
+          <option value="object" ${isObj ? "selected" : ""}>${escHtml(tr("set.perm.optRuleReason"))}</option>
         </select>
         <input type="text" class="rule-pattern" placeholder="Bash(npm run *) · Read(.env) · mcp__srv · /regex/" />
-        <input type="text" class="rule-reason" placeholder="reason (optional)" />
-        <button type="button" class="del-btn">Remove</button>
+        <input type="text" class="rule-reason" placeholder="${escHtml(tr("set.perm.reasonPlaceholder"))}" />
+        <button type="button" class="del-btn">${escHtml(tr("common.remove"))}</button>
       `;
       const kindSel = row.querySelector(".rule-kind");
       const patIn = row.querySelector(".rule-pattern");
@@ -3582,15 +3582,15 @@ const BASE_PATH = window.BASE_PATH || "";
   // Events map to lifecycle moments; `matcher` is a tool-name regexp for the
   // tool events (ignored for the others). See CLAUDE.md "Lifecycle hooks".
   const HOOK_EVENTS = [
-    { id: "PreToolUse",       hint: "Before a tool runs. matcher = tool-name regexp (e.g. Write|Edit). Exit 2 or a {\"decision\":\"block\"} / permissionDecision \"deny\" blocks the tool." },
-    { id: "PostToolUse",      hint: "After a tool runs. matcher = tool-name regexp. A block decision feeds the reason back to the model." },
-    { id: "UserPromptSubmit", hint: "When a prompt is submitted. stdout (or additionalContext) is injected into the turn; exit 2 / block aborts it." },
-    { id: "Stop",             hint: "When the agent finishes a turn." },
-    { id: "SubagentStop",     hint: "When a sub-agent invocation finishes. matcher = sub-agent name." },
-    { id: "SessionStart",     hint: "When a session is created. stdout is injected as context." },
-    { id: "SessionEnd",       hint: "When a session ends (CLI/TUI exit, or web session delete)." },
-    { id: "PreCompact",       hint: "Before context compaction. matcher = trigger (manual / auto / hard)." },
-    { id: "Notification",     hint: "On a notification (e.g. a permission / ask-user prompt)." },
+    { id: "PreToolUse",       hint: tr("hook.hint.PreToolUse") },
+    { id: "PostToolUse",      hint: tr("hook.hint.PostToolUse") },
+    { id: "UserPromptSubmit", hint: tr("hook.hint.UserPromptSubmit") },
+    { id: "Stop",             hint: tr("hook.hint.Stop") },
+    { id: "SubagentStop",     hint: tr("hook.hint.SubagentStop") },
+    { id: "SessionStart",     hint: tr("hook.hint.SessionStart") },
+    { id: "SessionEnd",       hint: tr("hook.hint.SessionEnd") },
+    { id: "PreCompact",       hint: tr("hook.hint.PreCompact") },
+    { id: "Notification",     hint: tr("hook.hint.Notification") },
   ];
 
   function hooksData() {
@@ -3602,7 +3602,7 @@ const BASE_PATH = window.BASE_PATH || "";
   function renderHooksForm() {
     const id = "hooks";
     if (!state.parsed[id]) {
-      bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+      bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
       loadParsed(id).then(() => renderHooksForm()).catch(e => {
         bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
       });
@@ -3612,14 +3612,12 @@ const BASE_PATH = window.BASE_PATH || "";
     bodyEl.innerHTML = `
       <div class="settings-form">
         <p class="empty" style="margin:0 0 .6rem">
-          Shell commands run at lifecycle moments. Each command receives the event
-          as JSON on stdin and runs through the Bash safety floor. Same format as
-          Claude Code hooks.
+          ${escHtml(tr("set.hook.intro"))}
         </p>
         ${HOOK_EVENTS.map(ev => `
           <section class="form-section">
             <h3>${ev.id}
-              <button type="button" class="add-btn" data-event="${ev.id}">+ Add matcher</button>
+              <button type="button" class="add-btn" data-event="${ev.id}">${escHtml(tr("set.hook.addMatcher"))}</button>
             </h3>
             <div class="form-card" style="margin-bottom:0">
               <p class="empty" style="margin:0 0 .4rem">${escHtml(ev.hint)}</p>
@@ -3647,16 +3645,16 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!el) return;
     const list = Array.isArray(h[event]) ? h[event] : [];
     el.innerHTML = "";
-    if (!list.length) { el.innerHTML = `<p class="empty">No hooks.</p>`; return; }
+    if (!list.length) { el.innerHTML = `<p class="empty">${escHtml(tr("set.hook.noHooks"))}</p>`; return; }
     list.forEach((matcher, mIdx) => {
       if (!Array.isArray(matcher.hooks)) matcher.hooks = [];
       const card = document.createElement("div");
       card.className = "hook-matcher-card";
       card.innerHTML = `
         <div class="hook-matcher-row">
-          <input type="text" class="hook-matcher" placeholder="matcher (regex; blank = all)" />
-          <button type="button" class="add-btn hook-add-cmd">+ Command</button>
-          <button type="button" class="del-btn hook-del-matcher">Remove matcher</button>
+          <input type="text" class="hook-matcher" placeholder="${escHtml(tr("set.hook.matcherPlaceholder"))}" />
+          <button type="button" class="add-btn hook-add-cmd">${escHtml(tr("set.hook.addCommand"))}</button>
+          <button type="button" class="del-btn hook-del-matcher">${escHtml(tr("set.hook.removeMatcher"))}</button>
         </div>
         <div class="hook-commands"></div>
       `;
@@ -3671,14 +3669,14 @@ const BASE_PATH = window.BASE_PATH || "";
       const cmdWrap = card.querySelector(".hook-commands");
       const paintCmds = () => {
         cmdWrap.innerHTML = "";
-        if (!matcher.hooks.length) { cmdWrap.innerHTML = `<p class="empty">No commands.</p>`; return; }
+        if (!matcher.hooks.length) { cmdWrap.innerHTML = `<p class="empty">${escHtml(tr("set.hook.noCommands"))}</p>`; return; }
         matcher.hooks.forEach((cmd, cIdx) => {
           const row = document.createElement("div");
           row.className = "hook-cmd-row";
           row.innerHTML = `
-            <input type="text" class="hook-cmd" placeholder="command (e.g. ./scripts/guard.sh)" />
-            <input type="number" class="hook-timeout" min="0" placeholder="timeout s" />
-            <button type="button" class="del-btn">Remove</button>
+            <input type="text" class="hook-cmd" placeholder="${escHtml(tr("set.hook.cmdPlaceholder"))}" />
+            <input type="number" class="hook-timeout" min="0" placeholder="${escHtml(tr("set.hook.timeoutPlaceholder"))}" />
+            <button type="button" class="del-btn">${escHtml(tr("common.remove"))}</button>
           `;
           const cmdIn = row.querySelector(".hook-cmd");
           const toIn = row.querySelector(".hook-timeout");
@@ -3722,7 +3720,7 @@ const BASE_PATH = window.BASE_PATH || "";
     registriesHubRefresh = null;
     const id = "mcp";
     if (!state.parsed[id]) {
-      bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+      bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
       loadParsed(id).then(() => renderMCPForm()).catch(e => {
         bodyEl.innerHTML = `<p class="settings-error">${escHtml(e.message)}</p>`;
       });
@@ -3777,15 +3775,15 @@ const BASE_PATH = window.BASE_PATH || "";
     host.innerHTML = `
       <div class="mcp-form-toolbar">
         <button type="button" class="add-btn" id="mcp-import-btn">Import JSON…</button>
-        <span class="settings-hint">Merge servers and inputs from a VS Code or Claude Code <code>mcp.json</code> snippet.</span>
+        <span class="settings-hint">${tr("set.mcp.importMergeHint")}</span>
       </div>
       <section class="form-section">
-        <h3>Inputs</h3>
-        <p class="settings-hint">Declare values the user is prompted for at first use. Reference them from server fields as <code>\${input:id}</code>.</p>
+        <h3>${escHtml(tr("set.hdr.inputs"))}</h3>
+        <p class="settings-hint">${tr("set.mcp.inputsHint")}</p>
         <div id="mcp-inputs"></div>
       </section>
       <section class="form-section">
-        <h3>MCP Servers</h3>
+        <h3>${escHtml(tr("settings.title.mcp"))}</h3>
         <div id="mcp-list"></div>
       </section>
     `;
@@ -3840,7 +3838,7 @@ const BASE_PATH = window.BASE_PATH || "";
         let i = 2;
         while (Object.prototype.hasOwnProperty.call(d.servers, `${name}-${i}`)) i++;
         target = `${name}-${i}`;
-        renamed.push(`server "${name}" → "${target}"`);
+        renamed.push(tr("set.mcp.renamedServer", { from: name, to: target }));
       }
       d.servers[target] = JSON.parse(JSON.stringify(server));
       addedServers.push(target);
@@ -3854,7 +3852,7 @@ const BASE_PATH = window.BASE_PATH || "";
         let i = 2;
         while (existingInputIds.has(`${input.id}-${i}`)) i++;
         target = `${input.id}-${i}`;
-        renamed.push(`input "${input.id}" → "${target}"`);
+        renamed.push(tr("set.mcp.renamedInput", { from: input.id, to: target }));
       }
       const cloned = JSON.parse(JSON.stringify(input));
       cloned.id = target;
@@ -3873,10 +3871,10 @@ const BASE_PATH = window.BASE_PATH || "";
     renderMCPList(d);
 
     const parts = [];
-    if (addedServers.length) parts.push(`${addedServers.length} server${addedServers.length === 1 ? "" : "s"}`);
-    if (addedInputs.length)  parts.push(`${addedInputs.length} input${addedInputs.length === 1 ? "" : "s"}`);
-    let msg = `Imported ${parts.join(" and ")}.`;
-    if (renamed.length) msg += `\n\nRenamed to avoid conflicts:\n• ${renamed.join("\n• ")}`;
+    if (addedServers.length) parts.push(trN("set.mcp.serverCount", addedServers.length));
+    if (addedInputs.length)  parts.push(trN("set.mcp.inputCount", addedInputs.length));
+    let msg = tr("set.mcp.importedSummary", { parts: parts.join(` ${tr("common.and")} `) });
+    if (renamed.length) msg += `\n\n${tr("set.mcp.renamedConflicts")}\n• ${renamed.join("\n• ")}`;
     await appConfirm(msg);
   }
 
@@ -3895,13 +3893,13 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const titleEl = document.createElement("p");
       titleEl.className = "app-dialog-msg";
-      titleEl.textContent = "Import MCP JSON";
+      titleEl.textContent = tr("set.mcp.importTitle");
       box.appendChild(titleEl);
 
       const hint = document.createElement("p");
       hint.className = "settings-hint";
       hint.style.margin = "0";
-      hint.textContent = "Paste a snippet with `servers` and/or `inputs`. Existing entries are kept; name conflicts are renamed.";
+      hint.textContent = tr("set.mcp.importDialogHint");
       box.appendChild(hint);
 
       const ta = document.createElement("textarea");
@@ -3926,11 +3924,11 @@ const BASE_PATH = window.BASE_PATH || "";
       actions.className = "app-dialog-actions";
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("common.cancel");
       const okBtn = document.createElement("button");
       okBtn.type = "button";
       okBtn.className = "btn-primary";
-      okBtn.textContent = "Import";
+      okBtn.textContent = tr("common.import");
 
       const close = result => { overlay.remove(); resolve(result); };
       cancelBtn.addEventListener("click", () => close(null));
@@ -3994,7 +3992,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const close = document.createElement("button");
       close.type = "button";
       close.className = "mcp-input-chip-close";
-      close.setAttribute("aria-label", "Remove input");
+      close.setAttribute("aria-label", tr("set.mcp.removeInput"));
       close.innerHTML = CLOSE_ICON_SVG;
       close.addEventListener("click", e => {
         e.stopPropagation();
@@ -4025,7 +4023,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const addChip = document.createElement("button");
     addChip.type = "button";
     addChip.className = "mcp-input-chip mcp-input-chip-add";
-    addChip.innerHTML = `<span class="mcp-input-chip-icon">+</span><span class="mcp-input-chip-label">Add input</span>`;
+    addChip.innerHTML = `<span class="mcp-input-chip-icon">+</span><span class="mcp-input-chip-label">${escHtml(tr("set.mcp.addInputChip"))}</span>`;
     addChip.addEventListener("click", async () => {
       const result = await appMCPInputDialog(
         { id: "", type: "promptString", description: "" },
@@ -4044,7 +4042,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const empty = document.createElement("p");
       empty.className = "settings-hint";
       empty.style.marginTop = "0.5rem";
-      empty.textContent = "No inputs declared. Add one if any server needs a user-supplied value.";
+      empty.textContent = tr("set.mcp.noInputs");
       el.appendChild(empty);
     }
   }
@@ -4071,7 +4069,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const titleEl = document.createElement("p");
       titleEl.className = "app-dialog-msg";
-      titleEl.textContent = initial && initial.id ? `Edit input: ${initial.id}` : "Add input";
+      titleEl.textContent = initial && initial.id ? tr("set.mcp.editInput", { id: initial.id }) : tr("set.mcp.addInput");
       box.appendChild(titleEl);
 
       const form = document.createElement("div");
@@ -4086,7 +4084,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const idField = document.createElement("div");
       idField.className = "model-field";
       idField.innerHTML = `
-        <label class="model-field-label model-field-label--title">ID</label>
+        <label class="model-field-label model-field-label--title">${escHtml(tr("set.mcp.id"))}</label>
         <input type="text" class="model-field-input" placeholder="github_pat" />
       `;
       const idInp = idField.querySelector("input");
@@ -4098,7 +4096,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const typeField = document.createElement("div");
       typeField.className = "model-field";
       typeField.innerHTML = `
-        <label class="model-field-label model-field-label--title">Type</label>
+        <label class="model-field-label model-field-label--title">${escHtml(tr("set.mcp.type"))}</label>
         <select class="model-field-input">
           <option value="promptString">promptString</option>
           <option value="pickString">pickString</option>
@@ -4112,8 +4110,8 @@ const BASE_PATH = window.BASE_PATH || "";
       const descField = document.createElement("div");
       descField.className = "model-field model-field-full";
       descField.innerHTML = `
-        <label class="model-field-label model-field-label--title">Description</label>
-        <input type="text" class="model-field-input" placeholder="Shown to the user at prompt time" />
+        <label class="model-field-label model-field-label--title">${escHtml(tr("common.description"))}</label>
+        <input type="text" class="model-field-input" placeholder="${escHtml(tr("set.mcp.descPlaceholder"))}" />
       `;
       const descInp = descField.querySelector("input");
       descInp.value = draft.description || "";
@@ -4129,7 +4127,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const defField = document.createElement("div");
       defField.className = "model-field model-field-full";
       defField.innerHTML = `
-        <label class="model-field-label model-field-label--title">Default (optional)</label>
+        <label class="model-field-label model-field-label--title">${escHtml(tr("set.mcp.defaultOptional"))}</label>
         <input type="text" class="model-field-input" />
       `;
       const defInp = defField.querySelector("input");
@@ -4143,7 +4141,7 @@ const BASE_PATH = window.BASE_PATH || "";
           if (!Array.isArray(draft.options)) draft.options = undefined;
           const pw = document.createElement("label");
           pw.className = "mcp-input-checkbox";
-          pw.innerHTML = `<input type="checkbox" /><span>Treat as password (mask input when prompting)</span>`;
+          pw.innerHTML = `<input type="checkbox" /><span>${escHtml(tr("set.mcp.treatAsPassword"))}</span>`;
           const cb = pw.querySelector("input");
           cb.checked = !!draft.password;
           cb.addEventListener("change", () => {
@@ -4159,7 +4157,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
           const sec = document.createElement("div");
           sec.className = "mcp-section";
-          sec.innerHTML = `<h4 class="mcp-section-title">Options</h4>`;
+          sec.innerHTML = `<h4 class="mcp-section-title">${escHtml(tr("set.hdr.options"))}</h4>`;
           const rows = document.createElement("div");
           rows.className = "mcp-arg-rows";
           sec.appendChild(rows);
@@ -4173,12 +4171,12 @@ const BASE_PATH = window.BASE_PATH || "";
               inp.value = o;
               inp.addEventListener("input", () => { draft.options[oi] = inp.value; });
               r.appendChild(inp);
-              const tr = document.createElement("button");
-              tr.type = "button";
-              tr.className = "mcp-trash";
-              tr.innerHTML = TRASH_ICON_SVG;
-              tr.addEventListener("click", () => { draft.options.splice(oi, 1); drawOpts(); });
-              r.appendChild(tr);
+              const delBtn = document.createElement("button");
+              delBtn.type = "button";
+              delBtn.className = "mcp-trash";
+              delBtn.innerHTML = TRASH_ICON_SVG;
+              delBtn.addEventListener("click", () => { draft.options.splice(oi, 1); drawOpts(); });
+              r.appendChild(delBtn);
               rows.appendChild(r);
             });
           };
@@ -4186,7 +4184,7 @@ const BASE_PATH = window.BASE_PATH || "";
           const addBtn = document.createElement("button");
           addBtn.type = "button";
           addBtn.className = "mcp-add-full";
-          addBtn.innerHTML = `<span class="mcp-add-full-icon">+</span><span>Add Option</span>`;
+          addBtn.innerHTML = `<span class="mcp-add-full-icon">+</span><span>${escHtml(tr("set.mcp.addOption"))}</span>`;
           addBtn.addEventListener("click", () => { draft.options.push(""); drawOpts(); });
           sec.appendChild(addBtn);
           variantSlot.appendChild(sec);
@@ -4209,19 +4207,19 @@ const BASE_PATH = window.BASE_PATH || "";
       actions.className = "app-dialog-actions";
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("common.cancel");
       const okBtn = document.createElement("button");
       okBtn.type = "button";
       okBtn.className = "btn-primary";
-      okBtn.textContent = "Save";
+      okBtn.textContent = tr("common.save");
 
       const close = result => { overlay.remove(); resolve(result); };
       cancelBtn.addEventListener("click", () => close(null));
       okBtn.addEventListener("click", () => {
         const id = (draft.id || "").trim();
-        if (!id) { showErr("ID is required."); idInp.focus(); return; }
+        if (!id) { showErr(tr("set.mcp.idRequired")); idInp.focus(); return; }
         if (siblings.some(s => s && s.id === id)) {
-          showErr(`Another input already uses the id "${id}".`);
+          showErr(tr("set.mcp.idInUse", { id }));
           idInp.focus();
           return;
         }
@@ -4291,7 +4289,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <span class="model-status-dot dot-active"></span>
             <strong class="mcp-card-name">${escHtml(currentName || "(unnamed)")}</strong>
           </div>
-          <button type="button" class="del-btn mcp-remove">Delete</button>
+          <button type="button" class="del-btn mcp-remove">${escHtml(tr("common.delete"))}</button>
         </div>
         <div class="mcp-card-body"></div>
       `;
@@ -4346,7 +4344,7 @@ const BASE_PATH = window.BASE_PATH || "";
         const b = document.createElement("button");
         b.type = "button";
         b.className = "mcp-trash";
-        b.setAttribute("aria-label", "Remove");
+        b.setAttribute("aria-label", tr("common.remove"));
         b.innerHTML = TRASH_ICON_SVG;
         b.addEventListener("click", onClick);
         return b;
@@ -4366,8 +4364,8 @@ const BASE_PATH = window.BASE_PATH || "";
         const headers = document.createElement("div");
         headers.className = "mcp-kv-headers";
         headers.innerHTML = `
-          <span class="model-field-label model-field-label--title">Key</span>
-          <span class="model-field-label model-field-label--title">Value</span>
+          <span class="model-field-label model-field-label--title">${escHtml(tr("set.kv.key"))}</span>
+          <span class="model-field-label model-field-label--title">${escHtml(tr("set.kv.value"))}</span>
           <span></span>
         `;
         grid.appendChild(headers);
@@ -4444,15 +4442,15 @@ const BASE_PATH = window.BASE_PATH || "";
       }
 
       // ── General Settings ────────────────────────────────────────────
-      const general = mcpSection("General Settings");
+      const general = mcpSection(tr("set.hdr.generalSettings"));
       const generalGrid = document.createElement("div");
       generalGrid.className = "model-field-grid";
       // Name is the map key, not a field on the Server object. We swap
       // the key on rename. Renaming to an existing name is silently
       // refused (no overwrite); empty names are silently refused too.
-      generalGrid.appendChild(mcpField("Name", currentName, v => {
+      generalGrid.appendChild(mcpField(tr("common.name"), currentName, v => {
         const nv = v.trim();
-        nameEl.textContent = nv || "(unnamed)";
+        nameEl.textContent = nv || tr("app.askuser.unnamed");
         if (!nv || nv === currentName) return;
         if (Object.prototype.hasOwnProperty.call(d.servers, nv)) return;
         delete d.servers[currentName];
@@ -4463,10 +4461,10 @@ const BASE_PATH = window.BASE_PATH || "";
       const typeField = document.createElement("div");
       typeField.className = "model-field";
       typeField.innerHTML = `
-        <label class="model-field-label model-field-label--title">Type</label>
+        <label class="model-field-label model-field-label--title">${escHtml(tr("set.mcp.type"))}</label>
         <select class="model-field-input">
-          <option value="stdio">stdio (local subprocess)</option>
-          <option value="http">http (remote server)</option>
+          <option value="stdio">${escHtml(tr("set.mcp.typeStdio"))}</option>
+          <option value="http">${escHtml(tr("set.mcp.typeHttp"))}</option>
         </select>
       `;
       const typeSel = typeField.querySelector("select");
@@ -4488,45 +4486,45 @@ const BASE_PATH = window.BASE_PATH || "";
 
       function renderTransportSection() {
         transportSection.innerHTML = "";
-        const inputHint = "Embed \"${input:id}\" anywhere in the value to have the user prompted for that input at first use.";
+        const inputHint = tr("set.mcp.inputEmbedHint");
         if (mcpTransportKind(s) === "http") {
-          const conn = mcpSection("Connection");
+          const conn = mcpSection(tr("set.mcp.connection"));
           const urlGrid = document.createElement("div");
           urlGrid.className = "model-field-grid";
-          urlGrid.appendChild(mcpField("URL", s.url, v => { s.url = v; markFormDirty("mcp"); }, {
+          urlGrid.appendChild(mcpField(tr("set.mcp.url"), s.url, v => { s.url = v; markFormDirty("mcp"); }, {
             full: true,
             placeholder: "https://api.githubcopilot.com/mcp/",
           }));
           conn.appendChild(urlGrid);
           transportSection.appendChild(conn);
           transportSection.appendChild(mcpKVList({
-            title: "Headers",
-            addLabel: "Add Header",
+            title: tr("set.mcp.headers"),
+            addLabel: tr("set.mcp.addHeader"),
             store: s.headers,
             keyPlaceholder: "Header-Name",
             valuePlaceholder: "value or Bearer ${input:id}",
-            addPromptMsg: "Header name (e.g. Authorization):",
+            addPromptMsg: tr("set.confirm.headerNamePrompt"),
             hint: inputHint,
           }));
         } else {
-          const exec = mcpSection("Execution");
+          const exec = mcpSection(tr("set.mcp.execution"));
           const cmdGrid = document.createElement("div");
           cmdGrid.className = "model-field-grid";
-          cmdGrid.appendChild(mcpField("Command", s.command, v => { s.command = v; markFormDirty("mcp"); }, { full: true }));
+          cmdGrid.appendChild(mcpField(tr("set.mcp.command"), s.command, v => { s.command = v; markFormDirty("mcp"); }, { full: true }));
           exec.appendChild(cmdGrid);
           transportSection.appendChild(exec);
           transportSection.appendChild(mcpStringList({
-            title: "Arguments",
-            addLabel: "Add Argument",
+            title: tr("set.mcp.arguments"),
+            addLabel: tr("set.mcp.addArgument"),
             store: s.args,
           }));
           transportSection.appendChild(mcpKVList({
-            title: "Environment Variables",
-            addLabel: "Add Variable",
+            title: tr("set.mcp.envVars"),
+            addLabel: tr("set.mcp.addVariable"),
             store: s.env,
             keyPlaceholder: "KEY",
             valuePlaceholder: "value or ${input:id}",
-            addPromptMsg: "Env var name:",
+            addPromptMsg: tr("set.mcp.envVarPrompt"),
             hint: inputHint,
           }));
         }
@@ -4552,7 +4550,7 @@ const BASE_PATH = window.BASE_PATH || "";
     emptyBtn.className = "model-card-empty-btn";
     emptyBtn.innerHTML = `
       <span class="model-card-empty-icon">⊕</span>
-      <span class="model-card-empty-label">Add MCP Server</span>
+      <span class="model-card-empty-label">${escHtml(tr("set.mcp.addServer"))}</span>
       <span class="model-card-empty-sub">Configure a new Model Context Protocol server</span>
     `;
     emptyBtn.addEventListener("click", () => {
@@ -4603,12 +4601,12 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("common.cancel");
 
       const okBtn = document.createElement("button");
       okBtn.type = "button";
       okBtn.className = "btn-primary";
-      okBtn.textContent = withInput ? "OK" : "Confirm";
+      okBtn.textContent = withInput ? tr("common.ok") : tr("common.confirm");
 
       const close = result => { overlay.remove(); resolve(result); };
       cancelBtn.addEventListener("click", () => close(withInput ? null : false));
@@ -4643,7 +4641,7 @@ const BASE_PATH = window.BASE_PATH || "";
     return "";
   }
 
-  function appRegistryDialog({ title = "Add Remote Registry", initial = {}, isEdit = false, defaultKind = "skills" } = {}) {
+  function appRegistryDialog({ title = tr("set.reg.addTitle"), initial = {}, isEdit = false, defaultKind = "skills" } = {}) {
     return new Promise(resolve => {
       const overlay = document.createElement("div");
       overlay.className = "app-dialog-overlay";
@@ -4661,7 +4659,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const form = document.createElement("div");
       form.className = "registry-dialog-form";
       const tokenPlaceholder = isEdit && initial.hasToken
-        ? "Leave blank to keep existing token"
+        ? tr("set.reg.tokenKeepHint")
         : "PAT / PRIVATE-TOKEN / personal token…";
       const kindVal = initial.kind || defaultKind;
       const urlPlaceholder = defaultKind === "agents"
@@ -4675,56 +4673,47 @@ const BASE_PATH = window.BASE_PATH || "";
         : defaultKind === "commands"
         ? "https://github.com/owner/repo/tree/main/commands"
         : "https://github.com/owner/repo/tree/main/skills";
-      const namePlaceholder = defaultKind === "agents"
-        ? "My agent registry"
-        : defaultKind === "mcp"
-        ? "My MCP registry"
-        : defaultKind === "a2a"
-        ? "My A2A registry"
-        : defaultKind === "squads"
-        ? "My squad registry"
-        : defaultKind === "commands"
-        ? "My command registry"
-        : "My skill registry";
+      const npKind = ["agents", "mcp", "a2a", "squads", "commands"].includes(defaultKind) ? defaultKind : "skills";
+      const namePlaceholder = tr("set.reg.namePlaceholder." + npKind);
       form.innerHTML = `
         <div class="registry-dialog-field">
-          <label for="reg-dlg-name">Name <span class="registry-dialog-hint">(optional)</span></label>
+          <label for="reg-dlg-name">${escHtml(tr("set.reg.nameLabel"))} <span class="registry-dialog-hint">${escHtml(tr("common.optional"))}</span></label>
           <input type="text" id="reg-dlg-name" autocomplete="off"
             placeholder="${escHtml(namePlaceholder)}"
             value="${escHtml(initial.name || "")}" />
         </div>
         <div class="registry-dialog-field">
-          <label for="reg-dlg-url">Repository URL</label>
+          <label for="reg-dlg-url">${escHtml(tr("set.reg.repoUrl"))}</label>
           <input type="url" id="reg-dlg-url" autocomplete="off"
             placeholder="${escHtml(urlPlaceholder)}"
             value="${escHtml(initial.url || "")}" />
-          <span class="registry-dialog-hint">GitHub · GitLab · Gitea (cloud or self-hosted)</span>
+          <span class="registry-dialog-hint">${escHtml(tr("set.reg.urlHint"))}</span>
         </div>
         <div class="registry-dialog-field">
-          <label for="reg-dlg-provider">Provider</label>
+          <label for="reg-dlg-provider">${escHtml(tr("set.reg.provider"))}</label>
           <select id="reg-dlg-provider">
-            <option value="">Auto-detect</option>
+            <option value="">${escHtml(tr("set.reg.autoDetect"))}</option>
             <option value="github"${initial.provider === "github" ? " selected" : ""}>GitHub</option>
             <option value="gitlab"${initial.provider === "gitlab" ? " selected" : ""}>GitLab</option>
             <option value="gitea"${initial.provider === "gitea" ? " selected" : ""}>Gitea</option>
           </select>
         </div>
         <div class="registry-dialog-field">
-          <label for="reg-dlg-kind">Hosts</label>
+          <label for="reg-dlg-kind">${escHtml(tr("set.reg.hosts"))}</label>
           <select id="reg-dlg-kind">
-            <option value="skills"${kindVal === "skills" ? " selected" : ""}>Skills</option>
-            <option value="agents"${kindVal === "agents" ? " selected" : ""}>Agents</option>
-            <option value="both"${kindVal === "both" ? " selected" : ""}>Both (Skills + Agents)</option>
-            <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>MCP Servers</option>
-            <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>A2A Agents</option>
-            <option value="squads"${kindVal === "squads" ? " selected" : ""}>Squads</option>
-            <option value="commands"${kindVal === "commands" ? " selected" : ""}>Slash Commands</option>
-            <option value="permissions"${kindVal === "permissions" ? " selected" : ""}>Permissions</option>
+            <option value="skills"${kindVal === "skills" ? " selected" : ""}>${escHtml(tr("settings.title.skills"))}</option>
+            <option value="agents"${kindVal === "agents" ? " selected" : ""}>${escHtml(tr("settings.menu.agent"))}</option>
+            <option value="both"${kindVal === "both" ? " selected" : ""}>${escHtml(tr("set.reg.kindBoth"))}</option>
+            <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>${escHtml(tr("settings.title.mcp"))}</option>
+            <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>${escHtml(tr("settings.title.a2a"))}</option>
+            <option value="squads"${kindVal === "squads" ? " selected" : ""}>${escHtml(tr("subtab.squads"))}</option>
+            <option value="commands"${kindVal === "commands" ? " selected" : ""}>${escHtml(tr("settings.title.user-commands"))}</option>
+            <option value="permissions"${kindVal === "permissions" ? " selected" : ""}>${escHtml(tr("settings.title.permissions"))}</option>
           </select>
-          <span class="registry-dialog-hint">Tab where this registry will appear.</span>
+          <span class="registry-dialog-hint">${escHtml(tr("set.reg.kindHint"))}</span>
         </div>
         <div class="registry-dialog-field">
-          <label for="reg-dlg-token">Access token <span class="registry-dialog-hint">(optional, for private repos)</span></label>
+          <label for="reg-dlg-token">${escHtml(tr("set.reg.accessToken"))} <span class="registry-dialog-hint">${escHtml(tr("set.reg.tokenOptional"))}</span></label>
           <input type="password" id="reg-dlg-token" autocomplete="off"
             placeholder="${escHtml(tokenPlaceholder)}" />
         </div>
@@ -4745,12 +4734,12 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("common.cancel");
 
       const okBtn = document.createElement("button");
       okBtn.type = "button";
       okBtn.className = "btn-primary";
-      okBtn.textContent = isEdit ? "Save" : "Add";
+      okBtn.textContent = isEdit ? tr("common.save") : tr("common.add");
 
       const close = result => { overlay.remove(); resolve(result); };
       cancelBtn.addEventListener("click", () => close(null));
@@ -4854,7 +4843,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (t === "serpapi" && !serpApiKeySet) {
         cb.disabled = true;
         lab.className += " tools-check-disabled";
-        lab.setAttribute("data-tip", "Set serpapi_key in Globals to enable this tool.");
+        lab.setAttribute("data-tip", tr("set.tool.serpapiDisabled"));
       }
       cb.addEventListener("change", () => {
         if (cb.checked) {
@@ -4938,7 +4927,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!hasSkillsTool) {
       const warn = document.createElement("p");
       warn.className = "skills-tool-warning";
-      warn.textContent = '"Skill" tool not enabled — assignments will be ignored until re-enabled in Agent → Agents.';
+      warn.textContent = tr("set.block.skillToolWarn");
       container.appendChild(warn);
     }
 
@@ -4947,7 +4936,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     if (!registry.length) {
       const p = document.createElement("p"); p.className = "empty";
-      p.textContent = "No skills installed.";
+      p.textContent = tr("set.block.noSkills");
       container.appendChild(p);
       return;
     }
@@ -4989,7 +4978,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const enableAllBtn = document.createElement("button");
     enableAllBtn.type = "button"; enableAllBtn.className = "add-btn";
-    enableAllBtn.textContent = "Enable all";
+    enableAllBtn.textContent = tr("set.block.enableAll");
     enableAllBtn.addEventListener("click", () => {
       agent.skills = registry.map(s => s.name);
       onChange();
@@ -4998,7 +4987,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const disableAllBtn = document.createElement("button");
     disableAllBtn.type = "button"; disableAllBtn.className = "del-btn";
-    disableAllBtn.textContent = "Disable all";
+    disableAllBtn.textContent = tr("set.block.disableAll");
     disableAllBtn.addEventListener("click", async () => {
       if (!await appConfirm(tr("set.confirm.removeAllSkills", { name: agent.name }))) return;
       agent.skills = [];
@@ -5011,7 +5000,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const manageLink = document.createElement("button");
     manageLink.type = "button"; manageLink.className = "skills-manage-link";
-    manageLink.textContent = "Manage in Skills →";
+    manageLink.textContent = tr("set.block.manageSkills");
     manageLink.addEventListener("click", () => {
       state.skills.editing = null;
       setActiveFile("skills");
@@ -5022,13 +5011,13 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // Populates a container with the agent's skill block (fetches registry async).
   async function populateAgentSkillBlock(container, agent, hasSkillsTool, onChange) {
-    container.innerHTML = `<p class="settings-hint">Loading skills…</p>`;
+    container.innerHTML = `<p class="settings-hint">${escHtml(tr("set.block.loadingSkills"))}</p>`;
     try {
       const regRes = await skillsGet("/skills/registry");
       const registry = regRes.skills || [];
       renderSkillBlockContent(container, agent, registry, hasSkillsTool, onChange);
     } catch (e) {
-      container.innerHTML = `<p class="settings-error">Skills unavailable: ${escHtml(e.message)}</p>`;
+      container.innerHTML = `<p class="settings-error">${escHtml(tr("set.block.skillsUnavailable", { error: e.message }))}</p>`;
     }
   }
 
@@ -5046,14 +5035,14 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!hasMCPTool) {
       const warn = document.createElement("p");
       warn.className = "skills-tool-warning";
-      warn.textContent = '"mcp" tool not enabled — selections will be ignored until re-enabled above.';
+      warn.textContent = tr("set.block.mcpToolWarn");
       container.appendChild(warn);
     }
 
     if (!servers.length) {
       const p = document.createElement("p");
       p.className = "empty";
-      p.textContent = "No MCP servers configured. Add some in the MCP tab.";
+      p.textContent = tr("set.block.noMcp");
       container.appendChild(p);
       return;
     }
@@ -5101,7 +5090,7 @@ const BASE_PATH = window.BASE_PATH || "";
     actions.className = "skills-block-actions";
 
     const enableAll = document.createElement("button");
-    enableAll.type = "button"; enableAll.className = "add-btn"; enableAll.textContent = "Enable all";
+    enableAll.type = "button"; enableAll.className = "add-btn"; enableAll.textContent = tr("set.block.enableAll");
     enableAll.addEventListener("click", () => {
       agent.mcp_servers = servers.map(s => s.name);
       onChange();
@@ -5109,7 +5098,7 @@ const BASE_PATH = window.BASE_PATH || "";
     });
 
     const disableAll = document.createElement("button");
-    disableAll.type = "button"; disableAll.className = "del-btn"; disableAll.textContent = "Disable all";
+    disableAll.type = "button"; disableAll.className = "del-btn"; disableAll.textContent = tr("set.block.disableAll");
     disableAll.addEventListener("click", () => {
       agent.mcp_servers = [];
       onChange();
@@ -5121,7 +5110,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const manageLink = document.createElement("button");
     manageLink.type = "button"; manageLink.className = "skills-manage-link";
-    manageLink.textContent = "Manage in MCP →";
+    manageLink.textContent = tr("set.block.manageMcp");
     manageLink.addEventListener("click", () => { setActiveFile("mcp"); });
     actions.appendChild(manageLink);
 
@@ -5129,7 +5118,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function populateAgentMCPBlock(container, agent, hasMCPTool, onChange) {
-    container.innerHTML = `<p class="settings-hint">Loading MCP servers…</p>`;
+    container.innerHTML = `<p class="settings-hint">${escHtml(tr("set.block.loadingMcp"))}</p>`;
     try {
       if (!state.parsed.mcp) await loadParsed("mcp");
       // VS Code's mcp.json schema: servers is a map keyed by name.
@@ -5140,7 +5129,7 @@ const BASE_PATH = window.BASE_PATH || "";
         : [];
       renderAgentMCPBlockContent(container, agent, servers, hasMCPTool, onChange);
     } catch (e) {
-      container.innerHTML = `<p class="settings-error">MCP unavailable: ${escHtml(e.message)}</p>`;
+      container.innerHTML = `<p class="settings-error">${escHtml(tr("set.block.mcpUnavailable", { error: e.message }))}</p>`;
     }
   }
 
@@ -5155,7 +5144,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!a2aAgents.length) {
       const p = document.createElement("p");
       p.className = "empty";
-      p.textContent = "No A2A agents configured. Add some in the A2A tab.";
+      p.textContent = tr("set.block.noA2a");
       container.appendChild(p);
       return;
     }
@@ -5198,7 +5187,7 @@ const BASE_PATH = window.BASE_PATH || "";
     actions.className = "skills-block-actions";
 
     const enableAll = document.createElement("button");
-    enableAll.type = "button"; enableAll.className = "add-btn"; enableAll.textContent = "Enable all";
+    enableAll.type = "button"; enableAll.className = "add-btn"; enableAll.textContent = tr("set.block.enableAll");
     enableAll.addEventListener("click", () => {
       agent.a2a_agents = a2aAgents.map(ag => ag.name);
       onChange();
@@ -5206,7 +5195,7 @@ const BASE_PATH = window.BASE_PATH || "";
     });
 
     const disableAll = document.createElement("button");
-    disableAll.type = "button"; disableAll.className = "del-btn"; disableAll.textContent = "Disable all";
+    disableAll.type = "button"; disableAll.className = "del-btn"; disableAll.textContent = tr("set.block.disableAll");
     disableAll.addEventListener("click", () => {
       agent.a2a_agents = [];
       onChange();
@@ -5218,7 +5207,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const manageLink = document.createElement("button");
     manageLink.type = "button"; manageLink.className = "skills-manage-link";
-    manageLink.textContent = "Manage in A2A →";
+    manageLink.textContent = tr("set.block.manageA2a");
     manageLink.addEventListener("click", () => { setActiveFile("a2a"); });
     actions.appendChild(manageLink);
 
@@ -5243,7 +5232,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   async function renderSkills() {
     registriesHubRefresh = null;
-    bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     applyClientOnlyChrome();
 
     if (state.skills.editing) {
@@ -5307,10 +5296,10 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.innerHTML = `
       <section class="form-section">
-        <h3>Installed skills
-          <button type="button" class="add-btn" id="skill-new">+ New</button>
+        <h3>${escHtml(tr("set.hdr.installedSkills"))}
+          <button type="button" class="add-btn" id="skill-new">${escHtml(tr("set.skill.newBtn"))}</button>
           <label class="add-btn skill-upload-label" id="skill-upload-label" style="cursor:pointer">
-            Upload archive
+            ${escHtml(tr("set.skill.uploadArchive"))}
             <input type="file" id="skill-upload-input" accept=".zip,.tar.gz,.tgz" style="display:none">
           </label>
         </h3>
@@ -5365,7 +5354,7 @@ const BASE_PATH = window.BASE_PATH || "";
         : "";
       const linkedStr = sk.linked_in && sk.linked_in.length
         ? `<span class="skill-mkt-linked">Used by: ${escHtml(sk.linked_in.join(", "))}</span>`
-        : `<span class="skill-mkt-unlinked">Not linked</span>`;
+        : `<span class="skill-mkt-unlinked">${escHtml(tr("set.skill.notLinked"))}</span>`;
       const sourceHtml = sk.source === "local"
         ? `<span class="source-badge source-badge-local">local</span>`
         : "";
@@ -5497,7 +5486,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   async function renderSkillDetailView() {
     const { name } = state.skills.editing;
-    bodyEl.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let detail;
     try { detail = await skillsGet(`/skills/registry/${name}`); }
     catch (e) {
@@ -5517,9 +5506,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <textarea class="skill-md-editor raw-editor" spellcheck="false" hidden></textarea>
         </div>
         <div class="skill-detail-footer">
-          <button type="button" class="del-btn skill-del-btn">Delete</button>
+          <button type="button" class="del-btn skill-del-btn">${escHtml(tr("common.delete"))}</button>
           <span class="skill-save-status"></span>
-          <button type="button" class="add-btn skill-edit-btn">Edit</button>
+          <button type="button" class="add-btn skill-edit-btn">${escHtml(tr("common.edit"))}</button>
         </div>
       </div>
     `;
@@ -5578,24 +5567,24 @@ const BASE_PATH = window.BASE_PATH || "";
         ta.hidden = false;
         ta.value = currentContent;
         footer.innerHTML = `
-          <button type="button" class="btn-discard skill-cancel-btn">Discard</button>
+          <button type="button" class="btn-discard skill-cancel-btn">${escHtml(tr("settings.discard"))}</button>
           <span class="skill-save-status"></span>
-          <button type="button" class="btn-save skill-save-btn">Save</button>
+          <button type="button" class="btn-save skill-save-btn">${escHtml(tr("common.save"))}</button>
         `;
         footer.querySelector(".skill-cancel-btn").addEventListener("click", () => setEditMode(false));
         footer.querySelector(".skill-save-btn").addEventListener("click", async () => {
           const saveBtn = footer.querySelector(".skill-save-btn");
           const status  = footer.querySelector(".skill-save-status");
-          saveBtn.disabled = true; status.textContent = "Saving…"; status.className = "skill-save-status";
+          saveBtn.disabled = true; status.textContent = tr("set.skill.saving"); status.className = "skill-save-status";
           try {
             currentContent = ta.value;
             const res = await skillsPut(`/skills/registry/${name}`, { content: currentContent, mtime: currentMtime });
             currentMtime = res.mtime;
             renderFrontmatterCard(currentContent);
-            status.textContent = "Saved."; status.className = "skill-save-status success";
+            status.textContent = tr("set.skill.saved"); status.className = "skill-save-status success";
             setTimeout(() => setEditMode(false), 800);
           } catch (e) {
-            status.textContent = "Save failed: " + e.message;
+            status.textContent = tr("set.skill.saveFailed", { error: e.message });
             status.className = "skill-save-status error";
           } finally { saveBtn.disabled = false; }
         });
@@ -5604,9 +5593,9 @@ const BASE_PATH = window.BASE_PATH || "";
         preview.hidden = false;
         renderPreview(currentContent);
         footer.innerHTML = `
-          <button type="button" class="del-btn skill-del-btn">Delete</button>
+          <button type="button" class="del-btn skill-del-btn">${escHtml(tr("common.delete"))}</button>
           <span class="skill-save-status"></span>
-          <button type="button" class="btn-save skill-edit-btn">Edit</button>
+          <button type="button" class="btn-save skill-edit-btn">${escHtml(tr("common.edit"))}</button>
         `;
         footer.querySelector(".skill-edit-btn").addEventListener("click", () => setEditMode(true));
         footer.querySelector(".skill-del-btn").addEventListener("click", async () => {
@@ -5666,8 +5655,8 @@ const BASE_PATH = window.BASE_PATH || "";
     const section = document.createElement("section");
     section.className = "form-section";
     section.innerHTML = `
-      <h3>Remote registries
-        <button type="button" class="add-btn" id="remote-reg-add">+ Add</button>
+      <h3>${escHtml(tr("set.hdr.remoteRegistries"))}
+        <button type="button" class="add-btn" id="remote-reg-add">${escHtml(tr("set.reg.add"))}</button>
       </h3>
       <div id="remote-reg-list"></div>
     `;
@@ -5689,7 +5678,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshRemoteRegList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/skills/remotes");
@@ -5713,9 +5702,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -5724,7 +5713,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit Registry",
+          title: tr("set.reg.title.editRegistry"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", hasToken: !!r.has_token },
           isEdit: true,
         });
@@ -5854,7 +5843,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!realSkills.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No skills found in this registry.";
+        empty.textContent = tr("set.reg.empty.skills");
         contentEl.appendChild(empty);
         return;
       }
@@ -5882,8 +5871,8 @@ const BASE_PATH = window.BASE_PATH || "";
           ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">${escHtml(sk.author)}</span></div>`
           : "";
         const actionHtml = sk.installed
-          ? `<span class="remote-skill-installed-badge">Installed</span>`
-          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+          : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`;
 
         card.innerHTML = `
           <div class="skill-mkt-header">
@@ -5901,15 +5890,15 @@ const BASE_PATH = window.BASE_PATH || "";
           const installBtn = card.querySelector(".remote-install-btn");
           installBtn.addEventListener("click", async () => {
             installBtn.disabled = true;
-            installBtn.textContent = "Installing…";
+            installBtn.textContent = tr("set.reg.installing");
             try {
               const res = await skillsPost(`/skills/remotes/${id}/install/${sk.dir_path}`, {});
-              installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+              installBtn.outerHTML = `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`;
               sk.installed = true;
               setStatus(`Skill "${res.name}" installed successfully.`, "success");
             } catch (e) {
               installBtn.disabled = false;
-              installBtn.textContent = "Install";
+              installBtn.textContent = tr("common.install");
               setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
@@ -5973,7 +5962,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
         </div>
         <div class="skill-frontmatter-card" id="skill-fm-card">
-          <p class="settings-loading">Loading…</p>
+          <p class="settings-loading">${escHtml(tr("set.loading"))}</p>
         </div>
         <div class="skill-content-wrap">
           <div class="skill-md-preview markdown-body"></div>
@@ -5982,8 +5971,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <span></span>
           <span class="skill-save-status"></span>
           ${skill.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+            ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+            : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`}
         </div>
       </div>
     `;
@@ -6040,16 +6029,16 @@ const BASE_PATH = window.BASE_PATH || "";
     if (installBtn) {
       installBtn.addEventListener("click", async () => {
         installBtn.disabled = true;
-        installBtn.textContent = "Installing…";
+        installBtn.textContent = tr("set.reg.installing");
         const statusEl = bodyEl.querySelector(".skill-save-status");
         try {
           const res = await skillsPost(`/skills/remotes/${id}/install/${skill.dir_path}`, {});
-          installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+          installBtn.outerHTML = `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`;
           skill.installed = true;
           setStatus(`Skill "${res.name}" installed successfully.`, "success");
         } catch (e) {
           installBtn.disabled = false;
-          installBtn.textContent = "Install";
+          installBtn.textContent = tr("common.install");
           if (statusEl) { statusEl.textContent = e.message; statusEl.className = "skill-save-status error"; }
         }
       });
@@ -6094,7 +6083,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     function renderKindNav() {
       kindList.innerHTML = "";
-      for (const k of [{ id: "agents", label: "Agents" }, { id: "squads", label: "Squads" }]) {
+      for (const k of [{ id: "agents", label: tr("settings.menu.agent") }, { id: "squads", label: tr("subtab.squads") }]) {
         const item = document.createElement("div");
         item.className = "agent-fleet-item" + (state.activeRemoteKind === k.id ? " active" : "");
         item.innerHTML = `<div class="agent-fleet-item-name">${escHtml(k.label)}</div>`;
@@ -6138,7 +6127,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const container = rightEl.querySelector("#agent-remote-list");
     await refreshAgentRemoteList(container);
     rightEl.querySelector("#agent-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({ title: "Add Agent Registry", defaultKind: "agents" });
+      const result = await appRegistryDialog({ title: tr("set.reg.title.addAgent"), defaultKind: "agents" });
       if (!result) return;
       try {
         await skillsPost("/agents/remotes", result);
@@ -6161,7 +6150,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const container = rightEl.querySelector("#squad-remote-list");
     await refreshSquadRemoteList(container);
     rightEl.querySelector("#squad-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({ title: "Add Squad Registry", defaultKind: "squads" });
+      const result = await appRegistryDialog({ title: tr("set.reg.title.addSquad"), defaultKind: "squads" });
       if (!result) return;
       try {
         await skillsPost("/squads-registry/remotes", result);
@@ -6173,7 +6162,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshAgentRemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/agents/remotes");
@@ -6189,7 +6178,7 @@ const BASE_PATH = window.BASE_PATH || "";
     container.innerHTML = "";
     for (const r of remotes) {
       const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
-      const kindBadge = r.kind === "both" ? ` <span class="remote-reg-provider">Both</span>` : "";
+      const kindBadge = r.kind === "both" ? ` <span class="remote-reg-provider">${escHtml(tr("set.reg.both"))}</span>` : "";
       const row = document.createElement("div");
       row.className = "remote-reg-row";
       row.innerHTML = `
@@ -6198,9 +6187,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -6209,7 +6198,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit Agent Registry",
+          title: tr("set.reg.title.editAgent"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "agents",
@@ -6304,7 +6293,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!real.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No agents found in this registry.";
+        empty.textContent = tr("set.reg.empty.agents");
         contentEl.appendChild(empty);
         return;
       }
@@ -6332,8 +6321,8 @@ const BASE_PATH = window.BASE_PATH || "";
           ? `<div class="skill-mkt-author"><span class="skill-mkt-author-icon">◆</span><span class="skill-mkt-author-name">Built-in</span></div>`
           : "";
         const actionHtml = a.installed
-          ? `<span class="remote-skill-installed-badge">Installed</span>`
-          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+          : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`;
         const metaRows = remoteAgentMetaRowsHtml(a);
 
         card.innerHTML = `
@@ -6409,7 +6398,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
         </div>
         <div class="skill-frontmatter-card" id="agent-fm-card">
-          <p class="settings-loading">Loading…</p>
+          <p class="settings-loading">${escHtml(tr("set.loading"))}</p>
         </div>
         <div class="skill-content-wrap">
           <div class="skill-md-preview markdown-body" id="agent-json-preview"></div>
@@ -6418,8 +6407,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <span></span>
           <span class="skill-save-status"></span>
           ${agent.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+            ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+            : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`}
         </div>
       </div>
     `;
@@ -6521,11 +6510,11 @@ const BASE_PATH = window.BASE_PATH || "";
     if (enable === null) return; // cancelled
 
     const btn = installBtn || cardOrHost.querySelector(".remote-install-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    if (btn) { btn.disabled = true; btn.textContent = tr("set.reg.installing"); }
     try {
       const res = await skillsPost(`/agents/remotes/${registryID}/install/${agentInfo.dir_path}`, { enable });
       agentInfo.installed = true;
-      if (btn) btn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+      if (btn) btn.outerHTML = `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`;
       if (res.enable_error) {
         setStatus(`Agent "${res.name}" installed, but enabling failed: ${res.enable_error}`, "error");
       } else if (res.enabled) {
@@ -6541,7 +6530,7 @@ const BASE_PATH = window.BASE_PATH || "";
         showInstallResult(`Agent "${res.name}" installed.`, res.warnings);
       }
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = "Install"; }
+      if (btn) { btn.disabled = false; btn.textContent = tr("common.install"); }
       setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
     }
   }
@@ -6564,7 +6553,7 @@ const BASE_PATH = window.BASE_PATH || "";
             Files will be written to <code>$OMNIS_HOME/registry/agents/${escHtml(agentInfo.name)}/</code>.
           </p>
           <label class="registry-dialog-toggle" for="agent-install-enable">
-            <span>Enable in <code>config/agents.json</code> after install</span>
+            <span>${tr("set.agent.enableInConfig")}</span>
             <input type="checkbox" id="agent-install-enable" checked />
           </label>
           <p class="registry-dialog-hint">
@@ -6573,8 +6562,8 @@ const BASE_PATH = window.BASE_PATH || "";
           </p>
         </div>
         <div class="app-dialog-actions">
-          <button type="button" id="agent-install-cancel">Cancel</button>
-          <button type="button" class="btn-primary" id="agent-install-ok">Install</button>
+          <button type="button" id="agent-install-cancel">${escHtml(tr("common.cancel"))}</button>
+          <button type="button" class="btn-primary" id="agent-install-ok">${escHtml(tr("common.install"))}</button>
         </div>
       `;
       overlay.appendChild(box);
@@ -6599,7 +6588,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const remoteSquadsCache = {}; // keyed by registry ID → { squads, timestamp }
 
   async function refreshSquadRemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/squads-registry/remotes");
@@ -6623,9 +6612,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -6634,7 +6623,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit Squad Registry",
+          title: tr("set.reg.title.editSquad"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "squads",
@@ -6706,7 +6695,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!real.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No squads found in this registry. Directories must contain a squad.json file.";
+        empty.textContent = tr("set.reg.empty.squads");
         contentEl.appendChild(empty);
         return;
       }
@@ -6735,8 +6724,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <div class="skill-mkt-header">
             <span class="skill-mkt-filename">${escHtml(sq.name)}</span>
             ${sq.installed
-              ? `<span class="remote-skill-installed-badge">Installed</span>`
-              : `<button type="button" class="add-btn squad-install-btn">Install</button>`}
+              ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+              : `<button type="button" class="add-btn squad-install-btn">${escHtml(tr("common.install"))}</button>`}
           </div>
           <div class="skill-mkt-body">
             ${leaderHtml}
@@ -6794,11 +6783,11 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!await appConfirm(tr("set.confirm.installSquad", { name: squadInfo.name }))) return;
 
     btn.disabled = true;
-    btn.textContent = "Installing…";
+    btn.textContent = tr("set.reg.installing");
     try {
       const res = await skillsPost(`/squads-registry/remotes/${registryID}/install/${squadInfo.dir_path}`, {});
       squadInfo.installed = true;
-      btn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+      btn.outerHTML = `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`;
       await doReload();
       // Refresh the in-memory agent config so the new squad is visible when
       // the user navigates to the squads sub-tab (no forced redirect).
@@ -6807,7 +6796,7 @@ const BASE_PATH = window.BASE_PATH || "";
       delete remoteSquadsCache[registryID];
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = "Install";
+      btn.textContent = tr("common.install");
       setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
     }
   }
@@ -6826,13 +6815,13 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const titleEl = document.createElement("p");
       titleEl.className = "app-dialog-msg";
-      titleEl.textContent = "Import Claude Code Agent";
+      titleEl.textContent = tr("set.agent.importTitle");
       box.appendChild(titleEl);
 
       const hint = document.createElement("p");
       hint.className = "settings-hint";
       hint.style.margin = "0 0 6px";
-      hint.innerHTML = "Paste a <code>.md</code> (YAML frontmatter) or <code>.json</code> agent definition, or load a file.";
+      hint.innerHTML = tr("set.agent.importHint");
       box.appendChild(hint);
 
       const fileRow = document.createElement("div");
@@ -6843,7 +6832,7 @@ const BASE_PATH = window.BASE_PATH || "";
       fileInput.style.display = "none";
       const browseBtn = document.createElement("button");
       browseBtn.type = "button";
-      browseBtn.textContent = "Browse…";
+      browseBtn.textContent = tr("set.agent.browse");
       browseBtn.addEventListener("click", () => fileInput.click());
       fileInput.addEventListener("change", () => {
         const f = fileInput.files[0];
@@ -6870,7 +6859,7 @@ const BASE_PATH = window.BASE_PATH || "";
       enableCheck.id = "agent-import-enable";
       enableCheck.checked = true;
       const enableLabel = document.createElement("span");
-      enableLabel.innerHTML = "Enable in <code>config/agents.json</code> after import";
+      enableLabel.innerHTML = tr("set.agent.enableInConfigImport");
       enableRow.appendChild(enableLabel);
       enableRow.appendChild(enableCheck);
       box.appendChild(enableRow);
@@ -6879,11 +6868,11 @@ const BASE_PATH = window.BASE_PATH || "";
       actions.className = "app-dialog-actions";
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = tr("common.cancel");
       const okBtn = document.createElement("button");
       okBtn.type = "button";
       okBtn.className = "btn-primary";
-      okBtn.textContent = "Import";
+      okBtn.textContent = tr("common.import");
 
       const close = result => { overlay.remove(); resolve(result); };
       cancelBtn.addEventListener("click", () => close(null));
@@ -6926,8 +6915,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.innerHTML = `
       <section class="form-section">
-        <h3>Remote MCP registries
-          <button type="button" class="add-btn" id="mcp-remote-add">+ Add</button>
+        <h3>${escHtml(tr("set.hdr.remoteMcpRegistries"))}
+          <button type="button" class="add-btn" id="mcp-remote-add">${escHtml(tr("set.reg.add"))}</button>
         </h3>
         <div id="mcp-remote-list"></div>
       </section>
@@ -6937,7 +6926,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector("#mcp-remote-add").addEventListener("click", async () => {
       const result = await appRegistryDialog({
-        title: "Add MCP Registry",
+        title: tr("set.reg.title.addMcp"),
         defaultKind: "mcp",
       });
       if (!result) return;
@@ -6951,7 +6940,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshMCPRemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/mcp/remotes");
@@ -6975,9 +6964,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -6986,7 +6975,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit MCP Registry",
+          title: tr("set.reg.title.editMcp"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "mcp",
@@ -7058,7 +7047,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!realTools.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No MCP servers found in this registry. Directories must contain a .json manifest file.";
+        empty.textContent = tr("set.reg.empty.mcp");
         contentEl.appendChild(empty);
         return;
       }
@@ -7079,8 +7068,8 @@ const BASE_PATH = window.BASE_PATH || "";
           ? `<span class="skill-mkt-tag">${escHtml(tool.type)}</span>`
           : "";
         const actionHtml = tool.installed
-          ? `<span class="remote-skill-installed-badge">Installed</span>`
-          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+          : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`;
         const card = document.createElement("div");
         card.className = "skill-mkt-card remote-skill-card";
         if (tool.has_readme) card.style.cursor = "pointer";
@@ -7105,13 +7094,13 @@ const BASE_PATH = window.BASE_PATH || "";
         if (btn) {
           btn.addEventListener("click", async () => {
             btn.disabled = true;
-            btn.textContent = "Installing…";
+            btn.textContent = tr("set.reg.installing");
             try {
               const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
               tool.installed = true;
               btn.replaceWith(Object.assign(document.createElement("span"), {
                 className: "remote-skill-installed-badge",
-                textContent: "Installed",
+                textContent: tr("set.reg.installed"),
               }));
               showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
               showBanner();
@@ -7119,7 +7108,7 @@ const BASE_PATH = window.BASE_PATH || "";
               delete state.parsed["mcp"];
             } catch (e) {
               btn.disabled = false;
-              btn.textContent = "Install";
+              btn.textContent = tr("common.install");
               setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
@@ -7175,8 +7164,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <span></span>
           <span class="skill-save-status"></span>
           ${tool.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+            ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+            : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`}
         </div>
       </div>
     `;
@@ -7202,18 +7191,18 @@ const BASE_PATH = window.BASE_PATH || "";
     if (installBtn) {
       installBtn.addEventListener("click", async () => {
         installBtn.disabled = true;
-        installBtn.textContent = "Installing…";
+        installBtn.textContent = tr("set.reg.installing");
         try {
           const res = await skillsPost(`/mcp/remotes/${id}/install/${tool.dir_path}`, {});
           tool.installed = true;
-          installBtn.outerHTML = `<span class="remote-skill-installed-badge">Installed</span>`;
+          installBtn.outerHTML = `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`;
           showInstallResult(`MCP server "${res.name}" added to mcp_config.json. Reload to apply.`, res.warnings);
           showBanner();
           delete remoteMCPCache[id];
           delete state.parsed["mcp"];
         } catch (e) {
           installBtn.disabled = false;
-          installBtn.textContent = "Install";
+          installBtn.textContent = tr("common.install");
           setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
         }
       });
@@ -7271,13 +7260,13 @@ const BASE_PATH = window.BASE_PATH || "";
   function renderA2AAgentsSubtab(host, d) {
     host.innerHTML = `
       <section class="form-section">
-        <h3>Inputs</h3>
-        <p class="settings-hint">Declare values the user is prompted for at first use. Reference them from agent fields as <code>\${input:id}</code>.</p>
+        <h3>${escHtml(tr("set.hdr.inputs"))}</h3>
+        <p class="settings-hint">${tr("set.a2a.inputsHint")}</p>
         <div id="a2a-inputs"></div>
       </section>
       <section class="form-section">
-        <h3>A2A Agents</h3>
-        <p class="settings-hint">Remote agent endpoints reachable via the <a href="https://google.github.io/A2A" target="_blank" rel="noopener">Agent-to-Agent (A2A)</a> protocol.</p>
+        <h3>${escHtml(tr("settings.title.a2a"))}</h3>
+        <p class="settings-hint">${tr("set.a2a.endpointsHint")}</p>
         <div id="a2a-list"></div>
       </section>
     `;
@@ -7322,7 +7311,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const close = document.createElement("button");
       close.type = "button";
       close.className = "mcp-input-chip-close";
-      close.setAttribute("aria-label", "Remove input");
+      close.setAttribute("aria-label", tr("set.mcp.removeInput"));
       close.innerHTML = CLOSE_ICON_SVG;
       close.addEventListener("click", e => {
         e.stopPropagation();
@@ -7350,7 +7339,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const addChip = document.createElement("button");
     addChip.type = "button";
     addChip.className = "mcp-input-chip mcp-input-chip-add";
-    addChip.innerHTML = `<span class="mcp-input-chip-icon">+</span><span class="mcp-input-chip-label">Add input</span>`;
+    addChip.innerHTML = `<span class="mcp-input-chip-icon">+</span><span class="mcp-input-chip-label">${escHtml(tr("set.mcp.addInputChip"))}</span>`;
     addChip.addEventListener("click", async () => {
       const result = await appMCPInputDialog(
         { id: "", type: "promptString", description: "" },
@@ -7369,7 +7358,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const empty = document.createElement("p");
       empty.className = "settings-hint";
       empty.style.marginTop = "0.5rem";
-      empty.textContent = "No inputs declared. Add one if any agent needs a user-supplied value.";
+      empty.textContent = tr("set.a2a.noInputs");
       el.appendChild(empty);
     }
   }
@@ -7398,7 +7387,7 @@ const BASE_PATH = window.BASE_PATH || "";
             <span class="model-status-dot dot-active"></span>
             <strong class="mcp-card-name">${escHtml(currentName || "(unnamed)")}</strong>
           </div>
-          <button type="button" class="del-btn a2a-remove">Delete</button>
+          <button type="button" class="del-btn a2a-remove">${escHtml(tr("common.delete"))}</button>
         </div>
         <div class="mcp-card-body"></div>
       `;
@@ -7445,17 +7434,17 @@ const BASE_PATH = window.BASE_PATH || "";
         const b = document.createElement("button");
         b.type = "button";
         b.className = "mcp-trash";
-        b.setAttribute("aria-label", "Remove");
+        b.setAttribute("aria-label", tr("common.remove"));
         b.innerHTML = TRASH_ICON_SVG;
         b.addEventListener("click", onClick);
         return b;
       }
 
       // ── General Settings ────────────────────────────────────────────
-      const general = a2aSection("General Settings");
+      const general = a2aSection(tr("set.hdr.generalSettings"));
       const generalGrid = document.createElement("div");
       generalGrid.className = "model-field-grid";
-      generalGrid.appendChild(a2aField("Name", currentName, v => {
+      generalGrid.appendChild(a2aField(tr("common.name"), currentName, v => {
         const nv = v.trim();
         nameEl.textContent = nv || "(unnamed)";
         if (!nv || nv === currentName) return;
@@ -7468,30 +7457,30 @@ const BASE_PATH = window.BASE_PATH || "";
       general.appendChild(generalGrid);
 
       // ── Connection ──────────────────────────────────────────────────
-      const conn = a2aSection("Connection");
+      const conn = a2aSection(tr("set.mcp.connection"));
       const connGrid = document.createElement("div");
       connGrid.className = "model-field-grid";
-      connGrid.appendChild(a2aField("URL", a.url, v => { a.url = v; markFormDirty("a2a"); }, {
+      connGrid.appendChild(a2aField(tr("set.mcp.url"), a.url, v => { a.url = v; markFormDirty("a2a"); }, {
         full: true,
         placeholder: "https://agent.example.com/",
       }));
-      connGrid.appendChild(a2aField("Description", a.description, v => { a.description = v; markFormDirty("a2a"); }, {
+      connGrid.appendChild(a2aField(tr("common.description"), a.description, v => { a.description = v; markFormDirty("a2a"); }, {
         full: true,
-        placeholder: "Optional description",
+        placeholder: tr("set.a2a.optionalDescription"),
       }));
       conn.appendChild(connGrid);
       body.appendChild(general);
       body.appendChild(conn);
 
       // ── Routing ─────────────────────────────────────────────────────
-      const routing = a2aSection("Routing");
+      const routing = a2aSection(tr("set.a2a.routing"));
       const routingGrid = document.createElement("div");
       routingGrid.className = "model-field-grid";
       routingGrid.appendChild(a2aField("Squad", a.squad, v => { a.squad = v || undefined; markFormDirty("a2a"); }, {
-        placeholder: "default (leave blank)",
+        placeholder: tr("set.a2a.squadPlaceholder"),
       }));
-      routingGrid.appendChild(a2aField("Session Name", a.session_name, v => { a.session_name = v || undefined; markFormDirty("a2a"); }, {
-        placeholder: "leave blank for ephemeral",
+      routingGrid.appendChild(a2aField(tr("set.a2a.sessionName"), a.session_name, v => { a.session_name = v || undefined; markFormDirty("a2a"); }, {
+        placeholder: tr("set.a2a.sessionPlaceholder"),
       }));
       routing.appendChild(routingGrid);
 
@@ -7506,7 +7495,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const createSpan = document.createElement("span");
       createSpan.className = "model-field-label model-field-label--title";
       createSpan.style.margin = "0";
-      createSpan.textContent = "Create session if missing";
+      createSpan.textContent = tr("set.a2a.createSession");
       createLabel.appendChild(createChk);
       createLabel.appendChild(createSpan);
       createRow.appendChild(createLabel);
@@ -7514,14 +7503,14 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(routing);
 
       // ── Headers ─────────────────────────────────────────────────────
-      const headersSec = a2aSection("Headers");
+      const headersSec = a2aSection(tr("set.mcp.headers"));
       const headersGrid = document.createElement("div");
       headersGrid.className = "mcp-kv-grid";
       const headersHdr = document.createElement("div");
       headersHdr.className = "mcp-kv-headers";
       headersHdr.innerHTML = `
-        <span class="model-field-label model-field-label--title">Key</span>
-        <span class="model-field-label model-field-label--title">Value</span>
+        <span class="model-field-label model-field-label--title">${escHtml(tr("set.kv.key"))}</span>
+        <span class="model-field-label model-field-label--title">${escHtml(tr("set.kv.value"))}</span>
         <span></span>
       `;
       headersGrid.appendChild(headersHdr);
@@ -7558,7 +7547,7 @@ const BASE_PATH = window.BASE_PATH || "";
         });
       };
       drawHeaders();
-      headersSec.appendChild(a2aAddButton("Add Header", async () => {
+      headersSec.appendChild(a2aAddButton(tr("set.mcp.addHeader"), async () => {
         let nk = await appPrompt(tr("set.confirm.headerNamePrompt"));
         if (!nk) return;
         nk = nk.trim();
@@ -7585,7 +7574,7 @@ const BASE_PATH = window.BASE_PATH || "";
     emptyBtn.className = "model-card-empty-btn";
     emptyBtn.innerHTML = `
       <span class="model-card-empty-icon">⊕</span>
-      <span class="model-card-empty-label">Add A2A Agent</span>
+      <span class="model-card-empty-label">${escHtml(tr("set.a2a.addAgent"))}</span>
       <span class="model-card-empty-sub">Configure a remote Agent-to-Agent endpoint</span>
     `;
     emptyBtn.addEventListener("click", () => {
@@ -7614,8 +7603,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.innerHTML = `
       <section class="form-section">
-        <h3>Remote A2A registries
-          <button type="button" class="add-btn" id="a2a-remote-add">+ Add</button>
+        <h3>${escHtml(tr("set.hdr.remoteA2aRegistries"))}
+          <button type="button" class="add-btn" id="a2a-remote-add">${escHtml(tr("set.reg.add"))}</button>
         </h3>
         <div id="a2a-remote-list"></div>
       </section>
@@ -7625,7 +7614,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector("#a2a-remote-add").addEventListener("click", async () => {
       const result = await appRegistryDialog({
-        title: "Add A2A Registry",
+        title: tr("set.reg.title.addA2a"),
         defaultKind: "a2a",
       });
       if (!result) return;
@@ -7639,7 +7628,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshA2ARemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/a2a/remotes");
@@ -7663,9 +7652,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -7674,7 +7663,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit A2A Registry",
+          title: tr("set.reg.title.editA2a"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "a2a",
@@ -7746,7 +7735,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!realAgents.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No A2A agents found in this registry. Directories must contain an a2a.json file.";
+        empty.textContent = tr("set.reg.empty.a2a");
         contentEl.appendChild(empty);
         return;
       }
@@ -7777,29 +7766,29 @@ const BASE_PATH = window.BASE_PATH || "";
           </div>
           <div class="skill-mkt-card-actions">
             ${agent.installed
-              ? `<span class="skill-installed-badge">Installed</span>`
-              : `<button type="button" class="add-btn a2a-install-btn" data-dir="${escHtml(agent.dir_path)}">Install</button>`}
+              ? `<span class="skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+              : `<button type="button" class="add-btn a2a-install-btn" data-dir="${escHtml(agent.dir_path)}">${escHtml(tr("common.install"))}</button>`}
           </div>
         `;
         const btn = card.querySelector(".a2a-install-btn");
         if (btn) {
           btn.addEventListener("click", async () => {
             btn.disabled = true;
-            btn.textContent = "Installing…";
+            btn.textContent = tr("set.reg.installing");
             try {
               const res = await skillsPost(`/a2a/remotes/${id}/install/${agent.dir_path}`, {});
               agent.installed = true;
               card.classList.add("skill-installed");
               btn.replaceWith(Object.assign(document.createElement("span"), {
                 className: "skill-installed-badge",
-                textContent: "Installed",
+                textContent: tr("set.reg.installed"),
               }));
               setStatus(`A2A agent "${res.name}" added to a2a_config.json. Reload to apply.`, "success");
               showBanner();
               delete remoteA2ACache[id];
             } catch (e) {
               btn.disabled = false;
-              btn.textContent = "Install";
+              btn.textContent = tr("common.install");
               setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
@@ -7857,13 +7846,11 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.innerHTML = `
       <section class="form-section">
-        <h3>Remote command registries
-          <button type="button" class="add-btn" id="cmd-remote-add">+ Add</button>
+        <h3>${escHtml(tr("set.hdr.remoteCommandRegistries"))}
+          <button type="button" class="add-btn" id="cmd-remote-add">${escHtml(tr("set.reg.add"))}</button>
         </h3>
         <p class="settings-hint">
-          Browse and install slash commands from GitHub, GitLab, or Gitea repositories.
-          Commands use Anthropic's Claude Code format — one markdown file per command,
-          with optional YAML frontmatter (<code>description</code>, <code>argument-hint</code>).
+          ${tr("set.cmd.remoteHint")}
         </p>
         <div id="cmd-remote-list"></div>
       </section>
@@ -7873,7 +7860,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector("#cmd-remote-add").addEventListener("click", async () => {
       const result = await appRegistryDialog({
-        title: "Add Command Registry",
+        title: tr("set.reg.title.addCommand"),
         defaultKind: "commands",
       });
       if (!result) return;
@@ -7887,7 +7874,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshCommandsRemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/commands/remotes");
@@ -7911,9 +7898,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -7922,7 +7909,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit Command Registry",
+          title: tr("set.reg.title.editCommand"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "commands",
@@ -7994,7 +7981,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!real.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No slash commands found in this registry. Files must be markdown (.md) with optional YAML frontmatter.";
+        empty.textContent = tr("set.reg.empty.commands");
         contentEl.appendChild(empty);
         return;
       }
@@ -8015,8 +8002,8 @@ const BASE_PATH = window.BASE_PATH || "";
         card.className = "skill-mkt-card remote-skill-card";
 
         const actionHtml = cmd.installed
-          ? `<span class="remote-skill-installed-badge">Installed</span>`
-          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+          : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`;
         const argHintRow = cmd.argument_hint
           ? `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">args</span><span class="remote-agent-meta-chips"><span class="remote-agent-chip">${escHtml(cmd.argument_hint)}</span></span></div>`
           : "";
@@ -8084,7 +8071,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
         </div>
         <div class="skill-frontmatter-card" id="cmd-fm-card">
-          <p class="settings-loading">Loading…</p>
+          <p class="settings-loading">${escHtml(tr("set.loading"))}</p>
         </div>
         <div class="skill-content-wrap">
           <div class="skill-md-preview markdown-body" id="cmd-md-preview"></div>
@@ -8093,8 +8080,8 @@ const BASE_PATH = window.BASE_PATH || "";
           <span></span>
           <span class="skill-save-status"></span>
           ${command.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+            ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+            : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`}
         </div>
       </div>
     `;
@@ -8154,14 +8141,14 @@ const BASE_PATH = window.BASE_PATH || "";
   // the detail view so we know which button to replace.
   async function doInstallCommand(registryID, command, cardOrHost, installBtn) {
     const btn = installBtn || cardOrHost.querySelector(".remote-install-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    if (btn) { btn.disabled = true; btn.textContent = tr("set.reg.installing"); }
     try {
       const res = await skillsPost(`/commands/remotes/${registryID}/install/${command.dir_path}`, {});
       command.installed = true;
       if (btn) {
         btn.replaceWith(Object.assign(document.createElement("span"), {
           className: "remote-skill-installed-badge",
-          textContent: "Installed",
+          textContent: tr("set.reg.installed"),
         }));
       }
       const verb = res.added ? "added" : "updated";
@@ -8175,7 +8162,7 @@ const BASE_PATH = window.BASE_PATH || "";
     } catch (err) {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "Install";
+        btn.textContent = tr("common.install");
       }
       setStatus(tr("set.reg.installFailed", { error: err.message }), "error");
     }
@@ -8201,15 +8188,11 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.innerHTML = `
       <section class="form-section">
-        <h3>Remote permission registries
-          <button type="button" class="add-btn" id="perm-remote-add">+ Add</button>
+        <h3>${escHtml(tr("set.hdr.remotePermissionRegistries"))}
+          <button type="button" class="add-btn" id="perm-remote-add">${escHtml(tr("set.reg.add"))}</button>
         </h3>
         <p class="settings-hint">
-          Browse and install permission rule-sets from GitHub, GitLab, or Gitea repositories.
-          Each rule-set is a directory holding a <code>permissions.json</code>
-          (<code>permissions.deny</code> / <code>permissions.ask</code> / <code>permissions.allow</code>;
-          old <code>always_deny</code>/<code>always_allow</code>/<code>ask_user</code> files are auto-converted).
-          Installing merges its rules into your permissions.json (deduped by rule).
+          ${tr("set.perm.remoteHint")}
         </p>
         <div id="perm-remote-list"></div>
       </section>
@@ -8219,7 +8202,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     host.querySelector("#perm-remote-add").addEventListener("click", async () => {
       const result = await appRegistryDialog({
-        title: "Add Permission Registry",
+        title: tr("set.reg.title.addPermission"),
         defaultKind: "permissions",
       });
       if (!result) return;
@@ -8233,7 +8216,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function refreshPermissionsRemoteList(container) {
-    container.innerHTML = `<p class="settings-loading">Loading…</p>`;
+    container.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let remotes;
     try {
       const res = await skillsGet("/permissions-registry/remotes");
@@ -8257,9 +8240,9 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="remote-reg-url">${escHtml(r.url)}</span>
         </div>
         <div class="remote-reg-actions">
-          <button type="button" class="add-btn remote-browse-btn">Browse</button>
-          <button type="button" class="edit-btn remote-edit-btn">Edit</button>
-          <button type="button" class="del-btn remote-remove-btn">Remove</button>
+          <button type="button" class="add-btn remote-browse-btn">${escHtml(tr("set.reg.browse"))}</button>
+          <button type="button" class="edit-btn remote-edit-btn">${escHtml(tr("common.edit"))}</button>
+          <button type="button" class="del-btn remote-remove-btn">${escHtml(tr("common.remove"))}</button>
         </div>
       `;
       row.querySelector(".remote-browse-btn").addEventListener("click", () => {
@@ -8268,7 +8251,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
         const result = await appRegistryDialog({
-          title: "Edit Permission Registry",
+          title: tr("set.reg.title.editPermission"),
           initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "permissions",
@@ -8339,7 +8322,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!real.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No permission rule-sets found. Each must be a directory containing a permissions.json file.";
+        empty.textContent = tr("set.reg.empty.permissions");
         contentEl.appendChild(empty);
         return;
       }
@@ -8359,8 +8342,8 @@ const BASE_PATH = window.BASE_PATH || "";
         const card = document.createElement("div");
         card.className = "skill-mkt-card remote-skill-card";
         const actionHtml = perm.installed
-          ? `<span class="remote-skill-installed-badge">Installed</span>`
-          : `<button type="button" class="add-btn remote-install-btn">Install</button>`;
+          ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+          : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`;
         const rulesRow = perm.rules
           ? `<div class="remote-agent-meta-row"><span class="remote-agent-meta-label">rules</span><span class="remote-agent-meta-chips"><span class="remote-agent-chip">${perm.rules}</span></span></div>`
           : "";
@@ -8417,14 +8400,14 @@ const BASE_PATH = window.BASE_PATH || "";
           <button type="button" class="skill-back-btn">Back to ${escHtml(name)}</button>
         </div>
         <div class="skill-content-wrap">
-          <pre class="skill-md-preview" id="perm-json-preview"><code>Loading…</code></pre>
+          <pre class="skill-md-preview" id="perm-json-preview"><code>${escHtml(tr("set.loading"))}</code></pre>
         </div>
         <div class="skill-detail-footer">
           <span></span>
           <span class="skill-save-status"></span>
           ${perm.installed
-            ? `<span class="remote-skill-installed-badge">Installed</span>`
-            : `<button type="button" class="add-btn remote-install-btn">Install</button>`}
+            ? `<span class="remote-skill-installed-badge">${escHtml(tr("set.reg.installed"))}</span>`
+            : `<button type="button" class="add-btn remote-install-btn">${escHtml(tr("common.install"))}</button>`}
         </div>
       </div>
     `;
@@ -8452,21 +8435,21 @@ const BASE_PATH = window.BASE_PATH || "";
   // doInstallPermission posts the install and swaps the button to "Installed".
   async function doInstallPermission(registryID, perm, cardOrHost, installBtn) {
     const btn = installBtn || cardOrHost.querySelector(".remote-install-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    if (btn) { btn.disabled = true; btn.textContent = tr("set.reg.installing"); }
     try {
       const res = await skillsPost(`/permissions-registry/remotes/${registryID}/install/${perm.dir_path}`, {});
       perm.installed = true;
       if (btn) {
         btn.replaceWith(Object.assign(document.createElement("span"), {
           className: "remote-skill-installed-badge",
-          textContent: "Installed",
+          textContent: tr("set.reg.installed"),
         }));
       }
       const n = res.rules || 0;
       setStatus(`Permission set "${res.name}" merged (${n} new rule${n !== 1 ? "s" : ""}). Reload to apply.`, "success");
       delete remotePermissionsCache[registryID];
     } catch (err) {
-      if (btn) { btn.disabled = false; btn.textContent = "Install"; }
+      if (btn) { btn.disabled = false; btn.textContent = tr("common.install"); }
       setStatus(tr("set.reg.installFailed", { error: err.message }), "error");
     }
   }

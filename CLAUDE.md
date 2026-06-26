@@ -95,15 +95,20 @@ falls back to English, so partial coverage is safe). Bump the `?v=` query on the
 `i18n/locales.js` + `i18n.js` (and `app.js`/`settings.js`) script tags in
 index.html when their contents change.
 
-**Coverage status:** fully translated — all static markup, the entire **chat
-surface** (`app.js`: status, dialogs, ask-user wizard, folder/session/turn context
-menus, update + provider-health modals, toasts, errors), and the **Settings
-chrome** (navigation/menu/titles/breadcrumb/view-toggle/footer + Appearance +
-Language). **Not yet extracted (graceful English fallback):** the deep per-panel
-form *internals* in `settings.js` (field labels/hints inside the Agents / Models /
-Permissions / MCP / A2A / Hooks / Skills / Commands / Registries editors), the
-`web/docs/*.md` documentation content, and Go server-emitted strings. Extending is
-mechanical: same `tr()` + `en.json` + translate + `make i18n` pattern.
+**Coverage status:** the **entire Web UI** is translated (en/fr/es/de at full key
+parity — ~610 keys/locale) — all static markup, the whole **chat surface**
+(`app.js`: status, dialogs, ask-user wizard, folder/session/turn context menus,
+update + provider-health modals, toasts, errors) **and all of `settings.js`**
+(navigation + every panel: Agents/Squads/Globals, Models & Providers, Permissions,
+MCP, A2A, Hooks, Skills, Commands, Registries hub + remote browse/detail views, the
+banner/reload/restart flow, and all confirm/prompt/status messages). Untranslated
+**data** is intentional: theme proper-names, doc-page titles in the Documentation
+TOC, tool/config-key identifiers, and `${input:id}`/code snippets. **Not extracted
+(graceful English fallback):** the `web/docs/*.md` documentation *content* and Go
+server-emitted strings. Extending is mechanical: same `tr()` + `en.json` +
+translate + `make i18n` pattern. **Gotcha:** `t` and `tr` appear as local/loop
+variable names in `settings.js` (e.g. a trash-button `const`); never shadow the
+global `tr()` — the i18n pass renamed one such `const tr` to `delBtn`.
 
 ## Distribution / packaging
 
