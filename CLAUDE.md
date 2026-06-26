@@ -40,6 +40,71 @@ the refreshed `web/monaco` or `web/xterm` files together with the Makefile bump.
 Lazy-loading is unaffected (`ensureMonaco` / `ensureXterm` resolve paths at
 runtime), so only the vendored files + the pinned version change.
 
+## Web UI internationalisation (i18n)
+
+The web UI is localised into **English (base), French, Spanish, German**. There
+is no build step / framework, so the i18n machinery is a tiny synchronous runtime
+plus per-locale JSON catalogues, mirroring the existing theme/notifications
+preference pattern (localStorage cache + server `preferences.json` +
+`GET/PUT /api/preferences`).
+
+**Pieces:**
+
+| File | Role |
+|---|---|
+| [web/i18n/<locale>.json](web/i18n/) | Authoring source — flat `"area.key": "string"` catalogues (`en`/`fr`/`es`/`de`). `en` is the base + fallback. |
+| [web/i18n/locales.js](web/i18n/locales.js) | **Generated** bundle (`window.OMNIS_I18N = {en,fr,es,de}`), committed like the vendored Monaco/xterm assets. Regenerate with `make i18n` ([scripts/build_i18n.mjs](scripts/build_i18n.mjs), node). |
+| [web/i18n.js](web/i18n.js) | Runtime: `window.tr(key, vars?)`, `window.trN(key, count, vars?)` (plurals via `Intl.PluralRules`), `window.I18N` = `{ locale, LOCALES, setLocale(id), translateDom(root), reconcileServerLocale(s) }`. |
+| [server/preferences.go](server/preferences.go) | `preferences.Locale *string` — persists the chosen locale (merged PUT, like theme/notifications). |
+
+**Load order** ([web/index.html](web/index.html)): `locales.js` → `i18n.js` →
+`app.js` → `settings.js`, all `defer` (defer runs in document order after parse),
+so `tr()`/`I18N` exist before app/settings render. `app.js` also installs an
+**i18n safety shim** at the top (if `window.tr` is missing it stubs `tr`/`trN`/
+`I18N`) so a failed `i18n.js` degrades to English keys instead of crashing.
+
+**How strings are localised:**
+- **Static markup** — annotate elements with `data-i18n` (textContent),
+  `data-i18n-html` (innerHTML, for the few strings with inline `<code>`),
+  `data-i18n-tip` / `data-i18n-placeholder` / `data-i18n-aria-label` /
+  `data-i18n-title` (attributes). Keep the English text in the markup as the no-JS
+  fallback. `I18N.translateDom(document.body)` runs once at boot; `createPanel`
+  calls `I18N.translateDom(frag)` on each cloned `#chat-pane-tpl`.
+- **Dynamic JS strings** — `tr("area.key"[, vars])`; interpolate `{placeholder}`
+  from `vars`; pluralise with `trN("area.key", count)` (catalogue holds
+  `key.one`/`key.other`). The function is named **`tr`, not `t`** (`t` is a loop
+  variable throughout settings.js). Date/number formatting passes `I18N.locale`
+  to `toLocale*` where localised output matters.
+- **Language picker** — Settings → Appearance has a Language section
+  (`renderAppearance`); selecting a locale calls `I18N.setLocale(id)`, which
+  persists (localStorage + `PUT /api/preferences {locale}`) and **reloads** so
+  every string re-renders. First run resolves `navigator.language` → `en`.
+  `syncThemeFromServer` reconciles a different server-side locale once per tab
+  (guarded), so a second browser/device converges.
+
+**Translation policy / glossary** — do **not** translate tool names (`Bash`,
+`Read`, …), config keys, model ids, file paths, slash-command names, or product
+nouns (`Omnis`, `Monaco`, `MCP`, `A2A`, `Squad`, `Skills`); translate everything
+else (labels, tooltips, hints, placeholders, dialog/status/toast/menu text).
+
+**Adding/maintaining strings:** add the key to **`web/i18n/en.json`** (+ the three
+translations), replace the literal with `tr(...)`/`trN(...)` or a `data-i18n*`
+attribute, then run `make i18n` to regenerate `locales.js` and commit it with the
+JSON. The generator **warns** when a non-`en` locale is missing keys (the runtime
+falls back to English, so partial coverage is safe). Bump the `?v=` query on the
+`i18n/locales.js` + `i18n.js` (and `app.js`/`settings.js`) script tags in
+index.html when their contents change.
+
+**Coverage status:** fully translated — all static markup, the entire **chat
+surface** (`app.js`: status, dialogs, ask-user wizard, folder/session/turn context
+menus, update + provider-health modals, toasts, errors), and the **Settings
+chrome** (navigation/menu/titles/breadcrumb/view-toggle/footer + Appearance +
+Language). **Not yet extracted (graceful English fallback):** the deep per-panel
+form *internals* in `settings.js` (field labels/hints inside the Agents / Models /
+Permissions / MCP / A2A / Hooks / Skills / Commands / Registries editors), the
+`web/docs/*.md` documentation content, and Go server-emitted strings. Extending is
+mechanical: same `tr()` + `en.json` + translate + `make i18n` pattern.
+
 ## Distribution / packaging
 
 omnis ships through several channels, all driven by `.goreleaser.yaml` +
@@ -94,6 +159,9 @@ make a2a-smoke A2A_URL=http://127.0.0.1:8091/              # live A2A smoke test
 make fmt                # go fmt ./...
 make vet                # go vet ./...
 make tidy               # go mod tidy
+
+# Web UI
+make i18n               # regenerate web/i18n/locales.js from web/i18n/<locale>.json (see "Web UI internationalisation")
 
 # Run — three usage modes
 go run .                                # CLI: REPL when TTY, one-shot when piped

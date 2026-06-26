@@ -2,6 +2,15 @@
 // Uses fetch + ReadableStream to consume SSE (EventSource doesn't allow
 // custom headers, so we use fetch with Authorization).
 
+// i18n safety shim: i18n.js loads (deferred) before this file and defines tr/
+// trN/I18N, but if it ever fails to load we degrade to English keys instead of
+// crashing the whole UI on a module-load ReferenceError.
+if (typeof window.tr !== "function") {
+  window.tr = (k) => k;
+  window.trN = (k) => k;
+  window.I18N = { locale: "en", LOCALES: [], setLocale() {}, translateDom() {}, reconcileServerLocale() { return false; } };
+}
+
 const TOKEN_KEY = "agent_toolkit_token";
 
 // ─── Debug instrumentation ───────────────────────────────────────────────────
@@ -274,6 +283,8 @@ function fp() { return focusedPanel(); }
 // inserted into the DOM — see rebuildChatDOM / layoutWidths).
 function createPanel(sessionId) {
   const frag = els.paneTpl.content.cloneNode(true);
+  // Translate the cloned pane's static strings (data-i18n*) before it mounts.
+  if (window.I18N) I18N.translateDom(frag);
   const root = frag.querySelector(".chat-pane");
   const id = "p" + (panelSeq++);
   root.dataset.panelId = id;
@@ -476,7 +487,7 @@ function renderPanePicker(panel) {
   if (!list.children.length) {
     const empty = document.createElement("li");
     empty.className = "pane-picker-empty";
-    empty.textContent = "No other sessions yet.";
+    empty.textContent = tr("app.session.noOthers");
     list.appendChild(empty);
   }
 }
@@ -1457,16 +1468,16 @@ async function saveEditor(panel, abs) {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setStatus(panel, "save failed: " + (body.error || res.status));
+      setStatus(panel, tr("app.editor.saveFailed", { error: (body.error || res.status) }));
       return;
     }
     editorDirty.set(abs, false);
     editorStale.delete(abs);
     for (const p of panelsWithTab(editorKey(abs))) { renderPaneTabs(p); updateEditorStaleUI(p); }
-    setStatus(panel, "saved " + baseName(abs));
+    setStatus(panel, tr("app.editor.saved", { name: baseName(abs) }));
     setTimeout(() => { if ((sessionStatus.get(panel.sessionId) || "") === "") setStatus(panel, ""); }, 1500);
   } catch (e) {
-    setStatus(panel, "save failed: " + e);
+    setStatus(panel, tr("app.editor.saveFailed", { error: e }));
   } finally {
     if (panel.els.editorSave) panel.els.editorSave.classList.remove("saving");
   }
@@ -1711,7 +1722,7 @@ async function createTerminal(key) {
 async function mountTerminal(panel, key) {
   let entry;
   try { entry = await createTerminal(key); }
-  catch (e) { setStatus(panel, "terminal failed to load: " + e); return; }
+  catch (e) { setStatus(panel, tr("app.terminal.loadFailed", { error: e })); return; }
   if (panel.activeTab !== key) return; // tab switched away while xterm loaded
   const hostWrap = panel.els.terminalHost;
   if (!hostWrap) return;
@@ -2515,8 +2526,8 @@ function openTurnMenu(anchor, sessionId, turnIndex, userText) {
   const menu = document.createElement("div");
   menu.className = "turn-menu";
   const items = [
-    ["Fork conversation from here", () => forkConversation(sessionId, turnIndex, userText)],
-    ["Rewind conversation to here", () => rewindConversation(sessionId, turnIndex, userText)],
+    [tr("menu.fork"), () => forkConversation(sessionId, turnIndex, userText)],
+    [tr("menu.rewind"), () => rewindConversation(sessionId, turnIndex, userText)],
   ];
   for (const [label, action] of items) {
     const b = document.createElement("button");
@@ -2563,9 +2574,9 @@ function prefillComposer(panel, text) {
 // re-renders the transcript and pre-fills the composer with the dropped message.
 async function rewindConversation(sessionId, turnIndex, userText) {
   const ok = await uiConfirm({
-    title: "Rewind conversation",
-    message: "This permanently removes this turn and everything after it from this conversation. Earlier turns are kept and the model's memory is rewound to match. Continue?",
-    confirmText: "Rewind",
+    title: tr("app.rewind.title"),
+    message: tr("app.rewind.message"),
+    confirmText: tr("app.rewind.confirm"),
     danger: true,
   });
   if (!ok) return;
@@ -2633,12 +2644,12 @@ function applyUserBubbleTruncation(bubble) {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "bubble-user-toggle";
-  toggle.textContent = "Show more";
+  toggle.textContent = tr("app.msg.showMore");
   toggle.addEventListener("click", (e) => {
     e.stopPropagation();
     const expanded = bubble.classList.toggle("bubble-user-expanded");
     textEl.classList.toggle("clamped", !expanded);
-    toggle.textContent = expanded ? "Show less" : "Show more";
+    toggle.textContent = expanded ? tr("app.msg.showLess") : tr("app.msg.showMore");
   });
   bubble.appendChild(toggle);
 }
@@ -3011,7 +3022,7 @@ function fallbackCopyHtml(html) {
 
 // Short, friendly labels for the confirmation toast (the menu labels are more
 // verbose, e.g. "Markdown (default)").
-const COPY_FORMAT_LABELS = { markdown: "Markdown", slack: "Slack", jira: "Jira", html: "Rich text", plain: "Plain text" };
+const COPY_FORMAT_LABELS = { markdown: "Markdown", slack: "Slack", jira: "Jira", html: tr("app.copy.richText"), plain: tr("app.copy.plainText") };
 
 // copyReplyAs copies an assistant reply in the requested flavor, flashes the
 // `.copied` state on the anchor button, and pops a confirmation toast so it's
@@ -3145,7 +3156,7 @@ function appendRoutingChip(container, to, reason) {
   row.className = "msg-row routing";
   const chip = document.createElement("div");
   chip.className = "routing-chip";
-  chip.textContent = "→ routed to " + (to || "?") + " squad";
+  chip.textContent = tr("app.routing.routedTo", { squad: (to || "?") });
   if (reason) chip.setAttribute("data-tip", reason);
   row.appendChild(chip);
   (container || fpTranscript()).appendChild(row);
@@ -3345,7 +3356,7 @@ function resolveCuratorBlock(block, data, errorMsg) {
 
   if (errorMsg) {
     if (dot)  { dot.classList.remove("pending"); dot.classList.add("error"); }
-    if (desc) desc.textContent = "curation failed";
+    if (desc) desc.textContent = tr("app.curation.failed");
     if (slot) {
       const div = document.createElement("div");
       div.className = "tool-section";
@@ -3532,7 +3543,9 @@ function buildWizardRail(wiz) {
   const count = document.createElement("span");
   count.className = "ask-wizard-count";
   const done = steps.filter(s => s.resolved).length;
-  count.textContent = "Step " + (wiz.current + 1) + " of " + steps.length + (done ? " · " + done + " done" : "");
+  count.textContent = done
+    ? tr("app.askwizard.stepDone", { current: wiz.current + 1, total: steps.length, done })
+    : tr("app.askwizard.step", { current: wiz.current + 1, total: steps.length });
   rail.appendChild(count);
   return rail;
 }
@@ -3606,7 +3619,7 @@ function buildAskInput(q) {
     if (q.allow_text) {
       textArea = document.createElement("textarea");
       textArea.className = "ask-user-text-input";
-      textArea.placeholder = "Additional notes (optional)…";
+      textArea.placeholder = tr("app.askuser.notesPlaceholder");
       el.appendChild(textArea);
     }
     getAnswer = () => {
@@ -3626,7 +3639,7 @@ function buildAskInput(q) {
       inputEl = document.createElement("textarea");
     }
     inputEl.className = "ask-user-text-input";
-    inputEl.placeholder = "Your answer…";
+    inputEl.placeholder = tr("app.askuser.answerPlaceholder");
     el.appendChild(inputEl);
     focusEl = inputEl;
     getAnswer = () => ({ selected: [], text: inputEl.value.trim(), cancelled: false });
@@ -3660,7 +3673,7 @@ function renderSingleStepBody(wiz, step) {
 
   const nav = appendWizardNav(wiz, {
     canSubmit: true,
-    skipLabel: "Skip",
+    skipLabel: tr("common.skip"),
     onSkip: () => submitSingleStep(wiz, step, { selected: [], text: "", cancelled: true }),
     onSubmit: () => {
       const answer = input.getAnswer();
@@ -3679,20 +3692,20 @@ function renderSingleStepBody(wiz, step) {
 // ─── Wizard: group step (install bursts) ─────────────────────────────────────
 // Friendly plural labels per item kind for the grouped install step.
 const ASK_GROUP_KIND_LABELS = {
-  skill: "Skills", agent: "Agents", mcp: "MCP servers", squad: "Squads",
-  a2a: "A2A agents", command: "Commands", permission: "Permission rule-sets",
-  item: "Items",
+  skill: tr("askkind.skill"), agent: tr("askkind.agent"), mcp: tr("askkind.mcp"), squad: tr("askkind.squad"),
+  a2a: tr("askkind.a2a"), command: tr("askkind.command"), permission: tr("askkind.permission"),
+  item: tr("askkind.item"),
 };
 
 // The five permission scopes, positional in every grouped question's `choices`
 // array ([Deny, allow-once, allow-tool-session, allow-project, allow-always]).
 // A grouped step picks one index and applies it to every member question.
 const ASK_GROUP_SCOPES = [
-  { idx: 0, label: "Deny all" },
-  { idx: 1, label: "Allow once" },
-  { idx: 2, label: "Allow all installs this session" },
-  { idx: 3, label: "Allow in this project" },
-  { idx: 4, label: "Allow always" },
+  { idx: 0, label: tr("askscope.denyAll") },
+  { idx: 1, label: tr("askscope.allowOnce") },
+  { idx: 2, label: tr("askscope.allowSession") },
+  { idx: 3, label: tr("askscope.allowProject") },
+  { idx: 4, label: tr("askscope.allowAlways") },
 ];
 
 // renderGroupStepBody renders an install-burst step: a "what will be installed"
@@ -3706,7 +3719,7 @@ function renderGroupStepBody(wiz, step) {
   title.className = "ask-user-prompt";
   const strong = document.createElement("strong");
   const n = questions.length;
-  strong.textContent = "Install " + n + " item" + (n === 1 ? "" : "s") + "?";
+  strong.textContent = trN("app.askuser.installItems", n);
   title.appendChild(strong);
   card.appendChild(title);
 
@@ -3737,13 +3750,13 @@ function renderGroupStepBody(wiz, step) {
       it.className = "ask-group-item";
       const nameEl = document.createElement("span");
       nameEl.className = "ask-group-item-name";
-      nameEl.textContent = (q.item && q.item.name) || "(unnamed)";
+      nameEl.textContent = (q.item && q.item.name) || tr("app.askuser.unnamed");
       it.appendChild(nameEl);
       const src = q.item && q.item.source;
       if (src) {
         const srcEl = document.createElement("span");
         srcEl.className = "ask-group-item-src";
-        srcEl.textContent = "from " + src;
+        srcEl.textContent = tr("app.askuser.from", { src });
         it.appendChild(srcEl);
       }
       section.appendChild(it);
@@ -3797,7 +3810,7 @@ function appendWizardNav(wiz, opts) {
     const back = document.createElement("button");
     back.type = "button";
     back.className = "ask-user-cancel-btn ask-wizard-back";
-    back.textContent = "← Back";
+    back.textContent = tr("common.back");
     back.addEventListener("click", () => { if (!wiz.busy) { wiz.current = i - 1; renderWizard(wiz); } });
     actions.appendChild(back);
   }
@@ -3807,7 +3820,7 @@ function appendWizardNav(wiz, opts) {
     const skip = document.createElement("button");
     skip.type = "button";
     skip.className = "ask-user-cancel-btn";
-    skip.textContent = opts.skipLabel || "Skip";
+    skip.textContent = opts.skipLabel || tr("common.skip");
     skip.addEventListener("click", () => { if (!wiz.busy) opts.onSkip(); });
     actions.appendChild(skip);
 
@@ -3816,7 +3829,7 @@ function appendWizardNav(wiz, opts) {
     submitBtn.className = "ask-user-submit";
     // "Next →" while any other step is still unanswered, otherwise "Submit".
     const moreUnanswered = steps.some((s, j) => j !== i && !s.resolved);
-    submitBtn.textContent = moreUnanswered ? "Next →" : "Submit";
+    submitBtn.textContent = moreUnanswered ? tr("common.next") : tr("common.submit");
     submitBtn.addEventListener("click", () => { if (!wiz.busy) opts.onSubmit(); });
     actions.appendChild(submitBtn);
     wiz._submit = () => { if (!wiz.busy && !submitBtn.disabled) opts.onSubmit(); };
@@ -3824,7 +3837,7 @@ function appendWizardNav(wiz, opts) {
     const next = document.createElement("button");
     next.type = "button";
     next.className = "ask-user-submit";
-    next.textContent = "Next →";
+    next.textContent = tr("common.next");
     next.addEventListener("click", () => { if (!wiz.busy) { wiz.current = i + 1; renderWizard(wiz); } });
     actions.appendChild(next);
     wiz._submit = () => { if (!wiz.busy) { wiz.current = i + 1; renderWizard(wiz); } };
@@ -4277,13 +4290,13 @@ function buildSessionRow(s, { archived }) {
 // splits the benign Copy/Rename actions from the Archive/Delete ones.
 function openSessionCtxMenu(ev, s, archived, li) {
   const displayName = s.title || s.id;
-  const items = [["Copy name", () => writeClipboard(displayName), { icon: ICON_COPY }]];
-  if (!archived) items.push(["Rename", () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
+  const items = [[tr("menu.copyName"), () => writeClipboard(displayName), { icon: ICON_COPY }]];
+  if (!archived) items.push([tr("menu.rename"), () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
   items.push(SEP);
   items.push(archived
-    ? ["Unarchive", () => unarchiveSession(s.id), { icon: ICON_UNARCHIVE }]
-    : ["Archive", () => archiveSession(s.id), { icon: ICON_ARCHIVE }]);
-  items.push(["Delete", () => deleteSession(s.id, li), { icon: ICON_DELETE }]);
+    ? [tr("menu.unarchive"), () => unarchiveSession(s.id), { icon: ICON_UNARCHIVE }]
+    : [tr("menu.archive"), () => archiveSession(s.id), { icon: ICON_ARCHIVE }]);
+  items.push([tr("menu.delete"), () => deleteSession(s.id, li), { icon: ICON_DELETE }]);
   showFolderCtxMenu(ev, items);
 }
 
@@ -4463,7 +4476,7 @@ function startRename(li, id, currentTitle) {
   input.type = "text";
   input.className = "session-rename-input";
   input.value = currentTitle;
-  input.placeholder = "Session name…";
+  input.placeholder = tr("app.session.namePlaceholder");
 
   nameEl.replaceWith(input);
   input.focus();
@@ -4711,7 +4724,7 @@ async function activateTab(panel, key) {
       b.className = "bubble-assistant";
       b.style.opacity = ".4";
       b.style.fontStyle = "italic";
-      b.textContent = "No messages yet.";
+      b.textContent = tr("app.session.noMessages");
       row.appendChild(b);
       container.appendChild(row);
       return;
@@ -5092,11 +5105,11 @@ async function requestDesktopNotifications() {
 function notificationUnblockHint() {
   const ua = navigator.userAgent || "";
   if (/Firefox\//.test(ua))
-    return "Click the permissions icon at the left of the address bar and clear the “Blocked” state for Notifications (or set it to Allow), then reload.";
+    return tr("app.notify.unblockFirefox");
   if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg|OPR/.test(ua))
-    return "Open Safari → Settings → Websites → Notifications and set this site to Allow, then reload.";
+    return tr("app.notify.unblockSafari");
   // Chromium family (Chrome, Edge, Brave, Opera) and anything else.
-  return "Click the site-info icon (the tune/ⓘ control just left of the address bar) → Site settings → Notifications → Allow, then reload.";
+  return tr("app.notify.unblockChromium");
 }
 
 // showNotificationBlockedHelp explains how to allow notifications in the browser
@@ -5104,10 +5117,9 @@ function notificationUnblockHint() {
 // itself, so this is guidance, not an action.
 function showNotificationBlockedHelp() {
   return uiConfirm({
-    title: "Allow notifications in your browser",
-    message: "Notifications are turned on in Omnis, but your browser is blocking them for this site. " +
-      notificationUnblockHint() + " A website can't grant this itself — it has to be allowed in the browser.",
-    confirmText: "Got it",
+    title: tr("app.notify.allowTitle"),
+    message: tr("app.notify.allowMsg", { hint: notificationUnblockHint() }),
+    confirmText: tr("common.gotIt"),
   });
 }
 
@@ -5193,8 +5205,9 @@ function showTaskToast(sid) {
   el.className = "task-toast";
   el.type = "button";
   el.innerHTML = '<span class="task-toast-dot"></span>' +
-    '<span class="task-toast-text">Background task finished</span>';
-  el.setAttribute("data-tip", "Open the session");
+    '<span class="task-toast-text"></span>';
+  el.querySelector(".task-toast-text").textContent = tr("app.toast.bgTaskFinished");
+  el.setAttribute("data-tip", tr("app.toast.openSession"));
   el.addEventListener("click", () => { selectSession(sid); el.remove(); });
   layer.appendChild(el);
   setTimeout(() => { el.classList.add("leaving"); }, 6000);
@@ -5287,7 +5300,7 @@ async function appendNewPushTurns(sessionId) {
 function showPushBanner(container) {
   const banner = document.createElement("div");
   banner.className = "push-banner";
-  banner.textContent = "📬 Background message received and processed";
+  banner.textContent = tr("app.banner.bgMessage");
   container.appendChild(banner);
   setTimeout(() => banner.remove(), 4000);
 }
@@ -5718,7 +5731,7 @@ async function sendMessage(panel) {
       });
       if (!res.ok) {
         const txt = await res.text();
-        appendErrorBubble(`error ${res.status}: ${txt}`, container);
+        appendErrorBubble(tr("app.error.httpStatus", { status: res.status, text: txt }), container);
         outcome = "error";
       } else {
         AgentDebug.start(sessionId);
@@ -5740,10 +5753,10 @@ async function sendMessage(panel) {
       await rerenderSessionFromHistory(sessionId);
     } else if (outcome === "exhausted") {
       finalizeSegment();
-      appendErrorBubble("⚠️ Lost connection to the server. The agent may still be finishing — reopen this chat to see its reply.", container);
+      appendErrorBubble(tr("app.error.lostConnection"), container);
     } else if (outcome === "stopped") {
       finalizeSegment();
-      appendErrorBubble("(stopped)", container);
+      appendErrorBubble(tr("app.error.stopped"), container);
     }
   } finally {
     finalizeSegment();
@@ -6360,7 +6373,7 @@ let userCmdModalState = { editing: null, onSaved: null };
 function openUserCommandModal(existing, opts) {
   userCmdModalState = { editing: existing || null, onSaved: (opts && opts.onSaved) || null };
   const isEdit = !!existing;
-  els.userCmdTitle.textContent = isEdit ? "Edit command" : "Add command";
+  els.userCmdTitle.textContent = isEdit ? tr("usercmd.editTitle") : tr("usercmd.addTitle");
   els.userCmdName.value = isEdit ? existing.name : "";
   els.userCmdDesc.value = isEdit ? (existing.description || "") : "";
   els.userCmdArgs.value = isEdit ? (existing.args || "") : "";
@@ -6665,12 +6678,12 @@ function closeSkillNameModal() {
 function confirmSkillNameModal() {
   const name = els.skillNameInput.value.trim();
   if (!name) {
-    els.skillNameError.textContent = "Skill name is required.";
+    els.skillNameError.textContent = tr("app.skill.nameRequired");
     els.skillNameError.hidden = false;
     return;
   }
   if (!SKILL_NAME_RE.test(name)) {
-    els.skillNameError.textContent = "Name must match: lowercase letters, digits, '-' or '.' (1–63 chars).";
+    els.skillNameError.textContent = tr("app.skill.nameInvalid");
     els.skillNameError.hidden = false;
     return;
   }
@@ -6894,16 +6907,16 @@ async function onCompactClick(e, panel) {
   if (!panel.sessionId) return;
   const btn = panel.els.ctxCompactBtn;
   btn.disabled = true;
-  btn.textContent = "Queuing…";
+  btn.textContent = tr("app.ctx.queuing");
   try {
     const res = await apiFetch(`/api/sessions/${panel.sessionId}/compact`, { method: "POST" });
     if (!res.ok) throw new Error(await res.text());
-    btn.textContent = "Queued ✓";
+    btn.textContent = tr("app.ctx.queued");
   } catch (err) {
     console.error("compact request failed:", err);
-    btn.textContent = "Error";
+    btn.textContent = tr("common.error");
   }
-  setTimeout(() => { btn.disabled = false; btn.textContent = "Compress Now"; closeCtxPopup(panel); }, 1400);
+  setTimeout(() => { btn.disabled = false; btn.textContent = tr("ctx.compressNow"); closeCtxPopup(panel); }, 1400);
 }
 
 // ─── Sidebar resize & toggle ─────────────────────────────────────────────────
@@ -7335,45 +7348,45 @@ async function folderDownload(abs, name, isDir) {
 // folderDelete removes a file/dir after confirmation.
 async function folderDelete(abs, name, isDir) {
   const ok = await uiConfirm({
-    title: `Delete ${isDir ? "folder" : "file"}`,
-    message: `Permanently delete “${name}”${isDir ? " and all its contents" : ""}? This cannot be undone.`,
-    confirmText: "Delete",
+    title: tr(isDir ? "app.folder.deleteFolder" : "app.folder.deleteFile"),
+    message: tr(isDir ? "app.folder.deleteMsgFolder" : "app.folder.deleteMsgFile", { name }),
+    confirmText: tr("common.delete"),
     danger: true,
   });
   if (!ok) return;
-  runFolderOp("delete", { path: abs }, "delete failed");
+  runFolderOp("delete", { path: abs }, tr("app.folder.deleteFailed"));
 }
 
 // folderNewEntry prompts for a name and creates a file or folder inside dirAbs.
 async function folderNewEntry(dirAbs, kind) {
   const name = await uiPrompt({
-    title: kind === "dir" ? "New folder" : "New file",
-    label: "Name",
+    title: tr(kind === "dir" ? "app.folder.newFolder" : "app.folder.newFile"),
+    label: tr("common.name"),
     placeholder: kind === "dir" ? "my-folder" : "file.txt",
-    confirmText: "Create",
+    confirmText: tr("common.create"),
   });
   if (!name) return;
-  runFolderOp("new", { dir: dirAbs, name, kind }, "create failed");
+  runFolderOp("new", { dir: dirAbs, name, kind }, tr("app.folder.createFailed"));
 }
 
 // folderRename prompts for a new name and renames the entry in place.
 async function folderRename(abs, name) {
-  const next = await uiPrompt({ title: "Rename", label: "New name", value: name, confirmText: "Rename" });
+  const next = await uiPrompt({ title: tr("common.rename"), label: tr("app.folder.newName"), value: name, confirmText: tr("common.rename") });
   if (!next || next === name) return;
-  runFolderOp("rename", { src: abs, name: next }, "rename failed");
+  runFolderOp("rename", { src: abs, name: next }, tr("app.folder.renameFailed"));
 }
 
 // folderMoveTo / folderCopyTo prompt for a destination directory (prefilled with
 // the current dir) and move/copy the entry there.
 async function folderMoveTo(abs) {
-  const dest = await uiPrompt({ title: "Move to", label: "Destination directory", value: foldersDir, confirmText: "Move" });
+  const dest = await uiPrompt({ title: tr("app.folder.moveTo"), label: tr("app.folder.destDir"), value: foldersDir, confirmText: tr("common.move") });
   if (!dest) return;
-  runFolderOp("move", { src: abs, dest }, "move failed");
+  runFolderOp("move", { src: abs, dest }, tr("app.folder.moveFailed"));
 }
 async function folderCopyTo(abs) {
-  const dest = await uiPrompt({ title: "Copy to", label: "Destination directory", value: foldersDir, confirmText: "Copy" });
+  const dest = await uiPrompt({ title: tr("app.folder.copyTo"), label: tr("app.folder.destDir"), value: foldersDir, confirmText: tr("common.copy") });
   if (!dest) return;
-  runFolderOp("copy", { src: abs, dest }, "copy failed");
+  runFolderOp("copy", { src: abs, dest }, tr("app.folder.copyFailed"));
 }
 
 // ─── Generic themed modal helpers (prompt / confirm) ──────────────────────────
@@ -7497,12 +7510,12 @@ function openUpdateDialog() {
         <span class="update-arrow">→</span>
         <span class="update-new">v${escHtml(st.latest || "?")}</span>
       </div>
-      <div class="update-method">Install method: <strong>${escHtml(st.method || "unknown")}</strong></div>
-      ${needsSudo ? `<label class="user-cmd-field"><span class="user-cmd-field-label">sudo password</span><input type="password" class="update-pass" autocomplete="off" /></label>` : ""}
+      <div class="update-method">${escHtml(tr("app.update.installMethod"))} <strong>${escHtml(st.method || "unknown")}</strong></div>
+      ${needsSudo ? `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("app.update.sudoPassword"))}</span><input type="password" class="update-pass" autocomplete="off" /></label>` : ""}
       <div class="update-result" hidden></div>
     </div>`;
   const ok = overlay.querySelector(".ui-modal-ok");
-  ok.textContent = "Install";
+  ok.textContent = tr("app.update.install");
   const result = body.querySelector(".update-result");
   const passInput = body.querySelector(".update-pass");
 
@@ -7519,9 +7532,9 @@ function openUpdateDialog() {
 
   const doInstall = async () => {
     ok.disabled = true;
-    ok.textContent = "Installing…";
+    ok.textContent = tr("app.update.installing");
     result.hidden = false;
-    result.innerHTML = `<div class="update-progress">Downloading and installing… this can take a minute.</div>`;
+    result.innerHTML = `<div class="update-progress">${escHtml(tr("app.update.downloading"))}</div>`;
     try {
       const res = await apiFetch("/api/update/install", {
         method: "POST",
@@ -7530,22 +7543,22 @@ function openUpdateDialog() {
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
-        ok.textContent = "Restart now";
+        ok.textContent = tr("app.update.restartNow");
         ok.disabled = false;
-        result.innerHTML = `<div class="update-success">Installed v${escHtml(st.latest)}. Restart the server to run the new version.</div>`;
+        result.innerHTML = `<div class="update-success">${escHtml(tr("app.update.installedRestart", { version: st.latest }))}</div>`;
         // Re-point the primary button to restart.
         ok.replaceWith(ok.cloneNode(true));
         const restartBtn = overlay.querySelector(".ui-modal-ok");
-        restartBtn.textContent = "Restart now";
+        restartBtn.textContent = tr("app.update.restartNow");
         restartBtn.addEventListener("click", () => { close(); restartServerAndReload(); });
       } else {
         ok.disabled = false;
-        ok.textContent = "Install";
-        showManual(j.error || "Install failed.");
+        ok.textContent = tr("app.update.install");
+        showManual(j.error || tr("app.update.installFailed"));
       }
     } catch (e) {
       ok.disabled = false;
-      ok.textContent = "Install";
+      ok.textContent = tr("app.update.install");
       showManual(String(e && e.message || e));
     }
   };
@@ -7553,7 +7566,7 @@ function openUpdateDialog() {
   // For a raw/unknown method there is no automated install — show manual steps
   // immediately and relabel the primary button.
   if (st.method === "raw" || st.method === "unknown") {
-    ok.textContent = "Show manual steps";
+    ok.textContent = tr("app.update.showManual");
     ok.addEventListener("click", () => showManual(""));
   } else {
     ok.addEventListener("click", doInstall);
@@ -7695,7 +7708,7 @@ async function openProviderHealthModal() {
     testBtn.addEventListener("click", async () => {
       testBtn.disabled = true;
       testStatus.className = "ph-test-status";
-      testStatus.textContent = "Testing…";
+      testStatus.textContent = tr("app.provider.testing");
       try {
         const res = await apiFetch("/api/providers/test", {
           method: "POST",
@@ -7704,7 +7717,9 @@ async function openProviderHealthModal() {
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {
           testStatus.className = "ph-test-status is-ok";
-          testStatus.textContent = `✓ Connected${typeof data.model_count === "number" ? ` (${data.model_count} models)` : ""}`;
+          testStatus.textContent = typeof data.model_count === "number"
+            ? tr("app.provider.testedCount", { count: data.model_count })
+            : tr("app.provider.tested");
           if (errEl) errEl.hidden = true; // stale boot-time error no longer applies
         } else {
           testStatus.className = "ph-test-status is-error";
@@ -7712,7 +7727,7 @@ async function openProviderHealthModal() {
         }
       } catch (e) {
         testStatus.className = "ph-test-status is-error";
-        testStatus.textContent = e.message || "test failed";
+        testStatus.textContent = e.message || tr("app.provider.testFailed");
       } finally {
         testBtn.disabled = false;
       }
@@ -7727,7 +7742,7 @@ async function openProviderHealthModal() {
   body.appendChild(status);
 
   const ok = overlay.querySelector(".ui-modal-ok");
-  ok.textContent = "Save & Reload";
+  ok.textContent = tr("app.provider.saveReload");
 
   let done = false;
   const close = () => {
@@ -7757,7 +7772,7 @@ async function openProviderHealthModal() {
       if (key) prov.api_key = key; // blank keeps the existing value / env ref
     }
     ok.disabled = true;
-    setStatus("Saving…");
+    setStatus(tr("app.provider.saving"));
     try {
       const putRes = await apiFetch("/api/config/parsed/models", {
         method: "PUT",
@@ -7767,7 +7782,7 @@ async function openProviderHealthModal() {
         const j = await putRes.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${putRes.status}`);
       }
-      setStatus("Reloading agent…");
+      setStatus(tr("app.provider.reloading"));
       const relRes = await apiFetch("/api/config/reload", { method: "POST" });
       if (!relRes.ok) {
         const j = await relRes.json().catch(() => ({}));
@@ -7779,14 +7794,14 @@ async function openProviderHealthModal() {
       const stillBad = (providerHealthState?.providers || []).filter(p => !p.ok);
       if (stillBad.length) {
         ok.disabled = false;
-        setStatus("Still can't connect: " + stillBad.map(p => p.ref).join(", ") + ". Check the values and try again.", "is-error");
+        setStatus(tr("app.provider.stillBad", { providers: stillBad.map(p => p.ref).join(", ") }), "is-error");
       } else {
-        setStatus("Connected — agent reloaded.", "is-ok");
+        setStatus(tr("app.provider.connected"), "is-ok");
         setTimeout(close, 1000);
       }
     } catch (e) {
       ok.disabled = false;
-      setStatus("Failed: " + e.message, "is-error");
+      setStatus(tr("app.provider.failed", { error: e.message }), "is-error");
     }
   });
 }
@@ -7973,16 +7988,16 @@ document.addEventListener("keydown", (e) => {
 function openFolderDirCtxMenu(ev) {
   if (!foldersDir) return;
   const items = [];
-  items.push(["Open Terminal here", () => openTerminalTab(null, { cwd: foldersDir })]);
+  items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: foldersDir })]);
   items.push(SEP);
-  items.push(["New File…", () => folderNewEntry(foldersDir, "file")]);
-  items.push(["New Folder…", () => folderNewEntry(foldersDir, "dir")]);
+  items.push([tr("menu.newFile"), () => folderNewEntry(foldersDir, "file")]);
+  items.push([tr("menu.newFolder"), () => folderNewEntry(foldersDir, "dir")]);
   if (folderClipboard) {
-    items.push([`Paste${folderClipboard.name ? ` “${folderClipboard.name}” here` : " here"}`, () => folderPasteInto(foldersDir)]);
+    items.push([folderClipboard.name ? tr("menu.pasteHereNamed", { name: folderClipboard.name }) : tr("menu.pasteHere"), () => folderPasteInto(foldersDir)]);
   }
   items.push(SEP);
-  items.push(["Download folder", () => folderDownload(foldersDir, foldersDir.split("/").filter(Boolean).pop() || "root", true)]);
-  items.push(["Copy path", () => writeClipboard(foldersDir)]);
+  items.push([tr("menu.downloadFolder"), () => folderDownload(foldersDir, foldersDir.split("/").filter(Boolean).pop() || "root", true)]);
+  items.push([tr("menu.copyPath"), () => writeClipboard(foldersDir)]);
   showFolderCtxMenu(ev, items);
 }
 els.foldersPath.addEventListener("contextmenu", openFolderDirCtxMenu);
@@ -8015,26 +8030,26 @@ function openFolderUpCtxMenu(ev) {
   const name = abs.split("/").filter(Boolean).pop() || "root";
   const D = { disabled: true };
   const items = [
-    ["Open Chat here", () => newChat(null, undefined, cur)],
-    ["Open Terminal here", () => openTerminalTab(null, { cwd: cur })],
-    ["Download", () => folderDownload(abs, name, true)],
+    [tr("menu.openChatHere"), () => newChat(null, undefined, cur)],
+    [tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: cur })],
+    [tr("menu.download"), () => folderDownload(abs, name, true)],
     SEP,
-    ["New File…", () => folderNewEntry(abs, "file")],
-    ["New Folder…", () => folderNewEntry(abs, "dir")],
+    [tr("menu.newFile"), () => folderNewEntry(abs, "file")],
+    [tr("menu.newFolder"), () => folderNewEntry(abs, "dir")],
   ];
   if (folderClipboard) {
-    items.push([`Paste${folderClipboard.name ? ` “${folderClipboard.name}”` : ""}`, () => folderPasteInto(abs)]);
+    items.push([folderClipboard.name ? tr("menu.pasteNamed", { name: folderClipboard.name }) : tr("menu.paste"), () => folderPasteInto(abs)]);
   }
   items.push(
     SEP,
-    ["Cut", null, D],
-    ["Copy", null, D],
-    ["Copy path", () => writeClipboard(abs)],
+    [tr("menu.cut"), null, D],
+    [tr("menu.copy"), null, D],
+    [tr("menu.copyPath"), () => writeClipboard(abs)],
     SEP,
-    ["Rename…", null, D],
-    ["Move to…", null, D],
-    ["Copy to…", null, D],
-    ["Delete", null, D],
+    [tr("menu.renameDots"), null, D],
+    [tr("menu.moveTo"), null, D],
+    [tr("menu.copyTo"), null, D],
+    [tr("menu.delete"), null, D],
   );
   showFolderCtxMenu(ev, items);
 }
@@ -8081,48 +8096,48 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   const abs = absForRel(rel);
   const name = rel.split("/").pop();
   const pasteLabel = folderClipboard
-    ? `Paste${folderClipboard.name ? ` “${folderClipboard.name}”` : ""}`
+    ? (folderClipboard.name ? tr("menu.pasteNamed", { name: folderClipboard.name }) : tr("menu.paste"))
     : null;
   const items = [];
   if (isDir) {
     // Open / download
-    items.push(["Open Chat here", () => newChat(null, undefined, abs)]);
-    items.push(["Open Terminal here", () => openTerminalTab(null, { cwd: abs })]);
-    items.push(["Download", () => folderDownload(abs, name, true)]);
+    items.push([tr("menu.openChatHere"), () => newChat(null, undefined, abs)]);
+    items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: abs })]);
+    items.push([tr("menu.download"), () => folderDownload(abs, name, true)]);
     items.push(SEP);
     // Create inside this folder
-    items.push(["New File…", () => folderNewEntry(abs, "file")]);
-    items.push(["New Folder…", () => folderNewEntry(abs, "dir")]);
+    items.push([tr("menu.newFile"), () => folderNewEntry(abs, "file")]);
+    items.push([tr("menu.newFolder"), () => folderNewEntry(abs, "dir")]);
     if (pasteLabel) items.push([pasteLabel, () => folderPasteInto(abs)]);
     items.push(SEP);
     // Clipboard
-    items.push(["Cut", () => setFolderClipboard(abs, name, true, "cut")]);
-    items.push(["Copy", () => setFolderClipboard(abs, name, true, "copy")]);
-    items.push(["Copy path", () => writeClipboard(abs)]);
+    items.push([tr("menu.cut"), () => setFolderClipboard(abs, name, true, "cut")]);
+    items.push([tr("menu.copy"), () => setFolderClipboard(abs, name, true, "copy")]);
+    items.push([tr("menu.copyPath"), () => writeClipboard(abs)]);
     items.push(SEP);
     // Mutating ops
-    items.push(["Rename…", () => folderRename(abs, name)]);
-    items.push(["Move to…", () => folderMoveTo(abs)]);
-    items.push(["Copy to…", () => folderCopyTo(abs)]);
-    items.push(["Delete", () => folderDelete(abs, name, true)]);
-    if (activeSessionId) { items.push(SEP); items.push(["Add to chat editor", () => insertFileRef(rel)]); }
+    items.push([tr("menu.renameDots"), () => folderRename(abs, name)]);
+    items.push([tr("menu.moveTo"), () => folderMoveTo(abs)]);
+    items.push([tr("menu.copyTo"), () => folderCopyTo(abs)]);
+    items.push([tr("menu.delete"), () => folderDelete(abs, name, true)]);
+    if (activeSessionId) { items.push(SEP); items.push([tr("menu.addToChatEditor"), () => insertFileRef(rel)]); }
   } else {
-    items.push(["Open", () => openFileInEditor(rel)]);
-    items.push(["Download", () => folderDownload(abs, name, false)]);
+    items.push([tr("menu.open"), () => openFileInEditor(rel)]);
+    items.push([tr("menu.download"), () => folderDownload(abs, name, false)]);
     items.push(SEP);
-    items.push(["Cut", () => setFolderClipboard(abs, name, false, "cut")]);
-    items.push(["Copy", () => setFolderClipboard(abs, name, false, "copy")]);
-    items.push(["Copy path", () => writeClipboard(abs)]);
+    items.push([tr("menu.cut"), () => setFolderClipboard(abs, name, false, "cut")]);
+    items.push([tr("menu.copy"), () => setFolderClipboard(abs, name, false, "copy")]);
+    items.push([tr("menu.copyPath"), () => writeClipboard(abs)]);
     items.push(SEP);
-    items.push(["Rename…", () => folderRename(abs, name)]);
-    items.push(["Move to…", () => folderMoveTo(abs)]);
-    items.push(["Copy to…", () => folderCopyTo(abs)]);
-    items.push(["Delete", () => folderDelete(abs, name, false)]);
+    items.push([tr("menu.renameDots"), () => folderRename(abs, name)]);
+    items.push([tr("menu.moveTo"), () => folderMoveTo(abs)]);
+    items.push([tr("menu.copyTo"), () => folderCopyTo(abs)]);
+    items.push([tr("menu.delete"), () => folderDelete(abs, name, false)]);
     const extras = [];
-    if (activeSessionId) extras.push(["Add to chat editor", () => insertFileRef(rel)]);
+    if (activeSessionId) extras.push([tr("menu.addToChatEditor"), () => insertFileRef(rel)]);
     if (editorDirty.get(abs)) {
       const panel = panelsWithTab(editorKey(abs))[0];
-      if (panel) extras.push(["Save", () => saveEditor(panel, abs)]);
+      if (panel) extras.push([tr("menu.save"), () => saveEditor(panel, abs)]);
     }
     if (extras.length) { items.push(SEP); items.push(...extras); }
   }
@@ -8285,7 +8300,7 @@ function renderFolder(data, err) {
   if (!els.foldersList.children.length) {
     const li = document.createElement("li");
     li.id = "folders-empty";
-    li.textContent = "empty";
+    li.textContent = tr("app.folders.empty");
     els.foldersList.appendChild(li);
   }
 }

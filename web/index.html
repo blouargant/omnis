@@ -37,53 +37,53 @@
   <aside id="sidebar">
     <div id="sidebar-header">
       <span class="app-name">Omnis</span>
-      <button id="update-btn" type="button" class="update-btn" hidden data-tip="A new omnis release is available — click to update">
+      <button id="update-btn" type="button" class="update-btn" hidden data-tip="A new omnis release is available — click to update" data-i18n-tip="update.tip">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-        <span class="update-btn-label">Update</span>
+        <span class="update-btn-label" data-i18n="update.label">Update</span>
       </button>
       <div class="sidebar-header-btns">
-        <button id="sidebar-toggle" type="button" data-tip="Hide sidebar">
+        <button id="sidebar-toggle" type="button" data-tip="Hide sidebar" data-i18n-tip="sidebar.hide">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
       </div>
     </div>
     <div id="new-chat-wrap">
-      <button id="new-chat" type="button" data-tip="New chat">
+      <button id="new-chat" type="button" data-tip="New chat" data-i18n-tip="newchat.tip">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span class="new-chat-text">
-          <span class="new-chat-label">New Chat</span>
+          <span class="new-chat-label" data-i18n="newchat.label">New Chat</span>
           <span class="new-chat-sub" hidden></span>
         </span>
       </button>
-      <button id="squad-toggle" type="button" data-tip="Choose squad" aria-haspopup="true" aria-expanded="false" hidden>
+      <button id="squad-toggle" type="button" data-tip="Choose squad" data-i18n-tip="squad.choose" aria-haspopup="true" aria-expanded="false" hidden>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div id="squad-menu" role="menu" hidden></div>
     </div>
     <ul id="session-list" aria-label="sessions"></ul>
     <div id="folders-panel" class="collapsed">
-      <div id="folders-resize" data-tip="Drag to resize"></div>
-      <div id="folders-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle folder browser">
+      <div id="folders-resize" data-tip="Drag to resize" data-i18n-tip="folders.resize"></div>
+      <div id="folders-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle folder browser" data-i18n-tip="folders.toggle">
         <svg class="folders-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
         <svg class="folders-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span class="sidebar-section-label">Folders</span>
+        <span class="sidebar-section-label" data-i18n="folders.label">Folders</span>
       </div>
       <div id="folders-body">
-        <div id="folders-path" data-tip="Current working directory"></div>
+        <div id="folders-path" data-tip="Current working directory" data-i18n-tip="folders.cwd"></div>
         <ul id="folders-list" aria-label="folder contents"></ul>
       </div>
     </div>
     <div id="archived-panel" class="collapsed" hidden>
-      <div id="archived-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle archived sessions">
+      <div id="archived-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle archived sessions" data-i18n-tip="archived.toggle">
         <svg class="archived-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
         <svg class="archived-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        <span class="sidebar-section-label">Archived</span>
+        <span class="sidebar-section-label" data-i18n="archived.label">Archived</span>
         <span id="archived-count" class="archived-count"></span>
       </div>
       <ul id="archived-list" aria-label="archived sessions"></ul>
     </div>
     <div id="settings-menu" hidden>
-      <div class="sidebar-section-label">Settings</div>
+      <div class="sidebar-section-label" data-i18n="settings.label">Settings</div>
       <ul id="settings-menu-list" aria-label="settings sections"></ul>
     </div>
     <div id="sidebar-footer">
@@ -92,7 +92,7 @@
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
-        <span>Settings</span>
+        <span data-i18n="settings.label">Settings</span>
       </button>
     </div>
   </aside>
@@ -113,22 +113,22 @@
     <section class="chat-pane">
       <div class="pane-tabbar">
         <div class="pane-tabs" role="tablist"></div>
-        <button class="pane-newtab-btn" type="button" data-tip="New chat tab" aria-label="New chat tab">
+        <button class="pane-newtab-btn" type="button" data-tip="New chat tab" data-i18n-tip="pane.newtab" aria-label="New chat tab" data-i18n-aria-label="pane.newtab">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <div class="pane-toolbar">
-          <button class="pane-term-btn" type="button" data-tip="Open terminal tab" aria-label="Open terminal tab">
+          <button class="pane-term-btn" type="button" data-tip="Open terminal tab" data-i18n-tip="pane.terminal" aria-label="Open terminal tab" data-i18n-aria-label="pane.terminal">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
           </button>
-          <button class="pane-split-btn" type="button" data-tip="Split editor right" aria-label="Split editor right">
+          <button class="pane-split-btn" type="button" data-tip="Split editor right" data-i18n-tip="pane.split" aria-label="Split editor right" data-i18n-aria-label="pane.split">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="4" width="18" height="16" rx="2"/>
               <line x1="12" y1="4" x2="12" y2="20"/>
             </svg>
           </button>
-          <button class="pane-close-btn" type="button" data-tip="Close panel" aria-label="Close panel">
+          <button class="pane-close-btn" type="button" data-tip="Close panel" data-i18n-tip="pane.close" aria-label="Close panel" data-i18n-aria-label="pane.close">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -140,14 +140,14 @@
       <div class="pane-editor" hidden>
         <div class="pane-editor-bar">
           <span class="pane-editor-path" data-tip=""></span>
-          <button class="pane-editor-save" type="button" data-tip="Save (Ctrl+S)" aria-label="Save file">
+          <button class="pane-editor-save" type="button" data-tip="Save (Ctrl+S)" data-i18n-tip="editor.saveTip" aria-label="Save file" data-i18n-aria-label="editor.saveAria">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            <span>Save</span>
+            <span data-i18n="common.save">Save</span>
           </button>
         </div>
         <div class="pane-editor-stale" hidden>
-          <span>This file was changed on disk by the agent. You have unsaved edits.</span>
-          <button class="pane-editor-reload" type="button">Reload from disk</button>
+          <span data-i18n="editor.staleMsg">This file was changed on disk by the agent. You have unsaved edits.</span>
+          <button class="pane-editor-reload" type="button" data-i18n="editor.reload">Reload from disk</button>
         </div>
         <div class="pane-editor-host"></div>
       </div>
@@ -159,7 +159,7 @@
           <div class="pane-picker-squad" hidden>
             <span class="pane-picker-squad-label">Squad</span>
             <div class="pane-picker-squad-control">
-              <button class="pane-picker-squad-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Choose squad for new chat">
+              <button class="pane-picker-squad-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Choose squad for new chat" data-i18n-aria-label="picker.squadAria">
                 <svg class="pane-picker-squad-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 <span class="pane-picker-squad-name"></span>
                 <svg class="pane-picker-squad-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
@@ -167,42 +167,42 @@
               <div class="pane-picker-squad-menu" role="menu" hidden></div>
             </div>
           </div>
-          <button type="button" class="provider-warn-banner is-picker" hidden data-tip="Model connection problem — click to fix">
+          <button type="button" class="provider-warn-banner is-picker" hidden data-tip="Model connection problem — click to fix" data-i18n-tip="provider.warn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
               <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <span class="provider-warn-text">Model connection problem — click to fix</span>
+            <span class="provider-warn-text" data-i18n="provider.warn">Model connection problem — click to fix</span>
           </button>
           <button class="pane-picker-new" type="button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-            <span>Start a new chat</span>
+            <span data-i18n="picker.newChat">Start a new chat</span>
           </button>
-          <div class="pane-picker-or">or open an existing session</div>
-          <ul class="pane-picker-list" aria-label="open session in this panel"></ul>
+          <div class="pane-picker-or" data-i18n="picker.or">or open an existing session</div>
+          <ul class="pane-picker-list" aria-label="open session in this panel" data-i18n-aria-label="picker.listAria"></ul>
         </div>
       </div>
       <div id="ask-user-slot"></div>
       <div id="composer-wrap">
         <div id="composer-resize" aria-hidden="true"></div>
         <div id="slash-menu" hidden></div>
-        <button type="button" class="provider-warn-banner is-composer" hidden data-tip="Model connection problem — click to fix">
+        <button type="button" class="provider-warn-banner is-composer" hidden data-tip="Model connection problem — click to fix" data-i18n-tip="provider.warn">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
-          <span class="provider-warn-text">Model connection problem — click to fix</span>
+          <span class="provider-warn-text" data-i18n="provider.warn">Model connection problem — click to fix</span>
         </button>
         <form id="composer">
           <input type="file" id="file-input" multiple hidden />
           <div id="attachments" hidden></div>
           <div class="prompt-stack">
             <div class="prompt-highlight" aria-hidden="true"></div>
-            <textarea id="prompt" rows="2" placeholder="Message the agent… (Enter to send)"></textarea>
+            <textarea id="prompt" rows="2" placeholder="Message the agent… (Enter to send)" data-i18n-placeholder="composer.placeholder"></textarea>
           </div>
           <div class="composer-actions">
             <div id="attach-wrap">
-              <button id="attach-btn" type="button" data-tip="Attach files">
+              <button id="attach-btn" type="button" data-tip="Attach files" data-i18n-tip="composer.attach">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                 </svg>
@@ -214,24 +214,24 @@
                     <polyline points="17 8 12 3 7 8"/>
                     <line x1="12" y1="3" x2="12" y2="15"/>
                   </svg>
-                  Upload from computer
+                  <span data-i18n="composer.uploadComputer">Upload from computer</span>
                 </button>
                 <button id="attach-context" type="button">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                   </svg>
-                  Add context
+                  <span data-i18n="composer.addContext">Add context</span>
                 </button>
               </div>
             </div>
-            <button id="edit-mode-btn" type="button" data-tip="Toggle Enter key: send vs new line">
+            <button id="edit-mode-btn" type="button" data-tip="Toggle Enter key: send vs new line" data-i18n-tip="composer.editMode">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 7V4h16v3"/>
                 <path d="M9 20h6"/>
                 <path d="M12 4v16"/>
               </svg>
             </button>
-            <button id="slash-btn" type="button" data-tip="Slash commands (/)">/</button>
+            <button id="slash-btn" type="button" data-tip="Slash commands (/)" data-i18n-tip="composer.slashTip">/</button>
             <span id="ctx-ring-wrap">
               <svg id="ctx-ring-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
                 <circle class="ctx-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"/>
@@ -239,20 +239,20 @@
                   stroke-linecap="round" transform="rotate(-90 12 12)"/>
               </svg>
               <div id="ctx-popup" hidden>
-                <div class="ctx-popup-header">Context</div>
+                <div class="ctx-popup-header" data-i18n="ctx.header">Context</div>
                 <div class="ctx-popup-grid">
-                  <span>Tokens used</span>  <span id="ctx-pop-used">—</span>
-                  <span>Max context</span>  <span id="ctx-pop-max">—</span>
-                  <span>Percent</span>      <span id="ctx-pop-pct">—</span>
-                  <span>Budget</span>       <span id="ctx-pop-budget">—</span>
+                  <span data-i18n="ctx.tokensUsed">Tokens used</span>  <span id="ctx-pop-used">—</span>
+                  <span data-i18n="ctx.maxContext">Max context</span>  <span id="ctx-pop-max">—</span>
+                  <span data-i18n="ctx.percent">Percent</span>      <span id="ctx-pop-pct">—</span>
+                  <span data-i18n="ctx.budget">Budget</span>       <span id="ctx-pop-budget">—</span>
                 </div>
                 <div id="ctx-pop-agents" hidden></div>
-                <button id="ctx-compact-btn" type="button">Compress Now</button>
+                <button id="ctx-compact-btn" type="button" data-i18n="ctx.compressNow">Compress Now</button>
               </div>
             </span>
             <span id="status"></span>
-            <button id="cancel" type="button" disabled>Stop</button>
-            <button id="send" type="submit">Send</button>
+            <button id="cancel" type="button" disabled data-i18n="composer.stop">Stop</button>
+            <button id="send" type="submit" data-i18n="composer.send">Send</button>
           </div>
         </form>
       </div>
@@ -262,8 +262,8 @@
   <div id="ctx-browser-overlay" hidden>
     <div id="ctx-browser">
       <div id="ctx-browser-header">
-        <span class="ctx-browser-title">Add Context</span>
-        <button id="ctx-browser-close" type="button" aria-label="Close">
+        <span class="ctx-browser-title" data-i18n="ctxbrowser.title">Add Context</span>
+        <button id="ctx-browser-close" type="button" aria-label="Close" data-i18n-aria-label="common.close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -274,10 +274,10 @@
         <ul id="ctx-browser-list"></ul>
       </div>
       <div id="ctx-browser-footer">
-        <span id="ctx-browser-count">No files selected</span>
+        <span id="ctx-browser-count" data-i18n="ctxbrowser.noFiles">No files selected</span>
         <div class="ctx-browser-footer-btns">
-          <button id="ctx-browser-cancel" type="button">Cancel</button>
-          <button id="ctx-browser-add" type="button" disabled>Add</button>
+          <button id="ctx-browser-cancel" type="button" data-i18n="common.cancel">Cancel</button>
+          <button id="ctx-browser-add" type="button" disabled data-i18n="common.add">Add</button>
         </div>
       </div>
     </div>
@@ -286,39 +286,39 @@
   <div id="user-cmd-modal-overlay" hidden>
     <div id="user-cmd-modal" role="dialog" aria-modal="true" aria-labelledby="user-cmd-modal-title">
       <div class="user-cmd-modal-header">
-        <span id="user-cmd-modal-title">Add command</span>
-        <button id="user-cmd-modal-close" type="button" aria-label="Close">
+        <span id="user-cmd-modal-title" data-i18n="usercmd.addTitle">Add command</span>
+        <button id="user-cmd-modal-close" type="button" aria-label="Close" data-i18n-aria-label="common.close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="user-cmd-modal-body">
         <label class="user-cmd-field">
-          <span class="user-cmd-field-label">Name</span>
+          <span class="user-cmd-field-label" data-i18n="usercmd.name">Name</span>
           <div class="user-cmd-name-row">
             <span class="user-cmd-name-prefix">/</span>
             <input id="user-cmd-name" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="review" />
           </div>
-          <span class="user-cmd-field-hint">letters, digits, '-' or '_' (1–40 chars)</span>
+          <span class="user-cmd-field-hint" data-i18n="usercmd.nameHint">letters, digits, '-' or '_' (1–40 chars)</span>
         </label>
         <label class="user-cmd-field">
-          <span class="user-cmd-field-label">Description</span>
-          <input id="user-cmd-desc" type="text" maxlength="120" autocomplete="off" placeholder="Review the staged changes" />
+          <span class="user-cmd-field-label" data-i18n="usercmd.description">Description</span>
+          <input id="user-cmd-desc" type="text" maxlength="120" autocomplete="off" placeholder="Review the staged changes" data-i18n-placeholder="usercmd.descPlaceholder" />
         </label>
         <label class="user-cmd-field">
-          <span class="user-cmd-field-label">Arguments hint <span class="user-cmd-field-optional">(optional)</span></span>
+          <span class="user-cmd-field-label"><span data-i18n="usercmd.argsHint">Arguments hint</span> <span class="user-cmd-field-optional" data-i18n="common.optional">(optional)</span></span>
           <input id="user-cmd-args" type="text" maxlength="60" autocomplete="off" placeholder="[file]" />
-          <span class="user-cmd-field-hint">shown next to the command name in the slash menu</span>
+          <span class="user-cmd-field-hint" data-i18n="usercmd.argsSubhint">shown next to the command name in the slash menu</span>
         </label>
         <label class="user-cmd-field">
-          <span class="user-cmd-field-label">Prompt template</span>
-          <textarea id="user-cmd-prompt" rows="6" spellcheck="false" placeholder="Review the staged changes carefully. Focus on $1 if provided."></textarea>
-          <span class="user-cmd-field-hint">Use <code>$1</code>, <code>$2</code> … for positional args, <code>$*</code> for all args.</span>
+          <span class="user-cmd-field-label" data-i18n="usercmd.promptTemplate">Prompt template</span>
+          <textarea id="user-cmd-prompt" rows="6" spellcheck="false" placeholder="Review the staged changes carefully. Focus on $1 if provided." data-i18n-placeholder="usercmd.promptPlaceholder"></textarea>
+          <span class="user-cmd-field-hint" data-i18n-html="usercmd.promptHint">Use <code>$1</code>, <code>$2</code> … for positional args, <code>$*</code> for all args.</span>
         </label>
         <div id="user-cmd-error" class="user-cmd-error" hidden></div>
       </div>
       <div class="user-cmd-modal-footer">
-        <button id="user-cmd-modal-cancel" type="button">Cancel</button>
-        <button id="user-cmd-modal-save" type="button" class="primary">Save</button>
+        <button id="user-cmd-modal-cancel" type="button" data-i18n="common.cancel">Cancel</button>
+        <button id="user-cmd-modal-save" type="button" class="primary" data-i18n="common.save">Save</button>
       </div>
     </div>
   </div>
@@ -326,29 +326,33 @@
   <div id="skill-name-modal-overlay" hidden>
     <div id="skill-name-modal" role="dialog" aria-modal="true" aria-labelledby="skill-name-modal-title">
       <div class="user-cmd-modal-header">
-        <span id="skill-name-modal-title">Create skill</span>
-        <button id="skill-name-modal-close" type="button" aria-label="Close">
+        <span id="skill-name-modal-title" data-i18n="skillmodal.title">Create skill</span>
+        <button id="skill-name-modal-close" type="button" aria-label="Close" data-i18n-aria-label="common.close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="user-cmd-modal-body">
         <label class="user-cmd-field">
-          <span class="user-cmd-field-label">Skill name</span>
+          <span class="user-cmd-field-label" data-i18n="skillmodal.nameLabel">Skill name</span>
           <div class="user-cmd-name-row">
             <input id="skill-name-input" type="text" maxlength="63" autocomplete="off" spellcheck="false" placeholder="my-skill" />
           </div>
-          <span class="user-cmd-field-hint">lowercase letters, digits, '-' or '.' (1–63 chars)</span>
+          <span class="user-cmd-field-hint" data-i18n="skillmodal.nameHint">lowercase letters, digits, '-' or '.' (1–63 chars)</span>
         </label>
         <div id="skill-name-modal-error" class="user-cmd-error" hidden></div>
       </div>
       <div class="user-cmd-modal-footer">
-        <button id="skill-name-modal-cancel" type="button">Cancel</button>
-        <button id="skill-name-modal-start" type="button" class="primary">Start</button>
+        <button id="skill-name-modal-cancel" type="button" data-i18n="common.cancel">Cancel</button>
+        <button id="skill-name-modal-start" type="button" class="primary" data-i18n="common.start">Start</button>
       </div>
     </div>
   </div>
 
-  <script src="assets/app.js?v=22" defer></script>
-  <script src="assets/settings.js?v=5" defer></script>
+  <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
+       BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
+  <script src="assets/i18n/locales.js?v=1" defer></script>
+  <script src="assets/i18n.js?v=1" defer></script>
+  <script src="assets/app.js?v=23" defer></script>
+  <script src="assets/settings.js?v=6" defer></script>
 </body>
 </html>

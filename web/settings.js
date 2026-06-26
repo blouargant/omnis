@@ -180,6 +180,13 @@ const BASE_PATH = window.BASE_PATH || "";
         if (prefs && typeof prefs.notifications === "boolean") {
           localStorage.setItem(NOTIFY_STORAGE_KEY, prefs.notifications ? "1" : "0");
         }
+        // Reconcile the UI language: an explicit server choice that differs from
+        // what this browser resolved adopts it and reloads once (guarded), so a
+        // second device/browser converges to the saved locale. First run (no
+        // server locale) leaves whatever i18n.js already resolved.
+        if (prefs && typeof prefs.locale === "string" && window.I18N) {
+          I18N.reconcileServerLocale(prefs.locale); // may reload — returns early below
+        }
       }
     } catch (_) { /* ignore */ }
     finally { _resolvePrefs(prefs); }
@@ -195,58 +202,58 @@ const BASE_PATH = window.BASE_PATH || "";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
   const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search", "docs"];
   const TOOL_DESCRIPTIONS = {
-    Bash:       "Run shell commands in the working directory.",
-    Read:       "Read file contents from the filesystem.",
-    Write:      "Write or overwrite files on the filesystem.",
-    Edit:       "Surgical in-place string replacement in a file.",
-    Grep:       "Search file contents with regular expressions.",
-    Glob:       "Find files by path pattern (glob).",
-    revert:     "Revert a file to its last snapshot.",
-    mime:       "Detect the MIME type of a file.",
-    mcp:        "MCP (Model Context Protocol) tools: connect to external MCP servers defined in mcp_config.json.",
-    Skill:      "Skill tools: load and list skill playbooks from the skills/ directory.",
-    softskills: "Soft-skill tools: load and list curator-distilled procedures from the softskills/ directory.",
-    calc:       "Calculator: evaluate mathematical expressions (arithmetic, sqrt, trig, log, pow…).",
-    ddg:        "Web search: search the web via DuckDuckGo (no API key required).",
-    serpapi:    "Web search: search the web via SerpAPI (Google). Requires serpapi_key in globals. Cannot be used together with ddg.",
-    web:        "Web tools: fetch a web page as Markdown (web_fetch) or convert an HTML string to Markdown (html_to_markdown).",
-    registries: "Skill registry tools: list configured remote registries, browse them, fetch a SKILL.md, install a skill, and link it to an agent.",
-    code_search: "Semantic code search (search_code, reindex_code): find code by meaning over the repo index. Mounted only when an embedding model is configured; otherwise the agent falls back to grep/read.",
-    docs: "Documentation tools: answer questions about omnis from its own docs. Always provides list_docs / read_doc / grep_docs; adds semantic search_docs / reindex_docs when an embedding model is configured.",
+    Bash:       tr("tool.desc.Bash"),
+    Read:       tr("tool.desc.Read"),
+    Write:      tr("tool.desc.Write"),
+    Edit:       tr("tool.desc.Edit"),
+    Grep:       tr("tool.desc.Grep"),
+    Glob:       tr("tool.desc.Glob"),
+    revert:     tr("tool.desc.revert"),
+    mime:       tr("tool.desc.mime"),
+    mcp:        tr("tool.desc.mcp"),
+    Skill:      tr("tool.desc.Skill"),
+    softskills: tr("tool.desc.softskills"),
+    calc:       tr("tool.desc.calc"),
+    ddg:        tr("tool.desc.ddg"),
+    serpapi:    tr("tool.desc.serpapi"),
+    web:        tr("tool.desc.web"),
+    registries: tr("tool.desc.registries"),
+    code_search: tr("tool.desc.code_search"),
+    docs: tr("tool.desc.docs"),
   };
   // Tools that are mutually exclusive: selecting one auto-deselects the other.
   const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
 
   const AGENT_SUBTABS = [
-    { id: "agents",  label: "Agents"  },
-    { id: "squads",  label: "Squads"  },
-    { id: "remotes", label: "Remotes" },
-    { id: "globals", label: "Global Environment" },
+    { id: "agents",  label: tr("subtab.agents")  },
+    { id: "squads",  label: tr("subtab.squads")  },
+    { id: "remotes", label: tr("subtab.remotes") },
+    { id: "globals", label: tr("subtab.globalEnv") },
   ];
 
   const MODELS_SUBTABS = [
-    { id: "providers", label: "Providers" },
-    { id: "models",    label: "Models"    },
+    { id: "providers", label: tr("subtab.providers") },
+    { id: "models",    label: tr("subtab.models")    },
   ];
 
   const SKILLS_SUBTABS = [
-    { id: "installed", label: "Installed" },
-    { id: "remotes",   label: "Remotes"   },
+    { id: "installed", label: tr("subtab.installed") },
+    { id: "remotes",   label: tr("subtab.remotes")   },
   ];
 
   const MCP_SUBTABS = [
-    { id: "servers", label: "Servers" },
-    { id: "remotes", label: "Remotes" },
+    { id: "servers", label: tr("subtab.servers") },
+    { id: "remotes", label: tr("subtab.remotes") },
   ];
 
   const A2A_SUBTABS = [
-    { id: "agents",  label: "Agents" },
-    { id: "remotes", label: "Remotes" },
+    { id: "agents",  label: tr("subtab.agents") },
+    { id: "remotes", label: tr("subtab.remotes") },
   ];
 
   const COMMANDS_SUBTABS = [
-    { id: "user",    label: "User Commands" },
-    { id: "remotes", label: "Remotes"       },
+    { id: "user",    label: tr("subtab.userCommands") },
+    { id: "remotes", label: tr("subtab.remotes")       },
   ];
 
   const state = {
@@ -335,19 +342,19 @@ const BASE_PATH = window.BASE_PATH || "";
     if (mode === "restart") {
       b.innerHTML = `
         <span class="restart-banner-text">
-          Embedder changed — a server restart is required to apply it (hot-reload can't swap the embedder).
+          ${escHtml(tr("set.banner.restartText"))}
         </span>
-        <button type="button" id="restart-banner-btn" class="reload-primary">Restart server</button>
-        <button type="button" id="restart-banner-dismiss" data-tip="Dismiss">×</button>
+        <button type="button" id="restart-banner-btn" class="reload-primary">${escHtml(tr("set.banner.restartBtn"))}</button>
+        <button type="button" id="restart-banner-dismiss" data-tip="${escHtml(tr("set.banner.dismiss"))}">×</button>
       `;
       b.querySelector("#restart-banner-btn").addEventListener("click", () => doRestart());
     } else {
       b.innerHTML = `
         <span class="restart-banner-text">
-          Configuration changed — apply with hot-reload (no downtime).
+          ${escHtml(tr("set.banner.reloadText"))}
         </span>
-        <button type="button" id="restart-banner-reload" class="reload-primary">Reload</button>
-        <button type="button" id="restart-banner-dismiss" data-tip="Dismiss">×</button>
+        <button type="button" id="restart-banner-reload" class="reload-primary">${escHtml(tr("set.banner.reloadBtn"))}</button>
+        <button type="button" id="restart-banner-dismiss" data-tip="${escHtml(tr("set.banner.dismiss"))}">×</button>
       `;
       b.querySelector("#restart-banner-reload").addEventListener("click", () => doReload());
     }
@@ -396,7 +403,7 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       document.body.appendChild(el);
     }
-    el.querySelector("#restart-overlay-msg").textContent = msg || "Server is restarting…";
+    el.querySelector("#restart-overlay-msg").textContent = msg || tr("set.overlay.restarting");
     el.hidden = false;
   }
 
@@ -428,20 +435,20 @@ const BASE_PATH = window.BASE_PATH || "";
       if (reloadBtn) {
         reloadBtn.disabled = !!on;
         reloadBtn.innerHTML = on
-          ? '<span class="reload-spinner" aria-hidden="true"></span>Reloading…'
+          ? `<span class="reload-spinner" aria-hidden="true"></span>${escHtml(tr("set.reload.reloading"))}`
           : origReloadHtml;
       }
       if (restartBtn) restartBtn.disabled = !!on;
     };
 
     if (hasAnyUnsaved()) {
-      if (!await appConfirm("You have unsaved changes. Save them before reloading?")) return;
+      if (!await appConfirm(tr("set.reload.unsavedConfirm"))) return;
       await saveActive();
       if (hasUnsavedActive()) return;
     }
 
     setLoading(true);
-    setStatus("Reloading agent…");
+    setStatus(tr("set.status.reloadingAgent"));
     try {
       const r = await fetch(BASE_PATH + "/api/config/reload", { method: "POST", headers: authHeaders() });
       if (!r.ok) {
@@ -455,15 +462,15 @@ const BASE_PATH = window.BASE_PATH || "";
 
       const draining = body.draining_sessions || 0;
       const summary = draining > 0
-        ? `Reloaded — generation ${body.generation}. ${draining} session(s) draining on previous version.`
-        : `Reloaded — generation ${body.generation}.`;
+        ? tr("set.reload.summaryDraining", { generation: body.generation, count: draining })
+        : tr("set.reload.summary", { generation: body.generation });
       setStatus(summary);
 
       // Animate the banner out before hiding it. The is-fading-out class
       // stays on the element while hidden so the reverse transition can
       // never play; showBanner clears the class on re-show.
       if (banner) {
-        if (textEl) textEl.textContent = "Reloaded — new sessions will use the updated configuration.";
+        if (textEl) textEl.textContent = tr("set.banner.reloaded");
         setLoading(false);
         banner.classList.add("is-fading-out");
         let done = false;
@@ -498,9 +505,9 @@ const BASE_PATH = window.BASE_PATH || "";
     } catch (e) {
       setLoading(false);
       if (textEl) {
-        textEl.textContent = "Reload failed: " + e.message + " — fix the configuration and try again.";
+        textEl.textContent = tr("set.reload.failedBanner", { error: e.message });
       }
-      setStatus("Reload failed: " + e.message);
+      setStatus(tr("set.reload.failed", { error: e.message }));
     }
   }
 
@@ -524,7 +531,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       const draining = body.draining_sessions || 0;
       if (draining > 0) {
-        pill.textContent = `gen ${body.generation} · ${draining} draining`;
+        pill.textContent = tr("set.pill.gen", { generation: body.generation, count: draining });
         pill.hidden = false;
         if (!generationPollHandle) {
           generationPollHandle = setInterval(refreshGenerationPill, 5000);
@@ -540,9 +547,9 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function doRestart() {
-    if (!await appConfirm("Restart the omnis server now? Active streams will be interrupted.")) return;
-    setStatus("Restarting…");
-    showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
+    if (!await appConfirm(tr("set.restart.confirm"))) return;
+    setStatus(tr("set.restart.restarting"));
+    showRestartingOverlay(tr("set.overlay.restartingFull"));
     try {
       const r = await fetch(BASE_PATH + "/api/server/restart", { method: "POST", headers: authHeaders() });
       if (!r.ok) {
@@ -554,8 +561,8 @@ const BASE_PATH = window.BASE_PATH || "";
       localStorage.removeItem(BANNER_DISMISS_FLAG);
       const b = document.getElementById("restart-banner");
       if (b) b.hidden = true;
-      setStatus("Server restarting — page will reload shortly…");
-      showRestartingOverlay("Server is restarting…\nThe page will reload automatically.");
+      setStatus(tr("set.restart.pageReload"));
+      showRestartingOverlay(tr("set.overlay.restartingFull"));
       // Poll /api/health until reachable, then reload.
       const start = Date.now();
       const tick = async () => {
@@ -565,7 +572,7 @@ const BASE_PATH = window.BASE_PATH || "";
         } catch (_) { /* not yet up */ }
         if (Date.now() - start > 30000) {
           hideRestartingOverlay();
-          setStatus("Server did not come back within 30s. Reload manually.");
+          setStatus(tr("set.restart.notBack"));
           return;
         }
         setTimeout(tick, 750);
@@ -573,7 +580,7 @@ const BASE_PATH = window.BASE_PATH || "";
       setTimeout(tick, 1000);
     } catch (e) {
       hideRestartingOverlay();
-      setStatus("Restart failed: " + e.message);
+      setStatus(tr("set.restart.failed", { error: e.message }));
     }
   }
 
@@ -586,7 +593,7 @@ const BASE_PATH = window.BASE_PATH || "";
     panelEl.innerHTML = `
       <header class="settings-header">
         <nav class="settings-breadcrumb" aria-label="Breadcrumb">
-          <span class="settings-breadcrumb-root">Settings</span>
+          <span class="settings-breadcrumb-root">${escHtml(tr("settings.label"))}</span>
           <svg class="settings-breadcrumb-sep" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           <span class="settings-breadcrumb-current"></span>
         </nav>
@@ -596,8 +603,8 @@ const BASE_PATH = window.BASE_PATH || "";
         <div class="settings-body-toolbar">
           <div class="settings-content-inner">
             <div class="settings-view-toggle" role="tablist">
-              <button type="button" data-view="form" class="active">Form</button>
-              <button type="button" data-view="raw">Raw JSON</button>
+              <button type="button" data-view="form" class="active">${escHtml(tr("settings.viewForm"))}</button>
+              <button type="button" data-view="raw">${escHtml(tr("settings.viewRaw"))}</button>
             </div>
           </div>
         </div>
@@ -605,8 +612,8 @@ const BASE_PATH = window.BASE_PATH || "";
       </div>
       <footer class="settings-footer">
         <span class="settings-status"></span>
-        <button type="button" class="btn-discard">Discard</button>
-        <button type="button" class="btn-save">Save</button>
+        <button type="button" class="btn-discard">${escHtml(tr("settings.discard"))}</button>
+        <button type="button" class="btn-save">${escHtml(tr("common.save"))}</button>
       </footer>
     `;
     const main = document.getElementById("chat");
@@ -622,7 +629,7 @@ const BASE_PATH = window.BASE_PATH || "";
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.file = f.id;
-      b.textContent = f.label;
+      b.textContent = tr("settings.menu." + f.id);
       b.addEventListener("click", () => setActiveFile(f.id));
       tabsEl.appendChild(b);
     }
@@ -653,7 +660,7 @@ const BASE_PATH = window.BASE_PATH || "";
     for (const m of MENU_ITEMS) {
       const li = document.createElement("li");
       li.dataset.file = m.id;
-      li.innerHTML = `${ICONS[m.id] || ""}<span>${escHtml(m.label)}</span>`;
+      li.innerHTML = `${ICONS[m.id] || ""}<span>${escHtml(tr("settings.menu." + m.id))}</span>`;
       li.addEventListener("click", () => setActiveFile(m.id));
       sidebarMenuListEl.appendChild(li);
     }
@@ -662,7 +669,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const raw = document.createElement("li");
     raw.dataset.file = RAW_VIEW_ID;
     raw.className = "settings-menu-raw";
-    raw.innerHTML = `${ICONS.raw}<span>Raw JSON</span>`;
+    raw.innerHTML = `${ICONS.raw}<span>${escHtml(tr("settings.viewRaw"))}</span>`;
     raw.addEventListener("click", () => {
       if (raw.classList.contains("disabled")) return;
       toggleRawView();
@@ -699,15 +706,15 @@ const BASE_PATH = window.BASE_PATH || "";
     const el = panelEl.querySelector(".settings-breadcrumb-current");
     if (!el) return;
     const item = MENU_ITEMS.find(m => m.id === id);
-    const base = item ? item.title : "";
+    const base = item ? tr("settings.title." + item.id) : "";
     el.textContent = (state.activeView === "raw" && !isClientOnly(id))
-      ? `${base} › Raw JSON`
+      ? `${base} › ${tr("settings.viewRaw")}`
       : base;
   }
 
   async function setActiveFile(id) {
     if (state.activeFile !== id && hasUnsavedActive() &&
-        !await appConfirm("Discard unsaved changes in the current tab?")) {
+        !await appConfirm(tr("set.confirm.discardTab"))) {
       return;
     }
     state.activeFile = id;
@@ -748,7 +755,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   async function setActiveView(v) {
     if (state.activeView === v) return;
-    if (hasUnsavedActive() && !await appConfirm("Discard unsaved changes in this view?")) return;
+    if (hasUnsavedActive() && !await appConfirm(tr("set.confirm.discardView"))) return;
     state.activeView = v;
     viewToggleEl?.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b.dataset.view === v);
@@ -1042,13 +1049,13 @@ const BASE_PATH = window.BASE_PATH || "";
       const original = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Reindexing…";
-      setStatus("Reindexing registries…");
+      setStatus(tr("set.status.reindexing"));
       try {
         const res = await skillsPost("/registries/reindex", {});
         const n = res && typeof res.indexed === "number" ? res.indexed : 0;
         setStatus(`Reindexed ${n} registry item${n === 1 ? "" : "s"}.`, "success");
       } catch (err) {
-        setStatus("Reindex failed: " + err.message, "error");
+        setStatus(tr("set.status.reindexFailed", { error: err.message }), "error");
       } finally {
         btn.disabled = false;
         btn.textContent = original;
@@ -1083,34 +1090,60 @@ const BASE_PATH = window.BASE_PATH || "";
       for (const t of inTier) (byTone[t.tone] = byTone[t.tone] || []).push(t);
       return `
         <section class="form-section">
-          <h3>${escHtml(tier.label)}</h3>
+          <h3>${escHtml(tr("theme.tier." + tier.id))}</h3>
           ${Object.entries(byTone).map(([tone, list]) => `
-            <div class="theme-group-label">${escHtml(tone)}</div>
+            <div class="theme-group-label">${escHtml(tr("theme.tone." + tone))}</div>
             <div class="theme-grid">${list.map(cardHTML).join("")}</div>
           `).join("")}
         </section>
       `;
     }).join("");
 
+    // Language picker — reuses the theme-card grid (no swatch, just a label).
+    const activeLocale = (window.I18N && I18N.locale) || "en";
+    const langCards = (window.I18N ? I18N.LOCALES : [])
+      .map(l => `
+        <button type="button" class="theme-card lang-card ${activeLocale === l.id ? "active" : ""}" data-locale-id="${escHtml(l.id)}">
+          <span class="theme-card-label">${escHtml(l.label)}</span>
+          <span class="theme-card-check" aria-hidden="true">✓</span>
+        </button>
+      `).join("");
+    const languageSection = `
+      <section class="form-section">
+        <h3>${escHtml(tr("appearance.language"))}</h3>
+        <p class="settings-hint" style="margin:0 0 0.5rem;">${escHtml(tr("appearance.languageHint"))}</p>
+        <div class="theme-grid">${langCards}</div>
+      </section>
+    `;
+
     const osNotify = localStorage.getItem(NOTIFY_STORAGE_KEY) === "1";
     bodyEl.innerHTML = `
       <div class="settings-form">
+        ${languageSection}
         <section class="form-section">
-          <h3>Notifications</h3>
+          <h3>${escHtml(tr("appearance.notifications"))}</h3>
           <label class="settings-checkrow">
             <input type="checkbox" id="os-notify-toggle" ${osNotify ? "checked" : ""} />
-            <span>Show a desktop notification when a background task finishes, or when a chat reply finishes while you're on another session or app.</span>
+            <span>${escHtml(tr("appearance.notifyLabel"))}</span>
           </label>
           <p class="settings-hint" style="margin:0;">
-            In-app toasts always appear; this also surfaces a desktop notification (needs browser permission). Your choice is saved on the server.
+            ${escHtml(tr("appearance.notifyHint"))}
           </p>
         </section>
         <p class="settings-hint" style="margin:0;">
-          Pick a color palette. Applied immediately and saved on the server.
+          ${escHtml(tr("appearance.themeHint"))}
         </p>
         ${sections}
       </div>
     `;
+
+    // Language cards — persist + reload via the i18n runtime.
+    bodyEl.querySelectorAll(".lang-card").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.localeId;
+        if (window.I18N && id) I18N.setLocale(id);
+      });
+    });
 
     bodyEl.querySelectorAll(".theme-card").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -1163,7 +1196,7 @@ const BASE_PATH = window.BASE_PATH || "";
     registriesHubRefresh = null;
     const UC = window.UserCommands;
     if (!UC) {
-      bodyEl.innerHTML = `<p class="settings-error">User commands API not available.</p>`;
+      bodyEl.innerHTML = `<p class="settings-error">${escHtml(tr("set.cmd.apiUnavailable"))}</p>`;
       return;
     }
     // Render the sub-tab shell once; each tab body paints into the inner host.
@@ -1229,15 +1262,15 @@ const BASE_PATH = window.BASE_PATH || "";
     `).join("");
 
     const userRows = commands.length === 0
-      ? `<tr><td colspan="4" class="cmd-empty">No user commands yet. Click "Add command" to create one.</td></tr>`
+      ? `<tr><td colspan="4" class="cmd-empty">${escHtml(tr("set.cmd.empty"))}</td></tr>`
       : commands.map(c => `
         <tr data-name="${escHtml(c.name)}">
           <td class="cmd-name">/${escHtml(c.name)}</td>
           <td class="cmd-args">${escHtml(c.args || "")}</td>
           <td class="cmd-desc">${escHtml(c.description || "")}</td>
           <td class="cmd-actions">
-            <button type="button" class="btn-edit" data-name="${escHtml(c.name)}">Edit</button>
-            <button type="button" class="btn-del" data-name="${escHtml(c.name)}">Delete</button>
+            <button type="button" class="btn-edit" data-name="${escHtml(c.name)}">${escHtml(tr("common.edit"))}</button>
+            <button type="button" class="btn-del" data-name="${escHtml(c.name)}">${escHtml(tr("common.delete"))}</button>
           </td>
         </tr>
       `).join("");
@@ -1245,26 +1278,24 @@ const BASE_PATH = window.BASE_PATH || "";
     host.innerHTML = `
       <div class="user-cmd-settings">
         <p class="settings-hint" style="margin:0;">
-          Slash commands shown in the chat composer. Built-in commands are reserved.
-          User commands expand to a prompt template that is sent to the agent — use
-          <code>$1</code>, <code>$2</code>, … for positional args and <code>$*</code> for all args.
+          ${tr("set.cmd.hint")}
         </p>
 
         <section class="form-section">
-          <h3>Built-in commands</h3>
+          <h3>${escHtml(tr("set.cmd.builtinHeader"))}</h3>
           <table class="cmd-table">
-            <thead><tr><th>Command</th><th>Args</th><th>Description</th></tr></thead>
+            <thead><tr><th>${escHtml(tr("set.cmd.colCommand"))}</th><th>${escHtml(tr("set.cmd.colArgs"))}</th><th>${escHtml(tr("set.cmd.colDescription"))}</th></tr></thead>
             <tbody>${builtinRows}</tbody>
           </table>
         </section>
 
         <section class="form-section">
           <div class="cmd-section-header">
-            <h3 style="margin:0;">User commands</h3>
-            <button type="button" id="user-cmd-add-btn" class="primary">+ Add command</button>
+            <h3 style="margin:0;">${escHtml(tr("set.cmd.userHeader"))}</h3>
+            <button type="button" id="user-cmd-add-btn" class="primary">${escHtml(tr("set.cmd.addBtn"))}</button>
           </div>
           <table class="cmd-table">
-            <thead><tr><th>Command</th><th>Args</th><th>Description</th><th></th></tr></thead>
+            <thead><tr><th>${escHtml(tr("set.cmd.colCommand"))}</th><th>${escHtml(tr("set.cmd.colArgs"))}</th><th>${escHtml(tr("set.cmd.colDescription"))}</th><th></th></tr></thead>
             <tbody>${userRows}</tbody>
           </table>
         </section>
@@ -1284,9 +1315,9 @@ const BASE_PATH = window.BASE_PATH || "";
     host.querySelectorAll(".btn-del").forEach(btn => {
       btn.addEventListener("click", async () => {
         const name = btn.dataset.name;
-        if (!await appConfirm(`Remove command "/${name}"?`)) return;
+        if (!await appConfirm(tr("set.cmd.removeConfirm", { name }))) return;
         try { await UC.remove(name); }
-        catch (e) { await appConfirm(`Delete failed: ${e.message}`); }
+        catch (e) { await appConfirm(tr("set.cmd.deleteFailed", { error: e.message })); }
       });
     });
   }
@@ -1319,7 +1350,7 @@ const BASE_PATH = window.BASE_PATH || "";
         </aside>
         <article class="docs-article" tabindex="-1">
           <div class="docs-article-body">
-            <p class="settings-loading">Loading…</p>
+            <p class="settings-loading">${escHtml(tr("set.loading"))}</p>
           </div>
         </article>
       </div>
@@ -1353,7 +1384,7 @@ const BASE_PATH = window.BASE_PATH || "";
         text = await r.text();
         state.docs.cache[page.id] = text;
       } catch (e) {
-        host.innerHTML = `<p class="settings-error">Could not load documentation: ${escHtml(e.message)}</p>`;
+        host.innerHTML = `<p class="settings-error">${escHtml(tr("set.docs.loadFailed", { error: e.message }))}</p>`;
         return;
       }
     }
@@ -1538,7 +1569,7 @@ const BASE_PATH = window.BASE_PATH || "";
             setStatus(`Imported: ${names}.`, "success");
           }
         } catch (e) {
-          setStatus("Import failed: " + e.message, "error");
+          setStatus(tr("set.status.importFailed", { error: e.message }), "error");
         }
       });
       renderAgentAgents(d);
@@ -1748,7 +1779,7 @@ const BASE_PATH = window.BASE_PATH || "";
     });
     if (!isDefault) {
       panel.querySelector("#squad-remove").addEventListener("click", async () => {
-        if (!await appConfirm(`Delete squad "${sq.name}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.deleteSquad", { name: sq.name }))) return;
         d.squads.splice(idx, 1);
         state.activeSquadIdx = Math.max(0, idx - 1);
         markFormDirty("agent");
@@ -1943,7 +1974,7 @@ const BASE_PATH = window.BASE_PATH || "";
       <div id="providers-grid"></div>
     `;
     host.querySelector("#add-provider").addEventListener("click", async () => {
-      let name = await appPrompt("New provider name:");
+      let name = await appPrompt(tr("set.confirm.newProviderName"));
       if (!name) return;
       name = name.trim().toLowerCase();
       if (!name || d.providers[name]) return;
@@ -2056,7 +2087,7 @@ const BASE_PATH = window.BASE_PATH || "";
     host.querySelector("#add-model").addEventListener("click", async () => {
       const providerNames = Object.keys(d.providers || {});
       if (!providerNames.length) {
-        setStatus("Add a provider first (Providers tab).", "error");
+        setStatus(tr("set.status.addProviderFirst"), "error");
         return;
       }
       const result = await appModelDialog(d);
@@ -2186,7 +2217,7 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(fg);
 
       card.querySelector(".model-remove-link").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove model "${name}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.removeModel", { name }))) return;
         delete d.models[name];
         markFormDirty("models");
         renderModelCards(d, el);
@@ -2512,14 +2543,14 @@ const BASE_PATH = window.BASE_PATH || "";
     btn.textContent = "⟳";
     btn.addEventListener("click", async () => {
       const model = (m.model || "").trim();
-      if (!model) { setStatus("Set a model first."); return; }
+      if (!model) { setStatus(tr("set.status.setModelFirst")); return; }
       const providerRef = (m.provider_ref || "").trim();
       const params = new URLSearchParams();
       if (providerRef) {
         params.set("provider_ref", providerRef);
       } else {
         const provider = (m.provider || "").trim();
-        if (!provider) { setStatus("Set a provider first."); return; }
+        if (!provider) { setStatus(tr("set.status.setProviderFirst")); return; }
         params.set("provider", provider);
         if (m.api_key) params.set("api_key", m.api_key);
         if (m.base_url) params.set("base_url", m.base_url);
@@ -2527,7 +2558,7 @@ const BASE_PATH = window.BASE_PATH || "";
       params.set("model", model);
       btn.disabled = true;
       btn.textContent = "…";
-      setStatus("Detecting embedding dimension…");
+      setStatus(tr("set.status.detectingDim"));
       try {
         const r = await fetch(BASE_PATH + `/api/providers/embedding-dim?${params}`, { headers: authHeaders() });
         const j = await r.json();
@@ -2537,7 +2568,7 @@ const BASE_PATH = window.BASE_PATH || "";
         onCh();
         setStatus(`Detected dimension: ${j.dim}.`);
       } catch (e) {
-        setStatus("Failed to detect dimension: " + e.message);
+        setStatus(tr("set.status.detectDimFailed", { error: e.message }));
       } finally {
         btn.disabled = false;
         btn.textContent = "⟳";
@@ -2700,7 +2731,7 @@ const BASE_PATH = window.BASE_PATH || "";
         sourceLabel = providerRef;
       } else {
         const provider = (m.provider || "").trim();
-        if (!provider) { setStatus("Set a provider first."); return; }
+        if (!provider) { setStatus(tr("set.status.setProviderFirst")); return; }
         params = new URLSearchParams({ provider });
         if (m.api_key) params.set("api_key", m.api_key);
         if (m.base_url) params.set("base_url", m.base_url);
@@ -2708,7 +2739,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       fetchBtn.disabled = true;
       fetchBtn.textContent = "…";
-      setStatus("Fetching model list…");
+      setStatus(tr("set.status.fetchingModels"));
       try {
         const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
         const j = await r.json();
@@ -2730,7 +2761,7 @@ const BASE_PATH = window.BASE_PATH || "";
         li.textContent = e.message;
         list.appendChild(li);
         panel.hidden = false;
-        setStatus("Failed to load models: " + e.message);
+        setStatus(tr("set.status.loadModelsFailed", { error: e.message }));
       } finally {
         fetchBtn.disabled = false;
         fetchBtn.textContent = "⟳";
@@ -2932,7 +2963,7 @@ const BASE_PATH = window.BASE_PATH || "";
     });
     if (!isBuiltin) {
       titleBar.querySelector(".agent-remove-link").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove agent "${a.name}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.removeAgent", { name: a.name }))) return;
         d.agents.splice(idx, 1);
         if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = Math.max(0, d.agents.length - 1);
         markFormDirty("agent"); renderAgentAgents(d);
@@ -3774,10 +3805,10 @@ const BASE_PATH = window.BASE_PATH || "";
 
     let parsed;
     try { parsed = JSON.parse(text); }
-    catch (e) { await appConfirm(`Invalid JSON: ${e.message}`); return; }
+    catch (e) { await appConfirm(tr("set.confirm.invalidJson", { error: e.message })); return; }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      await appConfirm("Expected a JSON object with `servers` and/or `inputs`.");
+      await appConfirm(tr("set.confirm.expectedServersInputs"));
       return;
     }
 
@@ -3833,7 +3864,7 @@ const BASE_PATH = window.BASE_PATH || "";
     }
 
     if (addedServers.length === 0 && addedInputs.length === 0) {
-      await appConfirm("Nothing to import — no valid servers or inputs found.");
+      await appConfirm(tr("set.confirm.nothingToImport"));
       return;
     }
 
@@ -4503,7 +4534,7 @@ const BASE_PATH = window.BASE_PATH || "";
       renderTransportSection();
 
       card.querySelector(".mcp-remove").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove server "${currentName}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.removeServer", { name: currentName }))) return;
         delete d.servers[currentName];
         markFormDirty("mcp"); renderMCPList(d);
       });
@@ -4969,7 +5000,7 @@ const BASE_PATH = window.BASE_PATH || "";
     disableAllBtn.type = "button"; disableAllBtn.className = "del-btn";
     disableAllBtn.textContent = "Disable all";
     disableAllBtn.addEventListener("click", async () => {
-      if (!await appConfirm(`Remove all skills from "${agent.name}"?`)) return;
+      if (!await appConfirm(tr("set.confirm.removeAllSkills", { name: agent.name }))) return;
       agent.skills = [];
       onChange();
       renderSkillBlockContent(container, agent, registry, hasSkillsTool, onChange);
@@ -5290,7 +5321,7 @@ const BASE_PATH = window.BASE_PATH || "";
     renderSkillCards(host.querySelector("#skills-list"), skills);
 
     host.querySelector("#skill-new").addEventListener("click", async () => {
-      const name = await appPrompt("Skill name (lowercase, hyphens ok):", "my-skill");
+      const name = await appPrompt(tr("set.confirm.skillNamePrompt"), "my-skill");
       if (!name) return;
       const n = name.trim().toLowerCase();
       try {
@@ -5298,7 +5329,7 @@ const BASE_PATH = window.BASE_PATH || "";
         state.skills.editing = { name: n };
         renderSkills();
       } catch (e) {
-        setStatus("Create failed: " + e.message, "error");
+        setStatus(tr("set.status.createFailed", { error: e.message }), "error");
       }
     });
 
@@ -5579,7 +5610,7 @@ const BASE_PATH = window.BASE_PATH || "";
         `;
         footer.querySelector(".skill-edit-btn").addEventListener("click", () => setEditMode(true));
         footer.querySelector(".skill-del-btn").addEventListener("click", async () => {
-          if (!await appConfirm(`Delete skill "${name}"?`)) return;
+          if (!await appConfirm(tr("set.confirm.deleteSkill", { name }))) return;
           try {
             await skillsDel(`/skills/registry/${name}`);
             state.skills.editing = null;
@@ -5587,11 +5618,11 @@ const BASE_PATH = window.BASE_PATH || "";
           } catch (e) {
             if (e.code === "LINKED_IN_AGENTS") {
               const agents = (e.details && e.details.agents || []).join(", ");
-              if (!await appConfirm(`"${name}" is still used by: ${agents}. Remove links and delete?`)) return;
+              if (!await appConfirm(tr("set.confirm.skillStillUsed", { name, agents }))) return;
               try { await skillsDel(`/skills/registry/${name}?force=1`); state.skills.editing = null; renderSkills(); }
-              catch (e2) { setStatus("Delete failed: " + e2.message, "error"); }
+              catch (e2) { setStatus(tr("set.status.deleteFailed", { error: e2.message }), "error"); }
             } else {
-              setStatus("Delete failed: " + e.message, "error");
+              setStatus(tr("set.status.deleteFailed", { error: e.message }), "error");
             }
           }
         });
@@ -5652,7 +5683,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/skills/remotes", result);
         await refreshRemoteRegList(listEl);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -5703,17 +5734,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteSkillsCache[r.id];
           await refreshRemoteRegList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
         try {
           await skillsDel(`/skills/remotes/${r.id}`);
           delete remoteSkillsCache[r.id];
           await refreshRemoteRegList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -5879,7 +5910,7 @@ const BASE_PATH = window.BASE_PATH || "";
             } catch (e) {
               installBtn.disabled = false;
               installBtn.textContent = "Install";
-              setStatus("Install failed: " + e.message, "error");
+              setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
         }
@@ -6113,7 +6144,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/agents/remotes", result);
         if (onRefresh) await onRefresh(); else await refreshAgentRemoteList(container);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -6136,7 +6167,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/squads-registry/remotes", result);
         if (onRefresh) await onRefresh(); else await refreshSquadRemoteList(container);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -6189,7 +6220,7 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteAgentsCache[r.id];
           await refreshAgentRemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
@@ -6203,7 +6234,7 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteAgentsCache[r.id];
           await refreshAgentRemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -6511,7 +6542,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Install"; }
-      setStatus("Install failed: " + e.message, "error");
+      setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
     }
   }
 
@@ -6614,17 +6645,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteSquadsCache[r.id];
           await refreshSquadRemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove squad registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.removeSquadRegistry", { name: r.name }))) return;
         try {
           await skillsDel(`/squads-registry/remotes/${r.id}`);
           delete remoteSquadsCache[r.id];
           await refreshSquadRemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -6760,7 +6791,7 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   async function doInstallSquad(registryID, squadInfo, btn) {
-    if (!await appConfirm(`Install squad "${squadInfo.name}"? It will be merged into config/agents.json and available after the next reload.`)) return;
+    if (!await appConfirm(tr("set.confirm.installSquad", { name: squadInfo.name }))) return;
 
     btn.disabled = true;
     btn.textContent = "Installing…";
@@ -6777,7 +6808,7 @@ const BASE_PATH = window.BASE_PATH || "";
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Install";
-      setStatus("Install failed: " + e.message, "error");
+      setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
     }
   }
 
@@ -6914,7 +6945,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/mcp/remotes", result);
         await refreshMCPRemoteList(listEl);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -6966,17 +6997,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteMCPCache[r.id];
           await refreshMCPRemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
         try {
           await skillsDel(`/mcp/remotes/${r.id}`);
           delete remoteMCPCache[r.id];
           await refreshMCPRemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -7089,7 +7120,7 @@ const BASE_PATH = window.BASE_PATH || "";
             } catch (e) {
               btn.disabled = false;
               btn.textContent = "Install";
-              setStatus("Install failed: " + e.message, "error");
+              setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
         }
@@ -7119,7 +7150,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!hasCached) {
         contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
       } else {
-        setStatus("Failed to refresh registry: " + e.message, "error");
+        setStatus(tr("set.reg.refreshFailed", { error: e.message }), "error");
       }
     }
   }
@@ -7183,7 +7214,7 @@ const BASE_PATH = window.BASE_PATH || "";
         } catch (e) {
           installBtn.disabled = false;
           installBtn.textContent = "Install";
-          setStatus("Install failed: " + e.message, "error");
+          setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
         }
       });
     }
@@ -7528,7 +7559,7 @@ const BASE_PATH = window.BASE_PATH || "";
       };
       drawHeaders();
       headersSec.appendChild(a2aAddButton("Add Header", async () => {
-        let nk = await appPrompt("Header name (e.g. Authorization):");
+        let nk = await appPrompt(tr("set.confirm.headerNamePrompt"));
         if (!nk) return;
         nk = nk.trim();
         if (!nk || nk in store) return;
@@ -7538,7 +7569,7 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(headersSec);
 
       card.querySelector(".a2a-remove").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove agent "${currentName}"?`)) return;
+        if (!await appConfirm(tr("set.confirm.removeAgent", { name: currentName }))) return;
         delete agents[currentName];
         markFormDirty("a2a"); renderA2AList(d);
       });
@@ -7602,7 +7633,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/a2a/remotes", result);
         await refreshA2ARemoteList(listEl);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -7654,17 +7685,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteA2ACache[r.id];
           await refreshA2ARemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
         try {
           await skillsDel(`/a2a/remotes/${r.id}`);
           delete remoteA2ACache[r.id];
           await refreshA2ARemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -7769,7 +7800,7 @@ const BASE_PATH = window.BASE_PATH || "";
             } catch (e) {
               btn.disabled = false;
               btn.textContent = "Install";
-              setStatus("Install failed: " + e.message, "error");
+              setStatus(tr("set.reg.installFailed", { error: e.message }), "error");
             }
           });
         }
@@ -7800,7 +7831,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!hasCached) {
         contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
       } else {
-        setStatus("Failed to refresh registry: " + e.message, "error");
+        setStatus(tr("set.reg.refreshFailed", { error: e.message }), "error");
       }
     }
   }
@@ -7850,7 +7881,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/commands/remotes", result);
         await refreshCommandsRemoteList(listEl);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -7902,17 +7933,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remoteCommandsCache[r.id];
           await refreshCommandsRemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
         try {
           await skillsDel(`/commands/remotes/${r.id}`);
           delete remoteCommandsCache[r.id];
           await refreshCommandsRemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -8040,7 +8071,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!hasCached) {
         contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
       } else {
-        setStatus("Failed to refresh registry: " + e.message, "error");
+        setStatus(tr("set.reg.refreshFailed", { error: e.message }), "error");
       }
     }
   }
@@ -8146,7 +8177,7 @@ const BASE_PATH = window.BASE_PATH || "";
         btn.disabled = false;
         btn.textContent = "Install";
       }
-      setStatus("Install failed: " + err.message, "error");
+      setStatus(tr("set.reg.installFailed", { error: err.message }), "error");
     }
   }
 
@@ -8196,7 +8227,7 @@ const BASE_PATH = window.BASE_PATH || "";
         await skillsPost("/permissions-registry/remotes", result);
         await refreshPermissionsRemoteList(listEl);
       } catch (e) {
-        setStatus("Failed to add registry: " + e.message, "error");
+        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
       }
     });
   }
@@ -8248,17 +8279,17 @@ const BASE_PATH = window.BASE_PATH || "";
           delete remotePermissionsCache[r.id];
           await refreshPermissionsRemoteList(container);
         } catch (e) {
-          setStatus("Failed to update registry: " + e.message, "error");
+          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
         }
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        if (!await appConfirm(`Remove registry "${r.name}"?`)) return;
+        if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
         try {
           await skillsDel(`/permissions-registry/remotes/${r.id}`);
           delete remotePermissionsCache[r.id];
           await refreshPermissionsRemoteList(container);
         } catch (e) {
-          setStatus("Failed to remove registry: " + e.message, "error");
+          setStatus(tr("set.reg.removeFailed", { error: e.message }), "error");
         }
       });
       container.appendChild(row);
@@ -8373,7 +8404,7 @@ const BASE_PATH = window.BASE_PATH || "";
       if (!hasCached) {
         contentEl.innerHTML = `<p class="settings-error">Failed to browse registry: ${escHtml(e.message)}</p>`;
       } else {
-        setStatus("Failed to refresh registry: " + e.message, "error");
+        setStatus(tr("set.reg.refreshFailed", { error: e.message }), "error");
       }
     }
   }
@@ -8436,7 +8467,7 @@ const BASE_PATH = window.BASE_PATH || "";
       delete remotePermissionsCache[registryID];
     } catch (err) {
       if (btn) { btn.disabled = false; btn.textContent = "Install"; }
-      setStatus("Install failed: " + err.message, "error");
+      setStatus(tr("set.reg.installFailed", { error: err.message }), "error");
     }
   }
 
@@ -8445,7 +8476,7 @@ const BASE_PATH = window.BASE_PATH || "";
   async function doSkillUpload(host, file, overwrite) {
     const fd = new FormData(); fd.append("file", file);
     const url = `/api/skills/registry/upload${overwrite ? "?overwrite=1" : ""}`;
-    setStatus("Uploading…");
+    setStatus(tr("set.status.uploading"));
     try {
       const r = await fetch(url, { method: "POST", headers: authHeaders(), body: fd });
       const j = await r.json().catch(() => ({}));
@@ -8454,7 +8485,7 @@ const BASE_PATH = window.BASE_PATH || "";
           // Extract skill name from error message if possible.
           const m = j.error && j.error.match(/"([^"]+)"/);
           const sname = m ? m[1] : "existing skill";
-          if (await appConfirm(`"${sname}" already exists. Overwrite?`)) {
+          if (await appConfirm(tr("set.confirm.overwriteExists", { name: sname }))) {
             await doSkillUpload(host, file, true);
           }
           return;
@@ -8463,7 +8494,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       setStatus(`Skill "${j.name}" uploaded successfully.`, "success");
       renderSkills();
-    } catch (e) { setStatus("Upload failed: " + e.message, "error"); }
+    } catch (e) { setStatus(tr("set.status.uploadFailed", { error: e.message }), "error"); }
   }
 
   function setupSkillDropZone(el, onFile) {
@@ -8473,7 +8504,7 @@ const BASE_PATH = window.BASE_PATH || "";
       e.preventDefault(); el.classList.remove("drop-active");
       const file = e.dataTransfer.files[0]; if (!file) return;
       if (!/\.(zip|tar\.gz|tgz)$/i.test(file.name)) {
-        setStatus("Only .zip or .tar.gz archives are accepted.", "error"); return;
+        setStatus(tr("set.status.archiveOnly"), "error"); return;
       }
       onFile(file);
     });
@@ -8521,7 +8552,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   async function saveActive() {
     const id = state.activeFile;
-    setStatus("Saving…");
+    setStatus(tr("set.status.saving"));
     try {
       let restartRequired = false;
       if (state.activeView === "raw") {
@@ -8561,13 +8592,13 @@ const BASE_PATH = window.BASE_PATH || "";
       showBanner(restartRequired);
       renderBody();
     } catch (e) {
-      setStatus("Save failed: " + e.message, "error");
+      setStatus(tr("set.status.saveFailed", { error: e.message }), "error");
     }
   }
 
   async function discardActive() {
     if (!hasUnsavedActive()) return;
-    if (!await appConfirm("Discard unsaved changes?")) return;
+    if (!await appConfirm(tr("set.confirm.discard"))) return;
     const id = state.activeFile;
     if (state.activeView === "raw") delete state.raw[id];
     else delete state.parsed[id];

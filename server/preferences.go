@@ -27,6 +27,11 @@ type preferences struct {
 	// from an explicit false; the web UI shows the first-run opt-in only while
 	// this is unset.
 	Notifications *bool `json:"notifications,omitempty"`
+	// Locale is the selected UI language id ("en"/"fr"/"es"/"de"). A pointer so
+	// an absent value (never chosen — first run) is distinguishable from an
+	// explicit choice; when unset the web UI falls back to the browser language
+	// then to English. Reconciled across devices on boot by the web UI.
+	Locale *string `json:"locale,omitempty"`
 }
 
 // preferencesStore persists preferences to a JSON file next to the YAML

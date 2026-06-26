@@ -73,6 +73,10 @@ vendor-xterm: ## Vendor xterm.js + fit addon into web/xterm for offline use
 	rm -rf $$tmp && \
 	echo "Vendored xterm $(XTERM_VERSION) into web/xterm"
 
+.PHONY: i18n
+i18n: ## Regenerate web/i18n/locales.js from the per-locale web/i18n/<locale>.json catalogues
+	node scripts/build_i18n.mjs
+
 .PHONY: test
 test: ## Run unit tests
 	$(GO) test ./...
