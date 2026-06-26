@@ -78,9 +78,25 @@ so `tr()`/`I18N` exist before app/settings render. `app.js` also installs an
 - **Language picker** — Settings → Appearance has a Language section
   (`renderAppearance`); selecting a locale calls `I18N.setLocale(id)`, which
   persists (localStorage + `PUT /api/preferences {locale}`) and **reloads** so
-  every string re-renders. First run resolves `navigator.language` → `en`.
-  `syncThemeFromServer` reconciles a different server-side locale once per tab
-  (guarded), so a second browser/device converges.
+  every string re-renders. `syncThemeFromServer` reconciles a different
+  server-side locale once per tab (guarded), so a second browser/device converges.
+- **First-run language: ask, never auto-switch.** The UI **defaults to English**
+  and `resolveLocale` ([web/i18n.js](web/i18n.js)) **no longer auto-applies
+  `navigator.language`** — a non-English user may prefer the English UI. Instead,
+  when the browser prefers a *supported, non-English* language (`detectBrowserLocale`
+  → `I18N.detectedLocale`) and there is **no recorded choice** (no localStorage
+  `agent_toolkit_locale` and no `preferences.json` `locale`), `maybePromptLocale`
+  ([web/app.js](web/app.js), run once at boot before `maybePromptNotifications`,
+  awaiting `Settings.prefsReady`) shows a **bilingual** `uiConfirm` — title +
+  message rendered in **both English and the detected language** via
+  `I18N.trIn(localeId, key, vars)` (look up a key in a *specific* locale), with the
+  Switch/Keep buttons in their respective languages. "Switch" → `I18N.setLocale`
+  (persist + reload); "Keep English" → `I18N.persistLocale("en")` (records the
+  choice **without** a reload, since the page is already English) so it's asked at
+  most once per home dir. `uiConfirm` gained an optional `cancelText`, and
+  `.ui-modal-message` is `white-space: pre-line` so the two-paragraph bilingual
+  message keeps its line break. Catalogue keys: `app.locale.{offerTitle,offerMsg,
+  useLanguage,keepEnglish}` ({language} = the native locale label from `I18N.LOCALES`).
 
 **Translation policy / glossary** — do **not** translate tool names (`Bash`,
 `Read`, …), config keys, model ids, file paths, slash-command names, or product

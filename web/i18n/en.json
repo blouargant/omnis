@@ -200,6 +200,11 @@
   "app.notify.unblockSafari": "Open Safari → Settings → Websites → Notifications and set this site to Allow, then reload.",
   "app.notify.unblockChromium": "Click the site-info icon (the tune/ⓘ control just left of the address bar) → Site settings → Notifications → Allow, then reload.",
 
+  "app.locale.offerTitle": "Switch language?",
+  "app.locale.offerMsg": "Your browser prefers {language}. Would you like to use the Omnis interface in {language}? You can change this any time in Settings → Appearance.",
+  "app.locale.useLanguage": "Switch to {language}",
+  "app.locale.keepEnglish": "Keep English",
+
   "app.copy.richText": "Rich text",
   "app.copy.plainText": "Plain text",
 

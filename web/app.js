@@ -8,7 +8,7 @@
 if (typeof window.tr !== "function") {
   window.tr = (k) => k;
   window.trN = (k) => k;
-  window.I18N = { locale: "en", LOCALES: [], setLocale() {}, translateDom() {}, reconcileServerLocale() { return false; } };
+  window.I18N = { locale: "en", localeStored: true, detectedLocale: null, LOCALES: [], trIn: (l, k) => k, labelFor: (id) => id, setLocale() {}, persistLocale() {}, translateDom() {}, reconcileServerLocale() { return false; } };
 }
 
 const TOKEN_KEY = "agent_toolkit_token";
@@ -5141,6 +5141,45 @@ async function offerNotificationGrant({ title, message, confirmText }, save) {
   await showNotificationBlockedHelp();
 }
 
+// maybePromptLocale runs once on first launch. The UI defaults to English and
+// NEVER auto-switches to the browser language (a non-English user may prefer the
+// English UI). Instead, when the browser prefers a supported non-English language
+// and the user has made no locale choice yet (neither locally nor server-side),
+// we ASK — bilingually (English + the detected language) — whether to switch.
+// Either answer is persisted so it's asked at most once per home dir.
+async function maybePromptLocale() {
+  try {
+    if (!window.I18N) return;
+    const detected = I18N.detectedLocale;
+    if (!detected) return;            // browser is English / unsupported → nothing to offer
+    if (I18N.localeStored) return;    // user already chose locally
+    const S = window.Settings;
+    const prefs = await (S && S.prefsReady ? S.prefsReady : Promise.resolve(null));
+    // A server-side choice exists (this or another device already decided) → respect it.
+    if (prefs && typeof prefs.locale === "string") return;
+    // prefs unreachable (offline/unauthenticated): still offer locally.
+
+    const lang = I18N.labelFor(detected); // native name, e.g. "Français"
+    // Build a genuinely bilingual prompt: English first, then the detected
+    // language. Buttons mirror the two choices in their respective languages.
+    const titleEn = tr("app.locale.offerTitle");
+    const titleLoc = I18N.trIn(detected, "app.locale.offerTitle");
+    const title = titleEn === titleLoc ? titleEn : titleEn + " · " + titleLoc;
+    const msgEn = tr("app.locale.offerMsg", { language: lang });
+    const msgLoc = I18N.trIn(detected, "app.locale.offerMsg", { language: lang });
+    const message = msgEn + "\n\n" + msgLoc;
+    const confirmText = I18N.trIn(detected, "app.locale.useLanguage", { language: lang });
+    const cancelText = tr("app.locale.keepEnglish");
+
+    const ok = await uiConfirm({ title, message, confirmText, cancelText });
+    if (ok) {
+      I18N.setLocale(detected);       // persists + reloads into the new language
+    } else {
+      I18N.persistLocale(I18N.DEFAULT_LOCALE); // record "keep English"; no reload needed
+    }
+  } catch (e) { console.error("locale opt-in failed:", e); }
+}
+
 // maybePromptNotifications runs once on launch and does two things:
 //   1. First run (no recorded choice) → ask the user to opt in.
 //   2. Reconcile a recorded "enabled" intent with the per-browser permission.
@@ -7442,13 +7481,14 @@ function uiPrompt({ title, label, value, placeholder, confirmText }) {
   });
 }
 
-function uiConfirm({ title, message, confirmText, danger }) {
+function uiConfirm({ title, message, confirmText, cancelText, danger }) {
   return new Promise((resolve) => {
     const overlay = uiModalShell(title);
     overlay.querySelector(".user-cmd-modal-body").innerHTML = `<div class="ui-modal-message"></div>`;
     overlay.querySelector(".ui-modal-message").textContent = message || "Are you sure?";
     const ok = overlay.querySelector(".ui-modal-ok");
     ok.textContent = confirmText || "OK";
+    if (cancelText) overlay.querySelector(".ui-modal-cancel").textContent = cancelText;
     if (danger) ok.classList.add("danger");
     let done = false;
     const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
@@ -8421,7 +8461,11 @@ async function restoreLayout(rec, liveIds) {
     else { newDraftTab(fp()); autoGrowPrompt(fp()); }
   }
 
-  // First-run: offer to enable desktop notifications (awaits the server prefs
-  // sync; no-op once a choice has been recorded). Fire-and-forget.
-  maybePromptNotifications();
+  // First-run prompts (each awaits the server prefs sync; no-op once a choice is
+  // recorded). The language offer runs first and may reload (switching language),
+  // so chain the notification opt-in after it to avoid two stacked modals.
+  (async () => {
+    await maybePromptLocale(); // may location.reload() when the user switches
+    maybePromptNotifications();
+  })();
 })();

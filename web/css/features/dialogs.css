@@ -39,6 +39,10 @@
   font-size: 13px;
   color: var(--text);
   line-height: 1.5;
+  /* Preserve explicit newlines (collapsing runs of spaces) so a multi-paragraph
+   * confirm message — e.g. the bilingual first-run language prompt — keeps its
+   * line breaks; single-line messages are unaffected. */
+  white-space: pre-line;
 }
 
 /* Orange "model connection problem" banner shown inside each chat pane — above

@@ -32,27 +32,41 @@
     ? window.OMNIS_I18N
     : {};
 
-  // Resolve the active locale: explicit local choice → browser language (first
-  // run only) → English. The server-side preference is reconciled later by
+  // Whether the user has an explicit recorded locale choice (localStorage). When
+  // false, the first-run bilingual prompt (app.js maybePromptLocale) may offer
+  // the detected browser language.
+  let localeStored = false;
+
+  // Resolve the active locale: explicit local choice → English. We deliberately
+  // DO NOT auto-apply the browser's language on first run — a non-English user
+  // may prefer to keep the English UI, so instead we default to English and let
+  // app.js (maybePromptLocale) ASK, bilingually, whether to switch to the
+  // detected language. The server-side preference is reconciled later by
   // settings.js (syncThemeFromServer), which reloads once on a mismatch.
   function resolveLocale() {
     let v = null;
     try { v = localStorage.getItem(STORAGE_KEY); } catch (_) { /* ignore */ }
+    localeStored = (v !== null);
     if (v && ids.includes(v)) return v;
-    if (v === null) {
-      // First run: try to honour the browser's preferred language.
-      const navs = (navigator.languages && navigator.languages.length)
-        ? navigator.languages
-        : [navigator.language || ""];
-      for (const tag of navs) {
-        const prefix = String(tag).toLowerCase().split("-")[0];
-        if (ids.includes(prefix)) return prefix;
-      }
-    }
     return DEFAULT_LOCALE;
   }
 
+  // detectBrowserLocale returns the browser's preferred *supported, non-English*
+  // language (or null), used only to offer a one-time switch — never applied
+  // automatically.
+  function detectBrowserLocale() {
+    const navs = (navigator.languages && navigator.languages.length)
+      ? navigator.languages
+      : [navigator.language || ""];
+    for (const tag of navs) {
+      const prefix = String(tag).toLowerCase().split("-")[0];
+      if (prefix !== DEFAULT_LOCALE && ids.includes(prefix)) return prefix;
+    }
+    return null;
+  }
+
   let locale = resolveLocale();
+  const detectedLocale = detectBrowserLocale();
   try { document.documentElement.lang = locale; } catch (_) { /* ignore */ }
 
   // Look up a key in the active locale, falling back to English, then to the
@@ -77,6 +91,21 @@
   // tr("area.key", { name: "x" }) → localised, interpolated string.
   function tr(key, vars) {
     return interpolate(lookup(key), vars);
+  }
+
+  // trIn(localeId, key, vars) → the string in a *specific* locale (falling back
+  // to English then the key). Powers the bilingual first-run language prompt,
+  // which must render the same message in both English and the detected language.
+  function trIn(localeId, key, vars) {
+    const cat = catalogs[localeId];
+    let str = (cat && typeof cat[key] === "string") ? cat[key] : lookup(key);
+    return interpolate(str, vars);
+  }
+
+  // Native label for a locale id (e.g. "fr" → "Français"), for use in prompts.
+  function labelFor(id) {
+    const m = LOCALES.find((l) => l.id === id);
+    return m ? m.label : id;
   }
 
   // Plural form: catalogues store "<key>.one" / "<key>.other" (and "few"/"many"
@@ -142,12 +171,15 @@
     }
   }
 
-  // Persist the chosen locale (local cache + server preferences) and reload so
-  // every already-rendered string is rebuilt in the new language.
-  function setLocale(id) {
+  // persistLocale records the chosen locale (local cache + server preferences)
+  // WITHOUT reloading. Used by the first-run prompt when the user keeps English
+  // (the page is already English, so a reload would be pointless) — and shared by
+  // setLocale, which adds the reload.
+  function persistLocale(id) {
     if (!ids.includes(id)) return;
+    localeStored = true;
     try { localStorage.setItem(STORAGE_KEY, id); } catch (_) { /* ignore */ }
-    // Best-effort server persistence; reload regardless so the choice applies.
+    // Best-effort server persistence.
     try {
       const headers = (typeof authHeaders === "function")
         ? authHeaders({ "Content-Type": "application/json" })
@@ -158,6 +190,13 @@
         body: JSON.stringify({ locale: id }),
       }).catch(() => { /* offline / unauthenticated — local cache wins */ });
     } catch (_) { /* ignore */ }
+  }
+
+  // Persist the chosen locale and reload so every already-rendered string is
+  // rebuilt in the new language.
+  function setLocale(id) {
+    if (!ids.includes(id)) return;
+    persistLocale(id);
     // Clear the resync guard so the next boot doesn't think it already reconciled.
     try { sessionStorage.removeItem(RESYNC_FLAG); } catch (_) { /* ignore */ }
     location.reload();
@@ -185,11 +224,16 @@
   window.trN = trN;
   window.I18N = {
     get locale() { return locale; },
+    get localeStored() { return localeStored; },
+    detectedLocale: detectedLocale,
     LOCALES: LOCALES,
     DEFAULT_LOCALE: DEFAULT_LOCALE,
     t: tr,
     trN: trN,
+    trIn: trIn,
+    labelFor: labelFor,
     setLocale: setLocale,
+    persistLocale: persistLocale,
     translateDom: translateDom,
     reconcileServerLocale: reconcileServerLocale,
   };

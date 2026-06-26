@@ -179,6 +179,11 @@
   "app.notify.unblockFirefox": "Haz clic en el icono de permisos a la izquierda de la barra de direcciones y borra el estado « Bloqueado » para las notificaciones (o ponlo en Permitir), luego recarga.",
   "app.notify.unblockSafari": "Abre Safari → Ajustes → Sitios web → Notificaciones y pon este sitio en Permitir, luego recarga.",
   "app.notify.unblockChromium": "Haz clic en el icono de información del sitio (el control de ajuste/ⓘ justo a la izquierda de la barra de direcciones) → Configuración del sitio → Notificaciones → Permitir, luego recarga.",
+  "app.locale.offerTitle": "¿Cambiar de idioma?",
+  "app.locale.offerMsg": "Tu navegador prefiere {language}. ¿Quieres usar la interfaz de Omnis en {language}? Puedes cambiarlo en cualquier momento en Ajustes → Apariencia.",
+  "app.locale.useLanguage": "Cambiar a {language}",
+  "app.locale.keepEnglish": "Mantener el inglés",
+
   "app.copy.richText": "Texto enriquecido",
   "app.copy.plainText": "Texto sin formato",
   "askkind.skill": "Skills",
