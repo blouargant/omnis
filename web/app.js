@@ -2863,13 +2863,17 @@ function appendMailboxBlock(text, container) {
 }
 
 // Update the floating prompt header to show the question whose agent reply is
-// currently at the top of the viewport. We pin as soon as a question's bubble
-// *starts* to scroll above the transcript top (its top edge crosses the line),
-// not only once it has scrolled completely out — so the panel appears the moment
-// the user begins scrolling rather than popping in late, which read as a jump.
+// currently at the top of the viewport. We pin a question only once its bubble
+// has scrolled *completely* above the transcript top (its bottom edge crosses the
+// line) — NOT the moment its top edge crosses. Pinning on the top edge meant that
+// as soon as the *next* question's top scrolled up, it was pinned into the header
+// while its bubble was still visible inline just below it, so the floating panel
+// and the inline bubble showed the same prompt twice. Keying on the bottom edge
+// keeps the previous question pinned until the next one has fully left the viewport,
+// so the header never duplicates a question that's still on screen.
 // The header steals height from the transcript when it appears, so transcriptRect.top
 // shifts down by the header height once shown; that visibility-dependent line gives
-// natural hysteresis (show at the top line, hide one header-height lower) so the
+// natural hysteresis (pin at the top line, unpin one header-height lower) so the
 // decision can't flicker around the threshold. withStableScroll counter-scrolls the
 // height it costs, keeping the content stationary as the bubble becomes the header.
 function updatePinnedForScroll(panel) {
@@ -2879,7 +2883,7 @@ function updatePinnedForScroll(panel) {
   let activeBubble = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.top < transcriptRect.top) activeBubble = bubble;
+    if (rowRect.bottom < transcriptRect.top) activeBubble = bubble;
   }
   if (activeBubble !== null) {
     // Pin the question only — steering notes show as chips on the inline bubble.
