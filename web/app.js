@@ -220,7 +220,6 @@ const queuedAskWidgets = new Map();
 // style every pane identically).
 const PANE_EL_IDS = {
   promptHeader: "prompt-header", transcript: "transcript",
-  steerTray: "steer-tray",
   composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
   editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
   send: "send", cancel: "cancel", status: "status",
@@ -1026,7 +1025,11 @@ function applySessionUI(id) {
   const active = sessionSending.has(id);
   const archived = archivedSessions.has(id);
   for (const p of panelsForSession(id)) {
-    p.els.send.disabled   = active || archived;
+    // While a turn streams the send button stays enabled but becomes a "Steer"
+    // button — clicking it (or Enter) submits the composer text as a mid-turn
+    // steering note (sendMessage routes to steerMessage when sessionSending).
+    p.els.send.disabled   = archived;
+    setSendButtonMode(p, active && !archived);
     p.els.cancel.disabled = !active;
     setStatus(p, sessionStatus.get(id) || "");
     setComposerReadOnly(p, archived);
@@ -1036,6 +1039,18 @@ function applySessionUI(id) {
   // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
   // including background tabs whose session is streaming.
   for (const p of panelsWithTab(id)) renderPaneTabs(p);
+}
+
+// setSendButtonMode flips a pane's send button between its normal "Send" state
+// and the mid-turn "Steer" state (label + tooltip + an `.is-steer` accent so the
+// different action reads at a glance).
+function setSendButtonMode(panel, steering) {
+  const btn = panel.els.send;
+  if (!btn) return;
+  btn.classList.toggle("is-steer", steering);
+  btn.textContent = steering ? tr("composer.steer") : tr("composer.send");
+  if (steering) btn.setAttribute("data-tip", tr("composer.steerTip"));
+  else btn.removeAttribute("data-tip");
 }
 
 // paneTabTitle resolves a tab's label: the session's title (falling back to id).
@@ -2449,10 +2464,14 @@ function appendUserBubble(text, container, files, turnIndex) {
   const bubble = document.createElement("div");
   bubble.className = "bubble-user";
   bubble.dataset.text = text || "";
-  if (text) {
+  // Mid-turn steering the model folded into this turn is persisted in the prompt
+  // as a "[Sent while working]" block; split it back out so the question renders
+  // as text and the notes render as chips (matching the live in-flight view).
+  const { base, notes } = splitSteerText(text);
+  if (base) {
     const textEl = document.createElement("div");
     textEl.className = "bubble-user-text";
-    renderUserText(textEl, text, sessionId);
+    renderUserText(textEl, base, sessionId);
     bubble.appendChild(textEl);
   }
   if (files && files.length > 0) {
@@ -2466,6 +2485,11 @@ function appendUserBubble(text, container, files, turnIndex) {
       chips.appendChild(chip);
     }
     bubble.appendChild(chips);
+  }
+  if (notes.length) {
+    bubble.dataset.textOriginal = base;
+    bubble._steerNotes = notes.slice();
+    renderSteerChips(bubble, notes);
   }
   row.appendChild(bubble);
   // A real (persisted) turn carries its index, so the per-turn fork/rewind
@@ -2720,7 +2744,8 @@ function updatePinnedForScroll(panel) {
     if (rowRect.top < transcriptRect.top) activeBubble = bubble;
   }
   if (activeBubble !== null) {
-    const text = activeBubble.dataset.text || "";
+    // Pin the question only — steering notes show as chips on the inline bubble.
+    const text = activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "";
     let files = [];
     if (activeBubble.dataset.files) {
       try { files = JSON.parse(activeBubble.dataset.files); } catch { files = []; }
@@ -5377,38 +5402,114 @@ async function* parseSSE(res) {
 // ─── Mid-turn steering ────────────────────────────────────────────────────────
 // While a turn is computing, a submitted message becomes a "steering" note: it
 // is queued on the server (POST /steer) so the agent picks it up at its next
-// reasoning step, and shown as a pending chip above the composer until the turn
-// folds it in (consumed mid-turn) or runs it as a follow-up (a `steer_turn`
-// frame, which clears the tray and renders the note as a user bubble).
+// reasoning step. It is shown immediately appended to the in-flight question
+// bubble it steers (a "[Sent while working]" block — the same shape the server
+// persists when the model folds the note into the current turn). If the model
+// never reaches the note it runs as a follow-up turn (a `steer_turn` frame),
+// in which case those notes are moved out of the question bubble into their own
+// user bubble so the live transcript matches the persisted/reloaded history.
 
-function addSteerChip(panel, text) {
-  const tray = panel.els.steerTray;
-  if (!tray) return null;
-  const chip = document.createElement("div");
+// lastUserBubbleIn returns the `.bubble-user` of the most recent user-turn row
+// in the container (the question currently being answered). Mailbox / background
+// injected turns don't render a `.msg-row-user`, so this is the real question.
+function lastUserBubbleIn(container) {
+  const rows = (container || document).querySelectorAll(".msg-row-user");
+  const row = rows[rows.length - 1];
+  return row ? row.querySelector(".bubble-user") : null;
+}
+
+// The server folds steering the model consumed mid-turn into the persisted
+// prompt with this marker. splitSteerText recovers the original prompt and the
+// individual notes so both the live and reloaded transcripts can render the
+// notes as chips (rather than as raw "[Sent while working]" text).
+const STEER_MARKER = "\n\n[Sent while working]\n";
+function splitSteerText(text) {
+  const t = String(text || "");
+  const idx = t.indexOf(STEER_MARKER);
+  if (idx === -1) return { base: t, notes: [] };
+  return {
+    base: t.slice(0, idx),
+    notes: t.slice(idx + STEER_MARKER.length).split("\n").filter(n => n.length > 0),
+  };
+}
+
+// makeSteerChip builds one "↑"-tagged chip for a steering note (full text in the
+// tooltip when truncated).
+function makeSteerChip(note) {
+  const chip = document.createElement("span");
   chip.className = "steer-chip";
-  chip.dataset.full = text;
-  chip.setAttribute("data-tip", text);
+  chip.setAttribute("data-tip", note);
   chip.innerHTML =
     `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>` +
     `<span class="steer-chip-text"></span>`;
   chip.querySelector(".steer-chip-text").textContent =
-    text.length > 90 ? text.slice(0, 90) + "…" : text;
-  tray.appendChild(chip);
-  tray.hidden = false;
+    note.length > 120 ? note.slice(0, 120) + "…" : note;
   return chip;
 }
 
-function removeSteerChip(panel, chip) {
-  if (chip && chip.parentNode) chip.remove();
-  const tray = panel.els.steerTray;
-  if (tray && tray.children.length === 0) tray.hidden = true;
+// renderSteerChips (re)paints the steering-note chips on a user bubble, kept
+// after the question text/attachments but before the truncation toggle.
+function renderSteerChips(bubble, notes) {
+  let wrap = bubble.querySelector(".bubble-steer");
+  if (!notes || !notes.length) {
+    if (wrap) wrap.remove();
+    return;
+  }
+  if (!wrap) wrap = document.createElement("div");
+  wrap.className = "bubble-steer";
+  wrap.replaceChildren();
+  for (const note of notes) wrap.appendChild(makeSteerChip(note));
+  const toggle = bubble.querySelector(".bubble-user-toggle");
+  if (toggle) bubble.insertBefore(wrap, toggle);
+  else bubble.appendChild(wrap);
 }
 
-function clearSteerChips(panel) {
-  const tray = panel && panel.els && panel.els.steerTray;
-  if (!tray) return;
-  tray.replaceChildren();
-  tray.hidden = true;
+// renderUserBubbleSteer syncs a question bubble's steering chips + dataset.text
+// from its `_steerNotes` (and remembered `textOriginal`). The base question text
+// is untouched — steering shows as chips, not inline text.
+function renderUserBubbleSteer(bubble) {
+  const orig = bubble.dataset.textOriginal ?? bubble.dataset.text ?? "";
+  const notes = bubble._steerNotes || [];
+  bubble.dataset.text = notes.length ? orig + STEER_MARKER + notes.join("\n") : orig;
+  renderSteerChips(bubble, notes);
+}
+
+// steerAppendToQuestion appends `note` to the in-flight question bubble (as a
+// chip) and returns that bubble (or null). The original prompt is remembered
+// once so the notes can be removed later.
+function steerAppendToQuestion(sessionId, note) {
+  const bubble = lastUserBubbleIn(getContainer(sessionId));
+  if (!bubble) return null;
+  if (bubble.dataset.textOriginal === undefined) bubble.dataset.textOriginal = bubble.dataset.text || "";
+  (bubble._steerNotes || (bubble._steerNotes = [])).push(note);
+  renderUserBubbleSteer(bubble);
+  return bubble;
+}
+
+// steerUndoFromQuestion drops the most recently appended note (used when the
+// turn had already finished and the note must be sent as a normal new turn).
+function steerUndoFromQuestion(bubble) {
+  if (!bubble || !bubble._steerNotes || !bubble._steerNotes.length) return;
+  bubble._steerNotes.pop();
+  renderUserBubbleSteer(bubble);
+}
+
+// steerExtractFromQuestion removes the suffix of appended notes that the server
+// ran as a follow-up turn (its `steer_turn` text), so they can be re-rendered as
+// their own user bubble. Pending notes are always a suffix of those sent (each
+// model boundary drains all pending at once), so the smallest trailing run whose
+// join matches `combined` is the set to move out.
+function steerExtractFromQuestion(container, combined) {
+  const bubble = lastUserBubbleIn(container);
+  if (!bubble || !bubble._steerNotes || !bubble._steerNotes.length) return;
+  const notes = bubble._steerNotes;
+  for (let k = 1; k <= notes.length; k++) {
+    if (notes.slice(notes.length - k).join("\n") === combined) {
+      bubble._steerNotes = notes.slice(0, notes.length - k);
+      renderUserBubbleSteer(bubble);
+      return;
+    }
+  }
 }
 
 // steerMessage queues `note` on the in-flight turn. If the server reports no
@@ -5417,7 +5518,9 @@ function clearSteerChips(panel) {
 async function steerMessage(panel, sessionId, note) {
   note = (note || "").trim();
   if (!sessionId || !note) return;
-  const chip = addSteerChip(panel, note);
+  // Show the note immediately, appended to the question it steers.
+  const bubble = steerAppendToQuestion(sessionId, note);
+  scrollBottom(panel, true);
   setSessionStatus(sessionId, tr("app.steer.queued"));
   let queued = false;
   try {
@@ -5432,8 +5535,8 @@ async function steerMessage(panel, sessionId, note) {
     queued = false;
   }
   if (!queued) {
-    // The turn had already finished — drop the chip and send it normally.
-    removeSteerChip(panel, chip);
+    // The turn had already finished — undo the append and send it normally.
+    steerUndoFromQuestion(bubble);
     sessionSending.delete(sessionId);
     if (!panel.els.prompt.value.trim()) {
       panel.els.prompt.value = note;
@@ -5776,12 +5879,14 @@ async function sendMessage(panel) {
 
         case "steer_turn": {
           // Steering the model didn't reach during the turn is run as a follow-up
-          // turn. Close the current segment, clear the queued chips (they're now
-          // represented by this note), render the note as a user bubble, and let
-          // the follow-up reply stream into a fresh segment below it.
+          // turn. Close the current segment, move these notes out of the question
+          // bubble they were provisionally appended to, render them as their own
+          // user bubble, and let the follow-up reply stream into a fresh segment
+          // below it.
           finalizeSegment();
-          clearSteerChips(panel);
-          appendUserBubble(data.text || "", container, null);
+          const combined = data.text || "";
+          steerExtractFromQuestion(container, combined);
+          appendUserBubble(combined, container, null);
           scrollBottom(panel, true);
           sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
           break;
@@ -5897,10 +6002,9 @@ async function sendMessage(panel) {
     }
   } finally {
     finalizeSegment();
-    // Any steering chips still queued are resolved now (consumed mid-turn and
-    // folded into the prompt, or the turn ended). steer_turn already cleared
-    // chips it ran as follow-ups.
-    clearSteerChips(panel);
+    // Steering notes appended to the question bubble stay there: the ones the
+    // model consumed mid-turn match the server's persisted "[Sent while working]"
+    // fold, and any that ran as a follow-up were already moved out by steer_turn.
     AgentDebug.end();
     // Clean up any still-pending tool dots (e.g. on cancel).
     for (const b of [...pendingTools, ...innerPending]) {

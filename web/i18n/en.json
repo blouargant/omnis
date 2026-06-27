@@ -43,6 +43,8 @@
   "composer.placeholder": "Message the agent… (Enter to send)",
   "composer.stop": "Stop",
   "composer.send": "Send",
+  "composer.steer": "Steer",
+  "composer.steerTip": "Send a steering note to the running turn",
 
   "ctx.header": "Context",
   "ctx.tokensUsed": "Tokens used",

@@ -248,6 +248,14 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 #send:hover { background: var(--accent-hover); }
 #send:disabled { background: var(--bg-active); color: #555558; cursor: not-allowed; }
+/* Mid-turn "Steer" state: a softer accent variant (matches the steer chips) so
+   it reads as a different action from the normal "Send". */
+#send.is-steer {
+  background: var(--accent-bg-soft);
+  color: var(--text);
+  border: 1px solid var(--accent-border-soft);
+}
+#send.is-steer:hover { background: var(--accent-bg-soft); border-color: var(--accent); }
 
 #cancel {
   background: transparent;
@@ -318,36 +326,6 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 #attachments[hidden] { display: none; }
 
-/* Mid-turn steering: notes the user queues while a turn is still computing.
-   Rendered as pending chips above the textarea (like attachment chips); cleared
-   when the turn folds them in or runs them as a follow-up. */
-#steer-tray {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 2px 2px;
-}
-#steer-tray[hidden] { display: none; }
-.steer-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-elev, #2a2f37);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  max-width: 320px;
-  overflow: hidden;
-}
-.steer-chip svg { flex-shrink: 0; opacity: 0.7; }
-.steer-chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .attachment-chip {
   display: inline-flex;
   align-items: center;
@@ -394,6 +372,32 @@ body.resizing-composer #composer-resize { transition: none; }
   border-radius: 4px;
   padding: 1px 7px;
   font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Mid-turn steering notes, shown as chips on the question bubble they steer. */
+.bubble-steer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.steer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  background: var(--accent-bg-soft);
+  border: 1px solid var(--accent-border-soft);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+.steer-chip svg { flex-shrink: 0; color: var(--accent); }
+.steer-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

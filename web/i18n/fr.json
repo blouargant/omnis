@@ -40,6 +40,8 @@
   "composer.placeholder": "Écrivez à l'agent… (Entrée pour envoyer)",
   "composer.stop": "Arrêter",
   "composer.send": "Envoyer",
+  "composer.steer": "Orienter",
+  "composer.steerTip": "Envoyer une note d'orientation au tour en cours",
   "ctx.header": "Contexte",
   "ctx.tokensUsed": "Jetons utilisés",
   "ctx.maxContext": "Contexte maximal",

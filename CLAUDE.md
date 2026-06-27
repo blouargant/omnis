@@ -1714,13 +1714,28 @@ Surfaces:
   repeat; one terminal `done` at the very end. The run-guard is held across the
   whole loop so no other turn interleaves. Stop (`handleCancel`) also drops
   pending steering so a cancel doesn't leak notes into the next turn. Client
-  ([web/app.js](web/app.js)): the composer stays enabled while streaming; an Enter
-  submit during `sessionSending` routes to `steerMessage` (POST `/steer`), shows a
-  pending **chip** in the per-pane `#steer-tray` (styled in
-  [web/css/features/composer.css](web/css/features/composer.css)), and on
-  `{queued:false}` falls back to `sendMessage`. The `steer_turn` SSE clears the
-  tray + renders the note as a user bubble; the send-path `finally` clears any
-  remaining chips. i18n key `app.steer.queued`.
+  ([web/app.js](web/app.js)): the composer stays enabled while streaming, and the
+  send button stays enabled too — `applySessionUI` flips it into a **"Steer"**
+  state (`setSendButtonMode` toggles the label/tooltip + an `.is-steer` accent;
+  i18n `composer.steer`/`composer.steerTip`) so clicking it (or Enter) during
+  `sessionSending` routes to `steerMessage` (POST `/steer`), which **shows the note
+  as a `.steer-chip` on the in-flight question bubble** it steers (not in the
+  composer). The chips are driven by `renderUserBubbleSteer` from the
+  bubble's `_steerNotes` (+ remembered `dataset.textOriginal`); `dataset.text` is
+  kept as the full `"[Sent while working]"` fold so the pinned header / fork-rewind
+  still see the verbatim persisted prompt, while the **base question stays plain
+  text and each note is a chip**. On `{queued:false}` it `steerUndoFromQuestion`s
+  the append and falls back to `sendMessage`. When the model never reached a note
+  it runs as a follow-up turn: the `steer_turn` SSE `steerExtractFromQuestion`s the
+  matching suffix of notes out of the question bubble (pending notes are always a
+  suffix — each model boundary drains all pending at once) and re-renders them as
+  their own user bubble, so a folded-in note stays as a chip on the question and a
+  follow-up note becomes a separate turn, exactly as persisted. The **reload path**
+  matches: `appendUserBubble` runs `splitSteerText` on the persisted prompt to
+  render the base question as text and the folded notes as chips (`renderSteerChips`
+  / `makeSteerChip`, styled `.bubble-steer` / `.steer-chip` in
+  [web/css/features/composer.css](web/css/features/composer.css)). (There is no
+  longer a `#steer-tray` in the composer.) i18n key `app.steer.queued`.
 - **TUI** ([internal/tui/tui.go](internal/tui/tui.go)) — while `busy`, a plain
   Enter `Enqueue`s on `cfg.SteerStore` and echoes "steering queued"; the send
   goroutine loops the same fold/drain/follow-up after `RunWithRouting`.

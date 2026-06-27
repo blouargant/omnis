@@ -40,6 +40,8 @@
   "composer.placeholder": "Nachricht an den Agenten… (Enter zum Senden)",
   "composer.stop": "Stopp",
   "composer.send": "Senden",
+  "composer.steer": "Lenken",
+  "composer.steerTip": "Eine Lenkungsnotiz an den laufenden Zug senden",
   "ctx.header": "Kontext",
   "ctx.tokensUsed": "Verwendete Token",
   "ctx.maxContext": "Maximaler Kontext",

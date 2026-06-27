@@ -40,6 +40,8 @@
   "composer.placeholder": "Escribe al agente… (Intro para enviar)",
   "composer.stop": "Detener",
   "composer.send": "Enviar",
+  "composer.steer": "Orientar",
+  "composer.steerTip": "Enviar una nota de orientación al turno en curso",
   "ctx.header": "Contexto",
   "ctx.tokensUsed": "Tokens usados",
   "ctx.maxContext": "Contexto máximo",
