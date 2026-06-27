@@ -1,4 +1,5 @@
 [data-theme="subtle-grey"] {
+  color-scheme: light;
   /* Backgrounds */
   --bg: #f8f9fa; /* Main content area background */
   --bg-panel: #ffffff; /* Card/Container backgrounds */

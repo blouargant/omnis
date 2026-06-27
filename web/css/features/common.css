@@ -9,6 +9,14 @@
  * css/themes/<name>.css — switching [data-theme] on <html> retheme the
  * entire UI without touching any selector. */
 :root {
+  /* Tone of the default (VS Code Dark) skin. Keeps the browser's navigation
+     canvas, scrollbars and native form controls dark to match — and, crucially,
+     stops a dark-mode OS from painting a dark canvas under a *light* theme
+     during the reload gap (the "flash to dark on language change"). Each light
+     theme overrides this with `color-scheme: light` in its themes/*.css block;
+     dark themes inherit this default. */
+  color-scheme: dark;
+
   /* Layout */
   --sidebar-w: 280px;
   /* Chat content column width, as a % of the pane so it scales edge-to-edge

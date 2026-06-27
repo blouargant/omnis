@@ -8,7 +8,11 @@
   <script>
     // Apply the persisted theme synchronously before stylesheets resolve,
     // so the page never flashes the default palette when a different theme
-    // is selected. Settings.js writes to this same localStorage key.
+    // is selected. Settings.js writes to this same localStorage key. The
+    // matching `color-scheme` (which keeps the browser's navigation canvas /
+    // scrollbars / form controls in step with the theme tone, so a dark OS
+    // never paints a dark canvas under a light theme on reload) is declared in
+    // CSS per-theme — see `color-scheme` in features/common.css + themes/*.css.
     (function () {
       try {
         var t = localStorage.getItem("agent_toolkit_theme");
