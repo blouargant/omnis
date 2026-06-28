@@ -14,8 +14,10 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/goal"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/scheduler"
 	"github.com/blouargant/omnis/internal/skills"
 	"github.com/blouargant/omnis/internal/steer"
 	"github.com/blouargant/omnis/internal/tasks"
@@ -57,6 +59,19 @@ type Infrastructure struct {
 	// leftover after the turn and runs it as the next turn. Process-wide so it
 	// survives hot-reload, like the other session-scoped holders above.
 	SteerStore *steer.Store
+
+	// Scheduler runs prompts on a timer: in-memory /loop jobs and durable
+	// /schedule routines (persisted to schedules.json). Process-wide so it
+	// survives hot-reload like the holders above; each surface supplies the
+	// `fire` callback to Scheduler.Run (server: the turn-injection rail;
+	// CLI/TUI: a turn in the current session).
+	Scheduler *scheduler.Scheduler
+
+	// GoalStore holds the per-session /goal completion condition. After each
+	// turn, if a session has an active goal, the surface runs the evaluator
+	// (Manager.EvaluateGoal) and either keeps working (injects a follow-up turn)
+	// or clears the goal. Process-wide so it survives hot-reload, like SteerStore.
+	GoalStore *goal.Store
 
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
@@ -179,6 +194,8 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		BgQueues:        bgQueues,
 		TodoStore:       todoStore,
 		SteerStore:      steer.New(),
+		Scheduler:       scheduler.New(paths.SchedulesPath()),
+		GoalStore:       goal.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 	}, nil

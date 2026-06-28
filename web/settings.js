@@ -17,6 +17,7 @@ const BASE_PATH = window.BASE_PATH || "";
     documentation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
     "user-commands": `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="15" y1="7" x2="9" y2="17"/></svg>`,
     registries: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
+    automation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`,
     raw: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
   };
 
@@ -40,6 +41,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const DOCUMENTATION_ID = "documentation";
   const USER_COMMANDS_ID = "user-commands";
   const REGISTRIES_ID = "registries";
+  const AUTOMATION_ID = "automation";
   const MENU_ITEMS = [
     { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "agent",         label: "Agents",      title: "Agent Configuration",       kind: "json" },
@@ -49,6 +51,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "a2a",           label: "A2A",         title: "A2A Agents",                kind: "json" },
     { id: "hooks",         label: "Hooks",       title: "Lifecycle Hooks",           kind: "json" },
     { id: USER_COMMANDS_ID,label: "Commands",    title: "Slash Commands",            kind: "client" },
+    { id: AUTOMATION_ID,   label: "Automation",  title: "Automation",                kind: "client" },
     { id: REGISTRIES_ID,   label: "Registries",  title: "Remote Registries",         kind: "client" },
     { id: APPEARANCE_ID,   label: "Appearance",  title: "Appearance",                kind: "client" },
     { id: DOCUMENTATION_ID,label: "Documentation", title: "Documentation",           kind: "client" },
@@ -784,7 +787,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // True for menu entries with no server-side JSON — these hide the
   // Form/Raw toggle and the Save/Discard footer.
   function isClientOnly(id) {
-    return id === APPEARANCE_ID || id === "skills" || id === DOCUMENTATION_ID || id === USER_COMMANDS_ID || id === REGISTRIES_ID;
+    return id === APPEARANCE_ID || id === "skills" || id === DOCUMENTATION_ID || id === USER_COMMANDS_ID || id === REGISTRIES_ID || id === AUTOMATION_ID;
   }
 
   function applyClientOnlyChrome() {
@@ -927,6 +930,7 @@ const BASE_PATH = window.BASE_PATH || "";
       else if (id === DOCUMENTATION_ID) renderDocumentation();
       else if (id === USER_COMMANDS_ID) renderUserCommands();
       else if (id === REGISTRIES_ID) renderRegistriesHub();
+      else if (id === AUTOMATION_ID) renderAutomation();
       return;
     }
     try {
@@ -1192,6 +1196,176 @@ const BASE_PATH = window.BASE_PATH || "";
   // CRUD view of the user-defined commands persisted via
   // /api/user-commands. Editing reuses the inline modal defined in
   // app.js (window.UserCommands.openModal).
+  // ─── Automation page (loops & schedules) ──────────────────────────────
+  // Full management surface for /loop and /schedule jobs: two grouped lists
+  // (durable Schedules + active Loops), each row with run-now / inline-edit
+  // (spec+prompt) / enable-disable / delete, an expandable run history (with
+  // links to the session each run produced), and an add-routine form. Backed by
+  // the /api/schedules routes.
+  let _schedSpec = "", _schedPrompt = "";
+
+  // fmtTime renders an ISO timestamp, treating Go's zero time as "never".
+  function fmtSchedTime(t) {
+    if (!t || String(t).startsWith("0001")) return tr("set.sched.never");
+    return new Date(t).toLocaleString(I18N.locale);
+  }
+  function schedOneLine(s) {
+    const t = (s || "").split("\n").map(x => x.trim()).find(Boolean) || "";
+    return t.length > 90 ? t.slice(0, 90) + "…" : t;
+  }
+  function schedHistoryHTML(j) {
+    const recs = (j.history || []).slice().reverse(); // newest first
+    if (!recs.length) return `<p class="settings-hint">${escHtml(tr("set.sched.noRuns"))}</p>`;
+    return recs.map(r => {
+      const ok = r.status !== "error";
+      const when = r.at ? new Date(r.at).toLocaleString(I18N.locale) : "";
+      const link = r.session_id
+        ? `<a class="sched-link" data-open="${escHtml(r.session_id)}">${escHtml(tr("set.sched.open"))}</a>`
+        : "";
+      const note = r.note ? `<span class="sched-run-note">${escHtml(r.note)}</span>` : "";
+      return `<div class="sched-run"><span class="sched-run-dot ${ok ? "ok" : "err"}"></span>` +
+        `<span class="sched-run-when">${escHtml(when)}</span>${link}${note}</div>`;
+    }).join("");
+  }
+  function schedRowHTML(j) {
+    const histN = (j.history || []).length;
+    return `
+      <div class="sched-row" data-id="${escHtml(j.id)}">
+        <div class="sched-row-head">
+          <span class="sched-kind sched-kind-${escHtml(j.kind)}">${escHtml(j.kind)}</span>
+          <code class="sched-spec">${escHtml(j.spec)}</code>
+          <span class="sched-prompt" title="${escHtml(j.prompt || "")}">${escHtml(schedOneLine(j.prompt))}</span>
+          <span class="sched-state ${j.enabled ? "on" : "off"}">${escHtml(j.enabled ? tr("set.sched.active") : tr("set.sched.paused"))}</span>
+        </div>
+        <div class="sched-row-meta">
+          <span>${escHtml(tr("set.sched.next"))}: ${escHtml(fmtSchedTime(j.next_run))}</span>
+          <span>${escHtml(tr("set.sched.last"))}: ${escHtml(fmtSchedTime(j.last_run))}</span>
+          <span>${escHtml(tr("set.sched.runs"))}: ${j.runs || 0}</span>
+          ${histN ? `<button type="button" class="sched-link" data-act="history">${escHtml(tr("set.sched.viewRuns"))}</button>` : ""}
+        </div>
+        <div class="sched-history" hidden>${schedHistoryHTML(j)}</div>
+        <div class="sched-edit" hidden>
+          <label>${escHtml(tr("set.sched.spec"))}
+            <input type="text" class="sched-edit-spec" value="${escHtml(j.spec)}" placeholder="${escHtml(tr("set.sched.specHint"))}">
+          </label>
+          <label>${escHtml(tr("set.sched.prompt"))}
+            <textarea class="sched-edit-prompt" rows="2">${escHtml(j.prompt || "")}</textarea>
+          </label>
+          <div class="sched-edit-actions">
+            <button type="button" class="btn-small" data-act="save">${escHtml(tr("common.save"))}</button>
+            <button type="button" class="btn-small" data-act="cancel">${escHtml(tr("common.cancel"))}</button>
+          </div>
+        </div>
+        <div class="sched-actions">
+          <button type="button" class="btn-small" data-act="run">${escHtml(tr("set.sched.run"))}</button>
+          <button type="button" class="btn-small" data-act="edit">${escHtml(tr("set.sched.edit"))}</button>
+          <button type="button" class="btn-small" data-act="toggle">${j.enabled ? escHtml(tr("set.sched.disable")) : escHtml(tr("set.sched.enable"))}</button>
+          <button type="button" class="btn-small btn-danger" data-act="delete">${escHtml(tr("set.sched.delete"))}</button>
+        </div>
+      </div>`;
+  }
+
+  async function renderAutomation() {
+    registriesHubRefresh = null;
+    bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
+    let jobs = [];
+    try {
+      const r = await fetch(BASE_PATH + "/api/schedules", { headers: authHeaders() });
+      const j = await r.json();
+      jobs = Array.isArray(j.jobs) ? j.jobs : [];
+    } catch (e) {
+      bodyEl.innerHTML = `<p class="settings-error">${escHtml(String(e))}</p>`;
+      return;
+    }
+    const schedules = jobs.filter(j => j.kind === "schedule");
+    const loops = jobs.filter(j => j.kind === "loop");
+
+    bodyEl.innerHTML = `
+      <div class="settings-form sched-panel">
+        <h2>${escHtml(tr("set.sched.heading"))}</h2>
+        <p class="settings-hint">${escHtml(tr("set.sched.intro"))}</p>
+
+        <div class="sched-section">
+          <h3>${escHtml(tr("set.sched.schedulesH"))} <span class="sched-count">${schedules.length}</span></h3>
+          <div class="sched-list">${schedules.map(schedRowHTML).join("") || `<p class="settings-hint">${escHtml(tr("set.sched.emptySchedules"))}</p>`}</div>
+          <div class="sched-add">
+            <h4>${escHtml(tr("set.sched.addTitle"))}</h4>
+            <label>${escHtml(tr("set.sched.spec"))}
+              <input type="text" id="sched-spec" placeholder="${escHtml(tr("set.sched.specHint"))}" value="${escHtml(_schedSpec)}">
+            </label>
+            <label>${escHtml(tr("set.sched.prompt"))}
+              <textarea id="sched-prompt" rows="2">${escHtml(_schedPrompt)}</textarea>
+            </label>
+            <button type="button" class="add-btn" id="sched-add-btn">${escHtml(tr("set.sched.add"))}</button>
+          </div>
+        </div>
+
+        <div class="sched-section">
+          <h3>${escHtml(tr("set.sched.loopsH"))} <span class="sched-count">${loops.length}</span></h3>
+          <div class="sched-list">${loops.map(schedRowHTML).join("") || `<p class="settings-hint">${escHtml(tr("set.sched.emptyLoops"))}</p>`}</div>
+        </div>
+      </div>`;
+
+    const api = (path, opts) => fetch(
+      BASE_PATH + "/api/schedules" + path,
+      Object.assign({ headers: authHeaders({ "Content-Type": "application/json" }) }, opts)
+    );
+
+    // One delegated handler for every row action + run-history "open" link.
+    bodyEl.querySelector(".sched-panel").addEventListener("click", async (e) => {
+      const openEl = e.target.closest("[data-open]");
+      if (openEl) {
+        if (typeof selectSession === "function") selectSession(openEl.dataset.open);
+        return;
+      }
+      const btn = e.target.closest("[data-act]");
+      if (!btn) return;
+      const row = btn.closest(".sched-row");
+      if (!row) return;
+      const id = row.dataset.id;
+      const job = jobs.find(j => j.id === id);
+      const act = btn.dataset.act;
+      try {
+        if (act === "history") { const h = row.querySelector(".sched-history"); h.hidden = !h.hidden; return; }
+        if (act === "edit") { const ed = row.querySelector(".sched-edit"); ed.hidden = !ed.hidden; return; }
+        if (act === "cancel") { row.querySelector(".sched-edit").hidden = true; return; }
+        if (act === "run") { await api(`/${encodeURIComponent(id)}/run`, { method: "POST" }); }
+        else if (act === "toggle") { await api(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ enabled: !(job && job.enabled) }) }); }
+        else if (act === "delete") { await api(`/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+        else if (act === "save") {
+          const spec = row.querySelector(".sched-edit-spec").value.trim();
+          const prompt = row.querySelector(".sched-edit-prompt").value.trim();
+          const r = await api(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ spec, prompt }) });
+          if (!r.ok) { const jj = await r.json().catch(() => ({})); setStatus(jj.error || ("error " + r.status), "error"); return; }
+        } else return;
+        renderAutomation();
+      } catch (err) { setStatus(String(err), "error"); }
+    });
+
+    // Add-routine form.
+    const specEl = bodyEl.querySelector("#sched-spec");
+    const promptEl = bodyEl.querySelector("#sched-prompt");
+    if (specEl) specEl.addEventListener("input", () => { _schedSpec = specEl.value; });
+    if (promptEl) promptEl.addEventListener("input", () => { _schedPrompt = promptEl.value; });
+    const addBtn = bodyEl.querySelector("#sched-add-btn");
+    if (addBtn) addBtn.addEventListener("click", async () => {
+      const spec = specEl.value.trim(), prompt = promptEl.value.trim();
+      if (!spec || !prompt) { setStatus(tr("set.sched.needBoth"), "error"); return; }
+      try {
+        const r = await api("", { method: "POST", body: JSON.stringify({ kind: "schedule", spec, prompt }) });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); setStatus(j.error || ("error " + r.status), "error"); return; }
+        _schedSpec = ""; _schedPrompt = "";
+        renderAutomation();
+      } catch (e) { setStatus(String(e), "error"); }
+    });
+  }
+
+  // refreshSchedules re-renders the Automation panel when it is the active
+  // section (driven by the schedule_changed SSE event from app.js).
+  function refreshSchedules() {
+    if (isOpen() && state.activeFile === AUTOMATION_ID) renderAutomation();
+  }
+
   async function renderUserCommands() {
     registriesHubRefresh = null;
     const UC = window.UserCommands;
@@ -8674,7 +8848,7 @@ const BASE_PATH = window.BASE_PATH || "";
   });
 
   // Expose & wire button.
-  window.Settings = { open, close, isOpen, prefsReady, saveNotifications };
+  window.Settings = { open, close, isOpen, prefsReady, saveNotifications, refreshSchedules };
 
   document.addEventListener("DOMContentLoaded", () => {
     refreshBannerVisibility();

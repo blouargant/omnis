@@ -19,7 +19,9 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/compress"
+	goalpkg "github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/scheduler"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/blouargant/omnis/internal/steer"
 )
@@ -66,8 +68,16 @@ type serverDeps struct {
 	// types while a turn is computing). Backs the /steer endpoint; drained into
 	// the running turn by the steering plugin and folded/looped by the producer.
 	SteerStore *steer.Store
+	// GoalStore holds the per-session /goal completion condition. Backs the
+	// /api/sessions/:id/goal routes; the producer loop evaluates it after each
+	// turn and keeps working (or stops) accordingly.
+	GoalStore *goalpkg.Store
 	// PushMgr manages per-session background mailbox watchers.
 	PushMgr *pushManager
+	// Scheduler runs /loop and /schedule jobs on a timer (process-wide, from
+	// the infrastructure). Backs the /api/schedules routes; its fire callback
+	// (scheduleFire) is started once from main.go.
+	Scheduler *scheduler.Scheduler
 	// PushEvents broadcasts push notifications to open /events SSE connections.
 	PushEvents *sessionPushBroadcaster
 	// rootCtx is the server's root context; used to scope watcher goroutines.
@@ -371,6 +381,12 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.SteerStore != nil {
 			d.SteerStore.Forget(id)
 		}
+		if d.GoalStore != nil {
+			d.GoalStore.Forget(id)
+		}
+		if d.Scheduler != nil {
+			d.Scheduler.RemoveLoopsForSession(id)
+		}
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
 		}
@@ -590,6 +606,9 @@ func newEngine(d serverDeps) *gin.Engine {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
+		if d.Scheduler != nil {
+			d.Scheduler.RemoveLoopsForSession(id)
+		}
 		if d.PushMgr != nil {
 			d.PushMgr.Stop(id)
 		}
@@ -728,6 +747,23 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.GET("/sessions/:id/messages/stream", handleMessageStream(d))
 	auth.POST("/sessions/:id/cancel", handleCancel(d))
 	auth.POST("/sessions/:id/steer", handleSteer(d))
+	// /goal — set / inspect / clear a session completion goal. The agent keeps
+	// working across turns until the evaluator judges the condition met. See
+	// server/goal.go.
+	auth.GET("/sessions/:id/goal", handleGoalStatus(d))
+	auth.POST("/sessions/:id/goal", handleGoalSet(d))
+	auth.DELETE("/sessions/:id/goal", handleGoalClear(d))
+	// Read-only "aside" endpoints: answer about the session without touching its
+	// conversation (one-off LLM call, nothing persisted). Back /btw and /recap.
+	auth.POST("/sessions/:id/btw", handleBtw(d))
+	auth.POST("/sessions/:id/recap", handleRecap(d))
+	// Scheduled prompts: /loop (in-memory, session-bound) and /schedule (durable
+	// routines). See server/scheduler.go.
+	auth.GET("/schedules", handleListSchedules(d))
+	auth.POST("/schedules", handleCreateSchedule(d))
+	auth.PATCH("/schedules/:id", handleUpdateSchedule(d))
+	auth.DELETE("/schedules/:id", handleDeleteSchedule(d))
+	auth.POST("/schedules/:id/run", handleRunSchedule(d))
 	// Conversation fork / rewind: branch a new session at a turn, or rewind the
 	// live session to before a turn. Both reseed the model's in-memory context
 	// from the kept turns (see server/fork_rewind.go).

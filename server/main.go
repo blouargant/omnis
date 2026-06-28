@@ -324,6 +324,12 @@ func run() error {
 			return meta.ID
 		}())
 		manager.Pin(meta.ID)
+		// Restore an in-progress /goal (resume semantics): the condition carries
+		// over, the timer/turn count reset. The goal then re-engages on this
+		// session's next user turn (the producer loop evaluates it after the turn).
+		if infra.GoalStore != nil && strings.TrimSpace(meta.Goal) != "" {
+			infra.GoalStore.Restore(meta.ID, meta.Goal)
+		}
 		pushMgr.Watch(rootCtx, serverDeps{
 			Manager:      manager,
 			Registry:     registry,
@@ -339,7 +345,7 @@ func run() error {
 	// server lifecycle (see comment on restartCoordinator).
 	restart := newRestartCoordinator()
 
-	engine := newEngine(serverDeps{
+	deps := serverDeps{
 		Token:               token,
 		Manager:             manager,
 		Registry:            registry,
@@ -356,6 +362,8 @@ func run() error {
 		RunGuard:            runGuard,
 		LiveTurns:           newLiveTurnRegistry(),
 		SteerStore:          infra.SteerStore,
+		GoalStore:           infra.GoalStore,
+		Scheduler:           infra.Scheduler,
 		PushMgr:             pushMgr,
 		PushEvents:          pushEvents,
 		AgentOptions:        agentOpts,
@@ -365,7 +373,15 @@ func run() error {
 		Restart:             restart,
 		Updates:             updates,
 		Version:             version,
-	})
+	}
+	engine := newEngine(deps)
+
+	// Start the scheduler timer loop (/loop + /schedule). The fire callback
+	// reuses the turn-injection rail; durable routines were loaded by
+	// scheduler.New in BuildInfrastructure and resume from here.
+	if infra.Scheduler != nil {
+		go infra.Scheduler.Run(rootCtx, scheduleFire(deps))
+	}
 
 	srv := &http.Server{
 		Addr:              addr,

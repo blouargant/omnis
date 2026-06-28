@@ -90,6 +90,7 @@ same colour/size in multiple partials.
 | `docs.css` | Documentation viewer |
 | `squads.css` | Squads sub-tab (Agent → Squads) |
 | `commands.css` | User Commands settings |
+| `automation.css` | Automation panel (Settings → Automation): loops & schedules list + add-routine form |
 
 > **Two `sidebar.css` files:** `features/sidebar.css` is the **main app**
 > sidebar (session list, folders/archived panels). `settings/sidebar.css` is the

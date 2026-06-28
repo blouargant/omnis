@@ -161,6 +161,21 @@ func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {
 	}
 }
 
+// selectionFromModelConfig builds an LLM selection from a models.json catalogue
+// entry (RuntimeModelConfig), as opposed to an agent definition. Used for
+// internal one-off evaluator calls (the /goal judge) that reference a model by
+// `eval_model_ref` rather than belonging to any agent.
+func selectionFromModelConfig(cfg RuntimeModelConfig) llm.Selection {
+	return llm.Selection{
+		Provider:         cfg.Provider,
+		Model:            cfg.Model,
+		BaseURL:          cfg.BaseURL,
+		APIKey:           cfg.APIKey,
+		DisableStreaming: cfg.DisableStreaming,
+		PromptCache:      cfg.PromptCache,
+	}
+}
+
 func defaultAgentDescription(name string) string {
 	switch name {
 	case "leader":

@@ -228,6 +228,23 @@
   white-space: normal;
 }
 
+/* Aside card — /btw and /recap render a labelled, non-persisted answer that is
+   visually set apart from the real transcript (it is not saved). */
+.aside-block {
+  max-width: min(var(--col-w), 100%);
+  width: 100%;
+  margin: 4px auto;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--accent, #0e639c);
+}
+.aside-head {
+  color: var(--text-muted, #858585);
+  font-size: 12px;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.aside-body { margin: 0; }
+
 /* Markdown inside assistant */
 .bubble-assistant p { margin: 0 0 10px; }
 .bubble-assistant p:last-child { margin-bottom: 0; }
@@ -391,5 +408,25 @@
   letter-spacing: 0.02em;
   cursor: default;
 }
+
+/* /goal between-turns divider — centred pill the producer loop drops after each
+   goal evaluation (still working / achieved / stopped). */
+.msg-row.goal-divider { justify-content: center; }
+.goal-divider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px auto;
+  padding: 3px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: default;
+}
+.goal-divider-icon { color: var(--accent); }
+.msg-row.goal-achieved .goal-divider-chip { color: var(--accent); border-style: solid; }
 
 

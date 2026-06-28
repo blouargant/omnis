@@ -93,8 +93,10 @@ func handleRewind(d serverDeps) gin.HandlerFunc {
 // handleFork creates a new session seeded with the first `turn_index` turns of
 // the source (a branch point), reseeds its in-memory context, and wires it up
 // exactly like POST /sessions. POST /api/sessions/:id/fork body {turn_index,
-// title?}. The source session is left untouched, so forking an archived source
-// is allowed. Returns {session_id, squad, dropped_user_text}.
+// title?, full?}. With `full: true` it forks the entire conversation (the
+// `/fork` command) so the new session inherits the source's complete context,
+// ignoring turn_index. The source session is left untouched, so forking an
+// archived source is allowed. Returns {session_id, squad, dropped_user_text}.
 func handleFork(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -106,6 +108,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		var req struct {
 			TurnIndex int    `json:"turn_index"`
 			Title     string `json:"title"`
+			Full      bool   `json:"full"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
@@ -124,9 +127,15 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		srcTurns, _ := sessions.LoadConversationTurns(id)
+		// `full` keeps every turn so the new session inherits the source's whole
+		// context; otherwise keep the first `turn_index` turns (the branch point).
+		keep := req.TurnIndex
+		if req.Full {
+			keep = len(srcTurns)
+		}
 		droppedUserText := ""
-		if req.TurnIndex >= 0 && req.TurnIndex < len(srcTurns) {
-			droppedUserText = srcTurns[req.TurnIndex].UserText
+		if keep >= 0 && keep < len(srcTurns) {
+			droppedUserText = srcTurns[keep].UserText
 		}
 
 		srcSquad := meta.Squad
@@ -140,7 +149,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		}
 
 		newMeta := d.Registry.New(srcSquad)
-		kept, err := sessions.ForkConversation(id, newMeta.ID, title, req.TurnIndex)
+		kept, err := sessions.ForkConversation(id, newMeta.ID, title, keep)
 		release()
 		if err != nil {
 			// Roll back the empty registry entry so a failed fork leaves nothing.

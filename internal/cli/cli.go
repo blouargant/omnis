@@ -34,6 +34,8 @@ import (
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/goal"
+	"github.com/blouargant/omnis/internal/scheduler"
 	"github.com/blouargant/omnis/internal/steer"
 )
 
@@ -66,6 +68,15 @@ type Config struct {
 	// at the next model boundary, or run as a follow-up turn). Nil-safe — when
 	// nil the REPL ignores input typed during a turn (the old behaviour).
 	SteerStore *steer.Store
+	// Scheduler, when non-nil, enables /loop and /schedule in the REPL. Due jobs
+	// fire into the current session between idle prompts (the single-session
+	// fallback; the server spawns a fresh session per scheduled run instead).
+	// Nil-safe — when nil the commands report that scheduling is unavailable.
+	Scheduler *scheduler.Scheduler
+	// GoalStore, when non-nil (with Manager set), enables /goal in the REPL: the
+	// agent keeps taking turns until the evaluator judges the condition met.
+	// Nil-safe — when nil /goal reports that goals are unavailable.
+	GoalStore *goal.Store
 	// UserID, SessionID default to "user" and a timestamped value.
 	UserID    string
 	SessionID string
@@ -159,7 +170,7 @@ func runOneShot(ctx context.Context, cfg Config, prompt string) error {
 	}
 	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	_, err := runTurn(turnCtx, cfg, prompt, false /*showTrace*/, cfg.Squad)
+	_, _, err := runTurn(turnCtx, cfg, prompt, false /*showTrace*/, cfg.Squad)
 	return err
 }
 
@@ -204,6 +215,19 @@ func runRepl(ctx context.Context, cfg Config) error {
 		}
 	}()
 
+	// Scheduler ticker: due /loop and /schedule jobs are delivered on `fired` and
+	// run as a turn when the REPL is idle. fire blocks until the loop consumes the
+	// job, so the scheduler's in-flight guard prevents a slow turn from stacking.
+	fired := make(chan scheduler.Job)
+	if cfg.Scheduler != nil {
+		go cfg.Scheduler.Run(ctx, func(_ context.Context, job scheduler.Job) {
+			select {
+			case fired <- job:
+			case <-ctx.Done():
+			}
+		})
+	}
+
 	type turnResult struct {
 		squad string
 		err   error
@@ -213,6 +237,15 @@ func runRepl(ctx context.Context, cfg Config) error {
 		turnCancel context.CancelFunc
 		exitAfter  bool // EOF arrived mid-turn: exit once it finishes
 	)
+	startTurn := func(prompt string) {
+		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+		turnCancel = cancel
+		turnDone = make(chan turnResult, 1)
+		go func(p, sq string, tctx context.Context, done chan turnResult) {
+			squad, err := runTurnSteering(tctx, cfg, p, sq)
+			done <- turnResult{squad: squad, err: err}
+		}(prompt, currentSquad, turnCtx, turnDone)
+	}
 	showPrompt := func() {
 		if turnDone == nil {
 			fmt.Fprint(cfg.Stdout, "> ")
@@ -284,6 +317,17 @@ func runRepl(ctx context.Context, cfg Config) error {
 			// agent turn; other slash commands are REPL-only.
 			if strings.EqualFold(prompt, "/init") {
 				prompt = agentmd.InitPrompt()
+			} else if lc := strings.ToLower(prompt); lc == "/goal" || strings.HasPrefix(lc, "/goal ") {
+				// "/goal ..." sets / inspects / clears a session completion goal.
+				// Setting one starts a turn with the condition as the directive; the
+				// autonomous loop in runTurnSteering then continues it after each turn.
+				arg := strings.TrimSpace(prompt[len("/goal"):])
+				if start, run := handleGoalCLI(cfg, arg); run {
+					startTurn(start)
+				} else {
+					showPrompt()
+				}
+				continue
 			} else if strings.HasPrefix(prompt, "/") {
 				if quit := handleSlash(cfg, prompt); quit {
 					return nil
@@ -293,14 +337,58 @@ func runRepl(ctx context.Context, cfg Config) error {
 			}
 			// Run the turn in a goroutine so the reader keeps accepting steering
 			// notes while it runs. Ctrl-C cancels just this turn.
-			turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-			turnCancel = cancel
-			turnDone = make(chan turnResult, 1)
-			go func(p, sq string, tctx context.Context, done chan turnResult) {
-				squad, err := runTurnSteering(tctx, cfg, p, sq)
-				done <- turnResult{squad: squad, err: err}
-			}(prompt, currentSquad, turnCtx, turnDone)
+			startTurn(prompt)
+
+		case job := <-fired:
+			// A scheduled /loop or /schedule fired. Skip it while a turn is in
+			// flight (it recurs); otherwise run its prompt in the current session.
+			if turnDone != nil {
+				continue
+			}
+			fmt.Fprintf(cfg.Stdout, "\n\x1b[2m⏰ %s (%s):\x1b[0m %s\n", job.Kind, job.Spec, scheduler.FirstLine(job.Prompt))
+			startTurn(job.Prompt)
 		}
+	}
+}
+
+// handleGoalCLI implements the REPL /goal command. It returns (startPrompt,
+// true) when the caller should start a turn — a goal was just set, with the
+// condition as the directive; otherwise ("", false): status and clear are
+// handled inline here.
+func handleGoalCLI(cfg Config, arg string) (string, bool) {
+	if cfg.GoalStore == nil || cfg.Manager == nil {
+		fmt.Fprintln(cfg.Stdout, "goals are not available in this mode")
+		return "", false
+	}
+	arg = strings.TrimSpace(arg)
+	switch {
+	case arg == "":
+		g, ok := cfg.GoalStore.Get(cfg.SessionID)
+		if !ok || g.Condition == "" {
+			fmt.Fprintln(cfg.Stdout, "no active goal — set one with /goal <condition>")
+			return "", false
+		}
+		if g.Achieved {
+			fmt.Fprintf(cfg.Stdout, "◎ goal achieved in %d turn(s), %s: %s\n", g.Turns, g.Duration().Round(time.Second), g.Condition)
+		} else {
+			fmt.Fprintf(cfg.Stdout, "◎ goal active — %d/%d turns, %s elapsed\n  condition: %s\n", g.Turns, goal.MaxTurns(), g.Duration().Round(time.Second), g.Condition)
+			if g.LastReason != "" {
+				fmt.Fprintf(cfg.Stdout, "  latest: %s\n", g.LastReason)
+			}
+		}
+		return "", false
+	case goal.IsClearAlias(arg):
+		if cfg.GoalStore.Clear(cfg.SessionID) {
+			fmt.Fprintln(cfg.Stdout, "goal cleared")
+		} else {
+			fmt.Fprintln(cfg.Stdout, "no active goal")
+		}
+		return "", false
+	default:
+		cond := goal.CleanCondition(arg)
+		cfg.GoalStore.Set(cfg.SessionID, cond)
+		fmt.Fprintf(cfg.Stdout, "◎ goal set — working until: %s\n", cond)
+		return cond, true
 	}
 }
 
@@ -314,23 +402,58 @@ func runTurnSteering(ctx context.Context, cfg Config, prompt, startSquad string)
 	turnPrompt := prompt
 	const maxSteerFollowups = 16
 	for i := 0; ; i++ {
+		var text string
 		var err error
-		squad, err = runTurn(ctx, cfg, turnPrompt, true /*showTrace*/, squad)
+		squad, text, err = runTurn(ctx, cfg, turnPrompt, true /*showTrace*/, squad)
 		if cfg.SteerStore != nil {
 			cfg.SteerStore.TakeConsumed(cfg.SessionID) // clear; the CLI keeps no transcript to fold into
 		}
 		if err != nil {
 			return squad, err
 		}
-		if ctx.Err() != nil || i >= maxSteerFollowups || cfg.SteerStore == nil {
+		if ctx.Err() != nil {
 			break
 		}
-		pending := cfg.SteerStore.TakePending(cfg.SessionID)
-		if len(pending) == 0 {
-			break
+		// 1) Steering the model never reached becomes the next turn.
+		if cfg.SteerStore != nil {
+			if pending := cfg.SteerStore.TakePending(cfg.SessionID); len(pending) > 0 {
+				if i >= maxSteerFollowups {
+					break
+				}
+				turnPrompt = strings.Join(pending, "\n")
+				fmt.Fprintf(cfg.Stdout, "\n> %s\n", turnPrompt)
+				continue
+			}
 		}
-		turnPrompt = strings.Join(pending, "\n")
-		fmt.Fprintf(cfg.Stdout, "\n> %s\n", turnPrompt)
+		// 2) /goal: keep working until the evaluator says the condition holds (or
+		//    a hard turn cap / eval failure stops the autonomous loop). Requires a
+		//    Manager (the evaluator resolves the session's model via it).
+		if cfg.GoalStore != nil && cfg.Manager != nil {
+			if g, ok := cfg.GoalStore.Get(cfg.SessionID); ok && g.Active() {
+				if cfg.GoalStore.CapReached(cfg.SessionID) {
+					fmt.Fprintf(cfg.Stdout, "\x1b[2m◎ goal: reached the maximum number of turns — clear it with /goal clear\x1b[0m\n")
+					break
+				}
+				evalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				transcript := strings.TrimSpace(turnPrompt + "\n\n[assistant]\n" + text)
+				met, reason, evalOK := cfg.Manager.EvaluateGoal(evalCtx, cfg.SessionID, g.Condition, transcript)
+				cancel()
+				if !evalOK {
+					fmt.Fprintf(cfg.Stdout, "\x1b[2m◎ goal: could not evaluate the condition — clear it with /goal clear\x1b[0m\n")
+					break
+				}
+				if met {
+					cfg.GoalStore.MarkAchieved(cfg.SessionID, reason)
+					fmt.Fprintf(cfg.Stdout, "\x1b[32m◎ goal achieved\x1b[0m %s\n", reason)
+					break
+				}
+				turns := cfg.GoalStore.RecordTurn(cfg.SessionID, reason, 0)
+				fmt.Fprintf(cfg.Stdout, "\x1b[2m◎ goal (turn %d/%d): %s\x1b[0m\n", turns, goal.MaxTurns(), reason)
+				turnPrompt = goal.Directive(g.Condition, reason)
+				continue
+			}
+		}
+		break
 	}
 	return squad, nil
 }
@@ -344,7 +467,7 @@ func runTurnSteering(ctx context.Context, cfg Config, prompt, startSquad string)
 // When cfg.Manager is set the turn runs through the Omnis routing dispatch
 // loop (the router can hand control to the best-suited squad, and squads can
 // hand back); otherwise it runs the single cfg.Runner with no routing.
-func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, startSquad string) (string, error) {
+func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, startSquad string) (squadOut string, assistantText string, err error) {
 	// Tag the run with the session id so mid-turn steering reaches sub-agents
 	// (which run under an ephemeral agenttool session id).
 	ctx = toolkitagent.WithSteerSession(ctx, cfg.SessionID)
@@ -418,7 +541,7 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 		if strings.TrimSpace(text) != "" {
 			fmt.Fprintln(cfg.Stdout)
 		}
-		return startSquad, err
+		return startSquad, text, err
 	}
 
 	routerSquad := cfg.Manager.RouterSquad()
@@ -460,7 +583,7 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 	if strings.TrimSpace(text) != "" {
 		fmt.Fprintln(cfg.Stdout)
 	}
-	return finalSquad, err
+	return finalSquad, text, err
 }
 
 // handleSlash dispatches REPL-only slash commands. Returns true when the
@@ -476,12 +599,112 @@ func handleSlash(cfg Config, line string) bool {
 		fmt.Fprintln(cfg.Stdout, "  /quit, /exit, /q    Exit the REPL")
 		fmt.Fprintln(cfg.Stdout, "  /help, /?           Show this help")
 		fmt.Fprintln(cfg.Stdout, "  /init               Analyze the repo and write a starter AGENT.md")
+		fmt.Fprintln(cfg.Stdout, "  /loop <spec> <prompt>   Re-run a prompt in this session on a timer (/loop stop, /loop list)")
+		fmt.Fprintln(cfg.Stdout, "  /schedule <spec> <prompt>  Durable routine (/schedule list|remove <id>|run <id>)")
+		fmt.Fprintln(cfg.Stdout, "  /goal <condition>   Keep working until a condition is met (/goal shows status, /goal clear stops)")
 		fmt.Fprintln(cfg.Stdout, "  #<text>             Append a one-line memory to the project AGENT.md")
+		fmt.Fprintln(cfg.Stdout, "Spec: \"30m\", \"every 2h\", \"in 90m\", \"at 09:00\", or a cron expr like \"0 9 * * 1-5\".")
 		fmt.Fprintln(cfg.Stdout, "Tips:")
 		fmt.Fprintln(cfg.Stdout, "  Ctrl-C cancels an in-flight turn; Ctrl-D exits the REPL.")
+		return false
+	case "loop", "schedule":
+		rest := strings.TrimSpace(line[len(fields[0]):])
+		handleSchedulerSlash(cfg, cmd, rest)
 		return false
 	default:
 		fmt.Fprintf(cfg.Stderr, "Unknown command: /%s (try /help)\n", cmd)
 		return false
+	}
+}
+
+// handleSchedulerSlash implements /loop and /schedule in the REPL: create,
+// list, and remove jobs on the shared scheduler. Jobs fire into the current
+// session (see the `fired` case in runRepl).
+func handleSchedulerSlash(cfg Config, cmd, rest string) {
+	if cfg.Scheduler == nil {
+		fmt.Fprintln(cfg.Stderr, "scheduling is unavailable in this mode")
+		return
+	}
+	first := strings.ToLower(strings.Fields(rest + " ")[0])
+
+	// Subcommands and bare-list.
+	switch {
+	case cmd == "loop" && (rest == "" || first == "list"):
+		printJobs(cfg, "loop", cfg.SessionID)
+		return
+	case cmd == "loop" && (first == "stop" || first == "off"):
+		n := cfg.Scheduler.RemoveLoopsForSession(cfg.SessionID)
+		fmt.Fprintf(cfg.Stdout, "stopped %d loop(s)\n", n)
+		return
+	case cmd == "schedule" && (rest == "" || first == "list"):
+		printJobs(cfg, "", "")
+		return
+	case cmd == "schedule" && first == "remove":
+		id := strings.TrimSpace(strings.TrimPrefix(rest, strings.Fields(rest)[0]))
+		if cfg.Scheduler.Remove(id) {
+			fmt.Fprintf(cfg.Stdout, "removed %s\n", id)
+		} else {
+			fmt.Fprintf(cfg.Stderr, "no schedule %q\n", id)
+		}
+		return
+	case cmd == "schedule" && first == "run":
+		id := strings.TrimSpace(strings.TrimPrefix(rest, strings.Fields(rest)[0]))
+		if cfg.Scheduler.RunNow(id) {
+			fmt.Fprintf(cfg.Stdout, "running %s now\n", id)
+		} else {
+			fmt.Fprintf(cfg.Stderr, "no schedule %q (or already running)\n", id)
+		}
+		return
+	}
+
+	spec, prompt := scheduler.SplitSpecPrompt(rest)
+	if spec == "" || prompt == "" {
+		fmt.Fprintf(cfg.Stderr, "usage: /%s <spec> <prompt>  (spec: 30m, \"in 90m\", \"at 09:00\", \"0 9 * * 1-5\")\n", cmd)
+		return
+	}
+	parsed, err := scheduler.ParseSpec(spec, time.Now())
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "%v\n", err)
+		return
+	}
+	kind := scheduler.KindSchedule
+	sid := ""
+	if cmd == "loop" {
+		kind = scheduler.KindLoop
+		sid = cfg.SessionID
+	}
+	job, err := cfg.Scheduler.Add(scheduler.Job{
+		Kind: kind, Prompt: prompt, Spec: spec,
+		Interval: parsed.Interval, Cron: parsed.Cron, At: parsed.At,
+		SessionID: sid, UserID: cfg.UserID,
+	})
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "%v\n", err)
+		return
+	}
+	fmt.Fprintf(cfg.Stdout, "%s scheduled (id=%s, next %s)\n", cmd, job.ID, job.NextRun.Format("15:04:05"))
+}
+
+// printJobs lists scheduler jobs, optionally filtered by kind and session.
+func printJobs(cfg Config, kind, sessionID string) {
+	jobs := cfg.Scheduler.List()
+	n := 0
+	for _, j := range jobs {
+		if kind != "" && j.Kind != kind {
+			continue
+		}
+		if sessionID != "" && j.SessionID != sessionID {
+			continue
+		}
+		state := "on"
+		if !j.Enabled {
+			state = "off"
+		}
+		fmt.Fprintf(cfg.Stdout, "  %s  %-8s %-14s [%s] next %s — %s\n",
+			j.ID, j.Kind, j.Spec, state, j.NextRun.Format("15:04:05"), scheduler.FirstLine(j.Prompt))
+		n++
+	}
+	if n == 0 {
+		fmt.Fprintln(cfg.Stdout, "  (none)")
 	}
 }

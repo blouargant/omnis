@@ -117,11 +117,16 @@ type ConversationTurn struct {
 // ConversationFile is the on-disk format for a session's history.
 // Legacy files used a plain JSON array; those are read transparently.
 type ConversationFile struct {
-	Title     string             `json:"title,omitempty"`
-	Squad     string             `json:"squad,omitempty"`
-	Harvested bool               `json:"harvested,omitempty"`
-	Archived  bool               `json:"archived,omitempty"`
-	Turns     []ConversationTurn `json:"turns"`
+	Title     string `json:"title,omitempty"`
+	Squad     string `json:"squad,omitempty"`
+	Harvested bool   `json:"harvested,omitempty"`
+	Archived  bool   `json:"archived,omitempty"`
+	// Goal is the session's active /goal completion condition, persisted so an
+	// in-progress goal is restored on a server restart (resume semantics: the
+	// condition carries over, the timer/turn count reset). Empty when no goal is
+	// active or it was achieved/cleared.
+	Goal  string             `json:"goal,omitempty"`
+	Turns []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -391,6 +396,13 @@ func SetConversationTitle(sessionID, title string) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Title = title })
 }
 
+// SetConversationGoal persists (or clears, when condition is empty) the active
+// /goal completion condition without touching turns. The persisted value lets a
+// server restart restore an in-progress goal.
+func SetConversationGoal(sessionID, condition string) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.Goal = condition })
+}
+
 // DeleteConversationFile removes the on-disk file for a session.
 // A missing file is not an error.
 func DeleteConversationFile(sessionID string) {
@@ -444,6 +456,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Squad:      f.Squad,
 			Harvested:  f.Harvested,
 			Archived:   f.Archived,
+			Goal:       f.Goal,
 			UserID:     DefaultUserID,
 			CreatedAt:  f.Turns[0].At,
 			LastUsedAt: f.Turns[len(f.Turns)-1].At,

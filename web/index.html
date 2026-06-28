@@ -22,7 +22,7 @@
     })();
   </script>
   <link rel="stylesheet" href="assets/css/styles.css?v=8" />
-  <link rel="stylesheet" href="assets/css/settings.css?v=6" />
+  <link rel="stylesheet" href="assets/css/settings.css?v=7" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/one-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/vscode-light.css" />
@@ -197,6 +197,11 @@
           </svg>
           <span class="provider-warn-text" data-i18n="provider.warn">Model connection problem — click to fix</span>
         </button>
+        <button type="button" class="goal-chip" hidden data-tip="Click to clear the goal" data-i18n-tip="goal.chipTip">
+          <span class="goal-chip-icon" aria-hidden="true">◎</span>
+          <span class="goal-chip-text"></span>
+          <span class="goal-chip-clear" aria-hidden="true">✕</span>
+        </button>
         <form id="composer">
           <input type="file" id="file-input" multiple hidden />
           <div id="attachments" hidden></div>
@@ -354,9 +359,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=6" defer></script>
+  <script src="assets/i18n/locales.js?v=9" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=31" defer></script>
-  <script src="assets/settings.js?v=7" defer></script>
+  <script src="assets/app.js?v=36" defer></script>
+  <script src="assets/settings.js?v=9" defer></script>
 </body>
 </html>

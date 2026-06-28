@@ -23,6 +23,7 @@ import (
 	"github.com/blouargant/omnis/core/llm"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/fileref"
+	goalpkg "github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -360,30 +361,78 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 					}
 				}
 
-				// Stop on cancel/shutdown or the runaway backstop.
-				if runCtx.Err() != nil || i >= maxSteerFollowups {
+				// Stop on cancel/shutdown.
+				if runCtx.Err() != nil {
 					break
 				}
-				// Steering the model never reached becomes the next turn.
+
+				// 1) Steering the model never reached becomes the next turn (its own
+				//    runaway backstop). This takes precedence over goal continuation:
+				//    a note the user added mid-turn is steered in first, and the goal
+				//    loop re-engages on the turn after.
 				var pending []string
 				if d.SteerStore != nil {
 					pending = d.SteerStore.TakePending(meta.ID)
 				}
-				if len(pending) == 0 {
-					break
+				if len(pending) > 0 {
+					if i >= maxSteerFollowups {
+						break
+					}
+					combined := strings.Join(pending, "\n")
+					// Render the steering note as a user bubble in every attached
+					// stream (the injecting browser also clears its queued chip).
+					emitFrame("steer_turn", map[string]string{"text": combined})
+					// Routing during the turn may have moved the session's squad; the
+					// follow-up resumes from wherever it ended up.
+					if cur, ok := d.Registry.Get(meta.ID); ok && cur.Squad != "" {
+						curSquad = cur.Squad
+					}
+					turnParts = []*genai.Part{{Text: combined}}
+					turnRouterParts = []*genai.Part{{Text: combined}}
+					persistPrompt = combined
+					continue
 				}
-				combined := strings.Join(pending, "\n")
-				// Render the steering note as a user bubble in every attached
-				// stream (the injecting browser also clears its queued chip).
-				emitFrame("steer_turn", map[string]string{"text": combined})
-				// Routing during the turn may have moved the session's squad; the
-				// follow-up resumes from wherever it ended up.
-				if cur, ok := d.Registry.Get(meta.ID); ok && cur.Squad != "" {
-					curSquad = cur.Squad
+
+				// 2) /goal: when the session has an active completion goal, ask the
+				//    evaluator whether the just-finished work satisfies it. "Met" →
+				//    achieve and stop; "not met" → inject a follow-up directive and
+				//    keep working; a hard turn cap or an evaluation failure stops the
+				//    autonomous loop WITHOUT clearing the goal (the user can /goal
+				//    clear it, or steer it). With no active goal this is a no-op.
+				if d.GoalStore != nil {
+					if g, ok := d.GoalStore.Get(meta.ID); ok && g.Active() {
+						if d.GoalStore.CapReached(meta.ID) {
+							emitFrame("goal_stopped", map[string]any{"condition": g.Condition, "reason": "reached the maximum number of goal turns", "turns": g.Turns})
+							break
+						}
+						evalCtx, evalCancel := context.WithTimeout(d.rootCtx, goalEvalTimeout)
+						transcript := strings.TrimSpace(persistPrompt + "\n\n[assistant]\n" + assistantText)
+						met, reason, evalOK := d.Manager.EvaluateGoal(evalCtx, meta.ID, g.Condition, transcript)
+						evalCancel()
+						if !evalOK {
+							emitFrame("goal_stopped", map[string]any{"condition": g.Condition, "reason": "could not evaluate the goal condition", "turns": g.Turns})
+							break
+						}
+						if met {
+							ach, _ := d.GoalStore.MarkAchieved(meta.ID, reason)
+							_ = sessions.SetConversationGoal(meta.ID, "")
+							emitFrame("goal_achieved", map[string]any{"condition": ach.Condition, "reason": reason, "turns": ach.Turns, "duration_ms": ach.Duration().Milliseconds()})
+							break
+						}
+						// Not met → record the turn and keep working.
+						turns := d.GoalStore.RecordTurn(meta.ID, reason, 0)
+						emitFrame("goal_progress", map[string]any{"condition": g.Condition, "reason": reason, "turns": turns, "max_turns": goalpkg.MaxTurns()})
+						directive := buildGoalDirective(g.Condition, reason)
+						if cur, ok := d.Registry.Get(meta.ID); ok && cur.Squad != "" {
+							curSquad = cur.Squad
+						}
+						turnParts = []*genai.Part{{Text: directive}}
+						turnRouterParts = []*genai.Part{{Text: directive}}
+						persistPrompt = directive
+						continue
+					}
 				}
-				turnParts = []*genai.Part{{Text: combined}}
-				turnRouterParts = []*genai.Part{{Text: combined}}
-				persistPrompt = combined
+				break
 			}
 			// Terminal event for the whole (possibly multi-turn) exchange. Carry the
 			// wall-clock time so the web UI can show "time taken" next to copy.
@@ -444,6 +493,16 @@ func handleCancel(d serverDeps) gin.HandlerFunc {
 		// Stop doesn't leak those notes into the next (possibly unrelated) turn.
 		if d.SteerStore != nil {
 			d.SteerStore.TakePending(id)
+		}
+		// Stop ends the autonomous goal loop too (the Ctrl+C semantics): clear the
+		// active goal so the next turn doesn't silently resume working on it.
+		if d.GoalStore != nil {
+			if d.GoalStore.Clear(id) {
+				_ = sessions.SetConversationGoal(id, "")
+				if d.PushEvents != nil {
+					d.PushEvents.broadcast("goal_cleared", id)
+				}
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"cancelled": cancelled})
 	}

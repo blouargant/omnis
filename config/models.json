@@ -7,6 +7,7 @@
     }
   },
   "embed_model_ref": "",
+  "eval_model_ref": "hosted",
   "models": {
     "embedder": {
       "provider_ref": "openai-compat",

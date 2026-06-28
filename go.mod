@@ -22,6 +22,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/rivo/tview v0.42.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/serpapi/serpapi-golang v0.0.0-20260126142127-0e41c7993cda
 	golang.org/x/image v0.40.0

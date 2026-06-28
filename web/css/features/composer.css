@@ -401,6 +401,35 @@ body.resizing-composer #composer-resize { transition: none; }
   white-space: nowrap;
 }
 
+/* /goal "active" indicator — a pill above the composer while a session has an
+   active completion goal. Clickable to stop the goal. */
+.goal-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 4px 10px;
+  background: var(--accent-bg-soft);
+  border: 1px solid var(--accent-border-soft);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.goal-chip[hidden] { display: none; }
+.goal-chip:hover { background: var(--bg-raised); }
+.goal-chip-icon { color: var(--accent); font-weight: 700; flex-shrink: 0; }
+.goal-chip-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.goal-chip-clear { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
+.goal-chip:hover .goal-chip-clear { color: var(--danger-fg); }
+
 
 /* ─── Slash command menu ────────────────────────────────────── */
 #slash-menu {
@@ -431,6 +460,19 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 .slash-menu-item:last-child { border-bottom: none; }
 .slash-menu-item:hover, .slash-menu-item.focused { background: var(--bg-active); }
+
+/* Section header grouping commands by kind. Not a .slash-menu-item, so it is
+   skipped by keyboard nav and is never selectable. */
+.slash-menu-section {
+  padding: 7px 14px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--bg-raised);
+  user-select: none;
+}
 
 .slash-menu-cmd {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;

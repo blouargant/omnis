@@ -1,0 +1,165 @@
+/* Automation page (Settings → Automation): the grouped loops & schedules lists,
+ * each row's inline editor + run history, and the add-routine form. Backed by
+ * the /api/schedules routes (see renderAutomation in settings.js). */
+
+.sched-section { margin-bottom: 1.25rem; }
+.sched-section > h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+.sched-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--text);
+}
+
+.sched-panel .sched-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.75rem;
+}
+
+.sched-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "head actions" "meta actions" "history history" "edit edit";
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+
+.sched-row-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.sched-row-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.85rem;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+.sched-actions { grid-area: actions; }
+.sched-history { grid-area: history; }
+.sched-edit    { grid-area: edit; }
+
+.sched-state {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.sched-state.on  { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.sched-state.off { opacity: 0.6; }
+
+.sched-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.sched-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem 0.2rem 0.1rem;
+  border-top: 1px dashed var(--border);
+}
+.sched-run {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.sched-run-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--accent);
+}
+.sched-run-dot.err { background: var(--danger-fg, #e06c75); }
+.sched-run-when { opacity: 0.8; }
+.sched-run-note { opacity: 0.7; font-style: italic; }
+
+.sched-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.2rem 0.2rem;
+  border-top: 1px dashed var(--border);
+}
+.sched-edit label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; }
+.sched-edit input, .sched-edit textarea { width: 100%; }
+.sched-edit-actions { display: flex; gap: 0.35rem; }
+
+.sched-kind {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--text);
+}
+.sched-kind-loop { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+.sched-spec {
+  flex: 0 0 auto;
+  font-family: var(--mono, monospace);
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.sched-prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.sched-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-self: start;
+  justify-content: flex-end;
+}
+
+.sched-add {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+.sched-add label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+.sched-add input,
+.sched-add textarea {
+  width: 100%;
+}

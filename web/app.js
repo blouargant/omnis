@@ -313,6 +313,9 @@ function mountInPanel(panel, sessionId) {
   if (next && t.contains(next)) return;
   while (t.firstChild) t.removeChild(t.firstChild);
   if (next) t.appendChild(next);
+  // Pull the session's /goal state so the chip reflects an active goal (e.g.
+  // after a restart, or when first opening the session in this browser).
+  if (sessionId && !sessionGoals.has(sessionId)) refreshGoal(sessionId);
 }
 
 function setFocusedPanel(pid) {
@@ -571,6 +574,17 @@ function attachPaneHandlers(panel) {
     b.addEventListener("click", (e) => { e.stopPropagation(); openProviderHealthModal(); });
   }
   applyProviderWarning(panel);
+
+  // Goal chip — clicking it stops the active /goal (the autonomous loop).
+  const goalChip = panel.root.querySelector(".goal-chip");
+  if (goalChip) goalChip.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const sid = panel.sessionId;
+    if (!sid) return;
+    try { await apiFetch(`/api/sessions/${sid}/goal`, { method: "DELETE" }); } catch (_) {}
+    refreshGoal(sid);
+  });
+  renderGoalChip(panel);
 
   // Toolbar: terminal / split / close.
   if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
@@ -919,6 +933,7 @@ const sessionTitles     = new Map(); // sessionId → display title (for pane ta
 const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
 const sessionTodos       = new Map(); // sessionId → [{ task, status }] live plan view
 const sessionTodoBlock   = new Map(); // sessionId → latest .todo-block (older ones auto-collapse)
+const sessionGoals       = new Map(); // sessionId → goal status {active,achieved,condition,turns,...} for the chip
 
 // ─── Per-session file attachments ────────────────────────────────────────────
 // Pending uploads are stored per session so switching sessions preserves them.
@@ -1035,10 +1050,42 @@ function applySessionUI(id) {
     setComposerReadOnly(p, archived);
     setCtxRingSpinning(p, active);
     renderCtxRing(p);
+    renderGoalChip(p);
   }
   // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
   // including background tabs whose session is streaming.
   for (const p of panelsWithTab(id)) renderPaneTabs(p);
+}
+
+// renderGoalChip paints the per-pane "◎ goal active" indicator above the
+// composer from sessionGoals. Active → shows turn count + condition preview and
+// is clickable to clear; achieved/none → hidden. Mirrors the provider-warn
+// banner's per-pane class-selector pattern.
+function renderGoalChip(panel) {
+  if (!panel || !panel.root) return;
+  const chip = panel.root.querySelector(".goal-chip");
+  if (!chip) return;
+  const g = panel.sessionId ? sessionGoals.get(panel.sessionId) : null;
+  if (!g || !g.active) { chip.hidden = true; return; }
+  chip.hidden = false;
+  const txt = chip.querySelector(".goal-chip-text");
+  if (txt) {
+    const cond = (g.condition || "").replace(/\s+/g, " ").trim();
+    const short = cond.length > 80 ? cond.slice(0, 80) + "…" : cond;
+    txt.textContent = tr("goal.chipActive", { turns: g.turns || 0 }) + " — " + short;
+  }
+}
+
+// refreshGoal fetches the session's goal status and repaints the chip in every
+// pane showing it. Called after /goal set|clear and on the goal_* SSE events.
+async function refreshGoal(sessionId) {
+  if (!sessionId) return;
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/goal`);
+    if (!res.ok) return;
+    sessionGoals.set(sessionId, await res.json());
+  } catch (_) { return; }
+  for (const p of panelsForSession(sessionId)) renderGoalChip(p);
 }
 
 // setSendButtonMode flips a pane's send button between its normal "Send" state
@@ -2766,12 +2813,17 @@ async function rewindConversation(sessionId, turnIndex, userText) {
 // forkConversation branches a new session from before `turnIndex`, opens it in
 // the focused pane, and pre-fills its composer with the dropped message so the
 // user can try a different continuation. The source session is left untouched.
-async function forkConversation(sessionId, turnIndex, userText) {
+// Pass `opts.full` (the `/fork` command) to copy the ENTIRE conversation instead
+// — the new session then inherits the source's complete context and nothing is
+// dropped, so there is no prefill.
+async function forkConversation(sessionId, turnIndex, userText, opts) {
+  opts = opts || {};
+  const body = opts.full ? { full: true } : { turn_index: turnIndex };
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}/fork`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turn_index: turnIndex }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -3325,6 +3377,29 @@ function appendRoutingChip(container, to, reason) {
   const chip = document.createElement("div");
   chip.className = "routing-chip";
   chip.textContent = tr("app.routing.routedTo", { squad: (to || "?") });
+  if (reason) chip.setAttribute("data-tip", reason);
+  row.appendChild(chip);
+  (container || fpTranscript()).appendChild(row);
+  scrollBottom(paneOfNode(row));
+}
+
+// appendGoalDivider renders a compact between-turns marker for the /goal loop:
+// "progress" (still working, with the evaluator reason), "achieved" (condition
+// met), or "stopped" (turn cap / eval failure). Live-only chrome, like the
+// routing chip — a reload rebuilds turns from history instead.
+function appendGoalDivider(container, kind, data) {
+  data = data || {};
+  const row = document.createElement("div");
+  row.className = "msg-row goal-divider goal-" + kind;
+  let label;
+  if (kind === "achieved") label = tr("goal.divAchieved", { turns: data.turns || 0 });
+  else if (kind === "stopped") label = tr("goal.divStopped");
+  else label = tr("goal.divProgress", { turns: data.turns || 0, max: data.max_turns || 0 });
+  const reason = (data.reason || "").trim();
+  const chip = document.createElement("div");
+  chip.className = "goal-divider-chip";
+  chip.innerHTML = `<span class="goal-divider-icon" aria-hidden="true">◎</span> <span class="goal-divider-label"></span>`;
+  chip.querySelector(".goal-divider-label").textContent = label;
   if (reason) chip.setAttribute("data-tip", reason);
   row.appendChild(chip);
   (container || fpTranscript()).appendChild(row);
@@ -4624,6 +4699,7 @@ function forgetSession(id) {
   sessionAgentTokens.delete(id);
   sessionTodos.delete(id);
   sessionTodoBlock.delete(id);
+  sessionGoals.delete(id);
   sessionNotifiedAt.delete(id);
   composerDrafts.delete(id);
   // Remove any pending ask_user widgets belonging to this session from every
@@ -5164,6 +5240,18 @@ async function subscribeGlobalEvents() {
           // in passive mode there is no new turn and the toast is the only signal.
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
+        } else if (event === "schedule_run" && sid) {
+          // A /loop or /schedule routine injected a turn into this session
+          // (a loop into the current session, or a fresh scheduled-run session).
+          // Append it if the session is open, and toast like a background task.
+          if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
+          notifyTaskEvent(sid);
+        } else if (event === "schedule_changed") {
+          // A loop/schedule was created, edited, or removed (here or elsewhere) —
+          // refresh the Automation settings panel if it is open.
+          if (window.Settings && typeof window.Settings.refreshSchedules === "function") {
+            window.Settings.refreshSchedules();
+          }
         } else if (event === "chat_reply" && sid) {
           // A chat turn finished. This fires for EVERY completed reply on the
           // persistent /api/events stream — the same robust channel as
@@ -5177,6 +5265,10 @@ async function subscribeGlobalEvents() {
           // The self-update poller found a newer stable release — refresh the
           // sidebar button without waiting for a page reload.
           checkForUpdate();
+        } else if ((event === "goal_set" || event === "goal_cleared") && sid) {
+          // A /goal was set or cleared (here or in another browser) — resync the
+          // per-pane chip from the server.
+          refreshGoal(sid);
         } else if (event === "ask_user" && data && typeof data === "object" && sid) {
           renderAskUserWidget(sid, data);
         } else if (event === "ask_user_cancel" && data && data.question_id) {
@@ -5751,6 +5843,7 @@ async function sendMessage(panel) {
   if (prompt.startsWith("/") && pendingFiles.length === 0) {
     panel.els.prompt.value = "";
     composerDrafts.delete(panel.activeTab);
+    autoGrowPrompt(panel);
     hideSlashMenu();
     await handleSlashCommand(prompt, panel);
     return;
@@ -6094,6 +6187,36 @@ async function sendMessage(panel) {
           break;
         }
 
+        case "goal_progress": {
+          // The /goal evaluator judged the condition not yet met; the agent keeps
+          // working. Drop a compact divider with the reason and bump the chip.
+          finalizeSegment();
+          appendGoalDivider(container, "progress", data);
+          sessionGoals.set(sessionId, Object.assign({}, sessionGoals.get(sessionId) || {}, {
+            active: true, achieved: false, condition: data.condition,
+            turns: data.turns, max_turns: data.max_turns, last_reason: data.reason,
+          }));
+          for (const p of panelsForSession(sessionId)) renderGoalChip(p);
+          break;
+        }
+
+        case "goal_achieved": {
+          finalizeSegment();
+          appendGoalDivider(container, "achieved", data);
+          sessionGoals.set(sessionId, { active: false, achieved: true, condition: data.condition, turns: data.turns, last_reason: data.reason });
+          for (const p of panelsForSession(sessionId)) renderGoalChip(p);
+          break;
+        }
+
+        case "goal_stopped": {
+          // The autonomous loop stopped (turn cap or evaluation failure) but the
+          // goal stays set. Show the reason; resync the chip from the server.
+          finalizeSegment();
+          appendGoalDivider(container, "stopped", data);
+          refreshGoal(sessionId);
+          break;
+        }
+
         case "done":
           // Stamp the reply time onto the turn's final assistant bubble (next to
           // its copy button). segBubble is the live final text segment; fall back
@@ -6240,17 +6363,91 @@ async function sendMessage(panel) {
 // User commands are loaded lazily from /api/user-commands and live in
 // userSlashCommands. They expand to a prompt template that is then sent
 // to the agent as a normal message (see invokeUserCommand).
+// Each builtin carries a `kind` naming the slash-menu section it appears under
+// (see SLASH_SECTIONS). The array order is irrelevant for display — the menu
+// groups by `kind` and sorts each section (common keeps COMMON_ORDER, the rest
+// are alphabetical), so just give a new command the right `kind`. The array is
+// grouped by section here only for readability.
 const BUILTIN_SLASH_COMMANDS = [
-  { cmd: "/help",          args: "",       desc: "Show available commands", builtin: true },
-  { cmd: "/compress",      args: "",       desc: "Trigger context compression before the next model call", builtin: true },
-  { cmd: "/create-skill",  args: "[name]", desc: "Create a new skill playbook with agent guidance", builtin: true },
-  { cmd: "/update-skill",  args: "<name>", desc: "Update an existing skill playbook with agent guidance", builtin: true },
-  { cmd: "/learn",         args: "[reason]", desc: "Mark session for soft-skill curation (runs on session end)", builtin: true },
-  { cmd: "/learn-now",     args: "[reason]", desc: "Immediately run soft-skill curation and show result", builtin: true },
-  { cmd: "/status",        args: "",       desc: "Show current session info", builtin: true },
-  { cmd: "/init",          args: "",       desc: "Analyze the repo and write a starter AGENT.md", builtin: true },
+  // Common — most-used; rendered in the curated COMMON_ORDER, not alphabetical.
+  { cmd: "/help",          args: "",           desc: "Show available commands", kind: "common", builtin: true },
+  { cmd: "/compress",      args: "",           desc: "Trigger context compression before the next model call", kind: "common", builtin: true },
+  { cmd: "/init",          args: "",           desc: "Analyze the repo and write a starter AGENT.md", kind: "common", builtin: true },
+  { cmd: "/cost",          args: "",           desc: "Alias for /usage", kind: "common", builtin: true },
+  { cmd: "/learn-now",     args: "[reason]",   desc: "Immediately run soft-skill curation and show result", kind: "common", builtin: true },
+  // Session — actions/info about the current conversation.
+  { cmd: "/status",        args: "",           desc: "Show current session info", kind: "session", builtin: true },
+  { cmd: "/usage",         args: "",           desc: "Show this session's token usage and estimated cost", kind: "session", builtin: true },
+  { cmd: "/recap",         args: "",           desc: "Summarise the current session", kind: "session", builtin: true },
+  { cmd: "/fork",          args: "",           desc: "Branch a new session inheriting this conversation's full context", kind: "session", builtin: true },
+  { cmd: "/btw",           args: "<question>", desc: "Ask a quick side question — not saved to the conversation", kind: "session", builtin: true },
+  { cmd: "/export",        args: "[filename]", desc: "Export the conversation as a Markdown file", kind: "session", builtin: true },
+  { cmd: "/plan",          args: "[task]",     desc: "Research and propose a step-by-step plan without making changes", kind: "session", builtin: true },
+  // Automation — recurring / scheduled prompts.
+  { cmd: "/loop",          args: "<spec> <prompt>", desc: "Re-run a prompt in this session on a timer (/loop stop, /loop list)", kind: "automation", builtin: true },
+  { cmd: "/schedule",      args: "<spec> <prompt>", desc: "Durable routine on a cron/interval (/schedule list|remove <id>|run <id>)", kind: "automation", builtin: true },
+  { cmd: "/goal",          args: "<condition>", desc: "Keep working across turns until a condition is met (/goal shows status, /goal clear stops)", kind: "automation", builtin: true },
+  // Skills — soft-skill / skill-playbook management.
+  { cmd: "/create-skill",  args: "[name]",     desc: "Create a new skill playbook with agent guidance", kind: "skills", builtin: true },
+  { cmd: "/update-skill",  args: "<name>",     desc: "Update an existing skill playbook with agent guidance", kind: "skills", builtin: true },
+  { cmd: "/learn",         args: "[reason]",   desc: "Mark session for soft-skill curation (runs on session end)", kind: "skills", builtin: true },
 ];
 const BUILTIN_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.cmd.slice(1)));
+
+// Slash-menu sections, rendered top-to-bottom in this order with a header per
+// non-empty section. The FIRST section ("common") keeps the hand-curated
+// COMMON_ORDER below; every other section (and the trailing user-commands
+// section) sorts alphabetically by command name. To add a builtin command, set
+// its `kind` above to one of these section keys (or add a new {key,label} here)
+// — it then lands under the right header, sorted, with no change to
+// renderSlashMenu. Keep this list and the docs ("/" command menu in CLAUDE.md)
+// in sync.
+const SLASH_SECTIONS = [
+  { key: "common",     label: "Common" },
+  { key: "session",    label: "Session" },
+  { key: "automation", label: "Automation" },
+  { key: "skills",     label: "Skills" },
+];
+// Fixed (non-alphabetical) order for the "common" section — most-used commands
+// first. A "common" command not listed here sorts after these, alphabetically.
+const COMMON_ORDER = ["/help", "/compress", "/init", "/cost", "/learn-now"];
+
+// sortSlashSection orders one section's rows: the "common" section follows the
+// curated COMMON_ORDER (importance, not A→Z); every other section is A→Z by cmd.
+function sortSlashSection(key, rows) {
+  if (key === "common") {
+    return rows.slice().sort((a, b) => {
+      const ia = COMMON_ORDER.indexOf(a.cmd), ib = COMMON_ORDER.indexOf(b.cmd);
+      return (ia < 0 ? COMMON_ORDER.length : ia) - (ib < 0 ? COMMON_ORDER.length : ib)
+          || a.cmd.localeCompare(b.cmd);
+    });
+  }
+  return rows.slice().sort((a, b) => a.cmd.localeCompare(b.cmd));
+}
+
+// buildHelpBody renders the /help output as Markdown, using the SAME sections,
+// order, and sort as the slash menu (renderSlashMenu) — generated from
+// BUILTIN_SLASH_COMMANDS so the two can never drift. Each section gets a bold
+// sub-heading; the "common" section follows COMMON_ORDER, every other section is
+// alphabetical, and user commands trail under their own heading.
+function buildHelpBody() {
+  const line = item => {
+    const args = item.args ? ` ${item.args}` : "";
+    const desc = item.desc ? ` — ${item.desc}` : "";
+    return `- \`${item.cmd}${args}\`${desc}`;
+  };
+  const parts = [];
+  for (const sec of SLASH_SECTIONS) {
+    const rows = sortSlashSection(sec.key, BUILTIN_SLASH_COMMANDS.filter(c => (c.kind || "common") === sec.key));
+    if (rows.length) parts.push(`**${sec.label}**\n\n` + rows.map(line).join("\n"));
+  }
+  if (userSlashCommands.length) {
+    const rows = userSlashCommands.map(userCommandAsMenuEntry).sort((a, b) => a.cmd.localeCompare(b.cmd));
+    parts.push("**User commands**\n\n" + rows.map(line).join("\n"));
+  }
+  return parts.join("\n\n") +
+    "\n\nTip: start a line with `#` to append a one-line memory to the project AGENT.md.";
+}
 
 let userSlashCommands = []; // { name, description, args, prompt }
 let userCommandsLoaded = false;
@@ -6282,10 +6479,6 @@ function userCommandAsMenuEntry(uc) {
   };
 }
 
-function getAllSlashEntries() {
-  return BUILTIN_SLASH_COMMANDS.concat(userSlashCommands.map(userCommandAsMenuEntry));
-}
-
 // The slash menu lives in the focused pane's composer (the user is typing
 // there). All slash helpers resolve elements through fp().els.
 let slashMenuFocusIdx = -1;
@@ -6299,20 +6492,47 @@ let atReqSeq = 0;        // same, for "@file" reference completion
 // replaces exactly its path token: { panel, tokenStart, pathLen }.
 let atMenuState = null;
 
+// appendSlashHeader adds a (non-selectable) section header row. It deliberately
+// does NOT carry the .slash-menu-item class, so keyboard nav (which queries
+// .slash-menu-item) skips it.
+function appendSlashHeader(sm, label) {
+  const h = document.createElement("div");
+  h.className = "slash-menu-section";
+  h.textContent = label;
+  sm.appendChild(h);
+}
+
+// appendSlashRow renders one selectable command row.
+function appendSlashRow(sm, item) {
+  const row = document.createElement("div");
+  row.className = "slash-menu-item" + (item.builtin ? "" : " is-user");
+  row.dataset.value = item.cmd + (item.args ? " " : "");
+  row.innerHTML =
+    `<span class="slash-menu-cmd">${escHtml(item.cmd)}</span>` +
+    (item.args ? `<span class="slash-menu-args">${escHtml(item.args)}</span>` : "") +
+    `<span class="slash-menu-desc">${escHtml(item.desc)}</span>`;
+  row.addEventListener("mousedown", e => {
+    e.preventDefault(); // keep textarea focus
+    selectSlashCommand(item.cmd + (item.args ? " " : ""));
+  });
+  sm.appendChild(row);
+}
+
 function renderSlashMenu(prefix) {
   menuMode = "slash";
   const panel = fp();
   if (!panel) return;
   const sm = panel.els.slashMenu;
   const p = prefix.toLowerCase();
-  const all = getAllSlashEntries();
-  const matches = p === "/" ? all : all.filter(c => c.cmd.startsWith(p));
-  sm.innerHTML = "";
+  const matchPrefix = c => p === "/" || c.cmd.toLowerCase().startsWith(p);
+  const builtinMatches = BUILTIN_SLASH_COMMANDS.filter(matchPrefix);
+  const userMatches = userSlashCommands.map(userCommandAsMenuEntry).filter(matchPrefix);
 
-  if (matches.length === 0 && p !== "/") {
+  if (builtinMatches.length === 0 && userMatches.length === 0 && p !== "/") {
     hideSlashMenu();
     return;
   }
+  sm.innerHTML = "";
 
   // "+ Add command" header row — always present, opens the inline modal.
   const add = document.createElement("div");
@@ -6325,20 +6545,21 @@ function renderSlashMenu(prefix) {
   });
   sm.appendChild(add);
 
-  matches.forEach(item => {
-    const row = document.createElement("div");
-    row.className = "slash-menu-item" + (item.builtin ? "" : " is-user");
-    row.dataset.value = item.cmd + (item.args ? " " : "");
-    row.innerHTML =
-      `<span class="slash-menu-cmd">${escHtml(item.cmd)}</span>` +
-      (item.args ? `<span class="slash-menu-args">${escHtml(item.args)}</span>` : "") +
-      `<span class="slash-menu-desc">${escHtml(item.desc)}</span>`;
-    row.addEventListener("mousedown", e => {
-      e.preventDefault(); // keep textarea focus
-      selectSlashCommand(item.cmd + (item.args ? " " : ""));
-    });
-    sm.appendChild(row);
-  });
+  // Builtin commands grouped by section (SLASH_SECTIONS order); "common" keeps
+  // its curated order, the rest are alphabetical. Empty sections are skipped.
+  for (const sec of SLASH_SECTIONS) {
+    const rows = sortSlashSection(sec.key, builtinMatches.filter(c => (c.kind || "common") === sec.key));
+    if (!rows.length) continue;
+    appendSlashHeader(sm, sec.label);
+    rows.forEach(item => appendSlashRow(sm, item));
+  }
+
+  // User commands always come last, under their own header, alphabetically.
+  if (userMatches.length) {
+    userMatches.sort((a, b) => a.cmd.localeCompare(b.cmd));
+    appendSlashHeader(sm, "User commands");
+    userMatches.forEach(item => appendSlashRow(sm, item));
+  }
 
   slashMenuFocusIdx = -1;
   sm.removeAttribute("hidden");
@@ -6599,6 +6820,100 @@ function appendCommandBubble(text, isError = false, panel) {
   scrollBottom(panel, true);
 }
 
+// appendAsideBlock renders a labelled, live-only "aside" card (used by /btw and
+// /recap) with a pending body, and returns the body element so the caller can
+// fill it once the answer arrives. Asides are not persisted, so they are not
+// re-rendered on reload.
+function appendAsideBlock(container, label) {
+  const row = document.createElement("div");
+  row.className = "msg-row";
+  const wrap = document.createElement("div");
+  wrap.className = "aside-block";
+  const head = document.createElement("div");
+  head.className = "aside-head";
+  head.textContent = label;
+  const body = document.createElement("div");
+  body.className = "aside-body bubble-assistant rendered";
+  body.textContent = "…";
+  wrap.appendChild(head);
+  wrap.appendChild(body);
+  row.appendChild(wrap);
+  if (container) container.appendChild(row);
+  return body;
+}
+
+// resolveAsideBlock fills an aside body with the final answer (markdown) or an
+// error message.
+function resolveAsideBlock(bodyEl, text, isError) {
+  if (!bodyEl) return;
+  if (isError) {
+    bodyEl.className = "aside-body bubble-error";
+    bodyEl.textContent = text;
+  } else {
+    bodyEl.className = "aside-body bubble-assistant rendered";
+    renderMarkdown(bodyEl, text);
+  }
+}
+
+// downloadTextBlob saves an in-memory string to the user's machine as a file
+// (used by /export). Mirrors downloadHostFile but for client-generated content.
+function downloadTextBlob(text, name, mime) {
+  const blob = new Blob([text], { type: (mime || "text/plain") + ";charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name || "export.txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// conversationToMarkdown renders persisted turns ({user_text, assistant_text,
+// at}) as a single Markdown document for /export.
+function conversationToMarkdown(title, turns) {
+  const lines = [`# ${title}`, ""];
+  turns.forEach((t, i) => {
+    let when = "";
+    if (t.at) { try { when = new Date(t.at).toLocaleString(I18N && I18N.locale); } catch (_) {} }
+    lines.push(`## Turn ${i + 1}${when ? " — " + when : ""}`, "");
+    lines.push("**You:**", "", (t.user_text || "").trim() || "_(no text)_", "");
+    lines.push("**Omnis:**", "", (t.assistant_text || "").trim() || "_(no response)_", "");
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+// formatUsageReport turns the /usage-estimate payload into a Markdown summary
+// for /usage and /cost.
+function formatUsageReport(u) {
+  let nf;
+  try { nf = new Intl.NumberFormat(I18N && I18N.locale); } catch (_) { nf = new Intl.NumberFormat(); }
+  const used = u.tokens_used || 0;
+  const win = u.window_tokens || 0;
+  const pct = win ? Math.round((used / win) * 100) : 0;
+  const budget = typeof u.budget === "number" ? u.budget : 0;
+  const lines = [
+    "**Session usage**",
+    "",
+    `- Context window: ${nf.format(used)} / ${nf.format(win)} tokens (${pct}%)`,
+    `- Prompt tokens (cumulative): ${nf.format(u.prompt_total || 0)}`,
+    `- Output tokens (cumulative): ${nf.format(u.output_total || 0)}`,
+    `- Estimated cost: $${budget.toFixed(4)}`,
+  ];
+  const agents = u.agents || {};
+  const names = Object.keys(agents);
+  if (names.length) {
+    names.sort((a, b) => (agents[b].cost || 0) - (agents[a].cost || 0));
+    lines.push("", "**By agent**", "");
+    names.forEach(n => {
+      const a = agents[n] || {};
+      lines.push(`- \`${n}\`: ${nf.format(a.prompt || 0)} in / ${nf.format(a.output || 0)} out — $${(a.cost || 0).toFixed(4)}`);
+    });
+  }
+  return lines.join("\n");
+}
+
 // Substitute $1..$N positional args and $* (all args joined) in a user
 // command's prompt template. When the template has no placeholders and
 // the user supplied args, the args are appended on a new line so simple
@@ -6612,6 +6927,169 @@ function applyUserCommandTemplate(promptTemplate, argText) {
     .replace(/\$(\d+)/g, (_, n) => args[parseInt(n, 10) - 1] || "");
   if (!hasPlaceholder && argText_) out = out + "\n\n" + argText_;
   return out;
+}
+
+// splitSpecPrompt separates a schedule spec from the prompt (mirrors
+// scheduler.SplitSpecPrompt in Go): the spec is a quoted string (for multi-word
+// specs like "in 90m" or a cron expr) or the first whitespace token; the rest is
+// the prompt.
+function splitSpecPrompt(s) {
+  s = (s || "").trim();
+  if (!s) return ["", ""];
+  const q = s[0];
+  if (q === '"' || q === "'") {
+    const end = s.indexOf(q, 1);
+    if (end >= 0) return [s.slice(1, end), s.slice(end + 1).trim()];
+    return [s.replace(/^['"]|['"]$/g, ""), ""];
+  }
+  const m = s.match(/\s/);
+  if (m) return [s.slice(0, m.index), s.slice(m.index).trim()];
+  return [s, ""];
+}
+
+// scheduleListMarkdown renders /loop and /schedule list output.
+function scheduleListMarkdown(jobs, filt) {
+  filt = filt || {};
+  let rows = Array.isArray(jobs) ? jobs : [];
+  if (filt.kind) rows = rows.filter(j => j.kind === filt.kind);
+  if (filt.sessionId) rows = rows.filter(j => j.session_id === filt.sessionId);
+  if (!rows.length) return tr("schedule.none");
+  const lines = rows.map(j => {
+    const state = j.enabled ? "on" : "off";
+    const next = j.next_run ? new Date(j.next_run).toLocaleString(I18N.locale) : "—";
+    let p = (j.prompt || "").split("\n").map(l => l.trim()).find(Boolean) || "";
+    if (p.length > 80) p = p.slice(0, 80) + "…";
+    return `- \`${j.id}\` · **${j.kind}** · \`${j.spec}\` · [${state}] · ${tr("schedule.next")} ${next}\n  ${p}`;
+  });
+  return `**${tr("schedule.title")}**\n\n` + lines.join("\n");
+}
+
+// handleSchedulerCommand implements /loop and /schedule: create, list, stop,
+// remove, run. Backed by the /api/schedules routes.
+async function handleSchedulerCommand(cmd, argPart, panel) {
+  const first = (argPart.split(/\s+/)[0] || "").toLowerCase();
+
+  if (argPart === "" || first === "list") {
+    try {
+      const res = await apiFetch("/api/schedules");
+      const j = await res.json();
+      const filt = cmd === "loop" ? { kind: "loop", sessionId: panel.sessionId } : {};
+      appendCommandBubble(scheduleListMarkdown(j.jobs, filt), false, panel);
+    } catch (err) { appendCommandBubble(String(err), true, panel); }
+    return;
+  }
+
+  if (cmd === "loop" && (first === "stop" || first === "off")) {
+    if (!panel.sessionId) { appendCommandBubble("No active session — start a chat first.", true, panel); return; }
+    try {
+      const res = await apiFetch("/api/schedules");
+      const j = await res.json();
+      const loops = (j.jobs || []).filter(x => x.kind === "loop" && x.session_id === panel.sessionId);
+      for (const lp of loops) await apiFetch(`/api/schedules/${lp.id}`, { method: "DELETE" });
+      appendCommandBubble(tr("schedule.stopped", { count: loops.length }), false, panel);
+    } catch (err) { appendCommandBubble(String(err), true, panel); }
+    return;
+  }
+
+  if (cmd === "schedule" && (first === "remove" || first === "run")) {
+    const id = argPart.slice(first.length).trim();
+    if (!id) { appendCommandBubble(`Usage: /schedule ${first} <id>`, true, panel); return; }
+    try {
+      if (first === "remove") {
+        const res = await apiFetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+        appendCommandBubble(res.ok ? tr("schedule.removed", { id }) : tr("schedule.notFound", { id }), !res.ok, panel);
+      } else {
+        const res = await apiFetch(`/api/schedules/${encodeURIComponent(id)}/run`, { method: "POST" });
+        appendCommandBubble(res.ok ? tr("schedule.running", { id }) : tr("schedule.notFound", { id }), !res.ok, panel);
+      }
+    } catch (err) { appendCommandBubble(String(err), true, panel); }
+    return;
+  }
+
+  if (cmd === "loop" && !panel.sessionId) {
+    appendCommandBubble("No active session — start a chat first.", true, panel);
+    return;
+  }
+  const [spec, prompt] = splitSpecPrompt(argPart);
+  if (!spec || !prompt) {
+    appendCommandBubble(tr("schedule.usage", { cmd }), true, panel);
+    return;
+  }
+  const body = { kind: cmd, spec, prompt };
+  if (cmd === "loop") body.session_id = panel.sessionId;
+  try {
+    const res = await apiFetch("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+    const j = await res.json();
+    if (!res.ok) { appendCommandBubble(j.error || `error ${res.status}`, true, panel); return; }
+    const next = j.next_run ? new Date(j.next_run).toLocaleString(I18N.locale) : "—";
+    appendCommandBubble(tr("schedule.created", { kind: cmd, id: j.id, next }), false, panel);
+  } catch (err) { appendCommandBubble(String(err), true, panel); }
+}
+
+// Words accepted as `/goal clear` (Claude Code parity), mirroring goal.IsClearAlias.
+const GOAL_CLEAR_ALIASES = new Set(["clear", "stop", "off", "reset", "none", "cancel"]);
+
+// handleGoalCommand implements /goal: set / status / clear a session completion
+// goal. Setting one records it server-side then sends the condition as a normal
+// turn; the producer loop keeps working until the evaluator says it is met.
+async function handleGoalCommand(argPart, panel) {
+  if (!panel.sessionId) {
+    appendCommandBubble(tr("goal.noSession"), true, panel);
+    return;
+  }
+  const sid = panel.sessionId;
+  const arg = argPart.trim();
+
+  // "/goal" with no argument — show status.
+  if (arg === "") {
+    try {
+      const res = await apiFetch(`/api/sessions/${sid}/goal`);
+      const g = await res.json();
+      appendCommandBubble(goalStatusMarkdown(g), false, panel);
+    } catch (err) { appendCommandBubble(String(err), true, panel); }
+    return;
+  }
+
+  // "/goal clear" (and aliases) — stop the goal.
+  if (GOAL_CLEAR_ALIASES.has(arg.toLowerCase())) {
+    try {
+      const res = await apiFetch(`/api/sessions/${sid}/goal`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      appendCommandBubble(j.cleared ? tr("goal.cleared") : tr("goal.noneActive"), false, panel);
+    } catch (err) { appendCommandBubble(String(err), true, panel); }
+    refreshGoal(sid);
+    return;
+  }
+
+  // "/goal <condition>" — record it, then send the condition as the first turn.
+  try {
+    const res = await apiFetch(`/api/sessions/${sid}/goal`, {
+      method: "POST", body: JSON.stringify({ condition: arg }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { appendCommandBubble(j.error || `error ${res.status}`, true, panel); return; }
+    refreshGoal(sid);
+    panel.els.prompt.value = arg;
+    autoGrowPrompt(panel);
+    await sendMessage(panel);
+  } catch (err) { appendCommandBubble(String(err), true, panel); }
+}
+
+// goalStatusMarkdown renders the `/goal` (no-arg) status reply.
+function goalStatusMarkdown(g) {
+  if (!g || (!g.active && !g.achieved)) {
+    return tr("goal.statusNone");
+  }
+  const cond = g.condition || "";
+  if (g.achieved) {
+    return tr("goal.statusAchieved", { turns: g.turns }) +
+      `\n\n- ${tr("goal.condition")}: ${cond}` +
+      (g.last_reason ? `\n- ${tr("goal.evaluator")}: ${g.last_reason}` : "");
+  }
+  const mins = g.duration_ms ? Math.max(1, Math.round(g.duration_ms / 60000)) : 0;
+  return tr("goal.statusActive", { turns: g.turns, max: g.max_turns, mins }) +
+    `\n\n- ${tr("goal.condition")}: ${cond}` +
+    (g.last_reason ? `\n- ${tr("goal.latest")}: ${g.last_reason}` : "");
 }
 
 async function handleSlashCommand(raw, panel) {
@@ -6642,25 +7120,7 @@ async function handleSlashCommand(raw, panel) {
 
   switch (cmd) {
     case "help": {
-      let body =
-        "**Built-in commands**\n\n" +
-        "- `/help` — Show this help\n" +
-        "- `/compress` — Trigger context compression before the next model call\n" +
-        "- `/create-skill [name]` — Create a new skill playbook with agent guidance\n" +
-        "- `/update-skill <name>` — Update an existing skill playbook with agent guidance\n" +
-        "- `/learn [reason]` — Mark session for soft-skill curation (runs on session end)\n" +
-        "- `/learn-now [reason]` — Immediately run soft-skill curation and show result\n" +
-        "- `/status` — Show current session info\n" +
-        "- `/init` — Analyze the repo and write a starter AGENT.md\n\n" +
-        "Tip: start a line with `#` to append a one-line memory to the project AGENT.md.";
-      if (userSlashCommands.length) {
-        body += "\n\n**User commands**\n\n" + userSlashCommands.map(c => {
-          const args = c.args ? ` ${c.args}` : "";
-          const desc = c.description ? ` — ${c.description}` : "";
-          return `- \`/${c.name}${args}\`${desc}`;
-        }).join("\n");
-      }
-      appendCommandBubble(body, false, panel);
+      appendCommandBubble(buildHelpBody(), false, panel);
       break;
     }
 
@@ -6799,6 +7259,138 @@ async function handleSlashCommand(raw, panel) {
           return;
         }
         appendCommandBubble("Context compression queued — runs before the next model call.", false, panel);
+      } catch (err) {
+        appendCommandBubble(String(err), true, panel);
+      }
+      break;
+    }
+
+    case "btw": {
+      const question = argPart.trim();
+      if (!question) {
+        appendCommandBubble("Usage: `/btw <question>` — ask a quick side question.", true, panel);
+        return;
+      }
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      const sessionId = panel.sessionId;
+      mountInPanel(panel, sessionId);
+      const body = appendAsideBlock(getContainer(sessionId), "btw: " + question);
+      scrollBottom(panel, true);
+      try {
+        const res = await apiFetch(`/api/sessions/${sessionId}/btw`, {
+          method: "POST",
+          body: JSON.stringify({ question }),
+        });
+        const d = await res.json();
+        if (!res.ok) { resolveAsideBlock(body, d.error || `error ${res.status}`, true); return; }
+        resolveAsideBlock(body, d.answer || "(no answer)", false);
+      } catch (err) {
+        resolveAsideBlock(body, String(err), true);
+      }
+      scrollBottom(panel, true);
+      break;
+    }
+
+    case "recap": {
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      const sessionId = panel.sessionId;
+      mountInPanel(panel, sessionId);
+      const body = appendAsideBlock(getContainer(sessionId), "recap");
+      scrollBottom(panel, true);
+      try {
+        const res = await apiFetch(`/api/sessions/${sessionId}/recap`, { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) { resolveAsideBlock(body, d.error || `error ${res.status}`, true); return; }
+        resolveAsideBlock(body, d.recap || "(no recap)", false);
+      } catch (err) {
+        resolveAsideBlock(body, String(err), true);
+      }
+      scrollBottom(panel, true);
+      break;
+    }
+
+    case "fork": {
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      // Branch a brand-new session that inherits the whole current conversation,
+      // then switch to it (mirrors Claude Code's /fork). The original is left
+      // untouched, so you can explore a different direction without losing it.
+      await forkConversation(panel.sessionId, 0, "", { full: true });
+      break;
+    }
+
+    case "plan": {
+      // Prompt-level plan mode: a templated message that asks the agent to
+      // research and propose a plan without making changes. Sent like a normal
+      // turn (mirrors a user command); it is NOT enforced by the permission
+      // layer (see /plan note in the docs).
+      const task = argPart.trim();
+      const prompt =
+        "Enter plan mode. Research the codebase and context as needed, then produce a " +
+        "clear, step-by-step plan. Do NOT modify any files, run mutating commands, or make " +
+        "changes yet — only investigate and propose the plan for review." +
+        (task ? `\n\nTask: ${task}` : "");
+      panel.els.prompt.value = prompt;
+      autoGrowPrompt(panel);
+      await sendMessage(panel);
+      break;
+    }
+
+    case "loop":
+    case "schedule": {
+      await handleSchedulerCommand(cmd, argPart.trim(), panel);
+      break;
+    }
+
+    case "goal": {
+      await handleGoalCommand(argPart.trim(), panel);
+      break;
+    }
+
+    case "export": {
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/sessions/${panel.sessionId}/messages`);
+        if (!res.ok) { appendCommandBubble(`export failed (${res.status})`, true, panel); return; }
+        const j = await res.json();
+        const turns = Array.isArray(j.turns) ? j.turns : [];
+        if (!turns.length) { appendCommandBubble("Nothing to export yet.", true, panel); return; }
+        let title;
+        try { title = paneTabTitle(panel.sessionId); } catch (_) { title = panel.sessionId; }
+        const md = conversationToMarkdown(title || panel.sessionId, turns);
+        const stem = (argPart.trim() || `omnis-${panel.sessionId}`)
+          .replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "omnis-export";
+        const name = stem.toLowerCase().endsWith(".md") ? stem : stem + ".md";
+        downloadTextBlob(md, name, "text/markdown");
+        appendCommandBubble(`Exported ${turns.length} turn${turns.length === 1 ? "" : "s"} to \`${name}\`.`, false, panel);
+      } catch (err) {
+        appendCommandBubble(String(err), true, panel);
+      }
+      break;
+    }
+
+    case "usage":
+    case "cost": {
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/sessions/${panel.sessionId}/usage-estimate`);
+        if (!res.ok) { appendCommandBubble(`usage request failed (${res.status})`, true, panel); return; }
+        const u = await res.json();
+        appendCommandBubble(formatUsageReport(u), false, panel);
       } catch (err) {
         appendCommandBubble(String(err), true, panel);
       }

@@ -45,7 +45,9 @@ import (
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/fileref"
+	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/scheduler"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/blouargant/omnis/internal/shellcomplete"
 	"github.com/blouargant/omnis/internal/steer"
@@ -251,6 +253,13 @@ type Config struct {
 	// while a turn is computing: queued via the steering plugin's drain during
 	// the turn, with leftover run as a follow-up turn here. Nil-safe.
 	SteerStore *steer.Store
+	// Scheduler, when non-nil, enables /loop and /schedule. Due jobs fire into
+	// the current session when the TUI is idle (the single-session fallback;
+	// the server spawns a fresh session per scheduled run). Nil-safe.
+	Scheduler *scheduler.Scheduler
+	// GoalStore, when non-nil, enables /goal: the agent keeps taking turns until
+	// the evaluator judges the condition met. Nil-safe.
+	GoalStore *goal.Store
 	// AgentOptions are the Options used to build the initial Instance.
 	// The hot-reload key (Ctrl-R) hands them back to Manager.Reload so a
 	// new generation is built from the latest on-disk config.
@@ -357,7 +366,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Slash-command autocomplete: suggest matching commands when the
 	// user starts typing "/".
-	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status", "/init", "/upload ", "/new"}
+	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status", "/init", "/goal ", "/upload ", "/new"}
 	slashCommandsDisplay := []string{
 		"/help",
 		"/compress",
@@ -370,6 +379,7 @@ func Run(ctx context.Context, cfg Config) error {
 		"/learn <reason>",
 		"/status",
 		"/init",
+		"/goal <condition>",
 		"/upload <path>",
 		"/new",
 	}
@@ -1200,6 +1210,79 @@ func Run(ctx context.Context, cfg Config) error {
 	busy := false
 	// send is declared before handleShortcut so the shortcut handler can call it.
 	var send func(string)
+
+	// handleSchedulerShortcut implements /loop and /schedule in the TUI: create,
+	// list, and manage jobs on the shared scheduler. Loops bind to the current
+	// session; due jobs fire via the scheduler ticker (see Run, below).
+	handleSchedulerShortcut := func(cmd, rest string) {
+		appendChat("\n[::b]assistant[-]\n")
+		if cfg.Scheduler == nil {
+			appendChat("[yellow]Scheduling is unavailable in this mode.[-]\n")
+			return
+		}
+		sid := ""
+		if cur := current.Load(); cur != nil {
+			sid = cur.ID
+		}
+		first := strings.ToLower(strings.Fields(rest + " ")[0])
+		switch {
+		case cmd == "loop" && (rest == "" || first == "list"):
+			tuiPrintJobs(appendChat, cfg.Scheduler, "loop", sid)
+			return
+		case cmd == "loop" && (first == "stop" || first == "off"):
+			n := cfg.Scheduler.RemoveLoopsForSession(sid)
+			appendChat("[green]Stopped %d loop(s).[-]\n", n)
+			return
+		case cmd == "schedule" && (rest == "" || first == "list"):
+			tuiPrintJobs(appendChat, cfg.Scheduler, "", "")
+			return
+		case cmd == "schedule" && first == "remove":
+			id := strings.TrimSpace(strings.TrimPrefix(rest, strings.Fields(rest)[0]))
+			if cfg.Scheduler.Remove(id) {
+				appendChat("[green]Removed %s.[-]\n", tview.Escape(id))
+			} else {
+				appendChat("[yellow]No schedule %q.[-]\n", tview.Escape(id))
+			}
+			return
+		case cmd == "schedule" && first == "run":
+			id := strings.TrimSpace(strings.TrimPrefix(rest, strings.Fields(rest)[0]))
+			if cfg.Scheduler.RunNow(id) {
+				appendChat("[green]Running %s now.[-]\n", tview.Escape(id))
+			} else {
+				appendChat("[yellow]No schedule %q (or already running).[-]\n", tview.Escape(id))
+			}
+			return
+		}
+		if cmd == "loop" && sid == "" {
+			appendChat("[red]No active session for the loop — create one first.[-]\n")
+			return
+		}
+		spec, prompt := scheduler.SplitSpecPrompt(rest)
+		if spec == "" || prompt == "" {
+			appendChat("[yellow]Usage:[-] /%s <spec> <prompt>  (spec: 30m, \"in 90m\", \"at 09:00\", \"0 9 * * 1-5\")\n", cmd)
+			return
+		}
+		parsed, err := scheduler.ParseSpec(spec, time.Now())
+		if err != nil {
+			appendChat("[red]%v[-]\n", tview.Escape(err.Error()))
+			return
+		}
+		kind, jobSid := scheduler.KindSchedule, ""
+		if cmd == "loop" {
+			kind, jobSid = scheduler.KindLoop, sid
+		}
+		job, err := cfg.Scheduler.Add(scheduler.Job{
+			Kind: kind, Prompt: prompt, Spec: spec,
+			Interval: parsed.Interval, Cron: parsed.Cron, At: parsed.At,
+			SessionID: jobSid, UserID: cfg.UserID,
+		})
+		if err != nil {
+			appendChat("[red]%v[-]\n", tview.Escape(err.Error()))
+			return
+		}
+		appendChat("[green]%s scheduled[-] (id=%s, next %s).\n", cmd, tview.Escape(job.ID), job.NextRun.Format("15:04:05"))
+	}
+
 	handleShortcut := func(raw string) {
 		line := strings.TrimSpace(raw)
 		fields := strings.Fields(line)
@@ -1334,6 +1417,49 @@ func Run(ctx context.Context, cfg Config) error {
 			appendChat("\n[::b]assistant[-]\n")
 			appendChat("[green]Initializing AGENT.md[-] — the agent will analyze the repo and write the file.\n")
 			go send(agentmd.InitPrompt())
+		case "loop", "schedule":
+			rest := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			handleSchedulerShortcut(cmd, rest)
+		case "goal":
+			arg := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			cur := current.Load()
+			appendChat("\n[::b]assistant[-]\n")
+			if cur == nil {
+				appendChat("[red]/goal failed:[-] no active session\n")
+				return
+			}
+			if cfg.GoalStore == nil {
+				appendChat("[yellow]Goals are not available.[-]\n")
+				return
+			}
+			sid := cur.ID
+			switch {
+			case arg == "":
+				g, ok := cfg.GoalStore.Get(sid)
+				if !ok || g.Condition == "" {
+					appendChat("[gray]No active goal — set one with /goal <condition>.[-]\n")
+					return
+				}
+				if g.Achieved {
+					appendChat("[green]◎ goal achieved[-] in %d turn(s), %s: %s\n", g.Turns, g.Duration().Round(time.Second), g.Condition)
+				} else {
+					appendChat("[aqua]◎ goal active[-] — %d/%d turns, %s elapsed\n  condition: %s\n", g.Turns, goal.MaxTurns(), g.Duration().Round(time.Second), g.Condition)
+					if g.LastReason != "" {
+						appendChat("  [gray]latest: %s[-]\n", g.LastReason)
+					}
+				}
+			case goal.IsClearAlias(arg):
+				if cfg.GoalStore.Clear(sid) {
+					appendChat("[green]goal cleared[-]\n")
+				} else {
+					appendChat("[gray]no active goal[-]\n")
+				}
+			default:
+				cond := goal.CleanCondition(arg)
+				cfg.GoalStore.Set(sid, cond)
+				appendChat("[green]◎ goal set[-] — working until: %s\n", cond)
+				go send(cond)
+			}
 		case "new":
 			chooseSquadModal(func(squad string) { createSession(squad) })
 		case "help":
@@ -1346,6 +1472,9 @@ func Run(ctx context.Context, cfg Config) error {
 			appendChat("  [aqua]/learn-now [reason][-]  Mark and trigger soft-skill curation immediately.\n")
 			appendChat("  [aqua]/status[-]              Show current session and curation status.\n")
 			appendChat("  [aqua]/init[-]                Analyze the repo and write a starter AGENT.md.\n")
+			appendChat("  [aqua]/loop <spec> <prompt>[-]  Re-run a prompt in this session on a timer (/loop stop, /loop list).\n")
+			appendChat("  [aqua]/schedule <spec> <prompt>[-]  Durable routine (/schedule list|remove <id>|run <id>).\n")
+			appendChat("  [aqua]/goal <condition>[-]   Keep working until a condition is met (/goal status, /goal clear).\n")
 			appendChat("  [aqua]/upload <path>[-]        Stage a file under the current session's uploads dir.\n")
 			appendChat("  [aqua]#<text>[-]              Append a one-line memory to the project AGENT.md.\n")
 			appendChat("  [aqua]/new[-]                  Create a new session (squad picker).\n")
@@ -1654,18 +1783,53 @@ func Run(ctx context.Context, cfg Config) error {
 					appendChat("[red]persist turn: %v[-]\n", err)
 				}
 
-				if ctx.Err() != nil || i >= maxSteerFollowups || cfg.SteerStore == nil {
+				if ctx.Err() != nil {
 					break
 				}
-				pending := cfg.SteerStore.TakePending(sessionID)
-				if len(pending) == 0 {
-					break
+				// 1) Steering the model never reached becomes the next turn.
+				if cfg.SteerStore != nil {
+					if pending := cfg.SteerStore.TakePending(sessionID); len(pending) > 0 {
+						if i >= maxSteerFollowups {
+							break
+						}
+						turnPrompt = strings.Join(pending, "\n")
+						turnParts = []*genai.Part{{Text: turnPrompt}}
+						// Echo the follow-up as a fresh turn.
+						appendChat("\n[::b]you[-]\n\n%s\n", colorizeFileRefs(sanitizeInputText(turnPrompt), getBashCwd(sessionID)))
+						appendChat("[::b]assistant[-]\n")
+						continue
+					}
 				}
-				turnPrompt = strings.Join(pending, "\n")
-				turnParts = []*genai.Part{{Text: turnPrompt}}
-				// Echo the follow-up as a fresh turn.
-				appendChat("\n[::b]you[-]\n\n%s\n", colorizeFileRefs(sanitizeInputText(turnPrompt), getBashCwd(sessionID)))
-				appendChat("[::b]assistant[-]\n")
+				// 2) /goal: keep working until the evaluator says the condition holds
+				//    (or a hard turn cap / eval failure stops the autonomous loop).
+				if cfg.GoalStore != nil {
+					if g, ok := cfg.GoalStore.Get(sessionID); ok && g.Active() {
+						if cfg.GoalStore.CapReached(sessionID) {
+							appendChat("[gray]◎ goal: reached the maximum number of turns — clear it with /goal clear[-]\n")
+							break
+						}
+						evalCtx, evalCancel := context.WithTimeout(ctx, 30*time.Second)
+						transcript := strings.TrimSpace(turnPrompt + "\n\n[assistant]\n" + fullText)
+						met, reason, evalOK := cfg.Manager.EvaluateGoal(evalCtx, sessionID, g.Condition, transcript)
+						evalCancel()
+						if !evalOK {
+							appendChat("[gray]◎ goal: could not evaluate the condition — clear it with /goal clear[-]\n")
+							break
+						}
+						if met {
+							cfg.GoalStore.MarkAchieved(sessionID, reason)
+							appendChat("[green]◎ goal achieved[-] %s\n", reason)
+							break
+						}
+						turns := cfg.GoalStore.RecordTurn(sessionID, reason, 0)
+						appendChat("[gray]◎ goal (turn %d/%d): %s[-]\n", turns, goal.MaxTurns(), reason)
+						turnPrompt = goal.Directive(g.Condition, reason)
+						turnParts = []*genai.Part{{Text: turnPrompt}}
+						appendChat("[::b]assistant[-]\n")
+						continue
+					}
+				}
+				break
 			}
 			app.QueueUpdateDraw(func() {
 				refreshSessions()
@@ -1696,6 +1860,22 @@ func Run(ctx context.Context, cfg Config) error {
 			setFocus(idx)
 			return
 		}
+	}
+
+	// Scheduler ticker: due /loop and /schedule jobs run in the current session
+	// when the TUI is idle (single-session fallback; the server spawns a fresh
+	// session per scheduled run). Skipped while a turn streams (loops recur).
+	if cfg.Scheduler != nil {
+		go cfg.Scheduler.Run(ctx, func(_ context.Context, job scheduler.Job) {
+			if busy {
+				return
+			}
+			if current.Load() == nil {
+				return
+			}
+			go appendChat("\n[gray]⏰ %s (%s):[-] %s\n", job.Kind, tview.Escape(job.Spec), tview.Escape(scheduler.FirstLine(job.Prompt)))
+			send(job.Prompt)
+		})
 	}
 
 	// Global key bindings.
@@ -2139,4 +2319,29 @@ func centered(p tview.Primitive, width, height int) tview.Primitive {
 			AddItem(p, height, 0, true).
 			AddItem(nil, 0, 1, false), width, 0, true).
 		AddItem(nil, 0, 1, false)
+}
+
+// tuiPrintJobs lists scheduler jobs via appendChat, optionally filtered by kind
+// and session. Backs /loop list and /schedule list.
+func tuiPrintJobs(appendChat func(string, ...any), sch *scheduler.Scheduler, kind, sessionID string) {
+	n := 0
+	for _, j := range sch.List() {
+		if kind != "" && j.Kind != kind {
+			continue
+		}
+		if sessionID != "" && j.SessionID != sessionID {
+			continue
+		}
+		state := "on"
+		if !j.Enabled {
+			state = "off"
+		}
+		appendChat("  [aqua]%s[-]  %s  %s  [%s] next %s — %s\n",
+			tview.Escape(j.ID), j.Kind, tview.Escape(j.Spec), state,
+			j.NextRun.Format("15:04:05"), tview.Escape(scheduler.FirstLine(j.Prompt)))
+		n++
+	}
+	if n == 0 {
+		appendChat("  [gray](none)[-]\n")
+	}
 }

@@ -122,6 +122,13 @@ type modelsConfigFile struct {
 	// config (the embedding model entries + which one is active) in one place.
 	// An agents.json `embed_model_ref` or OMNIS_EMBED_MODEL_REF env override it.
 	EmbedModelRef string `json:"embed_model_ref,omitempty"`
+	// EvalModelRef names the model used for internal one-off evaluator calls —
+	// currently the /goal completion judge (condition + transcript → yes/no).
+	// It is a cheap "small fast model" role, distinct from any agent's model_ref;
+	// when empty the evaluator falls back to the session's leader model so /goal
+	// works out-of-the-box. An agents.json `eval_model_ref` or the
+	// OMNIS_GOAL_MODEL_REF env override it. Mirrors EmbedModelRef precisely.
+	EvalModelRef string `json:"eval_model_ref,omitempty"`
 }
 
 type runtimeConfigFile struct {
@@ -138,9 +145,12 @@ type runtimeConfigFile struct {
 	// embedding (softskill/precedent/codebase recall). It must reference a
 	// model entry flagged `"embedding": true`. Empty disables semantic recall
 	// unless the OMNIS_EMBED_* environment provides an embedder instead.
-	EmbedModelRef string       `json:"embed_model_ref,omitempty"`
-	Agents        []string     `json:"agents"`
-	Squads        []SquadEntry `json:"squads"`
+	EmbedModelRef string `json:"embed_model_ref,omitempty"`
+	// EvalModelRef overrides models.json `eval_model_ref` (the /goal evaluator
+	// model). OMNIS_GOAL_MODEL_REF overrides this in turn.
+	EvalModelRef string       `json:"eval_model_ref,omitempty"`
+	Agents       []string     `json:"agents"`
+	Squads       []SquadEntry `json:"squads"`
 	// RouterSquad names the squad that acts as the Omnis router — the default
 	// agent for new chats, which routes each request to the best-suited squad.
 	// A pointer so we can distinguish absent (nil → default to "omnis") from an
@@ -261,8 +271,12 @@ type RuntimeSettings struct {
 	// semantic recall. Empty means no config-selected embedder (the OMNIS_EMBED_*
 	// environment may still provide one).
 	EmbedModelRef string
-	Models        map[string]RuntimeModelConfig
-	Agents        []RuntimeAgentConfig
+	// EvalModelRef names the model in Models used for internal one-off evaluator
+	// calls (the /goal completion judge). Empty means the evaluator falls back to
+	// the session's leader model. See modelsConfigFile.EvalModelRef.
+	EvalModelRef string
+	Models       map[string]RuntimeModelConfig
+	Agents       []RuntimeAgentConfig
 	// Squads is the normalised list of named agent groups. Always contains
 	// at least one entry named DefaultSquadName.
 	Squads []RuntimeSquadConfig
@@ -876,6 +890,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(modelsCfg.EmbedModelRef) != "" {
 		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(modelsCfg.EmbedModelRef))
 	}
+	if strings.TrimSpace(modelsCfg.EvalModelRef) != "" {
+		out.EvalModelRef = strings.ToLower(strings.TrimSpace(modelsCfg.EvalModelRef))
+	}
 
 	// File
 	if strings.TrimSpace(cfg.SoftSkillsDir) != "" {
@@ -905,6 +922,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.EmbedModelRef) != "" {
 		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(cfg.EmbedModelRef))
+	}
+	if strings.TrimSpace(cfg.EvalModelRef) != "" {
+		out.EvalModelRef = strings.ToLower(strings.TrimSpace(cfg.EvalModelRef))
 	}
 	if len(cfg.Agents) > 0 {
 		agentsRegistryDirs := paths.AgentsRegistrySearchDirs()
@@ -939,6 +959,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if raw := strings.TrimSpace(os.Getenv("OMNIS_EMBED_MODEL_REF")); raw != "" {
 		out.EmbedModelRef = strings.ToLower(raw)
+	}
+	if raw := strings.TrimSpace(os.Getenv("OMNIS_GOAL_MODEL_REF")); raw != "" {
+		out.EvalModelRef = strings.ToLower(raw)
 	}
 
 	// Options (highest precedence)

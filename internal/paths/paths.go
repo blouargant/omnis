@@ -283,6 +283,11 @@ func SoftSkillsDir() string { return filepath.Join(Home(), "softskills") }
 // State (write root), not config, so always anchored under Home().
 func IndexDir() string { return filepath.Join(Home(), "index") }
 
+// SchedulesPath returns Home()/schedules.json — the durable store for
+// /schedule routines (the scheduler subsystem). State (write root), so always
+// anchored under Home(). Loop jobs are in-memory and never persisted here.
+func SchedulesPath() string { return filepath.Join(Home(), "schedules.json") }
+
 // SkillsAllSearchDirs returns every directory that should be scanned for skill
 // definitions, across all layers and both the hand-crafted (skills/) and
 // registry-installed (registry/skills/) sub-paths. Directories are ordered

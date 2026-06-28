@@ -535,6 +535,8 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/bg/` | Per-session background task queue + **task registry**: `bash_background` (one-shot), `monitor` (streaming line-matcher, [monitor.go](internal/bg/monitor.go)), and lifecycle `bg_list`/`bg_cancel`/`bg_output` ([tasks.go](internal/bg/tasks.go)) — named with a `bg_` prefix to avoid colliding with the `planning` group's task-graph `task_list`. Every launch registers a `Task{ID,Kind,Status,…}`; completions/streamed matches push a `Notification` consumed by the host (see "Background task notifications") |
 | `internal/worktree/` | Git worktree isolation tools |
 | `internal/steer/` | Per-session **mid-turn steering** store (extra info the user types while a turn is computing): `Enqueue`/`Drain`/`TakeConsumed`/`TakePending`/`Forget`. Drained into the running turn by the steering plugin and looped by each surface (see "Mid-turn steering") |
+| `internal/scheduler/` | Timer that runs prompts on a schedule, backing `/loop` (in-memory, session-bound) and `/schedule` (durable cron/interval/one-shot routines, persisted to `schedules.json`): `Job`, `Scheduler` (process-wide, one `Run` goroutine + `fire` callback), `ParseSpec` (interval/`in`/`at`/cron via `robfig/cron/v3`). Surface-agnostic — each surface supplies the `fire` callback (see "Scheduled prompts") |
+| `internal/goal/` | Per-session **completion goals** backing `/goal`: `Store` (process-wide, one `Goal` per session — condition/turns/last-reason/achieved), `MaxTurns` (hard turn cap, `OMNIS_GOAL_MAX_TURNS`), `Directive` (the not-yet-met continuation prompt), `IsClearAlias`, `CleanCondition`. Surface-agnostic; the LLM judge is `Manager.EvaluateGoal` ([agent/goal_eval.go](agent/goal_eval.go)). See "Goals (`/goal`)" |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
 | `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate and the MCP `requires` connect gate |
@@ -670,7 +672,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | File | Purpose |
 |---|---|
 | `agents.json` | List of enabled agent names, squad composition, global paths, and `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables) |
-| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache": true` adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall |
+| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache": true` adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model) |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
@@ -905,6 +907,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   $HOME/.omnis/
   ├── agents.json       # editor writes — user config overrides
   ├── permissions.json  # editor writes — user permission overrides
+  ├── schedules.json    # durable /schedule routines (scheduler; loops not persisted)
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
@@ -969,6 +972,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_EMBED_API_KEY` | Embedder API key (default `OMNIS_API_KEY`/provider key) |
 | `OMNIS_EMBED_DIM` | Expected embedding dimension (default `1536`, or learned from the first response) |
 | `OMNIS_EMBED_MODEL_REF` | Overrides `embed_model_ref` from `models.json` — selects which catalogue model is the internal embedder |
+| `OMNIS_GOAL_MODEL_REF` | Overrides `eval_model_ref` from `models.json` — selects which catalogue model judges `/goal` completion. Unset/unresolvable ⇒ the session's leader model |
+| `OMNIS_GOAL_MAX_TURNS` | Hard ceiling on how many turns one `/goal` may drive before the loop stops regardless of the condition (default `30`) |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
@@ -1649,6 +1654,143 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
 empty and behaviour is byte-identical to before; the recall/glob fallbacks are
 untouched.
 
+### Scheduled prompts (`/loop` + `/schedule`)
+
+Two surface commands run a prompt **on a timer**, reusing the same
+turn-injection rail as background tasks/mailbox delivery
+([server/mailbox_push.go](server/mailbox_push.go) `injectTurn`). The engine is
+[internal/scheduler/](internal/scheduler/): a process-wide `Scheduler` on
+`Infrastructure` (survives hot-reload like `BgQueues`/`SteerStore`), a single
+`Run(ctx, fire)` goroutine that sleeps until the earliest due `Job`, and a
+surface-supplied `fire` callback. `ParseSpec` accepts `30m`/`every 2h`
+(interval, 30s floor), `in 90m` / `at 09:00` / `at <RFC3339>` (one-shot), and a
+5-field cron expr (`robfig/cron/v3`).
+
+- **`/loop <spec> <prompt>`** — Kind `loop`: **in-memory**, bound to the current
+  session, recurring. Dies on session archive/delete (`RemoveLoopsForSession`,
+  called beside `PushMgr.Stop` in the delete/archive handlers) or process
+  restart — matching Claude Code. Never persisted.
+- **`/schedule <spec> <prompt>`** — Kind `schedule`: **durable**, persisted to
+  `$OMNIS_HOME/schedules.json` (loaded by `scheduler.New` in
+  `BuildInfrastructure`, resumed on boot — cron skips missed ticks, a past-due
+  one-shot fires once then drops).
+
+**Job lifecycle**: `Add` computes the first `NextRun`; `tick` (under `Run`)
+fires every due+enabled job whose previous fire isn't still in flight
+(per-job in-flight guard), increments `Runs`, advances `NextRun`, and drops
+exhausted/one-shot jobs, persisting durable changes. `RunNow` fires
+off-schedule. Loops stay in memory; only `schedule` jobs hit disk. After each
+run the surface `fire` callback calls `Scheduler.RecordRun(jobID, RunRecord)` to
+append a capped (`maxHistory`=10) per-job **run history** — `{at, session_id,
+status}` — so the management UI can list recent runs and link to the session
+each produced (for a scheduled run, that fresh session).
+
+**Surface asymmetry (documented, like active-wake notifications):** the `fire`
+callback differs per surface.
+- **Server** ([server/scheduler.go](server/scheduler.go) `scheduleFire`, started
+  once from [server/main.go](server/main.go) via `infra.Scheduler.Run`): a
+  **loop** injects into its bound session via `pushManager.injectTurn` (which
+  blocks for the whole run, so the in-flight guard truly gates stacking); a
+  **schedule** spins up a **fresh session per run** (`createScheduledSession`,
+  factored from the `POST /sessions` block — register + pin + watch + broadcast
+  `session_created`), injects the turn, then **auto-archives** it
+  (`SetArchived` + `PushMgr.Stop` + `Manager.Release`) so the run is read-only
+  but visible in the sidebar. Both emit a `schedule_run` SSE; mutating routes
+  emit `schedule_changed`.
+- **CLI/TUI** ([internal/cli/cli.go](internal/cli/cli.go) `runRepl` `fired`
+  case; [internal/tui/tui.go](internal/tui/tui.go) fire callback): due jobs run
+  in the **current** session when idle (single-session surfaces have no
+  session-spawning rail); skipped while a turn is in flight (loops recur).
+  `/loop` + `/schedule` management (`handleSchedulerSlash` / `handleSchedulerShortcut`)
+  works against the same `schedules.json`.
+
+**Routes** ([server/scheduler.go](server/scheduler.go), `auth` group): `GET
+/api/schedules`, `POST /api/schedules` `{kind,spec,prompt,session_id?,squad?,
+max_runs?}`, `PATCH /api/schedules/:id` `{enabled?,spec?,prompt?}`, `DELETE
+/api/schedules/:id`, `POST /api/schedules/:id/run`. **Web UI**: `/loop` +
+`/schedule` slash commands (`handleSchedulerCommand` in [web/app.js](web/app.js),
+Automation slash-menu section) plus a full **Settings → Automation** page
+(`renderAutomation` in [web/settings.js](web/settings.js), styled by
+[web/css/settings/automation.css](web/css/settings/automation.css), nav key
+`settings.menu.automation`): two grouped lists (durable Schedules + active
+Loops), each row with **run-now / inline-edit (spec+prompt, via `PATCH`) /
+enable-disable / delete**, an expandable **run history** whose entries link to
+their result session (`selectSession`), and an add-routine form. The
+`schedule_run` SSE appends the injected turn and `schedule_changed` refreshes
+the page (`window.Settings.refreshSchedules`). `loop`/`schedule` are reserved in
+`usercommands.ReservedNames`. The spec grammar (quoted multi-word spec or first
+token, then prompt) is `scheduler.SplitSpecPrompt`, mirrored in JS.
+
+**No-op contract:** no jobs ⇒ the `Run` goroutine sleeps; behaviour is
+byte-identical to before. The 30s interval floor + in-flight skip prevent
+runaway loops; loops are cleaned up on session delete/archive; durable routines
+survive hot-reload (the `fire` closure re-resolves the squad via
+`Manager.LookupSquad`, and `injectTurn` calls `MigrateToCurrent`).
+
+### Goals (`/goal`)
+
+`/goal <condition>` sets a **session-scoped completion condition** and the agent
+keeps taking turns on its own until a small fast **evaluator model** judges the
+condition met — omnis's port of Claude Code's `/goal`. Where `/loop` re-runs on a
+*timer*, `/goal` re-runs until a *model* says the work is done. It reuses the
+same machinery as steering/`/loop`: the per-surface turn loop + the one-off-LLM
+pattern (no new runner/topology).
+
+- **Store** = [internal/goal/](internal/goal/) `Store` on `Infrastructure.GoalStore`
+  (process-wide, survives hot-reload like `SteerStore`/`Scheduler`): one `Goal`
+  per session — `Condition`, `SetAt`, `Turns`, `LastReason`, `Achieved`. `Set`
+  (resets timer/turns), `RecordTurn`, `MarkAchieved`, `CapReached`, `Clear`,
+  `Forget`. `MaxTurns()` is the hard ceiling (`OMNIS_GOAL_MAX_TURNS`, default 30);
+  `Directive(condition, reason)` is the shared "not met — keep working" prompt;
+  `IsClearAlias` accepts `clear`/`stop`/`off`/`reset`/`none`/`cancel`.
+- **Evaluator** = `Manager.EvaluateGoal(ctx, sid, condition, transcript)`
+  ([agent/goal_eval.go](agent/goal_eval.go)): one non-streamed
+  `model.LLM.GenerateContent` returning `GOAL_MET`/`GOAL_NOT_MET` + a one-line
+  reason — the **same isolated one-off-LLM pattern** as the routing capability
+  probe / session-title generation (no runner, tools, or event bus, so nothing
+  reaches the SSE stream). It judges **only the transcript** (it can't run tools),
+  so conditions must be ones the agent's own output makes visible. The model is
+  resolved by `Manager.evalModel`: `eval_model_ref` (models.json → agents.json →
+  `OMNIS_GOAL_MODEL_REF`) when set/resolvable, else the session's **leader model**
+  (so `/goal` always works). `eval_model_ref` mirrors `embed_model_ref` exactly
+  (a top-level catalogue ref for an internal, non-agent model role); the shipped
+  `config/models.json` defaults it to `hosted` (the cheapest model).
+- **Loop integration** = the existing per-surface turn loop, *after* the steering
+  follow-up branch. Server [server/sse.go](server/sse.go) `handleMessages`
+  producer: after `RunWithRouting` + persist, if a goal is active and there is no
+  pending steering, it evaluates `persistPrompt + assistantText`; **met** →
+  `MarkAchieved` + `goal_achieved` SSE + stop; **not met** → `RecordTurn` +
+  `goal_progress` SSE + inject `buildGoalDirective` (= `goal.Directive`) as the
+  next turn; **cap reached / eval failure** → `goal_stopped` SSE + stop (goal
+  stays set). Steering takes precedence each iteration (a note steers the running
+  work; the goal loop re-engages after). CLI ([internal/cli/cli.go](internal/cli/cli.go)
+  `runTurnSteering`, after `runTurn` was extended to return the assistant text)
+  and TUI ([internal/tui/tui.go](internal/tui/tui.go) send loop) mirror it with
+  printed `◎ goal …` lines.
+- **`/goal` command** (reserved in `usercommands.ReservedNames`): set / bare-status
+  / `clear`+aliases. Setting it **records the goal then sends the condition as a
+  normal turn** — the loop continues it. Web ([web/app.js](web/app.js)
+  `handleGoalCommand`, automation slash-menu section) POSTs `/api/sessions/:id/goal`
+  then `sendMessage`; TUI/CLI handle it inline before the generic slash dispatch.
+- **Surfaces / web UI**: routes ([server/goal.go](server/goal.go)) `GET` (status),
+  `POST {condition}` (set + persist + `goal_set` broadcast), `DELETE` (clear +
+  `goal_cleared`). A **"◎ Goal" chip** above the composer (`renderGoalChip`,
+  per-pane, [web/css/features/composer.css](web/css/features/composer.css)) shows
+  an active goal and is click-to-clear; between-turn **goal dividers**
+  (`appendGoalDivider`, [web/css/features/messages.css](web/css/features/messages.css))
+  render the `goal_progress`/`goal_achieved`/`goal_stopped` SSE frames; `goal_set`/
+  `goal_cleared` on `/api/events` keep other browsers in sync (`refreshGoal`).
+- **Stop / persistence / resume**: the **Stop button** (`handleCancel`) clears the
+  goal (Ctrl+C semantics). The active condition is persisted on the session
+  (`ConversationFile.Goal` / `SessionMeta.Goal`); on restart the startup loop in
+  [server/main.go](server/main.go) `Restore`s it (condition carries over, timer/
+  turns reset), re-engaging on the session's next turn. Cleared/achieved goals are
+  not persisted. CLI/TUI goals are in-memory only.
+
+**No-op contract:** with no active goal the loop branch is a map-check no-op and
+behaviour is byte-identical to before; with no `eval_model_ref` the evaluator
+silently uses the leader model.
+
 ### Mid-turn steering (type while computing)
 
 A user can send additional information, remarks, or insights **while a turn is
@@ -1878,7 +2020,12 @@ completed user turn and drives away-from-session OS notifications (see "Desktop
 notifications"); it does not change the transcript. A sixth event,
 **`update_available`** (no session id), is fired once by the self-update poller
 when a newer stable release is found; the client re-runs `checkForUpdate()` to
-reveal the sidebar button (see "Self-update").
+reveal the sidebar button (see "Self-update"). Two more events back the scheduler
+(see "Scheduled prompts"): **`schedule_run`** (carrying the session id) fires when
+a `/loop` or `/schedule` injects a turn — the client appends it (like
+`task_notification`) and toasts; **`schedule_changed`** (no session id) fires on
+any loop/schedule create/edit/delete so an open **Settings → Automation** panel
+refreshes (`window.Settings.refreshSchedules`).
 
 ### Self-update (new-release detection + in-app install)
 
@@ -1958,13 +2105,17 @@ A conversation lives in **two layers**, both handled:
 **Routes** ([server/fork_rewind.go](server/fork_rewind.go), registered in
 [server/server.go](server/server.go)): `POST /api/sessions/:id/rewind`
 `{turn_index}` → `{turns}` + a `session_rewound` broadcast; `POST
-/api/sessions/:id/fork` `{turn_index, title?}` → `{session_id, squad,
+/api/sessions/:id/fork` `{turn_index, title?, full?}` → `{session_id, squad,
 dropped_user_text}` and mirrors the `POST /sessions` wiring (RegisterSession,
 Pin, PushMgr.Watch, `session_created` broadcast, SessionStart hook, inherits the
-source `bashCwd`). Both reject **archived** (rewind only; forking an archived
-source is allowed since it never mutates the source) and refuse to run while a
-turn is in flight (`RunGuard.tryAcquire` → 409). A reseed failure is logged but
-never corrupts the already-truncated display history.
+source `bashCwd`). `full: true` (the **`/fork` command**) keeps **every** turn
+(`keep = len(srcTurns)`, ignoring `turn_index`) so the new session inherits the
+source's **complete context** and nothing is dropped; the turn-action menu path
+omits it and keeps the first `turn_index` turns instead. Both reject **archived**
+(rewind only; forking an archived source is allowed since it never mutates the
+source) and refuse to run while a turn is in flight (`RunGuard.tryAcquire` → 409).
+A reseed failure is logged but never corrupts the already-truncated display
+history.
 
 **Web UI** ([web/app.js](web/app.js)): `appendUserBubble` takes a `turnIndex` and
 stamps it on the row (`addTurnActions` adds the control); each render site
@@ -1973,7 +2124,12 @@ initial history load) passes the true turn index, so the cut point stays exact
 even with non-rendered mailbox/background turns. `forkConversation` /
 `rewindConversation` POST then re-render and **pre-fill the composer** with the
 dropped user message (only when empty) for edit-and-resend; `rewindConversation`
-gates on a `uiConfirm`. Styles: `.turn-action-btn` / `.turn-menu` in
+gates on a `uiConfirm`. The **`/fork` slash command** (`handleSlashCommand`
+`case "fork"`, a `session`-kind builtin in `BUILTIN_SLASH_COMMANDS`, also reserved
+in `usercommands.ReservedNames`) calls `forkConversation(sessionId, 0, "", {full:
+true})` — the same path with the full-fork flag, so it copies the whole
+conversation and switches to it with no prefill (nothing was dropped). Styles:
+`.turn-action-btn` / `.turn-menu` in
 [web/css/features/messages.css](web/css/features/messages.css). CLI/TUI are
 untouched (no routes, no reseed callers) — byte-identical no-op there.
 
@@ -2603,6 +2759,43 @@ centre after horizontal clamping.
   soft-wraps onto multiple lines instead of stretching into one unreadable
   strip. Just write the full description in `data-tip` — wrapping is automatic,
   no manual line breaks.
+
+### Web UI slash command menu
+
+Typing `/` in the composer opens the `#slash-menu` dropdown of available
+commands ([web/app.js](web/app.js) `renderSlashMenu`). Commands are **grouped by
+kind into labelled sections** and **sorted within each section**, so the list
+stays organised as commands are added:
+
+- **Builtin commands** carry a `kind` field in `BUILTIN_SLASH_COMMANDS` naming
+  the section they belong to. `SLASH_SECTIONS` (a `[{key,label}]` list) defines
+  the **section order and headers**; the menu renders them top-to-bottom,
+  skipping empty sections. Current sections: **Common** → **Session** →
+  **Automation** (`/loop`, `/schedule`, `/goal`) → **Skills**, followed by a trailing
+  **User commands** section (the per-user `user_commands.json` entries).
+- **Sorting** (`sortSlashSection`): the **`common` section is NOT alphabetical**
+  — it follows the hand-curated `COMMON_ORDER` (`/help`, `/compress`, `/init`,
+  `/cost`, `/learn-now`), i.e. the most-used commands first. **Every other section (and
+  the User-commands section) is sorted alphabetically** by command name. A
+  `common` command missing from `COMMON_ORDER` sorts after the curated ones,
+  alphabetically.
+- **To add a builtin command**: append it to `BUILTIN_SLASH_COMMANDS` with the
+  right `kind` (one of the `SLASH_SECTIONS` keys) — it then lands under the
+  correct header, sorted, with **no change to `renderSlashMenu`**. To add a new
+  *section*, add a `{key,label}` to `SLASH_SECTIONS` in the desired position and
+  tag commands with its key. To re-order or extend the curated common list, edit
+  `COMMON_ORDER`. The **`/help` command output** (`buildHelpBody`) is **generated
+  from the same `BUILTIN_SLASH_COMMANDS`/`SLASH_SECTIONS`/`COMMON_ORDER` data**
+  (same headers, same per-section sort as the menu), so it never drifts — no
+  manual upkeep. Keep this doc section, `SLASH_SECTIONS`/`COMMON_ORDER`, and
+  [web/docs/18-commands.md](web/docs/18-commands.md) in sync.
+- **Rendering details**: section headers are `.slash-menu-section` divs
+  (styled in [web/css/features/composer.css](web/css/features/composer.css)) that
+  **deliberately lack the `.slash-menu-item` class**, so the keyboard nav
+  (ArrowUp/Down/Tab/Enter, which queries `.slash-menu-item`) skips them and only
+  the `+ Add command` row and real command rows are selectable. The same
+  `#slash-menu` element is reused for the `!` shell-escape and `@file` completion
+  menus (`menuMode`), which render flat (no sections).
 
 ### Web UI todo plan widget
 

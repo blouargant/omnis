@@ -45,6 +45,11 @@ type SessionMeta struct {
 	// indexes) and are surfaced in a separate panel by the UI surfaces. The flag
 	// is persisted in the conversation file so it survives server restarts.
 	Archived bool `json:"archived,omitempty"`
+	// Goal is the session's active /goal completion condition, mirrored from the
+	// conversation file so the server can restore an in-progress goal on restart.
+	// Empty when no goal is active. The live goal state lives in the process-wide
+	// goal store; this is only the durable condition for resume.
+	Goal string `json:"goal,omitempty"`
 	// Indexed is set by the idle indexer (and on archive) once a session's
 	// StateLog has been pushed into the cross-session precedent index. It is
 	// in-memory only and cleared by Touch on new activity so a session that
