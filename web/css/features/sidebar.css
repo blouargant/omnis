@@ -387,7 +387,10 @@ body.resizing #sidebar { transition: none; }
   min-height: 130px;
 }
 #session-list li {
-  padding: 6px 10px;
+  position: relative;
+  /* Reserve a right gutter for the hover-revealed action stack so the floating
+     buttons never sit over the session name / meta. */
+  padding: 6px 30px 6px 10px;
   border-radius: 4px;
   cursor: pointer;
   color: var(--text-muted);
@@ -460,16 +463,27 @@ body.resizing #sidebar { transition: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Per-row action stack: the menu ("Actions") button on top, the delete button
+   just below it, pinned to the row's right edge. Absolutely positioned so the
+   two stacked buttons never grow the row height, and hidden (opacity:0) until
+   the row is hovered — not revealed for the active/open session. */
 .session-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   gap: 2px;
   flex-shrink: 0;
-  margin-left: auto;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.1s;
 }
-#session-list li:hover .session-actions,
-#session-list li.active .session-actions { opacity: 1; }
+#session-list li:hover .session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 .session-action-btn {
   appearance: none;
   -webkit-appearance: none;
@@ -479,15 +493,24 @@ body.resizing #sidebar { transition: none; }
   box-shadow: none;
   color: var(--text-strong);
   cursor: pointer;
-  padding: 0 2px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
   line-height: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
   opacity: 0.8;
-  transition: opacity 0.1s, color 0.1s;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
 }
+/* Hovering a button gives it a circular highlight so the pointer target is
+   unmistakable. Both buttons share the same soft red wash. */
 .session-action-btn:hover,
-.session-action-btn:focus { background: none; outline: none; opacity: 1; }
+.session-action-btn:focus { outline: none; opacity: 1; background: var(--danger-bg-soft); }
+/* Delete is destructive — additionally tint its icon red on hover/focus. */
+.session-delete-btn:hover,
+.session-delete-btn:focus { color: var(--danger-fg); }
 .session-rename-input {
   width: 100%;
   background: var(--bg);
@@ -546,7 +569,8 @@ body.resizing #sidebar { transition: none; }
 #archived-panel.collapsed #archived-list { display: none; }
 /* Archived rows reuse the active-session row look and hover behaviour. */
 #archived-list li {
-  padding: 6px 10px;
+  position: relative;
+  padding: 6px 30px 6px 10px;
   border-radius: 4px;
   cursor: pointer;
   color: var(--text-muted);
@@ -565,8 +589,10 @@ body.resizing #sidebar { transition: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#archived-list li:hover .session-actions,
-#archived-list li.active .session-actions { opacity: 1; }
+#archived-list li:hover .session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 #sidebar-footer {
   padding: 8px 12px;

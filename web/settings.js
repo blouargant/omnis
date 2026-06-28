@@ -2254,12 +2254,10 @@ const BASE_PATH = window.BASE_PATH || "";
         </div>
         <button type="button" class="add-btn model-add-btn" id="add-model">${escHtml(tr("set.model.addModel"))}</button>
       </div>
-      <div id="embed-select-row"></div>
-      <div id="eval-select-row"></div>
+      <div id="general-select-row"></div>
       <div id="models-grid"></div>
     `;
-    renderEmbedSelector(d, host.querySelector("#embed-select-row"));
-    renderEvalSelector(d, host.querySelector("#eval-select-row"));
+    renderGeneralSelectors(d, host.querySelector("#general-select-row"));
     host.querySelector("#add-model").addEventListener("click", async () => {
       const providerNames = Object.keys(d.providers || {});
       if (!providerNames.length) {
@@ -2271,20 +2269,18 @@ const BASE_PATH = window.BASE_PATH || "";
       d.models[result.name] = result.model;
       markFormDirty("models");
       renderModelCards(d, host.querySelector("#models-grid"));
-      renderEmbedSelector(d, host.querySelector("#embed-select-row"));
-      renderEvalSelector(d, host.querySelector("#eval-select-row"));
+      renderGeneralSelectors(d, host.querySelector("#general-select-row"));
     });
     renderModelCards(d, host.querySelector("#models-grid"));
   }
 
-  // renderEmbedSelector renders the "internal embedding model" dropdown,
-  // listing only models flagged `embedding: true`. The selection is persisted
-  // as models.json `embed_model_ref` and drives semantic recall (soft-skills,
-  // precedents, codebase). When unset, recall is disabled and the agent uses
-  // its glob/grep fallbacks.
-  function renderEmbedSelector(d, el) {
+  // renderGeneralSelectors renders the "General" card grouping the two internal
+  // model-role selectors — the /goal evaluator model (on top) and the internal
+  // embedding model — into a single card above the model grid. Both persist into
+  // models.json (`eval_model_ref` / `embed_model_ref`) and are re-rendered
+  // together whenever a model's embedding flag or combo metadata changes.
+  function renderGeneralSelectors(d, el) {
     if (!el) return;
-    const embedModels = Object.keys(d.models || {}).filter(n => d.models[n] && d.models[n].embedding);
     el.innerHTML = "";
 
     // Mirror the standard model-card structure (header bar + padded body) so
@@ -2297,14 +2293,73 @@ const BASE_PATH = window.BASE_PATH || "";
     const title = document.createElement("div");
     title.className = "model-card-title";
     const strong = document.createElement("strong");
-    strong.textContent = tr("set.model.internalEmbedding");
+    strong.textContent = tr("set.model.general");
     title.appendChild(strong);
     hdr.appendChild(title);
 
     const body = document.createElement("div");
     body.className = "model-card-body";
+    // /goal evaluator first (on top), then the internal embedding model.
+    body.appendChild(buildEvalField(d));
+    body.appendChild(buildEmbedField(d));
+
+    wrap.appendChild(hdr);
+    wrap.appendChild(body);
+    el.appendChild(wrap);
+  }
+
+  // buildEvalField returns the "/goal evaluator model" field — a dropdown of the
+  // chat (non-embedding) models. The selection is persisted as models.json
+  // `eval_model_ref` and is used by the /goal completion judge after each turn.
+  // When unset, the judge falls back to the session's leader model; applies on
+  // the next config reload (no restart needed).
+  function buildEvalField(d) {
+    const chatModels = Object.keys(d.models || {}).filter(n => d.models[n] && !d.models[n].embedding);
     const fld = document.createElement("div");
     fld.className = "model-field model-field-full";
+
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = tr("set.model.evalModel");
+
+    const sel = document.createElement("select");
+    sel.className = "model-field-input";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = tr("set.model.evalDefault");
+    sel.appendChild(none);
+    for (const n of chatModels) {
+      const opt = document.createElement("option");
+      opt.value = n; opt.textContent = n;
+      if ((d.eval_model_ref || "").toLowerCase() === n.toLowerCase()) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.disabled = !chatModels.length;
+    sel.addEventListener("change", () => {
+      if (sel.value) d.eval_model_ref = sel.value; else delete d.eval_model_ref;
+      markFormDirty("models");
+    });
+    const desc = document.createElement("p");
+    desc.className = "model-panel-desc";
+    desc.textContent = tr("set.model.evalDesc");
+
+    fld.appendChild(lbl); fld.appendChild(sel); fld.appendChild(desc);
+    return fld;
+  }
+
+  // buildEmbedField returns the "internal embedding model" field — a dropdown of
+  // the models flagged `embedding: true`. The selection is persisted as
+  // models.json `embed_model_ref` and drives semantic recall (soft-skills,
+  // precedents, codebase). When unset, recall is disabled and the agent uses its
+  // glob/grep fallbacks.
+  function buildEmbedField(d) {
+    const embedModels = Object.keys(d.models || {}).filter(n => d.models[n] && d.models[n].embedding);
+    const fld = document.createElement("div");
+    fld.className = "model-field model-field-full";
+
+    const lbl = document.createElement("label");
+    lbl.className = "model-field-label";
+    lbl.textContent = tr("set.model.internalEmbedding");
 
     const sel = document.createElement("select");
     sel.className = "model-field-input";
@@ -2329,66 +2384,8 @@ const BASE_PATH = window.BASE_PATH || "";
     desc.className = "model-panel-desc";
     desc.textContent = tr("set.model.embedDesc");
 
-    fld.appendChild(sel); fld.appendChild(desc);
-    body.appendChild(fld);
-    wrap.appendChild(hdr);
-    wrap.appendChild(body);
-    el.appendChild(wrap);
-  }
-
-  // renderEvalSelector renders the "/goal evaluator model" dropdown, listing the
-  // chat (non-embedding) models. The selection is persisted as models.json
-  // `eval_model_ref` and is used by the /goal completion judge after each turn.
-  // When unset, the judge falls back to the session's leader model. Mirrors
-  // renderEmbedSelector; applies on the next config reload (no restart needed).
-  function renderEvalSelector(d, el) {
-    if (!el) return;
-    const chatModels = Object.keys(d.models || {}).filter(n => d.models[n] && !d.models[n].embedding);
-    el.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.className = "embed-select-card model-card";
-
-    const hdr = document.createElement("div");
-    hdr.className = "model-card-hdr";
-    const title = document.createElement("div");
-    title.className = "model-card-title";
-    const strong = document.createElement("strong");
-    strong.textContent = tr("set.model.evalModel");
-    title.appendChild(strong);
-    hdr.appendChild(title);
-
-    const body = document.createElement("div");
-    body.className = "model-card-body";
-    const fld = document.createElement("div");
-    fld.className = "model-field model-field-full";
-
-    const sel = document.createElement("select");
-    sel.className = "model-field-input";
-    const none = document.createElement("option");
-    none.value = "";
-    none.textContent = tr("set.model.evalDefault");
-    sel.appendChild(none);
-    for (const n of chatModels) {
-      const opt = document.createElement("option");
-      opt.value = n; opt.textContent = n;
-      if ((d.eval_model_ref || "").toLowerCase() === n.toLowerCase()) opt.selected = true;
-      sel.appendChild(opt);
-    }
-    sel.disabled = !chatModels.length;
-    sel.addEventListener("change", () => {
-      if (sel.value) d.eval_model_ref = sel.value; else delete d.eval_model_ref;
-      markFormDirty("models");
-    });
-    const desc = document.createElement("p");
-    desc.className = "model-panel-desc";
-    desc.textContent = tr("set.model.evalDesc");
-
-    fld.appendChild(sel); fld.appendChild(desc);
-    body.appendChild(fld);
-    wrap.appendChild(hdr);
-    wrap.appendChild(body);
-    el.appendChild(wrap);
+    fld.appendChild(lbl); fld.appendChild(sel); fld.appendChild(desc);
+    return fld;
   }
 
   function renderModelCards(d, el) {
@@ -2433,16 +2430,13 @@ const BASE_PATH = window.BASE_PATH || "";
       const body = card.querySelector(".model-card-body");
 
       // On model-combo selection we re-render the whole card grid (and the
-      // embed selector) so prefilled metadata — context length, prices, dim,
-      // embedding flag — becomes visible.
+      // General selectors) so prefilled metadata — context length, prices, dim,
+      // embedding flag — becomes visible. Both the embedding and /goal evaluator
+      // selectors depend on the embedding-flag set, so re-render the whole card.
       const refreshEmbed = () => {
         const parent = el.parentElement;
-        const row = parent && parent.querySelector("#embed-select-row");
-        if (row) renderEmbedSelector(d, row);
-        // The /goal evaluator selector lists chat (non-embedding) models, so an
-        // embedding-flag toggle changes its options too — keep it in sync.
-        const evalRow = parent && parent.querySelector("#eval-select-row");
-        if (evalRow) renderEvalSelector(d, evalRow);
+        const row = parent && parent.querySelector("#general-select-row");
+        if (row) renderGeneralSelectors(d, row);
       };
       const rerender = () => { renderModelCards(d, el); refreshEmbed(); };
       const { streamWrap, cacheWrap, fg } = buildModelConfigFields(d, m, {

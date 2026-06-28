@@ -4565,6 +4565,7 @@ function buildSessionRow(s, { archived }) {
       <div class="session-name" data-tip="${escHtml(displayName)}">${escHtml(displayName)}</div>
       <div class="session-actions">
         <button class="session-action-btn session-menu-btn" data-tip="Actions" tabindex="-1" aria-label="Session actions">${ICON_DOTS}</button>
+        <button class="session-action-btn session-delete-btn" data-tip="${escHtml(tr("menu.delete"))}" tabindex="-1" aria-label="${escHtml(tr("menu.delete"))}">${ICON_DELETE}</button>
       </div>
     </div>
     <div class="session-bottom-row">
@@ -4580,6 +4581,17 @@ function buildSessionRow(s, { archived }) {
   li.querySelector(".session-menu-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     openSessionCtxMenu(e, s, archived, li);
+  });
+  li.querySelector(".session-delete-btn").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const ok = await uiConfirm({
+      title: tr("app.session.deleteTitle"),
+      message: tr("app.session.deleteMsg", { name: displayName }),
+      confirmText: tr("common.delete"),
+      cancelText: tr("common.cancel"),
+      danger: true,
+    });
+    if (ok) deleteSession(s.id, li);
   });
   return li;
 }
