@@ -713,6 +713,8 @@ function attachPaneHandlers(panel) {
 
   pe.slashBtn.addEventListener("click", () => {
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
+    // Toggle: a second click on the button closes the open menu.
+    if (!pe.slashMenu.hasAttribute("hidden")) { hideSlashMenu(); return; }
     if (!pe.prompt.value.startsWith("/")) pe.prompt.value = "/" + pe.prompt.value;
     pe.prompt.focus();
     autoGrowPrompt(panel);
@@ -6563,6 +6565,7 @@ function renderSlashMenu(prefix) {
 
   slashMenuFocusIdx = -1;
   sm.removeAttribute("hidden");
+  sm.scrollTop = 0; // start from the top each time the menu is shown
   panel.els.slashBtn.classList.add("active");
 }
 
@@ -7806,10 +7809,17 @@ function updateEditModeBtn() {
       : (sendOnEnter ? "Message the agent… (Enter to send)" : "Message the agent… (Ctrl+Enter to send)");
   }
 }
-// Clicking outside the focused pane's composer closes its slash menu.
+// Any mousedown outside the open menu closes it — except on the slash button
+// (whose own click toggles the menu) and inside the prompt textarea (so clicking
+// to reposition the caret while filtering keeps it open). This also means
+// clicking a sibling composer control (context ring, send, attach…) closes it.
 document.addEventListener("mousedown", (e) => {
   const open = panels.find(p => !p.els.slashMenu.hasAttribute("hidden"));
-  if (open && !open.els.composerWrap.contains(e.target)) hideSlashMenu();
+  if (!open) return;
+  if (open.els.slashMenu.contains(e.target)) return;
+  if (open.els.slashBtn.contains(e.target)) return;
+  if (open.els.prompt.contains(e.target)) return;
+  hideSlashMenu();
 });
 
 // ─── Composer resize ─────────────────────────────────────────────────────────
