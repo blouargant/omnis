@@ -35,6 +35,14 @@
   margin: 18px auto 0;
   white-space: normal;
   position: relative;
+  /* Lift the floating header above the transcript so its downward box-shadow is
+     not occluded. Assistant rows are `position: relative` (z-index auto) to
+     anchor their copy button, so they paint in DOM order with the header (also
+     z-index auto) — and being later in the DOM, their opaque code-block
+     backgrounds would otherwise cover the header's shadow. A small explicit
+     z-index lifts the header above those auto-stacked rows while staying below
+     the composer (3), ask-user slot (4), and tab bar (8/9). */
+  z-index: 1;
 }
 /* The pinned prompt floats above the transcript, so it gets a soft, slightly
    stronger, downward-biased drop shadow (rather than a hard fade band beneath
