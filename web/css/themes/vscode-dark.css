@@ -1,0 +1,39 @@
+/* VS Code Dark — the historical base (:root) palette, now exposed under an
+   explicit id so it stays selectable while an empty/unset theme resolves to the
+   default VS Code Light skin. Values mirror the dark tokens in
+   features/common.css :root; color-scheme: dark is inherited from there. */
+[data-theme="vscode-dark"] {
+  --bg: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-raised: #2a2d2e;
+  --bg-raised-hover: #333436;
+  --bg-active: #37373d;
+  --bg-input: #3a3c3a;
+  --border: #3e3e42;
+  --border-strong: #595959;
+  --text: #cccccc;
+  --text-strong: #ffffff;
+  --text-muted: #858585;
+  --text-faint: #5a5a5a;
+  --accent: #0e639c;
+  --accent-hover: #1177bb;
+  --accent-strong: #007acc;
+  --accent-bg-soft: rgba(14, 99, 156, 0.25);
+  --accent-border-soft: rgba(14, 99, 156, 0.5);
+  --accent-hover-bg: #094771;
+  --scroll-thumb: #424242;
+  --scroll-thumb-hover: #525257;
+  --bubble-user-bg: #3a3c3a;
+  --bubble-user-border: #595959;
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --danger-fg: #f48771;
+  --danger-bg: #3a1f1f;
+  --danger-border: #5a2a2a;
+  --danger-bg-hover: #4a2525;
+  --danger-bg-soft: rgba(244, 135, 113, 0.12);
+  --warn-fg: #e2c08d;
+  --warn-bg: #3a2f0a;
+  --warn-border: #5a4a1f;
+  --warn-action-bg: #8a6d1a;
+  --warn-action-hover: #a3811f;
+}

@@ -16,10 +16,11 @@ import (
 // restarts. It is intentionally narrow: anything that can be reconstructed
 // from a YAML file does not belong here.
 type preferences struct {
-	// Theme is the selected UI theme id ("" = VS Code Dark, the empty-id :root
-	// palette). A pointer so an absent value (never chosen — first run) is
-	// distinguishable from an explicit "" (VS Code Dark); the web UI applies its
-	// default skin (VS Code Light) only while this is unset.
+	// Theme is the selected UI theme id (e.g. "vscode-dark", "github-dark"). A
+	// pointer so an absent value (never chosen — first run) is distinguishable
+	// from an explicit choice. The web UI applies its default skin (VS Code
+	// Light) whenever this is unset OR empty: an empty "" is treated as "no
+	// real choice" and resolves to the default, not to a base dark palette.
 	Theme *string `json:"theme,omitempty"`
 	// Notifications records whether the user opted into desktop notifications
 	// (background-task completions and finished chat replies while away). A

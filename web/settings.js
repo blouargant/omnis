@@ -87,8 +87,9 @@ const BASE_PATH = window.BASE_PATH || "";
   // `tone` groups Dark/Light within a tier in the picker.
   const THEME_STORAGE_KEY = "agent_toolkit_theme";
   // Default skin applied when the user has never picked a theme (no localStorage
-  // entry and no server-side preference). VS Code Dark remains selectable as the
-  // empty-id :root palette; this only governs the first-run fallback.
+  // entry and no server-side preference) or has an empty "" value. VS Code Dark
+  // remains selectable via its explicit "vscode-dark" id; this governs the
+  // unset/empty fallback only.
   const DEFAULT_THEME = "vscode-light";
   // localStorage cache for the unified desktop-notification preference. The
   // durable source of truth is the server preferences.json (user home); this
@@ -96,7 +97,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const NOTIFY_STORAGE_KEY = "agent_toolkit_os_notify";
   const THEMES = [
     // Principal
-    { id: "",                label: "VS Code Dark",    tier: "principal", tone: "Dark",  swatch: ["#1e1e1e", "#252526", "#0e639c", "#cccccc"] },
+    { id: "vscode-dark",     label: "VS Code Dark",    tier: "principal", tone: "Dark",  swatch: ["#1e1e1e", "#252526", "#0e639c", "#cccccc"] },
     { id: "github-dark",     label: "GitHub Dark",     tier: "principal", tone: "Dark",  swatch: ["#0d1117", "#161b22", "#388bfd", "#e6edf3"] },
     { id: "one-dark",        label: "One Dark",        tier: "principal", tone: "Dark",  swatch: ["#282c34", "#21252b", "#61afef", "#abb2bf"] },
     { id: "vscode-light",    label: "VS Code Light",   tier: "principal", tone: "Light", swatch: ["#ffffff", "#f3f3f3", "#0e639c", "#1e1e1e"] },
@@ -117,22 +118,27 @@ const BASE_PATH = window.BASE_PATH || "";
   ];
 
   function getActiveTheme() {
-    // null = never chosen → fall back to the default skin; "" = explicit VS Code Dark.
+    // null (never chosen) OR "" (legacy empty value) → the default light skin.
+    // VS Code Dark is now an explicit id ("vscode-dark"), so an empty theme no
+    // longer means dark — it resolves to DEFAULT_THEME like an unset value.
     const v = localStorage.getItem(THEME_STORAGE_KEY);
-    return v === null ? DEFAULT_THEME : v;
+    return v ? v : DEFAULT_THEME;
   }
   function applyTheme(id, opts) {
     const root = document.documentElement;
-    if (id) root.setAttribute("data-theme", id);
-    else root.removeAttribute("data-theme");
-    localStorage.setItem(THEME_STORAGE_KEY, id);
+    // Normalise empty/null to the default skin so an empty theme renders as
+    // VS Code Light (not the historical base dark palette) and is persisted as
+    // a concrete id.
+    const eff = id || DEFAULT_THEME;
+    root.setAttribute("data-theme", eff);
+    localStorage.setItem(THEME_STORAGE_KEY, eff);
     // Persist to the server so the choice survives restarts. Skipped when
     // applying a value that just came from the server.
     if (!opts || opts.persist !== false) {
       fetch(BASE_PATH + "/api/preferences", {
         method: "PUT",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ theme: id }),
+        body: JSON.stringify({ theme: eff }),
       }).catch(() => { /* offline / unauthenticated — local cache wins */ });
     }
   }
@@ -172,10 +178,12 @@ const BASE_PATH = window.BASE_PATH || "";
       const r = await fetch(BASE_PATH + "/api/preferences", { headers: authHeaders() });
       if (r.ok) {
         prefs = await r.json();
-        // An explicit server choice (any string, including "" = VS Code Dark)
-        // wins. Its absence (first run) leaves whatever the inline <head> script
-        // applied — the user's local choice, or the DEFAULT_THEME default skin.
-        if (prefs && typeof prefs.theme === "string" && prefs.theme !== getActiveTheme()) {
+        // An explicit non-empty server choice wins. An empty "" (or absent)
+        // value is "no real choice" → the default light skin; applyTheme
+        // normalises "" to DEFAULT_THEME, so a legacy theme:"" no longer paints
+        // the base dark palette. Absence (first run) leaves whatever the inline
+        // <head> script applied — the user's local choice, or the default skin.
+        if (prefs && typeof prefs.theme === "string" && (prefs.theme || DEFAULT_THEME) !== getActiveTheme()) {
           applyTheme(prefs.theme, { persist: false });
         }
         // Seed the notification cache from the server when a choice exists; an
