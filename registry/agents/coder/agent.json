@@ -1,0 +1,21 @@
+{
+  "allow_file_attachments": true,
+  "builtin": true,
+  "description": "Engineering agent for substantial coding work: navigates and edits large codebases with language-server intelligence (definitions, references, hover types, diagnostics, safe rename), plans multi-step changes, isolates risky work in git worktrees, and verifies edits by re-checking diagnostics and running builds/tests in the background.",
+  "enabled": true,
+  "leader": true,
+  "model_ref": "premium",
+  "name": "coder",
+  "skills": null,
+  "softskills_dir": "",
+  "tools": [
+    "fs",
+    "Skill",
+    "softskills",
+    "code_search",
+    "planning",
+    "worktree",
+    "bg",
+    "lsp"
+  ]
+}

@@ -245,6 +245,13 @@ func run() error {
 	fstools.SetCwdResolver(func(sessionID string) string { return bashCwd.get(sessionID) })
 	defer fstools.SetCwdResolver(nil)
 
+	// Keep running language servers' open-buffer view current with agent edits:
+	// every successful Write/Edit/revert fires file_changed (see server/sse.go),
+	// which calls this hook → the LSP manager re-syncs an already-open document.
+	// No-op for files no server has open or languages nobody is using.
+	agent.SetFileChangeHook(infra.LSP().NotifyChange)
+	defer agent.SetFileChangeHook(nil)
+
 	registry := sessions.NewRegistry()
 
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.

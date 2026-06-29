@@ -15,6 +15,7 @@ import (
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/goal"
+	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/scheduler"
@@ -107,6 +108,11 @@ type Infrastructure struct {
 	// bus listeners, wired exactly once). Built lazily from the first
 	// generation's runtime settings; see Hooks.
 	hooks hooksCache
+
+	// lsp memoises the process-wide LSP language-server pool (see LSP). Built
+	// lazily, survives hot-reload like the MCP pool; servers index whole
+	// projects, so they must not be rebuilt per generation.
+	lsp lspCache
 }
 
 // BuildInfrastructure constructs the shared infrastructure for the agent.
@@ -162,6 +168,12 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 	// (asking the user first) before the model proceeds. Process-wide because
 	// the ask-user registry is process-wide and survives hot-reload.
 	skills.SetDepGate(newSkillDepGate(askUserReg))
+
+	// Install the process-wide LSP dependency gate: when a configured language
+	// server declares `requires`, its binary is installed (asking the user
+	// first) at first use before the server starts. Same model as the skill
+	// gate above; process-wide because the LSP manager survives hot-reload.
+	lsp.SetDepGate(newLSPDepGate(askUserReg))
 
 	suffix := func(userID, sessionID string) string {
 		u := sanitizeID(userID)
@@ -297,7 +309,11 @@ func (i *Infrastructure) WatchBackground(ctx context.Context, userID, sessionID 
 // Close releases shared resources held by the infrastructure. Safe to call
 // at most once; subsequent calls are no-ops at the backend level.
 func (i *Infrastructure) Close() error {
-	if i == nil || i.Backend == nil {
+	if i == nil {
+		return nil
+	}
+	i.shutdownLSP()
+	if i.Backend == nil {
 		return nil
 	}
 	return i.Backend.Close()

@@ -26,6 +26,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/llm"
 	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/softskills"
@@ -166,6 +167,14 @@ func buildSquadInstance(
 	}
 	if keySet["bg"] {
 		leadTools = append(leadTools, infra.BgQueues.Tools()...)
+	}
+	if keySet["lsp"] {
+		// Language-server code intelligence (navigation + diagnostics + rename).
+		// Mounted only when lsp_config.json declares a server, so the toolset
+		// stays clean otherwise (additive no-op contract).
+		if mgr := infra.LSP(); mgr != nil && mgr.HasServers() {
+			leadTools = append(leadTools, lsp.Tools(mgr)...)
+		}
 	}
 
 	// ── Always-on for any squad root: teammate mailbox + ask_user ──

@@ -185,6 +185,10 @@ func toolClasses(omnisTool string) []string {
 		return []string{"Read"}
 	case "Edit", "revert":
 		return []string{"Edit"}
+	case "lsp_rename":
+		// A project-wide rename writes many files; gate it like any edit so
+		// Edit allow/deny/ask rules and acceptEdits mode cover it.
+		return []string{"Edit"}
 	case "Write":
 		return []string{"Write", "Edit"}
 	default:

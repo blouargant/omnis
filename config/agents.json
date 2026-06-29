@@ -14,7 +14,8 @@
     "k8s_leader",
     "k8s_investigator",
     "knowledge_leader",
-    "doc_agent"
+    "doc_agent",
+    "coder"
   ],
   "app_name": "omnis",
   "bash_timeout_seconds": 120,
@@ -74,6 +75,14 @@
       "leader": "none",
       "members": [
         "helper"
+      ]
+    },
+    {
+      "name": "Coding",
+      "description": "Software-engineering specialist for substantial coding work on real projects: navigating and editing large codebases with language-server intelligence (go-to-definition, find-references, hover types, project-wide diagnostics and safe rename), planning multi-step changes, isolating risky work in git worktrees, and verifying every edit by re-checking diagnostics and running builds/tests in the background. Route here for implementing features, refactoring, fixing bugs, or any non-trivial change to a codebase (as opposed to one-off scripts). Leaderless: the coder agent runs directly.",
+      "leader": "none",
+      "members": [
+        "coder"
       ]
     }
   ],

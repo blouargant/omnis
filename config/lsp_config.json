@@ -1,0 +1,54 @@
+{
+  "servers": {
+    "go": {
+      "command": "gopls",
+      "extensions": [".go"],
+      "root_markers": ["go.work", "go.mod"],
+      "requires": [
+        {
+          "command": "gopls",
+          "label": "gopls (Go language server)",
+          "install": "go install golang.org/x/tools/gopls@latest"
+        }
+      ]
+    },
+    "rust": {
+      "command": "rust-analyzer",
+      "extensions": [".rs"],
+      "root_markers": ["Cargo.toml"],
+      "requires": [
+        {
+          "command": "rust-analyzer",
+          "label": "rust-analyzer",
+          "install": "rustup component add rust-analyzer"
+        }
+      ]
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+      "root_markers": ["tsconfig.json", "jsconfig.json", "package.json"],
+      "requires": [
+        {
+          "command": "typescript-language-server",
+          "label": "TypeScript language server",
+          "install": "npm install -g typescript-language-server typescript"
+        }
+      ]
+    },
+    "python": {
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "extensions": [".py", ".pyi"],
+      "root_markers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"],
+      "requires": [
+        {
+          "command": "pyright-langserver",
+          "label": "Pyright (Python language server)",
+          "install": "npm install -g pyright"
+        }
+      ]
+    }
+  }
+}
