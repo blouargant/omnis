@@ -245,6 +245,17 @@ func run() error {
 	fstools.SetCwdResolver(func(sessionID string) string { return bashCwd.get(sessionID) })
 	defer fstools.SetCwdResolver(nil)
 
+	// Durably record a session's working directory whenever it changes (folder
+	// navigation, "!cd", "Open Chat here", fork). Persisting it lets a session —
+	// and any fork of it — resume in the same environment after a restart rather
+	// than falling back to the process root. Server-only: CLI/TUI/tests leave the
+	// hook nil, so their cwd stays in-memory and behaviour is unchanged.
+	bashCwd.setPersist(func(id, dir string) {
+		if err := sessions.SetConversationCwd(id, dir); err != nil {
+			log.Printf("server: failed to persist cwd for session %s: %v", id, err)
+		}
+	})
+
 	// Keep running language servers' open-buffer view current with agent edits:
 	// every successful Write/Edit/revert fires file_changed (see server/sse.go),
 	// which calls this hook → the LSP manager re-syncs an already-open document.
@@ -331,6 +342,12 @@ func run() error {
 			return meta.ID
 		}())
 		manager.Pin(meta.ID)
+		// Restore the session's working directory so it (and any fork) resumes in
+		// the same environment instead of the process root. seed avoids re-writing
+		// the value we just loaded.
+		if dir := strings.TrimSpace(meta.Cwd); dir != "" {
+			bashCwd.seed(meta.ID, dir)
+		}
 		// Restore an in-progress /goal (resume semantics): the condition carries
 		// over, the timer/turn count reset. The goal then re-engages on this
 		// session's next user turn (the producer loop evaluates it after the turn).

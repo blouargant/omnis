@@ -14,20 +14,46 @@ import (
 	"github.com/blouargant/omnis/internal/shellcomplete"
 )
 
-// bashCwdStore tracks the working directory of each session's interactive "!"
-// shell-escape, so an embedded `cd` persists between commands. State is
-// in-memory and per-process — it is intentionally not persisted (the shell
-// escape is a live convenience, not part of the conversation history).
+// bashCwdStore tracks the working directory of each session — the dir its agent
+// tools, interactive "!" shell-escape, and Folders panel operate in — so an
+// embedded `cd` persists between commands. The map is the in-memory source of
+// truth; per-session entries are ALSO durably recorded via the optional persist
+// hook (server-only) so a session, and any fork of it, resumes in the same
+// environment after a restart instead of falling back to the process root. The
+// fixed `root` and the global "no session" browse cwd (`def`) stay in-memory
+// only (transient UI state, not tied to a session).
 type bashCwdStore struct {
-	mu   sync.Mutex
-	m    map[string]string
-	root string // fixed initial root — where new chat sessions start
-	def  string // global "no session" browse cwd (navigable Folders panel)
+	mu      sync.Mutex
+	m       map[string]string
+	root    string               // fixed initial root — where new chat sessions start
+	def     string               // global "no session" browse cwd (navigable Folders panel)
+	persist func(id, dir string) // optional: durably record a session's cwd on change
 }
 
 func newBashCwdStore() *bashCwdStore {
 	wd, _ := os.Getwd()
 	return &bashCwdStore{m: map[string]string{}, root: wd, def: wd}
+}
+
+// setPersist installs the durable-write hook fired by set when a session's cwd
+// changes (the server wires it to sessions.SetConversationCwd). Nil disables
+// persistence — the default for CLI/TUI/tests, where behaviour is unchanged.
+func (s *bashCwdStore) setPersist(fn func(id, dir string)) {
+	s.mu.Lock()
+	s.persist = fn
+	s.mu.Unlock()
+}
+
+// seed sets a session's cwd WITHOUT firing the persist hook — used to restore a
+// persisted cwd on boot, so reloading the saved value doesn't immediately
+// rewrite it.
+func (s *bashCwdStore) seed(id, dir string) {
+	if id == "" || dir == "" {
+		return
+	}
+	s.mu.Lock()
+	s.m[id] = dir
+	s.mu.Unlock()
 }
 
 // get returns the stored working directory for id, falling back to the fixed
@@ -49,8 +75,18 @@ func (s *bashCwdStore) set(id, dir string) {
 		return
 	}
 	s.mu.Lock()
+	changed := s.m[id] != dir
 	s.m[id] = dir
+	persist := s.persist
 	s.mu.Unlock()
+	// Durably record the new cwd only when it actually changed, so a "!ls" (no
+	// cd) or a re-set to the same dir never triggers a redundant disk write.
+	// Synchronous: the write is a tiny atomic file op serialised per-session by
+	// the conversation lock, and ordering matters (a rapid "cd a; cd b" must end
+	// on b).
+	if changed && persist != nil {
+		persist(id, dir)
+	}
 }
 
 // getGlobal / setGlobal manage the **navigable** global browse cwd — the

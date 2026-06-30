@@ -1041,8 +1041,10 @@ calls fall through to the mode default (ask in `default` mode).
 
 - **Rule syntax** ([spec.go](core/permissions/spec.go)): `Bash(npm run *)`,
   `Read(.env)`, `Edit(/src/**)`, `mcp__server__tool`, `Agent(Name)`, bare `Read`.
-  Tool fan-out via `toolClasses`: `Read` rules also cover `Grep`/`Glob`/`mime`;
-  `Edit` covers `Write`/`revert`. Bash gets full Claude parity in
+  Tool fan-out via `toolClasses`: `Read` rules also cover `Grep`/`Glob`/`mime`
+  and the read-only LSP tools (`lsp_document_symbols`/`lsp_workspace_symbol`/
+  `lsp_definition`/`lsp_references`/`lsp_hover`/`lsp_diagnostics`); `Edit` covers
+  `Write`/`revert`/`lsp_rename`. Bash gets full Claude parity in
   [match_bash.go](core/permissions/match_bash.go) (glob with space/`:*`
   word-boundary, compound-command splitting, wrapper stripping, built-in
   read-only allowlist); paths use gitignore anchors in
@@ -1107,7 +1109,7 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 - `agent_memory_<u>_<ts>.md` — compressed session memory
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
-- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag (server only)
+- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` (server only)
 
 **Context restore after a restart.** The web UI persists turn *history* to
 `conversation_<id>.json`, but the model's working memory is the ADK runner's
@@ -1330,11 +1332,16 @@ LLM history (a convenience, like the todo widget).
   separate `!` commands (CWD only — not env vars or shell functions, since each
   call is a fresh shell). The Unix wrapper preserves the command's exit status;
   the cmd.exe wrapper does not.
-- **CWD store**: per-session, in-memory, never persisted. TUI keeps a
+- **CWD store**: per-session. TUI keeps an in-memory
   `map[sessionID]string` in [internal/tui/tui.go](internal/tui/tui.go); the
   server keeps the process-wide `bashCwd *bashCwdStore` in
   [server/bash.go](server/bash.go) (defaults to the process CWD; also used when
-  no session id is supplied, e.g. completion from a draft tab).
+  no session id is supplied, e.g. completion from a draft tab). **In server mode
+  a session's cwd is durably persisted** (see "Per-session working directory
+  persistence" below) so a session — and any fork — resumes in the same
+  environment after a restart; the TUI store stays in-memory only. The fixed
+  initial `root` and the global "no session" browse cwd (`def`) are never
+  persisted (transient, not tied to a session).
 - **Web routes** ([server/bash.go](server/bash.go), registered in
   [server/server.go](server/server.go)): `POST /api/sessions/:id/bash`
   `{command}` → `{output, dir}` (rejects archived sessions); `GET /api/complete?line=…&session=…`
@@ -1568,6 +1575,19 @@ the process working directory. The mechanism lives in
   that never navigated, `bashCwd.get` returns the process cwd, so resolution is a
   no-op and behaviour is byte-identical to before. The `Cwd` fields carry
   `json:"-"` so they never appear in the LLM-facing tool schema.
+- **Per-session working directory persistence (server mode).** A session's cwd is
+  durable, so it (and any **fork** of it) resumes in the same environment after a
+  server restart rather than falling back to the process root. The cwd is mirrored
+  to the persisted `ConversationFile.Cwd` / `SessionMeta.Cwd` and seeded back into
+  `bashCwd` on boot. The write rail is a single **persist hook** on `bashCwdStore`
+  (`setPersist`, wired in [server/main.go](server/main.go) to
+  `sessions.SetConversationCwd`): `bashCwd.set` fires it **only when the dir
+  actually changes** (a `!ls` with no `cd` writes nothing), so every cwd mutation —
+  folder navigation, `!cd`, "Open Chat here", and **fork** (`handleFork`'s
+  `bashCwd.set(forkID, bashCwd.get(srcID))`, [server/fork_rewind.go](server/fork_rewind.go)) —
+  is recorded with no per-call-site plumbing. Boot restore uses `bashCwd.seed`
+  (set without re-firing the hook). CLI/TUI/tests leave the hook nil ⇒ in-memory
+  only, behaviour unchanged. Regression coverage: [server/fork_cwd_test.go](server/fork_cwd_test.go).
 - **Permission scoping follows the session cwd.** The permissions plugin's
   `CWDFunc` now takes the tool context and resolves the cwd via the exported
   `fstools.CwdForContext(tc)` (same resolution as the tools), falling back to the
@@ -2140,8 +2160,10 @@ A conversation lives in **two layers**, both handled:
 `{turn_index}` → `{turns}` + a `session_rewound` broadcast; `POST
 /api/sessions/:id/fork` `{turn_index, title?, full?}` → `{session_id, squad,
 dropped_user_text}` and mirrors the `POST /sessions` wiring (RegisterSession,
-Pin, PushMgr.Watch, `session_created` broadcast, SessionStart hook, inherits the
-source `bashCwd`). `full: true` (the **`/fork` command**) keeps **every** turn
+Pin, PushMgr.Watch, `session_created` broadcast, SessionStart hook, **inherits the
+source's working directory** so the fork starts in the same environment —
+`bashCwd.set(forkID, bashCwd.get(srcID))`, durably persisted, see "Per-session
+working directory persistence"). `full: true` (the **`/fork` command**) keeps **every** turn
 (`keep = len(srcTurns)`, ignoring `turn_index`) so the new session inherits the
 source's **complete context** and nothing is dropped; the turn-action menu path
 omits it and keeps the first `turn_index` turns instead. Both reject **archived**

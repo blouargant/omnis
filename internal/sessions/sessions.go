@@ -50,6 +50,12 @@ type SessionMeta struct {
 	// Empty when no goal is active. The live goal state lives in the process-wide
 	// goal store; this is only the durable condition for resume.
 	Goal string `json:"goal,omitempty"`
+	// Cwd is the session's working directory, mirrored from the conversation file
+	// so the server can seed the in-memory cwd store on restart and a session
+	// (plus any fork) resumes in the same environment. Empty means "never
+	// navigated" (resolves to the process root). The live cwd lives in the
+	// process-wide bashCwd store; this is only the durable value for resume.
+	Cwd string `json:"cwd,omitempty"`
 	// Indexed is set by the idle indexer (and on archive) once a session's
 	// StateLog has been pushed into the cross-session precedent index. It is
 	// in-memory only and cleared by Touch on new activity so a session that

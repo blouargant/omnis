@@ -6,11 +6,10 @@
   "leader": true,
   "model_ref": "premium",
   "name": "coder",
-  "skills": null,
+  "skills": [],
   "softskills_dir": "",
   "tools": [
     "fs",
-    "Skill",
     "softskills",
     "code_search",
     "planning",

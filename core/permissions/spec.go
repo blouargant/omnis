@@ -181,7 +181,11 @@ func toolClasses(omnisTool string) []string {
 	switch omnisTool {
 	case "Bash":
 		return []string{"Bash"}
-	case "Read", "Grep", "Glob", "mime":
+	case "Read", "Grep", "Glob", "mime",
+		// Read-only language-server code intelligence — as safe as Read/Grep, so
+		// an allowed Read rule covers them and they don't prompt.
+		"lsp_document_symbols", "lsp_workspace_symbol", "lsp_definition",
+		"lsp_references", "lsp_hover", "lsp_diagnostics":
 		return []string{"Read"}
 	case "Edit", "revert":
 		return []string{"Edit"}
