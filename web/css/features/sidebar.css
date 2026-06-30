@@ -95,7 +95,9 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #settings-menu,
 #sidebar.collapsed .session-name-row,
 #sidebar.collapsed .session-bottom-row,
-#sidebar.collapsed #settings-btn span {
+#sidebar.collapsed #settings-btn span,
+#sidebar.collapsed #appearance-btn span,
+#sidebar.collapsed #documentation-btn span {
   display: none;
 }
 
@@ -145,9 +147,11 @@ body.resizing #sidebar { transition: none; }
   box-shadow: inset 0 0 0 2px #f0b429;
 }
 
-/* Settings footer: centre the gear, drop the label. */
+/* Settings footer: centre the gear + shortcut buttons, drop the labels. */
 #sidebar.collapsed #sidebar-footer { padding: 8px 4px; }
-#sidebar.collapsed #settings-btn { justify-content: center; padding: 0.4rem 0; gap: 0; }
+#sidebar.collapsed #settings-btn,
+#sidebar.collapsed #appearance-btn,
+#sidebar.collapsed #documentation-btn { justify-content: center; padding: 0.4rem 0; gap: 0; }
 
 #sidebar-header {
   display: flex;
@@ -595,20 +599,24 @@ body.resizing #sidebar { transition: none; }
 }
 
 #sidebar-footer {
+  /* Stacks the Settings gear plus the Appearance / Documentation shortcut
+     buttons as a vertical column at the very bottom of the sidebar. */
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   padding: 8px 12px;
-  /* Fixed bottom-bar height (--bottom-bar-h) so the Settings button row keeps a
-     stable size at the bottom of the sidebar. */
+  /* Fixed bottom-bar minimum (--bottom-bar-h) so the footer keeps a stable
+     size at the bottom of the sidebar; it grows to fit the stacked buttons. */
   min-height: var(--bottom-bar-h);
   border-top: 1px solid var(--border);
-  /* Never let the Settings button be clipped by the sidebar's overflow:hidden;
+  /* Never let the footer buttons be clipped by the sidebar's overflow:hidden;
      the scrollable middle sections (sessions / settings menu) yield space. */
   flex-shrink: 0;
 }
-/* The button is the sole child and is vertically centred by the footer flex;
-   drop its top margin (meant for in-column flow) so it sits truly centred. */
-#sidebar-footer #settings-btn { margin-top: 0; }
+/* Drop the buttons' top margin (meant for in-column flow) — the footer's own
+   gap handles the spacing between the stacked buttons. */
+#sidebar-footer button { margin-top: 0; }
 #set-token {
   width: 100%;
   background: transparent;

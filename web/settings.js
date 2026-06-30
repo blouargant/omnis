@@ -57,6 +57,11 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: DOCUMENTATION_ID,label: "Documentation", title: "Documentation",           kind: "client" },
   ];
 
+  // Menu ids surfaced as always-visible buttons in the sidebar footer (below
+  // the Settings gear) instead of in the in-Settings category list. They stay
+  // in MENU_ITEMS so breadcrumb/title lookups still resolve them.
+  const FOOTER_ITEMS = [APPEARANCE_ID, DOCUMENTATION_ID];
+
   // Documentation pages: ordered list of markdown files served from /assets/docs/.
   // Each entry maps to <web/docs/<file>>; `group` partitions the TOC sidebar.
   const DOC_PAGES = [
@@ -269,6 +274,9 @@ const BASE_PATH = window.BASE_PATH || "";
 
   const state = {
     activeFile: "skills",
+    // Last non-footer (config) section shown — the gear returns here when it is
+    // opened from an autonomous Appearance/Documentation view.
+    lastMenuFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "agents", // only used when activeFile === 'agent'
     activeModelsSubtab: "models", // only used when activeFile === 'models'
@@ -670,6 +678,9 @@ const BASE_PATH = window.BASE_PATH || "";
     sidebarMenuListEl = document.getElementById("settings-menu-list");
     if (!sidebarMenuListEl || sidebarMenuListEl.children.length) return;
     for (const m of MENU_ITEMS) {
+      // Appearance and Documentation live as always-visible buttons in the
+      // sidebar footer (below the Settings gear), not in this category list.
+      if (FOOTER_ITEMS.includes(m.id)) continue;
       const li = document.createElement("li");
       li.dataset.file = m.id;
       li.innerHTML = `${ICONS[m.id] || ""}<span>${escHtml(tr("settings.menu." + m.id))}</span>`;
@@ -710,6 +721,17 @@ const BASE_PATH = window.BASE_PATH || "";
         li.classList.toggle("active", f === id);
       }
     });
+    // The Appearance / Documentation footer buttons highlight when their
+    // section is the active one (they live outside #settings-menu-list).
+    document.getElementById("appearance-btn")?.classList.toggle("active", id === APPEARANCE_ID);
+    document.getElementById("documentation-btn")?.classList.toggle("active", id === DOCUMENTATION_ID);
+    // Sidebar chrome follows the active section: a footer section (Appearance /
+    // Documentation) is autonomous — the Settings category menu stays hidden and
+    // the gear is not highlighted; a config section reveals the menu + lights
+    // the gear. Anything goes when the panel is closed.
+    const footer = FOOTER_ITEMS.includes(id);
+    document.getElementById("settings-btn")?.classList.toggle("active", state.open && !footer);
+    if (sidebarMenuEl) sidebarMenuEl.hidden = !state.open || footer;
     updateBreadcrumb(id);
   }
 
@@ -730,6 +752,9 @@ const BASE_PATH = window.BASE_PATH || "";
       return;
     }
     state.activeFile = id;
+    // Remember the last config section so the gear can return to it after an
+    // autonomous Appearance/Documentation view.
+    if (!FOOTER_ITEMS.includes(id)) state.lastMenuFile = id;
     // Switching sections always returns to the form view; raw is opt-in
     // per visit via the sidebar Raw JSON entry.
     state.activeView = "form";
@@ -8885,13 +8910,19 @@ const BASE_PATH = window.BASE_PATH || "";
     ensurePanel();
     refreshBannerVisibility();
     state.open = true;
+    // The gear always opens the configuration view (category menu visible). If
+    // we were showing an autonomous footer section (Appearance/Documentation),
+    // fall back to the last config section so the menu highlight matches.
+    if (FOOTER_ITEMS.includes(state.activeFile)) {
+      state.activeFile = state.lastMenuFile || "skills";
+      state.activeView = "form";
+    }
     // Single CSS class drives chat-vs-settings layout; no inline style fights
     // with app.js for control of #transcript / #composer-wrap / #prompt-header.
     document.getElementById("chat").classList.add("chat--settings");
     panelEl.hidden = false;
-    const sb = document.getElementById("settings-btn");
-    if (sb) sb.classList.add("active");
-    if (sidebarMenuEl) sidebarMenuEl.hidden = false;
+    // syncActiveHighlight reveals the category menu + lights the gear (config
+    // section ⇒ not a footer item).
     syncActiveHighlight(state.activeFile);
     renderBody();
   }
@@ -8903,10 +8934,26 @@ const BASE_PATH = window.BASE_PATH || "";
     document.getElementById("chat").classList.remove("chat--settings");
     const sb = document.getElementById("settings-btn");
     if (sb) sb.classList.remove("active");
+    document.getElementById("appearance-btn")?.classList.remove("active");
+    document.getElementById("documentation-btn")?.classList.remove("active");
     if (sidebarMenuEl) sidebarMenuEl.hidden = true;
   }
 
   function isOpen() { return state.open; }
+
+  // Open an autonomous footer section (Appearance / Documentation) — the panel
+  // content shows, but the Settings category menu stays hidden and the gear is
+  // not highlighted (driven by syncActiveHighlight via setActiveFile). Clicking
+  // the button for the already-showing section closes it (toggle).
+  async function jumpToSection(id) {
+    if (state.open && state.activeFile === id) { close(); return; }
+    ensurePanel();
+    refreshBannerVisibility();
+    state.open = true;
+    document.getElementById("chat").classList.add("chat--settings");
+    panelEl.hidden = false;
+    await setActiveFile(id);
+  }
 
   // ─── Settings assistant (in-panel Helper chat) ──────────────────────────
   // A Helper-backed chat reached via a floating action button (FAB) at the
@@ -9231,7 +9278,15 @@ const BASE_PATH = window.BASE_PATH || "";
     syncThemeFromServer();
     const btn = document.getElementById("settings-btn");
     if (btn) btn.addEventListener("click", () => {
-      if (isOpen()) close(); else open();
+      // Close only when already showing a config section; when showing an
+      // autonomous footer section (Appearance/Documentation), the gear switches
+      // to the config view rather than closing.
+      if (isOpen() && !FOOTER_ITEMS.includes(state.activeFile)) close();
+      else open();
     });
+    document.getElementById("appearance-btn")
+      ?.addEventListener("click", () => jumpToSection(APPEARANCE_ID));
+    document.getElementById("documentation-btn")
+      ?.addEventListener("click", () => jumpToSection(DOCUMENTATION_ID));
   });
 })();

@@ -1,8 +1,11 @@
 /* Settings sidebar chrome: settings button, section labels, in-sidebar settings menu
    Part of web/css/settings.css — edit this partial, not the @import barrel. */
 
-/* Settings sidebar button */
-#settings-btn {
+/* Settings sidebar buttons: the gear plus the Appearance / Documentation
+   shortcut buttons stacked beneath it in #sidebar-footer share one look. */
+#settings-btn,
+#appearance-btn,
+#documentation-btn {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -14,18 +17,28 @@
   text-align: left;
   cursor: pointer;
   border-radius: 4px;
-  font-size: 0.85rem;
+  font-size: 0.65rem;
   color: inherit;
 }
-#settings-btn svg { flex-shrink: 0; opacity: 0.8; }
-#settings-btn:hover { background: var(--bg-raised); }
-#settings-btn:hover svg { opacity: 1; }
-#settings-btn.active {
+#settings-btn svg,
+#appearance-btn svg,
+#documentation-btn svg { flex-shrink: 0; opacity: 0.8; }
+#settings-btn:hover,
+#appearance-btn:hover,
+#documentation-btn:hover { background: var(--bg-raised); }
+#settings-btn:hover svg,
+#appearance-btn:hover svg,
+#documentation-btn:hover svg { opacity: 1; }
+#settings-btn.active,
+#appearance-btn.active,
+#documentation-btn.active {
   background: var(--accent-bg-soft);
   border-color: var(--accent-border-soft);
   color: var(--text);
 }
-#settings-btn.active svg { opacity: 1; }
+#settings-btn.active svg,
+#appearance-btn.active svg,
+#documentation-btn.active svg { opacity: 1; }
 
 /* ─── Sidebar section labels ──────────────────────────────────────────── */
 .sidebar-section-label {
