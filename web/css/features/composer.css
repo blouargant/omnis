@@ -43,7 +43,7 @@
   right: 0;
   bottom: 0;
   top: -52px;
-  background: linear-gradient(to bottom, transparent, var(--bg-panel) 65%);
+  background: linear-gradient(to bottom, transparent, var(--bg) 65%);
   pointer-events: none;
   z-index: 0;
 }

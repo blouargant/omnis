@@ -23,7 +23,10 @@
   display: flex;
   flex-direction: row;
   overflow: hidden;
-  background: var(--bg-panel);
+  /* Match the Settings panel's reading surface (var(--bg)); the pane chrome
+     (tab bar, picker) stays var(--bg-panel), mirroring how Settings keeps its
+     header on --bg-panel above a --bg body. */
+  background: var(--bg);
   /* Positioning context for the absolutely-positioned settings panel
    * (see settings.css). Always set, not gated by a class, so the panel
    * is correctly anchored regardless of load order. */
