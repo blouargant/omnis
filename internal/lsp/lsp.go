@@ -37,12 +37,24 @@ type Server struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Extensions are the file suffixes this server handles, incl. dot (".go").
 	Extensions []string `json:"extensions"`
+	// Filenames are basename glob patterns this server handles, matched with
+	// filepath.Match against filepath.Base(path) (e.g. ["Dockerfile",
+	// "Dockerfile.*", "Makefile"]). This is how extensionless files — which have
+	// no suffix for Extensions to key on — get routed to a server. A file matches
+	// a server if its extension is in Extensions OR its basename matches any
+	// Filenames pattern.
+	Filenames []string `json:"filenames,omitempty"`
 	// RootMarkers are filenames whose presence marks a workspace root
 	// (e.g. ["go.mod"], ["Cargo.toml"], ["package.json", "tsconfig.json"]).
 	RootMarkers []string `json:"root_markers"`
 	// LanguageID is the LSP languageId sent on didOpen. Defaults to Name when
 	// empty (e.g. key "ts" → set "typescript" here).
 	LanguageID string `json:"language_id,omitempty"`
+	// LanguageIDs overrides the languageId per file extension (lowercased, incl.
+	// dot), for a server that handles several languages under one process — e.g.
+	// clangd with {".c": "c"} so pure-C files open as "c" while the rest fall back
+	// to LanguageID/Name ("cpp"). An extension absent here uses langID().
+	LanguageIDs map[string]string `json:"language_ids,omitempty"`
 	// Requires lists runtime tool dependencies (typically the server binary
 	// itself) the host installs on first use via the dependency gate — same
 	// mechanism as skill / MCP `requires`. Empty means the binary must already
@@ -56,6 +68,45 @@ func (s Server) langID() string {
 		return s.LanguageID
 	}
 	return s.Name
+}
+
+// langIDForPath returns the languageId for a specific file: a per-extension
+// override from LanguageIDs when present, else the server default (langID). This
+// lets one server serve several languages with the right per-file id — e.g.
+// clangd sending "c" for .c and "cpp" for .cpp.
+func (s Server) langIDForPath(path string) string {
+	if len(s.LanguageIDs) > 0 {
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != "" {
+			if id := strings.TrimSpace(s.LanguageIDs[ext]); id != "" {
+				return id
+			}
+		}
+	}
+	return s.langID()
+}
+
+// handles reports whether this server should service path: true when path's
+// extension is one of Extensions, or its basename matches any Filenames glob.
+// The Filenames branch is what routes extensionless files (Dockerfile, Makefile).
+func (s Server) handles(path string) bool {
+	if ext := strings.ToLower(filepath.Ext(path)); ext != "" {
+		for _, e := range s.Extensions {
+			if strings.EqualFold(e, ext) {
+				return true
+			}
+		}
+	}
+	base := filepath.Base(path)
+	for _, pat := range s.Filenames {
+		if strings.EqualFold(pat, base) {
+			return true
+		}
+		if ok, err := filepath.Match(pat, base); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Load parses the JSON at path. A missing file yields an empty config, so a
@@ -109,19 +160,14 @@ func (c *Config) ServerList() []Server {
 	return out
 }
 
-// ServerForFile returns the server that handles path's extension. When two
-// servers declare the same extension the lexicographically-first key wins
-// (a config-authoring concern). Returns false when no server matches.
+// ServerForFile returns the server that handles path — by extension or by a
+// Filenames glob on its basename (so extensionless files like Dockerfile route).
+// When two servers both match, the lexicographically-first key wins (a
+// config-authoring concern). Returns false when no server matches.
 func (c *Config) ServerForFile(path string) (Server, bool) {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == "" {
-		return Server{}, false
-	}
 	for _, s := range c.ServerList() {
-		for _, e := range s.Extensions {
-			if strings.EqualFold(e, ext) {
-				return s, true
-			}
+		if s.handles(path) {
+			return s, true
 		}
 	}
 	return Server{}, false

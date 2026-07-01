@@ -53,7 +53,8 @@ func (b *boundedBuffer) tail(n int) string {
 // langServer is one live (root, language) server instance.
 type langServer struct {
 	name string // config key, e.g. "go"
-	lang string // LSP languageId, e.g. "go" / "typescript"
+	lang string // default LSP languageId, e.g. "go" / "typescript"
+	cfg  Server // the server config, for per-file languageId resolution
 	root string // workspace root the server was initialized against
 	cmd  *exec.Cmd
 	cli  *Client
@@ -115,6 +116,7 @@ func startServer(s Server, root string, initTimeout time.Duration) (*langServer,
 	ls := &langServer{
 		name:       s.Name,
 		lang:       s.langID(),
+		cfg:        s,
 		root:       root,
 		cmd:        cmd,
 		cli:        cli,
@@ -174,7 +176,7 @@ func (ls *langServer) ensureOpen(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := ls.cli.DidOpen(uri, ls.lang, string(data)); err != nil {
+	if err := ls.cli.DidOpen(uri, ls.cfg.langIDForPath(path), string(data)); err != nil {
 		return err
 	}
 	ls.mu.Lock()
@@ -260,7 +262,7 @@ func (ls *langServer) syncDoc(path string) error {
 	if !open {
 		ls.openDocs[uri] = 1
 		ls.mu.Unlock()
-		return ls.cli.DidOpen(uri, ls.lang, string(data))
+		return ls.cli.DidOpen(uri, ls.cfg.langIDForPath(path), string(data))
 	}
 	ver++
 	ls.openDocs[uri] = ver

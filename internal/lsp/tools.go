@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -385,15 +386,31 @@ func newLSPTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool.Too
 
 // --- formatting ---
 
-// formatSymbols renders a symbol tree as an indented outline with kinds and
-// 1-based line numbers.
+// formatSymbols renders a symbol tree as an indented outline. Each line is
+// "<name>  <signature>  (<kind>)  L<line>", where the signature is the
+// server-provided detail (a function's parameters/returns, a field's type) —
+// the most useful part for the model, since it shows how to use a symbol
+// without opening the file. The detail is omitted when the server provides none.
 func formatSymbols(syms []DocumentSymbol) string {
 	var b strings.Builder
 	var walk func(s []DocumentSymbol, depth int)
 	walk = func(s []DocumentSymbol, depth int) {
 		for _, sym := range s {
-			fmt.Fprintf(&b, "%s%s  (%s)  L%d\n",
-				strings.Repeat("  ", depth), sym.Name, sym.Kind, sym.SelectionRange.Start.Line+1)
+			b.WriteString(strings.Repeat("  ", depth))
+			b.WriteString(sym.Name)
+			if d := strings.TrimSpace(sym.Detail); d != "" {
+				b.WriteString("  ")
+				b.WriteString(d)
+			}
+			// Anchor line is the name (SelectionRange); append the body's end
+			// line so the model knows the symbol's extent and can Read it whole.
+			start := sym.SelectionRange.Start.Line + 1
+			end := sym.Range.End.Line + 1
+			if end > start {
+				fmt.Fprintf(&b, "  (%s)  L%d-%d\n", sym.Kind, start, end)
+			} else {
+				fmt.Fprintf(&b, "  (%s)  L%d\n", sym.Kind, start)
+			}
 			walk(sym.Children, depth+1)
 		}
 	}
@@ -401,29 +418,82 @@ func formatSymbols(syms []DocumentSymbol) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// formatLocations renders locations as compact 1-based file:line:col lines,
-// relative to cwd when possible.
+// formatLocations renders locations as "file:line:col: <source line>" — the
+// actual code at each location (like grep -n), so the model sees the call site
+// or definition line without opening every file. Each file is read once
+// (cached); long lines are truncated. Falls back to bare file:line:col when the
+// line can't be read.
 func formatLocations(locs []Location, cwd string) string {
 	if len(locs) == 0 {
 		return "(no results)"
 	}
+	cache := map[string][]string{}
+	sourceLine := func(path string, line int) string {
+		lines, ok := cache[path]
+		if !ok {
+			if data, err := os.ReadFile(path); err == nil {
+				lines = strings.Split(string(data), "\n")
+			}
+			cache[path] = lines
+		}
+		if line >= 0 && line < len(lines) {
+			return strings.TrimSpace(lines[line])
+		}
+		return ""
+	}
 	var b strings.Builder
 	for _, l := range locs {
-		fmt.Fprintf(&b, "%s:%d:%d\n",
-			displayPath(URIToPath(l.URI), cwd), l.Range.Start.Line+1, l.Range.Start.Character+1)
+		p := URIToPath(l.URI)
+		disp := displayPath(p, cwd)
+		line, col := l.Range.Start.Line, l.Range.Start.Character
+		if txt := sourceLine(p, line); txt != "" {
+			fmt.Fprintf(&b, "%s:%d:%d: %s\n", disp, line+1, col+1, truncateLine(txt, 220))
+		} else {
+			fmt.Fprintf(&b, "%s:%d:%d\n", disp, line+1, col+1)
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// formatWorkspaceSymbols renders workspace/symbol hits as "name  (kind)  file:line".
+// truncateLine caps a source line so a very long line can't dominate the output.
+func truncateLine(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
+// diagCode renders a diagnostic code (LSP allows an int or a string).
+func diagCode(code any) string {
+	switch v := code.(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'g', -1, 64)
+	}
+	return ""
+}
+
+// formatWorkspaceSymbols renders workspace/symbol hits as
+// "name  (kind)  file:line  in <container>", including the enclosing container
+// (type or package) the server reports so the model can disambiguate same-named
+// symbols. workspace/symbol carries no signature (protocol limitation) — use
+// lsp_hover on a result for that.
 func formatWorkspaceSymbols(syms []SymbolInformation, cwd string) string {
 	if len(syms) == 0 {
 		return "(no results)"
 	}
 	var b strings.Builder
 	for _, s := range syms {
-		fmt.Fprintf(&b, "%s  (%s)  %s:%d\n",
+		fmt.Fprintf(&b, "%s  (%s)  %s:%d",
 			s.Name, s.Kind, displayPath(URIToPath(s.Location.URI), cwd), s.Location.Range.Start.Line+1)
+		if c := strings.TrimSpace(s.ContainerName); c != "" {
+			fmt.Fprintf(&b, "  in %s", c)
+		}
+		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -446,6 +516,9 @@ func formatDiagnostics(path string, diags []Diagnostic, cwd string) string {
 	for _, d := range diags {
 		line, col := d.Range.Start.Line+1, d.Range.Start.Character+1
 		fmt.Fprintf(&b, "%s:%d:%d: %s: %s", disp, line, col, d.Severity, strings.TrimSpace(d.Message))
+		if code := diagCode(d.Code); code != "" {
+			fmt.Fprintf(&b, " (%s)", code)
+		}
 		if src := strings.TrimSpace(d.Source); src != "" {
 			fmt.Fprintf(&b, " [%s]", src)
 		}

@@ -84,6 +84,27 @@ func TestQueriesAgainstGopls(t *testing.T) {
 	}
 }
 
+// TestFormatSymbolsIncludesSignature verifies the outline shows the server's
+// detail (signature) when present and omits it cleanly when absent.
+func TestFormatSymbolsIncludesSignature(t *testing.T) {
+	syms := []DocumentSymbol{
+		{
+			Name:           "(*Client).Initialize",
+			Kind:           SymbolKindMethod,
+			Detail:         "func(ctx context.Context, rootPath string) (*InitializeResult, error)",
+			SelectionRange: Range{Start: Position{Line: 41}},
+		},
+		{Name: "NoDetail", Kind: SymbolKindFunction, SelectionRange: Range{Start: Position{Line: 9}}},
+	}
+	out := formatSymbols(syms)
+	if !strings.Contains(out, "func(ctx context.Context, rootPath string) (*InitializeResult, error)") {
+		t.Errorf("signature missing from outline:\n%s", out)
+	}
+	if !strings.Contains(out, "(*Client).Initialize") || !strings.Contains(out, "L42") {
+		t.Errorf("outline missing name/line:\n%s", out)
+	}
+}
+
 // TestToolsConstruction verifies the lsp_* tool set builds with the expected
 // names and arity (no server contact).
 func TestToolsConstruction(t *testing.T) {

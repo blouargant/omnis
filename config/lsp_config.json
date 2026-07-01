@@ -29,6 +29,13 @@
       "args": ["--stdio"],
       "extensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
       "root_markers": ["tsconfig.json", "jsconfig.json", "package.json"],
+      "language_ids": {
+        ".js": "javascript",
+        ".cjs": "javascript",
+        ".mjs": "javascript",
+        ".jsx": "javascriptreact",
+        ".tsx": "typescriptreact"
+      },
       "requires": [
         {
           "command": "typescript-language-server",
@@ -47,6 +54,338 @@
           "command": "pyright-langserver",
           "label": "Pyright (Python language server)",
           "install": "npm install -g pyright"
+        }
+      ]
+    },
+    "cpp": {
+      "command": "clangd",
+      "extensions": [".c", ".h", ".cpp", ".cxx", ".cc", ".hpp", ".hxx", ".hh", ".inl"],
+      "root_markers": ["compile_commands.json", ".clangd", "compile_flags.txt", "CMakeLists.txt", "Makefile"],
+      "language_id": "cpp",
+      "language_ids": {
+        ".c": "c"
+      },
+      "requires": [
+        {
+          "command": "clangd",
+          "label": "clangd (C/C++ language server)",
+          "install": {
+            "linux": "sudo apt-get install -y clangd",
+            "darwin": "brew install llvm",
+            "windows": "choco install llvm"
+          }
+        }
+      ]
+    },
+    "csharp": {
+      "command": "csharp-ls",
+      "extensions": [".cs"],
+      "root_markers": ["*.sln", "*.csproj", "global.json"],
+      "language_id": "csharp",
+      "requires": [
+        {
+          "command": "csharp-ls",
+          "label": "csharp-ls (.NET language server)",
+          "install": "dotnet tool install --global csharp-ls"
+        }
+      ]
+    },
+    "java": {
+      "command": "jdtls",
+      "extensions": [".java"],
+      "root_markers": ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", ".project"],
+      "language_id": "java",
+      "requires": [
+        {
+          "command": "jdtls",
+          "label": "Eclipse JDT Language Server (jdtls)",
+          "install": {
+            "darwin": "brew install jdtls"
+          }
+        }
+      ]
+    },
+    "kotlin": {
+      "command": "kotlin-language-server",
+      "extensions": [".kt", ".kts"],
+      "root_markers": ["build.gradle.kts", "build.gradle", "settings.gradle.kts", "pom.xml"],
+      "language_id": "kotlin",
+      "requires": [
+        {
+          "command": "kotlin-language-server",
+          "label": "Kotlin language server",
+          "install": {
+            "darwin": "brew install kotlin-language-server"
+          }
+        }
+      ]
+    },
+    "swift": {
+      "command": "sourcekit-lsp",
+      "extensions": [".swift"],
+      "root_markers": ["Package.swift", ".xcodeproj", ".xcworkspace"],
+      "language_id": "swift",
+      "requires": [
+        {
+          "command": "sourcekit-lsp",
+          "label": "SourceKit-LSP (Swift)",
+          "install": {
+            "darwin": "xcode-select --install"
+          }
+        }
+      ]
+    },
+    "php": {
+      "command": "intelephense",
+      "args": ["--stdio"],
+      "extensions": [".php"],
+      "root_markers": ["composer.json", ".git"],
+      "language_id": "php",
+      "requires": [
+        {
+          "command": "intelephense",
+          "label": "Intelephense (PHP language server)",
+          "install": "npm install -g intelephense"
+        }
+      ]
+    },
+    "ruby": {
+      "command": "ruby-lsp",
+      "extensions": [".rb", ".rake", ".gemspec"],
+      "root_markers": ["Gemfile", ".ruby-version", ".git"],
+      "language_id": "ruby",
+      "requires": [
+        {
+          "command": "ruby-lsp",
+          "label": "Ruby LSP",
+          "install": "gem install ruby-lsp"
+        }
+      ]
+    },
+    "bash": {
+      "command": "bash-language-server",
+      "args": ["start"],
+      "extensions": [".sh", ".bash"],
+      "root_markers": [".git"],
+      "language_id": "shellscript",
+      "requires": [
+        {
+          "command": "bash-language-server",
+          "label": "Bash language server",
+          "install": "npm install -g bash-language-server"
+        }
+      ]
+    },
+    "lua": {
+      "command": "lua-language-server",
+      "extensions": [".lua"],
+      "root_markers": [".luarc.json", ".git"],
+      "language_id": "lua",
+      "requires": [
+        {
+          "command": "lua-language-server",
+          "label": "Lua language server",
+          "install": {
+            "linux": "sudo apt-get install -y lua-language-server",
+            "darwin": "brew install lua-language-server"
+          }
+        }
+      ]
+    },
+    "yaml": {
+      "command": "yaml-language-server",
+      "args": ["--stdio"],
+      "extensions": [".yaml", ".yml"],
+      "root_markers": [".git"],
+      "language_id": "yaml",
+      "requires": [
+        {
+          "command": "yaml-language-server",
+          "label": "YAML language server",
+          "install": "npm install -g yaml-language-server"
+        }
+      ]
+    },
+    "json": {
+      "command": "vscode-json-language-server",
+      "args": ["--stdio"],
+      "extensions": [".json", ".jsonc"],
+      "root_markers": [".git"],
+      "language_id": "json",
+      "requires": [
+        {
+          "command": "vscode-json-language-server",
+          "label": "JSON language server (vscode-langservers-extracted)",
+          "install": "npm install -g vscode-langservers-extracted"
+        }
+      ]
+    },
+    "html": {
+      "command": "vscode-html-language-server",
+      "args": ["--stdio"],
+      "extensions": [".html", ".htm"],
+      "root_markers": ["package.json", ".git"],
+      "language_id": "html",
+      "requires": [
+        {
+          "command": "vscode-html-language-server",
+          "label": "HTML language server (vscode-langservers-extracted)",
+          "install": "npm install -g vscode-langservers-extracted"
+        }
+      ]
+    },
+    "css": {
+      "command": "vscode-css-language-server",
+      "args": ["--stdio"],
+      "extensions": [".css", ".scss", ".less"],
+      "root_markers": ["package.json", ".git"],
+      "language_id": "css",
+      "language_ids": {
+        ".scss": "scss",
+        ".less": "less"
+      },
+      "requires": [
+        {
+          "command": "vscode-css-language-server",
+          "label": "CSS language server (vscode-langservers-extracted)",
+          "install": "npm install -g vscode-langservers-extracted"
+        }
+      ]
+    },
+    "markdown": {
+      "command": "marksman",
+      "extensions": [".md", ".markdown"],
+      "root_markers": [".git", ".marksman.toml"],
+      "language_id": "markdown",
+      "requires": [
+        {
+          "command": "marksman",
+          "label": "Marksman (Markdown language server)",
+          "install": {
+            "darwin": "brew install marksman"
+          }
+        }
+      ]
+    },
+    "zig": {
+      "command": "zls",
+      "extensions": [".zig", ".zon"],
+      "root_markers": ["build.zig", "build.zig.zon", ".git"],
+      "language_id": "zig",
+      "requires": [
+        {
+          "command": "zls",
+          "label": "zls (Zig language server)",
+          "install": {
+            "darwin": "brew install zls"
+          }
+        }
+      ]
+    },
+    "terraform": {
+      "command": "terraform-ls",
+      "args": ["serve"],
+      "extensions": [".tf", ".tfvars"],
+      "root_markers": [".terraform", ".git"],
+      "language_id": "terraform",
+      "requires": [
+        {
+          "command": "terraform-ls",
+          "label": "terraform-ls (Terraform language server)",
+          "install": {
+            "darwin": "brew install hashicorp/tap/terraform-ls"
+          }
+        }
+      ]
+    },
+    "elixir": {
+      "command": "elixir-ls",
+      "extensions": [".ex", ".exs"],
+      "root_markers": ["mix.exs", ".git"],
+      "language_id": "elixir",
+      "requires": [
+        {
+          "command": "elixir-ls",
+          "label": "ElixirLS (Elixir language server)",
+          "install": {
+            "darwin": "brew install elixir-ls"
+          }
+        }
+      ]
+    },
+    "haskell": {
+      "command": "haskell-language-server-wrapper",
+      "args": ["--lsp"],
+      "extensions": [".hs", ".lhs"],
+      "root_markers": ["stack.yaml", "cabal.project", "package.yaml", ".git"],
+      "language_id": "haskell",
+      "requires": [
+        {
+          "command": "haskell-language-server-wrapper",
+          "label": "Haskell Language Server",
+          "install": {
+            "darwin": "brew install haskell-language-server"
+          }
+        }
+      ]
+    },
+    "scala": {
+      "command": "metals",
+      "extensions": [".scala", ".sbt", ".sc"],
+      "root_markers": ["build.sbt", "build.sc", ".git"],
+      "language_id": "scala",
+      "requires": [
+        {
+          "command": "metals",
+          "label": "Metals (Scala language server)",
+          "install": {
+            "darwin": "cs install metals"
+          }
+        }
+      ]
+    },
+    "dart": {
+      "command": "dart",
+      "args": ["language-server", "--protocol=lsp"],
+      "extensions": [".dart"],
+      "root_markers": ["pubspec.yaml", ".git"],
+      "language_id": "dart",
+      "requires": [
+        {
+          "command": "dart",
+          "label": "Dart SDK (dart language-server)",
+          "install": {
+            "darwin": "brew install dart"
+          }
+        }
+      ]
+    },
+    "sql": {
+      "command": "sql-language-server",
+      "args": ["up", "--method", "stdio"],
+      "extensions": [".sql"],
+      "root_markers": [".git"],
+      "language_id": "sql",
+      "requires": [
+        {
+          "command": "sql-language-server",
+          "label": "SQL language server",
+          "install": "npm install -g sql-language-server"
+        }
+      ]
+    },
+    "dockerfile": {
+      "command": "docker-langserver",
+      "args": ["--stdio"],
+      "extensions": [".dockerfile"],
+      "filenames": ["Dockerfile", "Dockerfile.*", "*.Dockerfile", "Containerfile"],
+      "root_markers": [".git"],
+      "language_id": "dockerfile",
+      "requires": [
+        {
+          "command": "docker-langserver",
+          "label": "Dockerfile language server",
+          "install": "npm install -g dockerfile-language-server-nodejs"
         }
       ]
     }
