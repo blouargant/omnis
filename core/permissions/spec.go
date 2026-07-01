@@ -187,7 +187,7 @@ func toolClasses(omnisTool string) []string {
 		"lsp_document_symbols", "lsp_workspace_symbol", "lsp_definition",
 		"lsp_references", "lsp_hover", "lsp_diagnostics":
 		return []string{"Read"}
-	case "Edit", "revert":
+	case "Edit", "revert", "MultiEdit":
 		return []string{"Edit"}
 	case "lsp_rename":
 		// A project-wide rename writes many files; gate it like any edit so

@@ -120,6 +120,22 @@ func applyTextEdits(content string, edits []TextEdit) string {
 	return string(b)
 }
 
+// wholeFileRange returns the [start, end) range spanning all of content — used
+// as the code-action request range so the server offers file-wide actions like
+// source.organizeImports. The end column is the last line's UTF-16 length.
+func wholeFileRange(content string) Range {
+	lines := strings.Split(content, "\n")
+	last := len(lines) - 1
+	if last < 0 {
+		last = 0
+	}
+	end := 0
+	if last < len(lines) {
+		end = utf16Len(lines[last])
+	}
+	return Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: last, Character: end}}
+}
+
 // wordColumnUTF16 returns the UTF-16 start column of word as a whole identifier
 // within a single line.
 func wordColumnUTF16(line, word string) (int, bool) {

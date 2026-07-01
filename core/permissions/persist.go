@@ -70,7 +70,7 @@ func buildApprovalRule(toolName, input, cwd string) Rule {
 		return Rule{Rule: "Read", Reason: "User-approved Read on any file " + scope, CWD: cwd}
 	case "Write":
 		return Rule{Rule: "Write", Reason: "User-approved Write on any file " + scope, CWD: cwd}
-	case "Edit", "revert":
+	case "Edit", "revert", "MultiEdit":
 		return Rule{Rule: "Edit", Reason: "User-approved Edit on any file " + scope, CWD: cwd}
 	}
 	// Fallback: exact-probe regex match.

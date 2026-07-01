@@ -460,7 +460,7 @@ func isReadTool(t string) bool {
 
 func isEditTool(t string) bool {
 	switch t {
-	case "Edit", "Write", "revert":
+	case "Edit", "Write", "revert", "MultiEdit":
 		return true
 	}
 	return false

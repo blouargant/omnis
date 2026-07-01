@@ -38,6 +38,7 @@ import (
 	"github.com/blouargant/omnis/internal/settings"
 	"github.com/blouargant/omnis/internal/skills"
 	"github.com/blouargant/omnis/internal/softskills"
+	"github.com/blouargant/omnis/internal/testrun"
 	"github.com/blouargant/omnis/internal/usercommands"
 )
 
@@ -302,6 +303,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			agentTools = append(agentTools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
 		case "web":
 			agentTools = append(agentTools, fstools.NewWebTools()...)
+		case "tests":
+			// Targeted, structured test runner (run_tests). Auto-detects the
+			// project's framework and parses the output into a pass/fail summary —
+			// the verify step of the edit→check loop. Stateless (runs in the
+			// session cwd), so no infra wiring needed.
+			agentTools = append(agentTools, testrun.Tools()...)
 		case "registries":
 			agentTools = append(agentTools, registries.NewTools(buildRegistriesDeps(runtime))...)
 			hasRegistries = true

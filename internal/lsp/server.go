@@ -443,6 +443,35 @@ func (ls *langServer) Rename(ctx context.Context, path, symbol, newName string) 
 	return ls.cli.Rename(ctx, PathToURI(path), pos, newName)
 }
 
+// RequestCodeActions asks the server for the code actions of the given kinds
+// over path's whole content, resolving each action's edit (via codeAction/resolve
+// when the server returned the action without one). It syncs the file first so
+// the actions reflect the latest on-disk content. diags is the diagnostic context
+// used for quickfixes. The caller decides which actions to apply and writes them.
+func (ls *langServer) RequestCodeActions(ctx context.Context, path string, only []string, diags []Diagnostic) ([]CodeAction, error) {
+	if err := ls.syncDoc(path); err != nil {
+		return nil, err
+	}
+	ls.touch()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	uri := PathToURI(path)
+	actions, err := ls.cli.CodeActions(ctx, uri, wholeFileRange(string(data)), only, diags)
+	if err != nil {
+		return nil, err
+	}
+	for i := range actions {
+		if actions[i].Edit == nil && len(actions[i].Data) > 0 {
+			if resolved, rerr := ls.cli.ResolveCodeAction(ctx, actions[i]); rerr == nil && resolved.Edit != nil {
+				actions[i].Edit = resolved.Edit
+			}
+		}
+	}
+	return actions, nil
+}
+
 // stop shuts the server down gracefully (shutdown+exit), then closes the
 // transport and reaps the process. Best-effort and bounded so a wedged server
 // can't block the manager.

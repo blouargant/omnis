@@ -257,6 +257,37 @@ type WorkspaceEdit struct {
 	DocumentChanges json.RawMessage            `json:"documentChanges,omitempty"`
 }
 
+// --- textDocument/codeAction ---
+
+// CodeActionContext carries the diagnostics relevant to the requested range
+// (quickfixes are computed against them) and an optional Only filter naming the
+// kinds the client wants (e.g. ["source.organizeImports"]).
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Only        []string     `json:"only,omitempty"`
+}
+
+// CodeActionParams requests the code actions available for a document range.
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+// CodeAction is one offered fix/refactor. Edit is the change to apply; when it
+// is absent but Data is set the action is resolvable via codeAction/resolve.
+// Command is kept raw because a code-action list element may be a bare Command
+// (a string "command" field) rather than a CodeAction (an object) — we only need
+// to know whether an applicable Edit exists, not to execute the command.
+type CodeAction struct {
+	Title       string          `json:"title"`
+	Kind        string          `json:"kind,omitempty"`
+	Diagnostics []Diagnostic    `json:"diagnostics,omitempty"`
+	Edit        *WorkspaceEdit  `json:"edit,omitempty"`
+	Command     json.RawMessage `json:"command,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+}
+
 // SymbolKind enumerates the LSP symbol kinds (spec values 1..26).
 type SymbolKind int
 

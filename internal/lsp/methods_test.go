@@ -116,13 +116,14 @@ func TestToolsConstruction(t *testing.T) {
 	for _, want := range []string{
 		"lsp_document_symbols", "lsp_workspace_symbol",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics", "lsp_rename",
+		"lsp_code_action",
 	} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
 	}
-	if len(tools) != 7 {
-		t.Errorf("expected 7 tools, got %d", len(tools))
+	if len(tools) != 8 {
+		t.Errorf("expected 8 tools, got %d", len(tools))
 	}
 }
 

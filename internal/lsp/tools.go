@@ -49,6 +49,7 @@ func Tools(m *Manager) []tool.Tool {
 		lt.hover(),
 		lt.diagnostics(),
 		lt.rename(),
+		lt.codeAction(),
 	}
 }
 
@@ -232,11 +233,12 @@ func (lt *lspTools) rename() tool.Tool {
 		})
 }
 
-// applyWorkspaceEdit writes a rename's per-file edits to disk through the fs
-// Write path (which snapshots each file, so the change is revertible) and
-// returns a human-readable summary. Files are processed in a deterministic
-// order; a file whose content is unchanged is skipped.
-func applyWorkspaceEdit(edits map[DocumentURI][]TextEdit, cwd string) (string, error) {
+// writeEditMap applies a per-file edit map to disk through the fs Write path
+// (which snapshots each file, so the change is revertible), in a deterministic
+// file order, skipping any file whose content is unchanged. It returns the
+// per-file summary lines plus the count of files and total edits applied. Shared
+// by lsp_rename and lsp_code_action, which wrap it with their own headers.
+func writeEditMap(edits map[DocumentURI][]TextEdit, cwd string) (lines string, files, total int, err error) {
 	uris := make([]DocumentURI, 0, len(edits))
 	for uri := range edits {
 		uris = append(uris, uri)
@@ -244,30 +246,163 @@ func applyWorkspaceEdit(edits map[DocumentURI][]TextEdit, cwd string) (string, e
 	sort.Slice(uris, func(i, j int) bool { return uris[i] < uris[j] })
 
 	var b strings.Builder
-	files, total := 0, 0
 	for _, uri := range uris {
 		path := URIToPath(uri)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", path, err)
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return "", 0, 0, fmt.Errorf("%s: %w", path, rerr)
 		}
 		updated := applyTextEdits(string(data), edits[uri])
 		if updated == string(data) {
 			continue
 		}
-		if _, err := fstools.RunWrite(context.Background(), fstools.WriteIn{Path: path, Content: updated}); err != nil {
-			return "", fmt.Errorf("write %s: %w", path, err)
+		if _, werr := fstools.RunWrite(context.Background(), fstools.WriteIn{Path: path, Content: updated}); werr != nil {
+			return "", 0, 0, fmt.Errorf("write %s: %w", path, werr)
 		}
 		n := len(edits[uri])
 		files++
 		total += n
 		fmt.Fprintf(&b, "%s  (%d edit%s)\n", displayPath(path, cwd), n, plural(n))
 	}
+	return strings.TrimRight(b.String(), "\n"), files, total, nil
+}
+
+// defaultActionKinds is the "clean up this file" superset applied when the tool
+// is called without an explicit kind, in dependency order: fix imports, apply
+// safe whole-file fixes, then quickfix the remaining diagnostics. Each kind is
+// requested and applied in its own round (re-syncing between rounds) so the
+// import-block rewrites of organizeImports and fixAll never clash.
+var defaultActionKinds = []string{"source.organizeImports", "source.fixAll", "quickfix"}
+
+type codeActionIn struct {
+	File string `json:"file"`
+	Kind string `json:"kind,omitempty"`
+}
+
+func (lt *lspTools) codeAction() tool.Tool {
+	return newLSPTool("lsp_code_action",
+		"Apply the language server's own fixes to a file — organize/add/remove imports, apply safe fix-alls, and "+
+			"quickfix diagnostics — instead of hand-patching them. This is how you clear the errors that lsp_diagnostics "+
+			"reports (e.g. a missing or unused import): call it after an edit, then re-run lsp_diagnostics to confirm. "+
+			"Changes are written to disk and are revertible. "+
+			"Arguments: `file` (string, required) — path to a source file; `kind` (string, optional) — restrict to one "+
+			"LSP code-action kind (e.g. `source.organizeImports`, `source.fixAll`, `quickfix`); omitted applies all three.",
+		func(ctx tool.Context, in codeActionIn) (lspOut, error) {
+			qctx, cancel := toolCtx(ctx)
+			defer cancel()
+			path := resolveFile(ctx, in.File)
+			cwd := fstools.CwdForContext(ctx)
+			ls, err := lt.m.ResolveServer(qctx, path)
+			if err != nil {
+				return lspOut{Result: resolveErrMsg(err)}, nil
+			}
+
+			kinds := defaultActionKinds
+			if k := strings.TrimSpace(in.Kind); k != "" {
+				kinds = []string{k}
+			}
+
+			var body strings.Builder
+			var commandOnly []string
+			totalFiles, totalEdits := 0, 0
+			for _, kind := range kinds {
+				// Quickfixes need the current diagnostics as context; source.* actions
+				// don't. Fetch fresh diagnostics per quickfix round so a fix isn't
+				// offered for an error an earlier round already resolved.
+				var ctxDiags []Diagnostic
+				if strings.HasPrefix(kind, "quickfix") {
+					ctxDiags, _ = ls.Diagnostics(qctx, path, diagMaxWait, diagQuiet)
+				}
+				actions, aerr := ls.RequestCodeActions(qctx, path, []string{kind}, ctxDiags)
+				if aerr != nil {
+					continue // best-effort per kind
+				}
+				merged := map[DocumentURI][]TextEdit{}
+				var titles []string
+				for _, a := range actions {
+					if !actionKindMatches(a.Kind, kind) {
+						continue
+					}
+					if a.Edit != nil {
+						for uri, edits := range flattenWorkspaceEdit(a.Edit) {
+							merged[uri] = append(merged[uri], edits...)
+						}
+						titles = append(titles, a.Title)
+					} else {
+						commandOnly = append(commandOnly, a.Title)
+					}
+				}
+				if len(merged) == 0 {
+					continue
+				}
+				lines, files, edits, werr := writeEditMap(merged, cwd)
+				if werr != nil {
+					return lspOut{Result: "lsp code_action: " + werr.Error()}, nil
+				}
+				for uri := range merged {
+					lt.m.NotifyChange(URIToPath(uri))
+				}
+				if files == 0 {
+					continue
+				}
+				totalFiles += files
+				totalEdits += edits
+				fmt.Fprintf(&body, "%s — %s\n%s\n", kind, strings.Join(titles, "; "), lines)
+			}
+
+			if totalEdits == 0 {
+				msg := "No code actions changed " + displayPath(path, cwd) + " (nothing to fix or organise)."
+				if len(commandOnly) > 0 {
+					msg += "\nOffered but not auto-applicable (need manual steps): " + strings.Join(dedupe(commandOnly), "; ")
+				}
+				return lspOut{Result: msg}, nil
+			}
+			header := fmt.Sprintf("Applied code actions across %d file%s, %d edit%s:\n",
+				totalFiles, plural(totalFiles), totalEdits, plural(totalEdits))
+			out := header + strings.TrimRight(body.String(), "\n")
+			if len(commandOnly) > 0 {
+				out += "\n\nOffered but not auto-applicable (need manual steps): " + strings.Join(dedupe(commandOnly), "; ")
+			}
+			return lspOut{Result: out}, nil
+		})
+}
+
+// actionKindMatches reports whether a code action of kind actKind falls under
+// the requested kind, honouring the LSP kind hierarchy (dot-separated): an
+// action "source.organizeImports.foo" matches the request "source.organizeImports",
+// and an unkinded action matches nothing (we only apply explicitly-kinded fixes).
+func actionKindMatches(actKind, want string) bool {
+	if actKind == "" {
+		return false
+	}
+	return actKind == want || strings.HasPrefix(actKind, want+".")
+}
+
+// dedupe returns s with duplicate entries removed, preserving first-seen order.
+func dedupe(s []string) []string {
+	seen := map[string]bool{}
+	out := s[:0]
+	for _, v := range s {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// applyWorkspaceEdit writes a rename's per-file edits to disk and returns a
+// human-readable summary.
+func applyWorkspaceEdit(edits map[DocumentURI][]TextEdit, cwd string) (string, error) {
+	lines, files, total, err := writeEditMap(edits, cwd)
+	if err != nil {
+		return "", err
+	}
 	if files == 0 {
 		return "Rename produced no on-disk changes.", nil
 	}
 	header := fmt.Sprintf("Renamed across %d file%s, %d edit%s:\n", files, plural(files), total, plural(total))
-	return header + strings.TrimRight(b.String(), "\n"), nil
+	return header + lines, nil
 }
 
 func plural(n int) string {

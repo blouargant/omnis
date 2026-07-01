@@ -135,6 +135,96 @@ func RunEdit(_ context.Context, in EditIn) (string, error) {
 	return fmt.Sprintf("edited %s (%d replacement(s); snapshot saved - call revert to undo)", in.Path, n), nil
 }
 
+// EditOp is one string replacement within a file, as used by MultiEdit.
+type EditOp struct {
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
+}
+
+// MultiEditFile groups the ordered edits to apply to one file.
+type MultiEditFile struct {
+	Path  string   `json:"file_path"`
+	Edits []EditOp `json:"edits"`
+}
+
+// MultiEditIn is a batch of per-file edits applied atomically: every edit in
+// every file is validated first, and only if all pass are any files written.
+type MultiEditIn struct {
+	Files []MultiEditFile `json:"files"`
+}
+type MultiEditOut struct {
+	Result string `json:"result"`
+}
+
+// RunMultiEdit applies a batch of exact-string replacements across one or more
+// files in a single call. Edits within a file apply in order (a later edit sees
+// earlier ones' result); each edit follows RunEdit's rules — old_string must be
+// present, and appear exactly once unless replace_all is set. The whole batch is
+// atomic on validation: if ANY edit in ANY file would fail, nothing is written
+// and the error names the offending file/edit. On success each file is written
+// through the snapshotting Write path, so the batch is revertible per file.
+func RunMultiEdit(_ context.Context, in MultiEditIn) (string, error) {
+	if len(in.Files) == 0 {
+		return "Error: no files supplied to MultiEdit", nil
+	}
+	// Phase 1 — validate + compute every file's final content, no writes.
+	type plan struct {
+		path    string
+		content string
+		count   int
+	}
+	seen := map[string]bool{}
+	plans := make([]plan, 0, len(in.Files))
+	for fi, f := range in.Files {
+		if f.Path == "" {
+			return fmt.Sprintf("Error: file %d has an empty file_path", fi+1), nil
+		}
+		if seen[f.Path] {
+			return fmt.Sprintf("Error: %s appears more than once — merge its edits into a single files[] entry", f.Path), nil
+		}
+		seen[f.Path] = true
+		if len(f.Edits) == 0 {
+			return fmt.Sprintf("Error: %s has no edits", f.Path), nil
+		}
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			return fmt.Sprintf("Error reading %s: %v", f.Path, err), nil
+		}
+		content := string(data)
+		applied := 0
+		for ei, e := range f.Edits {
+			if e.OldString == "" {
+				return fmt.Sprintf("Error: %s edit %d has an empty old_string", f.Path, ei+1), nil
+			}
+			count := strings.Count(content, e.OldString)
+			if count == 0 {
+				return fmt.Sprintf("Error: old_string of %s edit %d not found", f.Path, ei+1), nil
+			}
+			if !e.ReplaceAll && count > 1 {
+				return fmt.Sprintf("Error: old_string of %s edit %d appears %d times — set replace_all:true or add context to make it unique", f.Path, ei+1, count), nil
+			}
+			if e.ReplaceAll {
+				content = strings.ReplaceAll(content, e.OldString, e.NewString)
+				applied += count
+			} else {
+				content = strings.Replace(content, e.OldString, e.NewString, 1)
+				applied++
+			}
+		}
+		plans = append(plans, plan{path: f.Path, content: content, count: applied})
+	}
+	// Phase 2 — commit. Each write snapshots the prior content (revertible).
+	total := 0
+	for _, p := range plans {
+		if _, err := RunWrite(context.Background(), WriteIn{Path: p.path, Content: p.content}); err != nil {
+			return fmt.Sprintf("Error writing %s: %v", p.path, err), nil
+		}
+		total += p.count
+	}
+	return fmt.Sprintf("MultiEdit applied %d replacement(s) across %d file(s); snapshots saved - call revert per file to undo.", total, len(plans)), nil
+}
+
 type RevertIn struct {
 	Path string `json:"file_path"`
 }

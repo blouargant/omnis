@@ -49,6 +49,22 @@ func New() []tool.Tool {
 				out, _ := RunEdit(context.Background(), in)
 				return EditOut{Result: out}, nil
 			}),
+		mustTool("MultiEdit",
+			"Apply many string replacements across one or more files in a single call — the efficient way to make a "+
+				"multi-file change (a refactor, a rename-by-hand, a coordinated edit) instead of many separate Edit calls. "+
+				"Each edit follows the same rules as Edit (old_string must be present, and unique unless replace_all is set); "+
+				"edits within a file apply in order. The batch is atomic: if any edit in any file would fail, nothing is "+
+				"written and the error names the offending file/edit. Snapshots each written file so you can revert. "+
+				"Arguments: `files` (array, required) — each item is `{ file_path (string), edits (array of "+
+				"{ old_string, new_string, replace_all? }) }`.",
+			func(ctx tool.Context, in MultiEditIn) (MultiEditOut, error) {
+				cwd := sessionCwd(ctx)
+				for i := range in.Files {
+					in.Files[i].Path = resolveAgainst(cwd, in.Files[i].Path)
+				}
+				out, _ := RunMultiEdit(context.Background(), in)
+				return MultiEditOut{Result: out}, nil
+			}),
 		mustTool("Grep",
 			"Search a regex pattern across files or a single file. Returns file:line matches. Prefer this over 'Bash grep'. "+
 				"Arguments: `pattern` (string, required) — extended regex; `path` (string, optional) — file or directory to search, defaults to '.' (current directory); `recursive` (bool, optional) — recurse into subdirectories, default false. "+

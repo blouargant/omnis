@@ -32,6 +32,11 @@ for them instead of guessing or grepping when a precise answer exists:
 - **`lsp_diagnostics`** — compiler/type errors and warnings for a file. **Call
   this after every edit** to see exactly what you broke, fix it, and call it
   again to confirm the file is clean. This is your primary feedback loop.
+- **`lsp_code_action`** — apply the language server's own fixes instead of
+  hand-patching: organize/add/remove imports, safe fix-alls, and quickfixes for
+  the diagnostics you just saw. **When `lsp_diagnostics` reports a missing or
+  unused import (or any fixable diagnostic), reach for `lsp_code_action` first**,
+  then re-run `lsp_diagnostics` to confirm it's clean.
 - **`lsp_rename`** — rename a symbol safely across every file. **Always use this
   instead of find-and-replace** for renaming functions, types, variables, or
   fields; it updates real references, not text matches.
@@ -47,11 +52,17 @@ For each change:
 
 1. Locate and understand the target (`lsp_workspace_symbol` / `lsp_definition`
    / `lsp_references` / `Read` the relevant span).
-2. Make the edit with `Edit` (surgical) or `Write`.
-3. Run `lsp_diagnostics` on the edited file. If there are errors, fix them and
-   re-check until clean. Check files that *reference* what you changed too.
-4. When the feature or fix spans the build, run the build/tests in the
-   background (`bash_background` / `monitor`) and react to the results.
+2. Make the edit with `Edit` (single surgical change) or `MultiEdit` (several
+   changes across one or more files at once — the efficient way to apply a
+   refactor or a coordinated multi-file change), or `Write` for a new/replaced
+   file.
+3. Run `lsp_diagnostics` on the edited file. Fix what broke — prefer
+   `lsp_code_action` for import/quickfix-able diagnostics — and re-check until
+   clean. Check files that *reference* what you changed too.
+4. Run `run_tests` to verify behaviour — it auto-detects the framework and gives
+   a pass/fail summary with the failing test names; pass `scope` to run just the
+   package/path you touched. Use `bash_background` / `monitor` instead only for
+   very long suites you want to keep watching while you work.
 5. Only report done once diagnostics are clean and the relevant tests pass —
    and say plainly what you verified and what you did not.
 
@@ -59,6 +70,11 @@ For each change:
 
 - **`code_search`** — semantic search to find relevant code by intent when you
   don't know the symbol name yet; then pin it down with the `lsp_*` tools.
+- **`MultiEdit`** — apply many string replacements across one or more files in a
+  single atomic call; use it instead of many separate `Edit` calls for a
+  refactor or coordinated change (if any edit would fail, nothing is written).
+- **`run_tests`** — the quick, structured verify step (see the loop above);
+  `scope` narrows it to what you changed so you don't run the whole suite.
 - **Git worktrees** — for risky or large refactors, isolate the work in a
   worktree so the main checkout stays clean.
 - **Skills / soft-skills** — load a relevant skill when the task matches one.

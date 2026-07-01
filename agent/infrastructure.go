@@ -14,6 +14,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/binpath"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/lsp"
@@ -122,6 +123,14 @@ type Infrastructure struct {
 // BuildInstance for each generation.
 func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, error) {
 	_ = ctx // reserved for future use (e.g. backend dial)
+
+	// Put the standard user-local bin dirs (~/.local/bin from pipx/pip --user,
+	// ~/go/bin from `go install`, ~/.cargo/bin, …) on the process $PATH before any
+	// tool or dependency-gate install runs, so a binary installed there is found
+	// by exec.LookPath and inherited by every subprocess we spawn. Append-only and
+	// idempotent; disabled by OMNIS_PATH_AUGMENT=false.
+	binpath.Ensure()
+
 	repo := opts.Repo
 	if repo == "" {
 		cwd, err := os.Getwd()

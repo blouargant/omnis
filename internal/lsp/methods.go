@@ -78,16 +78,73 @@ func (c *Client) Rename(ctx context.Context, uri DocumentURI, pos Position, newN
 	return parseWorkspaceEdit(raw), nil
 }
 
-// parseWorkspaceEdit flattens a WorkspaceEdit (either the changes map or the
-// documentChanges array) into a per-file edit map. File-operation entries in
-// documentChanges (create/rename/delete) are skipped — symbol renames don't
-// emit them.
+// CodeActions returns the code actions offered for rng in uri. only filters the
+// kinds requested (e.g. ["source.organizeImports"]); diags is the diagnostic
+// context quickfixes are computed against. Bare-Command list entries (no Edit)
+// are kept so the caller can report them as non-applicable.
+func (c *Client) CodeActions(ctx context.Context, uri DocumentURI, rng Range, only []string, diags []Diagnostic) ([]CodeAction, error) {
+	var raw json.RawMessage
+	params := CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Range:        rng,
+		Context:      CodeActionContext{Diagnostics: diags, Only: only},
+	}
+	if err := c.Call(ctx, "textDocument/codeAction", params, &raw); err != nil {
+		return nil, err
+	}
+	return parseCodeActions(raw), nil
+}
+
+// ResolveCodeAction fills in a code action's Edit via codeAction/resolve, used
+// when the initial response returned the action without its (lazily computed)
+// edit. Returns the resolved action.
+func (c *Client) ResolveCodeAction(ctx context.Context, ca CodeAction) (CodeAction, error) {
+	var out CodeAction
+	err := c.Call(ctx, "codeAction/resolve", ca, &out)
+	return out, err
+}
+
+// parseCodeActions decodes a textDocument/codeAction result — a
+// (Command | CodeAction)[] union. Each element is decoded as a CodeAction;
+// a bare Command decodes with only a Title (its "command" is a string, kept raw
+// and ignored), so it surfaces as an action with no Kind/Edit.
+func parseCodeActions(raw json.RawMessage) []CodeAction {
+	raw = bytes.TrimSpace(raw)
+	if isNullRaw(raw) || string(raw) == "[]" {
+		return nil
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil
+	}
+	out := make([]CodeAction, 0, len(arr))
+	for _, e := range arr {
+		var ca CodeAction
+		if err := json.Unmarshal(e, &ca); err == nil && ca.Title != "" {
+			out = append(out, ca)
+		}
+	}
+	return out
+}
+
+// parseWorkspaceEdit flattens a raw WorkspaceEdit into a per-file edit map.
 func parseWorkspaceEdit(raw json.RawMessage) map[DocumentURI][]TextEdit {
 	if isNullRaw(raw) {
 		return nil
 	}
 	var we WorkspaceEdit
 	if err := json.Unmarshal(raw, &we); err != nil {
+		return nil
+	}
+	return flattenWorkspaceEdit(&we)
+}
+
+// flattenWorkspaceEdit flattens a WorkspaceEdit (either the changes map or the
+// documentChanges array) into a per-file edit map. File-operation entries in
+// documentChanges (create/rename/delete) are skipped — symbol renames and the
+// code actions we apply don't emit them.
+func flattenWorkspaceEdit(we *WorkspaceEdit) map[DocumentURI][]TextEdit {
+	if we == nil {
 		return nil
 	}
 	out := map[DocumentURI][]TextEdit{}

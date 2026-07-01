@@ -9,7 +9,7 @@ func TestNew(t *testing.T) {
 
 	tools := New()
 
-	wantNames := []string{"Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime"}
+	wantNames := []string{"Bash", "Read", "Write", "Edit", "MultiEdit", "Grep", "Glob", "revert", "mime"}
 	if len(tools) != len(wantNames) {
 		t.Fatalf("New() returned %d tools, want %d", len(tools), len(wantNames))
 	}
