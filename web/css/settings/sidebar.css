@@ -126,4 +126,39 @@
 .settings-panel--client-only .settings-body-toolbar,
 .settings-panel--client-only .settings-header-actions { display: none; }
 
+/* ─── Dark veil over the chat sidebar while Settings is open ────────────
+ * When the Settings panel unfolds, the sidebar's chat-navigation sections
+ * (header, New-Chat pill, session list, archived + folders panels) read as
+ * backgrounded — a translucent dark film is drawn in front of them. Driven
+ * purely off the `#chat.chat--settings` class the panel toggles (open() /
+ * jumpToSection() add it, close() removes it) via :has(), so it covers the
+ * gear, Appearance, and Documentation views alike with no JS change.
+ *
+ * One `#sidebar::after` overlay spans the whole sidebar; the settings menu
+ * and footer are lifted above it (z-index) AND painted with an opaque panel
+ * background so the film is hidden *behind* them — otherwise their
+ * transparent bodies would let the veil bleed through and they'd look dimmed
+ * too. Result: only the sections above the settings menu are veiled.
+ * `pointer-events:none` keeps the veil purely visual — the dimmed sessions
+ * stay clickable (selecting one closes Settings, exactly as before). */
+body:has(#chat.chat--settings) #sidebar { position: relative; }
+body:has(#chat.chat--settings) #sidebar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  animation: sidebar-veil-in 0.18s ease-out;
+}
+@keyframes sidebar-veil-in { from { opacity: 0; } to { opacity: 1; } }
+/* Lift the settings menu + footer above the veil and make them opaque so the
+   film can't show through (bright + interactive, not dimmed). */
+body:has(#chat.chat--settings) #settings-menu,
+body:has(#chat.chat--settings) #sidebar-footer {
+  position: relative;
+  z-index: 4;
+  background: var(--bg-panel);
+}
+
 
