@@ -230,6 +230,38 @@ auto-discovered, no wiring.** Full guide + the feature→check map live in
 [tools/model-probe/CLAUDE.md](tools/model-probe/CLAUDE.md); keep that suite current
 when Omnis starts depending on a new model capability.
 
+## Squad benchmark harness (`tools/squad-bench`)
+
+A dependency-free (Python stdlib) harness that drives the **running omnis-server**
+HTTP API like the web UI (create a session pinned to a squad → send one task
+prompt → stream the SSE) and reduces the event stream to a **metrics record** —
+so you can change which **model** an agent runs on (or tighten its instruction)
+and re-run the **same task** to compare. Complements `tools/model-probe` (which
+tests a raw endpoint's capabilities); this tests *squad behaviour*.
+
+```bash
+python3 tools/squad-bench/bench.py --suite               # all tasks in tasks.json
+python3 tools/squad-bench/bench.py --task search-single   # one task
+python3 tools/squad-bench/bench.py --suite --out runs.jsonl --repeat 3
+```
+
+Per-run metrics: `wall_ms`/`ttfb_ms`, **`token_events`** (streaming granularity —
+high ⇒ token-by-token, 1–3 ⇒ coarse/non-streaming), **`delegations`** +
+**`redispatches`** (did the leader delegate, and retry the same sub-agent),
+`leader_tools`/`subagent_tools` (e.g. a scout doing 12 greps = over-search),
+per-agent `models` cost estimate, **`subagent_errors`** (empty / `deadline
+exceeded` — endpoint too slow), `ask_user` (permission prompts — want 0), and
+`correct` (vs a task's `expect`). Tasks live in
+[tools/squad-bench/tasks.json](tools/squad-bench/tasks.json); `cwd:"sandbox"`
+tasks run against a fresh, git-isolated temp copy of
+[tools/squad-bench/sandbox](tools/squad-bench/sandbox) so an accidental edit can
+never touch a real repo. Full guide + the benchmarking loop (baseline → change
+model/instruction + reload → re-run → diff JSONL) in
+[tools/squad-bench/README.md](tools/squad-bench/README.md). Born from the
+multi-agent Coding-squad work — it caught a `simple`-model latency outlier
+(a scout dispatch hung ~310 s → HTTP client timeout) and premium's coarse
+streaming.
+
 ## Architecture
 
 **Design contract**: the same binary becomes a code reviewer, Kubernetes triage assistant, or DBA helper purely by mounting different tools, skills, and MCP servers. No code changes required to retarget the agent.
@@ -1121,7 +1153,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$OMNIS_HOME/registry/skills`) |
 | `OMNIS_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$OMNIS_HOME/registry/agents`) |
 | `OMNIS_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
-| `OMNIS_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence" until the 5-minute client timeout. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
+| `OMNIS_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence". This is the *per-chunk* control; `OMNIS_LLM_HTTP_TIMEOUT` is the total-request cap, and the default (15m) sits above this guard so a frozen stream is caught here first. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
+| `OMNIS_LLM_HTTP_TIMEOUT` | Total duration cap for a single LLM HTTP request — connection + reading the whole (possibly streamed) body (Go duration, default `15m`; `0` disables entirely, leaving only the stall guard + request context). Sits **above** `OMNIS_LLM_STREAM_STALL_TIMEOUT` (10m) so a genuinely frozen stream trips the stall guard first (clear message) rather than this raw client timeout. Raise it for slow backends whose generation intermittently blocks for minutes under load (e.g. a Scaleway-hosted model) — the previous hard 5-minute cap killed such legitimate long generations with `Client.Timeout … while reading body`. Both adapters ([core/llm/stall.go](core/llm/stall.go) `httpClientTimeout`, applied in [core/llm/openai.go](core/llm/openai.go) + [core/llm/anthropic.go](core/llm/anthropic.go)). |
 | `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). See "Self-update". |
 | `OMNIS_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
 

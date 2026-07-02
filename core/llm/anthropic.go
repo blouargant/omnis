@@ -14,7 +14,6 @@ import (
 	"iter"
 	"net/http"
 	"strings"
-	"time"
 
 	"google.golang.org/genai"
 
@@ -48,7 +47,7 @@ func NewAnthropic(modelName, apiKey, baseURL string) model.LLM {
 		model:   modelName,
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: 5 * time.Minute},
+		client:  &http.Client{Timeout: httpClientTimeout()},
 	}
 }
 

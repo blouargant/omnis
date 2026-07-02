@@ -1,0 +1,41 @@
+{
+  "_comment": "Benchmark tasks for squad-bench. `cwd: \"sandbox\"` runs against a fresh temp copy of ./sandbox (git-seeded, isolated). `expect` is a substring, or /regex/ (case-insensitive), matched against the final answer; omit it for open-ended tasks. Add your own tasks freely — same shape.",
+  "tasks": [
+    {
+      "id": "search-single",
+      "squad": "coding",
+      "cwd": "sandbox",
+      "kind": "search",
+      "prompt": "Use your code_scout teammate to find where retry-with-backoff logic is implemented in this codebase. Report the function name and file:line. Read-only — let Scout do the searching, do not read files yourself.",
+      "expect": "/retry\\.go|retrywithbackoff/",
+      "notes": "Single-target search. Weak scout should find it in ~1 grep; measures over-search (subagent_tools grep count) and redispatches."
+    },
+    {
+      "id": "search-multi",
+      "squad": "coding",
+      "cwd": "sandbox",
+      "kind": "search",
+      "prompt": "I need two independent things located in this codebase. Delegate the searching to your code_scout teammate (you may fan out). (1) Where is retry-with-backoff implemented? (2) Where is the LRU cache type defined? Report each with the symbol name and file:line. Read-only.",
+      "expect": "/retry\\.go[\\s\\S]*cache\\.go|cache\\.go[\\s\\S]*retry\\.go/",
+      "notes": "Exercises parallel fan-out (code_scout max_instances). Both targets exist in the sandbox."
+    },
+    {
+      "id": "symbol-fields",
+      "squad": "coding",
+      "cwd": "sandbox",
+      "kind": "navigate",
+      "prompt": "Have code_scout report the exact fields of the LruCache struct in this codebase (name and type of each). Read-only.",
+      "expect": "/order/",
+      "notes": "Precise symbol read (lsp_read_symbol / small Read). 'order' is the last field, so mentioning it proves the whole struct was read."
+    },
+    {
+      "id": "docs-lookup",
+      "squad": "coding",
+      "cwd": "sandbox",
+      "kind": "web",
+      "prompt": "Ask your code_docs teammate: in the Go standard library, what does strings.Cut return and what is its exact signature? Report the signature and the meaning of each return value.",
+      "expect": "/before[\\s\\S]*after[\\s\\S]*found|found bool/",
+      "notes": "Network task (code_docs uses web search). Skip in offline runs. strings.Cut returns (before, after string, found bool)."
+    }
+  ]
+}

@@ -31,6 +31,28 @@ func streamStallTimeout() time.Duration {
 	return defaultStreamStallTimeout
 }
 
+// defaultHTTPClientTimeout caps the total duration of a single LLM HTTP request
+// (connection + reading the whole, possibly streamed, body). It sits *above* the
+// stream stall guard (defaultStreamStallTimeout, 10m) so a genuinely frozen
+// stream is caught by the guard first — with a clear message — rather than by
+// this raw client timeout, while a slow-but-alive generation on a sluggish
+// backend is not strangled. The previous hard 5-minute cap fired *before* the
+// stall guard and killed legitimate long generations on slow backends (e.g. a
+// Scaleway-hosted model whose generation intermittently blocks for minutes under
+// load) with "Client.Timeout ... while reading body". Override via
+// OMNIS_LLM_HTTP_TIMEOUT (a Go duration such as "20m"); "0" disables the cap
+// entirely, leaving only the stall guard + request context in control.
+const defaultHTTPClientTimeout = 15 * time.Minute
+
+func httpClientTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("OMNIS_LLM_HTTP_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return defaultHTTPClientTimeout
+}
+
 // stallGuard wraps a streaming response body so that if no Read makes progress
 // within `timeout`, the request context is cancelled — which unblocks the
 // in-flight Read with an error. Stalled() then reports whether the abort was a
