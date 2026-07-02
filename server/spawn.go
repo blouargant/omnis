@@ -114,13 +114,68 @@ func spawnDefaultSquad(d serverDeps) string {
 	return toolkitagent.DefaultSquadName
 }
 
-// runSpawnedTask runs a spawned session's initial task in the background and
-// pings the user (task_notification) when its first reply lands.
-func runSpawnedTask(d serverDeps, sessionID, userID, prompt string) {
-	if strings.TrimSpace(prompt) == "" || d.PushMgr == nil {
+// runSpawnedTask runs a spawned session's initial task in the background and,
+// when it finishes, delivers the result back into the ORIGINATING session so its
+// leader can react to it (the "delegate a sub-task and bring the findings back"
+// workflow). Delivery is one-way: the parent turn is injected with replyTo=""
+// (via injectTurn), so the parent reacts but never bounces a reply back to the
+// spawned session. A task_notification also fires on the spawned session so an
+// away user is pinged. parentID/childLabel are empty ⇒ no delivery (just run).
+func runSpawnedTask(d serverDeps, childID, childLabel, parentID, userID, task string) {
+	if strings.TrimSpace(task) == "" || d.PushMgr == nil {
 		return
 	}
-	go d.PushMgr.injectTurn(d.rootCtx, d, sessionID, userOrDefault(userID), prompt, "task_notification")
+	go func() {
+		// Announce the turn is starting so an open (or just-opened) spawned session
+		// shows the request + a processing state immediately, instead of looking
+		// idle until the background run finishes. Carries the task text as the
+		// request to render.
+		if d.PushEvents != nil {
+			d.PushEvents.broadcastWithText("turn_started", childID, task)
+		}
+		reply := d.PushMgr.injectTurn(d.rootCtx, d, childID, userOrDefault(userID), task, "task_notification")
+		// Deliver the result back to the session that launched the spawn.
+		if parentID == "" || parentID == childID || strings.TrimSpace(reply) == "" {
+			return
+		}
+		if _, ok := d.Registry.Get(parentID); !ok {
+			return // parent gone (deleted/archived) — nothing to deliver into
+		}
+		notice := formatSpawnResultNotice(childLabel, task, reply)
+		// "mailbox_push" makes an open parent tab append the delivered turn (the
+		// notice + the leader's reaction) via appendNewPushTurns.
+		d.PushMgr.injectTurn(d.rootCtx, d, parentID, userOrDefault(userID), notice, "mailbox_push")
+	}()
+}
+
+// formatSpawnResultNotice builds the one-way message injected into the parent
+// session carrying a finished spawned session's result. It frames the result as
+// coming from a separate session and tells the leader not to reply back to it, so
+// the delegation is one-way (no cross-session ping-pong).
+func formatSpawnResultNotice(childLabel, task, reply string) string {
+	label := strings.TrimSpace(childLabel)
+	if label == "" {
+		label = "a spawned session"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[Spawned session %q finished the task you delegated to it.]\n", label)
+	if t := strings.TrimSpace(task); t != "" {
+		fmt.Fprintf(&b, "Task: %s\n", t)
+	}
+	b.WriteString("\nResult:\n")
+	b.WriteString(strings.TrimSpace(reply))
+	b.WriteString("\n\n(This result was produced by a separate session you spawned; use it as needed. " +
+		"You do not need to reply to that session.)")
+	return b.String()
+}
+
+// spawnLabel is the friendly label used for a spawned session in the deliver-back
+// notice: its title when named, else its id.
+func spawnLabel(name, id string) string {
+	if n := strings.TrimSpace(name); n != "" {
+		return n
+	}
+	return id
 }
 
 // drainSpawns materialises every session the leader requested via spawn_session
@@ -155,7 +210,8 @@ func drainSpawns(d serverDeps, parentID, parentUserID string) {
 		if meta == nil {
 			continue
 		}
-		runSpawnedTask(d, meta.ID, parentUserID, sd.Prompt)
+		// Deliver the result back to the leader's own session (parentID) when done.
+		runSpawnedTask(d, meta.ID, spawnLabel(sd.Name, meta.ID), parentID, parentUserID, sd.Prompt)
 	}
 }
 
@@ -193,7 +249,12 @@ func handleSpawn(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create session"})
 			return
 		}
-		runSpawnedTask(d, meta.ID, sessionUserID(parentMeta), req.Prompt)
-		c.JSON(http.StatusCreated, gin.H{"session_id": meta.ID, "squad": meta.Squad})
+		// When done, deliver the result back into the session that ran /spawn.
+		runSpawnedTask(d, meta.ID, spawnLabel(req.Name, meta.ID), parentID, sessionUserID(parentMeta), req.Prompt)
+		// routed=true means no explicit squad was given and the session was pinned
+		// to the Omnis router, which will pick the best squad for the task — so the
+		// client shouldn't claim it's "on the <router> squad".
+		routed := d.Manager != nil && meta.Squad == d.Manager.RouterSquad()
+		c.JSON(http.StatusCreated, gin.H{"session_id": meta.ID, "squad": meta.Squad, "routed": routed})
 	}
 }

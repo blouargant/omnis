@@ -104,8 +104,9 @@ func spawnSessionTool(reg *SpawnRegistry, validSquads []string) tool.Tool {
 		Description: "Spawn a NEW chat session that starts with a fresh, empty context and inherits this " +
 			"session's working directory. Use it to hand off a separate, parallel task to a clean session — " +
 			"it does NOT share this conversation's history, so restate everything the task needs in `prompt`. " +
-			"If you provide `prompt`, the new session immediately starts working on it in the background and the " +
-			"user is notified when it replies; leave `prompt` empty to create an idle session for the user. " +
+			"If you provide `prompt`, the new session immediately starts working on it in the background, and when " +
+			"it finishes its result is delivered back to YOU (this session) as a follow-up message you can act on; " +
+			"leave `prompt` empty to create an idle session for the user. " +
 			"Leave `squad` empty to let the Omnis router pick the best-suited squad for the task (recommended " +
 			"unless you have a specific reason to force one). Available squads: " + list + ".",
 	}, func(ctx tool.Context, in spawnIn) (spawnOut, error) {

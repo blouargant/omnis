@@ -918,7 +918,12 @@ function loadSavedLayout() {
 // carry over the disabled Send button or the "streaming…" status label.
 
 const sessionAbortCtrls = new Map(); // sessionId → AbortController
-const sessionSending    = new Set(); // sessionIds currently streaming
+const sessionSending    = new Set(); // sessionIds currently streaming (started by THIS browser)
+// A server-initiated (background/spawned) turn in flight: this browser did not
+// start it and has no local SSE stream for it, but it should still show the
+// request + processing state (spinner + Steer button). Cleared on completion.
+const remoteBusy        = new Map(); // sessionId → request text of the in-flight background turn
+const remoteBusyBubble  = new Map(); // sessionId → optimistic user-bubble element to remove on completion
 const sessionStopped    = new Set(); // sessionIds whose turn the user explicitly Stopped
 const sessionStatus     = new Map(); // sessionId → status string
 // sessionId → epoch ms a chat-reply OS notification last fired. A completed turn
@@ -1043,18 +1048,23 @@ function setSessionStatus(sessionId, s) {
 // applySessionUI reflects a session's streaming/archived state on every pane
 // that currently shows it.
 function applySessionUI(id) {
-  const active = sessionSending.has(id);
+  const localActive = sessionSending.has(id);
+  // A turn is "in flight" if this browser is streaming it OR a background/spawned
+  // turn is running server-side (remoteBusy) — both show the spinner + Steer.
+  const busy = localActive || remoteBusy.has(id);
   const archived = archivedSessions.has(id);
   for (const p of panelsForSession(id)) {
-    // While a turn streams the send button stays enabled but becomes a "Steer"
-    // button — clicking it (or Enter) submits the composer text as a mid-turn
-    // steering note (sendMessage routes to steerMessage when sessionSending).
+    // While a turn is in flight the send button stays enabled but becomes a
+    // "Steer" button — clicking it (or Enter) submits the composer text as a
+    // mid-turn steering note (sendMessage routes to steerMessage when busy).
     p.els.send.disabled   = archived;
-    setSendButtonMode(p, active && !archived);
-    p.els.cancel.disabled = !active;
+    setSendButtonMode(p, busy && !archived);
+    // Only a locally-streamed turn can be Stopped from here (a background turn
+    // has no client-side AbortController / liveTurn to cancel).
+    p.els.cancel.disabled = !localActive;
     setStatus(p, sessionStatus.get(id) || "");
     setComposerReadOnly(p, archived);
-    setCtxRingSpinning(p, active);
+    setCtxRingSpinning(p, busy);
     renderCtxRing(p);
     renderGoalChip(p);
   }
@@ -1176,7 +1186,7 @@ function renderPaneTabs(panel) {
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", !draft && !editor && !term && sessionSending.has(key));
+    tab.classList.toggle("is-busy", !draft && !editor && !term && (sessionSending.has(key) || remoteBusy.has(key)));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
       if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
@@ -4670,7 +4680,7 @@ function buildSessionRow(s, { archived }) {
   const abbr = (displayName.match(/[a-zA-Z0-9]/g) || []).slice(0, 2).join("").toLowerCase()
     || displayName.trim().slice(0, 2).toLowerCase();
 
-  if (!archived && sessionSending.has(s.id)) li.classList.add("session-busy");
+  if (!archived && (sessionSending.has(s.id) || remoteBusy.has(s.id))) li.classList.add("session-busy");
   // Show a squad badge only when the session uses a non-default squad,
   // so single-squad / default setups stay visually quiet.
   const showBadge = s.squad && s.squad !== defaultSquadName;
@@ -4834,6 +4844,8 @@ function forgetSession(id) {
   sessionTodoBlock.delete(id);
   sessionGoals.delete(id);
   sessionNotifiedAt.delete(id);
+  remoteBusy.delete(id);
+  remoteBusyBubble.delete(id);
   composerDrafts.delete(id);
   // Remove any pending ask_user widgets belonging to this session from every
   // pane's slot, plus the queued/ pending maps.
@@ -5378,18 +5390,25 @@ async function subscribeGlobalEvents() {
         // session-scoped global events here so it never spawns a pane
         // ask-widget, an OS notification, or a sidebar entry.
         if (sid && sid === window.__omnisSettingsSessionId) continue;
-        if (event === "mailbox_push" && sid && !sessionSending.has(sid)) {
-          await appendNewPushTurns(sid);
+        if (event === "mailbox_push" && sid) {
+          endRemoteBusy(sid);
+          if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
+        } else if (event === "turn_started" && sid) {
+          // A server-initiated (background/spawned) turn began — show its request
+          // + processing state so the session doesn't look idle while it runs.
+          if (!sessionSending.has(sid)) startRemoteBusy(sid, (data && data.text) || "");
         } else if (event === "task_notification" && sid) {
-          // A background task / monitor produced a result. In active-wake mode
-          // the server injected a synthetic turn (picked up by appendNewPushTurns);
-          // in passive mode there is no new turn and the toast is the only signal.
+          // A background task / monitor / spawned turn produced a result. In
+          // active-wake mode the server injected a synthetic turn (picked up by
+          // appendNewPushTurns); in passive mode the toast is the only signal.
+          endRemoteBusy(sid); // drop the optimistic request bubble before re-render
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
         } else if (event === "schedule_run" && sid) {
           // A /loop or /schedule routine injected a turn into this session
           // (a loop into the current session, or a fresh scheduled-run session).
           // Append it if the session is open, and toast like a background task.
+          endRemoteBusy(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
         } else if (event === "schedule_changed") {
@@ -5795,6 +5814,41 @@ async function appendNewPushTurns(sessionId) {
   }
 }
 
+// startRemoteBusy reflects a server-initiated (background/spawned) turn that this
+// browser did not start: it optimistically renders the request as a user bubble
+// and flips the session into its processing state (spinner + Steer button), so an
+// open — or subsequently opened — spawned session doesn't look idle while the
+// task runs. The optimistic bubble is removed by endRemoteBusy on completion,
+// where appendNewPushTurns re-renders the real turn from history.
+function startRemoteBusy(sid, text) {
+  if (!sid || remoteBusy.has(sid)) return;
+  remoteBusy.set(sid, text || "");
+  setSessionStatus(sid, "working…");
+  const t = (text || "").trim();
+  if (t) {
+    const container = getContainer(sid);
+    const placeholder = container.querySelector(".no-messages-placeholder");
+    if (placeholder) placeholder.remove();
+    appendUserBubble(t, container, null, sessionTurnCounts.get(sid) ?? 0);
+    remoteBusyBubble.set(sid, container.lastElementChild);
+  }
+  applySessionUI(sid);
+  for (const p of panelsForSession(sid)) requestAnimationFrame(() => scrollBottom(p, true));
+}
+
+// endRemoteBusy clears the in-flight background-turn state and removes the
+// optimistic request bubble, so the completed turn (rendered from history by
+// appendNewPushTurns) is not duplicated. No-op when the session wasn't busy.
+function endRemoteBusy(sid) {
+  if (!remoteBusy.has(sid)) return;
+  remoteBusy.delete(sid);
+  const bubble = remoteBusyBubble.get(sid);
+  if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+  remoteBusyBubble.delete(sid);
+  setSessionStatus(sid, "");
+  applySessionUI(sid);
+}
+
 // showPushBanner inserts a temporary notice into the transcript container.
 function showPushBanner(container) {
   const banner = document.createElement("div");
@@ -6017,12 +6071,14 @@ async function sendMessage(panel) {
   if (!panel.sessionId) await newChat(panel);
   if (!panel.sessionId) return;
 
-  // If a turn is already streaming for this session, this submission is a
-  // mid-turn steering note (extra information, a remark, an insight) — not a new
+  // If a turn is already in flight for this session — streamed locally OR a
+  // background/spawned turn running server-side (remoteBusy) — this submission is
+  // a mid-turn steering note (extra information, a remark, an insight), not a new
   // turn. Hand it to the steering path, which queues it on the server so the
-  // agent can pick it up at its next reasoning step. Attachments (if any) are
-  // left in place for a normal turn once the current one finishes.
-  if (sessionSending.has(panel.sessionId)) {
+  // agent can pick it up at its next reasoning step (the server accepts the note
+  // for a background turn too, while its run guard is held). Attachments (if any)
+  // are left in place for a normal turn once the current one finishes.
+  if (sessionSending.has(panel.sessionId) || remoteBusy.has(panel.sessionId)) {
     const note = prompt;
     panel.els.prompt.value = "";
     composerDrafts.delete(panel.activeTab);
@@ -6527,7 +6583,7 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/usage",         args: "",           desc: "Show this session's token usage and estimated cost", kind: "session", builtin: true },
   { cmd: "/recap",         args: "",           desc: "Summarise the current session", kind: "session", builtin: true },
   { cmd: "/fork",          args: "",           desc: "Branch a new session inheriting this conversation's full context", kind: "session", builtin: true },
-  { cmd: "/spawn",         args: "<name> [squad] [task]", desc: "Start a fresh session (empty context) in this folder; omit the squad to let the router pick; an optional task runs in the background", kind: "session", builtin: true },
+  { cmd: "/spawn",         args: "<name> [@squad]: <task>", desc: "Start a fresh session (empty context) in this folder; text after ':' is a task run in the background; omit @squad to let the router pick", kind: "session", builtin: true },
   { cmd: "/btw",           args: "<question>", desc: "Ask a quick side question — not saved to the conversation", kind: "session", builtin: true },
   { cmd: "/export",        args: "[filename]", desc: "Export the conversation as a Markdown file", kind: "session", builtin: true },
   { cmd: "/plan",          args: "[task]",     desc: "Research and propose a step-by-step plan without making changes", kind: "session", builtin: true },
@@ -7518,19 +7574,52 @@ async function handleSlashCommand(raw, panel) {
         appendCommandBubble("No active session — start a chat first.", true, panel);
         return;
       }
-      // /spawn <name> [squad] [initial task…] — create a fresh session (empty
-      // context) rooted in this session's working directory. First token is the
-      // name, second the squad; anything after is an initial task the new
-      // session runs in the background. Omit the squad to let the Omnis router
-      // pick the best-suited squad for the task. Unlike /fork, no history copied.
-      const toks = argPart.trim().split(/\s+/).filter(Boolean);
-      if (toks.length === 0) {
-        appendCommandBubble("Usage: `/spawn <name> [squad] [initial task…]`", true, panel);
+      // /spawn <name> [@squad]: <task> — create a fresh session (empty context)
+      // rooted in this session's working directory. Grammar: split on the first
+      // ":"; the text before it is the header (an "@word" token in it is the
+      // squad, the remaining words are the multi-word name), and the text after
+      // it is an optional initial task the new session runs in the background.
+      // No ":" ⇒ no task (idle session). Omit "@squad" to let the Omnis router
+      // pick the best-suited squad. Unlike /fork, no conversation is copied.
+      const spawnUsage =
+        "Usage: `/spawn <name> [@squad]: <task>` — e.g. " +
+        "`/spawn parser tests @coding: add unit tests for the tokenizer`. " +
+        "The name is required; `@squad` is optional (omit to let the router pick); " +
+        "text after `:` is an optional starting task.";
+      const rawSpawn = argPart.trim();
+      if (!rawSpawn) {
+        appendCommandBubble(spawnUsage, true, panel);
         return;
       }
-      const spawnName = toks[0];
-      const spawnSquad = toks[1] || "";
-      const spawnPrompt = toks.slice(2).join(" ");
+      const spawnColon = rawSpawn.indexOf(":");
+      const spawnHeader = (spawnColon >= 0 ? rawSpawn.slice(0, spawnColon) : rawSpawn).trim();
+      const spawnPrompt = spawnColon >= 0 ? rawSpawn.slice(spawnColon + 1).trim() : "";
+      // Pull the optional @squad out of the header; the rest is the name.
+      let spawnSquad = "";
+      const spawnNameToks = [];
+      for (const tok of spawnHeader.split(/\s+/).filter(Boolean)) {
+        if (!spawnSquad && tok.length > 1 && tok[0] === "@") {
+          spawnSquad = tok.slice(1).toLowerCase();
+          continue;
+        }
+        spawnNameToks.push(tok);
+      }
+      const spawnName = spawnNameToks.join(" ");
+      if (!spawnName) {
+        appendCommandBubble(spawnUsage, true, panel);
+        return;
+      }
+      // A typed @squad must be a real squad — error (don't silently reroute) so
+      // a typo is obvious. An unknown/offline squad list skips this (server also
+      // validates); omitting @squad lets the router pick.
+      if (spawnSquad && availableSquads.length &&
+          !availableSquads.some(s => (s.name || "").toLowerCase() === spawnSquad)) {
+        const names = availableSquads.map(s => s.name).join(", ");
+        appendCommandBubble(
+          `Unknown squad \`${spawnSquad}\`. Available: ${names}. Omit \`@squad\` to let the router pick.`,
+          true, panel);
+        return;
+      }
       try {
         const res = await apiFetch(`/api/sessions/${encodeURIComponent(panel.sessionId)}/spawn`, {
           method: "POST",
@@ -7542,9 +7631,10 @@ async function handleSlashCommand(raw, panel) {
           return;
         }
         let msg = `Spawned session **${spawnName}**`;
-        if (d.squad) msg += ` on the \`${d.squad}\` squad`;
+        if (d.routed) msg += " — the router will assign it to the best squad";
+        else if (d.squad) msg += ` on the \`${d.squad}\` squad`;
         msg += spawnPrompt
-          ? ", now working on the task in the background — you'll be notified when it replies."
+          ? ". It's working on the task in the background — the result will be delivered back into this session when it's ready."
           : " — it's idle and waiting in the sidebar.";
         appendCommandBubble(msg, false, panel);
       } catch (err) {

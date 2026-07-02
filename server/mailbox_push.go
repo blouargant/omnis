@@ -49,6 +49,19 @@ func (g *sessionRunGuard) tryAcquire(sessionID string) (release func(), ok bool)
 	}
 }
 
+// busy reports (best-effort, non-blocking) whether a turn is currently in flight
+// for sessionID — i.e. the guard is held. Used to let a steer note be enqueued
+// for a background/spawned turn that has no liveTurn buffer: the squad's steering
+// plugin drains SteerStore at the next model boundary regardless of how the turn
+// was started.
+func (g *sessionRunGuard) busy(sessionID string) bool {
+	v, ok := g.m.Load(sessionID)
+	if !ok {
+		return false
+	}
+	return len(v.(chan struct{})) > 0
+}
+
 // pushMsg is one multiplexed /api/events payload: a named event plus the
 // session id it concerns. "mailbox_push" signals a completed background turn;
 // "session_created"/"session_deleted"/"session_renamed" keep other open
@@ -270,10 +283,13 @@ func (pm *pushManager) injectNotification(ctx context.Context, d serverDeps, ses
 // the reply, and fires the given SSE event so open UI tabs refresh. Shared by
 // the background-task, scheduler, and spawned-task delivery paths (which have no
 // separate router-view / answering-view of the prompt).
-func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, userID, prompt, sseEvent string) {
+// injectTurn returns the assistant reply text so callers that want to act on the
+// result (e.g. a spawned task delivering its result back to the originating
+// session) can, without re-reading the transcript.
+func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, userID, prompt, sseEvent string) string {
 	// replyTo="" — these paths (background tasks, scheduler, spawned tasks) have no
 	// cross-session sender to reply to, so the backstop is inert.
-	pm.injectTurnRouted(ctx, d, sessionID, userID, prompt, prompt, sseEvent, "")
+	return pm.injectTurnRouted(ctx, d, sessionID, userID, prompt, prompt, sseEvent, "")
 }
 
 // injectTurnRouted runs a synthetic, run-guarded turn through the Omnis routing
@@ -296,9 +312,9 @@ func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, 
 // turn's reply to that sender exactly once (see sendMailboxBackstop), so a
 // workflow-critical reply is never dropped just because the model forgot to send
 // it. A squad that did reply/interact suppresses the backstop (no double reply).
-func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) {
+func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) string {
 	if ctx.Err() != nil {
-		return
+		return ""
 	}
 
 	// Serialize with any concurrent user turn for this session.
@@ -306,19 +322,19 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	defer release()
 
 	if ctx.Err() != nil {
-		return // session deleted while waiting for the lock
+		return "" // session deleted while waiting for the lock
 	}
 
 	meta, ok := d.Registry.Get(sessionID)
 	if !ok {
-		return
+		return ""
 	}
 	// We hold the run-guard for this session, so any hot-reload that happened
 	// between turns can now be applied: migrate the pin to the current generation
 	// before the dispatch loop resolves squads.
 	d.Manager.MigrateToCurrent(sessionID)
 	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
-		return // no runnable squad (e.g. session dropped mid-flight)
+		return "" // no runnable squad (e.g. session dropped mid-flight)
 	}
 
 	routerSquad := d.Manager.RouterSquad()
@@ -412,6 +428,7 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	} else {
 		pm.bcast.broadcast(sseEvent, sessionID)
 	}
+	return reply
 }
 
 // sendMailboxBackstop forwards a routed turn's reply back to the originating

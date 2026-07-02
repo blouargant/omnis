@@ -2105,7 +2105,10 @@ Surfaces:
 
 - **Web** — `POST /api/sessions/:id/steer {text}` ([server/sse.go](server/sse.go)
   `handleSteer`): enqueues and returns `{queued:true}` when a turn is live
-  (`LiveTurns.get(id) != nil`), else `{queued:false}` so the client sends it as a
+  (`LiveTurns.get(id) != nil`) **or** a turn is otherwise in flight for the session
+  (`RunGuard.busy(id)` — a background/spawned turn has no liveTurn buffer but its
+  run guard is held, and the squad's steering plugin still drains `SteerStore` at
+  the next model boundary), else `{queued:false}` so the client sends it as a
   normal turn. The turn producer in `handleMessages` is a **loop** (not a single
   `RunWithRouting`): fold consumed → persist → drain pending → emit a `steer_turn`
   SSE (the follow-up's user bubble, rendered in every attached stream) → run it →
@@ -2262,7 +2265,16 @@ reveal the sidebar button (see "Self-update"). Two more events back the schedule
 a `/loop` or `/schedule` injects a turn — the client appends it (like
 `task_notification`) and toasts; **`schedule_changed`** (no session id) fires on
 any loop/schedule create/edit/delete so an open **Settings → Automation** panel
-refreshes (`window.Settings.refreshSchedules`).
+refreshes (`window.Settings.refreshSchedules`). A further event,
+**`turn_started`** (carrying the session id + the request `text`), is fired by a
+**server-initiated (background/spawned) turn** just before it runs (see "Session
+spawning") so an open — or subsequently opened — session shows the request +
+processing state (spinner + Steer button) instead of looking idle; the client
+tracks these in a `remoteBusy` map (folded into `applySessionUI`'s busy state
+alongside the local `sessionSending`), optimistically renders the request bubble
+(`startRemoteBusy`), and clears it (`endRemoteBusy`) on the completing
+`task_notification`/`mailbox_push` before `appendNewPushTurns` re-renders the real
+turn from history.
 
 ### Self-update (new-release detection + in-app install)
 
@@ -2410,7 +2422,16 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   like `handleFork`). `drainSpawns` — called from [server/sse.go](server/sse.go)
   `handleMessages` after the exchange loop (on `d.rootCtx`, so a Stop/disconnect
   never cancels a spawn) — drains the parent's `SpawnDirectives` and materialises
-  each; an initial task runs via `PushMgr.injectTurn(… "task_notification")`.
+  each; an initial task runs via `runSpawnedTask` → `PushMgr.injectTurn(…
+  "task_notification")`. **Result delivered back to the originating session:** when
+  the spawned task finishes, `runSpawnedTask` captures the reply (`injectTurn` now
+  returns it) and injects a one-way notice turn (`formatSpawnResultNotice`, framed
+  "you do not need to reply to that session") into the **parent** session via
+  `injectTurn(… "mailbox_push")`, so the parent's leader reacts to the findings
+  in-thread. One-way (`replyTo=""`) so it never bounces a reply back to the spawned
+  session. Applies to both the leader tool and the `/spawn` command (the parent is
+  the launching session). No delivery when the task is empty (idle session) or the
+  parent is gone.
   **Squad defaulting** (`spawnDefaultSquad`): an empty squad defaults to the
   **router** (when routing is enabled), for both idle **and** task-bearing
   sessions — because `injectTurn` now drives the routing dispatch loop, an initial
@@ -2423,10 +2444,26 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   `handleSpawn` backs `POST /api/sessions/:id/spawn {name,squad,prompt}` (the
   `/spawn` command).
 - **Web UI** ([web/app.js](web/app.js)): `/spawn` is a `session`-section builtin
-  (reserved in `usercommands.ReservedNames`); the handler parses `<name> <squad>`
-  + trailing task and POSTs the spawn route. The new session appears via the
-  existing `session_created` SSE (not auto-opened — background choice). No-op
-  contract: nothing enqueued ⇒ `drainSpawns` is a map-check no-op.
+  (reserved in `usercommands.ReservedNames`). Grammar is **`<name> [@squad]:
+  <task>`** — the handler splits on the first `:`, pulls an optional `@squad`
+  token out of the header (the rest of the header is the multi-word **name**), and
+  treats the text after `:` as the initial **task** (no `:` ⇒ idle session). A
+  typed `@squad` is validated against `availableSquads` (typo ⇒ error listing the
+  real squads); omitting it lets the router pick. It POSTs `{name,squad,prompt}` to
+  the spawn route. The new session appears via the existing `session_created` SSE
+  (not auto-opened — background choice). No-op contract: nothing enqueued ⇒
+  `drainSpawns` is a map-check no-op.
+- **Progress display (not idle-looking).** A spawned task runs via the silent
+  `injectTurn` rail (no per-token SSE stream), so without help an opened spawned
+  session would show nothing until the run finished. `runSpawnedTask` therefore
+  broadcasts a **`turn_started`** SSE (with the task text) before running; the
+  client (`startRemoteBusy`) shows the request as a user bubble and flips the
+  session into its processing state (spinner + **Steer** button) via the
+  `remoteBusy` map, and clears it on completion (`endRemoteBusy`). Steering a
+  spawned turn works because `handleSteer` accepts a note while the run guard is
+  held (`RunGuard.busy`) even though there is no liveTurn — the squad's steering
+  plugin drains it at the next model boundary (the note reaches the model but,
+  like other injected turns, is not folded into the persisted transcript).
 
 ### Background server (`omnis-server start` / `stop` / `status`)
 

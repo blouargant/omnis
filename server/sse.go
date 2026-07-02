@@ -548,9 +548,15 @@ func handleSteer(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		// A live turn exists exactly while its producer goroutine is running
-		// (lt.get returns nil once finished + GC'd). Only then can a note be
-		// injected/looped; otherwise the caller should send it as a normal turn.
-		if d.LiveTurns == nil || d.LiveTurns.get(id) == nil {
+		// (lt.get returns nil once finished + GC'd). A background/spawned turn has
+		// no liveTurn buffer, but a note can still be steered into it while its run
+		// guard is held (the squad's steering plugin drains SteerStore at the next
+		// model boundary). So enqueue when EITHER a liveTurn exists OR a turn is
+		// otherwise in flight; only when the session is truly idle do we tell the
+		// caller to send it as a normal turn.
+		live := d.LiveTurns != nil && d.LiveTurns.get(id) != nil
+		running := d.RunGuard != nil && d.RunGuard.busy(id)
+		if !live && !running {
 			c.JSON(http.StatusOK, gin.H{"queued": false})
 			return
 		}
