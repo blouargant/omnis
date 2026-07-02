@@ -787,6 +787,9 @@ func newEngine(d serverDeps) *gin.Engine {
 	// from the kept turns (see server/fork_rewind.go).
 	auth.POST("/sessions/:id/rewind", handleRewind(d))
 	auth.POST("/sessions/:id/fork", handleFork(d))
+	// Spawn a fresh session (empty context) inheriting this session's working
+	// directory; an initial task runs in the background (see server/spawn.go).
+	auth.POST("/sessions/:id/spawn", handleSpawn(d))
 	auth.POST("/sessions/:id/bash", handleBash(d))
 	auth.GET("/sessions/:id/folder", handleFolder(d))
 	auth.POST("/sessions/:id/folder", handleFolder(d))

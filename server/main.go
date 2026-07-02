@@ -195,6 +195,10 @@ func run() error {
 		// provider-health banner reports the unreachable provider; turns fail
 		// with the real error only if the user actually chats.
 		DeferModelErrors: true,
+		// The server can materialise sessions requested by the spawn_session
+		// leader tool (drainSpawns after each turn), so mount the `spawn` tool
+		// group on coordinating leaders that declare it.
+		SessionSpawning: true,
 	}
 
 	log.Printf("server: omnis home: %s", paths.Home())

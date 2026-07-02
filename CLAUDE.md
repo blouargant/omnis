@@ -454,7 +454,9 @@ root build their tools from the root agent's declared `tools` groups via
 `toolsForAgentConfig` (the same resolver sub-agents use), so a squad root is
 limited to exactly the capability groups it declares — it no longer inherits a
 fixed coordinator toolset. Infra-scoped coordination groups are declarable
-keys: `planning` (todo + task graph), `worktree`, `bg`. **Always-on for any
+keys: `planning` (todo + task graph), `worktree`, `bg`, and `spawn`
+(`spawn_session`, coordinating-leader-only + server-only — see "Session
+spawning"). **Always-on for any
 squad root** (not gated): the teammate **mailbox** (so the root stays
 reachable cross-session — another squad can `teammate_ask` the Helper to
 install a skill) and **ask_user**. **Coordinating-leader-only** (skipped when
@@ -1256,8 +1258,9 @@ skips brand-new sessions), it loads `conversation_<id>.json` and calls the same
 tool calls/attachments not replayed). Only the session's **persisted/active**
 squad is seeded; routing to a *different* squad post-restart starts that squad
 fresh, the same per-squad-context boundary as within a single process. **Known
-gap:** the inbound A2A turn path ([server/a2a_server.go](server/a2a_server.go))
-runs `sq.Runner.Run` directly and is **not** yet reseeded on restart.
+gap:** the inbound A2A turn path ([server/a2a_server.go](server/a2a_server.go),
+now `runRouted` → `RunWithRouting`) is **not** reseeded on restart — only the
+web-UI `handleMessages` path lazily reseeds.
 
 ### Session states (active / archived / deleted)
 
@@ -1785,6 +1788,46 @@ polled by the model. [server/mailbox_push.go](server/mailbox_push.go)
 cross-session message arrives it `inject`s a synthetic `"[mailbox] …"` turn
 (serialised against user turns by `sessionRunGuard`) and fires the
 `sessionPushBroadcaster` so open web UI tabs refresh.
+
+**The inbound message is routed, and the receiving squad must reply.** `inject`
+drives the turn through the Omnis routing dispatch loop via `injectTurnRouted`
+(not a direct `Runner.Run`): it starts at the session's pinned squad
+(`meta.Squad`), so a **freshly-started session — pinned to the router — has the
+router route the message to the proper squad**, while an already-routed session
+runs its pinned squad directly (one hop, no re-route). This is what lets a
+brand-new (user- or spawn-created) session receive an outside message and get it
+to the right squad even though the router "has the hand" at session start. Two
+part-views mirror the interactive path: the **answering** squad receives
+`answerPrompt` (the `[mailbox] From/Body` message **plus a mandatory reply
+directive** — the sender is a live session blocked on the answer, so the squad is
+told it MUST `teammate_tell`/`teammate_ask` `from` when done); the **router hop**
+receives the clean `routerPrompt` (the message only — the router has no mailbox
+reply duty and must not act on the directive), and its routing chatter is dropped
+(`PendingRoute`) exactly like the interactive `runHop`. The clean `routerPrompt`
+is what gets persisted as the user turn. `notify` persists the routed squad
+(`SetSquad` + `SetConversationSquad`) so the sender's follow-up messages continue
+in the same squad — the reply/interaction is primarily **agent-driven** (the squad
+root's always-on mailbox tools are the reply channel).
+
+**Host-side reply backstop.** Because a missed reply strands the sender's
+workflow, `injectTurnRouted` takes a `replyTo` (the sender's friendly name, set
+only on the mailbox path) and guarantees a reply: during the routed turn it
+watches the root runner's events for a `teammate_tell`/`teammate_ask` call
+(`repliedToSender`); if the answering squad **did not** itself send one, the host
+forwards the turn's reply to the sender exactly once via `sendMailboxBackstop`
+(resolve `replyTo` → canonical address through `Registry.Lookup`; `From` =
+`NameFunc(userID, sessionID, "leader")` — this session's registered/watched
+address — so the sender reverse-resolves it and can reply back; `context.Background()`
+Send, like the teammate tools). A squad that **did** reply disarms the backstop,
+so there's no duplicate; and it is one Send per one inbound message, so it cannot
+ping-pong. The generic `injectTurn` (background tasks, scheduler, spawned-task
+turns) is a thin wrapper over `injectTurnRouted` with identical answer/router
+prompts **and `replyTo=""`** (inert backstop — no cross-session sender), so those
+paths route-when-fresh too. **No-op contract:** with routing disabled
+(`RouterSquad == ""`) `RunWithRouting` runs the pinned squad once and breaks —
+byte-identical to the old direct `Runner.Run`.
+(Inbound **A2A** calls are routed the same way — see "A2A server" below — but their
+reply is the RPC response, so they use no mailbox backstop.)
 
 Because the JSONL backend's `Receive` **consumes** the message (single
 reader), the model must not also poll the same inbox. The server therefore
@@ -2329,6 +2372,62 @@ conversation and switches to it with no prefill (nothing was dropped). Styles:
 [web/css/features/messages.css](web/css/features/messages.css). CLI/TUI are
 untouched (no routes, no reseed callers) — byte-identical no-op there.
 
+### Session spawning (`/spawn` + `spawn_session`)
+
+Spawn a **fresh** session that starts with an **empty context** (unlike fork,
+which *copies* the parent's turns) and **inherits the parent's working
+directory**. Two entry points share one server-side path: a user **`/spawn <name>
+<squad> [initial task…]`** command, and a leader-callable **`spawn_session`**
+tool. When an initial task is given the new session **runs it in the background**
+and the user is **notified** on completion; with no task it's an idle session in
+the sidebar. Server-only (CLI/TUI are single-session surfaces).
+
+- **Leader tool = host-side directive** (mirrors `route_to_squad` →
+  `RouteRegistry`, since the `agent` package can't import the server).
+  [agent/spawn.go](agent/spawn.go): `SpawnDirective{Name,Squad,Prompt}` +
+  `SpawnRegistry` on `Infrastructure.SpawnDirectives` (process-wide, survives
+  hot-reload). Unlike routing it stores a **slice per session** (`Enqueue`/`Drain`)
+  — a leader may spawn several per turn (capped `maxSpawnsPerSession`=8). The
+  `spawn_session` tool only **records** intent (it does **not** set
+  `SkipSummarization` — spawning is fire-and-forget, so the leader keeps working).
+- **`spawn` tool group = the leader-only opt-out.** Mounted in
+  [agent/squad.go](agent/squad.go) next to the infra-scoped `planning`/`worktree`/
+  `bg`/`lsp` groups, gated on `keySet["spawn"] && opts.SessionSpawning &&
+  !leaderless` — so it's on a **coordinating leader** only (never the leaderless
+  router or a single-specialist root) and only when the surface can materialise
+  sessions. The user disables it by removing `"spawn"` from the leader's
+  `tools` (Settings → Agent, or the `set_agent` settings tool). Shipped enabled on
+  `leader` + `coder` ([registry/agents/leader/agent.json](registry/agents/leader/agent.json),
+  [registry/agents/coder/agent.json](registry/agents/coder/agent.json)). The
+  `spawn_session` tool is normally **permissioned** (not exempted like the routing
+  tools) — enabling is already opt-in and spawning is a real side effect.
+- **`Options.SessionSpawning`** ([agent/agent.go](agent/agent.go)) is the
+  server-only surface flag (set in [server/main.go](server/main.go), mirroring
+  `BackgroundMailboxDelivery`); false in CLI/TUI ⇒ the tool never mounts.
+- **Server** ([server/spawn.go](server/spawn.go)): `materializeSession` is the
+  shared session-creation wiring (register + pin + watch + `broadcast("session_created")`
+  + `SessionStart` hook) plus cwd inheritance (`bashCwd.set(new, bashCwd.get(parent))`,
+  like `handleFork`). `drainSpawns` — called from [server/sse.go](server/sse.go)
+  `handleMessages` after the exchange loop (on `d.rootCtx`, so a Stop/disconnect
+  never cancels a spawn) — drains the parent's `SpawnDirectives` and materialises
+  each; an initial task runs via `PushMgr.injectTurn(… "task_notification")`.
+  **Squad defaulting** (`spawnDefaultSquad`): an empty squad defaults to the
+  **router** (when routing is enabled), for both idle **and** task-bearing
+  sessions — because `injectTurn` now drives the routing dispatch loop, an initial
+  task starting at the router is routed to the proper squad (and an idle session's
+  first message likewise), exactly like a new chat. An explicit `sd.Squad` still
+  wins in `materializeSession`. (Previously a task-bearing spawn was forced onto
+  the default squad because `injectTurn` ran the pinned runner directly and did
+  not route; that workaround is gone now that injected turns route — see
+  "Background mailbox delivery".)
+  `handleSpawn` backs `POST /api/sessions/:id/spawn {name,squad,prompt}` (the
+  `/spawn` command).
+- **Web UI** ([web/app.js](web/app.js)): `/spawn` is a `session`-section builtin
+  (reserved in `usercommands.ReservedNames`); the handler parses `<name> <squad>`
+  + trailing task and POSTs the spawn route. The new session appears via the
+  existing `session_created` SSE (not auto-opened — background choice). No-op
+  contract: nothing enqueued ⇒ `drainSpawns` is a map-check no-op.
+
 ### Background server (`omnis-server start` / `stop` / `status`)
 
 `omnis-server` runs in the **foreground by default** (`omnis-server [flags]`).
@@ -2624,11 +2723,30 @@ session is materialised if it does not yet exist (uses the same
 calls from other A2A agents. Key behaviours:
 
 - **Squad routing**: `metadata.squad` selects which squad the task runs on
-  (falls back to `default`).
+  (an explicit squad is honoured verbatim). When the caller names **no** squad,
+  the target defaults to the **Omnis router** (`a2aDefaultSquad`; the default team
+  when routing is disabled or in unit tests with no manager).
+- **Omnis routing of the inbound message**: every inbound turn runs through the
+  routing dispatch loop via `s.runRouted` → `Manager.RunWithRouting` (not a direct
+  `Runner.Run`), starting at the resolved squad. So a **fresh/router-pinned session
+  or an unspecified-squad call has the router route the message to the proper
+  squad** (exactly like a new web chat), while an already-routed session runs its
+  pinned squad directly. The **answering squad's text is the A2A reply** (RPC
+  response / final artifact) — no mailbox backstop is needed since the reply is
+  the response itself. `runRouted` shares one per-hop runner (`consumeHop`, which
+  the streaming path drives with an `onPart` callback to emit `task_artifact_update`
+  deltas — the router hop's chatter is never streamed and is dropped on
+  `PendingRoute`). For a **persistent** session the routed squad is pinned onto it
+  (`SetSquad` + `SetConversationSquad`) so the sender's follow-ups continue there;
+  an **ephemeral** task's transient pin (Lookup auto-pins the directive-keying
+  sessionID) is `Release`d after the turn so it never leaks a generation refcount.
+  With routing disabled it is one hop — byte-identical to the old direct run.
 - **Session routing**: `metadata.session_name` routes into an existing named
-  session. `metadata.create: true` auto-creates it if missing.
+  session. `metadata.create: true` auto-creates it (defaulting to the router when
+  no squad is named, so the created session is routed on its first message).
 - **Ephemeral sessions**: omitting `session_name` creates a throwaway session
-  per task and discards it after the response.
+  per task and discards it after the response (its transient routing pin is
+  released — see above).
 - **SSE push**: after persisting a turn, `sessionPushBroadcaster.notify`
   fires a `mailbox_push` event so open web UI tabs refresh live.
 - **RunGuard**: `sessionRunGuard` serialises concurrent turns on the same

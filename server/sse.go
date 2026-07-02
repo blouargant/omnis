@@ -434,6 +434,12 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				}
 				break
 			}
+			// Materialise any sessions the leader requested via spawn_session during
+			// this exchange: fresh context, inheriting this session's working
+			// directory; an initial task runs in the background and notifies on
+			// completion. Runs on the server root context inside drainSpawns so a
+			// Stop/disconnect on this turn never cancels the spawn.
+			drainSpawns(d, meta.ID, meta.UserID)
 			// Terminal event for the whole (possibly multi-turn) exchange. Carry the
 			// wall-clock time so the web UI can show "time taken" next to copy.
 			emitFrame("done", map[string]any{"duration_ms": time.Since(overallStart).Milliseconds()})

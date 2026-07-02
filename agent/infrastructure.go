@@ -51,6 +51,12 @@ type Infrastructure struct {
 	// Process-wide so it survives hot-reload (directives are transient per turn).
 	RouteDirectives *RouteRegistry
 
+	// SpawnDirectives holds pending "create a new session" requests per parent
+	// session. Written by the spawn_session leader tool during a turn and drained
+	// by the surface (server handleMessages) after the turn's runner finishes.
+	// Process-wide so it survives hot-reload (requests are transient per turn).
+	SpawnDirectives *SpawnRegistry
+
 	// Session-scoped state holders. Each is a process-singleton that lazily
 	// creates per-(userID, sessionID) entries on disk, so they trivially
 	// outlive any single Instance.
@@ -239,6 +245,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		GoalStore:       goal.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
+		SpawnDirectives: NewSpawnRegistry(),
 	}, nil
 }
 

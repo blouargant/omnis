@@ -6527,6 +6527,7 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/usage",         args: "",           desc: "Show this session's token usage and estimated cost", kind: "session", builtin: true },
   { cmd: "/recap",         args: "",           desc: "Summarise the current session", kind: "session", builtin: true },
   { cmd: "/fork",          args: "",           desc: "Branch a new session inheriting this conversation's full context", kind: "session", builtin: true },
+  { cmd: "/spawn",         args: "<name> [squad] [task]", desc: "Start a fresh session (empty context) in this folder; omit the squad to let the router pick; an optional task runs in the background", kind: "session", builtin: true },
   { cmd: "/btw",           args: "<question>", desc: "Ask a quick side question — not saved to the conversation", kind: "session", builtin: true },
   { cmd: "/export",        args: "[filename]", desc: "Export the conversation as a Markdown file", kind: "session", builtin: true },
   { cmd: "/plan",          args: "[task]",     desc: "Research and propose a step-by-step plan without making changes", kind: "session", builtin: true },
@@ -7509,6 +7510,46 @@ async function handleSlashCommand(raw, panel) {
       // then switch to it (mirrors Claude Code's /fork). The original is left
       // untouched, so you can explore a different direction without losing it.
       await forkConversation(panel.sessionId, 0, "", { full: true });
+      break;
+    }
+
+    case "spawn": {
+      if (!panel.sessionId) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      // /spawn <name> [squad] [initial task…] — create a fresh session (empty
+      // context) rooted in this session's working directory. First token is the
+      // name, second the squad; anything after is an initial task the new
+      // session runs in the background. Omit the squad to let the Omnis router
+      // pick the best-suited squad for the task. Unlike /fork, no history copied.
+      const toks = argPart.trim().split(/\s+/).filter(Boolean);
+      if (toks.length === 0) {
+        appendCommandBubble("Usage: `/spawn <name> [squad] [initial task…]`", true, panel);
+        return;
+      }
+      const spawnName = toks[0];
+      const spawnSquad = toks[1] || "";
+      const spawnPrompt = toks.slice(2).join(" ");
+      try {
+        const res = await apiFetch(`/api/sessions/${encodeURIComponent(panel.sessionId)}/spawn`, {
+          method: "POST",
+          body: JSON.stringify({ name: spawnName, squad: spawnSquad, prompt: spawnPrompt }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          appendCommandBubble(d.error || "Could not spawn session.", true, panel);
+          return;
+        }
+        let msg = `Spawned session **${spawnName}**`;
+        if (d.squad) msg += ` on the \`${d.squad}\` squad`;
+        msg += spawnPrompt
+          ? ", now working on the task in the background — you'll be notified when it replies."
+          : " — it's idle and waiting in the sidebar.";
+        appendCommandBubble(msg, false, panel);
+      } catch (err) {
+        appendCommandBubble(String(err), true, panel);
+      }
       break;
     }
 

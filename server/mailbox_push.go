@@ -11,8 +11,10 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
+	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/teammates"
 )
 
 // sessionRunGuard ensures at most one runner.Run call is in flight per session.
@@ -219,10 +221,33 @@ func (pm *pushManager) Stop(sessionID string) {
 }
 
 // inject runs a synthetic agent turn for a received cross-session mailbox
-// message.
+// message. The turn is driven through the Omnis routing dispatch loop
+// (injectTurnRouted): a freshly-started session is pinned to the router, so the
+// router routes the message to the proper squad; that squad then owns the
+// exchange. Because the sender is another live session waiting on this reply,
+// the answering squad is given a MANDATORY directive to reply via its mailbox —
+// a missing reply would strand the sender's workflow.
 func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, userID, from, body string) {
-	prompt := fmt.Sprintf("[mailbox] Cross-session message received:\nFrom: %s\nBody: %s", from, body)
-	pm.injectTurn(ctx, d, sessionID, userID, prompt, "mailbox_push")
+	// The clean record of the message. This is also the view the router sees when
+	// it routes: the router has no reply duty, so it must not be shown the reply
+	// directive below (it would try to act on it).
+	message := fmt.Sprintf("[mailbox] Cross-session message received:\nFrom: %s\nBody: %s", from, body)
+	// The answering squad additionally gets the imperative reply directive. The
+	// squad root always carries the teammate mailbox tools, so `teammate_tell` /
+	// `teammate_ask` addressed to `from` reach the sender's inbox (delivered to
+	// them as their own injected turn), enabling both the reply and any follow-up
+	// exchange needed to finish the task.
+	answer := message + fmt.Sprintf(
+		"\n\n[REQUIRED ACTION — do not skip] This message came from another session (%q) that is BLOCKED waiting for your answer. "+
+			"When the task is done you MUST send your result back to the sender by calling `teammate_tell` with to=%q "+
+			"(use `teammate_ask` with the same `to` if you still need information from them). "+
+			"Do NOT end your turn without delivering that reply: the sender's workflow cannot continue until it arrives. "+
+			"You may exchange as many messages with %q as the task requires.",
+		from, from, from)
+	// replyTo=from arms the host-side reply backstop: if the answering squad does
+	// not itself send a mailbox reply during the turn, the host forwards the reply
+	// to `from` once, so the sender's workflow is never stranded on a missed reply.
+	pm.injectTurnRouted(ctx, d, sessionID, userID, answer, message, "mailbox_push", from)
 }
 
 // injectNotification delivers a batch of completed/streamed background-task
@@ -243,8 +268,35 @@ func (pm *pushManager) injectNotification(ctx context.Context, d serverDeps, ses
 
 // injectTurn runs a synthetic, run-guarded agent turn carrying prompt, persists
 // the reply, and fires the given SSE event so open UI tabs refresh. Shared by
-// the mailbox and background-task delivery paths.
+// the background-task, scheduler, and spawned-task delivery paths (which have no
+// separate router-view / answering-view of the prompt).
 func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, userID, prompt, sseEvent string) {
+	// replyTo="" — these paths (background tasks, scheduler, spawned tasks) have no
+	// cross-session sender to reply to, so the backstop is inert.
+	pm.injectTurnRouted(ctx, d, sessionID, userID, prompt, prompt, sseEvent, "")
+}
+
+// injectTurnRouted runs a synthetic, run-guarded turn through the Omnis routing
+// dispatch loop and persists the reply. It starts at the session's pinned squad
+// (meta.Squad): a freshly-started session is pinned to the router, so the router
+// routes the message to the proper squad; an already-routed session runs its
+// pinned squad directly with no re-route (one hop — byte-identical to a direct
+// Runner.Run). This is what lets an inbound cross-session message reach the right
+// squad even though the router "has the hand" at session start.
+//
+// answerPrompt is what every answering (non-router) squad receives; routerPrompt
+// is the clean text-only view the router sees when deciding where to route (the
+// router has no mailbox/file tools, so it must not see reply directives or
+// attachment notes). For every caller but the mailbox they are identical. The
+// clean routerPrompt is what gets persisted as the session's user turn.
+//
+// replyTo, when non-empty (the mailbox path), is the sender's friendly session
+// name and arms the host-side reply backstop: if the answering squad did not
+// itself call teammate_tell/teammate_ask during the turn, the host forwards the
+// turn's reply to that sender exactly once (see sendMailboxBackstop), so a
+// workflow-critical reply is never dropped just because the model forgot to send
+// it. A squad that did reply/interact suppresses the backstop (no double reply).
+func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -257,54 +309,101 @@ func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, 
 		return // session deleted while waiting for the lock
 	}
 
-	// Resolve the session's squad inside its pinned generation. Fall back
-	// to the default squad when the recorded squad is no longer present
-	// (e.g. it was renamed/removed by a later config edit).
 	meta, ok := d.Registry.Get(sessionID)
 	if !ok {
 		return
 	}
-	// We hold the run-guard for this session, so any hot-reload that
-	// happened between turns can now be applied: migrate the pin to the
-	// current generation before resolving the squad.
+	// We hold the run-guard for this session, so any hot-reload that happened
+	// between turns can now be applied: migrate the pin to the current generation
+	// before the dispatch loop resolves squads.
 	d.Manager.MigrateToCurrent(sessionID)
-	sq := d.Manager.LookupSquad(sessionID, meta.Squad)
-	if sq == nil || sq.Runner == nil {
-		return
+	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
+		return // no runnable squad (e.g. session dropped mid-flight)
 	}
 
-	seq := sq.Runner.Run(
-		ctx, userID, sessionID,
-		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
-		adkagent.RunConfig{},
-	)
+	routerSquad := d.Manager.RouterSquad()
 
-	var buf strings.Builder
-	seq(func(ev *session.Event, err error) bool {
-		if err != nil {
-			return false
-		}
-		if ev == nil || ev.Content == nil {
-			return true
-		}
-		// Skip partial streaming tokens; collect only final text.
-		if ev.LLMResponse.Partial {
-			return true
-		}
-		for _, p := range ev.Content.Parts {
-			if p != nil && p.Text != "" && p.FunctionCall == nil && p.FunctionResponse == nil {
-				buf.WriteString(p.Text)
+	// repliedToSender records whether the answering squad sent any mailbox message
+	// during the turn (teammate_tell/teammate_ask, the squad root's always-on
+	// reply channel). When it did, the host backstop below stands down so the
+	// sender never gets a duplicate reply.
+	repliedToSender := false
+
+	// run executes one squad hop and returns its final assistant text. On the
+	// router hop we suppress the router's chatter when it actually routed
+	// (PendingRoute) — mirroring the interactive runHop — so only the answering
+	// squad's reply is persisted; a router hop that instead talks to the "user"
+	// (no route) is kept as the reply.
+	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+		seq := sq.Runner.Run(rctx, userID, sessionID,
+			&genai.Content{Role: "user", Parts: hopParts}, adkagent.RunConfig{})
+		var buf strings.Builder
+		seq(func(ev *session.Event, err error) bool {
+			if err != nil {
+				return false
 			}
+			if ev == nil || ev.Content == nil {
+				return true
+			}
+			if ev.LLMResponse.Partial { // skip partial streaming tokens
+				return true
+			}
+			for _, p := range ev.Content.Parts {
+				if p == nil {
+					continue
+				}
+				// A mailbox send by the answering squad disarms the backstop.
+				if p.FunctionCall != nil {
+					if replyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
+						repliedToSender = true
+					}
+					continue
+				}
+				if p.Text != "" && p.FunctionResponse == nil {
+					buf.WriteString(p.Text)
+				}
+			}
+			return true
+		})
+		if routerSquad != "" && squadName == routerSquad && d.Manager.PendingRoute(sessionID) {
+			return "", nil // routed → drop the router's chatter
 		}
-		return true
-	})
+		return buf.String(), nil
+	}
 
-	reply := strings.TrimSpace(buf.String())
+	// notify fires when control moves to another squad: persist the new squad on
+	// the session (so follow-up messages from the sender continue in it and it
+	// survives a restart) and tell open browsers to update the squad label.
+	notify := func(from, to, reason string) {
+		d.Registry.SetSquad(sessionID, to)
+		_ = sessions.SetConversationSquad(sessionID, to)
+		pm.bcast.broadcast("routing", sessionID)
+	}
+
+	initialParts := []*genai.Part{{Text: answerPrompt}}
+	routerParts := []*genai.Part{{Text: routerPrompt}}
+	_, reply, err := d.Manager.RunWithRouting(
+		ctx, userID, sessionID, meta.Squad, initialParts, routerParts, run, notify)
+	if err != nil {
+		log.Printf("mailbox push: routing run error for %s: %v", sessionID, err)
+	}
+
+	reply = strings.TrimSpace(reply)
 	if reply != "" {
-		if err := sessions.AppendConversationTurn(sessionID, prompt, reply); err != nil {
-			log.Printf("mailbox push: persist failed for %s: %v", sessionID, err)
+		// Persist the clean message (routerPrompt), not the answer-only reply
+		// directive, so the transcript reads as the received message.
+		if perr := sessions.AppendConversationTurn(sessionID, routerPrompt, reply); perr != nil {
+			log.Printf("mailbox push: persist failed for %s: %v", sessionID, perr)
 		}
 		d.Registry.Touch(sessionID)
+	}
+
+	// Host-side reply backstop: a mailbox-originated turn MUST send its result
+	// back to the waiting sender. If the answering squad already did so
+	// (repliedToSender) we stand down to avoid a duplicate; otherwise the host
+	// forwards the reply once so the sender's workflow is never stranded.
+	if replyTo != "" && !repliedToSender && reply != "" {
+		pm.sendMailboxBackstop(d, userID, sessionID, replyTo, reply)
 	}
 
 	// Signal any open /events SSE connections so the UI can refresh.
@@ -312,5 +411,34 @@ func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, 
 		pm.bcast.notify(sessionID)
 	} else {
 		pm.bcast.broadcast(sseEvent, sessionID)
+	}
+}
+
+// sendMailboxBackstop forwards a routed turn's reply back to the originating
+// sender when the answering squad did not itself reply. It addresses the sender
+// exactly like a normal squad reply would: `replyTo` (the sender's friendly
+// session name) is resolved to its canonical mailbox address via the registry,
+// and the From is this session's canonical address (NameFunc(...,"leader") — the
+// address it is registered/watched under), so the sender can reverse-resolve it
+// to this session's friendly name and reply back. A single Send to a single
+// inbound message, so it cannot ping-pong. Uses context.Background() (like the
+// teammate tools) so delivery is decoupled from the turn's context.
+func (pm *pushManager) sendMailboxBackstop(d serverDeps, userID, sessionID, replyTo, body string) {
+	if d.Manager == nil {
+		return
+	}
+	infra := d.Manager.Infra()
+	if infra == nil || infra.Backend == nil {
+		return
+	}
+	toAddr := replyTo
+	if infra.Registry != nil {
+		if addr, ok := infra.Registry.Lookup(replyTo); ok {
+			toAddr = addr
+		}
+	}
+	fromAddr := infra.NameFunc(userID, sessionID, "leader")
+	if err := infra.Backend.Send(context.Background(), toAddr, teammates.Message{From: fromAddr, Body: body}); err != nil {
+		log.Printf("mailbox backstop: reply to %q failed for %s: %v", replyTo, sessionID, err)
 	}
 }

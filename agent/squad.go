@@ -176,6 +176,14 @@ func buildSquadInstance(
 			leadTools = append(leadTools, lsp.Tools(mgr)...)
 		}
 	}
+	// spawn_session — hand a parallel task to a fresh session. Leader-only
+	// (skipped when leaderless, so neither the router nor a single-specialist
+	// root gets it) and surface-gated (opts.SessionSpawning is set only by the
+	// server, which drains SpawnDirectives after the turn and materialises the
+	// sessions). Removing "spawn" from the leader's tools is the user opt-out.
+	if keySet["spawn"] && opts.SessionSpawning && !leaderless {
+		leadTools = append(leadTools, spawnSessionTool(infra.SpawnDirectives, routerSquadCatalogue(runtime)))
+	}
 
 	// ── Always-on for any squad root: teammate mailbox + ask_user ──
 	// The mailbox keeps the root reachable by other sessions/squads (e.g. a

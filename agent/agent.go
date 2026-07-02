@@ -151,6 +151,13 @@ type Options struct {
 	// the unreachable provider. Set by the server; left false in CLI/TUI, which
 	// fail fast (a one-shot run is useless without a working model).
 	DeferModelErrors bool
+	// SessionSpawning declares that the host can materialise the sessions
+	// requested by the spawn_session leader tool (it drains SpawnDirectives after
+	// each turn and creates + optionally auto-runs the new sessions). Only then is
+	// the `spawn` tool group mounted on a coordinating leader. Set by the server;
+	// left false in CLI/TUI (single-session surfaces with no session registry),
+	// so the tool never mounts there and the feature is a no-op.
+	SessionSpawning bool
 }
 
 func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {

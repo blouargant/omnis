@@ -152,6 +152,7 @@ var ReservedNames = map[string]struct{}{
 	"learn-now":    {},
 	"init":         {},
 	"fork":         {},
+	"spawn":        {},
 	"loop":         {},
 	"schedule":     {},
 	"goal":         {},

@@ -284,7 +284,7 @@ func (s *a2aServer) tasksSend(w http.ResponseWriter, r *http.Request, req rpcReq
 	rec.mu.Unlock()
 
 	promptText := a2aMessageText(p.Message)
-	responseText, runErr := s.runAgent(ctx, routing.Squad, routing.UserID, routing.SessionID, p.ID, promptText)
+	responseText, runErr := s.runRouted(ctx, routing, promptText, nil)
 
 	rec.mu.Lock()
 	switch {
@@ -351,7 +351,7 @@ func (s *a2aServer) autoCreateSession(name, squad string) (*sessions.SessionMeta
 	}
 	chosenSquad := squad
 	if chosenSquad == "" {
-		chosenSquad = toolkitagent.DefaultSquadName
+		chosenSquad = s.a2aDefaultSquad()
 	}
 	if s.deps.Manager != nil && !s.deps.Manager.HasSquad(chosenSquad) {
 		return nil, &routingError{fmt.Sprintf("unknown squad %q", chosenSquad)}
@@ -435,50 +435,35 @@ func (s *a2aServer) tasksSendSubscribe(w http.ResponseWriter, r *http.Request, r
 
 	emitSSE("task_status_update", a2aStatusEvent(p.ID, a2aStateWorking, nil, false))
 
-	sq := s.deps.Manager.LookupSquad("", routing.Squad)
-	if sq == nil || sq.Runner == nil {
-		msg := "agent not available"
-		emitSSE("task_status_update", a2aStatusEvent(p.ID, a2aStateFailed, &msg, true))
-		rec.mu.Lock()
-		rec.task.Status.State = a2aStateFailed
-		rec.mu.Unlock()
-		close(rec.doneCh)
-		return
-	}
-
 	promptText := a2aMessageText(p.Message)
-	seq := sq.Runner.Run(ctx, routing.UserID, routing.SessionID,
-		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: promptText}}},
-		adkagent.RunConfig{StreamingMode: adkagent.StreamingModeSSE})
-
-	type adkEvt struct {
-		ev  *adksession.Event
-		err error
-	}
-	adkCh := make(chan adkEvt, 4)
-	go func() {
-		defer close(adkCh)
-		seq(func(ev *adksession.Event, err error) bool {
-			select {
-			case adkCh <- adkEvt{ev, err}:
-				return err == nil
-			case <-ctx.Done():
-				return false
-			}
-		})
-	}()
-
-	var respBuf strings.Builder
-	var sawPartial bool
 	artifactIdx := 0
+	// Stream each answering-hop partial to the caller as an artifact delta; the
+	// final/full artifact is emitted by finalize once the turn completes.
+	onPart := func(text string, partial bool) {
+		if !partial {
+			return
+		}
+		emitSSE("task_artifact_update", map[string]any{
+			"id": p.ID,
+			"artifact": a2aArtifact{
+				Parts:  []a2aPart{{Type: "text", Text: text}},
+				Index:  artifactIdx,
+				Append: artifactIdx > 0,
+			},
+		})
+		artifactIdx++
+	}
+
+	// Route the inbound message through the Omnis dispatch loop (starting at the
+	// resolved squad — the router for a fresh/unspecified target) and collect the
+	// answering squad's reply, which becomes the final artifact.
+	result, runErr := s.runRouted(ctx, routing, promptText, onPart)
 
 	finalize := func(state a2aTaskState, errMsg *string) {
 		rec.mu.Lock()
 		rec.task.Status.State = state
 		rec.task.Status.Timestamp = nowRFC3339()
-		var result string
 		if state == a2aStateCompleted {
-			result = respBuf.String()
 			rec.task.Artifacts = []a2aArtifact{{
 				Parts:     []a2aPart{{Type: "text", Text: result}},
 				Index:     0,
@@ -497,48 +482,14 @@ func (s *a2aServer) tasksSendSubscribe(w http.ResponseWriter, r *http.Request, r
 		}
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			finalize(a2aStateCanceled, nil)
-			return
-
-		case aev, ok := <-adkCh:
-			if !ok {
-				finalize(a2aStateCompleted, nil)
-				return
-			}
-			if aev.err != nil {
-				msg := aev.err.Error()
-				finalize(a2aStateFailed, &msg)
-				return
-			}
-			if aev.ev == nil || aev.ev.Content == nil {
-				continue
-			}
-			isPartial := aev.ev.LLMResponse.Partial
-			for _, part := range aev.ev.Content.Parts {
-				if part == nil || part.Text == "" {
-					continue
-				}
-				if isPartial {
-					respBuf.WriteString(part.Text)
-					emitSSE("task_artifact_update", map[string]any{
-						"id": p.ID,
-						"artifact": a2aArtifact{
-							Parts:  []a2aPart{{Type: "text", Text: part.Text}},
-							Index:  artifactIdx,
-							Append: artifactIdx > 0,
-						},
-					})
-					artifactIdx++
-					sawPartial = true
-				} else if !sawPartial {
-					// Non-streaming model: collect final text
-					respBuf.WriteString(part.Text)
-				}
-			}
-		}
+	switch {
+	case ctx.Err() != nil:
+		finalize(a2aStateCanceled, nil)
+	case runErr != nil:
+		msg := runErr.Error()
+		finalize(a2aStateFailed, &msg)
+	default:
+		finalize(a2aStateCompleted, nil)
 	}
 }
 
@@ -595,14 +546,68 @@ func (s *a2aServer) tasksCancel(w http.ResponseWriter, r *http.Request, req rpcR
 
 // ─── agent runner ─────────────────────────────────────────────────────────────
 
-func (s *a2aServer) runAgent(ctx context.Context, squad, userID, sessionID, taskID, prompt string) (string, error) {
-	sq := s.deps.Manager.LookupSquad("", squad)
-	if sq == nil || sq.Runner == nil {
+// runRouted drives one inbound A2A turn through the Omnis routing dispatch loop,
+// starting at routing.Squad. A freshly-created / router-pinned session has the
+// router route the message to the proper squad; an already-routed session runs
+// its pinned squad directly (one hop — byte-identical to the old direct run when
+// routing is disabled). The answering squad's text is returned as the A2A reply
+// (the RPC response / final artifact); onPart streams the answering hop's parts
+// so a subscribe caller can emit artifacts (the router hop's chatter is never
+// streamed). For a persistent session the routed squad is pinned onto it (so the
+// sender's follow-ups continue there and it survives a restart); an ephemeral
+// task's transient pin (Lookup auto-pins the sessionID that keys the routing
+// directive) is released after the turn so it never leaks a generation refcount.
+func (s *a2aServer) runRouted(ctx context.Context, routing *sessionRouting, prompt string, onPart func(text string, partial bool)) (string, error) {
+	if s.deps.Manager == nil {
 		return "", fmt.Errorf("agent not available")
 	}
+	if !routing.Persistent {
+		defer s.deps.Manager.Release(routing.SessionID)
+	}
+	routerSquad := s.deps.Manager.RouterSquad()
+	parts := []*genai.Part{{Text: prompt}}
 
+	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+		isRouter := routerSquad != "" && squadName == routerSquad
+		var emit func(string, bool)
+		if !isRouter {
+			emit = onPart // only the answering hop streams to the caller
+		}
+		text, err := s.consumeHop(rctx, sq, routing.UserID, routing.SessionID, hopParts, emit)
+		if err != nil {
+			return text, err
+		}
+		if isRouter && s.deps.Manager.PendingRoute(routing.SessionID) {
+			return "", nil // routed → drop the router's chatter
+		}
+		return text, nil
+	}
+	notify := func(from, to, reason string) {
+		if !routing.Persistent {
+			return // ephemeral task: nothing to pin
+		}
+		if s.deps.Registry != nil {
+			s.deps.Registry.SetSquad(routing.SessionID, to)
+		}
+		_ = sessions.SetConversationSquad(routing.SessionID, to)
+	}
+
+	// A2A prompts are plain text (no attachments / reply directives), so the
+	// router and answering views are identical — pass nil routerParts.
+	_, text, err := s.deps.Manager.RunWithRouting(
+		ctx, routing.UserID, routing.SessionID, routing.Squad, parts, nil, run, notify)
+	return text, err
+}
+
+// consumeHop runs ONE squad hop under (userID, sessionID) and returns its final
+// assistant text. onPart, when non-nil, is invoked for each text part (streaming
+// deltas with partial=true, or the whole text with partial=false for a
+// non-streaming model) so a subscribe caller can emit A2A artifacts as they
+// arrive; the non-partial duplicate a streamed turn also emits at the end is
+// skipped via sawPartial. This is the per-hop runner RunWithRouting calls.
+func (s *a2aServer) consumeHop(ctx context.Context, sq *toolkitagent.SquadInstance, userID, sessionID string, parts []*genai.Part, onPart func(text string, partial bool)) (string, error) {
 	seq := sq.Runner.Run(ctx, userID, sessionID,
-		&genai.Content{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
+		&genai.Content{Role: "user", Parts: parts},
 		adkagent.RunConfig{StreamingMode: adkagent.StreamingModeSSE})
 
 	type adkEvt struct {
@@ -627,13 +632,13 @@ func (s *a2aServer) runAgent(ctx context.Context, squad, userID, sessionID, task
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return buf.String(), ctx.Err()
 		case aev, ok := <-ch:
 			if !ok {
 				return buf.String(), nil
 			}
 			if aev.err != nil {
-				return "", aev.err
+				return buf.String(), aev.err
 			}
 			if aev.ev == nil || aev.ev.Content == nil {
 				continue
@@ -646,8 +651,14 @@ func (s *a2aServer) runAgent(ctx context.Context, squad, userID, sessionID, task
 				if isPartial {
 					buf.WriteString(part.Text)
 					sawPartial = true
+					if onPart != nil {
+						onPart(part.Text, true)
+					}
 				} else if !sawPartial {
 					buf.WriteString(part.Text)
+					if onPart != nil {
+						onPart(part.Text, false)
+					}
 				}
 				// skip non-partial when sawPartial (duplicate of streamed content)
 			}
@@ -745,6 +756,21 @@ type routingError struct{ msg string }
 
 func (e *routingError) Error() string { return e.msg }
 
+// a2aDefaultSquad is the squad an inbound A2A call lands on when it names none:
+// the Omnis router (so the message is routed to the proper squad, exactly like a
+// new web chat) when routing is enabled, else the default team. Manager==nil
+// (unit tests) falls back to the default team. Applied only to the ephemeral and
+// auto-create (genuinely new) paths — an existing session already carries its
+// own pinned squad, which the router pins onto the session on its first route.
+func (s *a2aServer) a2aDefaultSquad() string {
+	if s.deps.Manager != nil {
+		if rs := s.deps.Manager.RouterSquad(); rs != "" {
+			return rs
+		}
+	}
+	return toolkitagent.DefaultSquadName
+}
+
 // resolveRouting picks squad + session for one A2A call. Empty / missing
 // session_name → ephemeral session (task ID + defaultUserID + chosen squad).
 // Non-empty session_name → lookup in the registry; conflict on squad
@@ -758,7 +784,7 @@ func (s *a2aServer) resolveRouting(meta map[string]any, taskID string) (*session
 	if wantSession == "" {
 		squad := wantSquad
 		if squad == "" {
-			squad = toolkitagent.DefaultSquadName
+			squad = s.a2aDefaultSquad()
 		} else if s.deps.Manager != nil && !s.deps.Manager.HasSquad(squad) {
 			return nil, &routingError{fmt.Sprintf("unknown squad %q", squad)}
 		}
