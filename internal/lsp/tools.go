@@ -43,6 +43,7 @@ func Tools(m *Manager) []tool.Tool {
 	lt := &lspTools{m: m}
 	return []tool.Tool{
 		lt.documentSymbols(),
+		lt.readSymbol(),
 		lt.workspaceSymbol(),
 		lt.definition(),
 		lt.references(),
@@ -91,6 +92,74 @@ func (lt *lspTools) documentSymbols() tool.Tool {
 				return lspOut{Result: "(no symbols)"}, nil
 			}
 			return lspOut{Result: formatSymbols(syms)}, nil
+		})
+}
+
+type readSymbolIn struct {
+	Symbol string `json:"symbol"`
+	File   string `json:"file,omitempty"`
+}
+
+func (lt *lspTools) readSymbol() tool.Tool {
+	return newLSPTool("lsp_read_symbol",
+		"Read the full source of ONE symbol — a function, method, type, or class — by name, instead of reading the "+
+			"whole file to see it. Returns just that symbol's body (with its doc comment) and line numbers, so you spend "+
+			"tokens on the 20 lines you need, not an 800-line file. Prefer this — or lsp_document_symbols for a file's "+
+			"outline — as the default way to look at code; Read the whole file only when you genuinely need the surrounding "+
+			"context. Arguments: `symbol` (string, required) — the symbol's name (a bare name like `Foo` or a qualified "+
+			"one like `(*Client).Call`); `file` (string, optional) — the file it's declared in; omit `file` to let the "+
+			"language server locate it project-wide.",
+		func(ctx tool.Context, in readSymbolIn) (lspOut, error) {
+			qctx, cancel := toolCtx(ctx)
+			defer cancel()
+			symbol := strings.TrimSpace(in.Symbol)
+			if symbol == "" {
+				return lspOut{Result: "lsp_read_symbol: `symbol` is required."}, nil
+			}
+			cwd := fstools.CwdForContext(ctx)
+
+			// Resolve the declaring file: an explicit file wins; otherwise ask the
+			// server's project-wide index where the symbol lives.
+			path := ""
+			if in.File != "" {
+				path = resolveFile(ctx, in.File)
+			}
+			if path == "" {
+				anchor := lt.anchorFile(ctx, "")
+				if anchor == "" {
+					return lspOut{Result: resolveErrMsg(ErrNoServer)}, nil
+				}
+				ls, err := lt.m.ResolveServer(qctx, anchor)
+				if err != nil {
+					return lspOut{Result: resolveErrMsg(err)}, nil
+				}
+				syms, err := ls.WorkspaceSymbols(qctx, symbol)
+				if err != nil {
+					return lspOut{Result: "lsp: " + err.Error()}, nil
+				}
+				p, ok := pickSymbolFile(syms, symbol)
+				if !ok {
+					return lspOut{Result: fmt.Sprintf("Symbol %q is not in the project index — try lsp_workspace_symbol, or pass `file`.", symbol)}, nil
+				}
+				path = p
+			}
+
+			ls, err := lt.m.ResolveServer(qctx, path)
+			if err != nil {
+				return lspOut{Result: resolveErrMsg(err)}, nil
+			}
+			sym, ok, err := ls.SymbolExtent(qctx, path, symbol)
+			if err != nil {
+				return lspOut{Result: "lsp: " + err.Error()}, nil
+			}
+			if !ok {
+				return lspOut{Result: fmt.Sprintf("Symbol %q not found in %s — use lsp_document_symbols to list what's there, or Read the file.", symbol, displayPath(path, cwd))}, nil
+			}
+			body, err := sliceSymbol(path, sym.Range, sym.Kind, cwd)
+			if err != nil {
+				return lspOut{Result: "lsp: " + err.Error()}, nil
+			}
+			return lspOut{Result: body}, nil
 		})
 }
 
@@ -551,6 +620,85 @@ func formatSymbols(syms []DocumentSymbol) string {
 	}
 	walk(syms, 0)
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// pickSymbolFile chooses which file a project-wide symbol lookup meant: an exact
+// name match wins, then a base-name match (so "Call" resolves gopls's
+// "(*Client).Call"), then the first hit. Returns false when there are no hits.
+func pickSymbolFile(syms []SymbolInformation, name string) (string, bool) {
+	var baseMatch string
+	for _, s := range syms {
+		if s.Name == name {
+			return URIToPath(s.Location.URI), true
+		}
+		if baseMatch == "" && symbolBaseName(s.Name) == name {
+			baseMatch = URIToPath(s.Location.URI)
+		}
+	}
+	if baseMatch != "" {
+		return baseMatch, true
+	}
+	if len(syms) > 0 {
+		return URIToPath(syms[0].Location.URI), true
+	}
+	return "", false
+}
+
+// sliceSymbol reads path and returns the source of the symbol whose full range
+// is rng, with a header (path, line range, kind) and gutter line numbers so the
+// model can edit precisely. The start is widened upward over an immediately
+// preceding doc comment. Out-of-range lines are clamped.
+func sliceSymbol(path string, rng Range, kind SymbolKind, cwd string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1] // drop trailing-newline artefact
+	}
+	start := rng.Start.Line
+	end := rng.End.Line
+	if start < 0 {
+		start = 0
+	}
+	if end >= len(lines) {
+		end = len(lines) - 1
+	}
+	if end < start {
+		end = start
+	}
+	start = expandToDocComment(lines, start)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s  L%d-%d  (%s)\n", displayPath(path, cwd), start+1, end+1, kind)
+	for i := start; i <= end; i++ {
+		fmt.Fprintf(&b, "%5d\t%s\n", i+1, lines[i])
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// expandToDocComment walks upward from start over an unbroken run of
+// comment-only lines (//, ///, #, or a /* … */ / * block) and returns the first
+// such line's index, so a symbol is shown together with its doc comment. Stops
+// at the first blank or non-comment line. Language-agnostic and conservative
+// (covers Go/Rust/TS/JS //, Python #, and block-comment continuations).
+func expandToDocComment(lines []string, start int) int {
+	i := start - 1
+	for i >= 0 {
+		t := strings.TrimSpace(lines[i])
+		if t == "" {
+			break
+		}
+		if strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") ||
+			strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*") ||
+			strings.HasSuffix(t, "*/") {
+			i--
+			continue
+		}
+		break
+	}
+	return i + 1
 }
 
 // formatLocations renders locations as "file:line:col: <source line>" — the

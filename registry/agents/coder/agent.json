@@ -11,11 +11,11 @@
   "tools": [
     "fs",
     "softskills",
-    "code_search",
     "planning",
     "worktree",
     "bg",
     "lsp",
-    "tests"
+    "tests",
+    "astgrep"
   ]
 }

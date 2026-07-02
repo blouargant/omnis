@@ -184,14 +184,16 @@ func toolClasses(omnisTool string) []string {
 	case "Read", "Grep", "Glob", "mime",
 		// Read-only language-server code intelligence — as safe as Read/Grep, so
 		// an allowed Read rule covers them and they don't prompt.
-		"lsp_document_symbols", "lsp_workspace_symbol", "lsp_definition",
-		"lsp_references", "lsp_hover", "lsp_diagnostics":
+		"lsp_document_symbols", "lsp_read_symbol", "lsp_workspace_symbol", "lsp_definition",
+		"lsp_references", "lsp_hover", "lsp_diagnostics",
+		// Read-only structural search (ast-grep) — same safety as Grep.
+		"ast_grep_search":
 		return []string{"Read"}
 	case "Edit", "revert", "MultiEdit":
 		return []string{"Edit"}
-	case "lsp_rename":
-		// A project-wide rename writes many files; gate it like any edit so
-		// Edit allow/deny/ask rules and acceptEdits mode cover it.
+	case "lsp_rename", "ast_grep_rewrite":
+		// A project-wide rename / structural rewrite writes many files; gate it
+		// like any edit so Edit allow/deny/ask rules and acceptEdits mode cover it.
 		return []string{"Edit"}
 	case "Write":
 		return []string{"Write", "Edit"}

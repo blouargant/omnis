@@ -16,6 +16,7 @@ import (
 	"github.com/blouargant/omnis/internal/cache"
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/lsp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/steer"
 )
@@ -42,6 +43,7 @@ func buildPlugins(
 	asker permissions.Asker,
 	hooksEngine *hooks.Reloader,
 	steerStore *steer.Store,
+	lspMgr *lsp.Manager,
 	isRouterSquad bool,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	logsDir := paths.LogsDir()
@@ -68,10 +70,14 @@ func buildPlugins(
 		loggerSubs = append(loggerSubs, bus.Subscribe(ev, logger))
 	}
 	permsCtx, cancelPerms := context.WithCancel(context.Background())
+	var extraCleanups []func()
 	closer = func() error {
 		cancelPerms()
 		for _, sub := range loggerSubs {
 			sub.Off()
+		}
+		for _, c := range extraCleanups {
+			c()
 		}
 		if closeLog != nil {
 			return closeLog()
@@ -100,6 +106,18 @@ func buildPlugins(
 	if !isRouterSquad && steerStore != nil {
 		if sp, serr := steerPlugin("steer", steerStore); serr == nil && sp != nil {
 			plugins = append(plugins, sp)
+		}
+	}
+	// Token-saving coding transforms (edit-fused diagnostics, unchanged-read
+	// dedup, universal output shaper). Mounted on answering roots only (the
+	// router never runs fs/edit tools); a no-op until a tool result is large,
+	// a re-read is identical, or an edit touches a file with a running LSP.
+	if !isRouterSquad {
+		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus); cerr == nil && cep != nil {
+			plugins = append(plugins, cep)
+			if cepClean != nil {
+				extraCleanups = append(extraCleanups, cepClean)
+			}
 		}
 	}
 	if _, cp, err := cache.Plugin("cache"); err == nil {

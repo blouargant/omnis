@@ -107,6 +107,7 @@
 }
 .pane-tabs::-webkit-scrollbar { height: 0; }
 .pane-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -120,6 +121,25 @@
   cursor: pointer;
   user-select: none;
 }
+/* The tab being dragged dims so the drop target reads clearly. */
+.pane-tab.dragging { opacity: .4; }
+/* Insertion indicator — a vertical accent bar on the side the dragged tab will
+ * land. A pseudo-element (not box-shadow) avoids clobbering the active tab's
+ * inset focus bar. */
+.pane-tab.drag-over-left::before,
+.pane-tab.drag-over-right::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent, #4a9eff);
+  border-radius: 1px;
+  z-index: 2;
+  pointer-events: none;
+}
+.pane-tab.drag-over-left::before { left: -1px; }
+.pane-tab.drag-over-right::after { right: -1px; }
 .pane-tab:hover { background: var(--bg-raised, #2a2d2e); color: var(--text, #eee); }
 /* The active tab of the pane. */
 .pane-tab.active {

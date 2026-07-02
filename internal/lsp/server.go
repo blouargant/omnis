@@ -375,6 +375,37 @@ func findSymbolPos(syms []DocumentSymbol, name string) (Position, bool) {
 	return Position{}, false
 }
 
+// SymbolExtent returns the full source range of a named symbol in path (its
+// whole declaration, not just the name), resolved via the document outline.
+// Used by lsp_read_symbol to slice out one symbol's body so the model reads the
+// 20 lines it needs instead of the whole file. Returns ok=false when the name
+// isn't a declared symbol in the file.
+func (ls *langServer) SymbolExtent(ctx context.Context, path, symbol string) (DocumentSymbol, bool, error) {
+	syms, err := ls.DocumentSymbols(ctx, path)
+	if err != nil {
+		return DocumentSymbol{}, false, err
+	}
+	if s, ok := findSymbolFull(syms, symbol); ok {
+		return s, true, nil
+	}
+	return DocumentSymbol{}, false, nil
+}
+
+// findSymbolFull is findSymbolPos's sibling: it returns the whole matching
+// DocumentSymbol (so the caller has Range/Kind), matching the full name or its
+// base (so "Call" matches gopls's "(*Client).Call").
+func findSymbolFull(syms []DocumentSymbol, name string) (DocumentSymbol, bool) {
+	for _, s := range syms {
+		if s.Name == name || symbolBaseName(s.Name) == name {
+			return s, true
+		}
+		if c, ok := findSymbolFull(s.Children, name); ok {
+			return c, true
+		}
+	}
+	return DocumentSymbol{}, false
+}
+
 // symbolBaseName strips a receiver/qualifier prefix, e.g. "(*Client).Call" →
 // "Call", "pkg.Foo" → "Foo".
 func symbolBaseName(name string) string {

@@ -15,7 +15,11 @@
     "k8s_investigator",
     "knowledge_leader",
     "doc_agent",
-    "coder"
+    "coder",
+    "code_scout",
+    "code_docs",
+    "reviewer",
+    "refactorer"
   ],
   "app_name": "omnis",
   "bash_timeout_seconds": 120,
@@ -79,10 +83,13 @@
     },
     {
       "name": "Coding",
-      "description": "Software-engineering specialist for substantial coding work on real projects: navigating and editing large codebases with language-server intelligence (go-to-definition, find-references, hover types, project-wide diagnostics and safe rename), planning multi-step changes, isolating risky work in git worktrees, and verifying every edit by re-checking diagnostics and running builds/tests in the background. Route here for implementing features, refactoring, fixing bugs, or any non-trivial change to a codebase (as opposed to one-off scripts). Leaderless: the coder agent runs directly.",
-      "leader": "none",
+      "description": "Software-engineering squad for substantial coding work on real projects. The Coder leads on a top-tier reasoning model: it plans multi-step changes, edits, and verifies every edit with language-server diagnostics and tests. It delegates the cheap, high-volume work to specialists — broad code search and navigation to a fast low-cost Scout, programming-documentation and API research on the internet to the Docs web agent, read-only diff review to the Reviewer, and behaviour-preserving structural refactors (in a git worktree) to the Refactorer. Route here for implementing features, refactoring, fixing bugs, or any non-trivial change to a codebase (as opposed to one-off scripts).",
+      "leader": "coder",
       "members": [
-        "coder"
+        "code_scout",
+        "code_docs",
+        "reviewer",
+        "refactorer"
       ]
     }
   ],

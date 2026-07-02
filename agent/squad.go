@@ -321,7 +321,7 @@ func buildSquadInstance(
 	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
 	hooksEngine := infra.Hooks(runtime)
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, asker, hooksEngine, infra.SteerStore, isRouterSquad)
+	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, asker, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad)
 	if err != nil {
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)

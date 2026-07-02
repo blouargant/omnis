@@ -1,0 +1,20 @@
+{
+  "allow_file_attachments": true,
+  "builtin": true,
+  "description": "Fast, low-cost read-only code navigator. Locates symbols, definitions, references, call sites and relevant code across the project using language-server intelligence (lsp_read_symbol / document_symbols / references) plus structural (ast_grep_search) and text (Grep/Glob) search, then reports precise file:line locations with minimal snippets. Never edits — it hands findings back to the Coder.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 5,
+  "model_ref": "simple",
+  "name": "code_scout",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "code_search",
+    "lsp",
+    "astgrep"
+  ]
+}

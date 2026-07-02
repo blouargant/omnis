@@ -28,6 +28,7 @@ import (
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/a2a"
 	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/claudeformat"
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/docindex"
@@ -309,6 +310,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// the verify step of the edit→check loop. Stateless (runs in the
 			// session cwd), so no infra wiring needed.
 			agentTools = append(agentTools, testrun.Tools()...)
+		case "astgrep":
+			// Structural search/rewrite (ast_grep_search / ast_grep_rewrite) via
+			// the ast-grep CLI. Stateless in the session cwd; the ast-grep binary
+			// is auto-installed on first use by the process-wide dependency gate
+			// (astgrep.SetDepGate, wired in infrastructure.go).
+			agentTools = append(agentTools, astgrep.Tools()...)
 		case "registries":
 			agentTools = append(agentTools, registries.NewTools(buildRegistriesDeps(runtime))...)
 			hasRegistries = true

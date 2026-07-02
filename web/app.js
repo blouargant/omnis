@@ -250,6 +250,7 @@ function bindPaneEls(root) {
   e.toolbar     = root.querySelector(".pane-toolbar");
   e.splitBtn    = root.querySelector(".pane-split-btn");
   e.closeBtn    = root.querySelector(".pane-close-btn");
+  e.tabbar      = root.querySelector(".pane-tabbar");
   e.tabs        = root.querySelector(".pane-tabs");
   e.newTabBtn   = root.querySelector(".pane-newtab-btn");
   e.picker      = root.querySelector(".pane-picker");
@@ -608,6 +609,9 @@ function attachPaneHandlers(panel) {
   // session is created until the user clicks "Start a new chat". Several drafts
   // can coexist.
   if (pe.newTabBtn) pe.newTabBtn.addEventListener("click", (e) => { e.stopPropagation(); newDraftTab(panel); });
+
+  // Tab drag-and-drop reordering / cross-pane move (drop zone = the tab bar).
+  wireTabDrag(panel);
 
   // Empty-pane picker. The squad selector (when shown) overrides the global
   // choice for this new chat only.
@@ -1181,8 +1185,123 @@ function renderPaneTabs(panel) {
       if (e.target.closest(".pane-tab-close")) return;
       activateTab(panel, key);
     });
+
+    // Drag-and-drop reordering: a tab can be dragged to a new slot in its own
+    // pane, or into another pane's tab strip. dragover/drop live on the tab bar
+    // (see attachPaneHandlers), which survives these per-tab re-renders.
+    tab.draggable = true;
+    tab.addEventListener("dragstart", (e) => onTabDragStart(e, panel, key, tab));
+    tab.addEventListener("dragend", onTabDragEnd);
     strip.appendChild(tab);
   }
+}
+
+// ─── Tab drag-and-drop (reorder within a pane / move between panes) ───────────
+// Native HTML5 drag-and-drop. State lives in `tabDrag` for the duration of a
+// drag; the payload mime type lets dragover ignore unrelated drags (OS files).
+
+let tabDrag = null; // { key, fromPanelId } during an active tab drag
+
+const TAB_DND_MIME = "application/x-omnis-tab";
+
+function onTabDragStart(e, panel, key, tab) {
+  tabDrag = { key, fromPanelId: panel.id };
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData(TAB_DND_MIME, key); } catch (_) {}
+  }
+  // Defer the dim so the browser snapshots the tab at full opacity for the ghost.
+  setTimeout(() => tab.classList.add("dragging"), 0);
+}
+
+function onTabDragEnd() {
+  tabDrag = null;
+  clearTabDropIndicators();
+  for (const el of document.querySelectorAll(".pane-tab.dragging")) el.classList.remove("dragging");
+}
+
+function clearTabDropIndicators() {
+  for (const el of document.querySelectorAll(".pane-tab.drag-over-left, .pane-tab.drag-over-right"))
+    el.classList.remove("drag-over-left", "drag-over-right");
+}
+
+// tabDropInfo finds the insertion point for the pointer x within a pane's strip:
+// the target index in panel.tabs, plus which tab (and side) to mark visually.
+function tabDropInfo(panel, x) {
+  const tabs = [...panel.els.tabs.querySelectorAll(".pane-tab")];
+  if (!tabs.length) return { index: 0, tab: null, side: "before" };
+  for (let i = 0; i < tabs.length; i++) {
+    const r = tabs[i].getBoundingClientRect();
+    if (x < r.left + r.width / 2) return { index: i, tab: tabs[i], side: "before" };
+  }
+  return { index: tabs.length, tab: tabs[tabs.length - 1], side: "after" };
+}
+
+// wireTabDrag attaches the drop-zone handlers to a pane's tab bar (stable across
+// renderPaneTabs, so wired once per pane in attachPaneHandlers).
+function wireTabDrag(panel) {
+  const bar = panel.els.tabbar;
+  if (!bar) return;
+  bar.addEventListener("dragover", (e) => {
+    if (!tabDrag) return; // not a tab drag (e.g. an OS file drag) — ignore
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const info = tabDropInfo(panel, e.clientX);
+    clearTabDropIndicators();
+    if (info.tab) info.tab.classList.add(info.side === "before" ? "drag-over-left" : "drag-over-right");
+  });
+  bar.addEventListener("dragleave", (e) => {
+    // Only clear when the pointer truly leaves this tab bar (not on child hops).
+    if (!bar.contains(e.relatedTarget)) clearTabDropIndicators();
+  });
+  bar.addEventListener("drop", (e) => {
+    if (!tabDrag) return;
+    e.preventDefault();
+    const info = tabDropInfo(panel, e.clientX);
+    const drag = tabDrag;
+    clearTabDropIndicators();
+    const fromPanel = getPanel(drag.fromPanelId);
+    if (fromPanel) moveTab(fromPanel, drag.key, panel, info.index);
+  });
+}
+
+// moveTab relocates a tab key to `toIndex` in `toPanel` — a same-pane reorder or
+// a cross-pane move. On a cross-pane move the source pane re-picks its active tab
+// (or closes if it empties), and the moved tab becomes active in its new pane.
+function moveTab(fromPanel, key, toPanel, toIndex) {
+  const fi = fromPanel.tabs.indexOf(key);
+  if (fi === -1) return;
+
+  if (fromPanel === toPanel) {
+    fromPanel.tabs.splice(fi, 1);
+    let idx = toIndex > fi ? toIndex - 1 : toIndex; // account for the removed slot
+    idx = Math.max(0, Math.min(idx, fromPanel.tabs.length));
+    if (idx === fi) { fromPanel.tabs.splice(fi, 0, key); return; } // no move
+    fromPanel.tabs.splice(idx, 0, key);
+    renderPaneTabs(fromPanel);
+    saveLayout();
+    return;
+  }
+
+  // Cross-pane move — a distinct toPanel implies ≥2 panes exist.
+  const wasActive = fromPanel.activeTab === key;
+  fromPanel.tabs.splice(fi, 1);
+  toIndex = Math.max(0, Math.min(toIndex, toPanel.tabs.length));
+  toPanel.tabs.splice(toIndex, 0, key);
+
+  if (!fromPanel.tabs.length) {
+    // The moved key is already out of fromPanel.tabs, so closePanel won't release
+    // it (no push-drop / editor-dispose for the tab we're keeping alive).
+    closePanel(fromPanel);
+  } else if (wasActive) {
+    activateTab(fromPanel, fromPanel.tabs[Math.min(fi, fromPanel.tabs.length - 1)]);
+  } else {
+    renderPaneTabs(fromPanel);
+  }
+
+  setFocusedPanel(toPanel.id);
+  activateTab(toPanel, key); // mounts the moved tab in its new pane + saveLayout
+  saveLayout();
 }
 
 // newDraftTab always appends a fresh pending "New Chat" tab and activates it —

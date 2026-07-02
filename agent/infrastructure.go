@@ -13,6 +13,7 @@ import (
 
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/binpath"
 	"github.com/blouargant/omnis/internal/configedit"
@@ -191,6 +192,11 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 	// first) at first use before the server starts. Same model as the skill
 	// gate above; process-wide because the LSP manager survives hot-reload.
 	lsp.SetDepGate(newLSPDepGate(askUserReg))
+
+	// Install the process-wide ast-grep dependency gate: the first ast_grep_*
+	// call installs the binary (asking the user first) if it's missing. Same
+	// model as the skill/LSP gates; process-wide + survives hot-reload.
+	astgrep.SetDepGate(newAstgrepDepGate(askUserReg))
 
 	// Install the process-wide settings confirmer: the settings tool group
 	// (mounted on the Helper) uses it to gate security-sensitive changes

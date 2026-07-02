@@ -159,6 +159,52 @@ func (m *Manager) NotifyChange(path string) {
 	}
 }
 
+// runningServerFor returns the already-running language server whose scope
+// includes path, or nil when none is live — it never starts one.
+func (m *Manager) runningServerFor(path string) *langServer {
+	if m == nil {
+		return nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil
+	}
+	c := m.cfgFn()
+	if c == nil {
+		return nil
+	}
+	s, ok := c.ServerForFile(abs)
+	if !ok {
+		return nil
+	}
+	key := serverKey(DetectRoot(filepath.Dir(abs), s.RootMarkers), s.Name)
+	m.mu.Lock()
+	e, ok := m.servers[key]
+	m.mu.Unlock()
+	if ok && isReady(e) && e.err == nil {
+		return e.ls
+	}
+	return nil
+}
+
+// DiagnosticsIfRunning returns path's current diagnostics from an already-running
+// server, briefly waiting for the just-applied edit to settle. ok is false when
+// no server is live for path — the caller (edit-fused diagnostics) then skips
+// fusion with zero added latency, so an edit to a file whose language has no
+// running server is never slowed down. A server that runs but errors returns
+// (nil, true), i.e. "no delta information available".
+func (m *Manager) DiagnosticsIfRunning(ctx context.Context, path string, maxWait, quiet time.Duration) ([]Diagnostic, bool) {
+	ls := m.runningServerFor(path)
+	if ls == nil {
+		return nil, false
+	}
+	d, err := ls.Diagnostics(ctx, path, maxWait, quiet)
+	if err != nil {
+		return nil, true
+	}
+	return d, true
+}
+
 // ensureDeps runs the process-wide dependency gate for a server's requirements.
 // A no-op when the server declares none or no gate is set (the binary must then
 // already be on PATH). deps.Ensure short-circuits when the binary is present, so

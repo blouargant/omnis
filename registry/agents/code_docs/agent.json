@@ -1,0 +1,19 @@
+{
+  "allow_file_attachments": false,
+  "builtin": true,
+  "description": "Programming-documentation research specialist. Searches the internet for official language/library/framework documentation, API references, language and standard-library specs, release notes and changelogs, GitHub source/issues/PRs, and Stack Overflow answers, then returns precise, cited findings (exact API signatures, version notes, minimal code examples). Read-only web access.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "balanced",
+  "name": "code_docs",
+  "skills": null,
+  "softskills_dir": "",
+  "max_instances": 5,
+  "tools": [
+    "Skill",
+    "serpapi",
+    "ddg",
+    "web",
+    "softskills"
+  ]
+}

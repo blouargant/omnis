@@ -562,7 +562,10 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/goal/` | Per-session **completion goals** backing `/goal`: `Store` (process-wide, one `Goal` per session — condition/turns/last-reason/achieved), `MaxTurns` (hard turn cap, `OMNIS_GOAL_MAX_TURNS`), `Directive` (the not-yet-met continuation prompt), `IsClearAlias`, `CleanCondition`. Surface-agnostic; the LLM judge is `Manager.EvaluateGoal` ([agent/goal_eval.go](agent/goal_eval.go)). See "Goals (`/goal`)" |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
-| `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate and the MCP `requires` connect gate |
+| `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate, the MCP `requires` connect gate, the LSP `requires` server gate, and the `ast-grep` binary gate |
+| `internal/lsp/` | Polyglot **language-server** client + refcounted `(root,lang)` server pool (`Manager`, survives hot-reload via `Infrastructure.LSP()`), and the `lsp_*` **name-based** tool group (see "Coding squad"): `lsp_document_symbols`, `lsp_read_symbol` (one symbol's body), `lsp_workspace_symbol`, `lsp_definition`, `lsp_references`, `lsp_hover`, `lsp_diagnostics`, `lsp_rename` (Edit-class), `lsp_code_action`. `DiagnosticsIfRunning` (no cold-start) backs edit-fused diagnostics. Servers declared in `lsp_config.json` with `requires` auto-install |
+| `internal/testrun/` | Targeted structured test runner (`run_tests`, the `tests` tool group): marker-file framework detection (go/cargo/maven/gradle/pytest/npm/…), runs via `fstools.RunShellCaptured`, parses a pass/fail summary + failing test names. No free-form command (allowlisted base cmd + charset-validated `scope`) to avoid a permission bypass |
+| `internal/astgrep/` | Structural search/rewrite via the **ast-grep** CLI (the `astgrep` tool group): `ast_grep_search` (Read-class, structural pattern search) + `ast_grep_rewrite` (Edit-class, pattern→template codemod applied through the snapshot Write path, revertible; `dry_run` first). Binary auto-installed by the process-wide `SetDepGate` (pipx on Linux, brew macOS, npm Windows). Explicit argv (no shell); JSON output |
 | `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
@@ -688,6 +691,96 @@ Two mechanisms keep the matrix cost bounded:
   without forcing the load, so an unchanged-corpus restart (docs Reindex is a
   no-op, registries `EnsureBuilt` is a no-op) never reconstructs a matrix — boot
   reaches `ListenAndServe` immediately and the QR happens lazily on first search.
+
+### Coding squad (token-efficient code intelligence)
+
+The **Coding** squad is a **coordinating leader + specialist members** tree tuned
+so a unit of coding progress costs as few context tokens as possible — the guiding
+metric is *bytes-in-context per accepted edit*. The economics are explicit: the
+expensive reasoning model does design and edits; the cheap, high-volume grunt work
+(broad search, doc lookup) runs on small models and only the distilled result
+returns to the leader's context.
+
+- **Leader `coder`** ([registry/agents/coder/](registry/agents/coder/), `premium`)
+  — plans, reasons, edits, and runs the tight *edit → `lsp_diagnostics` →
+  `run_tests`* verify loop (that loop, backed by the coding-efficiency plugin
+  below, is the squad's core value and must stay on the leader). Tool groups
+  `fs` / `planning` / `worktree` / `bg` plus:
+- **Members (delegable sub-agents):**
+  - **`code_scout`** ([registry/agents/code_scout/](registry/agents/code_scout/),
+    `simple`, `max_instances: 5`) — fast **read-only** code navigator. Broad /
+    exploratory search is delegated here (`lsp_*` read tools, `ast_grep_search`,
+    `code_search`, `Grep`/`Glob`/`Read`); it returns `file:line` + minimal
+    snippets. The leader keeps `lsp`/`astgrep` for *surgical* lookups and edits.
+  - **`code_docs`** ([registry/agents/code_docs/](registry/agents/code_docs/),
+    `balanced`) — programming-documentation web researcher (official docs, API
+    refs, specs, GitHub, Stack Overflow) via the `web`/`serpapi`/`ddg` tools.
+  - **`reviewer`** (`high`, skill `review`) — read-only diff review.
+  - **`refactorer`** (`high`, `worktree`) — behaviour-preserving structural
+    changes in an isolated worktree.
+
+  `code_search` was **removed from the leader** (and is inert anyway with no
+  embedder configured, `embed_model_ref: ""`), so exploratory search structurally
+  routes to Scout rather than running on `premium`. Leaderless→coordinating was a
+  pure `config/agents.json` + registry change (hot-reloadable, no Go).
+
+The leader's tool set beyond `fs` / `planning` / `worktree` / `bg`:
+
+- **`lsp`** ([internal/lsp/](internal/lsp/)) — name-based language-server tools
+  (Go/Rust/TS/Python via `lsp_config.json`). **`lsp_read_symbol`** returns one
+  symbol's body (with its doc comment) instead of a whole file, and
+  `lsp_document_symbols` gives a file outline — these are the agent's *default*
+  way to look at code (Read-the-whole-file is the fallback). `lsp_code_action`
+  applies the server's own import/quickfix fixes; `lsp_rename` is the Edit-class
+  safe rename.
+- **`tests`** ([internal/testrun/](internal/testrun/)) — `run_tests`, the verify
+  step (framework auto-detect + pass/fail summary).
+- **`astgrep`** ([internal/astgrep/](internal/astgrep/)) — structural
+  `ast_grep_search` / `ast_grep_rewrite`, the efficient path for mechanical
+  multi-site refactors (one pattern+template call vs. grep→read-each→N edits).
+
+**Coding-efficiency plugin** ([agent/coding_efficiency_plugin.go](agent/coding_efficiency_plugin.go),
+built in [agent/build_plugins.go](agent/build_plugins.go) `buildPlugins`, mounted
+as one `AfterToolCallback` on every **answering** squad root — `!isRouterSquad`,
+same gating as steering/hooks). Three transforms run in a fixed order so they
+compose (fusion → dedup → shaper):
+
+1. **Edit-fused diagnostics** — after `Edit`/`Write`/`MultiEdit`/`revert`, the
+   language-server diagnostics **delta** (`+N new (file:line msg), M resolved,
+   K unchanged`) for the touched file(s) is appended to the tool result, so the
+   edit→check loop doesn't spend a whole extra `lsp_diagnostics` round-trip.
+   Uses `Manager.DiagnosticsIfRunning` — **zero cold-start**: a file whose
+   language has no *running* server adds no latency; a running server gets a
+   bounded ~1.5 s settle-wait. Bounded to `fuseMaxFiles`=3 per MultiEdit; skipped
+   on a failed/no-op edit (`looksLikeError`); edit tools are then **exempt from
+   the shaper** so the appended line is never truncated. `lsp_rename` /
+   `lsp_code_action` / `ast_grep_rewrite` are **not** fused (they summarise their
+   own multi-file blast radius). `lsp_diagnostics` itself still returns the
+   **full** set (the explicit "show me the state" call).
+2. **Unchanged-read dedup** — a re-`Read` of a file whose returned bytes are
+   identical to a prior read this session is replaced by a one-line "unchanged"
+   stub. Keys on the **SHA-256 of the returned content**, so it self-invalidates
+   against any on-disk mutation (leader edit, sub-agent edit, Bash, external) —
+   the next read simply hashes different bytes; no `file_changed` wiring needed.
+   The only staleness risk (the earlier read scrolled out via compression) is
+   closed by **clearing the cache on `EventCompressionStart`** (a bus
+   subscription detached by the plugin's cleanup in the `buildPlugins` closer).
+   Caches live in the **per-squad-instance** plugin, so a squad handoff can't
+   serve another squad a stale stub.
+3. **Universal output shaper** — any non-exempt tool result over the budget
+   (`shaperMaxChars`=32000 ≈ 8k tokens, 70/30 head/tail; per-tool override via
+   `budgetFor`, e.g. `run_tests` is tail-weighted) is truncated head+tail with a
+   "narrow your query" note — one runaway Grep/Bash/test dump can't flood
+   context. **Universal-with-exemptions** (`shaperExempt`: `ask_user`, the
+   routing tools, `todo_*`), so a newly added high-volume tool is capped by
+   default. No paging (v1) — the note pushes a precise re-query instead.
+
+`dominantString` picks each tool's largest string field, so the plugin works
+across tools without hard-coding output keys. **No-op contract:** with nothing
+to fuse/dedup/cap the callback returns nil and behaviour is byte-identical.
+Permission fan-out ([core/permissions/spec.go](core/permissions/spec.go)
+`toolClasses`): `lsp_read_symbol` + `ast_grep_search` → **Read** class;
+`ast_grep_rewrite` → **Edit** class (like `lsp_rename`/`MultiEdit`).
 
 ### Configuration files
 
@@ -3115,7 +3208,17 @@ strip (`.pane-tabs` in the `.pane-tabbar`, one `.pane-tab` per key — drafts ge
 `.pane-tab-draft` — plus a `+` `.pane-newtab-btn`) is rebuilt by
 `renderPaneTabs(panel)`; clicking a tab `activateTab`s it (a draft key shows the
 start picker, a session key mounts its transcript), the `×`/middle-click
-`closeTab`s it. `+` (`newDraftTab`) **always** appends a fresh draft tab and
+`closeTab`s it. Tabs are **drag-and-drop reorderable** (native HTML5 DnD): every
+`.pane-tab` is `draggable`, the `.pane-tabbar` is the drop zone (`wireTabDrag`,
+wired once per pane since it survives `renderPaneTabs`), and `moveTab(fromPanel,
+key, toPanel, toIndex)` performs the relocation — a **same-pane reorder** (splice)
+or a **cross-pane move** (the moved key leaves the source's `tabs` *before* any
+`closePanel`, so the tab isn't released/disposed; the source re-picks its active
+tab or closes when it empties, and the tab becomes active in its new pane). During
+a drag a module-level `tabDrag {key, fromPanelId}` gates `dragover`/`drop` so OS
+file drags are ignored, the source tab dims (`.dragging`), and a pseudo-element
+accent bar (`.drag-over-left`/`.drag-over-right`) marks the insertion point.
+`+` (`newDraftTab`) **always** appends a fresh draft tab and
 activates it — several drafts can coexist; the session is created only when the
 user clicks "Start a new chat" (`newChat`) or picks one from the picker
 (`bindSessionToPanel`), which takes the active draft's slot in place rather than
