@@ -446,6 +446,46 @@
 .badge-slate   { background: var(--bg-raised); color: var(--text-muted); }
 .border-slate  { border-color: #555558; }
 
+/* Delivered spawn-session result (server formatSpawnResultNotice): a compact
+   clickable chip that folds the full result away, instead of a raw user bubble. */
+.spawn-result {
+  max-width: min(var(--col-w), 100%);
+  width: 100%;
+  margin: 2px auto;
+}
+.spawn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: #2a1f4a;
+  color: #c586c0;
+  border: 1px solid #c586c0;
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  cursor: pointer;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.spawn-chip:hover { filter: brightness(1.18); }
+.spawn-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spawn-chip-chev { font-size: 9px; flex-shrink: 0; transition: transform 0.15s; }
+.spawn-result.expanded .spawn-chip-chev { transform: rotate(90deg); }
+.spawn-result-body { display: none; margin-top: 6px; padding-left: 4px; }
+.spawn-result.expanded .spawn-result-body { display: block; }
+.spawn-result-task {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+/* Result markdown: flush (drop the .bubble-assistant auto-margins) and a touch
+   smaller than a real reply so it reads as an embedded, foldable panel. */
+.spawn-result-md { margin: 0; font-size: 14px; }
+
 
 
 /* ─── Generated-file download card ──────────────────────────────

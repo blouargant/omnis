@@ -542,6 +542,9 @@ func newEngine(d serverDeps) *gin.Engine {
 				return
 			case msg := <-pushCh:
 				payload := map[string]any{"session_id": msg.SID}
+				for k, v := range msg.Data {
+					payload[k] = v
+				}
 				if msg.Text != "" {
 					payload["text"] = msg.Text
 				}

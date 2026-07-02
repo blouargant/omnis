@@ -6,13 +6,16 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/llm"
 	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/blouargant/omnis/internal/teammates"
 )
@@ -72,6 +75,10 @@ type pushMsg struct {
 	// Text carries an optional payload (e.g. a short reply preview for the
 	// chat_reply event); empty for events that only need the session id.
 	Text string
+	// Data carries an optional structured payload merged into the SSE data object
+	// alongside session_id (e.g. the context_usage / turn_usage frames delivered
+	// for a background turn, which has no per-turn SSE stream). Nil for most events.
+	Data map[string]any
 }
 
 // sessionPushBroadcaster holds per-session channels that fire whenever a
@@ -162,6 +169,22 @@ func (b *sessionPushBroadcaster) broadcastWithText(event, sessionID, text string
 	for ch := range b.all {
 		select {
 		case ch <- pushMsg{Event: event, SID: sessionID, Text: text}:
+		default:
+		}
+	}
+	b.mu.RUnlock()
+}
+
+// broadcastData is broadcast plus a structured JSON payload merged into the SSE
+// data object (alongside session_id). Used to deliver live usage frames
+// (context_usage / turn_usage) for background/injected turns, which have no
+// per-turn SSE stream, over the multiplexed /api/events channel so an open (or
+// remoteBusy) session's context ring + budget update live.
+func (b *sessionPushBroadcaster) broadcastData(event, sessionID string, data map[string]any) {
+	b.mu.RLock()
+	for ch := range b.all {
+		select {
+		case ch <- pushMsg{Event: event, SID: sessionID, Data: data}:
 		default:
 		}
 	}
@@ -292,6 +315,54 @@ func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, 
 	return pm.injectTurnRouted(ctx, d, sessionID, userID, prompt, prompt, sseEvent, "")
 }
 
+// recordInjectedUsage accumulates one model call's usage for a background/injected
+// turn (into acc, freezing the agent's prices) and broadcasts live context_usage +
+// turn_usage frames on the multiplexed /api/events stream — a background turn has
+// no per-turn SSE stream, so this is how an open (or remoteBusy) session's context
+// ring + budget update while it runs. Called only for the answering root agent
+// from its session-scoped ADK stream (never the shared bus), so concurrent turns
+// on other sessions cannot contaminate it.
+func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, output, cacheRead, cacheCreate int64, acc map[string]sessions.TokenUsage, priceFor func(string) agentPrices) {
+	if agent == "" {
+		return
+	}
+	pr := priceFor(agent)
+	e := acc[agent]
+	e.Prompt += prompt
+	e.Output += output
+	e.CacheRead += cacheRead
+	e.CacheCreate += cacheCreate
+	if pr.in > 0 || pr.out > 0 {
+		e.InPricePerM, e.OutPricePerM = pr.in, pr.out
+		e.CacheReadPricePerM, e.CacheCreatePricePerM = pr.cacheRead, pr.cacheCreate
+	}
+	acc[agent] = e
+	if pm.bcast == nil {
+		return
+	}
+	pm.bcast.broadcastData("turn_usage", sessionID, map[string]any{
+		"agent":                    agent,
+		"prompt_tokens":            prompt,
+		"output_tokens":            output,
+		"cache_read_tokens":        cacheRead,
+		"cache_create_tokens":      cacheCreate,
+		"in_price_per_m":           pr.in,
+		"out_price_per_m":          pr.out,
+		"cache_read_price_per_m":   pr.cacheRead,
+		"cache_create_price_per_m": pr.cacheCreate,
+	})
+	// The latest prompt size IS the current context-window fill; use the default
+	// window (the same basis as the cold usage-estimate endpoint) so the ring is
+	// consistent whether it's fed live or rebuilt from history on reload.
+	window := compress.DefaultWindowTokens
+	pm.bcast.broadcastData("context_usage", sessionID, map[string]any{
+		"tokens_used":   int(prompt),
+		"soft_limit":    int(float64(window) * compress.DefaultSoftRatio),
+		"hard_limit":    int(float64(window) * compress.DefaultHardRatio),
+		"window_tokens": window,
+	})
+}
+
 // injectTurnRouted runs a synthetic, run-guarded turn through the Omnis routing
 // dispatch loop and persists the reply. It starts at the session's pinned squad
 // (meta.Squad): a freshly-started session is pinned to the router, so the router
@@ -339,6 +410,18 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 
 	routerSquad := d.Manager.RouterSquad()
 
+	// Per-agent token usage accumulated across every answering hop, persisted on
+	// the turn (below) so the session's context ring + cost survive a reload —
+	// same data the interactive path records. priceFor freezes the agent's prices
+	// onto the usage so a later price change never rewrites this turn's budget.
+	// Attributed to the answering ROOT agent from the per-session ADK stream (not
+	// the shared, session-unfiltered event bus), so a concurrent turn on another
+	// session can never contaminate it; sub-agent tokens are consequently not
+	// separately captured for background turns.
+	usageAccum := map[string]sessions.TokenUsage{}
+	priceFor := agentPriceMap(d.Manager.Lookup(sessionID))
+	turnStart := time.Now()
+
 	// repliedToSender records whether the answering squad sent any mailbox message
 	// during the turn (teammate_tell/teammate_ask, the squad root's always-on
 	// reply channel). When it did, the host backstop below stands down so the
@@ -351,6 +434,13 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// squad's reply is persisted; a router hop that instead talks to the "user"
 	// (no route) is kept as the reply.
 	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
+		rootAgent := "leader"
+		if sq.Leader != nil {
+			rootAgent = sq.Leader.Name()
+		}
+		// The router hop's own tiny LLM call is not attributed to a user-facing
+		// squad (and its text is dropped), so skip usage accounting for it.
+		countUsage := !(routerSquad != "" && squadName == routerSquad)
 		seq := sq.Runner.Run(rctx, userID, sessionID,
 			&genai.Content{Role: "user", Parts: hopParts}, adkagent.RunConfig{})
 		var buf strings.Builder
@@ -358,7 +448,20 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 			if err != nil {
 				return false
 			}
-			if ev == nil || ev.Content == nil {
+			if ev == nil {
+				return true
+			}
+			// Usage may arrive on a content-less final event, so account for it
+			// before the ev.Content nil-check below. Session-scoped (this runner's
+			// stream), so no cross-session contamination.
+			if countUsage {
+				if u := ev.LLMResponse.UsageMetadata; u != nil {
+					cacheRead, cacheCreate := llm.CacheCounts(u)
+					pm.recordInjectedUsage(sessionID, rootAgent, int64(u.PromptTokenCount),
+						int64(u.CandidatesTokenCount), cacheRead, cacheCreate, usageAccum, priceFor)
+				}
+			}
+			if ev.Content == nil {
 				return true
 			}
 			if ev.LLMResponse.Partial { // skip partial streaming tokens
@@ -408,7 +511,7 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	if reply != "" {
 		// Persist the clean message (routerPrompt), not the answer-only reply
 		// directive, so the transcript reads as the received message.
-		if perr := sessions.AppendConversationTurn(sessionID, routerPrompt, reply); perr != nil {
+		if perr := sessions.AppendConversationTurnFull(sessionID, routerPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
 			log.Printf("mailbox push: persist failed for %s: %v", sessionID, perr)
 		}
 		d.Registry.Touch(sessionID)

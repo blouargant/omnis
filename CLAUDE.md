@@ -2274,7 +2274,10 @@ tracks these in a `remoteBusy` map (folded into `applySessionUI`'s busy state
 alongside the local `sessionSending`), optimistically renders the request bubble
 (`startRemoteBusy`), and clears it (`endRemoteBusy`) on the completing
 `task_notification`/`mailbox_push` before `appendNewPushTurns` re-renders the real
-turn from history.
+turn from history. A background turn also emits **`context_usage`** +
+**`turn_usage`** frames on this stream (carrying a structured `Data` payload via
+`broadcastData`) so an open session's context ring + budget update live during the
+run, mirroring the per-turn stream's frames (see "Session spawning").
 
 ### Self-update (new-release detection + in-app install)
 
@@ -2431,7 +2434,19 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   in-thread. One-way (`replyTo=""`) so it never bounces a reply back to the spawned
   session. Applies to both the leader tool and the `/spawn` command (the parent is
   the launching session). No delivery when the task is empty (idle session) or the
-  parent is gone.
+  parent is gone. **The delivered notice renders as a compact clickable chip, not
+  a raw user bubble.** `formatSpawnResultNotice`'s `[Spawned session "<label>"
+  finished …]` prefix is detected in `appendUserBubble` ([web/app.js](web/app.js),
+  same prefix-dispatch as `[mailbox]`) and routed to `appendSpawnResultBlock`:
+  `parseSpawnResultText` extracts `{label, task, result}` (stripping the Go `%q`
+  quotes off the label and the trailing LLM-only "you do not need to reply"
+  parenthetical off the result), and the render is a `.spawn-chip` pill
+  (`chat.spawnChip`, purple) that folds the full result away — clicking it reveals
+  the optional Task line + the result as markdown (`.spawn-result*` in
+  [web/css/features/tools.css](web/css/features/tools.css)). Collapsed by default.
+  Because both the live push path and the reload path funnel through
+  `appendUserBubble`, the chip is identical live and after reload; the leader's
+  reaction renders as the normal assistant bubble that follows.
   **Squad defaulting** (`spawnDefaultSquad`): an empty squad defaults to the
   **router** (when routing is enabled), for both idle **and** task-bearing
   sessions — because `injectTurn` now drives the routing dispatch loop, an initial
@@ -2464,6 +2479,25 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   held (`RunGuard.busy`) even though there is no liveTurn — the squad's steering
   plugin drains it at the next model boundary (the note reaches the model but,
   like other injected turns, is not folded into the persisted transcript).
+- **Context + budget tracking (all injected turns).** `injectTurnRouted`
+  accumulates the answering **root agent's** per-call usage from its
+  **session-scoped ADK stream** (`ev.LLMResponse.UsageMetadata`), freezes the
+  agent's prices (shared `agentPriceMap`), and persists it via
+  `AppendConversationTurnFull` — so `/usage` cost + the context ring survive a
+  reload for spawned/mailbox/scheduler/bg turns, not just interactive ones. It is
+  **not** read from the shared `agentEventBroadcaster` bus (which is
+  session-unfiltered and would cross-contaminate concurrent turns), so **sub-agent
+  tokens are not separately attributed** for background turns — accurate for the
+  answering agent, an undercount for a delegating squad, but never wrong-session.
+  For the **live** ring/budget while the background turn runs (level 2),
+  `recordInjectedUsage` broadcasts `turn_usage` + `context_usage` frames on the
+  multiplexed `/api/events` stream via the new `broadcastData` (`pushMsg.Data`
+  merged into the SSE payload); the client's `subscribeGlobalEvents` handles them
+  exactly like the per-turn stream's frames (updating `sessionTokenAccum` /
+  `sessionCtxUsage` / `AgentDebug`), gated on `!sessionSending` so a locally
+  streamed turn never double-counts. `context_usage.tokens_used` is the latest
+  prompt size against `compress.DefaultWindowTokens` — the same basis as the cold
+  `usage-estimate` endpoint, so the ring reads consistently live vs. on reload.
 
 ### Background server (`omnis-server start` / `stop` / `status`)
 

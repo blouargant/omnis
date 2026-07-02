@@ -228,19 +228,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			// Resolve each agent's per-million model prices from the session's pinned
 			// generation, so the cost billed this turn is frozen onto the persisted
 			// usage (a later model/price change must not rewrite past budgets).
-			priceFor := func(string) agentPrices { return agentPrices{} }
-			if inst := d.Manager.Lookup(meta.ID); inst != nil {
-				prices := make(map[string]agentPrices, len(inst.Settings.Agents))
-				for _, a := range inst.Settings.Agents {
-					prices[a.Name] = agentPrices{
-						in:          a.InputTokenPricePerMillion,
-						out:         a.OutputTokenPricePerMillion,
-						cacheRead:   a.CachedInputTokenPricePerMillion,
-						cacheCreate: a.CacheCreationTokenPricePerMillion,
-					}
-				}
-				priceFor = func(name string) agentPrices { return prices[name] }
-			}
+			priceFor := agentPriceMap(d.Manager.Lookup(meta.ID))
 			// runHop streams one squad turn (one Runner.Run) and returns its
 			// assistant text. The Omnis dispatch loop calls it once per hop.
 			//
@@ -615,6 +603,26 @@ var routerVisibleTools = map[string]bool{
 // cache prices mean "no distinct cache rate" and fall back to the input rate.
 type agentPrices struct {
 	in, out, cacheRead, cacheCreate float64
+}
+
+// agentPriceMap resolves each agent's per-million model prices from a pinned
+// generation, so a cost billed this turn is frozen onto the persisted usage (a
+// later model/price change must not rewrite past budgets). Shared by the
+// interactive turn path and the injected/background turn path.
+func agentPriceMap(inst *toolkitagent.Instance) func(agent string) agentPrices {
+	if inst == nil {
+		return func(string) agentPrices { return agentPrices{} }
+	}
+	prices := make(map[string]agentPrices, len(inst.Settings.Agents))
+	for _, a := range inst.Settings.Agents {
+		prices[a.Name] = agentPrices{
+			in:          a.InputTokenPricePerMillion,
+			out:         a.OutputTokenPricePerMillion,
+			cacheRead:   a.CachedInputTokenPricePerMillion,
+			cacheCreate: a.CacheCreationTokenPricePerMillion,
+		}
+	}
+	return func(name string) agentPrices { return prices[name] }
 }
 
 func streamEvents(

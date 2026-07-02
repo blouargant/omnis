@@ -2767,6 +2767,14 @@ function appendUserBubble(text, container, files, turnIndex) {
     appendMailboxBlock(text, container);
     return;
   }
+  // A finished spawned session delivers its result back into this session as a
+  // synthetic "user" turn (server formatSpawnResultNotice). Render it as a
+  // collapsible sub-agent-style block, not a raw user bubble; the leader's
+  // reaction to it renders as the assistant bubble that follows.
+  if (typeof text === "string" && text.startsWith("[Spawned session ")) {
+    appendSpawnResultBlock(text, container);
+    return;
+  }
   // Background-task / monitor completions are injected as a synthetic "user"
   // turn so the model reacts to them, but the "[Background …]" / "[Monitor …]"
   // prompt is an internal message — don't render it as a user bubble. The
@@ -3042,6 +3050,81 @@ function appendMailboxBlock(text, container) {
   block.appendChild(header);
   block.appendChild(bodyEl);
   row.appendChild(block);
+  (container || fpTranscript()).appendChild(row);
+}
+
+// Parse the spawn-result notice produced by the server (formatSpawnResultNotice
+// in server/spawn.go) into { label, task, result }. Format:
+//   [Spawned session "<label>" finished the task you delegated to it.]
+//   Task: <task>                        (optional line)
+//
+//   Result:
+//   <reply…>
+//
+//   (This result was produced by a separate session you spawned; …)
+// The trailing parenthetical is an instruction for the leader, not display text,
+// so it is stripped from the shown result.
+function parseSpawnResultText(text) {
+  let label = "";
+  const head = text.match(/^\[Spawned session (.+?) finished the task you delegated to it\.\]/);
+  if (head) label = head[1].trim().replace(/^"([\s\S]*)"$/, "$1"); // strip Go %q quotes
+  const taskM = text.match(/^Task:\s*(.+)$/m);
+  const task = taskM ? taskM[1].trim() : "";
+  let result = "";
+  const marker = "\nResult:\n";
+  const ri = text.indexOf(marker);
+  if (ri >= 0) {
+    result = text.slice(ri + marker.length);
+    const tail = result.lastIndexOf("\n\n(This result was produced by a separate session");
+    if (tail >= 0) result = result.slice(0, tail);
+  } else {
+    result = text; // unrecognised shape — show the whole thing rather than nothing
+  }
+  return { label: label || tr("chat.spawnGenericLabel"), task, result: result.trim() };
+}
+
+// Render a delivered spawn-session result as a compact, clickable **chip** with
+// the full result folded away underneath — not a raw user bubble and not a
+// heavy tool-block bar. The chip names the spawned session; clicking it reveals
+// the optional task line + the result rendered as markdown. Collapsed by
+// default. Both the live push path and the reload path route through
+// appendUserBubble, so this covers both.
+function appendSpawnResultBlock(text, container) {
+  const { label, task, result } = parseSpawnResultText(text);
+
+  const row = document.createElement("div");
+  row.className = "tool-row";
+
+  const wrap = document.createElement("div");
+  wrap.className = "spawn-result";
+
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "spawn-chip";
+  chip.innerHTML = `
+    <span class="spawn-chip-icon" aria-hidden="true">⎇</span>
+    <span class="spawn-chip-label">${escHtml(tr("chat.spawnChip", { label }))}</span>
+    <span class="spawn-chip-chev" aria-hidden="true">▸</span>
+  `;
+  chip.addEventListener("click", () => wrap.classList.toggle("expanded"));
+
+  const body = document.createElement("div");
+  body.className = "spawn-result-body";
+
+  if (task) {
+    const t = document.createElement("div");
+    t.className = "spawn-result-task";
+    t.textContent = tr("chat.spawnTask") + ": " + task;
+    body.appendChild(t);
+  }
+  const md = document.createElement("div");
+  md.className = "bubble-assistant rendered spawn-result-md";
+  renderMarkdown(md, result);
+  body.appendChild(md);
+
+  wrap.appendChild(chip);
+  wrap.appendChild(body);
+  row.appendChild(wrap);
   (container || fpTranscript()).appendChild(row);
 }
 
@@ -5397,6 +5480,34 @@ async function subscribeGlobalEvents() {
           // A server-initiated (background/spawned) turn began — show its request
           // + processing state so the session doesn't look idle while it runs.
           if (!sessionSending.has(sid)) startRemoteBusy(sid, (data && data.text) || "");
+        } else if (event === "context_usage" && sid && !sessionSending.has(sid)) {
+          // Live context-window fill for a background/spawned turn (the interactive
+          // path carries this on its own per-turn stream; this is the background
+          // equivalent). Skipped when this browser is streaming the session locally
+          // to avoid double-driving the ring.
+          sessionCtxUsage.set(sid, data);
+          for (const p of panelsForSession(sid)) renderCtxRing(p);
+        } else if (event === "turn_usage" && sid && !sessionSending.has(sid)) {
+          // Live per-agent budget for a background/spawned turn (mirrors the
+          // per-turn stream's turn_usage handler).
+          const acc = sessionTokenAccum.get(sid) || { prompt: 0, output: 0 };
+          acc.prompt += (data.prompt_tokens || 0);
+          acc.output += (data.output_tokens || 0);
+          sessionTokenAccum.set(sid, acc);
+          AgentDebug.addAgentUsage(
+            sid, data.agent,
+            data.prompt_tokens || 0, data.output_tokens || 0,
+            data.cache_read_tokens || 0, data.cache_create_tokens || 0,
+            {
+              in:          data.in_price_per_m || 0,
+              out:         data.out_price_per_m || 0,
+              cacheRead:   data.cache_read_price_per_m || 0,
+              cacheCreate: data.cache_create_price_per_m || 0,
+            },
+          );
+          for (const p of panelsForSession(sid)) {
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+          }
         } else if (event === "task_notification" && sid) {
           // A background task / monitor / spawned turn produced a result. In
           // active-wake mode the server injected a synthetic turn (picked up by
