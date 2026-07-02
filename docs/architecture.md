@@ -13,10 +13,10 @@ This document maps the codebase and explains how the pieces interact.
                                         ▼
         ┌──────────────────────────────────────────────────────────┐
         │  Instance (one generation)                               │
-        │   ├─ Squad "omnis"     ← Omnis ROUTER (default new chat) │
-        │   ├─ Squad "default"   ← leader + full team              │
-        │   ├─ Squad "research"  ← leader + web_agent + summariser │
-        │   └─ Squad "…"         ← any number, defined in agent.json│
+        │   ├─ Squad "Omnis"     ← Omnis ROUTER (default new chat) │
+        │   ├─ Squad "Default"   ← leader + full team              │
+        │   ├─ Squad "Coding"    ← coder + code_scout/docs/…       │
+        │   └─ Squad "…"         ← any number, defined in agents.json│
         │  New chats start at the router, which routes to a squad   │
         └─────────────────┬────────────────────────────────────────┘
                           │ (Omnis routes → per-session squad)
@@ -186,9 +186,9 @@ RuntimeSettings ──► resolveSquadEntries ──► RuntimeSquadConfig[]
    ┌─────────────────────────────────────────────────────────┐
    │ Instance (one generation)                               │
    │                                                         │
-   │  Squads["default"] ─► SquadInstance{leader, members,    │
+   │  Squads["Default"] ─► SquadInstance{leader, members,    │
    │                                     runner, plugins}    │
-   │  Squads["research"] ─► SquadInstance{…}                 │
+   │  Squads["Coding"]  ─► SquadInstance{…}                 │
    │                                                         │
    └─────────────────────────────────────────────────────────┘
 ```

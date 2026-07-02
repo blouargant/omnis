@@ -379,7 +379,7 @@ go run . -d "what does main.go do?"
 ```bash
 make build              # bin/omnis + bin/omnis-server (host platform)
 make examples           # opt-in: build all examples under bin/
-make release            # cross-platform raw binaries → dist/
+make package            # cross-platform raw binaries + .deb + .rpm + .zip → dist/
 make fmt && make vet    # code quality
 make test               # unit tests
 make env-tests          # LLM integration tests (requires .env with API keys)

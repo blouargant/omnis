@@ -48,3 +48,6 @@ packaging/pip/src/omnis/_dist/
 packaging/pip/build/
 packaging/pip/**/*.egg-info/
 dist/wheels/
+
+# stray build artifact (was committed by mistake)
+yoke

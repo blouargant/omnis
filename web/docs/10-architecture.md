@@ -17,7 +17,8 @@ agent.NewAgent()                ← single wiring entry point
     │    │    ├── investigator  ← read-only evidence gatherer
     │    │    ├── web_agent     ← web search + page fetch
     │    │    └── summariser    ← condenses bulk output
-    │    └── "research"         ← leader + smaller team, picked per session
+    │    ├── "Coding"           ← coder + code_scout/code_docs/reviewer/refactorer
+    │    └── "Kubernetes" · "Knowledge" · "Skill Editor" · "Helper"  ← more squads, picked per session
     ├── reflector               ← process-wide post-session LLM analyst (optional)
     └── curator                 ← process-wide post-session soft-skill distiller
 ```

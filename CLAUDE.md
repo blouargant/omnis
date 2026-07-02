@@ -130,7 +130,7 @@ global `tr()` — the i18n pass renamed one such `const tr` to `delBtn`.
 
 omnis ships through several channels, all driven by `.goreleaser.yaml` +
 `.github/workflows/release.yml` and the assets under `packaging/`:
-goreleaser raw binaries (`make release`), `.deb`/`.rpm` (nfpms → `/etc/omnis`),
+goreleaser raw binaries + archives (`make package`), `.deb`/`.rpm` (nfpms → `/etc/omnis`),
 a Homebrew formula (`brews:` → `$(brew --prefix)/share/omnis`), a Windows MSI
 ([packaging/windows/omnis.wxs](packaging/windows/omnis.wxs) → `C:\ProgramData\Omnis`),
 and **pip wheels** (`make wheels`). All non-FHS wrappers rely on omnis embedding
@@ -164,8 +164,7 @@ make build              # bin/omnis + bin/omnis-server (host platform)
 make build-root         # bin/omnis only
 make build-server       # bin/omnis-server (HTTP API)
 make examples          # opt-in: build all examples under bin/
-make release            # cross-platform raw binaries → dist/
-make package            # cross-platform + .deb + .rpm + .zip → dist/ (requires goreleaser)
+make package            # cross-platform raw binaries + .deb + .rpm + .zip → dist/ (requires goreleaser)
 make package-check      # validate .goreleaser.yaml without building
 make wheels             # per-platform pip wheels (omnis-agent) → dist/wheels/ (override WHEEL_PLATFORMS=)
 
@@ -273,20 +272,24 @@ Built on [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk) for t
 ```
 main.go / server/
     └── agent.NewAgent()            ← single wiring entry point
-            ├── Squads              ← one wired tree per squad in agent.json
-            │    ├── "omnis"        ← Omnis ROUTER squad (default for new chats) — leaderless
+            ├── Squads              ← one wired tree per squad in agents.json (see config/agents.json for the live set)
+            │    ├── "Omnis"        ← Omnis ROUTER squad (default for new chats) — leaderless
             │    │    └── omnis              ← routes each request to the best squad (route_to_squad), then steps out
-            │    ├── "default"      ← leader + full team (used when a session omits a squad / routed to)
+            │    ├── "Default"     ← leader + full team (used when a session omits a squad / routed to)
             │    │    ├── leader              ← coordinator (fs tools + planning + mailbox + handoff_to_router)
             │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
-            │    │    ├── web_agent           ← web search + fetch
             │    │    ├── summariser          ← condenses bulk output
+            │    │    ├── image_generator      ← image generation
+            │    │    ├── helper               ← docs/registry/settings operator
             │    │    └── agentmd_reviewer     ← read-only fresh-eyes verifier for /init-generated AGENT.md
-            │    └── "research"     ← leader + smaller team, selectable per session
-            │         ├── leader
-            │         ├── web_agent
-            │         └── summariser
+            │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
+            │    │    ├── coder               ← plans/edits + verify loop
+            │    │    └── code_scout · code_docs · reviewer · refactorer
+            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator
+            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · summariser
+            │    ├── "Skill Editor" ← skill_editor + web_agent · helper
+            │    └── "Helper"      ← leaderless single specialist (helper)
             ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
             └── curator             ← process-wide post-session soft-skill distiller (one hook per generation)
 ```
@@ -716,8 +719,10 @@ Two mechanisms keep the matrix cost bounded:
   instead of go-turbovec's default random seed, and go-turbovec memoises
   `rotation.New` / `quant.NewQJL` by `(dim, seed)` — so all same-dim indexes
   **share one Π and one S** (built/loaded once) rather than each allocating its
-  own pair. (Requires go-turbovec ≥ the memoised build; omnis currently pins it
-  via a local `replace` in `go.mod` — publish + bump for release.)
+  own pair. (Requires go-turbovec ≥ the memoised build; omnis now pins the
+  published `github.com/blouargant/go-turbovec v0.1.1` in `go.mod` — no local
+  `replace`. When bumping, verify the memoised `rotation.New` / `quant.NewQJL`
+  build is present in the pinned version.)
 - **Deferred load.** `semindex.Open` reads only the cheap metadata sidecar and
   marks the `.tvim` as `pendingLoad`; the expensive `LoadIdMapFile` (the QR) is
   deferred to first real `Query`/`Upsert`/`Save` via `ensureLoadedLocked`, off
@@ -1145,6 +1150,10 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables) |
 | `OMNIS_SERVER_DAEMONIZED` | Set to `1` by `omnis-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
+| `OMNIS_SERVER_BASE_PATH` | Base path prefix the HTTP server + web UI are mounted under (overrides `server.yaml` `base_path`); normalised to a leading `/` with no trailing slash ([server/main.go](server/main.go) `normalizeBasePath`) |
+| `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
+| `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
+| `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
 | `OMNIS_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
 | `OMNIS_HOME` | Per-user state root for all mutable files (default `$HOME/.omnis`) |
 | `OMNIS_PATH_AUGMENT` | `true`/`false` (default `true`) — at startup ([internal/binpath/](internal/binpath/) `binpath.Ensure`, called from `BuildInfrastructure`) append the standard user-local bin dirs (`~/.local/bin` from pipx/pip-user, `$GOBIN`/`$GOPATH/bin`/`~/go/bin` from `go install`, `$CARGO_HOME/bin`/`~/.cargo/bin`, `~/.deno/bin`) to the process `$PATH`. Append-only + idempotent, so it never shadows system binaries; makes a dependency-gate auto-install (skill/MCP/LSP `requires`) that drops its binary in a user dir immediately visible to `exec.LookPath` and every spawned subprocess (fixes the "installed to ~/.local/bin but not on PATH" trap for pipx, and for the existing gopls `go install`→`~/go/bin` gate). `false` disables. |
