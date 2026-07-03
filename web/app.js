@@ -5296,6 +5296,7 @@ async function activateTab(panel, key) {
 // single-squad setups.
 
 const SQUAD_PREF_KEY = "agent_toolkit_squad";
+const SQUAD_MIGRATION_KEY = "agent_toolkit_squad_reset_omnis"; // one-time Omnis rollout reset
 let availableSquads = [];          // [{name, description, leader, members, ...}]
 let defaultSquadName = "default";
 let selectedSquadName = "";
@@ -5307,6 +5308,22 @@ async function loadSquads() {
     const data = await res.json();
     availableSquads = Array.isArray(data.squads) ? data.squads : [];
     defaultSquadName = data.default || "default";
+
+    // One-time migration (Omnis router rollout): older builds auto-persisted
+    // the then-default squad ("default"/"Default") into localStorage. Now that
+    // the Omnis router is the server default, that stale value shadows it and
+    // pins every new chat to the non-routed default team. Clear it exactly once
+    // so the fallback below adopts the server default (Omnis). A user who then
+    // deliberately re-picks the default team keeps it (the flag stops re-clearing).
+    if (!localStorage.getItem(SQUAD_MIGRATION_KEY)) {
+      const stale = localStorage.getItem(SQUAD_PREF_KEY);
+      if (stale && stale.toLowerCase() === "default"
+                && defaultSquadName.toLowerCase() !== "default") {
+        localStorage.removeItem(SQUAD_PREF_KEY);
+      }
+      localStorage.setItem(SQUAD_MIGRATION_KEY, "1");
+    }
+
     const saved = localStorage.getItem(SQUAD_PREF_KEY);
     selectedSquadName = (saved && availableSquads.some(s => s.name === saved))
       ? saved
