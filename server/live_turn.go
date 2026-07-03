@@ -44,12 +44,28 @@ type bufFrame struct {
 // directive instead of a corrupt partial replay (see stream()).
 const maxBufferBytes = 8 << 20 // 8 MiB
 
-func newLiveTurn(cancel context.CancelFunc) *liveTurn {
+// newLiveTurn creates a turn whose sequence numbers continue past seedSeq (the
+// previous turn's high-water mark for this session). Per-session-monotonic seqs
+// stop a stale `from` cursor left over from a PRIOR turn from aliasing a NEW
+// turn's frame: without the seed both turns start at seq 1, so a reconnect
+// carrying the old turn's cursor would silently skip the new turn's first frames
+// (start = cursor - firstSeq + 1 lands mid-buffer). With the seed a stale cursor
+// is ≤ seedSeq < the new turn's firstSeq, so stream() either replays from the
+// start or takes the reload path — never a silent skip.
+func newLiveTurn(cancel context.CancelFunc, seedSeq int) *liveTurn {
 	return &liveTurn{
-		firstSeq: 1,
+		firstSeq: seedSeq + 1,
+		seq:      seedSeq,
 		notify:   make(chan struct{}),
 		cancel:   cancel,
 	}
+}
+
+// currentSeq returns the last assigned sequence number.
+func (lt *liveTurn) currentSeq() int {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	return lt.seq
 }
 
 // emit appends a frame and wakes every attached consumer. Safe for concurrent
@@ -166,8 +182,17 @@ func newLiveTurnRegistry() *liveTurnRegistry {
 // start registers a fresh live turn for sessionID, replacing any prior one (the
 // run-guard guarantees the prior turn has finished before a new one starts).
 func (r *liveTurnRegistry) start(sessionID string, cancel context.CancelFunc) *liveTurn {
-	lt := newLiveTurn(cancel)
 	r.mu.Lock()
+	// Continue the sequence past the previous (still-retained) turn's high-water
+	// mark so a stale reconnect cursor from that turn can't alias this one's
+	// frames. The run-guard guarantees the prior turn has finished before this
+	// one starts; it lingers ~60s for tail replay, which is exactly the window a
+	// cross-turn reconnect could hit.
+	seed := 0
+	if prev := r.m[sessionID]; prev != nil {
+		seed = prev.currentSeq()
+	}
+	lt := newLiveTurn(cancel, seed)
 	r.m[sessionID] = lt
 	r.mu.Unlock()
 	return lt

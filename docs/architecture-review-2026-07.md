@@ -240,7 +240,15 @@ turn; all four directive stores guard every map access and return value copies.
   documented five env vars (D4); and updated the provider-route, terminal-auth, and
   cross-session-bus sections of CLAUDE.md to match the code changes above.
 
-**Not changed (deliberately):** P1 (reconnect-from-stale-turn frame skip) and P2 (mailbox
-watcher `acquire` not ctx-aware) were left as documented low-severity edge cases; and the
-illustrative `research`-squad JSON snippets in `docs/configuration.md` / `docs/extending.md`
-are valid teaching examples, so they were kept.
+**Plausible edge cases (also fixed):**
+
+- **P1** — `server/live_turn.go` now seeds each new turn's sequence numbers past the
+  previous (still-retained) turn's high-water mark, so a stale reconnect cursor from a
+  prior turn can no longer alias — and silently skip — a new turn's first frames; it
+  replays cleanly or takes the existing reload path. `TestLiveTurnSeqContinuesAcrossTurns`.
+- **P2** — the run guard gained a ctx-aware `acquireCtx`, used by `injectTurnRouted`, so a
+  watcher/scheduler goroutine parked behind a long turn cancels promptly on session
+  delete / server shutdown instead of waiting only to no-op.
+
+**Not changed (deliberately):** the illustrative `research`-squad JSON snippets in
+`docs/configuration.md` / `docs/extending.md` are valid teaching examples, so they were kept.

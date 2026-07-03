@@ -38,6 +38,21 @@ func (g *sessionRunGuard) acquire(sessionID string) (release func()) {
 	return func() { <-sem }
 }
 
+// acquireCtx is acquire that can be abandoned if ctx is cancelled while parked
+// behind a long-running turn. Returns ok=false without acquiring when ctx is
+// done (session deleted / server shutdown), so a watcher/scheduler goroutine
+// isn't stuck waiting for a turn it will then no-op on anyway.
+func (g *sessionRunGuard) acquireCtx(ctx context.Context, sessionID string) (release func(), ok bool) {
+	v, _ := g.m.LoadOrStore(sessionID, make(chan struct{}, 1))
+	sem := v.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, true
+	case <-ctx.Done():
+		return func() {}, false
+	}
+}
+
 // tryAcquire attempts to acquire the per-session guard without blocking.
 // Returns (release, true) on success; (no-op, false) when another goroutine
 // already holds the guard for this session — callers should skip and try
@@ -402,13 +417,15 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 		}
 	}()
 
-	// Serialize with any concurrent user turn for this session.
-	release := pm.guard.acquire(sessionID)
-	defer release()
-
-	if ctx.Err() != nil {
-		return "" // session deleted while waiting for the lock
+	// Serialize with any concurrent user turn for this session. Use the
+	// ctx-aware acquire so a watcher/scheduler goroutine parked behind a long
+	// turn can be cancelled promptly (session deleted / server shutdown) instead
+	// of waiting for that turn to finish only to no-op on the ctx check.
+	release, ok := pm.guard.acquireCtx(ctx, sessionID)
+	if !ok {
+		return ""
 	}
+	defer release()
 
 	meta, ok := d.Registry.Get(sessionID)
 	if !ok {
