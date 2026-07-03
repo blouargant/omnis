@@ -125,6 +125,20 @@ func (r *RouteRegistry) Peek(sessionID string) *RouteDirective {
 	return r.m[sessionID]
 }
 
+// Forget drops any pending directive and probe counter for sessionID. Directives
+// are normally transient (Taken each turn), but one recorded during a turn that
+// is torn down mid-flight would otherwise linger until the id is reused; call
+// this on session delete/archive.
+func (r *RouteRegistry) Forget(sessionID string) {
+	if r == nil || sessionID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.m, sessionID)
+	delete(r.probes, sessionID)
+}
+
 // ── Routing tools ──────────────────────────────────────────────────────────
 //
 // NOTE: the tool names below ("route_to_squad", "handoff_to_router") are

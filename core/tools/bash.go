@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,23 +15,201 @@ import (
 	"github.com/blouargant/omnis/internal/filter"
 )
 
-// alwaysBlock contains substrings that RunBash refuses outright. The
-// permissions package implements the full three-tier YAML governance; this
-// is the hard floor that always applies, even when permissions are disabled.
+// alwaysBlock contains representative catastrophic command substrings refused
+// outright via a coarse fast-path. The permissions package implements the full
+// three-tier YAML governance; this is the hard floor that always applies, even
+// when permissions are disabled. NOTE: substring matching alone is trivially
+// bypassed (flag reorder, extra whitespace, long-form flags), so the fast-path
+// is backed by the structural checks in SafetyFloorBlock below — do not rely on
+// this list for coverage.
 var alwaysBlock = []string{"rm -rf /", ":(){:|:&};:", "mkfs"}
 
+// forkBombRe matches a fork bomb after all whitespace is stripped, independent
+// of the function name: `name(){ name|name& };name` collapses to a shape like
+// `(){:|:&};`. This catches the canonical `:(){ :|:& };:` and its spaced forms
+// that the literal fast-path misses.
+var forkBombRe = regexp.MustCompile(`\(\)\{[^}]*\|[^}]*&\}[;&]`)
+
+// shellSplitRe splits a command line into candidate sub-commands on the shell
+// operators that separate independent commands (`;`, `|`, `||`, `&&`, `&`,
+// newlines). Detection does not need real pipe semantics — each segment is a
+// standalone command to inspect.
+var shellSplitRe = regexp.MustCompile(`[;&|\n]+`)
+
+// blockDeviceRe matches a raw block device path (a real disk, not /dev/null or
+// /dev/zero) as a dd output target or shell redirect target.
+var blockDeviceRe = regexp.MustCompile(`/dev/(sd[a-z]|nvme\d|vd[a-z]|hd[a-z]|mmcblk\d|disk\d)`)
+
 // SafetyFloorBlock reports whether command trips the hard safety floor,
-// returning the offending substring. It is the single source of truth shared
-// by RunBash, RunBashInteractive, and any other surface that executes a shell
-// command (e.g. the bash_background queue) so the floor can never be bypassed
-// by routing around RunBash.
+// returning a short reason. It is the single source of truth shared by RunBash,
+// RunBashInteractive, RunShellCaptured, and the bg queue so the floor can never
+// be bypassed by routing around RunBash.
+//
+// It is deliberately conservative (it must not block ordinary development
+// commands), so it targets a small set of unambiguously catastrophic patterns
+// and is robust to the evasions the old substring-only check missed: flag
+// reordering (`rm -fr /`), split/long flags (`rm -r -f /`, `rm --recursive
+// --force /`), extra whitespace, and whitespace in the fork bomb. It is NOT a
+// general destructive-command detector — decode-then-exec chains
+// (`… | base64 -d | bash`) and shell-variable-expanded targets (`$HOME`) are
+// out of reach of static inspection and are governed by the permission layer.
 func SafetyFloorBlock(command string) (string, bool) {
+	// Fast path: exact catastrophic literals (also exercised by tests).
 	for _, b := range alwaysBlock {
 		if strings.Contains(command, b) {
 			return b, true
 		}
 	}
+	// Fork bomb, whitespace-insensitive and function-name agnostic.
+	if forkBombRe.MatchString(stripWhitespace(command)) {
+		return "fork bomb", true
+	}
+	// Structural checks per independent sub-command.
+	for _, sub := range shellSplitRe.Split(command, -1) {
+		if reason, bad := blockedSubcommand(sub); bad {
+			return reason, true
+		}
+	}
 	return "", false
+}
+
+func stripWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// benignWrappers are command prefixes that don't change what the wrapped
+// command does destructively, so the floor looks past them to the real command.
+var benignWrappers = map[string]bool{
+	"sudo": true, "doas": true, "env": true, "nohup": true,
+	"time": true, "command": true, "exec": true, "nice": true, "ionice": true,
+}
+
+// blockedSubcommand inspects a single (operator-free) command segment and
+// reports whether it is one of the catastrophic patterns the floor blocks.
+func blockedSubcommand(sub string) (string, bool) {
+	// Redirect into a raw block device (`> /dev/sda`).
+	if strings.ContainsAny(sub, ">") && blockDeviceRe.MatchString(sub) &&
+		regexp.MustCompile(`>\s*`+blockDeviceRe.String()).MatchString(sub) {
+		return "redirect to block device", true
+	}
+
+	toks := strings.Fields(sub)
+	// Skip leading benign wrappers and VAR=val assignments / sudo flags.
+	i := 0
+	for i < len(toks) {
+		t := strings.TrimPrefix(toks[i], `\`)
+		if benignWrappers[filepath.Base(t)] {
+			i++
+			continue
+		}
+		if strings.HasPrefix(t, "-") { // e.g. `sudo -S`
+			i++
+			continue
+		}
+		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") &&
+			isEnvAssignment(t) {
+			i++
+			continue
+		}
+		break
+	}
+	if i >= len(toks) {
+		return "", false
+	}
+	cmd := filepath.Base(strings.TrimPrefix(toks[i], `\`))
+	args := toks[i+1:]
+
+	switch {
+	case cmd == "rm":
+		if rmHasFlag(args, 'r', "recursive") && rmHasFlag(args, 'f', "force") &&
+			hasAbsolutePathArg(args) {
+			return "recursive force rm of an absolute path", true
+		}
+	case cmd == "mkfs" || strings.HasPrefix(cmd, "mkfs."):
+		return "mkfs", true
+	case cmd == "dd":
+		for _, a := range args {
+			if strings.HasPrefix(a, "of=") && blockDeviceRe.MatchString(a) {
+				return "dd to block device", true
+			}
+		}
+	case cmd == "chmod" || cmd == "chown":
+		if rmHasFlag(args, 'r', "recursive") && targetsRoot(args) {
+			return "recursive " + cmd + " of /", true
+		}
+	case cmd == "find":
+		if len(args) > 0 && args[0] == "/" && containsToken(args, "-delete") {
+			return "find / -delete", true
+		}
+	}
+	return "", false
+}
+
+func isEnvAssignment(t string) bool {
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	for _, r := range t[:eq] {
+		if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// rmHasFlag reports whether the args carry a short flag rune (in a merged
+// cluster like `-rf`/`-fr`) or its long-form equivalent (`--recursive`).
+func rmHasFlag(args []string, short byte, long string) bool {
+	for _, a := range args {
+		if a == "--"+long {
+			return true
+		}
+		if len(a) >= 2 && a[0] == '-' && a[1] != '-' {
+			for k := 1; k < len(a); k++ {
+				c := a[k]
+				if c == short || (short == 'r' && c == 'R') {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func hasAbsolutePathArg(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if strings.HasPrefix(a, "/") {
+			return true
+		}
+	}
+	return false
+}
+
+func targetsRoot(args []string) bool {
+	for _, a := range args {
+		if a == "/" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsToken(args []string, tok string) bool {
+	for _, a := range args {
+		if a == tok {
+			return true
+		}
+	}
+	return false
 }
 
 // cwdSentinel prefixes the line RunBashInteractive appends to capture the

@@ -49,15 +49,22 @@ type providerModelInfo struct {
 	Embedding                         bool    `json:"embedding,omitempty"`
 }
 
-// registerProviderModelsRoute mounts GET /providers/models on the given router group.
-// Query params:
+// registerProviderModelsRoute mounts POST /providers/models on the given router
+// group. The connection is described by a JSON body (providerConnBody):
 //   - provider_ref: resolves credentials from models.json (preferred — no secrets cross the wire).
 //   - provider, api_key, base_url: explicit overrides, used when no provider_ref is set or when
 //     test-driving a new provider before it is saved. api_key and base_url are resolved as
 //     env-var names first, matching the agent config convention.
+//
+// These use POST (not GET) specifically so a typed, not-yet-saved api_key travels
+// in the request body rather than the URL query string — where it would otherwise
+// leak into browser history and any upstream reverse-proxy/ingress access log.
+// This mirrors the discipline already used by POST /providers/test.
 func registerProviderModelsRoute(rg *gin.RouterGroup) {
-	rg.GET("/providers/models", func(c *gin.Context) {
-		providerKind, apiKey, baseURL, status, err := resolveProviderConn(c)
+	rg.POST("/providers/models", func(c *gin.Context) {
+		var body providerConnBody
+		_ = c.ShouldBindJSON(&body)
+		providerKind, apiKey, baseURL, status, err := resolveProviderConn(body)
 		if err != nil {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
@@ -74,19 +81,21 @@ func registerProviderModelsRoute(rg *gin.RouterGroup) {
 		c.JSON(http.StatusOK, gin.H{"models": models})
 	})
 
-	// GET /providers/embedding-dim probes a single embeddings request against
+	// POST /providers/embedding-dim probes a single embeddings request against
 	// the resolved provider and reports the output vector length, so the Models
 	// editor can auto-fill the DIM field instead of asking the user to look it
 	// up. Credentials resolve the same way as /providers/models (provider_ref
 	// preferred; provider/api_key/base_url overrides for test-driving). The
 	// model id is required and must name an embeddings-capable model.
-	rg.GET("/providers/embedding-dim", func(c *gin.Context) {
-		model := strings.TrimSpace(c.Query("model"))
+	rg.POST("/providers/embedding-dim", func(c *gin.Context) {
+		var body providerConnBody
+		_ = c.ShouldBindJSON(&body)
+		model := strings.TrimSpace(body.Model)
 		if model == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "model query param is required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
 			return
 		}
-		providerKind, apiKey, baseURL, status, err := resolveProviderConn(c)
+		providerKind, apiKey, baseURL, status, err := resolveProviderConn(body)
 		if err != nil {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
@@ -227,12 +236,24 @@ func registerProviderModelsRoute(rg *gin.RouterGroup) {
 	})
 }
 
+// providerConnBody is the JSON body for the POST /providers/models and
+// /providers/embedding-dim probes. api_key/base_url travel in the body (not the
+// URL) so a typed, not-yet-saved credential never lands in an access log.
+type providerConnBody struct {
+	ProviderRef string `json:"provider_ref"`
+	Provider    string `json:"provider"`
+	APIKey      string `json:"api_key"`
+	BaseURL     string `json:"base_url"`
+	Model       string `json:"model"`
+}
+
 // resolveProviderConn extracts the provider kind + resolved credentials from a
-// request, honouring provider_ref (looked up in the live models.json catalogue,
-// so no secrets cross the wire) or the explicit provider/api_key/base_url
-// overrides. The returned status is the HTTP code to use when err is non-nil.
-func resolveProviderConn(c *gin.Context) (providerKind, apiKey, baseURL string, status int, err error) {
-	if ref := strings.TrimSpace(c.Query("provider_ref")); ref != "" {
+// request body, honouring provider_ref (looked up in the live models.json
+// catalogue, so no secrets cross the wire) or the explicit provider/api_key/
+// base_url overrides. The returned status is the HTTP code to use when err is
+// non-nil.
+func resolveProviderConn(b providerConnBody) (providerKind, apiKey, baseURL string, status int, err error) {
+	if ref := strings.TrimSpace(b.ProviderRef); ref != "" {
 		settings, err := agent.ResolveRuntimeSettings(agent.Options{})
 		if err != nil {
 			return "", "", "", http.StatusInternalServerError, fmt.Errorf("resolve runtime settings: %v", err)
@@ -243,11 +264,11 @@ func resolveProviderConn(c *gin.Context) (providerKind, apiKey, baseURL string, 
 		}
 		return p.Kind, p.APIKey, p.BaseURL, http.StatusOK, nil
 	}
-	providerKind = strings.TrimSpace(c.Query("provider"))
+	providerKind = strings.TrimSpace(b.Provider)
 	if providerKind == "" {
-		return "", "", "", http.StatusBadRequest, fmt.Errorf("provider or provider_ref query param is required")
+		return "", "", "", http.StatusBadRequest, fmt.Errorf("provider or provider_ref is required")
 	}
-	return providerKind, resolveEnvRef(c.Query("api_key")), resolveEnvRef(c.Query("base_url")), http.StatusOK, nil
+	return providerKind, resolveEnvRef(b.APIKey), resolveEnvRef(b.BaseURL), http.StatusOK, nil
 }
 
 // probeEmbeddingDim builds an embedder for the given connection and performs a

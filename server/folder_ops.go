@@ -71,6 +71,17 @@ func doFolderDownload(c *gin.Context, cwd string) {
 	zw := zip.NewWriter(c.Writer)
 	defer zw.Close()
 	base := filepath.Dir(p) // so paths in the zip are rooted at the dir's own name
+
+	// Bound the archive so a single fat-fingered path (e.g. ?path=/) can't try to
+	// zip-stream the entire reachable filesystem over HTTP. Streaming has already
+	// begun (headers sent), so we can't switch to a 4xx — instead we stop cleanly
+	// once a cap trips and append a note. The file-count + depth caps are the
+	// effective guard against a huge tree; the byte cap bounds cumulative size.
+	var (
+		count     int
+		total     int64
+		truncated bool
+	)
 	_ = filepath.WalkDir(p, func(path string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries rather than aborting the stream
@@ -80,6 +91,16 @@ func doFolderDownload(c *gin.Context, cwd string) {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		// Depth guard: don't descend past maxZipDepth levels.
+		if de.IsDir() && strings.Count(rel, "/") >= maxZipDepth {
+			return filepath.SkipDir
+		}
+		// Count/size guard: stop the whole walk cleanly once a cap is hit.
+		if count >= maxZipFiles || total >= maxZipBytes {
+			truncated = true
+			return filepath.SkipAll
+		}
+		count++
 		if de.IsDir() {
 			if rel != "." {
 				_, _ = zw.Create(rel + "/")
@@ -98,11 +119,28 @@ func doFolderDownload(c *gin.Context, cwd string) {
 		if oErr != nil {
 			return nil
 		}
-		defer f.Close()
-		_, _ = io.Copy(w, f)
+		// Cap the bytes copied from any single file to what remains of the budget,
+		// so one enormous file can't blow past the cap either.
+		n, _ := io.CopyN(w, f, maxZipBytes-total)
+		_ = f.Close()
+		total += n
 		return nil
 	})
+	if truncated {
+		if w, e := zw.Create("_TRUNCATED.txt"); e == nil {
+			fmt.Fprintf(w, "Download truncated: exceeded the archive cap (%d files or %d bytes). Select a smaller folder and try again.\n", maxZipFiles, maxZipBytes)
+		}
+	}
 }
+
+// Archive-download caps: guard the zip-stream path against an accidental
+// whole-filesystem download (e.g. ?path=/). Generous enough for real project
+// folders, small enough to refuse a runaway tree.
+const (
+	maxZipFiles = 20000          // total entries (files + dirs)
+	maxZipBytes = int64(2) << 30 // 2 GiB cumulative uncompressed
+	maxZipDepth = 64             // relative directory depth
+)
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
 

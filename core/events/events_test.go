@@ -1,12 +1,36 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRootSessionContextRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	if got := RootSessionFromContext(context.Background()); got != "" {
+		t.Fatalf("unset root session = %q, want empty", got)
+	}
+	if got := RootSessionFromContext(nil); got != "" { //nolint:staticcheck // nil ctx must be safe
+		t.Fatalf("nil ctx root session = %q, want empty", got)
+	}
+	// A blank id is a no-op.
+	if got := RootSessionFromContext(WithRootSession(context.Background(), "")); got != "" {
+		t.Fatalf("blank tag = %q, want empty", got)
+	}
+	// A real id round-trips and survives derived child contexts (mirrors how the
+	// value reaches a sub-agent's callback context).
+	ctx := WithRootSession(context.Background(), "teaching-kite")
+	child, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if got := RootSessionFromContext(child); got != "teaching-kite" {
+		t.Fatalf("child root session = %q, want teaching-kite", got)
+	}
+}
 
 func TestBusEmitAndPanicIsolation(t *testing.T) {
 	t.Parallel()

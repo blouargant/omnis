@@ -299,18 +299,37 @@ func (m *Manager) Reload(ctx context.Context, opts Options) (*Instance, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Newest-wins guard. Two reloads overlapping (e.g. a manual /api/config/reload
+	// racing a settings-tool RequestReload) each reserve a distinct nextGen up
+	// front, then build unlocked, then reach here in whatever order they finish.
+	// If a HIGHER generation already promoted while we were building, we must NOT
+	// demote to this older build — otherwise "last reload wins" degrades to
+	// "last-to-FINISH wins" and the newer config is silently dropped (and, with
+	// the idle-teardown below, deleted). No session can be pinned to nextGen yet
+	// (Reload has not returned it), so discarding our just-built instance is safe.
+	if nextGen <= m.currentGen {
+		m.repairCurrentLocked()
+		if cur := m.instances[m.currentGen]; cur != nil {
+			_ = inst.Close()
+			return cur.inst, nil
+		}
+		// Degenerate: the map has no live current generation. Fall through and
+		// install ours as the recovery rather than returning nil.
+	}
+
 	m.instances[nextGen] = &managedInstance{inst: inst}
-	oldGen := m.currentGen
 	m.currentGen = nextGen
-	// Tear down the PREVIOUS generation when it has no pinned sessions — but never
-	// the one we just installed. The `oldGen != nextGen` guard is essential: a
-	// concurrent reload that finishes after us may have already advanced
-	// currentGen, and without the guard the teardown would delete the live
-	// current generation, emptying the map and nil-ing Current().
-	if oldGen != nextGen {
-		if oldMI := m.instances[oldGen]; oldMI != nil && oldMI.refcount == 0 {
-			delete(m.instances, oldGen)
-			_ = oldMI.inst.Close()
+	// Retire every generation BELOW the new current that has no pinned sessions.
+	// A full sweep (not just the immediately-previous generation) so out-of-order
+	// reload completion can't strand an idle intermediate generation in the map,
+	// while a still-pinned older generation (refcount > 0) is kept until its
+	// in-flight sessions drain. currentGen itself is excluded, so Current() and
+	// every live pin stay valid.
+	for gen, mi := range m.instances {
+		if gen < m.currentGen && mi != nil && mi.refcount == 0 {
+			delete(m.instances, gen)
+			_ = mi.inst.Close()
 		}
 	}
 	return inst, nil

@@ -2263,11 +2263,17 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       card.querySelector(".model-test-link").addEventListener("click", async () => {
         try {
-          const params = new URLSearchParams({ provider: p.kind || "openai_compat" });
-          if (p.api_key) params.set("api_key", p.api_key);
-          if (p.base_url) params.set("base_url", p.base_url);
+          // POST (not GET): the api_key travels in the body so it never lands in
+          // browser history or an upstream proxy's access log.
+          const body = { provider: p.kind || "openai_compat" };
+          if (p.api_key) body.api_key = p.api_key;
+          if (p.base_url) body.base_url = p.base_url;
           setStatus(tr("set.model.testingName", { name }));
-          const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
+          const r = await fetch(BASE_PATH + "/api/providers/models", {
+            method: "POST",
+            headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify(body),
+          });
           const j = await r.json();
           if (!r.ok) throw new Error(j.error || r.statusText);
           setStatus(tr("set.model.reachable", { name, count: j.models?.length || 0 }), "success");
@@ -2811,22 +2817,26 @@ const BASE_PATH = window.BASE_PATH || "";
       const model = (m.model || "").trim();
       if (!model) { setStatus(tr("set.status.setModelFirst")); return; }
       const providerRef = (m.provider_ref || "").trim();
-      const params = new URLSearchParams();
+      // POST body (not query string) so a typed api_key stays out of access logs.
+      const body = { model };
       if (providerRef) {
-        params.set("provider_ref", providerRef);
+        body.provider_ref = providerRef;
       } else {
         const provider = (m.provider || "").trim();
         if (!provider) { setStatus(tr("set.status.setProviderFirst")); return; }
-        params.set("provider", provider);
-        if (m.api_key) params.set("api_key", m.api_key);
-        if (m.base_url) params.set("base_url", m.base_url);
+        body.provider = provider;
+        if (m.api_key) body.api_key = m.api_key;
+        if (m.base_url) body.base_url = m.base_url;
       }
-      params.set("model", model);
       btn.disabled = true;
       btn.textContent = "…";
       setStatus(tr("set.status.detectingDim"));
       try {
-        const r = await fetch(BASE_PATH + `/api/providers/embedding-dim?${params}`, { headers: authHeaders() });
+        const r = await fetch(BASE_PATH + "/api/providers/embedding-dim", {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || r.statusText);
         m.dim = j.dim;
@@ -2990,24 +3000,29 @@ const BASE_PATH = window.BASE_PATH || "";
 
     fetchBtn.addEventListener("click", async () => {
       const providerRef = (m.provider_ref || "").trim();
-      let params;
+      // POST body (not query string) so a typed api_key stays out of access logs.
+      let body;
       let sourceLabel;
       if (providerRef && typeof resolveProvider === "function") {
-        params = new URLSearchParams({ provider_ref: providerRef });
+        body = { provider_ref: providerRef };
         sourceLabel = providerRef;
       } else {
         const provider = (m.provider || "").trim();
         if (!provider) { setStatus(tr("set.status.setProviderFirst")); return; }
-        params = new URLSearchParams({ provider });
-        if (m.api_key) params.set("api_key", m.api_key);
-        if (m.base_url) params.set("base_url", m.base_url);
+        body = { provider };
+        if (m.api_key) body.api_key = m.api_key;
+        if (m.base_url) body.base_url = m.base_url;
         sourceLabel = provider;
       }
       fetchBtn.disabled = true;
       fetchBtn.textContent = "…";
       setStatus(tr("set.status.fetchingModels"));
       try {
-        const r = await fetch(BASE_PATH + `/api/providers/models?${params}`, { headers: authHeaders() });
+        const r = await fetch(BASE_PATH + "/api/providers/models", {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || r.statusText);
         allModels = (j.models || []).slice().sort((a, b) =>

@@ -81,6 +81,19 @@ func (r *SpawnRegistry) Drain(sessionID string) []*SpawnDirective {
 	return ds
 }
 
+// Forget drops any queued spawn directives for sessionID. Directives are
+// normally transient (Drain clears them after each turn), but a directive
+// recorded during a turn that is torn down mid-flight would otherwise linger
+// until the id is reused; call this on session delete/archive.
+func (r *SpawnRegistry) Forget(sessionID string) {
+	if r == nil || sessionID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.m, sessionID)
+}
+
 type spawnIn struct {
 	Name   string `json:"name" jsonschema:"a short, human-readable name/title for the new session (e.g. 'add tests for parser')"`
 	Squad  string `json:"squad" jsonschema:"which squad the new session should run; one of the available squads listed in your instruction, or empty to let the Omnis router pick the best-suited squad for the task"`

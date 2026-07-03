@@ -47,6 +47,16 @@ func (s *Store) getLocked(sid string) *entry {
 	return e
 }
 
+// pruneLocked drops sid's entry once it holds no notes. Without it the map would
+// retain one empty entry per session that ever steered (Forget only fires on
+// session delete), growing unbounded on a long-lived multi-session server. The
+// turn-end drains call this so a fully-consumed session self-cleans.
+func (s *Store) pruneLocked(sid string, e *entry) {
+	if e != nil && len(e.pending) == 0 && len(e.consumed) == 0 {
+		delete(s.m, sid)
+	}
+}
+
 // Enqueue appends a note to the pending queue for sid. Blank notes and an empty
 // session id are ignored.
 func (s *Store) Enqueue(sid, text string) {
@@ -88,6 +98,7 @@ func (s *Store) TakeConsumed(sid string) []string {
 	}
 	out := e.consumed
 	e.consumed = nil
+	s.pruneLocked(sid, e)
 	return out
 }
 
@@ -103,6 +114,7 @@ func (s *Store) TakePending(sid string) []string {
 	}
 	out := e.pending
 	e.pending = nil
+	s.pruneLocked(sid, e)
 	return out
 }
 

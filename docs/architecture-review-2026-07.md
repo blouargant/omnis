@@ -26,11 +26,15 @@ broken; the findings below are latent issues, doc drift, and hygiene.
   ordering can drop the newest config (C3).**
 - **[Docs] The squad topology drifted** (a removed `research` squad still documented in
   5 files; 5 new squads undocumented) plus a bogus `make release` target, a stale
-  go-turbovec `replace` note, and 5 undocumented env vars — **the low-risk doc + hygiene
-  items are already fixed on this branch** (see §7); code findings are left for the author.
+  go-turbovec `replace` note, and 5 undocumented env vars.
 
 The manager reload-race crash fix, background-turn usage accounting, and every
 watcher/poller's shutdown were reviewed and found **sound**.
+
+> **Status update:** every finding below — S1–S4, C1–C5, and all the doc/hygiene
+> items — has now been **fixed on this branch**, with tests. See §7 for the
+> per-finding changelog. `go build`, `go vet`, `go test ./...` (48 pkgs), and
+> `go test -race` on the concurrency-critical packages all pass.
 
 ---
 
@@ -181,20 +185,62 @@ turn; all four directive stores guard every map access and return value copies.
 6. **C3 (reload ordering), S4/S5, C4/C5, H1/H2 (hygiene), D1/D2/D4** — lower-risk
    correctness and cleanup.
 
-## 7. Fixes already applied on this branch
+## 7. Fixes applied on this branch (changelog)
 
-Low-risk hygiene and doc-accuracy fixes were applied directly (all reversible, docs +
-gitignore only — no source changed, build still green):
+**Security**
 
-- Untracked the 48 MB `yoke` binary (`git rm --cached`) and added it to `.gitignore` (H1).
-- Fixed the non-existent `make release` → `make package` in CLAUDE.md (×2) and README (D1).
-- Corrected the stale go-turbovec `replace`-directive note in CLAUDE.md (D2).
-- Rewrote the squad-topology diagram in CLAUDE.md and the two architecture diagrams in
-  `docs/architecture.md` + `web/docs/10-architecture.md` to the real seven squads;
-  removed the dead `research` squad (D3, partial — illustrative JSON how-to snippets in
-  `docs/configuration.md` / `docs/extending.md` still use a `research` example name).
-- Documented the five previously-undocumented env vars (`OMNIS_SERVER_BASE_PATH`,
-  `OMNIS_APP_NAME`, `OMNIS_SESSION_REBIND_IDLE`, `OMNIS_SOFTSKILLS_DIR`) in the table (D4).
+- **S1** — `core/tools/bash.go`: replaced the 3-literal `strings.Contains` safety floor
+  with structural detection that survives flag reorder/merge/long-form and whitespace
+  (`rm -fr /`, `rm -r -f /`, `rm --recursive --force /`), normalises the fork bomb
+  (whitespace-insensitive, function-name agnostic), and widens coverage to `mkfs.*`,
+  `dd` / redirect to a block device, recursive `chmod`/`chown` of `/`, and `find / -delete`.
+  Conservative (ordinary dev commands still pass) and covered by `TestSafetyFloorStructural`.
+- **S2** — the terminal WebSocket no longer rides the master token in the URL. A new
+  authenticated `POST /api/terminal/token` mints a 256-bit, 30 s TTL, single-use token
+  (`termTokens` store in `server/terminal.go`); the client mints one immediately before
+  the handshake and passes only that. Covered by `TestTerminalTokenSingleUse`;
+  empty-server-token (unauthenticated) mode preserved.
+- **S3** — `POST` (was `GET`) for `/api/providers/models` + `/api/providers/embedding-dim`,
+  so a typed, not-yet-saved `api_key` travels in the body, never the query string
+  (`server/provider_models.go` + the three `web/settings.js` call sites).
+- **S4** — the folder zip-download (`server/folder_ops.go`) is now bounded — max
+  20 000 entries, 2 GiB, depth 64, with a per-file `CopyN` cap — so `?path=/` can't try
+  to stream the whole filesystem; it stops cleanly and appends a `_TRUNCATED.txt` note.
 
-Everything else (all code-level findings) is left for follow-up so the author can decide
-scope — this branch changes no Go source.
+**Concurrency**
+
+- **C1** — cross-session leak fixed. Every run tags its bus events with the real session
+  id via `events.WithRootSession` (propagates into sub-agents like `WithCwd`), each bus
+  payload carries `root_session_id`, and `emitBusEvent` drops any event not belonging to
+  the subscriber's session — closing both the frame leak and the usage cross-contamination.
+  Tagged on all three entry points (interactive, injected, A2A). `TestRootSessionContextRoundTrip`.
+- **C2** — panic recovery added to every detached turn goroutine: the `streamEvents`
+  ADK-stream goroutine (where tool/plugin panics surface), the `handleMessages` producer,
+  and `injectTurnRouted` (mailbox/scheduler/spawn). A panicking turn now fails in isolation
+  with a logged stack + error frame instead of crashing the process.
+- **C3** — `Manager.Reload` (`agent/manager.go`) now only promotes when `nextGen >
+  currentGen` and discards a superseded older build, so an out-of-order reload completion
+  can't demote/delete the newer generation; teardown sweeps all idle sub-current
+  generations. Passes the existing `-race` reload test.
+- **C4** — `internal/steer/steer.go` self-prunes its map entry once a session's notes are
+  fully drained, so the store no longer grows one empty entry per steered session
+  (`TestStorePrunesEmptyEntries`).
+- **C5** — added `RouteRegistry.Forget` / `SpawnRegistry.Forget` and a
+  `forgetSessionState` helper wired into both the delete and archive handlers, so transient
+  route/spawn/steer state is cleared when a session ends (goal kept across archive — it is
+  persisted and resumes on unarchive).
+
+**Docs & hygiene**
+
+- Untracked the 48 MB `yoke` binary (`git rm --cached`) and gitignored it (H1).
+- `make release` → `make package` in CLAUDE.md (×2) and README (D1); corrected the stale
+  go-turbovec `replace` note (D2); rewrote the squad topology in CLAUDE.md +
+  `docs/architecture.md` + `web/docs/10-architecture.md` to the real seven squads (D3,
+  illustrative JSON how-to snippets elsewhere still use a `research` example name);
+  documented five env vars (D4); and updated the provider-route, terminal-auth, and
+  cross-session-bus sections of CLAUDE.md to match the code changes above.
+
+**Not changed (deliberately):** P1 (reconnect-from-stale-turn frame skip) and P2 (mailbox
+watcher `acquire` not ctx-aware) were left as documented low-severity edge cases; and the
+illustrative `research`-squad JSON snippets in `docs/configuration.md` / `docs/extending.md`
+are valid teaching examples, so they were kept.

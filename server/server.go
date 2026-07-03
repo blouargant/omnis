@@ -215,11 +215,18 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 	// Interactive terminal WebSocket. Registered on the unauthenticated group
 	// because a browser cannot set an Authorization header on a WebSocket
-	// handshake; handleTerminal verifies the bearer token from the `token` query
-	// param itself (see its doc comment).
+	// handshake; handleTerminal verifies a short-lived, single-use terminal token
+	// (minted below via the authenticated POST /terminal/token) from the `token`
+	// query param itself (see its doc comment).
 	api.GET("/terminal/ws", handleTerminal(d))
 
 	auth := api.Group("", authMiddleware(d.Token))
+	// POST /api/terminal/token — mint a short-lived, single-use token for the
+	// terminal WebSocket. Behind authMiddleware (needs the master bearer token in
+	// the Authorization header), so only an already-authenticated client can get
+	// one; the WS then rides that ephemeral token in its URL instead of the
+	// long-lived master token, which would leak via history / proxy access logs.
+	auth.POST("/terminal/token", handleTerminalToken(d))
 	// POST /api/admin/gc — trigger a one-shot garbage-collection sweep over
 	// logs/ and logs/uploads/. Returns counts per category so ops tooling
 	// can verify what was cleaned. The periodic background sweep keeps
@@ -396,10 +403,8 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		sessions.DeleteSessionLogs(userID, id)
 		deleteSessionUploads(id)
-		if d.SteerStore != nil {
-			d.SteerStore.Forget(id)
-		}
-		if d.GoalStore != nil {
+		forgetSessionState(d, id)
+		if d.GoalStore != nil { // permanent removal only on delete (kept across archive)
 			d.GoalStore.Forget(id)
 		}
 		if d.Scheduler != nil {
@@ -636,6 +641,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.Manager != nil {
 			d.Manager.Release(id)
 		}
+		// Archiving detaches the session from its generation; drop its transient
+		// per-session stores too so an archived session leaves nothing stranded.
+		forgetSessionState(d, id)
 		if d.PushEvents != nil {
 			d.PushEvents.notify(id)
 		}

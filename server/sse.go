@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	rtdebug "runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -194,12 +195,30 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// Tag the run with the real session id so mid-turn steering reaches
 		// sub-agents (which run under an ephemeral agenttool session id).
 		runCtx = toolkitagent.WithSteerSession(runCtx, meta.ID)
+		// Tag every bus event this run emits with the real session id (propagates
+		// to sub-agents the same way), so streamEvents can drop events belonging to
+		// a concurrent turn on another session — the process-wide event bus would
+		// otherwise leak another session's sub-agent frames + token usage here.
+		runCtx = events.WithRootSession(runCtx, meta.ID)
 		lt := d.LiveTurns.start(meta.ID, cancel)
 		turnStart := time.Now()
 
 		// Producer: drives the (possibly multi-hop) turn to completion regardless
 		// of whether any client is still attached. It owns the run-guard release.
 		go func() {
+			// Last-registered-runs-first: this recover is registered first so it
+			// runs LAST during a panic unwind — after the run-guard/liveTurn cleanup
+			// below — catching any panic in the producer's own logic (persistence,
+			// steering fold, drainSpawns) that isn't already contained by the ADK
+			// stream goroutine's recover in streamEvents. Without it a panic here
+			// crashes the whole process, killing every other session's turn.
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("server: recovered panic in turn producer for session %s: %v\n%s", meta.ID, r, rtdebug.Stack())
+					lt.emit("error", []byte(`{"message":"internal error while processing this turn"}`))
+					lt.finish()
+				}
+			}()
 			defer release()
 			defer cancel()
 			defer d.LiveTurns.release(meta.ID, lt)
@@ -255,9 +274,9 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				}
 				isRouter := routerSquad != "" && squadName == routerSquad
 				if !isRouter {
-					return streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, false, usageAccum, priceFor)
+					return streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, meta.ID, false, usageAccum, priceFor)
 				}
-				text, err := streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, true /*suppressText*/, usageAccum, priceFor)
+				text, err := streamEvents(rctx, sink, seq, subCh, cwd, rootAgent, meta.ID, true /*suppressText*/, usageAccum, priceFor)
 				if err != nil {
 					return text, err
 				}
@@ -632,6 +651,7 @@ func streamEvents(
 	subCh <-chan agentBusEvent,
 	cwd string,
 	rootAgent string,
+	ownSession string,
 	suppressText bool,
 	usageAccum map[string]sessions.TokenUsage,
 	priceFor func(agent string) agentPrices,
@@ -787,6 +807,21 @@ func streamEvents(
 	adkCh := make(chan adkEvt, 4)
 	go func() {
 		defer close(adkCh)
+		// The ADK run (model + tool + plugin callbacks) executes here, as the
+		// iterator is consumed. A panic in any tool/plugin must not escape this
+		// detached goroutine and crash the process (gin.Recovery only wraps the
+		// request handler). Recover, log, and surface it as a stream error so the
+		// turn ends cleanly with an error frame instead of taking down every other
+		// session's in-flight turn.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("server: recovered panic in agent stream: %v\n%s", r, rtdebug.Stack())
+				select {
+				case adkCh <- adkEvt{err: fmt.Errorf("internal error while running the turn: %v", r)}:
+				default:
+				}
+			}
+		}()
 		seq(func(ev *session.Event, err error) bool {
 			select {
 			case adkCh <- adkEvt{ev, err}:
@@ -799,6 +834,17 @@ func streamEvents(
 
 	emitBusEvent := func(be agentBusEvent) {
 		p := be.Payload
+		// Cross-session guard. The event bus + broadcaster are process-wide, so a
+		// concurrent turn on ANOTHER session fans its sub-agent tool/model events to
+		// this subscriber too. Every payload is tagged with root_session_id (the real
+		// surface session, propagated into sub-agents); drop anything not ours so we
+		// never (a) render another session's tool frames + args in this browser, or
+		// (b) fold another session's sub-agent tokens into this turn's usage. An
+		// empty tag means no surface correlation (CLI/TUI/examples) — fall through to
+		// the agent-name dedup below, byte-identical to the old behaviour.
+		if rs, _ := p["root_session_id"].(string); rs != "" && ownSession != "" && rs != ownSession {
+			return
+		}
 		agentName, _ := p["agent"].(string)
 		toolName, _ := p["tool"].(string)
 		// The runner-level events plugin fires tool/model callbacks for the

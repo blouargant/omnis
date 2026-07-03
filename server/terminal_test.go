@@ -126,3 +126,36 @@ func TestTerminalWebSocketRejectsBadToken(t *testing.T) {
 		t.Fatalf("expected 401, got %v (resp=%v)", err, resp)
 	}
 }
+
+// TestTerminalTokenSingleUse verifies a minted terminal token is accepted once
+// and only once (a captured URL can't be replayed), and that an unminted/expired
+// token is rejected.
+func TestTerminalTokenSingleUse(t *testing.T) {
+	store := &termTokenStore{m: map[string]time.Time{}}
+
+	tok, err := store.mint()
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if !store.consume(tok) {
+		t.Fatal("first consume of a fresh token = false, want true")
+	}
+	if store.consume(tok) {
+		t.Fatal("second consume of the same token = true, want false (single-use)")
+	}
+	if store.consume("never-minted") {
+		t.Fatal("consume of an unknown token = true, want false")
+	}
+	if store.consume("") {
+		t.Fatal("consume of empty token = true, want false")
+	}
+
+	// An expired token is rejected and swept.
+	expired, _ := store.mint()
+	store.mu.Lock()
+	store.m[expired] = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+	if store.consume(expired) {
+		t.Fatal("consume of an expired token = true, want false")
+	}
+}

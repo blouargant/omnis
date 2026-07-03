@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestStorePrunesEmptyEntries(t *testing.T) {
+	s := New()
+
+	// A steered-then-fully-drained session must leave no residual map entry, so
+	// the store can't grow one empty entry per session over a long-lived server.
+	s.Enqueue("sess", "note")
+	s.Drain("sess")        // pending → consumed
+	s.TakeConsumed("sess") // consumed cleared → entry now empty
+	if _, ok := s.m["sess"]; ok {
+		t.Fatalf("entry retained after full consume; want pruned")
+	}
+
+	// The pending-only fallback path prunes too.
+	s.Enqueue("other", "x")
+	s.TakePending("other")
+	if _, ok := s.m["other"]; ok {
+		t.Fatalf("entry retained after TakePending; want pruned")
+	}
+
+	// A session with notes still queued must NOT be pruned.
+	s.Enqueue("live", "keep")
+	if _, ok := s.m["live"]; !ok {
+		t.Fatalf("entry with pending notes was pruned; want retained")
+	}
+}
+
 func TestDrainMovesPendingToConsumed(t *testing.T) {
 	s := New()
 	s.Enqueue("sess", "first")

@@ -6,6 +6,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,38 @@ import (
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 )
+
+type rootSessionKeyT struct{}
+
+var rootSessionKey rootSessionKeyT
+
+// WithRootSession tags ctx with the real surface-level session id owning this
+// run. A surface plants it before Runner.Run; because agenttool passes the
+// leader's tool context down to a sub-agent's inner runner (the same
+// propagation path WithCwd / WithSteerSession use), the value reaches sub-agent
+// tool/model callbacks too — where the ADK-provided session id is instead an
+// ephemeral per-call agenttool session. Every bus payload then carries
+// "root_session_id" so a process-wide subscriber can filter events to its own
+// session and never cross-contaminate another session's stream or usage
+// accounting. A blank id is a no-op.
+func WithRootSession(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, rootSessionKey, sessionID)
+}
+
+// RootSessionFromContext reads the id planted by WithRootSession, or "" when
+// none was planted (CLI/TUI/examples, or a build without the surface tag).
+func RootSessionFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(rootSessionKey).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // Event names emitted by the bus.
 //
@@ -217,13 +250,14 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Store(scopedToolKey(agentName, t, args), time.Now())
 		b.Emit(EventBeforeTool, map[string]any{
-			"agent":      agentName,
-			"tool":       t.Name(),
-			"input":      args,
-			"call_id":    tctx.FunctionCallID(),
-			"user_id":    tctx.UserID(),
-			"session_id": tctx.SessionID(),
-			"run_id":     tctx.InvocationID(),
+			"agent":           agentName,
+			"tool":            t.Name(),
+			"input":           args,
+			"call_id":         tctx.FunctionCallID(),
+			"user_id":         tctx.UserID(),
+			"session_id":      tctx.SessionID(),
+			"root_session_id": RootSessionFromContext(tctx),
+			"run_id":          tctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -234,15 +268,16 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 			elapsed = time.Since(v.(time.Time))
 		}
 		b.Emit(EventAfterTool, map[string]any{
-			"agent":      agentName,
-			"tool":       t.Name(),
-			"input":      args,
-			"output":     result,
-			"duration":   elapsed,
-			"call_id":    tctx.FunctionCallID(),
-			"user_id":    tctx.UserID(),
-			"session_id": tctx.SessionID(),
-			"run_id":     tctx.InvocationID(),
+			"agent":           agentName,
+			"tool":            t.Name(),
+			"input":           args,
+			"output":          result,
+			"duration":        elapsed,
+			"call_id":         tctx.FunctionCallID(),
+			"user_id":         tctx.UserID(),
+			"session_id":      tctx.SessionID(),
+			"root_session_id": RootSessionFromContext(tctx),
+			"run_id":          tctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -250,14 +285,15 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := tctx.AgentName()
 		toolTimers.Delete(scopedToolKey(agentName, t, args))
 		b.Emit(EventToolError, map[string]any{
-			"agent":      agentName,
-			"tool":       t.Name(),
-			"input":      args,
-			"error":      err.Error(),
-			"call_id":    tctx.FunctionCallID(),
-			"user_id":    tctx.UserID(),
-			"session_id": tctx.SessionID(),
-			"run_id":     tctx.InvocationID(),
+			"agent":           agentName,
+			"tool":            t.Name(),
+			"input":           args,
+			"error":           err.Error(),
+			"call_id":         tctx.FunctionCallID(),
+			"user_id":         tctx.UserID(),
+			"session_id":      tctx.SessionID(),
+			"root_session_id": RootSessionFromContext(tctx),
+			"run_id":          tctx.InvocationID(),
 		})
 		return nil, nil
 	}
@@ -265,10 +301,11 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		agentName := cb.AgentName()
 		modelTimers.Store(modelKey(agentName, cb), time.Now())
 		payload := map[string]any{
-			"agent":      agentName,
-			"user_id":    cb.UserID(),
-			"session_id": cb.SessionID(),
-			"run_id":     cb.InvocationID(),
+			"agent":           agentName,
+			"user_id":         cb.UserID(),
+			"session_id":      cb.SessionID(),
+			"root_session_id": RootSessionFromContext(cb),
+			"run_id":          cb.InvocationID(),
 		}
 		if req != nil && req.Model != "" {
 			payload["model"] = req.Model
@@ -295,12 +332,13 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 			elapsed = time.Since(v.(time.Time))
 		}
 		payload := map[string]any{
-			"agent":      agentName,
-			"response":   resp,
-			"duration":   elapsed,
-			"user_id":    cb.UserID(),
-			"session_id": cb.SessionID(),
-			"run_id":     cb.InvocationID(),
+			"agent":           agentName,
+			"response":        resp,
+			"duration":        elapsed,
+			"user_id":         cb.UserID(),
+			"session_id":      cb.SessionID(),
+			"root_session_id": RootSessionFromContext(cb),
+			"run_id":          cb.InvocationID(),
 		}
 		if resp != nil && resp.UsageMetadata != nil {
 			u := resp.UsageMetadata

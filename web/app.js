@@ -1835,13 +1835,31 @@ function ensureXterm() {
   return _xtermPromise;
 }
 
-function termWsUrl(opts) {
+function termWsUrl(opts, wsToken) {
   const u = new URL("api/terminal/ws", document.baseURI);
   u.protocol = location.protocol === "https:" ? "wss:" : "ws:";
   if (opts && opts.sid) u.searchParams.set("session", opts.sid);
   if (opts && opts.cwd) u.searchParams.set("cwd", opts.cwd);
-  if (token) u.searchParams.set("token", token);
+  // Only a short-lived, single-use terminal token rides in the URL — never the
+  // long-lived master token (which would leak via history / proxy logs).
+  if (wsToken) u.searchParams.set("token", wsToken);
   return u.href;
+}
+
+// mintTerminalToken exchanges the master bearer token (sent in the POST's auth
+// header) for a short-lived, single-use terminal token safe to put in the WS URL.
+// Returns "" in unauthenticated mode (empty server token) or on failure, in which
+// case the handshake proceeds tokenless (accepted only when the server also has
+// no token).
+async function mintTerminalToken() {
+  try {
+    const r = await apiFetch("/api/terminal/token", { method: "POST" });
+    if (!r.ok) return "";
+    const j = await r.json();
+    return j.token || "";
+  } catch {
+    return "";
+  }
 }
 
 function sendTermResize(entry) {
@@ -1888,7 +1906,8 @@ async function createTerminal(key) {
   // shell prompt and error text are invisible). open() happens in mountTerminal
   // once the host is attached to the visible pane.
 
-  const ws = new WebSocket(termWsUrl(opts));
+  const wsToken = await mintTerminalToken();
+  const ws = new WebSocket(termWsUrl(opts, wsToken));
   ws.binaryType = "arraybuffer";
   const entry = { term, fit, ws, host, opened: false };
   termTabs.set(key, entry);

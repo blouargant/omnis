@@ -21,6 +21,7 @@ import (
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -565,6 +566,10 @@ func (s *a2aServer) runRouted(ctx context.Context, routing *sessionRouting, prom
 		defer s.deps.Manager.Release(routing.SessionID)
 	}
 	routerSquad := s.deps.Manager.RouterSquad()
+	// Tag this run's bus events with the real session id so a concurrent
+	// interactive turn on another session filters them out of its stream (the
+	// event bus is process-wide).
+	ctx = events.WithRootSession(ctx, routing.SessionID)
 	parts := []*genai.Part{{Text: prompt}}
 
 	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {

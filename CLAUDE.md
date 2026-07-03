@@ -910,12 +910,15 @@ model fields from the provider instead of asking the user to type them. Two
 server helper routes back this (both resolve credentials via `provider_ref` —
 no secrets cross the wire — or explicit `provider`/`api_key`/`base_url`
 overrides; see [server/provider_models.go](server/provider_models.go)):
-`GET /api/providers/models` lists the provider's models (the model combobox's
-⟳ button) and `GET /api/providers/embedding-dim?model=…` probes the embeddings
-endpoint with one tiny request and returns the vector length, filling the DIM
-field via the ⟳ button beside it ([web/settings.js](web/settings.js) `dimField`).
-Dimension detection requires both a provider and a model id and reports the
-model's native dimension.
+`POST /api/providers/models` lists the provider's models (the model combobox's
+⟳ button) and `POST /api/providers/embedding-dim` (`{model}` in the body) probes
+the embeddings endpoint with one tiny request and returns the vector length,
+filling the DIM field via the ⟳ button beside it ([web/settings.js](web/settings.js)
+`dimField`). Dimension detection requires both a provider and a model id and
+reports the model's native dimension. **These are POST (not GET) so a typed,
+not-yet-saved `api_key` travels in the request body, never the URL query string
+(which would leak into browser history and upstream proxy/ingress access logs) —
+the same discipline as `POST /api/providers/test`.**
 
 **Server boots even with an unconfigured/unreachable model.** Missing model
 credentials (no `OPENAI_BASE_URL` / `OPENAI_API_KEY`, etc.) no longer abort
@@ -2494,10 +2497,24 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   agent's prices (shared `agentPriceMap`), and persists it via
   `AppendConversationTurnFull` — so `/usage` cost + the context ring survive a
   reload for spawned/mailbox/scheduler/bg turns, not just interactive ones. It is
-  **not** read from the shared `agentEventBroadcaster` bus (which is
-  session-unfiltered and would cross-contaminate concurrent turns), so **sub-agent
+  **not** read from the shared `agentEventBroadcaster` bus, so **sub-agent
   tokens are not separately attributed** for background turns — accurate for the
   answering agent, an undercount for a delegating squad, but never wrong-session.
+- **Cross-session bus guard (interactive path).** The interactive `streamEvents`
+  path (unlike the injected path above) *does* subscribe to the process-wide
+  `agentEventBroadcaster` to surface sub-agent `agent_tool_call`/`agent_tool_result`
+  frames + per-agent `turn_usage`. Because that bus fans every concurrent turn's
+  events to every subscriber, each run tags its bus events with the real session id
+  via **`events.WithRootSession(runCtx, sessionID)`** — which propagates into
+  sub-agents the same way `WithCwd`/`WithSteerSession` do (the ADK-provided
+  `session_id` is an *ephemeral* agenttool session for a sub-agent, so it can't be
+  used). Every payload then carries **`root_session_id`**, and `emitBusEvent` drops
+  any event whose tag ≠ the subscriber's own session. Without this, two concurrent
+  interactive turns on a multi-user server leaked each other's sub-agent tool frames
+  (names + args) into the wrong browser and folded each other's sub-agent tokens
+  into the wrong turn's persisted usage. All three run entry points tag the context
+  — interactive (`handleMessages`), injected (`injectTurnRouted`), and A2A
+  (`runRouted`) — so no producer's events are mis-attributed.
   For the **live** ring/budget while the background turn runs (level 2),
   `recordInjectedUsage` broadcasts `turn_usage` + `context_usage` frames on the
   multiplexed `/api/events` stream via the new `broadcastData` (`pushMsg.Data`
@@ -3611,10 +3628,17 @@ menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
   [server/terminal_windows.go](server/terminal_windows.go) is an unsupported stub
   (no ConPTY) so cross-platform builds stay green.
 - **Auth**: the route is registered on the **unauthenticated** `api` group
-  because a browser can't set an `Authorization` header on a WebSocket handshake;
-  `handleTerminal` validates the bearer token from the **`token` query param**
-  itself (constant-time; empty server token = unauthenticated mode). `CheckOrigin`
-  additionally restricts browser clients to same-origin.
+  because a browser can't set an `Authorization` header on a WebSocket handshake.
+  Rather than ride the long-lived master token in the URL (which would leak via
+  browser history and upstream proxy/ingress access logs, and leaking it exposes
+  full API control), the client first mints a **short-lived, single-use terminal
+  token** over the authenticated `POST /api/terminal/token` (behind
+  `authMiddleware`, so only a master-token holder gets one) and passes only that
+  as the **`token` query param**; `handleTerminal` validates+consumes it via the
+  in-memory `termTokens` store (256-bit random, 30 s TTL, single-use — a captured
+  terminal URL grants nothing after the handshake). Empty server token =
+  unauthenticated mode (no token required, matching `authMiddleware`).
+  `CheckOrigin` additionally restricts browser clients to same-origin.
 - **Working directory**: explicit `?cwd=` (validated dir) wins, else `?session=`'s
   Folders/`!cd` cwd (`bashCwd`), else the global "no session" cwd.
 - **Wire protocol** (`runTerminalSession`): client → server **BinaryMessage** =

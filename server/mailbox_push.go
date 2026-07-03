@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/llm"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/compress"
@@ -383,10 +385,22 @@ func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, outp
 // turn's reply to that sender exactly once (see sendMailboxBackstop), so a
 // workflow-critical reply is never dropped just because the model forgot to send
 // it. A squad that did reply/interact suppresses the backstop (no double reply).
-func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) string {
+func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) (reply string) {
 	if ctx.Err() != nil {
 		return ""
 	}
+
+	// This drives a full agent turn synchronously in a detached watcher/scheduler/
+	// spawn goroutine (no gin.Recovery around it), so a panic in any tool/plugin
+	// would otherwise crash the whole process, killing every session's in-flight
+	// work. Recover, log, and return the (empty) reply so the injected turn fails
+	// in isolation. Named return `reply` is left "" on panic.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("server: recovered panic in injected turn for session %s: %v\n%s", sessionID, r, debug.Stack())
+			reply = ""
+		}
+	}()
 
 	// Serialize with any concurrent user turn for this session.
 	release := pm.guard.acquire(sessionID)
@@ -407,6 +421,12 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
 		return "" // no runnable squad (e.g. session dropped mid-flight)
 	}
+
+	// Tag this run's bus events with the real session id so a concurrent
+	// interactive turn on another session filters them out (the event bus is
+	// process-wide). This path reads its OWN usage from the session-scoped ADK
+	// stream, not the bus, so the tag is purely to protect other sessions' streams.
+	ctx = events.WithRootSession(ctx, sessionID)
 
 	routerSquad := d.Manager.RouterSquad()
 

@@ -55,6 +55,55 @@ func TestRunBashNoOutput(t *testing.T) {
 	}
 }
 
+func TestSafetyFloorStructural(t *testing.T) {
+	t.Parallel()
+
+	blocked := []string{
+		// rm bypass variants the old substring check missed.
+		"rm -fr /",
+		"rm -r -f /",
+		"rm --recursive --force /",
+		"rm -rf  /", // extra whitespace
+		"rm -Rf /etc",
+		"rm -rf /tmp/demo", // preserved existing behaviour (absolute target)
+		"sudo rm -rf /",
+		"FOO=bar rm -rf /home/user",
+		"echo hi; rm -fr /var", // compound command
+		// fork bomb, spaced/canonical.
+		":(){ :|:& };:",
+		":(){:|:&};:",
+		"bomb(){ bomb|bomb& };bomb",
+		// other catastrophic patterns.
+		"mkfs.ext4 /dev/sda1",
+		"dd if=/dev/zero of=/dev/sda",
+		"chmod -R 000 /",
+		"find / -delete",
+		"echo x > /dev/sda",
+	}
+	for _, cmd := range blocked {
+		if _, bad := SafetyFloorBlock(cmd); !bad {
+			t.Errorf("SafetyFloorBlock(%q) = not blocked, want blocked", cmd)
+		}
+	}
+
+	allowed := []string{
+		"rm -rf ./build",
+		"rm -rf build node_modules",
+		"rm -f config.tmp",
+		"rm -r somedir",
+		"go build ./...",
+		"dd if=/dev/zero of=./out.img bs=1M count=10",
+		"find . -name '*.tmp' -delete",
+		"chmod -R 755 ./scripts",
+		"printf hello",
+	}
+	for _, cmd := range allowed {
+		if reason, bad := SafetyFloorBlock(cmd); bad {
+			t.Errorf("SafetyFloorBlock(%q) = blocked (%s), want allowed", cmd, reason)
+		}
+	}
+}
+
 func TestRunBashTimeout(t *testing.T) {
 	t.Parallel()
 
