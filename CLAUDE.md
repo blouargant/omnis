@@ -1153,7 +1153,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
 | `OMNIS_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `OMNIS_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
-| `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables) |
+| `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables). The sweep ([server/gc.go](server/gc.go) `sweepLogsDir`) also **reaps orphaned atomic-write temp files** (`conversation_*.json.tmp` left behind when a fire-and-forget persistence goroutine is killed by a shutdown/restart between `os.CreateTemp` and `os.Rename` in `SaveConversationFile`), age-gated by `tmpReapAge` (1 min) so it never races a genuinely in-flight write |
 | `OMNIS_SERVER_DAEMONIZED` | Set to `1` by `omnis-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
 | `OMNIS_SERVER_BASE_PATH` | Base path prefix the HTTP server + web UI are mounted under (overrides `server.yaml` `base_path`); normalised to a leading `/` with no trailing slash ([server/main.go](server/main.go) `normalizeBasePath`) |
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
@@ -1816,9 +1816,21 @@ the process working directory. The mechanism lives in
   actually changes** (a `!ls` with no `cd` writes nothing), so every cwd mutation —
   folder navigation, `!cd`, "Open Chat here", and **fork** (`handleFork`'s
   `bashCwd.set(forkID, bashCwd.get(srcID))`, [server/fork_rewind.go](server/fork_rewind.go)) —
-  is recorded with no per-call-site plumbing. Boot restore uses `bashCwd.seed`
-  (set without re-firing the hook). CLI/TUI/tests leave the hook nil ⇒ in-memory
-  only, behaviour unchanged. Regression coverage: [server/fork_cwd_test.go](server/fork_cwd_test.go).
+  is recorded with no per-call-site plumbing. **Crucially, a plain new chat also
+  records its starting cwd at creation** ([server/server.go](server/server.go)
+  `POST /api/sessions` — `bashCwd.set(meta.ID, startDir)`, `startDir` = the pinned
+  "Open Chat here" dir else the fixed root the session would resolve to anyway):
+  without this a never-navigated session persisted **nothing** (its cwd was only
+  the un-persisted `bashCwd.get` fallback to the process root), so a server restart
+  in a **different** working directory silently moved every such session to the
+  wrong folder. Persisting the root at creation makes it durable. (Fork/spawn
+  already recorded their inherited cwd; only the direct-create path had the gap.)
+  Boot restore uses `bashCwd.seed` (set without re-firing the hook). Legacy
+  sessions created before this fix have no recorded cwd and keep re-resolving to
+  the process root each boot (their original dir is unrecoverable). CLI/TUI/tests
+  leave the hook nil ⇒ in-memory only, behaviour unchanged. Regression coverage:
+  [server/fork_cwd_test.go](server/fork_cwd_test.go) +
+  [server/newsession_cwd_test.go](server/newsession_cwd_test.go).
 - **Permission scoping follows the session cwd.** The permissions plugin's
   `CWDFunc` now takes the tool context and resolves the cwd via the exported
   `fstools.CwdForContext(tc)` (same resolution as the tools), falling back to the

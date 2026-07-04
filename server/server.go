@@ -297,14 +297,22 @@ func newEngine(d serverDeps) *gin.Engine {
 			return
 		}
 		meta := d.Registry.New(squad)
-		// New sessions start at the fixed initial root (bashCwd.get falls back
-		// to it), independent of where the global Folders panel has browsed —
-		// unless the caller pins a starting folder ("Open Chat here").
+		// Record the session's starting working directory durably. A new chat
+		// otherwise resolves its cwd via bashCwd.get's fallback to the fixed
+		// initial root without ever persisting it, so a server restart in a
+		// different process cwd would silently move the session to the wrong
+		// folder. Persisting the starting dir at creation — the "Open Chat here"
+		// dir when pinned, else the root the session would use anyway — lets it
+		// resume in the same environment after a restart (the bashCwd hook writes
+		// it to the conversation file; boot seeds it back). Mirrors what fork and
+		// spawn already do for their inherited cwd.
+		startDir := bashCwd.get(meta.ID) // fixed initial root unless overridden below
 		if dir := strings.TrimSpace(body.Dir); dir != "" {
 			if info, err := os.Stat(dir); err == nil && info.IsDir() {
-				bashCwd.set(meta.ID, dir)
+				startDir = dir
 			}
 		}
+		bashCwd.set(meta.ID, startDir)
 		if title := strings.TrimSpace(body.Title); title != "" {
 			d.Registry.SetTitle(meta.ID, title)
 		}

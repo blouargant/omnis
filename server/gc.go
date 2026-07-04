@@ -23,6 +23,15 @@ func logsDir() string { return paths.LogsDir() }
 // cadence is conservative.
 const defaultGCInterval = time.Hour
 
+// tmpReapAge is how old an orphaned atomic-write temp file
+// (conversation_*.json.tmp) must be before the GC reaps it. SaveConversationFile
+// creates its temp via os.CreateTemp and renames it over the target within a few
+// milliseconds; the only way a temp outlives that window is a fire-and-forget
+// persistence goroutine killed by a server shutdown/restart between the write and
+// the os.Rename. Gating on age keeps the sweep from ever racing a genuinely
+// in-flight write.
+const tmpReapAge = time.Minute
+
 // gcStats summarises what a single sweep removed. Reported via the admin
 // endpoint and logged after every periodic sweep.
 type gcStats struct {
@@ -31,11 +40,12 @@ type gcStats struct {
 	Uploads         int      `json:"uploads"`
 	Mailboxes       int      `json:"mailboxes"`
 	RegistryEntries int      `json:"registry_entries"`
+	TempFiles       int      `json:"temp_files"`
 	Errors          []string `json:"errors,omitempty"`
 }
 
 func (s gcStats) total() int {
-	return s.Conversations + s.AgentFiles + s.Uploads + s.Mailboxes + s.RegistryEntries
+	return s.Conversations + s.AgentFiles + s.Uploads + s.Mailboxes + s.RegistryEntries + s.TempFiles
 }
 
 // gcDeps bundles the optional cross-session-registry callbacks. Both are
@@ -127,6 +137,22 @@ func sweepLogsDir(stats gcStats, activeIDs, activeSuffixes map[string]struct{}) 
 		}
 		name := e.Name()
 		full := filepath.Join(logsDir(), name)
+
+		// Reap orphaned atomic-write temp files left behind when a fire-and-forget
+		// persistence goroutine (async title generation, idle indexer/curator,
+		// scheduler auto-archive, injected background turns) is killed by a server
+		// shutdown/restart between os.CreateTemp and os.Rename. Age-gated so a live
+		// temp (present for only milliseconds) is never deleted mid-write.
+		if strings.HasPrefix(name, "conversation_") && strings.HasSuffix(name, ".json.tmp") {
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > tmpReapAge {
+				if err := os.Remove(full); err != nil {
+					stats.Errors = append(stats.Errors, fmt.Sprintf("remove %s: %v", full, err))
+				} else {
+					stats.TempFiles++
+				}
+			}
+			continue
+		}
 
 		if strings.HasPrefix(name, "conversation_") && strings.HasSuffix(name, ".json") {
 			id := strings.TrimSuffix(strings.TrimPrefix(name, "conversation_"), ".json")
@@ -279,8 +305,8 @@ func logGCStats(kind string, s gcStats) {
 	if s.total() == 0 && len(s.Errors) == 0 {
 		return
 	}
-	log.Printf("gc(%s): removed %d conversations, %d agent files, %d upload dirs, %d mailbox files, %d registry entries (errors=%d)",
-		kind, s.Conversations, s.AgentFiles, s.Uploads, s.Mailboxes, s.RegistryEntries, len(s.Errors))
+	log.Printf("gc(%s): removed %d conversations, %d agent files, %d upload dirs, %d mailbox files, %d registry entries, %d temp files (errors=%d)",
+		kind, s.Conversations, s.AgentFiles, s.Uploads, s.Mailboxes, s.RegistryEntries, s.TempFiles, len(s.Errors))
 	for _, e := range s.Errors {
 		log.Printf("gc(%s) error: %s", kind, e)
 	}

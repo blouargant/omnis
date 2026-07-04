@@ -110,6 +110,48 @@ func TestRunGC_RemovesOrphansKeepsActiveAndGlobals(t *testing.T) {
 	}
 }
 
+func TestRunGC_ReapsOrphanTempFiles(t *testing.T) {
+	gcTestEnv(t)
+
+	reg := sessions.NewEmptyRegistry()
+	reg.Add(&sessions.SessionMeta{ID: "alive-cat", UserID: sessions.DefaultUserID, CreatedAt: time.Now()})
+
+	// A real active conversation file — must survive.
+	alive := filepath.Join(logsDir(), "conversation_alive-cat.json")
+	mustWriteFile(t, alive, `{"turns":[]}`)
+
+	// A stale orphan temp file (as os.CreateTemp names them) — must be reaped.
+	stale := filepath.Join(logsDir(), "conversation_126972590.json.tmp")
+	mustWriteFile(t, stale, `{"archived":true,"turns":null}`)
+	old := time.Now().Add(-2 * tmpReapAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("age stale temp: %v", err)
+	}
+
+	// A just-created temp (a write potentially in flight) — must be spared by
+	// the age gate.
+	fresh := filepath.Join(logsDir(), "conversation_999999999.json.tmp")
+	mustWriteFile(t, fresh, `{}`)
+
+	stats := runGC(reg, gcDeps{})
+
+	if stats.TempFiles != 1 {
+		t.Errorf("temp files reaped: got %d, want 1", stats.TempFiles)
+	}
+	if stats.Conversations != 0 {
+		t.Errorf("conversations removed: got %d, want 0", stats.Conversations)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("expected stale temp reaped; stat err=%v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("expected fresh temp spared by age gate: %v", err)
+	}
+	if _, err := os.Stat(alive); err != nil {
+		t.Errorf("expected active conversation to survive: %v", err)
+	}
+}
+
 func TestRunGC_RenamedSessionFilesSurvive(t *testing.T) {
 	// A renamed session only changes the Title field; ID and UserID are
 	// immutable, and every on-disk filename is keyed on ID/UserID. The GC
