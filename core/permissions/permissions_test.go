@@ -481,6 +481,16 @@ func TestShippedConfigParity(t *testing.T) {
 		{"Bash", bash("rm file.txt"), DecisionAsk},
 		{"Bash", bash("kubectl delete pod x"), DecisionAsk},
 		{"Read", file("/proj/main.go"), DecisionAllow},
+		// Safe, read-only sub-agent tools must not prompt now that the gate
+		// reaches sub-agents — a web_agent doing a web search, a doc researcher
+		// fetching a page, or any agent doing arithmetic should just run.
+		{"WebSearch", map[string]any{"query": "golang generics"}, DecisionAllow},
+		{"WebFetch", map[string]any{"url": "https://go.dev"}, DecisionAllow},
+		{"html_to_markdown", map[string]any{"html": "<p>x</p>"}, DecisionAllow},
+		{"calculate", map[string]any{"expression": "2+2"}, DecisionAllow},
+		// …but a sub-agent's mutating tools still prompt (fall through to ask).
+		{"Write", file("/proj/x.go"), DecisionAsk},
+		{"Edit", file("/proj/x.go"), DecisionAsk},
 	}
 	for _, c := range cases {
 		if d, r := cfg.CheckArgs(c.tool, c.args, "/proj"); d != c.want {

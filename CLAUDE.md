@@ -1263,6 +1263,22 @@ to before. The tool-level **lifecycle hooks** (`hooks.json` PreToolUse/PostToolU
 are attached to sub-agents the same way — see "Lifecycle hooks" — so a sub-agent's
 internal tool calls are both permission-gated *and* hooked.
 
+**Shipped allow-list covers sub-agents' safe read-only tools.** Because the gate
+now reaches sub-agents, tools that were never gated before (they ran ungated in
+the sub-agent's private runner) started prompting — e.g. a `web_agent` asking to
+run a web search. The shipped [config/permissions.json](config/permissions.json)
+`allow` tier therefore allowlists the inherently-safe, read-only,
+information-gathering tools by exact name so they never prompt: web research
+(`WebSearch`, `WebFetch`, `html_to_markdown`), `calculate`, the recall/search
+family (`search_code`, `search_docs`/`list_docs`/`read_doc`/`grep_docs`,
+`recall_softskills`/`recall_precedents`, `browse_registry`…), skills/soft-skills
+loaders, and read-only `Read`/Bash builtins. Mutating/executing tools (`Write`,
+`Edit`, `revert`, `ast_grep_rewrite`, `lsp_rename`, `worktree_*`, `run_tests`,
+`mcp__*`, mutating `Bash`) stay on the deny→ask default and prompt as before.
+`TestShippedConfigParity` ([core/permissions/permissions_test.go](core/permissions/permissions_test.go))
+locks this in. When adding a new sub-agent tool group, decide whether its tools
+are read-only-safe (add to the allow-list) or mutating (leave gated).
+
 **No ask-user / permission timeout — wait, don't auto-deny.** An unanswered
 ask-user or permission card **waits indefinitely** rather than being dropped on a
 timer: denying an action a task needs is worse than waiting for the user to come
