@@ -1,0 +1,80 @@
+/* Claude — Anthropic-style warm light skin.
+   Ivory chrome (sidebar / tab bar / composer) against a clean white reading
+   surface, with the signature Claude clay accent. The scoped rules at the
+   bottom reproduce the Claude Console's left-panel / main-panel separation:
+   a crisp ivory→white seam plus a whisper of depth. */
+[data-theme="claude-light"] {
+  color-scheme: light;
+
+  /* Surfaces — warm ivory chrome, clean white content. --bg is the reading
+     surface (main chat / Settings body); --bg-panel is every chrome surface
+     (sidebar, pane tab bar, composer), so the sidebar reads as a distinct
+     warm panel beside the white content — the core of the Console look. */
+  --bg: #ffffff;
+  --bg-panel: #f5f4ee;
+  --bg-raised: #edebe1;
+  --bg-raised-hover: #e5e2d4;
+  --bg-active: #f0e4db;
+  --bg-input: #ffffff;
+
+  /* Borders — warm hairlines (not neutral grey), so seams stay in the ivory family. */
+  --border: #e6e3d7;
+  --border-strong: #cdc8b6;
+
+  /* Text — warm near-black, matching Anthropic's off-black ink. */
+  --text: #2b2a25;
+  --text-strong: #14130f;
+  --text-muted: #726f5d;
+  --text-faint: #a3a08d;
+
+  /* Accent — the Claude clay / terracotta. Drives the focused-session rail,
+     focus rings, the New-chat glow and primary buttons. */
+  --accent: #c15f3c;
+  --accent-hover: #d97757;
+  --accent-strong: #b0532f;
+  --accent-bg-soft: rgba(193, 95, 60, 0.13);
+  --accent-border-soft: rgba(193, 95, 60, 0.42);
+  --accent-hover-bg: #f3e6de;
+
+  --scroll-thumb: #d9d6c7;
+  --scroll-thumb-hover: #c4c0ae;
+
+  --bubble-user-bg: #f0ede2;
+  --bubble-user-border: #ddd9c9;
+  --shadow-bubble: 0 2px 10px rgba(60, 50, 35, 0.08), 0 1px 3px rgba(60, 50, 35, 0.05);
+  --prompt-fade: rgba(0, 0, 0, 0.14);
+
+  --danger-fg: #b23324;
+  --danger-bg: rgba(178, 51, 36, 0.08);
+  --danger-border: rgba(178, 51, 36, 0.30);
+  --danger-bg-hover: rgba(178, 51, 36, 0.15);
+  --danger-bg-soft: rgba(178, 51, 36, 0.08);
+
+  --warn-fg: #8a5a12;
+  --warn-bg: rgba(138, 90, 18, 0.09);
+  --warn-border: rgba(138, 90, 18, 0.28);
+  --warn-action-bg: rgba(138, 90, 18, 0.16);
+  --warn-action-hover: rgba(138, 90, 18, 0.26);
+}
+
+/* ─── Left-panel / main-panel separation (the Console effect) ──────────
+   The ivory sidebar vs. white content already gives the tonal split; these
+   two rules add the crisp seam and a whisper of depth on top of it. */
+
+/* Raise the sidebar into the positioned paint layer so its soft right-edge
+   shadow lands ON the white chat. Without z-index the chat's own background
+   (which paints later in tree order) would cover the feather. overflow:hidden
+   does not clip an element's OWN outset shadow, so the depth still shows. */
+[data-theme="claude-light"] #sidebar {
+  position: relative;
+  z-index: 1;
+  box-shadow: 4px 0 14px -6px rgba(45, 37, 28, 0.10);
+}
+
+/* Blend the 4px resize handle into the white content side, so the only
+   visible boundary is the sidebar's own 1px border-right — a single clean
+   ivory→white line rather than an extra 4px strip of ivory. The
+   :not(:hover/:is-dragging) guard keeps the accent drag-highlight winning. */
+[data-theme="claude-light"] #sidebar-resize:not(:hover):not(.is-dragging) {
+  background: var(--bg);
+}

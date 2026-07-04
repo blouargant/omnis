@@ -16,7 +16,7 @@
     (function () {
       try {
         var t = localStorage.getItem("agent_toolkit_theme");
-        if (!t) t = "vscode-light"; // null OR "" → default light skin (VS Code Dark is "vscode-dark")
+        if (!t) t = "claude-light"; // null OR "" → default light skin (must match settings.js DEFAULT_THEME)
         document.documentElement.setAttribute("data-theme", t);
       } catch (_) { /* ignore */ }
     })();
@@ -28,6 +28,7 @@
   <link rel="stylesheet" href="assets/css/themes/one-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/vscode-light.css" />
   <link rel="stylesheet" href="assets/css/themes/github-light.css" />
+  <link rel="stylesheet" href="assets/css/themes/claude-light.css" />
   <link rel="stylesheet" href="assets/css/themes/dracula.css" />
   <link rel="stylesheet" href="assets/css/themes/nord.css" />
   <link rel="stylesheet" href="assets/css/themes/tokyo-night.css" />
@@ -371,6 +372,6 @@
   <script src="assets/i18n/locales.js?v=21" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
   <script src="assets/app.js?v=47" defer></script>
-  <script src="assets/settings.js?v=22" defer></script>
+  <script src="assets/settings.js?v=23" defer></script>
 </body>
 </html>

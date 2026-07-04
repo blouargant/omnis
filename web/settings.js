@@ -95,7 +95,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // entry and no server-side preference) or has an empty "" value. VS Code Dark
   // remains selectable via its explicit "vscode-dark" id; this governs the
   // unset/empty fallback only.
-  const DEFAULT_THEME = "vscode-light";
+  const DEFAULT_THEME = "claude-light";
   // localStorage cache for the unified desktop-notification preference. The
   // durable source of truth is the server preferences.json (user home); this
   // cache is what the synchronous fire path in app.js reads.
@@ -107,6 +107,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "one-dark",        label: "One Dark",        tier: "principal", tone: "Dark",  swatch: ["#282c34", "#21252b", "#61afef", "#abb2bf"] },
     { id: "vscode-light",    label: "VS Code Light",   tier: "principal", tone: "Light", swatch: ["#ffffff", "#f3f3f3", "#0e639c", "#1e1e1e"] },
     { id: "github-light",    label: "GitHub Light",    tier: "principal", tone: "Light", swatch: ["#ffffff", "#f6f8fa", "#0969da", "#24292f"] },
+    { id: "claude-light",    label: "Claude",          tier: "principal", tone: "Light", swatch: ["#ffffff", "#f5f4ee", "#c15f3c", "#2b2a25"] },
     // Secondary
     { id: "dracula",         label: "Dracula",         tier: "secondary", tone: "Dark",  swatch: ["#282a36", "#21222c", "#bd93f9", "#f8f8f2"] },
     { id: "nord",            label: "Nord",            tier: "secondary", tone: "Dark",  swatch: ["#2e3440", "#3b4252", "#5e81ac", "#d8dee9"] },
