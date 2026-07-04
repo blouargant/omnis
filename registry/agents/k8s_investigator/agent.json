@@ -9,7 +9,8 @@
   "name": "k8s_investigator",
   "skills": [
     "k8s-triage",
-    "k8s-log-investigation"
+    "k8s-log-investigation",
+    "k8s-cleanup"
   ],
   "softskills_dir": "",
   "tools": [

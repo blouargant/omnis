@@ -3941,10 +3941,15 @@ function renderAskUserWidget(sessionId, q) {
   const panel = panelsForSession(sessionId)[0];
   if (!panel) {
     // No pane currently shows this session — queue it; bindSessionToPanel /
-    // activateTab flush the queue when the session is opened in a pane.
+    // activateTab flush the queue when the session is opened in a pane. Record it
+    // in pendingAskWidgets too (questionId → session), so a server-side
+    // ask_user_cancel that arrives while the session is still hidden can find and
+    // purge the queued question — otherwise it lingers and later renders a card
+    // whose Submit/Skip 404s (the question is already resolved server-side).
     const list = queuedAskWidgets.get(sessionId) || [];
     if (!list.some(x => x.question_id === q.question_id)) list.push(q);
     queuedAskWidgets.set(sessionId, list);
+    pendingAskWidgets.set(q.question_id, { sessionId });
     return;
   }
   const slot = panel.els.askSlot;
@@ -4379,7 +4384,11 @@ function appendWizardNav(wiz, opts) {
   return { submitBtn };
 }
 
-// resolveQuestion POSTs one answer; returns true on success.
+// resolveQuestion POSTs one answer. Returns { ok, gone }: ok on success, and
+// gone when the server answers 404 — the question is no longer pending (already
+// answered, cancelled, or its session ended). Callers dismiss a `gone` card
+// instead of leaving Submit/Skip silently 404-ing, which would strand the user
+// behind a dead panel masking the session.
 async function resolveQuestion(sessionId, questionId, answer) {
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}/ask-user/${questionId}`, {
@@ -4387,8 +4396,8 @@ async function resolveQuestion(sessionId, questionId, answer) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(answer),
     });
-    return res.ok;
-  } catch { return false; }
+    return { ok: res.ok, gone: res.status === 404 };
+  } catch { return { ok: false, gone: false }; }
 }
 
 // setWizardBusy disables/enables every button in the card during an in-flight POST.
@@ -4401,12 +4410,15 @@ function setWizardBusy(wiz, busy) {
 async function submitSingleStep(wiz, step, answer) {
   if (wiz.busy) return;
   setWizardBusy(wiz, true);
-  const ok = await resolveQuestion(wiz.sessionId, step.q.question_id, answer);
+  const { ok, gone } = await resolveQuestion(wiz.sessionId, step.q.question_id, answer);
   setWizardBusy(wiz, false);
-  if (!ok) return; // leave the step editable so the user can retry
+  if (!ok && !gone) return; // transient failure — leave the step editable to retry
+  // Answered (ok), or already resolved server-side (gone): resolve this step and
+  // advance either way. Dismissing on `gone` is what lets a stale card self-heal
+  // instead of trapping the user behind Submit/Skip that do nothing.
   pendingAskWidgets.delete(step.q.question_id);
   step.resolved = true;
-  step.answer = answer;
+  step.answer = gone && !ok ? { selected: [], text: "", cancelled: true } : answer;
   afterStepResolved(wiz);
 }
 
@@ -4423,14 +4435,16 @@ async function submitGroupStep(wiz, step, cancelled) {
     } else {
       const choices = Array.isArray(q.choices) ? q.choices : [];
       const choice = choices[step.scopeIdx];
-      if (!choice) return Promise.resolve({ q, ok: false });
+      if (!choice) return Promise.resolve({ q, ok: false, gone: false });
       answer = { selected: [choice], text: "", cancelled: false };
     }
-    return resolveQuestion(wiz.sessionId, q.question_id, answer).then(ok => ({ q, ok }));
+    return resolveQuestion(wiz.sessionId, q.question_id, answer).then(r => ({ q, ...r }));
   }));
   setWizardBusy(wiz, false);
-  for (const r of results) if (r.ok) pendingAskWidgets.delete(r.q.question_id);
-  const failed = results.filter(r => !r.ok).map(r => r.q);
+  // A member that is `gone` (already resolved server-side) is done too — drop it
+  // rather than keep retrying a 404, so a stale group step can't get stuck.
+  for (const r of results) if (r.ok || r.gone) pendingAskWidgets.delete(r.q.question_id);
+  const failed = results.filter(r => !r.ok && !r.gone).map(r => r.q);
   if (failed.length === 0) {
     step.resolved = true;
     step.cancelled = cancelled;
@@ -4524,9 +4538,30 @@ function finalizeWizard(wiz) {
 // step resolved/skipped and either re-renders or finalizes the wizard.
 function cancelAskUserWidget(questionId) {
   const entry = pendingAskWidgets.get(questionId);
-  if (!entry) return;
   pendingAskWidgets.delete(questionId);
-  const wiz = askWizards.get(entry.sessionId);
+  // Resolve the owning session. pendingAskWidgets now covers both rendered and
+  // queued questions; fall back to scanning the per-session queues in case one
+  // was parked before that map was populated.
+  let sessionId = entry ? entry.sessionId : null;
+  if (!sessionId) {
+    for (const [sid, list] of queuedAskWidgets) {
+      if (list.some(x => x.question_id === questionId)) { sessionId = sid; break; }
+    }
+  }
+  if (!sessionId) return;
+  // Drop the cancelled question from the session's queue, so re-opening the
+  // session never re-renders a card for a question the server already resolved.
+  // Without this, a question cancelled while its session was hidden/background
+  // (never rendered, or requeued out of the slot by a tab switch) stayed queued
+  // and later rendered a dead card whose Submit/Skip 404 — masking the session
+  // with unclickable buttons.
+  const queued = queuedAskWidgets.get(sessionId);
+  if (queued) {
+    const rest = queued.filter(x => x.question_id !== questionId);
+    if (rest.length) queuedAskWidgets.set(sessionId, rest);
+    else queuedAskWidgets.delete(sessionId);
+  }
+  const wiz = askWizards.get(sessionId);
   if (!wiz) return;
   for (const step of wiz.steps) {
     if (step.resolved) continue;

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl config current-context *)",
+      "Bash(kubectl config view *)",
+      "Bash(helm list *)",
+      "Bash(helm status *)"
+    ],
+    "ask": [
+      {
+        "regex": "\\bkubectl\\s+(delete|patch|apply|edit|scale|replace|create|run|debug)\\b",
+        "reason": "kubectl deletion/mutation — confirm the target is an ephemeral leftover (labeled omnis.dev/ephemeral=true) and not a real workload before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bhelm\\s+(uninstall|delete|rollback|upgrade|install)\\b",
+        "reason": "helm operation changes a release — the cleaner should not normally run helm; confirm before proceeding",
+        "tools": ["Bash"]
+      }
+    ]
+  }
+}

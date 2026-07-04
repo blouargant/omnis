@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl explain *)",
+      "Bash(kubectl diff *)",
+      "Bash(kubectl config current-context *)",
+      "Bash(kubectl config view *)",
+      "Bash(helm list *)",
+      "Bash(helm status *)",
+      "Bash(helm get *)",
+      "Bash(helm history *)",
+      "Bash(helm show *)",
+      "Bash(helm diff *)",
+      "Bash(helm template *)",
+      "Bash(helm version *)",
+      "Bash(helm env *)",
+      "Bash(helm lint *)",
+      "Bash(helm search *)",
+      "Bash(helm repo list *)"
+    ],
+    "ask": [
+      {
+        "regex": "--force-conflicts\\b",
+        "reason": "server-side apply --force-conflicts steals field ownership from another manager (helm/argo/flux) and can break it — confirm this is a manually-owned resource",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bkubectl\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon|uncordon|create|replace|set|annotate|label|taint|run|debug|attach|expose|cp|port-forward)\\b",
+        "reason": "kubectl operation changes cluster state — confirm the target namespace/resource and review the diff before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bhelm\\s+(install|upgrade|uninstall|delete|rollback)\\b",
+        "reason": "helm operation changes the release / cluster state — confirm the release, namespace, and values before running",
+        "tools": ["Bash"]
+      }
+    ]
+  }
+}

@@ -13,6 +13,8 @@
     "reflector",
     "k8s_leader",
     "k8s_investigator",
+    "k8s_editor",
+    "k8s_cleaner",
     "knowledge_leader",
     "doc_agent",
     "coder",
@@ -47,10 +49,12 @@
     },
     {
       "name": "Kubernetes",
-      "description": "Kubernetes management & triage specialist. Diagnoses unhealthy workloads (crash-looping pods, deployments not ready, services unreachable) and investigates pod logs via read-only kubectl. Route here for anything mentioning kubernetes, k8s, kubectl, pods, deployments, replicasets, services, namespaces, nodes, helm, or a kubectl error.",
+      "description": "Kubernetes management, triage & change specialist. Diagnoses unhealthy workloads (crash-looping pods, deployments not ready, services unreachable) and investigates pod logs via read-only kubectl; applies careful, Helm-aware modifications (dry-run first, prefer helm for helm-managed resources, server-side apply / strategic-merge otherwise); and cleans up ephemeral debug leftovers. Route here for anything mentioning kubernetes, k8s, kubectl, pods, deployments, replicasets, services, namespaces, nodes, helm, applying/patching/scaling/editing a resource, or a kubectl error.",
       "leader": "k8s_leader",
       "members": [
-        "k8s_investigator"
+        "k8s_investigator",
+        "k8s_editor",
+        "k8s_cleaner"
       ]
     },
     {

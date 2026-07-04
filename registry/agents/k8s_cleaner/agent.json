@@ -1,0 +1,25 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Kubernetes hygiene specialist. Sweeps ephemeral diagnostic leftovers the squad created — debug pods, throwaway run pods, one-off jobs, temporary configmaps/secrets — identified by the omnis.dev/ephemeral=true label (well-known debug-pod name patterns are surfaced as confirm-first suspects). Removes only ephemeral resources, never real workloads; every deletion is permission-gated and production is protected.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "hosted",
+  "name": "k8s_cleaner",
+  "skills": [
+    "k8s-cleanup",
+    "k8s-triage"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Grep",
+    "Glob",
+    "Skill",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc"
+  ]
+}

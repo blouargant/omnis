@@ -1,0 +1,28 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Kubernetes change specialist. Applies modifications with great care: detects whether the target is Helm-, GitOps- (Flux/Argo), or kubectl-managed; previews every change with kubectl/helm diff and dry-run; prefers Helm-native changes (helm upgrade) for Helm releases; and falls back to server-side apply / strategic-merge patch only when needed, preserving field ownership so future helm upgrades are not broken. Every cluster mutation is permission-gated and production is protected.",
+  "enabled": true,
+  "leader": false,
+  "model_ref": "hosted",
+  "name": "k8s_editor",
+  "skills": [
+    "k8s-modification",
+    "k8s-triage"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc"
+  ]
+}
