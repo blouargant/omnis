@@ -27,7 +27,7 @@ writing prose — use the tool.
 | `choices` | []string | see below | Required for `single`/`confirm`/`multi`; optional for `text` |
 | `allow_text` | bool | – | Add a free-text field to a `multi` question |
 | `default` | string | – | Pre-selected value hint (display only) |
-| `timeout_seconds` | int | – | Override the 5-minute default |
+| `timeout_seconds` | int | – | Bound the wait. By default there is **no timeout** — the question waits until the user answers (or the turn is aborted). Set a positive value to auto-cancel after N seconds |
 
 ### Kind semantics
 
@@ -38,10 +38,12 @@ writing prose — use the tool.
 | `multi` | Checkboxes (+ optional text) | ≥1 required | `selected[]`, `text` |
 | `text` | Text area | Optional hint choices ignored | `text` |
 
-### Cancelled / timed-out result
+### Cancelled result
 
-If the user clicks Skip/Cancel or the timeout fires, `cancelled: true` is set
-in the result. Fall back to the safest default and note what was assumed.
+If the user clicks Skip/Cancel (or an explicit `timeout_seconds` you set
+elapses), `cancelled: true` is set in the result. Fall back to the safest default
+and note what was assumed. With no `timeout_seconds` the question simply waits for
+the user — it is not auto-cancelled on a timer.
 
 ---
 

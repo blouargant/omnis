@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"path"
 	"strings"
@@ -11,6 +10,19 @@ import (
 	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/askuser"
 )
+
+// realSessionID resolves the user-facing session id for a tool call. For the
+// squad root tc.SessionID() is already the real id; for a sub-agent — which
+// runs in agenttool's private runner under an ephemeral session id — the real
+// id is the one the surface planted on the run context (propagated into the
+// sub-agent the same way WithCwd is), recovered via steerSessionID. Falls back
+// to tc.SessionID() when nothing was planted (e.g. CLI examples).
+func realSessionID(tc tool.Context) string {
+	if id := steerSessionID(tc); id != "" {
+		return id
+	}
+	return tc.SessionID()
+}
 
 const askUserCmdSnippetMax = 1200
 
@@ -51,7 +63,10 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 	if a.reg == nil {
 		return permissions.OutcomeDeny
 	}
-	sid := tc.SessionID()
+	// Route to the user-facing session, not the ephemeral agenttool session a
+	// sub-agent runs under (which nobody is watching) — otherwise a sub-agent's
+	// permission prompt would never reach a UI.
+	sid := realSessionID(tc)
 	if sid == "" {
 		return permissions.OutcomeDeny
 	}
@@ -70,7 +85,12 @@ func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason st
 		q.Group = "install"
 		q.Item = item
 	}
-	ans, err := a.reg.Ask(context.Background(), sid, q)
+	// Wait on the tool's own context (the run context) rather than
+	// context.Background(): with the ask-user timeout removed the prompt would
+	// otherwise block forever, wedging the run guard even after a Stop/shutdown.
+	// A disconnect does NOT cancel the run context, so an unanswered prompt
+	// still waits for the user to come back; only a genuine abort ends it.
+	ans, err := a.reg.Ask(tc, sid, q)
 	if err != nil || ans.Cancelled {
 		return permissions.OutcomeDeny
 	}

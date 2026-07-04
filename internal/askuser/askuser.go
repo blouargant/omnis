@@ -79,8 +79,14 @@ var ErrUnknownQuestion = errors.New("askuser: unknown question_id")
 // ErrAlreadyResolved is returned by Resolve when the question was already answered.
 var ErrAlreadyResolved = errors.New("askuser: question already resolved")
 
-// DefaultTimeout is used when a question has TimeoutSecs == 0.
-const DefaultTimeout = 5 * time.Minute
+// DefaultTimeout is the registry's default per-question wait when a question
+// sets no TimeoutSecs. It is 0 — an unanswered ask-user / permission card waits
+// indefinitely rather than being auto-denied on a timer: denying an action the
+// task needs is worse than waiting for the user to come back. The wait still
+// ends on context cancellation (turn abort / Stop / shutdown), and a caller can
+// re-arm a bounded wait per-question (Question.TimeoutSecs) or per-registry
+// (WithDefaultTimeout) when a genuine deadline is wanted.
+const DefaultTimeout = 0
 
 // pending holds a question that is waiting for an answer.
 type pending struct {

@@ -20,6 +20,13 @@ Rules are evaluated **deny → ask → allow** — the first match wins, so a de
 always takes precedence. Anything matching no rule falls through to the mode
 default (in `default` mode that means **ask** — the safe default is to confirm).
 
+The engine covers **every** agent's tool calls, not just the leader you chat
+with: when the leader delegates to a sub-agent, that sub-agent's own file edits,
+shell commands, and MCP calls are gated by the same rules (and share your
+session's "allow this session / project" grants). A prompt you don't answer
+**waits** for you — it is not auto-denied on a timer — until you respond or stop
+the turn.
+
 ## Rule syntax
 
 A rule is a `Tool(specifier)` string:

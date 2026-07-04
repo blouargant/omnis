@@ -160,7 +160,9 @@ handy for bulk edits.
 
 - `Stop` / `SubagentStop` hooks fire as notifications but cannot force the agent
   to keep going; `PreCompact` cannot rewrite the compaction.
-- `PreToolUse` / `SubagentStop` do not fire for a sub-agent's **internal** tool
-  calls (sub-agents run in a private runner) — `SubagentStop` covers their
-  completion.
+- `PreToolUse` / `PostToolUse` **do** fire for a sub-agent's internal tool calls
+  (they run in a private runner, but the tool-level hook callbacks are attached to
+  sub-agents too). `UserPromptSubmit` / `Stop` stay leader-only — a sub-agent gets
+  the leader's delegated task, not your prompt, and its completion is reported by
+  `SubagentStop` instead.
 - An absent or empty `hooks.json` is a complete no-op.

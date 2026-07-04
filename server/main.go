@@ -186,10 +186,6 @@ func run() error {
 		// mailbox in the background and injects incoming messages as synthetic
 		// turns. Suppress the leader's redundant per-turn teammate_check poll.
 		BackgroundMailboxDelivery: true,
-		// The web UI keeps ask-user and permission cards on screen and simply
-		// waits for the user, so disarm the registry's 5-minute question
-		// timeout — only a turn abort (context cancellation) ends the wait.
-		DisableAskUserTimeout: true,
 		// Don't abort boot when a model can't be built (e.g. OPENAI_BASE_URL /
 		// OPENAI_API_KEY unset): the server starts and the web UI's
 		// provider-health banner reports the unreachable provider; turns fail

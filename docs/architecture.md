@@ -117,14 +117,22 @@ ADK plugins observe and mutate the agent loop. The OOTB harness wires:
   and a `usage` map (`prompt_tokens`, `candidates_tokens`,
   `total_tokens`) for per-call telemetry.
 - **permissions** — gates bash and tool calls against
-  `permissions.json` (allow / deny / ask).
+  `permissions.json` (allow / deny / ask). The gate is built once per squad
+  (`permissions.NewGate`) and enforced on **both** the squad root's tools (runner
+  plugin) **and every sub-agent's** tools: a sub-agent runs in agenttool's
+  plugin-less runner, so the shared gate callback is attached to it directly
+  (`agent/build_subagents.go`), and both share one approval cache. An unanswered
+  permission prompt now **waits** (no timeout) rather than auto-denying.
 - **hooks** — runs user-configured shell commands at lifecycle moments
   (Claude Code-style `hooks.json`). A per-squad runner plugin carries the
   blocking/injecting hooks (`PreToolUse` blocks a tool exactly like the
   permissions DENY path, `PostToolUse`, `UserPromptSubmit`, `Stop`); a
   process-wide engine on `Infrastructure` wires the fire-and-forget bus
   listeners (`SubagentStop`, `SessionStart`/`End`, `PreCompact`,
-  `Notification`) once. See [Lifecycle hooks](../web/docs/22-hooks.md) and
+  `Notification`) once. The two **tool-level** hooks (`PreToolUse`/`PostToolUse`)
+  are also attached to sub-agents (same mechanism as the permission gate), so a
+  sub-agent's internal tool calls are hooked too; `UserPromptSubmit`/`Stop` stay
+  leader-only. See [Lifecycle hooks](../web/docs/22-hooks.md) and
   `internal/hooks` + `agent/hooks_plugin.go`.
 - **cache** — surfaces prompt-cache stats per turn.
 - **compress** — when a session's context approaches the model window,

@@ -613,3 +613,34 @@ func TestBashBackgroundAliasesBash(t *testing.T) {
 		}
 	}
 }
+
+// TestNewGateExposesCallbackAndCleaner guards the sub-agent enforcement path:
+// NewGate must hand back the raw BeforeToolCallback (attached directly to
+// sub-agents, which never see the runner Plugin) alongside the Plugin and the
+// Cleaner, all backed by the same construction. A nil Callback would silently
+// leave every sub-agent's tools ungated.
+func TestNewGateExposesCallbackAndCleaner(t *testing.T) {
+	cfg := cfgFromJSON(t, `{"permissions":{"deny":["Edit"]},"defaultMode":"default"}`)
+	g, err := NewGate(PluginConfig{Name: "perms", Source: &Static{C: cfg}})
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	if g.Plugin == nil {
+		t.Error("Gate.Plugin is nil — squad root would run ungated")
+	}
+	if g.Callback == nil {
+		t.Error("Gate.Callback is nil — sub-agents would run ungated")
+	}
+	if g.Cleaner == nil {
+		t.Error("Gate.Cleaner is nil — session approvals would never be swept")
+	}
+
+	// The legacy plugin constructor must keep delegating to NewGate.
+	p, cleaner, err := NewPluginFromConfig(PluginConfig{Name: "perms", Source: &Static{C: cfg}})
+	if err != nil {
+		t.Fatalf("NewPluginFromConfig: %v", err)
+	}
+	if p == nil || cleaner == nil {
+		t.Errorf("NewPluginFromConfig returned nil plugin/cleaner (%v, %v)", p, cleaner)
+	}
+}

@@ -1234,6 +1234,51 @@ holds two granularities: per-call (`m`) and per-tool (`tools`); a per-tool
 grant short-circuits before per-call. Both are wiped by `Forget(sessionID)`
 on `EventSessionEnd`.
 
+**The gate governs sub-agents too, not just the squad root.** The enforcement is
+one closure (`permissions.NewGate` → `permissions.Gate{Plugin, Callback,
+Cleaner}`, [core/permissions/permissions.go](core/permissions/permissions.go))
+built **once per squad** in [agent/squad.go](agent/squad.go) `buildSquadInstance`
+(via `buildPermissionGate`, [agent/build_plugins.go](agent/build_plugins.go)). Its
+`Plugin` is mounted on the squad root's runner (`buildPlugins`); the **same**
+`Callback` is attached as a `BeforeToolCallback` to **every sub-agent**
+([agent/build_subagents.go](agent/build_subagents.go)). This closes a real gap:
+a sub-agent runs in `agenttool`'s **private, plugin-less runner**, so the
+runner-level Plugin never sees its tool calls — without the attached callback a
+sub-agent's `Edit`/`Write`/`Bash`/MCP calls would run **ungated** even though
+most sub-agents (`investigator`, `k8s_investigator`, `refactorer`, …) carry those
+tools. ADK's `Flow.callTool` ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go))
+runs the agent-level `BeforeToolCallback`s when there is no plugin manager and
+**skips `tool.Run` the instant one returns non-nil**, so the gate's deny/ask
+short-circuit works identically for a sub-agent. Because the Plugin and the
+Callback share **one** approval cache/asker/rule source, a session grant on the
+leader ("Allow all `Edit` this session") also covers its sub-agents and a single
+`Forget` clears both. **Session identity:** the cache key and the ask-user routing
+use the *user-facing* session id, not the sub-agent's ephemeral agenttool session
+— resolved via `PluginConfig.SessionFunc` (cache) / `realSessionID`
+([agent/permission_asker.go](agent/permission_asker.go), asker), both recovering
+the real id from the run context (the same `WithSteerSession` value that
+propagates into sub-agents, falling back to `tc.SessionID()`). **No-op contract:**
+a sub-agent built without a gate callback (CLI examples/tests) is byte-identical
+to before. The tool-level **lifecycle hooks** (`hooks.json` PreToolUse/PostToolUse)
+are attached to sub-agents the same way — see "Lifecycle hooks" — so a sub-agent's
+internal tool calls are both permission-gated *and* hooked.
+
+**No ask-user / permission timeout — wait, don't auto-deny.** An unanswered
+ask-user or permission card **waits indefinitely** rather than being dropped on a
+timer: denying an action a task needs is worse than waiting for the user to come
+back. `askuser.DefaultTimeout` is `0` (registry-wide default;
+[internal/askuser/askuser.go](internal/askuser/askuser.go)) — a nil timer, so
+`Registry.Ask` blocks until the question is answered **or its context is
+cancelled**. The permission asker waits on the **tool's run context** (`tc`), not
+`context.Background()`, so a genuine **Stop / session-end / shutdown** ends the
+wait (→ deny) while a mere client **disconnect does not** (the run context
+survives a disconnect — see "Resilient turn streaming"), so a backgrounded/closed
+tab keeps the prompt pending until the user returns. A finite wait can still be
+re-armed per-question (`Question.TimeoutSecs`) or per-registry
+(`askuser.WithDefaultTimeout`). (This replaced the old server-only
+`Options.DisableAskUserTimeout` flag — the no-timeout behaviour is now the global
+default on every surface.)
+
 **Persisted-rule breadth** ([core/permissions/persist.go](core/permissions/persist.go)
 `buildApprovalRule`) differs by tool: file tools (`Read`/`Write`/`Edit`/`revert`)
 broaden to a bare class spec (`Edit`, `Read`, `Write`) so approving the first of
@@ -1445,7 +1490,19 @@ so an existing Claude Code config is portable.
     Stop→`AfterRunCallback`. **The router squad mounts none** (`isRouterSquad`):
     the Omnis router only routes, so hooks fire on the answering squad's hop, not
     the router hop — this is why UserPromptSubmit fires exactly once per turn even
-    though `buildPlugins` runs per squad.
+    though `buildPlugins` runs per squad. **The two tool-level hooks
+    (PreToolUse/PostToolUse) are ALSO attached to every sub-agent** — factored out
+    as `hookToolCallbacks` ([agent/hooks_plugin.go](agent/hooks_plugin.go)) and
+    threaded into [agent/build_subagents.go](agent/build_subagents.go) beside the
+    permission-gate callback, so a sub-agent's internal tool calls (which run in
+    agenttool's plugin-less runner and never see this plugin) fire
+    PreToolUse/PostToolUse too. Hooks are stateless per call (each queries
+    `engine.Snapshot()` live), so no shared state is threaded — an independent
+    callback pair per sub-agent is equivalent, gated by the same `isRouter`.
+    **UserPromptSubmit/Stop stay leader-only**: a sub-agent receives the leader's
+    delegated task (not the user turn), and its completion is already covered by
+    the `SubagentStop` bus hook. The sub-agent hook input's `SessionID` is the
+    user-facing session (via `realSessionID`), not the ephemeral agenttool one.
   - **Fire-and-forget bus listeners** (`wireHookListeners`, wired **once** under the
     `Hooks` `sync.Once` so they don't multiply per squad): `EventSubAgentEnd`→
     SubagentStop, `EventSessionStart`→SessionStart, `EventSessionEnd`→SessionEnd,
@@ -1466,10 +1523,10 @@ so an existing Claude Code config is portable.
 - **No-op contract**: an absent/empty `hooks.json` mounts an inert engine and the
   behaviour is byte-identical to a build without hooks. **Limitations (v1):**
   Stop/SubagentStop hooks fire as notifications but cannot force-continue; PreCompact
-  cannot rewrite the compaction instructions; SubagentStop/PreToolUse do not fire
-  for a sub-agent's *internal* tool calls (sub-agents run in agenttool's private
-  runner without the plugin — SubagentStop covers their completion); SessionEnd on
-  CLI one-shot is best-effort.
+  cannot rewrite the compaction instructions; SessionEnd on CLI one-shot is
+  best-effort. (PreToolUse/PostToolUse **do** now fire for a sub-agent's internal
+  tool calls — the tool-level hook callbacks are attached to sub-agents, same as
+  the permission gate; SubagentStop still covers the sub-agent's completion.)
 
 ### Interactive shell-escape (`!` commands)
 
@@ -1754,8 +1811,11 @@ the process working directory. The mechanism lives in
   and `cwdMatches` (in [core/permissions/permissions.go](core/permissions/permissions.go))
   makes it apply to that directory **and its descendants but never its parents** —
   navigate deeper and the grant holds; navigate up out of the granted tree and it
-  no longer applies. (Sub-agents run their tools in a separate runner without the
-  permissions plugin, so this scoping is a leader-side concern.)
+  no longer applies. (Sub-agents run their tools in `agenttool`'s own runner, but
+  they **are** permission-gated: the same gate `Callback` is attached to every
+  sub-agent and resolves the cwd via `fstools.CwdForContext` too — see "The gate
+  governs sub-agents too" under the permission section — so this cwd scoping
+  applies to a sub-agent's tool calls as well, not just the leader's.)
 
 ### `@file` references in the composer
 
@@ -3430,8 +3490,8 @@ across renders (only children are replaced), so the one `keydown` Enter handler
 wired in `ensureWizard` survives — it fires `wiz._submit`, which each render
 points at the current step's primary action. **Steps resolve server-side as
 soon as answered** (`submitSingleStep` / `submitGroupStep` POST to
-`/api/sessions/:id/ask-user/:qid`), so a long wizard never lets early questions
-hit the 5-minute timeout; `afterStepResolved` auto-advances to the first
+`/api/sessions/:id/ask-user/:qid`), so an early answer is committed immediately
+(never lost on a later tab-hide/reconnect); `afterStepResolved` auto-advances to the first
 unanswered step or `finalizeWizard`s (collapse to a stacked per-step summary,
 moved into the transcript). Revisiting a resolved step via the rail shows a
 read-only summary. On tab-hide the wizard requeues only its **unanswered**

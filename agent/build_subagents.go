@@ -35,6 +35,9 @@ func buildSubAgents(
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
 	steerStore *steer.Store,
+	permGate llmagent.BeforeToolCallback,
+	hooksBeforeTool llmagent.BeforeToolCallback,
+	hooksAfterTool llmagent.AfterToolCallback,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -49,7 +52,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -63,9 +66,13 @@ func buildSubAgents(
 //
 // The caller is responsible for filtering out the leader and any agent it
 // does not want exposed. modelForAgent must instantiate an LLM for the
-// given config. callbacks are attached to every sub-agent so its tool/model
-// activity reaches the shared event bus (sub-agents run in their own
-// internal runner that does not inherit runner-level plugins).
+// given config. Because sub-agents run in their own internal runner that does
+// NOT inherit runner-level plugins, everything a sub-agent needs is attached as
+// agent-level callbacks here: `callbacks` (its tool/model activity reaches the
+// shared event bus), `permGate` (the permission gate — its tool calls are
+// asked/denied like the leader's), and `hooksBeforeTool`/`hooksAfterTool` (the
+// PreToolUse/PostToolUse lifecycle hooks). The last three are nil-safe: nil ⇒
+// that layer is skipped, byte-identical to a sub-agent built without it.
 func buildSubAgentsFromConfigs(
 	ctx context.Context,
 	configs []RuntimeAgentConfig,
@@ -79,6 +86,9 @@ func buildSubAgentsFromConfigs(
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
 	steerStore *steer.Store,
+	permGate llmagent.BeforeToolCallback,
+	hooksBeforeTool llmagent.BeforeToolCallback,
+	hooksAfterTool llmagent.AfterToolCallback,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -127,6 +137,26 @@ func buildSubAgentsFromConfigs(
 			beforeModel = append(beforeModel, subAgentSteerYield(steerStore))
 		}
 
+		// A sub-agent runs in agenttool's own plugin-less runner, so the
+		// runner-level permissions AND hooks plugins never see its tool calls —
+		// attach their tool-level callbacks here so a sub-agent's
+		// Edit/Write/Bash/MCP calls are gated + hooked exactly like the leader's.
+		// Before-tool order mirrors the leader's plugin order (events → perms →
+		// hooks PreToolUse); the first non-nil return short-circuits the tool.
+		// After-tool: events → hooks PostToolUse. Nil ⇒ that layer is skipped, so
+		// a sub-agent built with no gate/hooks is byte-identical to before.
+		beforeTool := []llmagent.BeforeToolCallback{callbacks.BeforeTool}
+		if permGate != nil {
+			beforeTool = append(beforeTool, permGate)
+		}
+		if hooksBeforeTool != nil {
+			beforeTool = append(beforeTool, hooksBeforeTool)
+		}
+		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
+		if hooksAfterTool != nil {
+			afterTool = append(afterTool, hooksAfterTool)
+		}
+
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                 cfg.Name,
 			Description:          desc,
@@ -134,8 +164,8 @@ func buildSubAgentsFromConfigs(
 			Model:                agentLLM,
 			Tools:                subTools,
 			Toolsets:             subToolsets,
-			BeforeToolCallbacks:  []llmagent.BeforeToolCallback{callbacks.BeforeTool},
-			AfterToolCallbacks:   []llmagent.AfterToolCallback{callbacks.AfterTool},
+			BeforeToolCallbacks:  beforeTool,
+			AfterToolCallbacks:   afterTool,
 			OnToolErrorCallbacks: []llmagent.OnToolErrorCallback{callbacks.OnToolError},
 			BeforeModelCallbacks: beforeModel,
 			AfterModelCallbacks:  []llmagent.AfterModelCallback{callbacks.AfterModel},

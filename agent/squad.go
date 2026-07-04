@@ -217,6 +217,30 @@ func buildSquadInstance(
 		leadTools = append(leadTools, handoffToRouterTool(infra.RouteDirectives))
 	}
 
+	// ── Permission gate (built once, shared by leader + sub-agents) ──
+	// Its runner Plugin governs the squad root's own tools; the same Callback is
+	// attached to every sub-agent (which run in agenttool's plugin-less runner and
+	// so never see the Plugin), so a sub-agent's Edit/Write/Bash/MCP calls are
+	// asked/denied identically and share the leader's approval cache. Built before
+	// the sub-agents because buildSubAgentsFromConfigs needs the callback.
+	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
+	permGate, permGateClose, err := buildPermissionGate(runtime, asker, infra.Bus)
+	if err != nil {
+		for _, h := range allMCPHandles {
+			infra.MCPPool.Release(h)
+		}
+		return nil, fmt.Errorf("squad %q: permission gate: %w", squad.Name, err)
+	}
+
+	// ── Tool-level lifecycle hooks (PreToolUse/PostToolUse), shared like the gate ──
+	// The runner plugin (buildPlugins → buildHooksPlugin) carries these for the
+	// squad root; the same tool-level callbacks are attached to every sub-agent so
+	// a sub-agent's internal tool calls fire PreToolUse/PostToolUse too. Built here
+	// (before the sub-agents) from the process-wide hooks engine; nil for the
+	// router squad. UserPromptSubmit/Stop stay leader-only (see hookToolCallbacks).
+	hooksEngine := infra.Hooks(runtime)
+	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, isRouter)
+
 	// ── Sub-agents + coordinator-only session tools (skipped when leaderless) ──
 	subAgentMap := map[string]adkagent.Agent{}
 	var subAgents []adkagent.Agent
@@ -246,8 +270,10 @@ func buildSquadInstance(
 			ctx, memberCfgs, runtime,
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
 			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, infra.SteerStore,
+			permGate.Callback, hooksBeforeTool, hooksAfterTool,
 		)
 		if berr != nil {
+			permGateClose()
 			for _, h := range allMCPHandles {
 				infra.MCPPool.Release(h)
 			}
@@ -318,6 +344,7 @@ func buildSquadInstance(
 		Instruction: rootInstruction,
 	})
 	if err != nil {
+		permGateClose()
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)
 		}
@@ -325,23 +352,31 @@ func buildSquadInstance(
 	}
 
 	// ── Plugins (one set per squad — bound to this squad's leader LLM) ──
+	// The permission gate + hooks engine built above are mounted here (the gate as
+	// the root's runner plugin; buildHooksPlugin reads the same hooksEngine).
 	suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
-	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
-	hooksEngine := infra.Hooks(runtime)
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, asker, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad)
+	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad)
 	if err != nil {
+		permGateClose()
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)
 		}
 		return nil, fmt.Errorf("squad %q: %w", squad.Name, err)
 	}
+	// Tear down the gate's reload poller + session-end sweeper alongside the
+	// squad's other plugins on generation teardown.
+	squadCloser := func() error {
+		permGateClose()
+		if pluginCloser != nil {
+			return pluginCloser()
+		}
+		return nil
+	}
 
 	loader, err := adkagent.NewMultiLoader(lead, subAgents...)
 	if err != nil {
-		if pluginCloser != nil {
-			_ = pluginCloser()
-		}
+		_ = squadCloser()
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)
 		}
@@ -357,9 +392,7 @@ func buildSquadInstance(
 	}
 	r, err := runner.New(rc)
 	if err != nil {
-		if pluginCloser != nil {
-			_ = pluginCloser()
-		}
+		_ = squadCloser()
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)
 		}
@@ -385,7 +418,7 @@ func buildSquadInstance(
 	}
 	return &squadBuildResult{
 		Squad:         sq,
-		PluginCloser:  pluginCloser,
+		PluginCloser:  squadCloser,
 		MCPHandles:    allMCPHandles,
 		SubAgentNames: subAgentNames,
 	}, nil

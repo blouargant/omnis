@@ -84,61 +84,7 @@ func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, er
 		return nil, nil
 	}
 
-	beforeTool := func(tc tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
-		cfg := engine.Snapshot()
-		if len(cfg.Match(hooks.PreToolUse, t.Name())) == 0 {
-			return nil, nil
-		}
-		cwd := fstools.CwdForContext(tc)
-		in := hooks.Input{
-			SessionID: tc.SessionID(),
-			Cwd:       cwd,
-			ToolName:  t.Name(),
-			ToolInput: args,
-		}
-		out := cfg.Run(tc, hooks.PreToolUse, t.Name(), in, cwd, hookDefaultTimeout)
-		if out.Blocked() {
-			reason := out.Reason
-			if reason == "" {
-				reason = "blocked by PreToolUse hook"
-			}
-			return map[string]any{
-				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s", t.Name(), reason),
-			}, nil
-		}
-		return nil, nil
-	}
-
-	afterTool := func(tc tool.Context, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
-		cfg := engine.Snapshot()
-		if len(cfg.Match(hooks.PostToolUse, t.Name())) == 0 {
-			return nil, nil
-		}
-		cwd := fstools.CwdForContext(tc)
-		in := hooks.Input{
-			SessionID:    tc.SessionID(),
-			Cwd:          cwd,
-			ToolName:     t.Name(),
-			ToolInput:    args,
-			ToolResponse: result,
-		}
-		out := cfg.Run(tc, hooks.PostToolUse, t.Name(), in, cwd, hookDefaultTimeout)
-		if out.Blocked() && out.Reason != "" {
-			// Surface the hook's feedback to the model by appending it to the
-			// tool output (the tool has already run).
-			merged := map[string]any{}
-			for k, v := range result {
-				merged[k] = v
-			}
-			if s, ok := merged["output"].(string); ok && s != "" {
-				merged["output"] = s + "\n\n[PostToolUse hook] " + out.Reason
-			} else {
-				merged["output"] = "[PostToolUse hook] " + out.Reason
-			}
-			return merged, nil
-		}
-		return nil, nil
-	}
+	beforeTool, afterTool := hookToolCallbacks(engine, isRouter)
 
 	onUserMsg := func(ctx adkagent.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
@@ -179,11 +125,91 @@ func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, er
 
 	return plugin.New(plugin.Config{
 		Name:                  "hooks",
-		BeforeToolCallback:    llmagent.BeforeToolCallback(beforeTool),
-		AfterToolCallback:     llmagent.AfterToolCallback(afterTool),
+		BeforeToolCallback:    beforeTool,
+		AfterToolCallback:     afterTool,
 		OnUserMessageCallback: plugin.OnUserMessageCallback(onUserMsg),
 		AfterRunCallback:      plugin.AfterRunCallback(afterRun),
 	})
+}
+
+// hookToolCallbacks builds the two tool-level hook callbacks — PreToolUse
+// (BeforeToolCallback, whose block short-circuits the tool) and PostToolUse
+// (AfterToolCallback, whose block appends its reason to the tool output). They
+// are used both by the squad root's runner plugin (buildHooksPlugin) AND
+// attached directly to every sub-agent, so a sub-agent's internal tool calls —
+// which run in agenttool's plugin-less runner and never see the runner plugin —
+// fire PreToolUse/PostToolUse too. Unlike the permission gate there is no shared
+// mutable state to thread: each callback queries engine.Snapshot() live, so
+// building an independent pair per sub-agent is equivalent. Returns (nil, nil)
+// for the router squad or an absent engine, so the caller attaches nothing.
+//
+// The turn-level hooks stay leader-only and are NOT returned here: UserPromptSubmit
+// applies to the user's prompt (a sub-agent receives the leader's delegated task,
+// not the user turn), and a sub-agent's completion is already covered by the
+// SubagentStop bus hook — firing Stop on it would misfire the "main agent
+// finished" hook.
+func hookToolCallbacks(engine *hooks.Reloader, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+	if engine == nil || isRouter {
+		return nil, nil
+	}
+
+	beforeTool := func(tc tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+		cfg := engine.Snapshot()
+		if len(cfg.Match(hooks.PreToolUse, t.Name())) == 0 {
+			return nil, nil
+		}
+		cwd := fstools.CwdForContext(tc)
+		in := hooks.Input{
+			SessionID: realSessionID(tc),
+			Cwd:       cwd,
+			ToolName:  t.Name(),
+			ToolInput: args,
+		}
+		out := cfg.Run(tc, hooks.PreToolUse, t.Name(), in, cwd, hookDefaultTimeout)
+		if out.Blocked() {
+			reason := out.Reason
+			if reason == "" {
+				reason = "blocked by PreToolUse hook"
+			}
+			return map[string]any{
+				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s", t.Name(), reason),
+			}, nil
+		}
+		return nil, nil
+	}
+
+	afterTool := func(tc tool.Context, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
+		cfg := engine.Snapshot()
+		if len(cfg.Match(hooks.PostToolUse, t.Name())) == 0 {
+			return nil, nil
+		}
+		cwd := fstools.CwdForContext(tc)
+		in := hooks.Input{
+			SessionID:    realSessionID(tc),
+			Cwd:          cwd,
+			ToolName:     t.Name(),
+			ToolInput:    args,
+			ToolResponse: result,
+		}
+		out := cfg.Run(tc, hooks.PostToolUse, t.Name(), in, cwd, hookDefaultTimeout)
+		if out.Blocked() && out.Reason != "" {
+			// Surface the hook's feedback to the model by appending it to the
+			// tool output (the tool has already run).
+			merged := map[string]any{}
+			for k, v := range result {
+				merged[k] = v
+			}
+			if s, ok := merged["output"].(string); ok && s != "" {
+				merged["output"] = s + "\n\n[PostToolUse hook] " + out.Reason
+			} else {
+				merged["output"] = "[PostToolUse hook] " + out.Reason
+			}
+			return merged, nil
+		}
+		return nil, nil
+	}
+
+	return llmagent.BeforeToolCallback(beforeTool), llmagent.AfterToolCallback(afterTool)
 }
 
 // FireHook runs the hook commands configured for (event, subject) directly,

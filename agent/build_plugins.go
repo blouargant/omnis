@@ -40,7 +40,7 @@ func buildPlugins(
 	orchestratorLLM model.LLM,
 	suffix func(userID, sessionID string) string,
 	buildTimestamp string,
-	asker permissions.Asker,
+	permPlugin *plugin.Plugin,
 	hooksEngine *hooks.Reloader,
 	steerStore *steer.Store,
 	lspMgr *lsp.Manager,
@@ -69,10 +69,8 @@ func buildPlugins(
 	} {
 		loggerSubs = append(loggerSubs, bus.Subscribe(ev, logger))
 	}
-	permsCtx, cancelPerms := context.WithCancel(context.Background())
 	var extraCleanups []func()
 	closer = func() error {
-		cancelPerms()
 		for _, sub := range loggerSubs {
 			sub.Off()
 		}
@@ -88,8 +86,12 @@ func buildPlugins(
 	if eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging}); err == nil {
 		plugins = append(plugins, eventsPlugin)
 	}
-	if perms, err := buildPermissionsPlugin(permsCtx, runtime, asker, bus); err == nil {
-		plugins = append(plugins, perms)
+	// The permission gate is built once per squad by the caller (so the same
+	// enforcement — one approval cache/asker — also attaches to sub-agents) and
+	// passed in as a runner plugin here, mounted right after events so its
+	// deny/ask short-circuit runs before the mutating plugins (hooks, …).
+	if permPlugin != nil {
+		plugins = append(plugins, permPlugin)
 	}
 	// Claude Code-style lifecycle hooks. The per-squad runner plugin carries the
 	// blocking/injecting hooks (PreToolUse/PostToolUse/UserPromptSubmit/Stop) and
@@ -150,7 +152,7 @@ func buildPlugins(
 	return plugins, closer, nil
 }
 
-// buildPermissionsPlugin wires the permissions plugin with three rule
+// buildPermissionGate wires the shared permission gate with three rule
 // sources:
 //
 //  1. the base file at runtime.PermissionsConfigPath (project config),
@@ -160,9 +162,16 @@ func buildPlugins(
 //
 // A Reloader polls (1) and (2) for changes and atomically swaps the
 // merged rule set, so external edits and persisted approvals propagate
-// to every running session without restarting the server. ctx cancels
-// the polling loop on generation teardown.
-func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus) (*plugin.Plugin, error) {
+// to every running session without restarting the server.
+//
+// It returns the permissions.Gate (whose Plugin governs the squad root and
+// whose Callback is attached to every sub-agent) plus a cleanup that stops the
+// reload poller and detaches the session-end approval-cache sweeper; the caller
+// (buildSquadInstance) runs the cleanup on generation teardown. Building the
+// gate here — once per squad — is what lets the SAME approval cache/asker cover
+// both the leader and its sub-agents.
+func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus) (*permissions.Gate, func(), error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	// Skill overlays (in-memory; do not need to be polled).
 	// Merge across every layer of the skills search chain so overlays from
 	// /etc/omnis or .agents/ are not dropped when $HOME/.omnis/registry/skills
@@ -219,7 +228,7 @@ func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker 
 	if asker == nil {
 		asker = permissions.StdinAsker{}
 	}
-	plug, cleaner, err := permissions.NewPluginFromConfig(permissions.PluginConfig{
+	gate, err := permissions.NewGate(permissions.PluginConfig{
 		Name:           "perms",
 		Source:         reloader,
 		Asker:          asker,
@@ -237,17 +246,31 @@ func buildPermissionsPlugin(ctx context.Context, runtime RuntimeSettings, asker 
 			d, _ := os.Getwd()
 			return d
 		},
+		// Recover the user-facing session id for a sub-agent tool call (which
+		// runs under an ephemeral agenttool session) so its approval cache keys —
+		// and grants like "Allow all Edit this session" — line up with the
+		// leader's. Falls back to tc.SessionID() for the root's own calls.
+		SessionFunc: func(tc tool.Context) string {
+			if id := steerSessionID(tc); id != "" {
+				return id
+			}
+			return tc.SessionID()
+		},
 		Debug: os.Getenv("OMNIS_DEBUG") != "",
 	})
-	if err == nil && cleaner != nil && bus != nil {
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if gate.Cleaner != nil && bus != nil {
 		sub := bus.Subscribe(events.EventSessionEnd, func(_ string, payload map[string]any) {
 			sid, _ := payload["session_id"].(string)
 			if sid != "" {
-				cleaner.Forget(sid)
+				gate.Cleaner.Forget(sid)
 			}
 		})
-		// Detach on ctx cancel so a hot-reload tears down the subscription.
+		// Detach on cancel so a hot-reload tears down the subscription.
 		go func() { <-ctx.Done(); sub.Off() }()
 	}
-	return plug, err
+	return gate, cancel, nil
 }

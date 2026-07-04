@@ -658,8 +658,14 @@ type PluginConfig struct {
 	Asker          Asker
 	UserConfigPath string
 	CWDFunc        func(tc tool.Context) string
-	OnPersist      func()
-	Debug          bool
+	// SessionFunc resolves the session id used to key the approval cache. It
+	// exists because a sub-agent runs in agenttool's private runner under an
+	// ephemeral session id, so tc.SessionID() there is not the user-facing
+	// session — the caller supplies a resolver that recovers the real id from
+	// the run context (falling back to tc.SessionID()). Nil ⇒ tc.SessionID().
+	SessionFunc func(tc tool.Context) string
+	OnPersist   func()
+	Debug       bool
 }
 
 // SessionCleaner exposes the internal session-approval cache so the caller can
@@ -689,12 +695,35 @@ func NewPluginFromRules(name string, cfg *Config, asker Asker) (*plugin.Plugin, 
 	return p, err
 }
 
+// Gate bundles permission enforcement in the two forms omnis needs: a runner
+// Plugin (mounted on a squad root's runner) and the raw BeforeToolCallback (to
+// attach directly to sub-agents, which run in agenttool's plugin-less runner
+// and so never see the runner Plugin). Both are backed by the SAME approval
+// cache / asker / rule source, so a session grant on the leader also covers its
+// sub-agents and a single Forget clears both.
+type Gate struct {
+	Plugin   *plugin.Plugin
+	Callback llmagent.BeforeToolCallback
+	Cleaner  SessionCleaner
+}
+
 // NewPluginFromConfig wires the permissions plugin with live-reloadable rules,
 // a session-scoped approval cache, and the AllowProject/AllowAlways persistence
-// path.
+// path. It is the runner-plugin view of NewGate.
 func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, error) {
+	g, err := NewGate(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return g.Plugin, g.Cleaner, nil
+}
+
+// NewGate builds the shared permission gate — see Gate. The enforcement closure
+// is identical to the runner plugin's BeforeToolCallback; NewGate simply also
+// hands it back raw so it can be attached to sub-agents.
+func NewGate(cfg PluginConfig) (*Gate, error) {
 	if cfg.Source == nil {
-		return nil, nil, fmt.Errorf("permissions: PluginConfig.Source is required")
+		return nil, fmt.Errorf("permissions: PluginConfig.Source is required")
 	}
 	if cfg.Asker == nil {
 		cfg.Asker = StdinAsker{}
@@ -704,6 +733,9 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 			d, _ := os.Getwd()
 			return d
 		}
+	}
+	if cfg.SessionFunc == nil {
+		cfg.SessionFunc = func(tc tool.Context) string { return tc.SessionID() }
 	}
 	cache := newSessionApprovalCache()
 	logf := func(format string, a ...any) {
@@ -716,7 +748,7 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 		input := flattenArgs(args)
 		cwd := cfg.CWDFunc(tc)
 		probeKey := t.Name() + "\x00" + input
-		sid := tc.SessionID()
+		sid := cfg.SessionFunc(tc)
 
 		if cache.hasTool(sid, t.Name()) {
 			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
@@ -776,12 +808,13 @@ func NewPluginFromConfig(cfg PluginConfig) (*plugin.Plugin, SessionCleaner, erro
 		}
 		return nil, nil
 	}
+	callback := llmagent.BeforeToolCallback(cb)
 	p, err := plugin.New(plugin.Config{
 		Name:               cfg.Name,
-		BeforeToolCallback: llmagent.BeforeToolCallback(cb),
+		BeforeToolCallback: callback,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return p, cache, nil
+	return &Gate{Plugin: p, Callback: callback, Cleaner: cache}, nil
 }
