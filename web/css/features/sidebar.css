@@ -403,6 +403,12 @@ body.resizing #sidebar { transition: none; }
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: var(--bg-raised); color: var(--text); }
+/* Indent the session rows so their left edge — the hover/active highlight box
+   and the focused accent rail — lines up with the timeframe group-label text
+   (list padding 6px + label padding-left 8px = 14px), rather than sticking out
+   ~8px to its left. Scoped to the expanded sidebar so the collapsed icon rail
+   keeps its centred avatars; the group labels themselves are excluded. */
+#sidebar:not(.collapsed) #session-list li:not(.session-group) { margin-left: 8px; }
 /* Timeframe group header (Today / Yesterday / This week / …). Non-interactive
    (pointer-events:none) so it never hovers, selects, or routes a click. */
 #session-list li.session-group {
