@@ -1,15 +1,15 @@
-/* Claude — Anthropic-style warm light skin.
+/* Ivory — a warm light skin.
    Ivory chrome (sidebar / tab bar / composer) against a clean white reading
-   surface, with the signature Claude clay accent. The scoped rules at the
-   bottom reproduce the Claude Console's left-panel / main-panel separation:
-   a crisp ivory→white seam plus a whisper of depth. */
-[data-theme="claude-light"] {
+   surface, with a warm clay accent. The scoped rules at the bottom reproduce
+   the left-panel / main-panel separation: a crisp ivory→white seam plus a
+   whisper of depth. */
+[data-theme="ivory"] {
   color-scheme: light;
 
   /* Surfaces — warm ivory chrome, clean white content. --bg is the reading
      surface (main chat / Settings body); --bg-panel is every chrome surface
      (sidebar, pane tab bar, composer), so the sidebar reads as a distinct
-     warm panel beside the white content — the core of the Console look. */
+     warm panel beside the white content — the core of the look. */
   --bg: #ffffff;
   --bg-panel: #f5f4ee;
   --bg-raised: #edebe1;
@@ -21,13 +21,13 @@
   --border: #e6e3d7;
   --border-strong: #cdc8b6;
 
-  /* Text — warm near-black, matching Anthropic's off-black ink. */
+  /* Text — warm near-black. */
   --text: #2b2a25;
   --text-strong: #14130f;
   --text-muted: #726f5d;
   --text-faint: #a3a08d;
 
-  /* Accent — the Claude clay / terracotta. Drives the focused-session rail,
+  /* Accent — a warm clay / terracotta. Drives the focused-session rail,
      focus rings, the New-chat glow and primary buttons. */
   --accent: #c15f3c;
   --accent-hover: #d97757;
@@ -57,7 +57,7 @@
   --warn-action-hover: rgba(138, 90, 18, 0.26);
 }
 
-/* ─── Left-panel / main-panel separation (the Console effect) ──────────
+/* ─── Left-panel / main-panel separation ──────────────────────────────
    The ivory sidebar vs. white content already gives the tonal split; these
    two rules add the crisp seam and a whisper of depth on top of it. */
 
@@ -65,7 +65,7 @@
    shadow lands ON the white chat. Without z-index the chat's own background
    (which paints later in tree order) would cover the feather. overflow:hidden
    does not clip an element's OWN outset shadow, so the depth still shows. */
-[data-theme="claude-light"] #sidebar {
+[data-theme="ivory"] #sidebar {
   position: relative;
   z-index: 1;
   box-shadow: 4px 0 14px -6px rgba(45, 37, 28, 0.10);
@@ -75,6 +75,6 @@
    visible boundary is the sidebar's own 1px border-right — a single clean
    ivory→white line rather than an extra 4px strip of ivory. The
    :not(:hover/:is-dragging) guard keeps the accent drag-highlight winning. */
-[data-theme="claude-light"] #sidebar-resize:not(:hover):not(.is-dragging) {
+[data-theme="ivory"] #sidebar-resize:not(:hover):not(.is-dragging) {
   background: var(--bg);
 }

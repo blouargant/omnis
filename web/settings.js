@@ -95,7 +95,12 @@ const BASE_PATH = window.BASE_PATH || "";
   // entry and no server-side preference) or has an empty "" value. VS Code Dark
   // remains selectable via its explicit "vscode-dark" id; this governs the
   // unset/empty fallback only.
-  const DEFAULT_THEME = "claude-light";
+  const DEFAULT_THEME = "ivory";
+  // Theme ids renamed after release keep a legacy alias so a choice already
+  // persisted (localStorage / server preferences) still resolves — otherwise a
+  // now-unknown id would paint the base dark palette. ("claude-light" → "ivory".)
+  const LEGACY_THEME_ALIASES = { "claude-light": "ivory" };
+  function normalizeThemeId(id) { return LEGACY_THEME_ALIASES[id] || id; }
   // localStorage cache for the unified desktop-notification preference. The
   // durable source of truth is the server preferences.json (user home); this
   // cache is what the synchronous fire path in app.js reads.
@@ -107,7 +112,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "one-dark",        label: "One Dark",        tier: "principal", tone: "Dark",  swatch: ["#282c34", "#21252b", "#61afef", "#abb2bf"] },
     { id: "vscode-light",    label: "VS Code Light",   tier: "principal", tone: "Light", swatch: ["#ffffff", "#f3f3f3", "#0e639c", "#1e1e1e"] },
     { id: "github-light",    label: "GitHub Light",    tier: "principal", tone: "Light", swatch: ["#ffffff", "#f6f8fa", "#0969da", "#24292f"] },
-    { id: "claude-light",    label: "Claude",          tier: "principal", tone: "Light", swatch: ["#ffffff", "#f5f4ee", "#c15f3c", "#2b2a25"] },
+    { id: "ivory",           label: "Ivory",           tier: "principal", tone: "Light", swatch: ["#ffffff", "#f5f4ee", "#c15f3c", "#2b2a25"] },
     // Secondary
     { id: "dracula",         label: "Dracula",         tier: "secondary", tone: "Dark",  swatch: ["#282a36", "#21222c", "#bd93f9", "#f8f8f2"] },
     { id: "nord",            label: "Nord",            tier: "secondary", tone: "Dark",  swatch: ["#2e3440", "#3b4252", "#5e81ac", "#d8dee9"] },
@@ -128,14 +133,15 @@ const BASE_PATH = window.BASE_PATH || "";
     // VS Code Dark is now an explicit id ("vscode-dark"), so an empty theme no
     // longer means dark — it resolves to DEFAULT_THEME like an unset value.
     const v = localStorage.getItem(THEME_STORAGE_KEY);
-    return v ? v : DEFAULT_THEME;
+    return v ? normalizeThemeId(v) : DEFAULT_THEME;
   }
   function applyTheme(id, opts) {
     const root = document.documentElement;
-    // Normalise empty/null to the default skin so an empty theme renders as
-    // VS Code Light (not the historical base dark palette) and is persisted as
-    // a concrete id.
-    const eff = id || DEFAULT_THEME;
+    // Normalise empty/null to the default skin so an empty theme renders as the
+    // default light skin (not the historical base dark palette), map any legacy
+    // alias to its current id, and persist the concrete result (self-healing a
+    // stale persisted id).
+    const eff = normalizeThemeId(id) || DEFAULT_THEME;
     root.setAttribute("data-theme", eff);
     localStorage.setItem(THEME_STORAGE_KEY, eff);
     // Persist to the server so the choice survives restarts. Skipped when
