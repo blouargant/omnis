@@ -90,20 +90,39 @@
    * toggle button + 1px border = 45px (box-sizing: border-box). */
   height: 45px;
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--border, #333);
   /* Sit above the empty-pane picker (z-index 4) so the tabs and the
    * split/close/new actions stay visible/usable even before a session is bound. */
   position: relative;
   z-index: 8;
 }
-/* The scrollable strip of tabs. */
+/* Chrome↕content separator. Drawn as a pseudo-line at the bar's bottom rather
+ * than a `border-bottom` so the active "folder tab" can paint OVER it (see
+ * .pane-tab.active z-index) and merge seamlessly into the content below — the
+ * classic folder-tab look. It sits above the inactive (transparent) tabs but
+ * below the active tab. Full-width, so it still runs under the +/toolbar. */
+.pane-tabbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border, #333);
+  z-index: 0;
+  pointer-events: none;
+}
+/* The scrollable strip of tabs. Bottom-aligned so the shorter folder tabs sit
+ * flush on the separator with a small strip of chrome showing above them. The
+ * left inset offsets the first tab off the sidebar seam (a small gap of chrome),
+ * matching the Console look. */
 .pane-tabs {
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   min-width: 0;
   flex: 0 1 auto;
   overflow-x: auto;
   scrollbar-width: thin;
+  padding-left: 8px;
 }
 .pane-tabs::-webkit-scrollbar { height: 0; }
 .pane-tab {
@@ -113,9 +132,15 @@
   gap: 6px;
   min-width: 90px;
   max-width: 200px;
+  /* Shorter than the 45px bar so a strip of chrome shows above the tab; the
+   * rounded top + white active fill give the folder-tab shape. The 1px
+   * transparent border is reserved so activating a tab never nudges layout. */
+  height: 36px;
   padding: 0 6px 0 12px;
   background: transparent;
-  border-right: 1px solid var(--border, #333);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
   color: var(--text-muted, #888);
   font-size: 12.5px;
   cursor: pointer;
@@ -141,16 +166,19 @@
 .pane-tab.drag-over-left::before { left: -1px; }
 .pane-tab.drag-over-right::after { right: -1px; }
 .pane-tab:hover { background: var(--bg-raised, #2a2d2e); color: var(--text, #eee); }
-/* The active tab of the pane. */
+/* The active tab of the pane: a white "folder" filled with the content colour
+ * (var(--bg)), outlined on three sides, its bottom left open. z-index:1 lifts it
+ * over the .pane-tabbar::after separator so its fill bridges into the content. */
 .pane-tab.active {
-  background: var(--bg-raised, #2a2d2e);
+  background: var(--bg);
+  border-color: var(--border);
   color: var(--text, #eee);
+  z-index: 1;
 }
-/* Brighter still when the active tab belongs to the focused pane. */
+/* Focused pane's active tab: an accent line along the tab top + stronger text. */
 .chat-pane.is-focused .pane-tab.active {
-  background: var(--bg-active);
   color: var(--text-strong, #fff);
-  box-shadow: inset 0 -2px 0 var(--accent, #4a9eff);
+  box-shadow: inset 0 2px 0 var(--accent, #4a9eff);
 }
 .pane-tab-name {
   min-width: 0;
