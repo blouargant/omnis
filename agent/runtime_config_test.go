@@ -309,6 +309,79 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimeSettingsModelOverride(t *testing.T) {
+	writeConfig := func(t *testing.T, overrideJSON string) string {
+		t.Helper()
+		dir := t.TempDir()
+		setupAgentsRegistry(t, dir, []AgentEntry{
+			{Name: "leader", ModelRef: "premium"},
+			{Name: "investigator", ModelRef: "cheap", Tools: []string{"fs"}},
+		})
+		path := filepath.Join(dir, "agent.json")
+		mustWrite(t, path, []byte(`{"agents": ["leader", "investigator"]}`))
+		mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "models": {
+    "premium": {"provider": "openai_compat", "model": "big-model", "base_url": "https://premium.example", "context_length": 200000},
+    "cheap":   {"provider": "openai_compat", "model": "small-model", "base_url": "https://cheap.example", "context_length": 32000}
+  }`+overrideJSON+`
+}`))
+		return path
+	}
+
+	// Enabled → every agent runs on the override model.
+	t.Run("enabled", func(t *testing.T) {
+		path := writeConfig(t, `,
+  "override_model_ref": "cheap",
+  "override_model_enabled": true`)
+		rs, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+		if err != nil {
+			t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+		}
+		for _, name := range []string{"leader", "investigator"} {
+			cfg, ok := rs.AgentConfig(name)
+			if !ok {
+				t.Fatalf("%s config missing", name)
+			}
+			if cfg.Model != "small-model" || cfg.BaseURL != "https://cheap.example" || cfg.ModelRef != "cheap" {
+				t.Fatalf("%s not forced onto override: model=%q base=%q ref=%q", name, cfg.Model, cfg.BaseURL, cfg.ModelRef)
+			}
+		}
+	})
+
+	// Disabled → each agent keeps its own model_ref.
+	t.Run("disabled", func(t *testing.T) {
+		path := writeConfig(t, `,
+  "override_model_ref": "cheap",
+  "override_model_enabled": false`)
+		rs, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+		if err != nil {
+			t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+		}
+		leader, _ := rs.AgentConfig("leader")
+		if leader.Model != "big-model" {
+			t.Fatalf("leader.Model = %q, want big-model (override disabled)", leader.Model)
+		}
+		inv, _ := rs.AgentConfig("investigator")
+		if inv.Model != "small-model" {
+			t.Fatalf("investigator.Model = %q, want small-model (override disabled)", inv.Model)
+		}
+	})
+
+	// Env override enables it and picks the ref, even when models.json is silent.
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("OMNIS_OVERRIDE_MODEL_REF", "cheap")
+		path := writeConfig(t, ``)
+		rs, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+		if err != nil {
+			t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+		}
+		leader, _ := rs.AgentConfig("leader")
+		if leader.Model != "small-model" {
+			t.Fatalf("leader.Model = %q, want small-model (env override)", leader.Model)
+		}
+	})
+}
+
 func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{

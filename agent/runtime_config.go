@@ -129,6 +129,16 @@ type modelsConfigFile struct {
 	// works out-of-the-box. An agents.json `eval_model_ref` or the
 	// OMNIS_GOAL_MODEL_REF env override it. Mirrors EmbedModelRef precisely.
 	EvalModelRef string `json:"eval_model_ref,omitempty"`
+	// OverrideModelRef names a single model that, when OverrideModelEnabled is
+	// true, is forced onto EVERY agent — a temporary "run the whole fleet on one
+	// model" switch (see applyModelOverride). The chosen ref is kept even while
+	// disabled so toggling the flag flips between the single model and the
+	// per-agent multi-model config without re-picking. OMNIS_OVERRIDE_MODEL_REF /
+	// OMNIS_OVERRIDE_MODEL_ENABLED override these. The internal embedder and the
+	// /goal evaluator models are deliberately unaffected (a chat model can't
+	// embed, and the evaluator is an internal, non-agent role).
+	OverrideModelRef     string `json:"override_model_ref,omitempty"`
+	OverrideModelEnabled bool   `json:"override_model_enabled,omitempty"`
 }
 
 type runtimeConfigFile struct {
@@ -275,7 +285,14 @@ type RuntimeSettings struct {
 	// calls (the /goal completion judge). Empty means the evaluator falls back to
 	// the session's leader model. See modelsConfigFile.EvalModelRef.
 	EvalModelRef string
-	Models       map[string]RuntimeModelConfig
+	// OverrideModelRef / OverrideModelEnabled implement the "single model for all
+	// agents" switch: when enabled and the ref resolves in Models, every agent's
+	// model connection + pricing fields are overwritten with that model
+	// (applyModelOverride). Disabled restores the per-agent config. Sourced from
+	// models.json + OMNIS_OVERRIDE_MODEL_REF / OMNIS_OVERRIDE_MODEL_ENABLED.
+	OverrideModelRef     string
+	OverrideModelEnabled bool
+	Models               map[string]RuntimeModelConfig
 	Agents       []RuntimeAgentConfig
 	// Squads is the normalised list of named agent groups. Always contains
 	// at least one entry named DefaultSquadName.
@@ -893,6 +910,11 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(modelsCfg.EvalModelRef) != "" {
 		out.EvalModelRef = strings.ToLower(strings.TrimSpace(modelsCfg.EvalModelRef))
 	}
+	// Single-model override ("run the whole fleet on one model"). The ref is kept
+	// even while disabled, so the toggle flips cleanly between the single model
+	// and the per-agent config; applyModelOverride (below) is what enforces it.
+	out.OverrideModelRef = strings.ToLower(strings.TrimSpace(modelsCfg.OverrideModelRef))
+	out.OverrideModelEnabled = modelsCfg.OverrideModelEnabled
 
 	// File
 	if strings.TrimSpace(cfg.SoftSkillsDir) != "" {
@@ -963,6 +985,16 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if raw := strings.TrimSpace(os.Getenv("OMNIS_GOAL_MODEL_REF")); raw != "" {
 		out.EvalModelRef = strings.ToLower(raw)
 	}
+	// OMNIS_OVERRIDE_MODEL_REF sets the single-model-override ref and, when
+	// non-empty, enables the override; OMNIS_OVERRIDE_MODEL_ENABLED then has the
+	// final say on the flag (so the env can force it on/off independently).
+	if raw := strings.TrimSpace(os.Getenv("OMNIS_OVERRIDE_MODEL_REF")); raw != "" {
+		out.OverrideModelRef = strings.ToLower(raw)
+		out.OverrideModelEnabled = true
+	}
+	if v, ok := parseBoolEnv("OMNIS_OVERRIDE_MODEL_ENABLED"); ok {
+		out.OverrideModelEnabled = v
+	}
 
 	// Options (highest precedence)
 	if strings.TrimSpace(opts.SoftSkillsDir) != "" {
@@ -985,6 +1017,11 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 
 	out.Agents = mapAgentEntries(out.Agents, normalizedAgentConfig)
+	// Single-model override: when enabled in models.json, force every agent onto
+	// one model. Applied before inheritance so it also short-circuits the
+	// leader-model inheritance step (and its "no model" error) — a clean global
+	// escape hatch. A no-op when disabled / unset / unresolvable.
+	applyModelOverride(&out)
 	out.Agents, err = withInheritedModels(out.Agents)
 	if err != nil {
 		return RuntimeSettings{}, err
@@ -1012,6 +1049,44 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
 	out.ModelsConfigPath = filepath.Clean(out.ModelsConfigPath)
 	return out, nil
+}
+
+// applyModelOverride forces every agent onto a single model when the models.json
+// "single model for all agents" override is enabled. It overwrites each agent's
+// resolved model connection + pricing fields with the chosen catalogue model, so
+// the whole fleet runs on one model regardless of each agent's own model_ref.
+// Disabled, an empty/unresolvable ref, or a ref that points at an embedding model
+// is a no-op — the per-agent multi-model config stands. The internal embedder and
+// the /goal evaluator models are deliberately untouched (a chat model can't embed,
+// and the evaluator is an internal, non-agent role). It runs before
+// withInheritedModels, so it also settles agents that carry no model_ref of their
+// own (they'd otherwise inherit the leader's).
+func applyModelOverride(rs *RuntimeSettings) {
+	if rs == nil || !rs.OverrideModelEnabled {
+		return
+	}
+	ref := strings.ToLower(strings.TrimSpace(rs.OverrideModelRef))
+	if ref == "" {
+		return
+	}
+	m, ok := rs.Models[ref]
+	if !ok || m.Embedding {
+		return
+	}
+	for i := range rs.Agents {
+		rs.Agents[i].ModelRef = ref
+		rs.Agents[i].Provider = m.Provider
+		rs.Agents[i].Model = m.Model
+		rs.Agents[i].BaseURL = m.BaseURL
+		rs.Agents[i].APIKey = m.APIKey
+		rs.Agents[i].ContextLength = m.ContextLength
+		rs.Agents[i].InputTokenPricePerMillion = m.InputTokenPricePerMillion
+		rs.Agents[i].OutputTokenPricePerMillion = m.OutputTokenPricePerMillion
+		rs.Agents[i].CachedInputTokenPricePerMillion = m.CachedInputTokenPricePerMillion
+		rs.Agents[i].CacheCreationTokenPricePerMillion = m.CacheCreationTokenPricePerMillion
+		rs.Agents[i].DisableStreaming = m.DisableStreaming
+		rs.Agents[i].PromptCache = m.PromptCache
+	}
 }
 
 // resolveAPIKeyReference interprets api_key as either a literal key or an

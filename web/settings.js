@@ -2340,13 +2340,168 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const body = document.createElement("div");
     body.className = "model-card-body";
-    // /goal evaluator first (on top), then the internal embedding model.
+    // Single-model override first (most prominent), then the /goal evaluator,
+    // then the internal embedding model.
+    body.appendChild(buildOverrideField(d));
     body.appendChild(buildEvalField(d));
     body.appendChild(buildEmbedField(d));
 
     wrap.appendChild(hdr);
     wrap.appendChild(body);
     el.appendChild(wrap);
+  }
+
+  // ── General-card help popovers ─────────────────────────────────────────────
+  // A "?" button after each General-card title opens a small themed popup with
+  // the field's full description, so the descriptions no longer crowd the panel.
+  // One popup shows at a time; it is dismissed on outside-click, Escape,
+  // scroll or resize. `position: fixed` on <body> so it escapes panel overflow.
+  let _modelHelpPopup = null;
+  function closeModelHelpPopup() {
+    if (!_modelHelpPopup) return;
+    const p = _modelHelpPopup;
+    _modelHelpPopup = null;
+    document.removeEventListener("click", p._onDoc, true);
+    document.removeEventListener("keydown", p._onKey, true);
+    window.removeEventListener("resize", p._onGone, true);
+    window.removeEventListener("scroll", p._onGone, true);
+    p.remove();
+  }
+  function openModelHelpPopup(anchor, text) {
+    // A re-click on the same anchor toggles the popup closed.
+    const sameAnchor = _modelHelpPopup && _modelHelpPopup._anchor === anchor;
+    closeModelHelpPopup();
+    if (sameAnchor) return;
+
+    const pop = document.createElement("div");
+    pop.className = "model-help-popup";
+    pop.textContent = text;
+    pop._anchor = anchor;
+    document.body.appendChild(pop);
+
+    // Position below the anchor, clamped to the viewport (flip above if needed).
+    const r = anchor.getBoundingClientRect();
+    const margin = 8;
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = r.left;
+    if (left + pw > window.innerWidth - margin) left = window.innerWidth - margin - pw;
+    if (left < margin) left = margin;
+    let top = r.bottom + 6;
+    if (top + ph > window.innerHeight - margin) top = Math.max(margin, r.top - ph - 6);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+
+    // Dismissal. The capture-phase document click was added after this opening
+    // click already passed capture, so it won't self-close; the next outside
+    // click closes it. Re-clicking the anchor toggles via openModelHelpPopup.
+    pop._onDoc = (e) => { if (!pop.contains(e.target) && e.target !== anchor) closeModelHelpPopup(); };
+    pop._onKey = (e) => { if (e.key === "Escape") closeModelHelpPopup(); };
+    pop._onGone = () => closeModelHelpPopup();
+    document.addEventListener("click", pop._onDoc, true);
+    document.addEventListener("keydown", pop._onKey, true);
+    window.addEventListener("resize", pop._onGone, true);
+    window.addEventListener("scroll", pop._onGone, true);
+
+    _modelHelpPopup = pop;
+  }
+
+  // helpButton returns a small "?" button wired to pop up `helpText`.
+  // buildHelpLabel wraps it in a field-label row (title, then the button) so the
+  // General-card descriptions live in a popup instead of a paragraph under every
+  // selector; the override toggle reuses helpButton directly beside its label.
+  function helpButton(helpText) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "model-help-btn";
+    btn.textContent = "?";
+    btn.setAttribute("aria-label", tr("set.model.helpAria"));
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openModelHelpPopup(btn, helpText);
+    });
+    return btn;
+  }
+  function buildHelpLabel(labelText, helpText) {
+    const row = document.createElement("div");
+    row.className = "model-field-labelrow";
+    const lbl = document.createElement("span");
+    lbl.className = "model-field-label";
+    lbl.textContent = labelText;
+    row.appendChild(lbl);
+    row.appendChild(helpButton(helpText));
+    return row;
+  }
+
+  // buildOverrideField returns the "single model for all agents" override — a
+  // toggle plus a chat-model dropdown. When enabled, models.json
+  // `override_model_enabled` + `override_model_ref` make the server force every
+  // agent onto the chosen model (applyModelOverride); disabling restores each
+  // agent's own model_ref. The chosen model is kept while disabled so re-enabling
+  // reuses it. Applies on the next config reload (no restart). The embedding and
+  // /goal evaluator models are unaffected, so the dropdown lists only chat models.
+  function buildOverrideField(d) {
+    const chatModels = Object.keys(d.models || {}).filter(n => d.models[n] && !d.models[n].embedding);
+    const fld = document.createElement("div");
+    fld.className = "model-field model-field-full";
+
+    // Toggle row: checkbox + label inside a <label>, then the help "?" as a
+    // sibling (outside the <label> so clicking it doesn't flip the checkbox).
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "model-override-togglerow";
+    const toggle = document.createElement("label");
+    toggle.className = "model-override-toggle";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!d.override_model_enabled;
+    const cbLbl = document.createElement("span");
+    cbLbl.textContent = tr("set.model.overrideEnable");
+    toggle.appendChild(cb);
+    toggle.appendChild(cbLbl);
+    toggleRow.appendChild(toggle);
+    toggleRow.appendChild(helpButton(tr("set.model.overrideDesc")));
+
+    // Model picker (label + dropdown), shown only while the toggle is on.
+    const picker = document.createElement("div");
+    picker.className = "model-override-picker";
+    const lbl = document.createElement("span");
+    lbl.className = "model-field-label";
+    lbl.textContent = tr("set.model.overrideModel");
+    const sel = document.createElement("select");
+    sel.className = "model-field-input";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = chatModels.length
+      ? tr("set.model.overridePick")
+      : tr("set.model.overrideNoModels");
+    sel.appendChild(none);
+    for (const n of chatModels) {
+      const opt = document.createElement("option");
+      opt.value = n; opt.textContent = n;
+      if ((d.override_model_ref || "").toLowerCase() === n.toLowerCase()) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.disabled = !chatModels.length;
+    picker.appendChild(lbl);
+    picker.appendChild(sel);
+
+    const syncVisible = () => { picker.style.display = cb.checked ? "" : "none"; };
+    syncVisible();
+
+    cb.addEventListener("change", () => {
+      d.override_model_enabled = cb.checked;
+      // Keep override_model_ref while disabled so re-enabling restores the pick.
+      syncVisible();
+      markFormDirty("models");
+    });
+    sel.addEventListener("change", () => {
+      if (sel.value) d.override_model_ref = sel.value; else delete d.override_model_ref;
+      markFormDirty("models");
+    });
+
+    fld.appendChild(toggleRow);
+    fld.appendChild(picker);
+    return fld;
   }
 
   // buildEvalField returns the "/goal evaluator model" field — a dropdown of the
@@ -2358,10 +2513,6 @@ const BASE_PATH = window.BASE_PATH || "";
     const chatModels = Object.keys(d.models || {}).filter(n => d.models[n] && !d.models[n].embedding);
     const fld = document.createElement("div");
     fld.className = "model-field model-field-full";
-
-    const lbl = document.createElement("label");
-    lbl.className = "model-field-label";
-    lbl.textContent = tr("set.model.evalModel");
 
     const sel = document.createElement("select");
     sel.className = "model-field-input";
@@ -2380,11 +2531,8 @@ const BASE_PATH = window.BASE_PATH || "";
       if (sel.value) d.eval_model_ref = sel.value; else delete d.eval_model_ref;
       markFormDirty("models");
     });
-    const desc = document.createElement("p");
-    desc.className = "model-panel-desc";
-    desc.textContent = tr("set.model.evalDesc");
-
-    fld.appendChild(lbl); fld.appendChild(sel); fld.appendChild(desc);
+    fld.appendChild(buildHelpLabel(tr("set.model.evalModel"), tr("set.model.evalDesc")));
+    fld.appendChild(sel);
     return fld;
   }
 
@@ -2397,10 +2545,6 @@ const BASE_PATH = window.BASE_PATH || "";
     const embedModels = Object.keys(d.models || {}).filter(n => d.models[n] && d.models[n].embedding);
     const fld = document.createElement("div");
     fld.className = "model-field model-field-full";
-
-    const lbl = document.createElement("label");
-    lbl.className = "model-field-label";
-    lbl.textContent = tr("set.model.internalEmbedding");
 
     const sel = document.createElement("select");
     sel.className = "model-field-input";
@@ -2421,11 +2565,8 @@ const BASE_PATH = window.BASE_PATH || "";
       if (sel.value) d.embed_model_ref = sel.value; else delete d.embed_model_ref;
       markFormDirty("models");
     });
-    const desc = document.createElement("p");
-    desc.className = "model-panel-desc";
-    desc.textContent = tr("set.model.embedDesc");
-
-    fld.appendChild(lbl); fld.appendChild(sel); fld.appendChild(desc);
+    fld.appendChild(buildHelpLabel(tr("set.model.internalEmbedding"), tr("set.model.embedDesc")));
+    fld.appendChild(sel);
     return fld;
   }
 

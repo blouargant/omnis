@@ -214,6 +214,82 @@
 /* Internal-embedding-model selector card sits above the model grid */
 .embed-select-card { margin-bottom: 1rem; }
 
+/* Visual separation between the General card's sections (override / evaluator /
+   embedding). Scoped to the General card so real model cards are untouched. */
+.embed-select-card .model-card-body > .model-field + .model-field {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+/* General-card field label row: a "?" help button after the title. */
+.model-field-labelrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.model-help-btn {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel, var(--bg));
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.model-help-btn:hover {
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+.model-help-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Themed help popup opened by a .model-help-btn (position set inline). */
+.model-help-popup {
+  position: fixed;
+  z-index: 1000;
+  max-width: 22rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel, var(--bg));
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: normal;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+/* "Use one model for all agents": the toggle label + its help "?" on one row,
+   with the model picker (label + dropdown) stacked below when enabled. */
+.model-override-togglerow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.model-override-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.model-override-toggle input { cursor: pointer; }
+.model-override-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 /* Embedding pill toggle inside a model card: align the switch under its label
    with a little breathing room, matching the agent "Active State" toggle. */
 .model-field .agent-toggle-switch { margin-top: 0.3rem; }
