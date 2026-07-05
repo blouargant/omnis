@@ -4802,6 +4802,19 @@ const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
 const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
 
+// Deterministic per-squad accent hue for the sidebar squad badges, so each
+// squad reads as its own colour (consumed as the inline --sq-h custom property
+// by .session-squad-badge in features/sidebar.css, which turns it into a
+// theme-adaptive pill via color-mix). A small curated palette keeps the hues
+// pleasant and well-separated; the same squad name always maps to the same hue.
+const SQUAD_HUES = [210, 25, 150, 275, 340, 190, 45, 110, 300, 0];
+function squadHue(name) {
+  let h = 0;
+  const s = String(name || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return SQUAD_HUES[h % SQUAD_HUES.length];
+}
+
 // buildSessionRow renders one session <li>. A single ⋮ "kebab" button opens a
 // menu grouping the row's actions: Copy name + Rename (active rows only), a
 // thin separator, then Archive/Unarchive + Delete. Archived rows route a click
@@ -4822,7 +4835,7 @@ function buildSessionRow(s, { archived }) {
   // so single-squad / default setups stay visually quiet.
   const showBadge = s.squad && s.squad !== defaultSquadName;
   const badgeHtml = showBadge
-    ? `<span class="session-squad-badge" data-tip="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
+    ? `<span class="session-squad-badge" style="--sq-h:${squadHue(s.squad)}" data-tip="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
     : "";
   li.innerHTML = `
     <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>

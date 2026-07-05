@@ -210,6 +210,34 @@
   opacity: 0.85;
 }
 
+/* Assistant reply row: the Omnis "sun" avatar sits in the left gutter (aligned
+   with the user bubble's left edge) and the reply text flows to its right. The
+   .msg-actions cluster is position:absolute, so the only flex children are the
+   avatar (::before) and the bubble. */
+.msg-row.assistant {
+  align-items: flex-start;
+  gap: 12px;
+}
+.msg-row.assistant::before {
+  content: "";
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: 8px;
+  background: var(--accent) var(--brand-mark) center / 18px 18px no-repeat;
+  box-shadow: var(--shadow-bubble);
+}
+/* Beside the avatar the reply fills the remaining width (margins reset, flex:1)
+   rather than centering. Scoped to the reply row so asides / placeholders /
+   spawn-result bubbles keep their own centering. */
+.msg-row.assistant .bubble-assistant {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0;
+  margin-right: 0;
+}
+
 /* Assistant content — plain text, no bubble. Adapts to the column width like
    the user/prompt boxes (min(--col-w, 100%)) instead of a fixed 700px cap. */
 .bubble-assistant {

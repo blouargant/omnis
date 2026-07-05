@@ -102,7 +102,7 @@ body.resizing-composer #composer-resize { transition: none; }
   width: 100%;
   background: var(--bubble-user-bg);
   border: 1px solid var(--bubble-user-border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
 }
 
@@ -239,10 +239,10 @@ body.resizing-composer #composer-resize { transition: none; }
   background: var(--accent);
   color: #ffffff;
   border: none;
-  border-radius: 4px;
-  padding: 6px 16px;
+  border-radius: 18px;
+  padding: 7px 18px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.1s;
 }
@@ -261,8 +261,8 @@ body.resizing-composer #composer-resize { transition: none; }
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 6px 14px;
+  border-radius: 18px;
+  padding: 7px 16px;
   font-size: 14px;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;

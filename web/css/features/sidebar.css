@@ -85,6 +85,7 @@
 body.resizing #sidebar { transition: none; }
 
 /* Hide everything that needs horizontal room in rail mode. */
+#sidebar.collapsed .app-logo,
 #sidebar.collapsed .app-name,
 #sidebar.collapsed .new-chat-text,
 #sidebar.collapsed #squad-toggle,
@@ -157,7 +158,10 @@ body.resizing #sidebar { transition: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  /* Pinned to the shared top-bar height so the header lines up exactly with the
+     pane tab bar across the sidebar seam (one continuous top strip). */
+  min-height: var(--topbar-h);
+  padding: 8px 12px;
   gap: 8px;
 }
 .sidebar-header-btns {
@@ -189,6 +193,18 @@ body.resizing #sidebar { transition: none; }
 .update-btn:hover { filter: brightness(1.12); }
 .update-btn[hidden] { display: none; }
 #sidebar.collapsed .update-btn { display: none; }
+
+/* Brand logo badge — an accent rounded-square carrying the white Omnis "sun"
+   glyph (--brand-mark), sitting to the left of the app name. Re-tints with the
+   active theme's --accent. */
+.app-logo {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent) var(--brand-mark) center / 18px 18px no-repeat;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
 
 .app-name {
   font-size: 20px;
@@ -225,19 +241,11 @@ body.resizing #sidebar { transition: none; }
   position: relative;
   display: flex;
   align-items: stretch;
+  gap: 8px;
   margin: 10px 12px 4px;
-  /* Full pill: 19px = half the 38px button height, so the ends are fully round. */
-  border-radius: 19px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  box-shadow: 0 0 0 1px var(--accent-border-soft), 0 0 12px var(--accent-bg-soft);
-  transition: box-shadow 0.15s, border-color 0.15s;
-}
-#new-chat-wrap:hover {
-  border-color: var(--accent-border-soft);
-  box-shadow: 0 0 0 1px var(--accent-border-soft), 0 0 16px var(--accent-bg-soft);
 }
 
+/* Solid accent "New Chat" pill — the primary call-to-action. */
 #new-chat {
   flex: 1;
   min-width: 0;
@@ -245,24 +253,23 @@ body.resizing #sidebar { transition: none; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  background: transparent;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--accent);
   border: none;
-  color: var(--text-strong);
+  color: #ffffff;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  /* Match the wrap radius so the button fills the pill cleanly. The
-   * trailing chevron narrows it on the right when squad selection is
-   * available (see :has() rule below). */
-  border-radius: 19px;
+  /* Full pill: 20px = half the 40px height, so the ends are fully round. */
+  border-radius: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  transition: background 0.12s, box-shadow 0.15s, transform 0.05s;
 }
-#new-chat:hover { background: var(--bg-raised-hover); }
-#new-chat-wrap:has(#squad-toggle:not([hidden])) #new-chat {
-  border-radius: 19px 0 0 19px;
-}
+#new-chat:hover { background: var(--accent-hover); box-shadow: 0 2px 8px var(--accent-bg-soft); }
+#new-chat:active { transform: translateY(0.5px); }
+#new-chat svg { flex-shrink: 0; }
 #new-chat .new-chat-text {
   display: flex;
   flex-direction: column;
@@ -281,31 +288,33 @@ body.resizing #sidebar { transition: none; }
 #new-chat .new-chat-sub {
   font-size: 10px;
   font-weight: 400;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.82);
   text-transform: lowercase;
   letter-spacing: .04em;
   margin-top: 1px;
 }
 #new-chat .new-chat-sub[hidden] { display: none; }
 
+/* Squad picker — a separate round accent button beside the New Chat pill. */
 #squad-toggle {
-  width: 36px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: var(--accent);
   border: none;
-  border-left: 1px solid var(--border);
-  border-radius: 0 19px 19px 0;
-  color: var(--text-muted);
+  border-radius: 50%;
+  color: #ffffff;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  transition: background 0.12s;
 }
-#squad-toggle:hover { background: var(--bg-raised-hover); color: var(--text); }
+#squad-toggle:hover { background: var(--accent-hover); color: #ffffff; }
 #squad-toggle[aria-expanded="true"] {
-  background: var(--bg-active);
-  color: var(--text);
+  background: var(--accent-strong);
+  color: #ffffff;
 }
 #squad-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 #squad-toggle svg { transition: transform 0.15s; }
@@ -363,21 +372,23 @@ body.resizing #sidebar { transition: none; }
   flex-shrink: 0;
   font-size: 10px;
   line-height: 1;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 8px;
-  background: var(--bg-raised);
-  color: var(--text-faint);
-  border: 1px solid var(--border);
+  /* Per-squad colour. The hue (--sq-h) is set inline from the squad name in
+     app.js (squadHue); saturation/lightness stay in CSS via color-mix so the
+     pill reads in every theme — a translucent tint over the current surface,
+     with text blended toward the theme's own --text (so it darkens on light
+     themes and lightens on dark ones). --sq-h defaults to a neutral amber when
+     unset. */
+  background: color-mix(in srgb, hsl(var(--sq-h, 40) 62% 50%) 15%, transparent);
+  color: color-mix(in srgb, hsl(var(--sq-h, 40) 60% 44%) 80%, var(--text));
+  border: 1px solid color-mix(in srgb, hsl(var(--sq-h, 40) 55% 50%) 34%, transparent);
   text-transform: lowercase;
   letter-spacing: .02em;
-  max-width: 80px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-#session-list li.active .session-squad-badge {
-  background: var(--bg-active);
-  color: var(--text);
 }
 
 #session-list {
@@ -397,12 +408,12 @@ body.resizing #sidebar { transition: none; }
   position: relative;
   /* Reserve a right gutter for the hover-revealed action stack so the floating
      buttons never sit over the session name / meta. */
-  padding: 6px 30px 6px 10px;
-  border-radius: 4px;
+  padding: 8px 30px 8px 12px;
+  border-radius: 10px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 13px;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: var(--bg-raised); color: var(--text); }
@@ -427,8 +438,9 @@ body.resizing #sidebar { transition: none; }
 }
 #session-list li.session-group:first-child { padding-top: 4px; }
 #sidebar.collapsed #session-list li.session-group { display: none; }
-/* Open in some (non-focused) pane: a subtle highlight. */
-#session-list li.active { background: var(--bg-raised); color: var(--text); }
+/* Open in some (non-focused) pane: just a darker label, no fill — only the
+   focused/active row (below) gets a background. */
+#session-list li.active { color: var(--text); }
 /* The chat in the focused pane — the one the user is working in — stands out
  * with the active background, brighter text, and an accent rail on the left. */
 #session-list li.active-focused {
@@ -594,8 +606,8 @@ body.resizing #sidebar { transition: none; }
 /* Archived rows reuse the active-session row look and hover behaviour. */
 #archived-list li {
   position: relative;
-  padding: 6px 30px 6px 10px;
-  border-radius: 4px;
+  padding: 8px 30px 8px 12px;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 13px;
@@ -625,7 +637,10 @@ body.resizing #sidebar { transition: none; }
   flex-direction: column;
   align-items: stretch;
   gap: 2px;
-  padding: 8px 12px;
+  /* No horizontal padding: the buttons carry their own 12px so their hover fill
+     spans the full sidebar width and their icons align with the Archived/Folders
+     chevron column (which sit 12px from the same edge). */
+  padding: 8px 0;
   /* Fixed bottom-bar minimum (--bottom-bar-h) so the footer keeps a stable
      size at the bottom of the sidebar; it grows to fit the stacked buttons. */
   min-height: var(--bottom-bar-h);

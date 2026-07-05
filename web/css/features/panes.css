@@ -86,9 +86,9 @@
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  /* Match the sidebar header (Omnis title) height: 10px×2 padding + 24px
-   * toggle button + 1px border = 45px (box-sizing: border-box). */
-  height: 45px;
+  /* Pinned to the shared --topbar-h so the tab bar aligns with the sidebar
+   * header (Omnis title) and the two read as one continuous top strip. */
+  height: var(--topbar-h);
   background: var(--bg-panel);
   /* Sit above the empty-pane picker (z-index 4) so the tabs and the
    * split/close/new actions stay visible/usable even before a session is bound. */
@@ -132,10 +132,10 @@
   gap: 6px;
   min-width: 90px;
   max-width: 200px;
-  /* Shorter than the 45px bar so a strip of chrome shows above the tab; the
+  /* Shorter than the bar so a strip of chrome shows above the tab; the
    * rounded top + white active fill give the folder-tab shape. The 1px
    * transparent border is reserved so activating a tab never nudges layout. */
-  height: 36px;
+  height: 42px;
   padding: 0 6px 0 12px;
   background: transparent;
   border: 1px solid transparent;

@@ -71,10 +71,12 @@
   box-shadow: 4px 0 14px -6px rgba(45, 37, 28, 0.10);
 }
 
-/* Blend the 4px resize handle into the white content side, so the only
-   visible boundary is the sidebar's own 1px border-right — a single clean
-   ivory→white line rather than an extra 4px strip of ivory. The
+/* Blend the 4px resize handle into whatever sits beside it so no stray strip
+   shows: ivory chrome (--bg-panel) alongside the top bar (sidebar header + pane
+   tab bar), switching to white (--bg) exactly at the top-bar seam so it merges
+   into the white transcript below. Without the top cream band the white handle
+   read as a gap between the (cream) sidebar and the (cream) tab bar. The
    :not(:hover/:is-dragging) guard keeps the accent drag-highlight winning. */
 [data-theme="ivory"] #sidebar-resize:not(:hover):not(.is-dragging) {
-  background: var(--bg);
+  background: linear-gradient(to bottom, var(--bg-panel) var(--topbar-h), var(--bg) var(--topbar-h));
 }

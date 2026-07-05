@@ -22,6 +22,11 @@
   /* Height of the sidebar footer (Settings button, features/sidebar.css
      #sidebar-footer). Kept as a token so other bottom chrome can align to it. */
   --bottom-bar-h: 60px;
+  /* Height of the top chrome bar — the sidebar header (Omnis logo/title) and
+     each pane's tab bar are pinned to this so they align edge-to-edge and read
+     as one continuous strip. The ivory sidebar-resize gradient also keys off it
+     (cream above the seam, white below). */
+  --topbar-h: 56px;
   /* Chat content column width, as a % of the pane so it scales edge-to-edge
      with the window. Leaves a margin on each side (not full-bleed). */
   --col-w: 90%;
@@ -56,6 +61,12 @@
   --accent-bg-soft: rgba(14, 99, 156, 0.25);
   --accent-border-soft: rgba(14, 99, 156, 0.5);
   --accent-hover-bg: #094771;
+
+  /* Brand mark — the Omnis "sun" glyph (white, theme-independent) used as a
+     background image over the --accent surface for the sidebar logo badge
+     (.app-logo) and the assistant-reply avatar (.msg-row.assistant::before).
+     Defined once in :root; the accent behind it re-tints per theme. */
+  --brand-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='5'/%3E%3Cline x1='12' y1='1' x2='12' y2='3'/%3E%3Cline x1='12' y1='21' x2='12' y2='23'/%3E%3Cline x1='4.22' y1='4.22' x2='5.64' y2='5.64'/%3E%3Cline x1='18.36' y1='18.36' x2='19.78' y2='19.78'/%3E%3Cline x1='1' y1='12' x2='3' y2='12'/%3E%3Cline x1='21' y1='12' x2='23' y2='12'/%3E%3Cline x1='4.22' y1='19.78' x2='5.64' y2='18.36'/%3E%3Cline x1='18.36' y1='5.64' x2='19.78' y2='4.22'/%3E%3C/svg%3E");
 
   /* Scrollbar */
   --scroll-thumb: #424242;

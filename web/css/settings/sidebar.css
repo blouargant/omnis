@@ -11,21 +11,28 @@
   gap: 8px;
   width: 100%;
   margin-top: 0.4rem;
-  padding: 0.4rem 0.6rem;
+  /* 12px left padding puts the icon on the same column as the Archived/Folders
+     chevrons (their headers pad 12px, panels pad 0), so the whole lower sidebar
+     shares one clean left edge; the label then lines up with the section labels.
+     Paired with #sidebar-footer padding:8px 0 so the hover fill spans full width
+     like the section headers. */
+  padding: 0.45rem 12px;
   background: transparent;
   border: 1px solid transparent;
   text-align: left;
   cursor: pointer;
   border-radius: 4px;
   font-size: 0.65rem;
-  color: inherit;
+  /* Same muted tone as the ARCHIVED / FOLDERS section labels so the five lower
+     labels read as one group; brightens to --text on hover/active. */
+  color: var(--text-muted);
 }
 #settings-btn svg,
 #appearance-btn svg,
 #documentation-btn svg { flex-shrink: 0; opacity: 0.8; }
 #settings-btn:hover,
 #appearance-btn:hover,
-#documentation-btn:hover { background: var(--bg-raised); }
+#documentation-btn:hover { background: var(--bg-raised); color: var(--text); }
 #settings-btn:hover svg,
 #appearance-btn:hover svg,
 #documentation-btn:hover svg { opacity: 1; }
