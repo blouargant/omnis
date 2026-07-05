@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl logs *)",
+      "Bash(kubectl top *)",
+      "Bash(kubectl explain *)",
+      "Bash(kubectl version *)",
+      "Bash(kubectl cluster-info *)",
+      "Bash(kubectl api-resources *)",
+      "Bash(kubectl api-versions *)",
+      "Bash(kubectl auth can-i *)",
+      "Bash(kubectl config current-context *)",
+      "Bash(kubectl config get-contexts *)",
+      "Bash(kubectl config view *)",
+      "Bash(kubectl config get-clusters *)",
+      "Bash(kubectl config get-users *)"
+    ],
+    "ask": [
+      {
+        "regex": "\\bkubectl\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon|uncordon|create|replace|exec|cp|port-forward|annotate|label|taint|set|run|debug|attach|expose)\\b",
+        "reason": "audits are read-only — a mutating kubectl operation during an audit is unexpected; confirm the intent and target",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bkubectl\\s+--context\\s",
+        "reason": "explicit --context selects a non-default cluster — confirm the target cluster",
+        "tools": ["Bash"]
+      }
+    ]
+  }
+}

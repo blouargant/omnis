@@ -265,7 +265,7 @@ main.go / server/
             │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer
-            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner
+            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill)
             │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · summariser
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
             │    └── "Helper"      ← leaderless single specialist (helper)

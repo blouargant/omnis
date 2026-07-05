@@ -9,6 +9,7 @@
   "skills": [
     "ask-user",
     "k8s-triage",
+    "k8s-audit",
     "k8s-modification",
     "k8s-cleanup"
   ],

@@ -15,6 +15,7 @@
     "k8s_investigator",
     "k8s_editor",
     "k8s_cleaner",
+    "k8s_auditor",
     "knowledge_leader",
     "doc_agent",
     "coder",
@@ -54,7 +55,8 @@
       "members": [
         "k8s_investigator",
         "k8s_editor",
-        "k8s_cleaner"
+        "k8s_cleaner",
+        "k8s_auditor"
       ]
     },
     {

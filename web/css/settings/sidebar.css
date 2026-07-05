@@ -161,4 +161,21 @@ body:has(#chat.chat--settings) #sidebar-footer {
   background: var(--bg-panel);
 }
 
+/* ─── Yield sidebar height to the settings menu while Settings is open ──────
+ * The Folders and Archived panels are `flex-shrink: 0`, so an *expanded* one
+ * (its body is up to ~32vh) claims fixed vertical space in the sidebar column.
+ * With Settings open, that space is stolen from the shrinkable #settings-menu
+ * (`flex: 0 1 auto`), squeezing the category list to zero height — leaving only
+ * the dark veil where the menu should be (the reported "clicking Settings shows
+ * nothing but the dark panel" bug, seen when Folders is expanded). Those
+ * sections are already backgrounded/veiled and not the focus, so collapse their
+ * scrollable bodies while Settings is open; the (dimmed) headers stay put and
+ * closing Settings restores them. Purely presentational — the panels' own
+ * collapsed state (class) is untouched, so app.js sees no change. */
+body:has(#chat.chat--settings) #folders-body,
+body:has(#chat.chat--settings) #folders-resize,
+body:has(#chat.chat--settings) #archived-list {
+  display: none;
+}
+
 
