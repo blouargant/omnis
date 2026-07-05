@@ -12,7 +12,7 @@ severe latency**:
 - One search dispatch hung ~**310 s** and returned
   `context deadline exceeded (Client.Timeout … while reading body)` — i.e. the
   HTTP client read timeout tripped mid-response.
-- In one `tools/squad-bench` suite pass, the **first two** Coding tasks stalled
+- In one `../omnis-benches/squad-bench` suite pass, the **first two** Coding tasks stalled
   past a 180 s deadline; the **later two finished fast** (~19–34 s).
 - Re-running the same two tasks minutes later: both finished in **~23 s**.
 
@@ -53,8 +53,8 @@ MODEL=Simple
 # SCALEWAY_API_KEY) — used later to bisect gateway-vs-backend, as in the GLM-5.2 case.
 ```
 
-Tools available: `tools/model-probe/probe.py` (stdlib, real requests; streaming +
-tool-call + parameterless-tool checks) and `tools/squad-bench/bench.py`
+Tools available: `../omnis-benches/model-probe/probe.py` (stdlib, real requests; streaming +
+tool-call + parameterless-tool checks) and `../omnis-benches/squad-bench/bench.py`
 (squad-level). `curl` + `python3` for ad-hoc probes.
 
 > **Never print the API key.** Mask it in any output you report.
@@ -65,7 +65,7 @@ Run these in order; record timings and raw errors for each.
 
 ### 1. Capability + streaming baseline (model-probe)
 ```bash
-python3 tools/model-probe/probe.py -u "$OPENAI_BASE_URL" -m "$MODEL" -k "$OPENAI_API_KEY"
+python3 ../omnis-benches/model-probe/probe.py -u "$OPENAI_BASE_URL" -m "$MODEL" -k "$OPENAI_API_KEY"
 ```
 Note especially: does **streamed chat** work, does **streamed tool-calling** work,
 and the **`Parameterless tool over streaming`** check (the exact GLM-5.2 fault —
@@ -131,7 +131,7 @@ through the ChapsVision gateway → gateway (LiteLLM) queueing/buffering.
 Reproduce the intermittency end-to-end and correlate with cold/warm:
 ```bash
 for i in $(seq 1 8); do
-  python3 tools/squad-bench/bench.py --task search-single --deadline 400 \
+  python3 ../omnis-benches/squad-bench/bench.py --task search-single --deadline 400 \
     --server http://127.0.0.1:8080 --out /tmp/simple_loop.jsonl --json | \
     python3 -c 'import sys,json;d=json.loads(sys.stdin.read().splitlines()[-1]);print(d["status"],d["wall_ms"],"ms",d.get("subagent_errors"))'
 done

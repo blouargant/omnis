@@ -206,60 +206,39 @@ make build-example-s11_todo    # build a single example
 go run ./examples/s21_skills   # run an example directly
 ```
 
-## Model compatibility probe (`tools/model-probe`)
+## Benchmarking & evaluation (sibling repo `omnis-benches`)
 
-A standalone, **dependency-free** (Python stdlib) test suite that verifies a live
-OpenAI-compatible endpoint + model supports the features Omnis actually uses, with
-**real requests** — streamed chat, tool calling (non-streaming **and** streaming),
-**parameterless tools over streaming**, the tool-result round-trip — plus side info
-(prompt caching, thinking-model `reasoning_content`, usage accounting, `/models`,
-LiteLLM `/model/info`); embeddings/vision checks are opt-in. Born from the GLM-5.2
-streaming regression (see [glm-5.2-streaming-bug.md](glm-5.2-streaming-bug.md));
-the `Parameterless tool over streaming` check encodes exactly that fault and emits
-a `disable_streaming` recommendation when it trips.
+**Policy: ALL benchmarks and evaluation tooling live in the `omnis-benches`
+repository — never in this repo.** Any new bench (a squad-bench tasks file, a
+model-probe check, or a whole new harness) MUST be added to
+**[omnis-benches](https://github.com/blouargant/omnis-benches)** (clone it next to
+this repo at `../omnis-benches`), not under `tools/` or anywhere in omnis. Do not
+re-introduce bench/eval code here. Both tools are dependency-free (Python stdlib)
+and driven over HTTP; **nothing imports omnis**, so they evolve independently.
 
-```bash
-python3 tools/model-probe/probe.py -u https://api.scaleway.ai/v1 -m glm-5.2 -k "$KEY"
-python3 tools/model-probe/probe.py --list           # all checks + what they validate
-```
-
-Exit code is non-zero iff a **critical** check fails. **To add a check, just drop a
-`tools/model-probe/checks/<name>.py` with `@check(...)` functions — it is
-auto-discovered, no wiring.** Full guide + the feature→check map live in
-[tools/model-probe/CLAUDE.md](tools/model-probe/CLAUDE.md); keep that suite current
-when Omnis starts depending on a new model capability.
-
-## Squad benchmark harness (`tools/squad-bench`)
-
-A dependency-free (Python stdlib) harness that drives the **running omnis-server**
-HTTP API like the web UI (create a session pinned to a squad → send one task
-prompt → stream the SSE) and reduces the event stream to a **metrics record** —
-so you can change which **model** an agent runs on (or tighten its instruction)
-and re-run the **same task** to compare. Complements `tools/model-probe` (which
-tests a raw endpoint's capabilities); this tests *squad behaviour*.
-
-```bash
-python3 tools/squad-bench/bench.py --suite               # all tasks in tasks.json
-python3 tools/squad-bench/bench.py --task search-single   # one task
-python3 tools/squad-bench/bench.py --suite --out runs.jsonl --repeat 3
-```
-
-Per-run metrics: `wall_ms`/`ttfb_ms`, **`token_events`** (streaming granularity —
-high ⇒ token-by-token, 1–3 ⇒ coarse/non-streaming), **`delegations`** +
-**`redispatches`** (did the leader delegate, and retry the same sub-agent),
-`leader_tools`/`subagent_tools` (e.g. a scout doing 12 greps = over-search),
-per-agent `models` cost estimate, **`subagent_errors`** (empty / `deadline
-exceeded` — endpoint too slow), `ask_user` (permission prompts — want 0), and
-`correct` (vs a task's `expect`). Tasks live in
-[tools/squad-bench/tasks.json](tools/squad-bench/tasks.json); `cwd:"sandbox"`
-tasks run against a fresh, git-isolated temp copy of
-[tools/squad-bench/sandbox](tools/squad-bench/sandbox) so an accidental edit can
-never touch a real repo. Full guide + the benchmarking loop (baseline → change
-model/instruction + reload → re-run → diff JSONL) in
-[tools/squad-bench/README.md](tools/squad-bench/README.md). Born from the
-multi-agent Coding-squad work — it caught a `simple`-model latency outlier
-(a scout dispatch hung ~310 s → HTTP client timeout) and premium's coarse
-streaming.
+- **`squad-bench/`** — drives a **running omnis-server** like the web UI (create a
+  session pinned to a squad → send one task → stream the SSE) and reduces the
+  stream to a **metrics record**: `wall_ms`/`ttfb_ms`, `token_events` (streaming
+  granularity), `delegations`/`redispatches`, `leader_tools`/`subagent_tools`,
+  per-agent `models` cost, `subagent_errors`, `ask_user` (want 0), `correct` (vs a
+  task's `expect`). Change an agent's **model** (or tighten its instruction) and
+  re-run the same task to compare. `cwd:"sandbox"` tasks run against a git-isolated
+  temp copy so an accidental edit can't touch a real repo. Born from the
+  multi-agent Coding-squad work (caught a `simple`-model ~310 s latency outlier and
+  premium's coarse streaming). Seeded k8s bench:
+  `squad-bench/tasks-kubernetes.json` (+ `README-kubernetes.md`) sweeps model tiers
+  for `k8s_editor`/`k8s_cleaner`.
+- **`model-probe/`** — verifies a live OpenAI-compatible **endpoint + model**
+  supports the features omnis actually uses with **real requests**: streamed chat,
+  tool calling (streaming **and** non-streaming), **parameterless tools over
+  streaming**, the tool-result round-trip, plus prompt caching / `reasoning_content`
+  / usage / `/models` / LiteLLM `/model/info`. Exit code is non-zero iff a
+  **critical** check fails. Born from the GLM-5.2 streaming regression (see
+  [glm-5.2-streaming-bug.md](glm-5.2-streaming-bug.md)); its `Parameterless tool
+  over streaming` check encodes exactly that fault and recommends `disable_streaming`
+  when it trips. **When omnis starts depending on a new model capability, add a
+  check there** (drop a `model-probe/checks/<name>.py` with `@check(...)` funcs —
+  auto-discovered).
 
 ## Architecture
 
