@@ -100,7 +100,10 @@ body.resizing-composer #composer-resize { transition: none; }
   margin: 0 auto;
   padding: 12px 14px;
   width: 100%;
-  background: var(--bubble-user-bg);
+  /* Editor surface: --composer-bg defaults to the peach user bubble; ivory /
+     terracotta override the token to white. The expanded Folders/Archived
+     sidebar cards read the same token so those panels always match the editor. */
+  background: var(--composer-bg);
   border: 1px solid var(--bubble-user-border);
   border-radius: 16px;
   box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));

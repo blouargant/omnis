@@ -592,14 +592,15 @@ body.resizing #sidebar { transition: none; }
   max-height: 32vh;
 }
 #archived-panel.collapsed #archived-list { display: none; }
-/* Expanded panel = an inset rounded "card" (border + soft shadow, one shade off
-   the sidebar via bg=--bg) so its rows don't blend into the sidebar chrome.
+/* Expanded panel = an inset rounded "card" (border + soft shadow) so its rows
+   don't blend into the sidebar chrome. bg=--composer-bg matches the prompt
+   editor's surface (peach bubble by default, white in ivory/terracotta).
    Collapsed it stays a plain header row. Mirrors Folders in features/folders.css. */
 #archived-panel:not(.collapsed) {
   margin: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--bg);
+  background: var(--composer-bg);
   box-shadow: var(--shadow-bubble);
   overflow: hidden;
 }

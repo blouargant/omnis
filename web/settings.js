@@ -113,6 +113,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "vscode-light",    label: "VS Code Light",   tier: "principal", tone: "Light", swatch: ["#ffffff", "#f3f3f3", "#0e639c", "#1e1e1e"] },
     { id: "github-light",    label: "GitHub Light",    tier: "principal", tone: "Light", swatch: ["#ffffff", "#f6f8fa", "#0969da", "#24292f"] },
     { id: "ivory",           label: "Ivory",           tier: "principal", tone: "Light", swatch: ["#ffffff", "#f5f4ee", "#c15f3c", "#2b2a25"] },
+    { id: "terracotta",      label: "Terracotta",      tier: "principal", tone: "Light", swatch: ["#f5f0e8", "#fbf7f1", "#be703c", "#2b2a25"] },
     // Secondary
     { id: "dracula",         label: "Dracula",         tier: "secondary", tone: "Dark",  swatch: ["#282a36", "#21222c", "#bd93f9", "#f8f8f2"] },
     { id: "nord",            label: "Nord",            tier: "secondary", tone: "Dark",  swatch: ["#2e3440", "#3b4252", "#5e81ac", "#d8dee9"] },

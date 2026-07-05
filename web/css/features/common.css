@@ -76,6 +76,11 @@
    * without forcing every input to match). */
   --bubble-user-bg: #3a3c3a;
   --bubble-user-border: #595959;
+  /* Prompt-editor (composer) surface. Defaults to the user bubble so the editor
+   * matches sent turns; a theme can override just this to give the editor its
+   * own surface (ivory/terracotta set it white). The expanded Folders/Archived
+   * sidebar cards also use it, so those panels always match the editor. */
+  --composer-bg: var(--bubble-user-bg);
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
 
   /* Danger — destructive buttons, error states */

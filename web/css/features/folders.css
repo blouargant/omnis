@@ -60,16 +60,16 @@
 #folders-panel.collapsed #folders-body { display: none; }
 /* When expanded, the panel becomes an inset rounded "card" so its contents read
    as a distinct region instead of blending into the sidebar chrome. Collapsed,
-   it stays a plain header row (base rules above). bg=--bg is one step off the
-   sidebar's --bg-panel in every theme; the border + soft shadow draw the card
-   edge, and overflow:hidden clips the header/rows to the rounded corners. Row
-   hover then steps to --bg-raised-hover so it still stands out on this surface.
-   Mirrored by the Archived panel in features/sidebar.css. */
+   it stays a plain header row (base rules above). bg=--composer-bg matches the
+   prompt editor's surface (peach bubble by default, white in ivory/terracotta);
+   the border + soft shadow draw the card edge, and overflow:hidden clips the
+   header/rows to the rounded corners. Row hover then steps to --bg-raised-hover
+   so it still stands out. Mirrored by the Archived panel in features/sidebar.css. */
 #folders-panel:not(.collapsed) {
   margin: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--bg);
+  background: var(--composer-bg);
   box-shadow: var(--shadow-bubble);
   overflow: hidden;
 }

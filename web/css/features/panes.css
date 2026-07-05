@@ -246,9 +246,14 @@
 /* A single open tab can't be closed via its × when it's the pane's only tab in
  * the only pane — but we keep the affordance; closeTab handles the picker. */
 
-/* "+" new-tab button. */
+/* "+" new-tab button. Bottom-aligned to the tab band and given the tab's height
+ * (rather than stretching the full 56px bar) so its glyph sits on the same line
+ * as the tabs' close (×) button instead of ~7px above it. The 42px MUST match
+ * .pane-tab height above. */
 .pane-newtab-btn {
   flex-shrink: 0;
+  align-self: flex-end;
+  height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

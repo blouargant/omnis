@@ -1,19 +1,18 @@
-/* Ivory — a warm light skin.
-   Warm ivory chrome (sidebar / tab bar / composer) beside a slightly lighter
-   warm-cream reading surface, with a warm clay accent and a peach user bubble.
-   The scoped rules at the bottom reproduce the left-panel / main-panel
-   separation: a crisp ivory→cream seam plus a whisper of depth. */
-[data-theme="ivory"] {
+/* Terracotta — a warm light skin (sibling of Ivory).
+   A near-white ivory sidebar beside a slightly deeper warm-cream reading
+   surface, with a strong terracotta accent and a peach user bubble. The scoped
+   rules at the bottom reproduce the left-panel / main-panel separation: a crisp
+   ivory→cream seam plus a whisper of depth. */
+[data-theme="terracotta"] {
   color-scheme: light;
 
-  /* Surfaces — warm ivory chrome, warm-cream content. --bg is the reading
-     surface (main chat / Settings body), a soft cream rather than stark white;
-     --bg-panel is every chrome surface (sidebar, pane tab bar), a touch deeper
-     and warmer so the sidebar reads as a distinct ivory panel beside the cream
-     content — the core of the look. --bg-input stays white so the composer
-     pops off the cream, matching the reference. */
-  --bg: #fbf7ef;
-  --bg-panel: #f4eddf;
+  /* Surfaces — near-white ivory chrome, warm-cream content. --bg is the reading
+     surface (main chat / Settings body), a soft cream; --bg-panel is every
+     chrome surface (sidebar, pane tab bar), a lighter near-white ivory so the
+     sidebar reads as a bright panel beside the deeper cream content. --bg-input
+     stays white so the composer pops off the surfaces. */
+  --bg: #f5f0e8;
+  --bg-panel: #fbf7f1;
   --bg-raised: #ece3d1;
   --bg-raised-hover: #e4dac4;
   --bg-active: #f7e6d6;
@@ -29,14 +28,14 @@
   --text-muted: #726f5d;
   --text-faint: #a3a08d;
 
-  /* Accent — a warm clay / terracotta. Drives the focused-session rail,
-     focus rings, the New-chat glow and primary buttons. */
-  --accent: #c15f3c;
-  --accent-hover: #d97757;
-  --accent-strong: #b0532f;
-  --accent-bg-soft: rgba(193, 95, 60, 0.13);
-  --accent-border-soft: rgba(193, 95, 60, 0.42);
-  --accent-hover-bg: #f3e6de;
+  /* Accent — a strong terracotta. Drives the focused-session rail, focus rings,
+     the New-chat glow and primary buttons. */
+  --accent: #be703c;
+  --accent-hover: #d3814c;
+  --accent-strong: #a85f30;
+  --accent-bg-soft: rgba(190, 112, 60, 0.13);
+  --accent-border-soft: rgba(190, 112, 60, 0.42);
+  --accent-hover-bg: #f4e7dc;
 
   --scroll-thumb: #d9d6c7;
   --scroll-thumb-hover: #c4c0ae;
@@ -64,14 +63,14 @@
 }
 
 /* ─── Left-panel / main-panel separation ──────────────────────────────
-   The ivory sidebar vs. white content already gives the tonal split; these
-   two rules add the crisp seam and a whisper of depth on top of it. */
+   The ivory sidebar vs. cream content already gives the tonal split; these two
+   rules add the crisp seam and a whisper of depth on top of it. */
 
 /* Raise the sidebar into the positioned paint layer so its soft right-edge
-   shadow lands ON the white chat. Without z-index the chat's own background
+   shadow lands ON the cream chat. Without z-index the chat's own background
    (which paints later in tree order) would cover the feather. overflow:hidden
    does not clip an element's OWN outset shadow, so the depth still shows. */
-[data-theme="ivory"] #sidebar {
+[data-theme="terracotta"] #sidebar {
   position: relative;
   z-index: 1;
   box-shadow: 4px 0 14px -6px rgba(45, 37, 28, 0.10);
@@ -79,10 +78,9 @@
 
 /* Blend the 4px resize handle into whatever sits beside it so no stray strip
    shows: ivory chrome (--bg-panel) alongside the top bar (sidebar header + pane
-   tab bar), switching to white (--bg) exactly at the top-bar seam so it merges
-   into the white transcript below. Without the top cream band the white handle
-   read as a gap between the (cream) sidebar and the (cream) tab bar. The
-   :not(:hover/:is-dragging) guard keeps the accent drag-highlight winning. */
-[data-theme="ivory"] #sidebar-resize:not(:hover):not(.is-dragging) {
+   tab bar), switching to the cream surface (--bg) exactly at the top-bar seam so
+   it merges into the cream transcript below. The :not(:hover/:is-dragging) guard
+   keeps the accent drag-highlight winning. */
+[data-theme="terracotta"] #sidebar-resize:not(:hover):not(.is-dragging) {
   background: linear-gradient(to bottom, var(--bg-panel) var(--topbar-h), var(--bg) var(--topbar-h));
 }
