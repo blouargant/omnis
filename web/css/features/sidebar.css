@@ -158,7 +158,6 @@ body.resizing #sidebar { transition: none; }
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
   gap: 8px;
 }
 .sidebar-header-btns {
@@ -192,7 +191,10 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed .update-btn { display: none; }
 
 .app-name {
-  font-size: 15px;
+  font-size: 20px;
+  /* Pinned line-height (< the 24px toggle button beside it) keeps the header's
+     content height — and thus the whole header — unchanged as the title grows. */
+  line-height: 1;
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -224,7 +226,8 @@ body.resizing #sidebar { transition: none; }
   display: flex;
   align-items: stretch;
   margin: 10px 12px 4px;
-  border-radius: 10px;
+  /* Full pill: 19px = half the 38px button height, so the ends are fully round. */
+  border-radius: 19px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
   box-shadow: 0 0 0 1px var(--accent-border-soft), 0 0 12px var(--accent-bg-soft);
@@ -254,11 +257,11 @@ body.resizing #sidebar { transition: none; }
   /* Match the wrap radius so the button fills the pill cleanly. The
    * trailing chevron narrows it on the right when squad selection is
    * available (see :has() rule below). */
-  border-radius: 10px;
+  border-radius: 19px;
 }
 #new-chat:hover { background: var(--bg-raised-hover); }
 #new-chat-wrap:has(#squad-toggle:not([hidden])) #new-chat {
-  border-radius: 10px 0 0 10px;
+  border-radius: 19px 0 0 19px;
 }
 #new-chat .new-chat-text {
   display: flex;
@@ -294,7 +297,7 @@ body.resizing #sidebar { transition: none; }
   background: transparent;
   border: none;
   border-left: 1px solid var(--border);
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 19px 19px 0;
   color: var(--text-muted);
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
@@ -577,6 +580,17 @@ body.resizing #sidebar { transition: none; }
   max-height: 32vh;
 }
 #archived-panel.collapsed #archived-list { display: none; }
+/* Expanded panel = an inset rounded "card" (border + soft shadow, one shade off
+   the sidebar via bg=--bg) so its rows don't blend into the sidebar chrome.
+   Collapsed it stays a plain header row. Mirrors Folders in features/folders.css. */
+#archived-panel:not(.collapsed) {
+  margin: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow-bubble);
+  overflow: hidden;
+}
 /* Archived rows reuse the active-session row look and hover behaviour. */
 #archived-list li {
   position: relative;
@@ -588,7 +602,7 @@ body.resizing #sidebar { transition: none; }
   margin-bottom: 1px;
   transition: background 0.1s, color 0.1s;
 }
-#archived-list li:hover { background: var(--bg-raised); color: var(--text); }
+#archived-list li:hover { background: var(--bg-raised-hover); color: var(--text); }
 #archived-list li.active { background: var(--bg-active); color: var(--text-strong); }
 #archived-list li .meta {
   font-size: 12px;

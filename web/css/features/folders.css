@@ -58,6 +58,27 @@
   min-height: 0;
 }
 #folders-panel.collapsed #folders-body { display: none; }
+/* When expanded, the panel becomes an inset rounded "card" so its contents read
+   as a distinct region instead of blending into the sidebar chrome. Collapsed,
+   it stays a plain header row (base rules above). bg=--bg is one step off the
+   sidebar's --bg-panel in every theme; the border + soft shadow draw the card
+   edge, and overflow:hidden clips the header/rows to the rounded corners. Row
+   hover then steps to --bg-raised-hover so it still stands out on this surface.
+   Mirrored by the Archived panel in features/sidebar.css. */
+#folders-panel:not(.collapsed) {
+  margin: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow-bubble);
+  overflow: hidden;
+}
+/* The resize grip becomes a slim top grab-strip inside the card — its base
+   negative margins would otherwise be clipped away by overflow:hidden. */
+#folders-panel:not(.collapsed) #folders-resize {
+  margin: 0;
+  height: 5px;
+}
 #folders-path {
   font-size: 11px;
   color: var(--text-faint);
@@ -98,7 +119,7 @@
   user-select: none;
 }
 #folders-list .folder-entry-row:hover,
-#folders-list li.folder-up:hover { background: var(--bg-raised); color: var(--text); }
+#folders-list li.folder-up:hover { background: var(--bg-raised-hover); color: var(--text); }
 #folders-list .folder-entry-icon { flex-shrink: 0; color: var(--text-faint); }
 #folders-list .folder-entry-row:hover .folder-entry-icon,
 #folders-list li.folder-up:hover .folder-entry-icon { color: var(--text); }

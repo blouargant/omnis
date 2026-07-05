@@ -177,5 +177,18 @@ body:has(#chat.chat--settings) #folders-resize,
 body:has(#chat.chat--settings) #archived-list {
   display: none;
 }
+/* …and drop the expanded "card" chrome (features/*.css) so an expanded panel
+   doesn't leave an empty rounded card behind the veil — just a plain, dimmed
+   header row. Closing Settings restores the card. */
+body:has(#chat.chat--settings) #folders-panel:not(.collapsed),
+body:has(#chat.chat--settings) #archived-panel:not(.collapsed) {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
 
 
