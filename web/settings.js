@@ -2690,11 +2690,18 @@ const BASE_PATH = window.BASE_PATH || "";
     streamSwitch.appendChild(streamCb); streamSwitch.appendChild(streamSlider);
     streamWrap.appendChild(streamSwitch); streamWrap.appendChild(streamText);
 
-    // PROMPT CACHE toggle — OFF by default (persisted as prompt_cache). When ON
-    // the OpenAI-compat adapter adds Anthropic `cache_control` breakpoints to the
-    // long-lived prefix so an upstream LiteLLM proxy caches it against the backing
-    // Anthropic model. Leave OFF for a plain OpenAI endpoint (it caches
-    // automatically and may reject the annotation).
+    // PROMPT CACHE toggle — tri-state opt-out (persisted as prompt_cache). When
+    // ON the OpenAI-compat adapter adds Anthropic `cache_control` breakpoints to
+    // the long-lived prefix so an upstream LiteLLM proxy caches it against the
+    // backing Anthropic model. Default (absent key) is ON for openai_compat
+    // providers and OFF for a plain OpenAI endpoint — mirroring promptCacheEnabled
+    // on the Go side. The key is only persisted when it deviates from that
+    // default, so models.json stays clean.
+    const cacheDefaultOn = (function () {
+      const kind = m.provider
+        || ((m.provider_ref && d.providers && d.providers[m.provider_ref] && d.providers[m.provider_ref].kind) || "");
+      return String(kind).toLowerCase() === "openai_compat";
+    })();
     const cacheWrap = document.createElement("span");
     cacheWrap.className = "model-stream-wrap";
     cacheWrap.setAttribute("data-tip", tr("set.model.cacheTip"));
@@ -2706,9 +2713,11 @@ const BASE_PATH = window.BASE_PATH || "";
     const cacheCb = document.createElement("input");
     cacheCb.type = "checkbox";
     cacheCb.className = "agent-toggle-input";
-    cacheCb.checked = !!m.prompt_cache;
+    cacheCb.checked = (m.prompt_cache === undefined || m.prompt_cache === null)
+      ? cacheDefaultOn : !!m.prompt_cache;
     cacheCb.addEventListener("change", () => {
-      if (cacheCb.checked) m.prompt_cache = true; else delete m.prompt_cache;
+      if (cacheCb.checked === cacheDefaultOn) delete m.prompt_cache;
+      else m.prompt_cache = cacheCb.checked;
       onChange();
     });
     const cacheSlider = document.createElement("span");

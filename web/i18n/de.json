@@ -481,7 +481,7 @@
   "set.model.unused": "Ungenutzt — kein Agent verwendet dieses Modell",
   "set.model.streamTip": "die Ausgabe dieses Modells streamen (aus = den nicht-streamenden Endpunkt verwenden)",
   "set.model.streaming": "Streaming",
-  "set.model.cacheTip": "den langlebigen Präfix dieses Modells per Prompt-Cache zwischenspeichern (für einen LiteLLM-Proxy vor einem Anthropic-Modell; bei einem einfachen OpenAI-Endpunkt ausschalten)",
+  "set.model.cacheTip": "den langlebigen Präfix dieses Modells per Prompt-Cache zwischenspeichern (für einen LiteLLM-Proxy vor einem Anthropic-Modell). Standardmäßig an für openai_compat-Gateways; Backends ohne Cache ignorieren es. Für einen einfachen OpenAI-Endpunkt ausschalten.",
   "set.model.promptCache": "Prompt-Cache",
   "set.model.provider": "ANBIETER",
   "set.model.noProviders": "(keine Anbieter — fügen Sie zuerst einen hinzu)",

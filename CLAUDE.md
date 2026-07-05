@@ -808,7 +808,7 @@ Config files are resolved through a **3-layer search chain** (high → low prece
 | File | Purpose |
 |---|---|
 | `agents.json` | List of enabled agent names, squad composition, global paths, and `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables) |
-| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache": true` adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model). Top-level `"override_model_ref"` + `"override_model_enabled"` implement the **single-model override** ("run the whole fleet on one model"): when enabled, `applyModelOverride` ([agent/runtime_config.go](agent/runtime_config.go)) forces **every** agent onto that one model (overwriting each agent's own `model_ref`-resolved connection + pricing) at `ResolveRuntimeSettings` time — so it's hot-reloadable; disabling restores the per-agent config. The ref is kept while disabled so the toggle flips cleanly. Scoped to **agents only** — the internal embedder + `/goal` evaluator are untouched (and an `embedding:true` ref is ignored). Web UI: Settings → Models → General card ("Use one model for all agents"). Env: `OMNIS_OVERRIDE_MODEL_REF`/`OMNIS_OVERRIDE_MODEL_ENABLED` |
+| `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache"` (tri-state `*bool`) adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy; **default ON for `openai_compat`, OFF for plain `openai`**, explicit `true`/`false` overrides (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model). Top-level `"override_model_ref"` + `"override_model_enabled"` implement the **single-model override** ("run the whole fleet on one model"): when enabled, `applyModelOverride` ([agent/runtime_config.go](agent/runtime_config.go)) forces **every** agent onto that one model (overwriting each agent's own `model_ref`-resolved connection + pricing) at `ResolveRuntimeSettings` time — so it's hot-reloadable; disabling restores the per-agent config. The ref is kept while disabled so the toggle flips cleanly. Scoped to **agents only** — the internal embedder + `/goal` evaluator are untouched (and an `embedding:true` ref is ignored). Web UI: Settings → Models → General card ("Use one model for all agents"). Env: `OMNIS_OVERRIDE_MODEL_REF`/`OMNIS_OVERRIDE_MODEL_ENABLED` |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
 | `registry/agents/default.md` | Fallback system instruction for agents without their own |
@@ -991,29 +991,48 @@ rate). omnis reaches Anthropic through a **LiteLLM proxy** on the `openai_compat
 provider, so the native `core/llm/anthropic.go` adapter is bypassed; the request
 is built by the OpenAI-compat adapter ([core/llm/openai.go](core/llm/openai.go)).
 
-A per-model **`"prompt_cache": true`** flag in `models.json` opts that model into
-caching (mirrors the `disable_streaming` plumbing exactly: `ModelEntry` →
-`RuntimeModelConfig`/`RuntimeAgentConfig` → `llm.Selection.PromptCache` →
-`applyModelPrefs` sets `openAI.promptCache`). When set, `buildRequest` calls
-`markCacheablePrefix`, which places **ephemeral `cache_control` breakpoints** on
-the request's **system message** (in Anthropic's `tools → system → messages`
-render order this also caches the tool catalogue) **and** its **final message**
-(incremental multi-turn reuse). LiteLLM accepts the annotation by reading
-`cache_control` on a **structured content part** (the adapter converts the
-string body to array form to carry it) and forwards it to Anthropic as the
-native breakpoint. Two breakpoints, well within Anthropic's 4-breakpoint cap; a
-sub-minimum/empty prefix is a **silent upstream no-op**, never an error
-(`markMessageCacheable` also skips a content-less assistant/tool-call turn).
+The per-model **`"prompt_cache"`** flag in `models.json` controls this (plumbing
+mirrors `disable_streaming`: `ModelEntry` → `RuntimeModelConfig`/
+`RuntimeAgentConfig` → `llm.Selection.PromptCache` → `applyModelPrefs` sets
+`openAI.promptCache`). When enabled, `buildRequest` calls `markCacheablePrefix`,
+which places **ephemeral `cache_control` breakpoints** on the request's **system
+message** (in Anthropic's `tools → system → messages` render order this also
+caches the tool catalogue) **and** its **final message** (incremental multi-turn
+reuse). LiteLLM accepts the annotation by reading `cache_control` on a
+**structured content part** (the adapter converts the string body to array form
+to carry it) and forwards it to Anthropic as the native breakpoint. Two
+breakpoints, well within Anthropic's 4-breakpoint cap; a sub-minimum/empty prefix
+is a **silent upstream no-op**, never an error (`markMessageCacheable` also skips
+a content-less assistant/tool-call turn).
 
-**Opt-in by design.** A plain OpenAI endpoint caches automatically server-side
-and may reject the unrecognised `cache_control` field, so the flag defaults off
-and only the `openai`/`openai_compat` adapters honour it (no effect on gemini or
-the native anthropic adapter). Cache reads still surface in the cache-stats
-plugin via the existing `usage.prompt_tokens_details.cached_tokens` mapping
+**Default ON for `openai_compat`, opt-out (tri-state).** `ModelEntry.PromptCache`
+is a `*bool` resolved by `promptCacheEnabled(pc, provider)`
+([agent/runtime_config.go](agent/runtime_config.go)) at the `ModelEntry`→
+`RuntimeModelConfig` boundary: an absent flag defaults to **ON for
+`openai_compat`** providers (the LiteLLM/gateway case — where a client-side
+breakpoint is what makes Anthropic caching engage at all) and **OFF for a plain
+`openai`** endpoint (it caches automatically server-side and may reject the
+unrecognised field). An explicit `false` forces it off, `true` forces it on for
+any provider. This is safe to send to a **non-caching openai_compat backend**:
+verified against Scaleway both directly (`api.scaleway.ai`: Llama/Mistral/gpt-oss)
+and behind ChapsVision's LiteLLM proxy (the `Simple`/`Balanced`/`High` models) —
+both **silently ignore** the `cache_control` field and return HTTP 200
+(streaming + non-streaming), never an error; the `Premium` Anthropic model behind
+the same gateway does honour it (`cache_creation_input_tokens` > 0 on a
+>1024-token prefix, 0 without the annotation). Only the `openai`/`openai_compat`
+adapters honour the flag (no effect on gemini or the native anthropic adapter).
+Cache reads surface in the cache-stats plugin via the existing
+`usage.prompt_tokens_details.cached_tokens` mapping
 ([core/llm/openai.go](core/llm/openai.go) `cachedRead`), which LiteLLM populates
 from Anthropic's `cache_read_input_tokens`. The web UI exposes it as a **Prompt
-cache** toggle beside **Streaming** in Settings → Models. **No-op contract:**
-with the flag off the request is byte-identical to before.
+cache** toggle beside **Streaming** in Settings → Models: it reflects the
+provider-based default and only persists the key when it deviates (so
+`models.json` stays clean). **No-op contract:** for a provider/model that
+resolves to off, the request is byte-identical to before. (Gateway note: whether
+cache *reads* actually hit depends on the proxy landing repeat requests on the
+same backing cache — e.g. LiteLLM load-balancing across deployments/keys can make
+back-to-back identical calls re-*create* rather than *read* the cache; that is a
+gateway-side concern, independent of the client-side annotation being correct.)
 
 ### Filesystem layout
 

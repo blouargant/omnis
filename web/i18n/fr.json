@@ -481,7 +481,7 @@
   "set.model.unused": "Inutilisé — aucun agent n'utilise ce modèle",
   "set.model.streamTip": "diffuser en flux la sortie de ce modèle (désactivé = utiliser l'endpoint non-streaming)",
   "set.model.streaming": "Streaming",
-  "set.model.cacheTip": "mettre en cache le préfixe à longue durée de vie de ce modèle (pour un proxy LiteLLM devant un modèle Anthropic ; laisser désactivé pour un endpoint OpenAI standard)",
+  "set.model.cacheTip": "mettre en cache le préfixe à longue durée de vie de ce modèle (pour un proxy LiteLLM devant un modèle Anthropic). Activé par défaut pour les passerelles openai_compat ; les backends sans cache l'ignorent. Désactiver pour un endpoint OpenAI standard.",
   "set.model.promptCache": "Cache de prompt",
   "set.model.provider": "FOURNISSEUR",
   "set.model.noProviders": "(aucun fournisseur — ajoutez-en un d'abord)",

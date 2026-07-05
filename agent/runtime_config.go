@@ -105,12 +105,22 @@ type ModelEntry struct {
 	// non-streaming path delivers the full reply in one turn.
 	DisableStreaming bool `json:"disable_streaming,omitempty"`
 	// PromptCache enables Anthropic-style prompt caching for agents using this
-	// model. The OpenAI-compat adapter adds `cache_control: {"type":
-	// "ephemeral"}` breakpoints to the long-lived prefix (system instruction +
-	// tool catalogue) and the latest turn so an upstream LiteLLM proxy fronting
-	// an Anthropic model caches them. Leave it off for a plain OpenAI endpoint,
-	// which caches automatically and may reject the annotation.
-	PromptCache bool `json:"prompt_cache,omitempty"`
+	// model: the OpenAI-compat adapter adds `cache_control: {"type": "ephemeral"}`
+	// breakpoints to the long-lived prefix (system instruction + tool catalogue)
+	// and the latest turn so an upstream LiteLLM proxy fronting an Anthropic model
+	// caches them.
+	//
+	// Tri-state (opt-out): nil/absent defaults to ON for `openai_compat`
+	// providers — LiteLLM/gateway backends, where a client-side breakpoint is
+	// what makes Anthropic caching engage at all, and which we verified silently
+	// ignore the annotation when the backing model doesn't cache (Scaleway,
+	// Llama/Mistral/GLM behind LiteLLM: HTTP 200, field ignored, no error) — and
+	// OFF for a plain `openai` provider (it caches automatically server-side and
+	// may reject the unrecognised field). An explicit `false` forces it off, a
+	// `true` forces it on for any provider. Resolved by promptCacheEnabled at the
+	// ModelEntry→RuntimeModelConfig boundary, so the runtime side stays a plain
+	// bool.
+	PromptCache *bool `json:"prompt_cache,omitempty"`
 }
 
 // modelsConfigFile is the on-disk shape of models.json.
@@ -454,9 +464,10 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 			}
 			refProvider = p
 		}
+		provider := firstNonEmpty(strings.TrimSpace(m.Provider), refProvider.Kind)
 		out[name] = RuntimeModelConfig{
 			Name:                              name,
-			Provider:                          firstNonEmpty(strings.TrimSpace(m.Provider), refProvider.Kind),
+			Provider:                          provider,
 			Model:                             strings.TrimSpace(m.Model),
 			BaseURL:                           resolveBaseURLReference(firstNonEmpty(strings.TrimSpace(m.BaseURL), refProvider.BaseURL)),
 			APIKey:                            resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(m.APIKey), refProvider.APIKey)),
@@ -468,7 +479,7 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 			Embedding:                         m.Embedding,
 			Dim:                               m.Dim,
 			DisableStreaming:                  m.DisableStreaming,
-			PromptCache:                       m.PromptCache,
+			PromptCache:                       promptCacheEnabled(m.PromptCache, provider),
 		}
 	}
 	return out, nil
@@ -665,6 +676,24 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 // (nil) means enabled; only an explicit false disables them.
 func resumableEnabled(p *bool) bool {
 	return p == nil || *p
+}
+
+// promptCacheEnabled resolves the per-model prompt_cache flag (opt-out for
+// gateways). An explicit value always wins; when absent (nil) the default is ON
+// for `openai_compat` providers and OFF otherwise. Rationale: client-side
+// `cache_control` breakpoints are what make Anthropic prompt caching engage
+// behind a LiteLLM/OpenAI-compat gateway (an un-annotated request caches 0%),
+// and non-caching openai_compat backends (e.g. Scaleway-hosted Llama/Mistral/GLM
+// behind LiteLLM) silently ignore the annotation — verified to return HTTP 200
+// with the field dropped, never an error. A plain `openai` endpoint caches
+// automatically server-side and may reject the unrecognised field, so it stays
+// off unless opted in. Only the openai/openai_compat adapters honour the flag
+// (see applyModelPrefs); gemini/native-anthropic ignore it regardless.
+func promptCacheEnabled(p *bool, provider string) bool {
+	if p != nil {
+		return *p
+	}
+	return strings.EqualFold(strings.TrimSpace(provider), "openai_compat")
 }
 
 func maxInt(a, b int) int {

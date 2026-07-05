@@ -239,6 +239,56 @@ func TestResolveRuntimeSettingsProviderRefInheritance(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimeSettingsPromptCacheDefault(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "compat_default"},
+		{Name: "investigator", ModelRef: "compat_off"},
+		{Name: "helper", ModelRef: "oai_default"},
+		{Name: "summariser", ModelRef: "oai_on"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{"agents": ["leader","investigator","helper","summariser"]}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "providers": {
+    "gw":  {"kind": "openai_compat", "base_url": "https://gw.example/x", "api_key": "K"},
+    "oai": {"kind": "openai", "api_key": "K"}
+  },
+  "models": {
+    "compat_default": {"provider_ref": "gw",  "model": "Premium"},
+    "compat_off":     {"provider_ref": "gw",  "model": "Simple", "prompt_cache": false},
+    "oai_default":    {"provider_ref": "oai", "model": "gpt-4o"},
+    "oai_on":         {"provider_ref": "oai", "model": "gpt-4o", "prompt_cache": true}
+  }
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+
+	cases := []struct {
+		agent string
+		want  bool
+		why   string
+	}{
+		{"leader", true, "openai_compat with no prompt_cache defaults ON"},
+		{"investigator", false, "openai_compat with explicit prompt_cache:false is OFF"},
+		{"helper", false, "plain openai with no prompt_cache defaults OFF"},
+		{"summariser", true, "plain openai with explicit prompt_cache:true is ON"},
+	}
+	for _, c := range cases {
+		cfg, ok := runtime.AgentConfig(c.agent)
+		if !ok {
+			t.Fatalf("%s config missing", c.agent)
+		}
+		if cfg.PromptCache != c.want {
+			t.Fatalf("%s PromptCache = %v, want %v (%s)", c.agent, cfg.PromptCache, c.want, c.why)
+		}
+	}
+}
+
 func TestResolveRuntimeSettingsUnknownProviderRef(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{

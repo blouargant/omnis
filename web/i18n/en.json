@@ -522,7 +522,7 @@
   "set.model.unused": "Unused — no agent uses this model",
   "set.model.streamTip": "stream this model's output (off = use the non-streaming endpoint)",
   "set.model.streaming": "Streaming",
-  "set.model.cacheTip": "prompt-cache this model's long-lived prefix (for a LiteLLM proxy fronting an Anthropic model; leave off for a plain OpenAI endpoint)",
+  "set.model.cacheTip": "prompt-cache this model's long-lived prefix (for a LiteLLM proxy fronting an Anthropic model). On by default for openai_compat gateways; non-caching backends ignore it. Turn off for a plain OpenAI endpoint.",
   "set.model.promptCache": "Prompt cache",
   "set.model.provider": "PROVIDER",
   "set.model.noProviders": "(no providers — add one first)",
