@@ -98,12 +98,18 @@ body.resizing-composer #composer-resize { transition: none; }
   gap: 8px;
   max-width: 700px;
   margin: 0 auto;
-  padding: 10px 12px;
+  padding: 12px 14px;
   width: 100%;
   background: var(--bubble-user-bg);
   border: 1px solid var(--bubble-user-border);
   border-radius: 16px;
   box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* Focus feedback lives on the whole card now that the textarea is borderless. */
+#composer:focus-within {
+  border-color: var(--accent-border-soft);
+  box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4)), 0 0 0 3px var(--accent-bg-soft);
 }
 
 /* The composer is a two-layer stack: a backdrop (.prompt-highlight) that
@@ -133,11 +139,12 @@ body.resizing-composer #composer-resize { transition: none; }
   pointer-events: none;
   overflow: hidden;
   box-sizing: border-box;
-  /* Prompt editor background follows the theme (chat panel bg). */
-  background: var(--bg-panel);
+  /* Seamless: the text sits directly on the composer card (no inner box) — the
+     card itself is the input surface, matching the clean single-card look. */
+  background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 10px 14px;
+  padding: 6px 8px;
   font-size: 15px;
   font-family: inherit;
   line-height: 1.5;
@@ -154,25 +161,26 @@ body.resizing-composer #composer-resize { transition: none; }
   position: relative;
   z-index: 1;
   width: 100%;
-  min-height: calc(1.5em + 20px);
+  min-height: calc(1.5em + 12px);
   background: transparent;
-  border: 1px solid var(--border-strong);
+  /* Borderless: the textarea blends into the composer card; focus feedback moves
+     to the whole card (#composer:focus-within below). Border kept transparent so
+     the box metrics still match .prompt-highlight exactly (no caret drift). */
+  border: 1px solid transparent;
   color: transparent;
   caret-color: var(--text);
   border-radius: 6px;
-  padding: 10px 14px;
+  padding: 6px 8px;
   font-size: 15px;
   font-family: inherit;
   resize: none;
   outline: none;
   line-height: 1.5;
   overflow-y: hidden;
-  transition: border-color 0.15s;
 }
 #composer-wrap.is-manual #prompt {
   overflow-y: auto;
 }
-#prompt:focus { border-color: var(--accent-strong); }
 /* While an IME is composing, show the textarea's own (preedit) text and hide
    the backdrop, since preedit text never reaches .value. */
 #composer-wrap.ime-composing #prompt { color: var(--text); }
