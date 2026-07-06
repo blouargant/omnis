@@ -89,6 +89,63 @@ under-reporting). Beating them is a matter of discipline, not cleverness.
    > overlooking an `initContainer`. Enumerate all three container lists, every
    > time.
 
+### Phase 3b — Rule-family extraction recipes (deterministic)
+
+These remove the judgment calls that go wrong under pressure. When the rule
+matches one of these families, follow the recipe mechanically instead of
+eyeballing.
+
+#### RBAC audits (ClusterRoles / Roles)
+
+- NEVER shortlist roles by name (grepping for "endpoint", "controller", …). Run
+  ONE mechanical filter over the COMPLETE set and flag every match:
+  ```bash
+  kubectl get clusterroles -o json | jq -r '.items[] |
+    select(.rules[]? |
+      ((.resources // []) | any(. == "endpoints" or . == "*")) and
+      ((.verbs // [])     | any(. == "create" or . == "update" or . == "patch"
+                                or . == "delete" or . == "deletecollection" or . == "*"))
+    ) | .metadata.name' | sort -u
+  ```
+  Adapt the resource/verb lists to the rule under audit. A wildcard `*` in verbs
+  or resources DOES grant the permission — it matches.
+- AGGREGATION: edit/admin-style permissions are frequently carried by
+  **aggregation ClusterRoles** (labelled
+  `rbac.authorization.k8s.io/aggregate-to-edit` / `…-admin` / `…-view`), e.g.
+  `system:aggregate-to-edit`. These hold the offending rules in their own
+  `.rules` and MUST be flagged when they match the filter — do not skip a role
+  because its name doesn't mention the audited resource, or because it is a
+  built-in. Evidence = the matching rule, regardless of the role's name.
+
+#### Numeric thresholds — compute, never eyeball
+
+1. Convert both sides to the same unit before comparing (1Gi = 1024Mi =
+   1073741824 bytes; 1G = 1000M). Write the comparison out explicitly:
+   `value=1073741824, threshold=1073741824, operator=<, result=EQUAL`.
+2. EQUALITY AT THE BOUNDARY: a value exactly EQUAL to the stated threshold is
+   **compliant** unless the rule unambiguously says "strictly less than".
+   Equality is the classic planted decoy — when the boundary reading is at all
+   uncertain, equality = compliant.
+3. Scope the field: "memory limits" constrains memory only — a missing or large
+   CPU limit is NOT a violation of a memory rule (and vice-versa).
+
+#### Image references — parse, don't pattern-match
+
+For every image string, parse mechanically:
+
+1. Contains `@sha256:` → digest-pinned → **compliant** (a digest is stricter than
+   any tag).
+2. Take the substring AFTER the last `/` (the repo:tag segment). A `:` BEFORE the
+   last `/` is a registry PORT (`registry.local:5000/app` has NO tag), never a
+   tag.
+3. In that final segment: no `:` → untagged → **violating**. Tag present →
+   violating ONLY if the tag is EXACTLY `latest` (case-sensitive, whole string).
+   Tags that merely contain "latest" (`v2-latest-stable`) or are pinned
+   (`1.2.3`, `stable`) are **compliant**.
+
+Apply to `containers` + `initContainers` + `ephemeralContainers` and controller
+pod templates. For each flag, quote the parsed image string and which step fired.
+
 ### Phase 4 — Classify with evidence, resisting decoys
 
 6. **Evidence-first flagging.** Flag a resource **only** when you can quote the
@@ -149,6 +206,13 @@ what removes the last false positives and false negatives:
 6. **Read the rule's scope exactly** — namespace vs cluster, per-pod vs
    per-container, and "and"/"or"/"both" logic.
 7. **RBAC denial → report the boundary**, do not retry with a different identity.
+8. **Rule-family recipes are mandatory** (Phase 3b). For an RBAC rule, filter the
+   complete role set by resource+verb (wildcards match) and flag aggregation
+   ClusterRoles by their own `.rules` — never shortlist by name. For a numeric
+   threshold, normalize units and treat a boundary-EQUAL value as compliant
+   unless the rule says "strictly less than". For an image rule, a `:` before the
+   last `/` is a registry port (not a tag), a `@sha256:` digest is compliant, and
+   only untagged or exactly-`latest` violate.
 
 ## Output rule
 
