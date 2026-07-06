@@ -214,16 +214,27 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		}
 	}
 
-	userConfigPath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("permissions.json")), "permissions.json")
-	// Only treat the user overlay as a polled file when it's a separate
-	// path from the base — otherwise we'd be reloading the same file twice.
+	// Merge permissions across EVERY layer of the search chain, low→high, so a
+	// per-user overlay evolves with the package-shipped rule set (the safe
+	// read-only allow-list) instead of shadowing it. Candidates include the
+	// not-yet-created user-layer file so the reloader watches for the first
+	// "Allow always" persist. base = lowest layer (system), overlays ascend to
+	// local; the in-memory skill overlays stay highest (staticOverlays).
+	layerPaths := paths.ConfigLayerCandidates("permissions.json")
+	basePath := runtime.PermissionsConfigPath
 	var overlayPaths []string
-	if userConfigPath != runtime.PermissionsConfigPath {
-		overlayPaths = append(overlayPaths, userConfigPath)
+	if len(layerPaths) > 0 {
+		basePath = layerPaths[0]
+		overlayPaths = layerPaths[1:]
 	}
 
-	reloader := permissions.NewReloader(runtime.PermissionsConfigPath, overlayPaths, skillOverlays)
+	reloader := permissions.NewReloader(basePath, overlayPaths, skillOverlays)
 	reloader.Start(ctx)
+
+	// Where "Allow always" / "Allow in this project" persistence lands (the
+	// layer-aware user/local write target). It is already among the watched
+	// overlay candidates above, so a persist is picked up by the reloader.
+	userConfigPath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("permissions.json")), "permissions.json")
 
 	if asker == nil {
 		asker = permissions.StdinAsker{}

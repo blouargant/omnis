@@ -251,6 +251,44 @@ func FindConfig(name string) string {
 	return filepath.Join(ConfigWriteDir(), name)
 }
 
+// ConfigLayers returns every EXISTING copy of a config filename across the
+// search chain, ordered LOW → HIGH precedence (system → user → local) — the
+// reverse of ConfigSearchDirs, filtered to files that actually exist.
+//
+// This is the enumeration used by the layered deep-merge: fold the returned
+// files left-to-right so each higher-precedence layer overlays the one below.
+// An empty result means the file exists in no layer. Directories are skipped.
+//
+// It is deliberately the single source of truth for "all layers of file X" so
+// the runtime loader (ResolveRuntimeSettings) and the Web UI editor
+// (configedit.ReadSection) enumerate identically.
+func ConfigLayers(name string) []string {
+	dirs := ConfigSearchDirs()
+	out := make([]string, 0, len(dirs))
+	// Walk low→high so callers can fold with higher-wins semantics.
+	for i := len(dirs) - 1; i >= 0; i-- {
+		p := filepath.Join(dirs[i], name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ConfigLayerCandidates returns the config filename joined against EVERY search
+// dir, ordered LOW → HIGH precedence — including layers where the file does not
+// exist yet. Use this for reloaders that must watch a not-yet-created overlay
+// (e.g. the user-layer permissions.json where "Allow always" first persists);
+// use ConfigLayers when you only want files that currently exist.
+func ConfigLayerCandidates(name string) []string {
+	dirs := ConfigSearchDirs()
+	out := make([]string, 0, len(dirs))
+	for i := len(dirs) - 1; i >= 0; i-- {
+		out = append(out, filepath.Join(dirs[i], name))
+	}
+	return out
+}
+
 // FindConfigDir resolves a subdirectory name against the config search chain
 // and returns the first existing directory. Falls back to the
 // write-target path under ConfigWriteDir() when no layer has it.

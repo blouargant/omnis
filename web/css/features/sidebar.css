@@ -377,12 +377,15 @@ body.resizing #sidebar { transition: none; }
   /* Per-squad colour. The hue (--sq-h) is set inline from the squad name in
      app.js (squadHue); saturation/lightness stay in CSS via color-mix so the
      pill reads in every theme — a translucent tint over the current surface,
-     with text blended toward the theme's own --text (so it darkens on light
-     themes and lightens on dark ones). --sq-h defaults to a neutral amber when
-     unset. */
-  background: color-mix(in srgb, hsl(var(--sq-h, 40) 62% 50%) 15%, transparent);
-  color: color-mix(in srgb, hsl(var(--sq-h, 40) 60% 44%) 80%, var(--text));
-  border: 1px solid color-mix(in srgb, hsl(var(--sq-h, 40) 55% 50%) 34%, transparent);
+     with the text blended MOSTLY toward the theme's own --text (which is always
+     chosen to contrast the panel) and only tinted by the hue, so it stays
+     readable on both light and dark themes while still reading as its own
+     colour. The earlier 80%-hue text sat at a fixed low lightness and turned
+     unreadable on dark themes (dark text on a dark panel) for the deeper hues
+     (purple/red/blue). --sq-h defaults to a neutral amber when unset. */
+  background: color-mix(in srgb, hsl(var(--sq-h, 40) 65% 55%) 18%, transparent);
+  color: color-mix(in srgb, hsl(var(--sq-h, 40) 70% 60%) 45%, var(--text));
+  border: 1px solid color-mix(in srgb, hsl(var(--sq-h, 40) 60% 55%) 40%, transparent);
   text-transform: lowercase;
   letter-spacing: .02em;
   max-width: 90px;

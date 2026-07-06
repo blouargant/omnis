@@ -95,7 +95,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // entry and no server-side preference) or has an empty "" value. VS Code Dark
   // remains selectable via its explicit "vscode-dark" id; this governs the
   // unset/empty fallback only.
-  const DEFAULT_THEME = "ivory";
+  const DEFAULT_THEME = "terracotta";
   // Theme ids renamed after release keep a legacy alias so a choice already
   // persisted (localStorage / server preferences) still resolves — otherwise a
   // now-unknown id would paint the base dark palette. ("claude-light" → "ivory".)

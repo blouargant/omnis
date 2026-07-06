@@ -591,7 +591,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/regindex/` | Semantic index over **remote registry** items of **all seven kinds** (skills, agents, mcp, a2a, squads, commands, permissions) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
 | `internal/docindex/` | Semantic index over **omnis's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/omnis/docs`; roots from `Roots()`, override `OMNIS_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
-| `internal/configedit/` | Layer-aware config read/write shared by the HTTP server (web-UI editor) and the in-process `settings` tools: `SourceLayer`/`AgentsConfigLayer`/`AgentTargetLayer` (moved from `server/layers.go`), `AtomicWriteFile`, `ConfigFileNames`, `ReadSection`/`WriteSection`, `ReadAgentEntry`/`WriteAgentEntry`, `ReadPreferences`/`SetPreference`, `EmbedderFingerprint`, and JSON-pointer `SetByPointer`/`RemoveByPointer`. Depends only on `internal/paths` + stdlib (no server/agent import), so both surfaces share one "where does this write land". `server/layers.go`/`config.go`/`preferences.go` delegate to it |
+| `internal/configedit/` | Layer-aware config read/write shared by the HTTP server (web-UI editor) and the in-process `settings` tools: `SourceLayer`/`AgentsConfigLayer`/`AgentTargetLayer` (moved from `server/layers.go`), `AtomicWriteFile`, `ConfigFileNames`, `ReadSection`/`WriteSection`, `ReadAgentEntry`/`WriteAgentEntry`, `ReadPreferences`/`SetPreference`, `EmbedderFingerprint`, and JSON-pointer `SetByPointer`/`RemoveByPointer`. Also the **layered deep-merge engine** ([merge.go](internal/configedit/merge.go) `MergeSection`/`LoadMergedSection`/`MergedBytes`/`MergeGeneric`, [diff.go](internal/configedit/diff.go) `DiffSection`/`DiffGeneric`, [overlay.go](internal/configedit/overlay.go) `OverlayBytes`/`AgentEntryOverlayBytes`/`BaseBelowLayer`) that merges every config file across layers and writes only the delta — see "Layered deep-merge" under Configuration files. Depends only on `internal/paths` + stdlib (no server/agent import), so both surfaces share one "where does this write land". `server/layers.go`/`config.go`/`preferences.go` delegate to it |
 | `internal/settings/` | The **`settings` tool group** mounted on the Helper: `get_settings`, `set_preference`, `set_agent`, `set_model`, `update_config`, `remove_config` (see "Settings management via chat"). All IO via `configedit`; sensitive changes gated by a process-wide `Confirmer` (`SetConfirmer`); `Deps{RequestReload}` for hot-reload; `LoaderProtocol` instruction addendum |
 | `internal/compress/` | Per-session context compression plugin + audit/statelog files |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
@@ -804,6 +804,51 @@ Permission fan-out ([core/permissions/spec.go](core/permissions/spec.go)
 
 Config files are resolved through a **3-layer search chain** (high → low precedence):
 `.agents/` (or `agents/` as a dotless alias; both participate when both exist, `.agents/` first) → `$HOME/.omnis/` (per-user) → `/etc/omnis/` (system). Agent and skill registries live under `registry/agents/` and `registry/skills/` inside whichever layer you're targeting.
+
+**Layered deep-merge (NOT file-level override).** Every config file is **merged
+across all layers** — system → user → local, low→high — so a per-user overlay in
+`$OMNIS_HOME` **evolves with package updates** instead of shadowing them. This is
+the fix for "I changed one setting, now new package agents don't appear": a
+per-user `agents.json` no longer freezes the whole config. The engine lives in
+[internal/configedit/merge.go](internal/configedit/merge.go) +
+[diff.go](internal/configedit/diff.go), enumerated by
+[paths.ConfigLayers](internal/paths/paths.go) / `ConfigLayerCandidates`:
+
+- **Merge rules** (per-file `sectionSpecs`): the `agents` name-list is a **union**;
+  `squads` merge **by `name`** (scalar fields higher-wins, `members` replaced when
+  the overlay sets them); `providers`/`models`/mcp `servers`/a2a `agents` are
+  **maps deep-merged by key**; `inputs` merge by `id`; permission `allow`/`ask`/
+  `deny` tiers **union**; `hooks.<event>` arrays concat; all other scalars/objects
+  are generic deep-merge (higher layer wins, nested objects recurse). Per-agent
+  `registry/agents/<name>/agent.json` also deep-merges across layers (generic:
+  scalars higher-wins, arrays replace) so editing one field of a package agent
+  keeps its other fields evolving ([loadAgentFromRegistry](agent/runtime_config.go)).
+- **Removals via tombstones**: a sibling `<key>_removed` list in a higher layer
+  drops entries a lower layer contributed — `agents_removed`, `squads_removed`,
+  `models_removed`, `providers_removed`, `mcp_servers`→`servers_removed`,
+  a2a `agents_removed`, permission `allow_removed`/`ask_removed`/`deny_removed`,
+  `hooks_removed`. Tombstone keys are stripped from the effective config.
+- **Delta-write (only the modified data)**: a save persists **only the diff**
+  against the merge of all layers *below* the write target
+  ([configedit.OverlayBytes](internal/configedit/overlay.go) /
+  `AgentEntryOverlayBytes`), enforced by the round-trip contract
+  `Merge(base, Diff(base, desired)) == desired`. So the user file stays minimal
+  and untouched fields keep tracking the package. All write paths honour it: the
+  web-UI editor (`PUT /api/config/parsed/:name` + per-agent fan-out in
+  [server/config.go](server/config.go)), the settings tools
+  (`configedit.WriteSection`/`WriteAgentEntry`), and permissions/hooks (both
+  reloaders are fed the full `ConfigLayerCandidates` chain instead of just
+  base+user, so a shipped allow-list is no longer shadowed by a user file).
+- **Reads return the merged effective view**: `ResolveRuntimeSettings`,
+  `mcp.LoadMerged`/`a2a.LoadMerged`, and the web-UI/settings readers
+  (`configedit.ReadSection`/`ReadAgentEntry`/`ReadAgentsConfig`) all surface the
+  merged config, so Settings shows the full evolving set. **No-op contract**: a
+  single-layer install merges one layer (identity) — byte-identical to before.
+  **Legacy full user files** keep working (lists union additively, so a stale
+  user file never hides a new package agent) and **self-heal** to a minimal
+  overlay on the next UI save (the GET hands back the merged view to diff against).
+  The `OMNIS_CONFIG_PATH` explicit-file bypass reads that single file verbatim (no
+  merge), as before.
 
 | File | Purpose |
 |---|---|
@@ -1039,8 +1084,9 @@ gateway-side concern, independent of the client-side annotation being correct.)
 Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 
 - **Read root for config**: a 3-layer search chain, high → low precedence.
-  Whichever layer has a given file wins for that whole file (file-level
-  override, not deep merge):
+  Files are **deep-merged across all layers** (system → user → local), not
+  first-file-wins — see "Layered deep-merge" under Configuration files. (The
+  legacy `OMNIS_CONFIG_PATH` explicit-file bypass still reads a single file.):
 
   1. `.agents/` (canonical) and/or `agents/` (dotless alias) — project-local
      directories (CWD-relative, highest priority). Both are accepted; when
@@ -1106,12 +1152,13 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
       └── agents/       # web UI installed agents (override via OMNIS_AGENTS_REGISTRY_DIR)
   ```
 
-  The web UI editor reads from the search chain and writes to the same
-  layer the source file lives in — local files stay local, user files
-  stay user, and system files fork to user. For `agents.json` specifically,
-  saves are promoted to the **local** layer when the file references any
-  agent or skill that only resolves in `.agents/` (or `agents/`), so
-  every reference remains satisfied after the write.
+  The web UI editor reads the **merged** effective config (all layers) and
+  writes **only the delta** to the target layer — local files stay local, user
+  edits fork system → user, and package updates keep flowing through untouched
+  fields (see "Layered deep-merge"). For `agents.json` specifically, saves are
+  promoted to the **local** layer when the file references any agent or skill
+  that only resolves in `.agents/` (or `agents/`), so every reference remains
+  satisfied after the write.
 
   The skill registry (`registry/skills/`) follows the same lookup as
   agent definitions: `.agents/registry/skills` (and `agents/registry/skills`

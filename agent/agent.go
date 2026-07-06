@@ -31,6 +31,7 @@ import (
 	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/claudeformat"
 	"github.com/blouargant/omnis/internal/codeindex"
+	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/docindex"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
@@ -406,7 +407,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	// optional; a missing file or unknown name is a silent no-op (already
 	// surfaced by the editor before the agent is built).
 	if len(cfg.A2AAgents) > 0 && runtime.A2AConfigPath != "" {
-		if a2aCfg, err := a2a.Load(runtime.A2AConfigPath); err == nil {
+		if a2aCfg, err := a2a.LoadMerged(); err == nil {
 			selected := selectA2AAgents(a2aCfg, cfg.A2AAgents)
 			if a2aTools := a2a.NewTools(selected); len(a2aTools) > 0 {
 				agentTools = append(agentTools, a2aTools...)
@@ -675,7 +676,7 @@ func buildRegistriesDeps(runtime RuntimeSettings) registries.Deps {
 // mcp_config.json. Shared by buildRegistriesDeps (browse Installed flag) and
 // the regindex Config (index Installed annotation).
 func installedMCPNames() map[string]bool {
-	cfg, err := mcpcfg.Load(paths.FindConfig("mcp_config.json"))
+	cfg, err := mcpcfg.LoadMerged()
 	if err != nil {
 		return map[string]bool{}
 	}
@@ -689,12 +690,8 @@ func installedMCPNames() map[string]bool {
 // installedSquadNames returns the set of squad names currently listed in
 // agents.json.
 func installedSquadNames() map[string]bool {
-	data, err := os.ReadFile(paths.FindConfig("agents.json"))
-	if err != nil {
-		return map[string]bool{}
-	}
-	var cfg map[string]any
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	cfg, _, err := configedit.LoadMergedSection("agents.json")
+	if err != nil || cfg == nil {
 		return map[string]bool{}
 	}
 	rawSquads, _ := cfg["squads"].([]any)
@@ -714,7 +711,7 @@ func installedSquadNames() map[string]bool {
 // installedA2ANames returns the set of A2A agent names currently in
 // a2a_config.json.
 func installedA2ANames() map[string]bool {
-	cfg, err := a2a.Load(paths.FindConfig("a2a_config.json"))
+	cfg, err := a2a.LoadMerged()
 	if err != nil {
 		return map[string]bool{}
 	}

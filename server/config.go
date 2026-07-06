@@ -714,17 +714,20 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			return
 		}
 		wpath, _ := files.writePath(name)
-		data, err := os.ReadFile(path)
-		if err != nil && !os.IsNotExist(err) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Return the MERGED effective view (system → user → local deep-merged),
+		// not just the highest-precedence file, so the editor shows the full
+		// config that actually takes effect — including package-shipped items a
+		// per-user overlay would otherwise shadow. (The agent branch below
+		// further resolves per-agent detail from the registry.)
+		filename, _ := configedit.FileNameForSection(name)
+		merged, _, mErr := configedit.LoadMergedSection(filename)
+		if mErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("file is not valid JSON: %v", mErr)})
 			return
 		}
 		var parsed any
-		if len(data) > 0 {
-			if err := json.Unmarshal(data, &parsed); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("file is not valid JSON: %v", err)})
-				return
-			}
+		if merged != nil {
+			parsed = merged
 		}
 
 		// Special handling for agent config: resolve agents from the registry
@@ -910,12 +913,16 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							}
 						}
 
-						agentJSON, err := json.MarshalIndent(cleanAgent, "", "  ")
+						// Persist only the delta of this agent's entry against the
+						// merge of its registry layers below the write layer, so
+						// editing one field of a package-shipped agent writes just
+						// that field and package updates to its other fields keep
+						// flowing through.
+						agentJSON, err := configedit.AgentEntryOverlayBytes(agentName, layer, cleanAgent, paths.AgentsRegistrySearchDirs())
 						if err != nil {
 							c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal agent: %v", err)})
 							return
 						}
-						agentJSON = append(agentJSON, '\n')
 
 						agentPath := filepath.Join(agentDir, "agent.json")
 						if err := atomicWriteFile(agentPath, agentJSON); err != nil {
@@ -966,15 +973,29 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			}
 		}
 
-		out, err := json.MarshalIndent(req.Data, "", "  ")
+		full, err := json.MarshalIndent(req.Data, "", "  ")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cannot serialize to JSON: %v", err)})
 			return
 		}
-		out = append(out, '\n')
-		// Resolve the write target with the body in hand so a top-level
+		full = append(full, '\n')
+		// Resolve the write target with the full body in hand so a top-level
 		// agents.json that references local-only elements lands in `.agents/`.
-		writePath, _ := files.writePathFor(name, out)
+		writePath, _ := files.writePathFor(name, full)
+		// Persist only the delta against the merge of all layers BELOW the write
+		// target, so the per-user file stays minimal and package updates keep
+		// flowing through untouched fields. Non-object payloads fall back to the
+		// full body.
+		out := full
+		if desired, ok := req.Data.(map[string]any); ok {
+			filename, _ := configedit.FileNameForSection(name)
+			if delta, derr := configedit.OverlayBytes(filename, desired, writePath); derr == nil {
+				out = delta
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": derr.Error()})
+				return
+			}
+		}
 		if status, body := checkMtime(effectiveMtimePath(readPath, writePath), req.MTime); status != 0 {
 			c.JSON(status, body)
 			return

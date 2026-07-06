@@ -29,9 +29,14 @@ func buildLeaderToolsets(
 	if leaderCfg.SoftSkillsDir != "" {
 		leaderSoftSkillsDir = leaderCfg.SoftSkillsDir
 	}
-	leaderMCPConfigPath := runtime.MCPConfigPath
-	if leaderCfg.MCPConfigPath != "" {
-		leaderMCPConfigPath = leaderCfg.MCPConfigPath
+	// Explicit per-agent MCP config path is read verbatim; the default resolves
+	// through the layered deep-merge (LoadMerged) so a per-user overlay evolves
+	// with package-shipped servers instead of shadowing them.
+	loadLeaderMCP := func() (*mcpcfg.Config, error) {
+		if leaderCfg.MCPConfigPath != "" {
+			return mcpcfg.Load(leaderCfg.MCPConfigPath)
+		}
+		return mcpcfg.LoadMerged()
 	}
 
 	if ts, err := skills.Toolset(ctx, leaderCfg.Skills); err == nil {
@@ -42,7 +47,7 @@ func buildLeaderToolsets(
 		softSkillTS = sts
 		allToolsets = append(allToolsets, sts)
 	}
-	if mc, err := mcpcfg.Load(leaderMCPConfigPath); err == nil && pool != nil {
+	if mc, err := loadLeaderMCP(); err == nil && pool != nil {
 		if _, hs, err := pool.AcquireAll(mc); err == nil {
 			mcpHandles = append(mcpHandles, hs...)
 			// Per-agent whitelist (explicit opt-in): the leader sees only

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -41,14 +40,20 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 		return nil
 	}
 	i.hooks.once.Do(func() {
+		// Merge hooks across EVERY layer of the search chain, low→high, so a
+		// per-user overlay evolves with package-shipped hooks instead of
+		// shadowing them. Candidates include the not-yet-created user-layer file
+		// (where the web UI editor saves) so the reloader picks it up on first
+		// write. base = lowest layer; overlays ascend to local.
+		layerPaths := paths.ConfigLayerCandidates("hooks.json")
 		base := runtime.HooksConfigPath
 		if base == "" {
 			base = paths.FindConfig("hooks.json")
 		}
-		userPath := filepath.Join(paths.WriteDirForLayer(layerForConfigFile("hooks.json")), "hooks.json")
 		var overlays []string
-		if userPath != base {
-			overlays = append(overlays, userPath)
+		if len(layerPaths) > 0 {
+			base = layerPaths[0]
+			overlays = layerPaths[1:]
 		}
 		r := hooks.NewReloader(base, overlays)
 		r.Start(context.Background())

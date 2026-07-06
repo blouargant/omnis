@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -303,7 +304,7 @@ type RuntimeSettings struct {
 	OverrideModelRef     string
 	OverrideModelEnabled bool
 	Models               map[string]RuntimeModelConfig
-	Agents       []RuntimeAgentConfig
+	Agents               []RuntimeAgentConfig
 	// Squads is the normalised list of named agent groups. Always contains
 	// at least one entry named DefaultSquadName.
 	Squads []RuntimeSquadConfig
@@ -821,41 +822,71 @@ func ensureDefaultSquad(squads []RuntimeSquadConfig, agents []RuntimeAgentConfig
 // $OMNIS_HOME/registry/agents/<name>/agent.json override takes precedence over
 // ./registry/agents/<name>/agent.json without hiding agents that only exist in
 // one of the layers.
+// loadAgentFromRegistry resolves one agent by name across the registry search
+// chain. Unlike a first-existing-wins lookup, it DEEP-MERGES the agent.json from
+// every layer (low→high, configedit.MergeGeneric) so a per-user overlay that
+// changes one field of a package-shipped agent keeps evolving with package
+// updates to the agent's other fields, instead of shadowing the whole entry.
+// instruction.md is taken from the highest-precedence layer that has one, and
+// its frontmatter overlays the merged agent.json (the Claude Code–style
+// markdown-agent contract). registryDirs is high→low precedence.
 func loadAgentFromRegistry(name string, registryDirs []string) (AgentEntry, error) {
-	for _, dir := range registryDirs {
-		agentDir := filepath.Join(dir, name)
-		jsonBytes, jsonErr := os.ReadFile(filepath.Join(agentDir, "agent.json"))
-		instrBytes, instrErr := os.ReadFile(filepath.Join(agentDir, "instruction.md"))
-
-		// Nothing usable in this layer — try the next one.
-		if (jsonErr != nil && os.IsNotExist(jsonErr)) && (instrErr != nil && os.IsNotExist(instrErr)) {
-			continue
-		}
-		if jsonErr != nil && !os.IsNotExist(jsonErr) {
-			return AgentEntry{}, fmt.Errorf("agent registry %q: %w", filepath.Join(agentDir, "agent.json"), jsonErr)
-		}
-
-		var e AgentEntry
-		if jsonErr == nil {
-			if err := json.Unmarshal(jsonBytes, &e); err != nil {
-				return AgentEntry{}, fmt.Errorf("agent registry %q: decode json: %w", filepath.Join(agentDir, "agent.json"), err)
+	// Collect agent.json maps low→high so higher layers overlay lower ones.
+	var layers []map[string]any
+	found := false
+	for i := len(registryDirs) - 1; i >= 0; i-- {
+		p := filepath.Join(registryDirs[i], name, "agent.json")
+		jsonBytes, err := os.ReadFile(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
 			}
+			return AgentEntry{}, fmt.Errorf("agent registry %q: %w", p, err)
 		}
-		if e.Name == "" {
-			e.Name = name
+		var m map[string]any
+		if err := json.Unmarshal(jsonBytes, &m); err != nil {
+			return AgentEntry{}, fmt.Errorf("agent registry %q: decode json: %w", p, err)
 		}
-		// Frontmatter in instruction.md acts as an override layer on top of
-		// agent.json so a Claude Code–style markdown agent stays portable:
-		// drop a single .md file into the registry and the model/tools/skills
-		// hints in the frontmatter drive the runtime config.
-		if instrErr == nil {
-			if fm, _ := ParseInstructionMarkdown(instrBytes); fm.HasAny() {
-				applyInstructionFrontmatter(&e, fm)
-			}
-		}
-		return e, nil
+		layers = append(layers, m)
+		found = true
 	}
-	return AgentEntry{}, fmt.Errorf("agent %q not found in any registry directory", name)
+
+	// instruction.md from the highest-precedence layer (high→low, first wins).
+	var instrBytes []byte
+	instrFound := false
+	for _, dir := range registryDirs {
+		if ib, err := os.ReadFile(filepath.Join(dir, name, "instruction.md")); err == nil {
+			instrBytes = ib
+			instrFound = true
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return AgentEntry{}, fmt.Errorf("agent %q not found in any registry directory", name)
+	}
+
+	var e AgentEntry
+	if len(layers) > 0 {
+		merged := configedit.MergeGeneric(layers)
+		mb, err := json.Marshal(merged)
+		if err != nil {
+			return AgentEntry{}, fmt.Errorf("agent registry %q: merge: %w", name, err)
+		}
+		if err := json.Unmarshal(mb, &e); err != nil {
+			return AgentEntry{}, fmt.Errorf("agent registry %q: decode merged json: %w", name, err)
+		}
+	}
+	if e.Name == "" {
+		e.Name = name
+	}
+	if instrFound {
+		if fm, _ := ParseInstructionMarkdown(instrBytes); fm.HasAny() {
+			applyInstructionFrontmatter(&e, fm)
+		}
+	}
+	return e, nil
 }
 
 // applyInstructionFrontmatter overlays frontmatter values onto an AgentEntry.
@@ -900,11 +931,12 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		Agents:                  defaultAgents(),
 	}
 
-	if strings.TrimSpace(opts.ConfigPath) != "" {
+	explicitConfig := strings.TrimSpace(opts.ConfigPath) != ""
+	if explicitConfig {
 		out.ConfigPath = strings.TrimSpace(opts.ConfigPath)
 	}
 
-	cfg, err := loadRuntimeConfig(out.ConfigPath)
+	cfg, err := loadRuntimeConfig(out.ConfigPath, explicitConfig)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) && !opts.ConfigPathStrict {
 			cfg = runtimeConfigFile{}
@@ -1157,10 +1189,29 @@ func parseBoolEnv(name string) (bool, bool) {
 	return v, true
 }
 
-func loadRuntimeConfig(path string) (runtimeConfigFile, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return runtimeConfigFile{}, fmt.Errorf("runtime config %q: %w", path, err)
+// loadRuntimeConfig loads agents.json. When explicit is true the single named
+// file is read verbatim (the OMNIS_CONFIG_PATH bypass); otherwise every layer of
+// the search chain is deep-merged (configedit.MergedBytes) so a per-user overlay
+// evolves with package updates instead of shadowing them. A missing file (no
+// layer has it, or the explicit path is absent) returns os.ErrNotExist so the
+// caller's "missing is fine unless strict" branch still applies.
+func loadRuntimeConfig(path string, explicit bool) (runtimeConfigFile, error) {
+	var b []byte
+	if explicit {
+		var err error
+		b, err = os.ReadFile(path)
+		if err != nil {
+			return runtimeConfigFile{}, fmt.Errorf("runtime config %q: %w", path, err)
+		}
+	} else {
+		merged, err := configedit.MergedBytes("agents.json")
+		if err != nil {
+			return runtimeConfigFile{}, fmt.Errorf("runtime config %q: %w", path, err)
+		}
+		if merged == nil {
+			return runtimeConfigFile{}, fmt.Errorf("runtime config %q: %w", path, os.ErrNotExist)
+		}
+		b = merged
 	}
 	var cfg runtimeConfigFile
 	if err := json.Unmarshal(b, &cfg); err != nil {
@@ -1169,13 +1220,19 @@ func loadRuntimeConfig(path string) (runtimeConfigFile, error) {
 	return cfg, nil
 }
 
+// loadModelsConfig deep-merges models.json across every layer of the search
+// chain. A missing file (no layer has it) returns os.ErrNotExist so the caller's
+// graceful "missing is fine" branch applies.
 func loadModelsConfig(path string) (modelsConfigFile, error) {
-	b, err := os.ReadFile(path)
+	merged, err := configedit.MergedBytes("models.json")
 	if err != nil {
 		return modelsConfigFile{}, fmt.Errorf("models config %q: %w", path, err)
 	}
+	if merged == nil {
+		return modelsConfigFile{}, fmt.Errorf("models config %q: %w", path, os.ErrNotExist)
+	}
 	var cfg modelsConfigFile
-	if err := json.Unmarshal(b, &cfg); err != nil {
+	if err := json.Unmarshal(merged, &cfg); err != nil {
 		return modelsConfigFile{}, fmt.Errorf("models config %q: decode json: %w", path, err)
 	}
 	return cfg, nil

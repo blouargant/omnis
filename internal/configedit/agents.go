@@ -9,45 +9,61 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 )
 
-// ReadAgentsConfig reads and parses the top-level agents.json (the `agents`
-// names list + `squads`). Returns nil parsed when absent. Used by the settings
-// tools to enumerate which agents are wired and to read squad composition.
+// ReadAgentsConfig reads the top-level agents.json (the `agents` names list +
+// `squads`) as the MERGED effective view — every layer deep-merged so callers
+// see the full wired set (package agents/squads + user overlay), not just the
+// highest-precedence file. This is essential for the settings tools' pointer
+// edits: diffing an unmerged view against the layer base would tombstone
+// package-shipped squads the overlay never saw. Returns an empty map when
+// agents.json exists in no layer.
 func ReadAgentsConfig() (parsed map[string]any, readPath, layer string, err error) {
 	p, _ := ReadPath("agent")
 	readPath = p
 	layer = paths.Layer(p)
-	data, rerr := os.ReadFile(p)
-	if rerr != nil {
-		if os.IsNotExist(rerr) {
-			return map[string]any{}, readPath, layer, nil
-		}
-		return nil, readPath, layer, rerr
+	merged, _, merr := LoadMergedSection("agents.json")
+	if merr != nil {
+		return nil, readPath, layer, fmt.Errorf("agents.json is not valid JSON: %w", merr)
 	}
-	if len(data) == 0 {
+	if merged == nil {
 		return map[string]any{}, readPath, layer, nil
 	}
-	if uerr := json.Unmarshal(data, &parsed); uerr != nil {
-		return nil, readPath, layer, fmt.Errorf("agents.json is not valid JSON: %w", uerr)
-	}
-	return parsed, readPath, layer, nil
+	return merged, readPath, layer, nil
 }
 
-// ReadAgentEntry reads the highest-precedence registry/agents/<name>/agent.json
-// for the named agent. It returns the parsed entry, the layer the file lives in,
-// and its path. Returns os.ErrNotExist when no definition is found in any layer.
+// ReadAgentEntry reads the MERGED registry/agents/<name>/agent.json for the
+// named agent — every layer deep-merged (low→high, MergeGeneric), so callers see
+// the full effective entry (package fields + user overrides) rather than only
+// the highest-precedence file. It returns the merged entry, the layer of the
+// highest-precedence file (for display), and that path. Returns os.ErrNotExist
+// when no definition is found in any layer.
 func ReadAgentEntry(name string) (entry map[string]any, layer, path string, err error) {
-	for _, dir := range paths.AgentsRegistrySearchDirs() {
-		p := filepath.Join(dir, name, "agent.json")
+	dirs := paths.AgentsRegistrySearchDirs() // high→low
+	var layersLowHigh []map[string]any
+	for i := len(dirs) - 1; i >= 0; i-- {
+		p := filepath.Join(dirs[i], name, "agent.json")
 		data, rerr := os.ReadFile(p)
 		if rerr != nil {
 			continue
 		}
-		if uerr := json.Unmarshal(data, &entry); uerr != nil {
+		var m map[string]any
+		if uerr := json.Unmarshal(data, &m); uerr != nil {
 			return nil, "", p, fmt.Errorf("%s is not valid JSON: %w", p, uerr)
 		}
-		return entry, paths.Layer(dir), p, nil
+		layersLowHigh = append(layersLowHigh, m)
 	}
-	return nil, "", "", os.ErrNotExist
+	// Highest-precedence path + layer for display (first high→low that exists).
+	for _, dir := range dirs {
+		p := filepath.Join(dir, name, "agent.json")
+		if st, serr := os.Stat(p); serr == nil && !st.IsDir() {
+			path = p
+			layer = paths.Layer(dir)
+			break
+		}
+	}
+	if len(layersLowHigh) == 0 {
+		return nil, "", "", os.ErrNotExist
+	}
+	return MergeGeneric(layersLowHigh), layer, path, nil
 }
 
 // AgentSkills extracts the declared skills list from a parsed agent entry.
@@ -91,11 +107,13 @@ func WriteAgentEntry(name string, entry map[string]any) (path, layer string, err
 		return "", "", fmt.Errorf("mkdir registry agent: %w", err)
 	}
 
-	out, merr := json.MarshalIndent(clean, "", "  ")
+	// Persist only the delta against the merge of this agent's lower registry
+	// layers, so a per-user edit stays minimal and package updates to the
+	// agent's other fields keep flowing through.
+	out, merr := AgentEntryOverlayBytes(name, layer, clean, paths.AgentsRegistrySearchDirs())
 	if merr != nil {
 		return "", "", fmt.Errorf("marshal agent: %w", merr)
 	}
-	out = append(out, '\n')
 	path = filepath.Join(dir, "agent.json")
 	if werr := AtomicWriteFile(path, out); werr != nil {
 		return "", "", fmt.Errorf("write agent: %w", werr)

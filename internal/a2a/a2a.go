@@ -25,6 +25,8 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+
+	"github.com/blouargant/omnis/internal/configedit"
 )
 
 // Agent describes one A2A agent connection.
@@ -89,6 +91,10 @@ func (c *Config) AgentList() []Agent {
 
 // Load parses the JSON at path. A missing file returns an empty config so a
 // fresh install with no A2A agents boots cleanly.
+//
+// Load reads a SINGLE file — use it for registry install read/write. For the
+// default runtime config use LoadMerged, which deep-merges every layer of the
+// search chain.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -97,6 +103,25 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, err
 	}
+	return parseConfig(data)
+}
+
+// LoadMerged deep-merges a2a_config.json across every layer of the config search
+// chain (configedit.MergedBytes), so a per-user overlay in $OMNIS_HOME evolves
+// with package-shipped peers instead of shadowing them. A file present in no
+// layer yields an empty config.
+func LoadMerged() (*Config, error) {
+	data, err := configedit.MergedBytes("a2a_config.json")
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return &Config{Agents: map[string]Agent{}}, nil
+	}
+	return parseConfig(data)
+}
+
+func parseConfig(data []byte) (*Config, error) {
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err

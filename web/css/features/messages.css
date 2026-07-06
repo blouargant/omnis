@@ -210,23 +210,16 @@
   opacity: 0.85;
 }
 
-/* Assistant reply row: the Omnis "sun" avatar sits in the left gutter (aligned
-   with the user bubble's left edge) and the reply text flows to its right. The
-   .msg-actions cluster is position:absolute, so the only flex children are the
-   avatar (::before) and the bubble. */
+/* Assistant reply row: a centred column a touch narrower than the user row —
+   inset by ≈ the former reply-avatar width (28px) on each side (56px total), so
+   the reply reads as a slightly recessed block under the user prompt. It stays
+   centred via the margin:auto inherited from .msg-row, and the .msg-actions
+   cluster (position:absolute, anchored to this row) moves in with the narrower
+   column so the copy button still tracks the reply's right edge. The bubble is
+   the only flex child (the avatar ::before was removed). */
 .msg-row.assistant {
   align-items: flex-start;
-  gap: 12px;
-}
-.msg-row.assistant::before {
-  content: "";
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  margin-top: 2px;
-  border-radius: 8px;
-  background: var(--accent) var(--brand-mark) center / 18px 18px no-repeat;
-  box-shadow: var(--shadow-bubble);
+  max-width: calc(min(var(--col-w), 100%) - 56px);
 }
 /* Beside the avatar the reply fills the remaining width (margins reset, flex:1)
    rather than centering. Scoped to the reply row so asides / placeholders /

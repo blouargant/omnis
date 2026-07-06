@@ -58,27 +58,26 @@ func WritePath(name string, body []byte) (string, bool) {
 	return filepath.Join(paths.WriteDirForLayer(layer), filename), true
 }
 
-// ReadSection reads and parses a whitelisted config section. It returns the
-// parsed JSON (nil when the file is absent or empty), the read path, the layer
-// the file currently lives in ("local"/"user"/"system"), and the file mtime.
-// A non-existent file is not an error (parsed is nil).
+// ReadSection reads a whitelisted config section as the MERGED effective view —
+// every layer of the search chain deep-merged (system → user → local), not just
+// the highest-precedence file — so callers see the full config that actually
+// takes effect (including package-shipped items a per-user overlay would
+// otherwise shadow). It returns the parsed object (nil when the file exists in
+// no layer), the highest-precedence read path (for display/mtime), the layer
+// that path lives in, and that file's mtime. A non-existent file is not an error.
 func ReadSection(name string) (parsed any, readPath, layer string, mtime time.Time, err error) {
-	readPath, ok := ReadPath(name)
+	filename, ok := FileNameForSection(name)
 	if !ok {
 		return nil, "", "", time.Time{}, fmt.Errorf("unknown config section %q", name)
 	}
+	readPath, _ = ReadPath(name)
 	layer = paths.Layer(readPath)
-	data, rerr := os.ReadFile(readPath)
-	if rerr != nil {
-		if os.IsNotExist(rerr) {
-			return nil, readPath, layer, time.Time{}, nil
-		}
-		return nil, readPath, layer, time.Time{}, rerr
+	merged, _, merr := LoadMergedSection(filename)
+	if merr != nil {
+		return nil, readPath, layer, time.Time{}, fmt.Errorf("%s: %w", name, merr)
 	}
-	if len(data) > 0 {
-		if uerr := json.Unmarshal(data, &parsed); uerr != nil {
-			return nil, readPath, layer, time.Time{}, fmt.Errorf("%s is not valid JSON: %w", name, uerr)
-		}
+	if merged != nil {
+		parsed = merged
 	}
 	if st, serr := os.Stat(readPath); serr == nil {
 		mtime = st.ModTime()
@@ -86,24 +85,40 @@ func ReadSection(name string) (parsed any, readPath, layer string, mtime time.Ti
 	return parsed, readPath, layer, mtime, nil
 }
 
-// WriteSection pretty-prints data and writes it atomically to the section's
-// write target (layer-aware). It returns the write path and the resolved layer.
-// Use this for every section EXCEPT "agent": agents.json is fanned out into
-// per-agent registry files by the server's editor and edited entry-by-entry by
-// the settings tools (see agents.go).
+// WriteSection persists `data` (the full desired effective section) to the
+// section's layer-aware write target, writing ONLY the delta against the merge
+// of every layer below that target (see OverlayBytes) — so a per-user save stays
+// minimal and package updates keep flowing through untouched fields. It returns
+// the write path and the layer actually written to.
+//
+// `data` is expected to be a JSON object (map[string]any); a non-object payload
+// is written verbatim (no delta semantics). Use this for every section EXCEPT
+// the per-agent registry files, which are written by WriteAgentEntry.
 func WriteSection(name string, data any) (writePath, layer string, err error) {
-	out, merr := json.MarshalIndent(data, "", "  ")
-	if merr != nil {
-		return "", "", fmt.Errorf("cannot serialize %s: %w", name, merr)
-	}
-	out = append(out, '\n')
-	writePath, ok := WritePath(name, out)
+	filename, ok := FileNameForSection(name)
 	if !ok {
 		return "", "", fmt.Errorf("unknown config section %q", name)
 	}
-	layer = SourceLayer(func() string { p, _ := ReadPath(name); return p }())
-	if name == "agent" {
-		layer = AgentsConfigLayer(func() string { p, _ := ReadPath(name); return p }(), out)
+	full, merr := json.MarshalIndent(data, "", "  ")
+	if merr != nil {
+		return "", "", fmt.Errorf("cannot serialize %s: %w", name, merr)
+	}
+	full = append(full, '\n')
+	// Resolve the write target with the full body in hand (an agents.json that
+	// references local-only items lands in .agents/).
+	writePath, ok = WritePath(name, full)
+	if !ok {
+		return "", "", fmt.Errorf("unknown config section %q", name)
+	}
+	layer = paths.Layer(writePath)
+
+	out := full
+	if desired, ok := data.(map[string]any); ok {
+		if delta, derr := OverlayBytes(filename, desired, writePath); derr == nil {
+			out = delta
+		} else {
+			return "", "", derr
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
 		return "", "", err
