@@ -1,28 +1,25 @@
 ---
 name: k8s-triage
-description: Diagnose an unhealthy Kubernetes workload — pods crash-looping, deployments not ready, services not reachable. Use whenever the user mentions kubernetes, k8s, kubectl, pods, deployments, namespaces, or attaches a kubectl error.
+description: Diagnose an unhealthy Kubernetes workload — pods crash-looping, deployments not ready, services not reachable. The triage decision playbook — confirm context, get evidence, classify the failure, propose one safe next action. Use whenever the user mentions kubernetes, k8s, kubectl, pods, deployments, namespaces, or attaches a kubectl error.
 metadata:
   author: blouargant@chapsvision.com
-  tags: "kubernetes, triage, diagnosis, playbook"
+  tags: "kubernetes, triage, diagnosis, coordination, playbook"
 ---
 
 # Kubernetes Triage
 
-This skill is the *playbook* the agent follows for any K8s incident. It
-assumes either:
+This skill is the *decision playbook* for any K8s incident: confirm the
+context, get the evidence, classify the failure, and propose ONE safe next
+action. It is about **deciding**, not about the mechanics of gathering
+evidence — those live in the `k8s-investigation` skill.
 
-- a `kubectl` binary is reachable through the `Bash` tool, **or**
-- a Kubernetes MCP server is mounted (preferred — it gives structured
-  output and respects permissions).
-
-If neither `kubectl` nor Kubernetes MCP is available, stop command-based
-triage and ask the user for manual evidence (for example: `kubectl get`
-output, `describe pod`, recent events, and the last 200 log lines).
-
-If the investigation becomes log-heavy (for example: log output exceeds about
-5,000 lines or ~5 MB, no clear anchors after scanning at least 2,000 recent
-lines, or the same pod restarts 3+ times within 30 minutes), load
-`k8s-log-investigation` and follow its token-efficient anchor-first workflow.
+- **In a squad** you coordinate: delegate the read-only evidence gathering to
+  the **k8s_investigator** (which follows `k8s-investigation`), classify from
+  the brief it returns, and delegate any change to the **k8s_editor** and any
+  leftover sweep to the **k8s_cleaner**.
+- **Standalone** (single agent, no squad) you do it yourself: load
+  `k8s-investigation` for the read-only snapshot mechanics and run them, then
+  come back here to classify and decide.
 
 ## Procedure
 
@@ -30,12 +27,13 @@ lines, or the same pod restarts 3+ times within 30 minutes), load
    (or the MCP equivalent) and quote it back to the user before doing
    anything else.
 2. **Locate the workload.** Ask for namespace + name if not provided.
-3. **Snapshot the state.** In one batch of read-only calls:
-   - `kubectl get deploy/sts/ds <name> -n <ns> -o wide`
-   - `kubectl get pods -n <ns> -l <selector> -o wide`
-   - `kubectl describe pod <pod>` (the most recent unhealthy one)
-   - `kubectl logs <pod> --previous --tail=200`
-   - relevant `kubectl get events -n <ns> --sort-by=.lastTimestamp | tail`
+3. **Gather evidence (read-only).** Get a compact, cited snapshot of the
+   workload's state — deployment/pod status, the most recent unhealthy pod's
+   `describe`, its previous-container logs, and recent namespace events. In a
+   squad, delegate this to the **k8s_investigator** and name the
+   `k8s-investigation` skill (add `k8s-log-investigation` when the failure is
+   log-heavy). Standalone, load `k8s-investigation` and run its snapshot
+   yourself. Never conclude from assumptions when a `kubectl` read can confirm.
 4. **Classify the failure** into one of:
    - image / pull
    - scheduling (resource, taint, affinity)
@@ -46,6 +44,8 @@ lines, or the same pod restarts 3+ times within 30 minutes), load
    - application (crashes after startup)
 5. **Propose ONE next action** — never a multi-step mitigation in the
    first message. Always a dry-run first when possible (`--dry-run=server`).
+   Delegate the change to the **k8s_editor** (which follows `k8s-modification`)
+   and any ephemeral-leftover sweep to the **k8s_cleaner** (`k8s-cleanup`).
 
 ## Hard rules
 

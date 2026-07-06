@@ -155,7 +155,8 @@ process-wide ask-user registry in
 | `agent-builder`  | Meta-skill: how to scaffold a new specialist agent.                   |
 | `liteparse`      | A tool-bound skill with a `requires.json` (the `lit` CLI, `pipx install liteparse`) and a `permissions.json` allowlist. |
 | `pdf`            | The `pdftotext` fallback for `liteparse`; per-OS `requires.json` (brew/apt). |
-| `k8s-triage`     | A full domain specialisation example (Kubernetes incident triage).    |
+| `k8s-triage`     | A domain specialisation example: the triage decision playbook (confirm context → classify failure → propose one safe fix). |
+| `k8s-investigation` | Its read-only evidence-gathering companion (the `kubectl` snapshot mechanics behind a triage). |
 
 ## Tips
 
