@@ -105,33 +105,6 @@ Only when a diff is insufficient, fall back to a dry-run apply
 - Report: the ownership determination, the strategy chosen and why, the exact
   commands run, the diff, and the post-change health. Cite command + output.
 
-## RBAC subject kinds (deterministic checklist)
-
-Kubernetes RBAC subjects come in THREE distinct kinds and a binding for one
-**NEVER** covers another:
-
-- A named person / developer ("alice", "the developer bob") = `kind: User,
-  name: alice` (the subject has no namespace).
-- A service account ("alice's service account", "alice-sa") =
-  `kind: ServiceAccount, name: alice-sa, namespace: <ns>`, impersonated as
-  `system:serviceaccount:<ns>:alice-sa`.
-- A group = `kind: Group`.
-
-RULE: enumerate every subject the task names, one per line, BEFORE writing any
-manifest. If the task grants access to BOTH a developer AND that developer's
-service account, you need a `(Cluster)RoleBinding` entry for **EACH** — either
-two bindings or one binding with two `subjects` entries. Binding only the SA is
-a common, silent failure: `kubectl auth can-i --as=alice` fails even though
-`--as=system:serviceaccount:<ns>:alice-sa` passes.
-
-MANDATORY self-verification after applying RBAC — for EVERY subject enumerated
-above, run the matching probe and require `yes` before reporting complete:
-
-```bash
-kubectl auth can-i <verb> <resource> --as=<user> -n <ns>                           # User
-kubectl auth can-i <verb> <resource> --as=system:serviceaccount:<ns>:<sa> -n <ns>  # ServiceAccount
-```
-
 ## Hard rules
 
 1. **Preview (diff/dry-run) before every real change** — no exceptions.
@@ -145,9 +118,6 @@ kubectl auth can-i <verb> <resource> --as=system:serviceaccount:<ns>:<sa> -n <ns
 5. **Smallest change.** Touch the fewest fields that achieve the goal; preserve
    existing labels/annotations.
 6. **RBAC denial → escalate**, do not retry with a different account.
-7. **RBAC subjects are distinct.** Bind every named subject; a `User` and that
-   user's `ServiceAccount` are different subjects. Verify each with
-   `kubectl auth can-i --as=…` before reporting the task complete.
 
 ## Output rule
 
