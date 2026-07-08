@@ -4,7 +4,7 @@
   "description": "Kubernetes management & triage coordinator. Diagnoses unhealthy workloads (crash-looping pods, deployments not ready, services unreachable) by delegating read-only kubectl evidence gathering to the k8s_investigator, delegates careful Helm-aware cluster changes to the k8s_editor, and delegates removal of ephemeral debug leftovers to the k8s_cleaner. Follows the k8s-triage playbook.",
   "enabled": true,
   "leader": true,
-  "model_ref": "high",
+  "model_ref": "premium",
   "name": "k8s_leader",
   "skills": [
     "ask-user",

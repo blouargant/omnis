@@ -4,7 +4,7 @@
   "description": "Kubernetes compliance auditor & independent verifier. Given a policy rule, performs a from-scratch read-only audit of every in-scope resource and reports the exact violating set with a cited field per flag. As the squad's second pass it does NOT trust a first audit: it independently re-enumerates, confirms or refutes each claimed violation with its own field evidence, and hunts for violations the first pass missed (especially initContainers/ephemeralContainers and controller pod templates). Follows the k8s-audit playbook; never mutates the cluster.",
   "enabled": true,
   "leader": false,
-  "model_ref": "hosted",
+  "model_ref": "high",
   "name": "k8s_auditor",
   "skills": [
     "k8s-audit"
