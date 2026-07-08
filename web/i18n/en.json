@@ -752,5 +752,12 @@
   "set.sched.noRuns": "No runs recorded yet.",
   "set.sched.emptySchedules": "No routines yet. Add one below, or use /schedule in a chat.",
   "set.sched.emptyLoops": "No active loops. Start one with /loop in a chat.",
-  "set.sched.needBoth": "Enter both a schedule and a prompt."
+  "set.sched.needBoth": "Enter both a schedule and a prompt.",
+  "set.sched.runsCount": "Runs ({n})",
+  "set.sched.clearRuns": "Clear runs",
+  "set.sched.deleteRun": "Delete this run",
+  "set.sched.clearRunsConfirmTitle": "Clear run history?",
+  "set.sched.clearRunsConfirmMsg": "This permanently removes all recorded runs for this routine. It can't be undone.",
+  "set.sched.deleteConfirmTitle": "Delete routine?",
+  "set.sched.deleteConfirmMsg": "Delete the routine “{spec}”? It stops running and is removed permanently."
 }

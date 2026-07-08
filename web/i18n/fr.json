@@ -702,5 +702,12 @@
   "set.sched.noRuns": "Aucune exécution enregistrée pour l'instant.",
   "set.sched.emptySchedules": "Aucune routine. Ajoutez-en une ci-dessous, ou utilisez /schedule dans une conversation.",
   "set.sched.emptyLoops": "Aucune boucle active. Démarrez-en une avec /loop dans une conversation.",
-  "set.sched.needBoth": "Saisissez à la fois une planification et une invite."
+  "set.sched.needBoth": "Saisissez à la fois une planification et une invite.",
+  "set.sched.runsCount": "Exécutions ({n})",
+  "set.sched.clearRuns": "Effacer l’historique",
+  "set.sched.deleteRun": "Supprimer cette exécution",
+  "set.sched.clearRunsConfirmTitle": "Effacer l’historique des exécutions ?",
+  "set.sched.clearRunsConfirmMsg": "Cela supprime définitivement toutes les exécutions enregistrées de cette routine. Action irréversible.",
+  "set.sched.deleteConfirmTitle": "Supprimer la routine ?",
+  "set.sched.deleteConfirmMsg": "Supprimer la routine « {spec} » ? Elle cesse de s’exécuter et est supprimée définitivement."
 }

@@ -56,6 +56,14 @@
 .sched-history { grid-area: history; }
 .sched-edit    { grid-area: edit; }
 
+/* The edit form and run history are collapsed by default and revealed by the
+ * Edit / View runs buttons via the [hidden] attribute. The .sched-edit /
+ * .sched-history rules below set display:flex, which would override the UA
+ * [hidden]{display:none} (equal specificity, author wins) and leave them
+ * permanently open — so re-assert hidden with an attribute-qualified selector. */
+.sched-edit[hidden],
+.sched-history[hidden] { display: none; }
+
 .sched-state {
   flex: 0 0 auto;
   font-size: 0.7rem;
@@ -79,9 +87,29 @@
 .sched-history {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.3rem;
   padding: 0.4rem 0.2rem 0.1rem;
   border-top: 1px dashed var(--border);
+}
+.sched-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.sched-history-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.8;
+}
+/* Cap the visible height (~10 rows) and scroll the rest; the list is newest-
+ * first so the most recent run stays pinned at the top without scrolling. */
+.sched-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 15rem;
+  overflow-y: auto;
 }
 .sched-run {
   display: flex;
@@ -97,6 +125,22 @@
 .sched-run-dot.err { background: var(--danger-fg, #e06c75); }
 .sched-run-when { opacity: 0.8; }
 .sched-run-note { opacity: 0.7; font-style: italic; }
+/* Per-run delete: a subtle × pushed to the far right, reddening on hover. */
+.sched-run-del {
+  margin-left: auto;
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  transition: opacity 0.1s ease, color 0.1s ease;
+}
+.sched-run-del:hover { opacity: 1; color: var(--danger-fg, #f48771); }
 
 .sched-edit {
   display: flex;
@@ -162,4 +206,36 @@
 .sched-add input,
 .sched-add textarea {
   width: 100%;
+}
+
+/* Row action buttons (run / edit / toggle / delete / save / cancel / clear
+ * runs) share the settings look & feel — mirrors .add-btn (core.css) and the
+ * User Commands action buttons rather than the raw browser default. */
+.sched-panel .btn-small,
+.sched-panel .btn-danger,
+.sched-panel .sched-edit-actions button {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+  user-select: none;
+}
+.sched-panel .btn-small:hover,
+.sched-panel .sched-edit-actions button:hover {
+  background: var(--bg-raised-hover);
+  border-color: var(--border-strong);
+}
+.sched-panel .btn-small:active,
+.sched-panel .btn-danger:active,
+.sched-panel .sched-edit-actions button:active { filter: brightness(0.88); }
+
+/* Danger buttons (delete / clear runs): neutral until hover, then red — matches
+ * the User Commands delete affordance. */
+.sched-panel .btn-danger:hover {
+  border-color: var(--danger-fg, #f48771);
+  color: var(--danger-fg, #f48771);
 }

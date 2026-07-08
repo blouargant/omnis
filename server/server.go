@@ -801,6 +801,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.PATCH("/schedules/:id", handleUpdateSchedule(d))
 	auth.DELETE("/schedules/:id", handleDeleteSchedule(d))
 	auth.POST("/schedules/:id/run", handleRunSchedule(d))
+	auth.DELETE("/schedules/:id/history", handleClearScheduleHistory(d))
+	auth.DELETE("/schedules/:id/history/:runID", handleDeleteScheduleRun(d))
 	// Conversation fork / rewind: branch a new session at a turn, or rewind the
 	// live session to before a turn. Both reseed the model's in-memory context
 	// from the kept turns (see server/fork_rewind.go).

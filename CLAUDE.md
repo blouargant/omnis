@@ -2091,19 +2091,35 @@ callback differs per surface.
 **Routes** ([server/scheduler.go](server/scheduler.go), `auth` group): `GET
 /api/schedules`, `POST /api/schedules` `{kind,spec,prompt,session_id?,squad?,
 max_runs?}`, `PATCH /api/schedules/:id` `{enabled?,spec?,prompt?}`, `DELETE
-/api/schedules/:id`, `POST /api/schedules/:id/run`. **Web UI**: `/loop` +
+/api/schedules/:id`, `POST /api/schedules/:id/run`, `DELETE
+/api/schedules/:id/history` (`handleClearScheduleHistory` → `Scheduler.ClearHistory`,
+clears the "past results" list, keeps LastRun/Runs), `DELETE
+/api/schedules/:id/history/:runID` (`handleDeleteScheduleRun` → `Scheduler.DeleteRun`,
+removes one run by its stable `RunRecord.ID`). Each `RunRecord` carries a stable
+`id` (assigned by `RecordRun`; legacy persisted runs are backfilled on `load`).
+**Web UI**: `/loop` +
 `/schedule` slash commands (`handleSchedulerCommand` in [web/app.js](web/app.js),
 Automation slash-menu section) plus a full **Settings → Automation** page
 (`renderAutomation` in [web/settings.js](web/settings.js), styled by
 [web/css/settings/automation.css](web/css/settings/automation.css), nav key
 `settings.menu.automation`): two grouped lists (durable Schedules + active
-Loops), each row with **run-now / inline-edit (spec+prompt, via `PATCH`) /
-enable-disable / delete**, an expandable **run history** whose entries link to
-their result session (`selectSession`), and an add-routine form. The
-`schedule_run` SSE appends the injected turn and `schedule_changed` refreshes
-the page (`window.Settings.refreshSchedules`). `loop`/`schedule` are reserved in
-`usercommands.ReservedNames`. The spec grammar (quoted multi-word spec or first
-token, then prompt) is `scheduler.SplitSpecPrompt`, mirrored in JS.
+Loops), each row with **run-now / inline-edit (spec+prompt, via `PATCH`, revealed
+only after clicking Edit) / enable-disable / delete (with a `uiConfirm` prompt)**,
+an expandable **run history** (a height-capped, scrollable, newest-first list with
+a **Clear runs** button plus a per-run **×** delete; the per-run delete updates the
+DOM in place so the open panel doesn't collapse) whose entries link to their
+result session (`selectSession`), and an add-routine form. Row buttons carry the shared
+`.btn-small`/`.btn-danger` look. **Gotcha:** `.sched-edit`/`.sched-history` set
+`display:flex`, which overrides the UA `[hidden]{display:none}` (equal specificity,
+author wins) — so `automation.css` re-asserts `.sched-edit[hidden]`/`.sched-history[hidden]`
+`{display:none}`; without it the Edit / View-runs buttons look inert (their panels
+are always open). Per-job run history is capped at `maxHistory` (50). The
+`schedule_run` SSE appends the injected turn **and refreshes the open Automation
+panel** (`window.Settings.refreshSchedules`, so a background-tab run updates the
+list live); `schedule_changed` refreshes it on create/edit/delete/clear.
+`loop`/`schedule` are reserved in `usercommands.ReservedNames`. The spec grammar
+(quoted multi-word spec or first token, then prompt) is `scheduler.SplitSpecPrompt`,
+mirrored in JS.
 
 **No-op contract:** no jobs ⇒ the `Run` goroutine sleeps; behaviour is
 byte-identical to before. The 30s interval floor + in-flight skip prevent

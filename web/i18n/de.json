@@ -702,5 +702,12 @@
   "set.sched.noRuns": "Noch keine Ausführungen aufgezeichnet.",
   "set.sched.emptySchedules": "Noch keine Routinen. Füge unten eine hinzu oder verwende /schedule in einem Chat.",
   "set.sched.emptyLoops": "Keine aktiven Schleifen. Starte eine mit /loop in einem Chat.",
-  "set.sched.needBoth": "Gib sowohl einen Zeitplan als auch einen Prompt ein."
+  "set.sched.needBoth": "Gib sowohl einen Zeitplan als auch einen Prompt ein.",
+  "set.sched.runsCount": "Ausführungen ({n})",
+  "set.sched.clearRuns": "Verlauf löschen",
+  "set.sched.deleteRun": "Diese Ausführung löschen",
+  "set.sched.clearRunsConfirmTitle": "Ausführungsverlauf löschen?",
+  "set.sched.clearRunsConfirmMsg": "Dadurch werden alle aufgezeichneten Ausführungen dieser Routine dauerhaft entfernt. Das lässt sich nicht rückgängig machen.",
+  "set.sched.deleteConfirmTitle": "Routine löschen?",
+  "set.sched.deleteConfirmMsg": "Die Routine „{spec}“ löschen? Sie wird gestoppt und dauerhaft entfernt."
 }

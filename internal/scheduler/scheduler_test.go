@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -242,6 +243,90 @@ func TestRecordRunCapsHistory(t *testing.T) {
 	}
 	// A no-op for an unknown job (e.g. a dropped one-shot).
 	s.RecordRun("nope", RunRecord{At: now})
+}
+
+func TestClearHistory(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.Local)
+	s := New(filepath.Join(t.TempDir(), "schedules.json"))
+	s.now = func() time.Time { return now }
+	job, _ := s.Add(Job{Kind: KindSchedule, Prompt: "x", Cron: "0 * * * *", Spec: "0 * * * *"})
+	for i := 0; i < 3; i++ {
+		s.RecordRun(job.ID, RunRecord{At: now.Add(time.Duration(i) * time.Minute), SessionID: "s", Status: "ok"})
+	}
+	if !s.ClearHistory(job.ID) {
+		t.Fatal("ClearHistory returned false for a known job")
+	}
+	got, _ := s.Get(job.ID)
+	if len(got.History) != 0 {
+		t.Errorf("history len = %d after clear, want 0", len(got.History))
+	}
+	// LastRun / Runs counters are left intact — only the per-run log is cleared.
+	if got.LastRun.IsZero() {
+		t.Error("ClearHistory should not reset LastRun")
+	}
+	// Unknown job → false, no panic.
+	if s.ClearHistory("nope") {
+		t.Error("ClearHistory returned true for an unknown job")
+	}
+}
+
+func TestDeleteRun(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.Local)
+	s := New(filepath.Join(t.TempDir(), "schedules.json"))
+	s.now = func() time.Time { return now }
+	job, _ := s.Add(Job{Kind: KindSchedule, Prompt: "x", Cron: "0 * * * *", Spec: "0 * * * *"})
+	for i := 0; i < 3; i++ {
+		s.RecordRun(job.ID, RunRecord{At: now.Add(time.Duration(i) * time.Minute), SessionID: "s", Status: "ok"})
+	}
+	got, _ := s.Get(job.ID)
+	// RecordRun assigns a stable id to each run.
+	for i, r := range got.History {
+		if r.ID == "" {
+			t.Fatalf("run %d has no id", i)
+		}
+	}
+	target := got.History[1].ID
+	if !s.DeleteRun(job.ID, target) {
+		t.Fatal("DeleteRun returned false for a known run")
+	}
+	got, _ = s.Get(job.ID)
+	if len(got.History) != 2 {
+		t.Fatalf("history len = %d after delete, want 2", len(got.History))
+	}
+	for _, r := range got.History {
+		if r.ID == target {
+			t.Error("deleted run still present")
+		}
+	}
+	// Unknown run id / job / empty id → false, no panic.
+	if s.DeleteRun(job.ID, "nope") {
+		t.Error("DeleteRun returned true for an unknown run id")
+	}
+	if s.DeleteRun(job.ID, "") {
+		t.Error("DeleteRun returned true for an empty run id")
+	}
+	if s.DeleteRun("nojob", target) {
+		t.Error("DeleteRun returned true for an unknown job")
+	}
+}
+
+// Legacy persisted history (no per-run ids) is backfilled on load so the UI can
+// delete those entries individually.
+func TestLoadBackfillsRunIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schedules.json")
+	seed := `{"jobs":[{"id":"j1","kind":"schedule","prompt":"x","spec":"0 * * * *","cron":"0 * * * *","enabled":true,"runs":1,"created_at":"2026-06-28T09:00:00Z","history":[{"at":"2026-06-28T09:30:00Z","status":"ok"}]}]}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(path) // New calls load(), which backfills the missing run id.
+	got, ok := s.Get("j1")
+	if !ok || len(got.History) != 1 {
+		t.Fatalf("job/history not loaded: ok=%v len=%d", ok, len(got.History))
+	}
+	if got.History[0].ID == "" {
+		t.Error("legacy run id was not backfilled on load")
+	}
 }
 
 func TestDurablePersistAndReload(t *testing.T) {

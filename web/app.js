@@ -5606,6 +5606,13 @@ async function subscribeGlobalEvents() {
           endRemoteBusy(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
+          // A run also appends a result to the job's history — refresh the open
+          // Automation panel so the results list updates live (this fires on the
+          // persistent /api/events stream, so it lands even when the tab was
+          // backgrounded, instead of only on the next navigation back).
+          if (window.Settings && typeof window.Settings.refreshSchedules === "function") {
+            window.Settings.refreshSchedules();
+          }
         } else if (event === "schedule_changed") {
           // A loop/schedule was created, edited, or removed (here or elsewhere) —
           // refresh the Automation settings panel if it is open.

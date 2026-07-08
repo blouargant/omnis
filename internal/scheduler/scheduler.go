@@ -36,13 +36,16 @@ const (
 	KindSchedule = "schedule"
 )
 
-// maxHistory bounds the per-job run history kept for the management UI.
-const maxHistory = 10
+// maxHistory bounds the per-job run history kept for the management UI. The
+// management surface caps the visible list and scrolls beyond a handful, so we
+// retain a generous window (past runs are cheap to store).
+const maxHistory = 50
 
 // RunRecord is one past execution of a job: when it ran and the session its
 // result landed in (the bound session for a loop, the fresh session for a
 // scheduled run). Surfaced by the Automation page so results are findable.
 type RunRecord struct {
+	ID        string    `json:"id,omitempty"` // stable per-run id (assigned by RecordRun)
 	At        time.Time `json:"at"`
 	SessionID string    `json:"session_id,omitempty"`
 	Status    string    `json:"status,omitempty"` // "ok" | "error" | ""
@@ -162,6 +165,13 @@ func (s *Scheduler) load() {
 			// one-shot: keep At (fires once even if in the past).
 		} else if next, ok := j.nextRun(now); ok {
 			j.NextRun = next
+		}
+		// Backfill stable run ids for history recorded before per-run ids existed,
+		// so the management UI can delete those legacy entries individually.
+		for i := range j.History {
+			if j.History[i].ID == "" {
+				j.History[i].ID = newID()
+			}
 		}
 		s.jobs[j.ID] = j
 	}
@@ -351,6 +361,9 @@ func (s *Scheduler) RecordRun(jobID string, rec RunRecord) {
 	if !ok {
 		return
 	}
+	if rec.ID == "" {
+		rec.ID = newID()
+	}
 	j.History = append(j.History, rec)
 	if len(j.History) > maxHistory {
 		j.History = j.History[len(j.History)-maxHistory:]
@@ -361,6 +374,52 @@ func (s *Scheduler) RecordRun(jobID string, rec RunRecord) {
 	if j.Kind == KindSchedule {
 		s.save()
 	}
+}
+
+// ClearHistory drops a job's recorded run history (the "past results" list),
+// persisting durable jobs. It returns false when the job is unknown. LastRun /
+// Runs counters are left intact — only the per-run log is cleared.
+func (s *Scheduler) ClearHistory(jobID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[jobID]
+	if !ok {
+		return false
+	}
+	j.History = nil
+	if j.Kind == KindSchedule {
+		s.save()
+	}
+	return true
+}
+
+// DeleteRun removes a single run record (by its stable id) from a job's history,
+// persisting durable jobs. It returns false when the job or run id is unknown.
+// LastRun / Runs counters are left intact — only the one log entry is dropped.
+func (s *Scheduler) DeleteRun(jobID, runID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[jobID]
+	if !ok || runID == "" {
+		return false
+	}
+	out := j.History[:0]
+	removed := false
+	for _, r := range j.History {
+		if r.ID == runID {
+			removed = true
+			continue
+		}
+		out = append(out, r)
+	}
+	if !removed {
+		return false
+	}
+	j.History = out
+	if j.Kind == KindSchedule {
+		s.save()
+	}
+	return true
 }
 
 // Run is the timer loop. It blocks until ctx is cancelled. `fire` runs a due

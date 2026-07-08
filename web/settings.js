@@ -1257,18 +1257,28 @@ const BASE_PATH = window.BASE_PATH || "";
     return t.length > 90 ? t.slice(0, 90) + "…" : t;
   }
   function schedHistoryHTML(j) {
-    const recs = (j.history || []).slice().reverse(); // newest first
+    const recs = (j.history || []).slice().reverse(); // newest first (last run on top)
     if (!recs.length) return `<p class="settings-hint">${escHtml(tr("set.sched.noRuns"))}</p>`;
-    return recs.map(r => {
+    const rows = recs.map(r => {
       const ok = r.status !== "error";
       const when = r.at ? new Date(r.at).toLocaleString(I18N.locale) : "";
       const link = r.session_id
         ? `<a class="sched-link" data-open="${escHtml(r.session_id)}">${escHtml(tr("set.sched.open"))}</a>`
         : "";
       const note = r.note ? `<span class="sched-run-note">${escHtml(r.note)}</span>` : "";
+      const del = r.id
+        ? `<button type="button" class="sched-run-del" data-act="del-run" data-run="${escHtml(r.id)}" data-tip="${escHtml(tr("set.sched.deleteRun"))}" aria-label="${escHtml(tr("set.sched.deleteRun"))}">×</button>`
+        : "";
       return `<div class="sched-run"><span class="sched-run-dot ${ok ? "ok" : "err"}"></span>` +
-        `<span class="sched-run-when">${escHtml(when)}</span>${link}${note}</div>`;
+        `<span class="sched-run-when">${escHtml(when)}</span>${link}${note}${del}</div>`;
     }).join("");
+    // Header (run count + clear) above a height-capped, scrollable list; the
+    // list is newest-first so the most recent run stays visible without scroll.
+    return `<div class="sched-history-head">` +
+        `<span class="sched-history-count">${escHtml(tr("set.sched.runsCount", { n: recs.length }))}</span>` +
+        `<button type="button" class="btn-small btn-danger" data-act="clear-history">${escHtml(tr("set.sched.clearRuns"))}</button>` +
+      `</div>` +
+      `<div class="sched-run-list">${rows}</div>`;
   }
   function schedRowHTML(j) {
     const histN = (j.history || []).length;
@@ -1372,9 +1382,46 @@ const BASE_PATH = window.BASE_PATH || "";
         if (act === "history") { const h = row.querySelector(".sched-history"); h.hidden = !h.hidden; return; }
         if (act === "edit") { const ed = row.querySelector(".sched-edit"); ed.hidden = !ed.hidden; return; }
         if (act === "cancel") { row.querySelector(".sched-edit").hidden = true; return; }
+        if (act === "del-run") {
+          const runId = btn.dataset.run;
+          const r = await api(`/${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`, { method: "DELETE" });
+          if (!r.ok && r.status !== 204) { const jj = await r.json().catch(() => ({})); setStatus(jj.error || ("error " + r.status), "error"); return; }
+          // Update the DOM in place so the expanded history panel stays open
+          // instead of collapsing on a full re-render.
+          if (job && Array.isArray(job.history)) job.history = job.history.filter(x => x.id !== runId);
+          const runRow = btn.closest(".sched-run");
+          if (runRow) runRow.remove();
+          const list = row.querySelector(".sched-run-list");
+          const remaining = list ? list.querySelectorAll(".sched-run").length : 0;
+          if (remaining === 0) { renderAutomation(); return; }
+          const countEl = row.querySelector(".sched-history-count");
+          if (countEl) countEl.textContent = tr("set.sched.runsCount", { n: remaining });
+          return;
+        }
         if (act === "run") { await api(`/${encodeURIComponent(id)}/run`, { method: "POST" }); }
         else if (act === "toggle") { await api(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ enabled: !(job && job.enabled) }) }); }
-        else if (act === "delete") { await api(`/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+        else if (act === "delete") {
+          const ok = await uiConfirm({
+            title: tr("set.sched.deleteConfirmTitle"),
+            message: tr("set.sched.deleteConfirmMsg", { spec: (job && job.spec) || "" }),
+            confirmText: tr("set.sched.delete"),
+            cancelText: tr("common.cancel"),
+            danger: true,
+          });
+          if (!ok) return;
+          await api(`/${encodeURIComponent(id)}`, { method: "DELETE" });
+        }
+        else if (act === "clear-history") {
+          const ok = await uiConfirm({
+            title: tr("set.sched.clearRunsConfirmTitle"),
+            message: tr("set.sched.clearRunsConfirmMsg"),
+            confirmText: tr("set.sched.clearRuns"),
+            cancelText: tr("common.cancel"),
+            danger: true,
+          });
+          if (!ok) return;
+          await api(`/${encodeURIComponent(id)}/history`, { method: "DELETE" });
+        }
         else if (act === "save") {
           const spec = row.querySelector(".sched-edit-spec").value.trim();
           const prompt = row.querySelector(".sched-edit-prompt").value.trim();

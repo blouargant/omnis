@@ -702,5 +702,12 @@
   "set.sched.noRuns": "Aún no hay ejecuciones registradas.",
   "set.sched.emptySchedules": "Aún no hay rutinas. Añade una abajo o usa /schedule en un chat.",
   "set.sched.emptyLoops": "No hay bucles activos. Inicia uno con /loop en un chat.",
-  "set.sched.needBoth": "Introduce tanto una programación como una indicación."
+  "set.sched.needBoth": "Introduce tanto una programación como una indicación.",
+  "set.sched.runsCount": "Ejecuciones ({n})",
+  "set.sched.clearRuns": "Borrar ejecuciones",
+  "set.sched.deleteRun": "Eliminar esta ejecución",
+  "set.sched.clearRunsConfirmTitle": "¿Borrar el historial de ejecuciones?",
+  "set.sched.clearRunsConfirmMsg": "Esto elimina de forma permanente todas las ejecuciones registradas de esta rutina. No se puede deshacer.",
+  "set.sched.deleteConfirmTitle": "¿Eliminar la rutina?",
+  "set.sched.deleteConfirmMsg": "¿Eliminar la rutina «{spec}»? Deja de ejecutarse y se elimina de forma permanente."
 }

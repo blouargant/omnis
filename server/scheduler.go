@@ -270,6 +270,32 @@ func handleRunSchedule(d serverDeps) gin.HandlerFunc {
 	}
 }
 
+// handleClearScheduleHistory drops a job's past-run history (the results list).
+// DELETE /api/schedules/:id/history.
+func handleClearScheduleHistory(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !d.Scheduler.ClearHistory(c.Param("id")) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
+			return
+		}
+		broadcastScheduleChanged(d)
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// handleDeleteScheduleRun removes a single past-run entry (by its id) from a
+// job's history. DELETE /api/schedules/:id/history/:runID.
+func handleDeleteScheduleRun(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !d.Scheduler.DeleteRun(c.Param("id"), c.Param("runID")) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		broadcastScheduleChanged(d)
+		c.Status(http.StatusNoContent)
+	}
+}
+
 func broadcastScheduleChanged(d serverDeps) {
 	if d.PushEvents != nil {
 		d.PushEvents.broadcast("schedule_changed", "")
