@@ -10,31 +10,49 @@ import (
 
 // GiteaRef points at a Gitea repository tree.
 type GiteaRef struct {
-	Host   string
-	Owner  string
-	Repo   string
-	Branch string
-	Path   string
+	Host string
+	// BasePath is the sub-path a Gitea instance may be hosted under
+	// (e.g. "/git" for https://host/git/...), leading slash and no trailing
+	// slash, or "" when hosted at the host root. It is carried through to the
+	// API base ("https://host{BasePath}/api/v1/...").
+	BasePath string
+	Owner    string
+	Repo     string
+	Branch   string
+	Path     string
 }
 
-var giteaTreeRe = regexp.MustCompile(`^https?://([^/]+)/([^/]+)/([^/]+)/src/branch/([^/]+)/?(.*)$`)
-var giteaRepoRe = regexp.MustCompile(`^https?://([^/]+)/([^/]+)/([^/]+)/?$`)
+// The owner/repo pair are the two path segments immediately preceding the
+// literal "/src/branch/" (tree form) or the end of the URL (repo-only form).
+// The optional, lazily-matched `((?:/[^/]+)*?)` group absorbs any base-path
+// prefix in between (e.g. a Gitea served under "/git"), so a subpath-hosted
+// instance is parsed correctly rather than mistaking the base path for the
+// owner.
+var giteaTreeRe = regexp.MustCompile(`^https?://([^/]+)((?:/[^/]+)*?)/([^/]+)/([^/]+)/src/branch/([^/]+)/?(.*)$`)
+var giteaRepoRe = regexp.MustCompile(`^https?://([^/]+)((?:/[^/]+)*?)/([^/]+)/([^/]+)/?$`)
 
 func parseGiteaRef(rawURL string) (GiteaRef, error) {
 	rawURL = strings.TrimRight(rawURL, "/")
 	if m := giteaTreeRe.FindStringSubmatch(rawURL); m != nil {
 		return GiteaRef{
-			Host:   m[1],
-			Owner:  m[2],
-			Repo:   m[3],
-			Branch: m[4],
-			Path:   strings.Trim(m[5], "/"),
+			Host:     m[1],
+			BasePath: m[2],
+			Owner:    m[3],
+			Repo:     m[4],
+			Branch:   m[5],
+			Path:     strings.Trim(m[6], "/"),
 		}, nil
 	}
 	if m := giteaRepoRe.FindStringSubmatch(rawURL); m != nil {
-		return GiteaRef{Host: m[1], Owner: m[2], Repo: m[3], Branch: "main"}, nil
+		return GiteaRef{Host: m[1], BasePath: m[2], Owner: m[3], Repo: m[4], Branch: "main"}, nil
 	}
 	return GiteaRef{}, fmt.Errorf("expected Gitea URL: https://gitea.example.com/{owner}/{repo}[/src/branch/{branch}/{path}]")
+}
+
+// apiURL builds a Gitea API URL, honouring any BasePath the instance is hosted
+// under (so "https://host/git/..." → "https://host/git/api/v1/...").
+func (g GiteaRef) apiURL(format string, args ...any) string {
+	return "https://" + g.Host + g.BasePath + "/api/v1" + fmt.Sprintf(format, args...)
 }
 
 func (g GiteaRef) giteaHeaders(token string) map[string]string {
@@ -56,9 +74,9 @@ func (g GiteaRef) AutoName() string {
 }
 
 func (g GiteaRef) TreeEntries(token string) ([]TreeEntry, error) {
-	branchURL := fmt.Sprintf(
-		"https://%s/api/v1/repos/%s/%s/branches/%s",
-		g.Host, g.Owner, g.Repo, url.PathEscape(g.Branch),
+	branchURL := g.apiURL(
+		"/repos/%s/%s/branches/%s",
+		g.Owner, g.Repo, url.PathEscape(g.Branch),
 	)
 	body, status, err := rawGet(branchURL, g.giteaHeaders(token))
 	if err != nil {
@@ -83,9 +101,9 @@ func (g GiteaRef) TreeEntries(token string) ([]TreeEntry, error) {
 	}
 	sha := branchResp.Commit.ID
 
-	treeURL := fmt.Sprintf(
-		"https://%s/api/v1/repos/%s/%s/git/trees/%s?recursive=1",
-		g.Host, g.Owner, g.Repo, sha,
+	treeURL := g.apiURL(
+		"/repos/%s/%s/git/trees/%s?recursive=1",
+		g.Owner, g.Repo, sha,
 	)
 	body, status, err = rawGet(treeURL, g.giteaHeaders(token))
 	if err != nil {
@@ -125,9 +143,9 @@ func (g GiteaRef) RawFile(relPath, token string) ([]byte, int, error) {
 	if g.Path != "" {
 		fullPath = g.Path + "/" + relPath
 	}
-	rawURL := fmt.Sprintf(
-		"https://%s/api/v1/repos/%s/%s/raw/%s?ref=%s",
-		g.Host, g.Owner, g.Repo, fullPath, url.QueryEscape(g.Branch),
+	rawURL := g.apiURL(
+		"/repos/%s/%s/raw/%s?ref=%s",
+		g.Owner, g.Repo, fullPath, url.QueryEscape(g.Branch),
 	)
 	return rawGet(rawURL, g.giteaHeaders(token))
 }
@@ -137,9 +155,9 @@ func (g GiteaRef) DirFiles(dirPath, token string) ([]InstallableFile, error) {
 	if g.Path != "" {
 		fullDir = g.Path + "/" + dirPath
 	}
-	contentsURL := fmt.Sprintf(
-		"https://%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
-		g.Host, g.Owner, g.Repo, fullDir, url.QueryEscape(g.Branch),
+	contentsURL := g.apiURL(
+		"/repos/%s/%s/contents/%s?ref=%s",
+		g.Owner, g.Repo, fullDir, url.QueryEscape(g.Branch),
 	)
 	body, status, err := rawGet(contentsURL, g.giteaHeaders(token))
 	if err != nil {

@@ -247,16 +247,57 @@ func handleUpdateSchedule(d serverDeps) gin.HandlerFunc {
 	}
 }
 
-// handleDeleteSchedule removes a job. DELETE /api/schedules/:id.
+// perRunSessionIDs returns the ids of the fresh, auto-archived sessions a
+// schedule job created on its own — one per run — so a delete can cascade to
+// them. It deliberately EXCLUDES shared sessions: a loop's bound session and a
+// schedule's fixed target session (both have run.SessionID == job.SessionID),
+// which must never be deleted by a routine/history cleanup. Empty for loops.
+func perRunSessionIDs(d serverDeps, jobID string) []string {
+	if d.Scheduler == nil {
+		return nil
+	}
+	job, ok := d.Scheduler.Get(jobID)
+	if !ok || job.Kind != scheduler.KindSchedule {
+		return nil
+	}
+	var out []string
+	for _, r := range job.History {
+		if r.SessionID != "" && r.SessionID != job.SessionID {
+			out = append(out, r.SessionID)
+		}
+	}
+	return out
+}
+
+// handleDeleteSchedule removes a job. DELETE /api/schedules/:id. When
+// ?delete_runs=true it also deletes the fresh per-run archived sessions the
+// routine produced (the "also delete associated runs" toggle in the UI).
 func handleDeleteSchedule(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !d.Scheduler.Remove(c.Param("id")) {
+		id := c.Param("id")
+		var sids []string
+		if truthy(c.Query("delete_runs")) {
+			sids = perRunSessionIDs(d, id) // capture before Remove drops the job
+		}
+		if !d.Scheduler.Remove(id) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
 			return
+		}
+		for _, sid := range sids {
+			deleteSession(d, sid)
 		}
 		broadcastScheduleChanged(d)
 		c.Status(http.StatusNoContent)
 	}
+}
+
+// truthy reports whether a query-string flag reads as true.
+func truthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // handleRunSchedule fires a job immediately. POST /api/schedules/:id/run.
@@ -270,13 +311,20 @@ func handleRunSchedule(d serverDeps) gin.HandlerFunc {
 	}
 }
 
-// handleClearScheduleHistory drops a job's past-run history (the results list).
-// DELETE /api/schedules/:id/history.
+// handleClearScheduleHistory drops a job's past-run history (the results list)
+// and, since each scheduled run produces a fresh archived session, also deletes
+// those per-run sessions (never a shared bound/target session). DELETE
+// /api/schedules/:id/history.
 func handleClearScheduleHistory(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !d.Scheduler.ClearHistory(c.Param("id")) {
+		id := c.Param("id")
+		sids := perRunSessionIDs(d, id) // capture before ClearHistory wipes it
+		if !d.Scheduler.ClearHistory(id) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
 			return
+		}
+		for _, sid := range sids {
+			deleteSession(d, sid)
 		}
 		broadcastScheduleChanged(d)
 		c.Status(http.StatusNoContent)
@@ -284,16 +332,44 @@ func handleClearScheduleHistory(d serverDeps) gin.HandlerFunc {
 }
 
 // handleDeleteScheduleRun removes a single past-run entry (by its id) from a
-// job's history. DELETE /api/schedules/:id/history/:runID.
+// job's history and deletes the fresh archived session that run produced (never
+// a shared bound/target session). DELETE /api/schedules/:id/history/:runID.
 func handleDeleteScheduleRun(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !d.Scheduler.DeleteRun(c.Param("id"), c.Param("runID")) {
+		id, runID := c.Param("id"), c.Param("runID")
+		sid := perRunSessionForRun(d, id, runID) // capture before the record is removed
+		if !d.Scheduler.DeleteRun(id, runID) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
 			return
+		}
+		if sid != "" {
+			deleteSession(d, sid)
 		}
 		broadcastScheduleChanged(d)
 		c.Status(http.StatusNoContent)
 	}
+}
+
+// perRunSessionForRun returns the fresh per-run session id for one run record
+// (empty when the run reused a shared session or isn't found) — see
+// perRunSessionIDs for the shared-session exclusion rationale.
+func perRunSessionForRun(d serverDeps, jobID, runID string) string {
+	if d.Scheduler == nil {
+		return ""
+	}
+	job, ok := d.Scheduler.Get(jobID)
+	if !ok || job.Kind != scheduler.KindSchedule {
+		return ""
+	}
+	for _, r := range job.History {
+		if r.ID == runID {
+			if r.SessionID != "" && r.SessionID != job.SessionID {
+				return r.SessionID
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 func broadcastScheduleChanged(d serverDeps) {

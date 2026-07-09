@@ -2091,12 +2091,29 @@ callback differs per surface.
 **Routes** ([server/scheduler.go](server/scheduler.go), `auth` group): `GET
 /api/schedules`, `POST /api/schedules` `{kind,spec,prompt,session_id?,squad?,
 max_runs?}`, `PATCH /api/schedules/:id` `{enabled?,spec?,prompt?}`, `DELETE
-/api/schedules/:id`, `POST /api/schedules/:id/run`, `DELETE
+/api/schedules/:id` (with `?delete_runs=true` to cascade — see below), `POST
+/api/schedules/:id/run`, `DELETE
 /api/schedules/:id/history` (`handleClearScheduleHistory` → `Scheduler.ClearHistory`,
 clears the "past results" list, keeps LastRun/Runs), `DELETE
 /api/schedules/:id/history/:runID` (`handleDeleteScheduleRun` → `Scheduler.DeleteRun`,
 removes one run by its stable `RunRecord.ID`). Each `RunRecord` carries a stable
 `id` (assigned by `RecordRun`; legacy persisted runs are backfilled on `load`).
+
+**Run-session delete cascade.** A `schedule` run with **no fixed target session**
+creates a fresh session per run and **auto-archives** it, so those archived
+sessions accumulate. Deleting run history therefore cascades to those sessions,
+via the shared `deleteSession(d, id)` helper ([server/spawn.go](server/spawn.go),
+extracted from the `DELETE /sessions/:id` handler): deleting one run
+(`handleDeleteScheduleRun`) or clearing history (`handleClearScheduleHistory`)
+**always** deletes the fresh per-run sessions; deleting the **routine**
+(`handleDeleteSchedule`) does so **only** when `?delete_runs=true` (the web UI's
+"Also delete the result sessions…" toggle). The scoping is enforced by
+`perRunSessionIDs` / `perRunSessionForRun` ([server/scheduler.go](server/scheduler.go)):
+they return a session id **only** when `job.Kind == schedule && run.SessionID != ""
+&& run.SessionID != job.SessionID` — so a **loop's bound session** and a
+**schedule's fixed target session** (both `run.SessionID == job.SessionID`, i.e.
+user-owned) are **never** deleted by a history/routine cleanup. Regression
+coverage: [server/scheduler_cascade_test.go](server/scheduler_cascade_test.go).
 **Web UI**: `/loop` +
 `/schedule` slash commands (`handleSchedulerCommand` in [web/app.js](web/app.js),
 Automation slash-menu section) plus a full **Settings → Automation** page
@@ -2104,19 +2121,28 @@ Automation slash-menu section) plus a full **Settings → Automation** page
 [web/css/settings/automation.css](web/css/settings/automation.css), nav key
 `settings.menu.automation`): two grouped lists (durable Schedules + active
 Loops), each row with **run-now / inline-edit (spec+prompt, via `PATCH`, revealed
-only after clicking Edit) / enable-disable / delete (with a `uiConfirm` prompt)**,
-an expandable **run history** (a height-capped, scrollable, newest-first list with
-a **Clear runs** button plus a per-run **×** delete; the per-run delete updates the
-DOM in place so the open panel doesn't collapse) whose entries link to their
-result session (`selectSession`), and an add-routine form. Row buttons carry the shared
-`.btn-small`/`.btn-danger` look. **Gotcha:** `.sched-edit`/`.sched-history` set
+only after clicking Edit) / enable-disable / delete (with a `uiConfirm` prompt — a
+`checkbox` toggle "Also delete the result sessions…" appears when the routine
+produced any, driving `?delete_runs=true`)**, an expandable **run history** (a
+height-capped, scrollable, newest-first list with a **Clear runs** button plus a
+per-run **×** delete — both cascade to the per-run sessions server-side) whose
+entries link to their result session (`selectSession`), and an add-routine form.
+`renderAutomation` **snapshots which rows have their history/edit panels open and
+re-opens them after a re-render**, so a `schedule_run`/`schedule_changed`-driven
+refresh (or a per-run delete) never collapses what the user expanded — this is why
+per-run delete can just re-render instead of surgically patching the DOM. Row
+buttons carry the shared `.btn-small`/`.btn-danger` look. `uiConfirm`
+([web/app.js](web/app.js)) grew an optional `checkbox` param: with it the promise
+resolves `{ok, checked}` (else a plain boolean — existing callers unaffected);
+styled `.ui-modal-check` in [web/css/features/dialogs.css](web/css/features/dialogs.css).
+**Gotcha:** `.sched-edit`/`.sched-history` set
 `display:flex`, which overrides the UA `[hidden]{display:none}` (equal specificity,
 author wins) — so `automation.css` re-asserts `.sched-edit[hidden]`/`.sched-history[hidden]`
 `{display:none}`; without it the Edit / View-runs buttons look inert (their panels
 are always open). Per-job run history is capped at `maxHistory` (50). The
 `schedule_run` SSE appends the injected turn **and refreshes the open Automation
 panel** (`window.Settings.refreshSchedules`, so a background-tab run updates the
-list live); `schedule_changed` refreshes it on create/edit/delete/clear.
+list live — even when the window is unfocused); `schedule_changed` refreshes it on create/edit/delete/clear.
 `loop`/`schedule` are reserved in `usercommands.ReservedNames`. The spec grammar
 (quoted multi-word spec or first token, then prompt) is `scheduler.SplitSpecPrompt`,
 mirrored in JS.
@@ -3177,18 +3203,36 @@ from the config search chain; with the same fork-on-first-edit semantics as
 other config), and the same set of provider adapters in
 [internal/registries/](internal/registries/).
 
-Each entry has a `kind` field: `skills` (default when missing — legacy),
-`agents`, `both` (skills + agents), `mcp`, `a2a`, `squads`, `commands`, or
-`permissions`. A **permissions** registry item is a directory holding a
-`permissions.json` (same `permissions.{allow,ask,deny}` shape as the
-local file; old `always_*` files auto-convert); installing **merges** its rules into the user's `permissions.json`
-deduped by pattern (`registries.MergePermissionsFile`), rather than copying a
-file. The Settings → Registries hub exposes a **Permissions** kind alongside
-the others.
-The Settings → Skills/Agents/MCP/A2A/Commands → Remotes tabs each list
-only the registries whose `kind` matches; a `both` entry shows up in
-both the skills and agents tabs. The "Hosts" selector on the add/edit
-dialog sets the kind.
+A registry can serve **any combination** of content kinds — `skills`, `agents`,
+`mcp`, `a2a`, `squads`, `commands`, `permissions`. The canonical field is the
+**`kinds` array** (`Registry.Kinds []string`); the legacy single **`kind`**
+string is still read for backwards compatibility (`""` ⇒ skills, the `"both"`
+alias ⇒ skills+agents) and is superseded by `kinds` when both are present.
+`Registry.EffectiveKinds()` resolves the served set (expanding `"both"`,
+applying the skills default, de-duping); `Serves(kind)` is membership in it;
+`NormalizedKind()`/`CanonicalKind()` return the `"+"`-joined set (used for
+display + the regindex corpus hash). New/edited entries are written with `kinds`
+and an empty `kind`; untouched legacy entries keep working. A **permissions**
+registry item is a directory holding a `permissions.json` (same
+`permissions.{allow,ask,deny}` shape as the local file; old `always_*` files
+auto-convert); installing **merges** its rules into the user's
+`permissions.json` deduped by pattern (`registries.MergePermissionsFile`),
+rather than copying a file. The Settings → Registries hub exposes a
+**Permissions** kind alongside the others.
+The Settings → Skills/Agents/MCP/A2A/Commands → Remotes tabs each list only the
+registries whose kind set **includes** that tab's kind, so a multi-kind registry
+shows up in every matching tab (with a "+ other-kinds" badge). The add/edit
+dialog's **"Content types"** field (formerly "Hosts") is a **multi-select of
+checkboxes** — tick every kind the registry provides. Server-side
+([server/remote_registry.go](server/remote_registry.go)): the POST/PUT accept a
+`kinds` array (plus the legacy single `kind`), `normalizeKinds` validates/expands
+them; **adding an already-present URL unions the requested kinds into the
+existing entry** (was: force `"both"`); **deleting from a tab removes only that
+tab's kind, dropping the whole entry only when it was the last kind** (generalises
+the old skills↔agents "both" demote). The helper's `browse_registry` iterates all
+served kinds; `get_remote_item`/`install_remote_item` still dispatch on a single
+`primaryKind()` (skills+agents ⇒ the historical `"both"` path, otherwise the
+first served kind).
 
 There is also a consolidated **Settings → Registries** section (top-level
 sidebar entry, between Commands and Appearance) that concentrates every remote
@@ -3205,7 +3249,11 @@ registry index via `POST /api/registries/reindex`
 ([server/server.go](server/server.go)), which calls
 `Infrastructure.RegistryIndex(...).Reindex(ctx)` and returns the indexed-item
 count (or `400` with a clear message when no embedding model is configured, in
-which case the index is absent and recall falls back to glob/browse).
+which case the index is absent and recall falls back to glob/browse). Because
+reindexing is a no-op without an embedder, the button is **hidden** when none is
+configured: `renderRegistriesHub` first probes `GET /api/registries/reindex`
+(`{available}` = whether `RegistryIndex(...)` resolves non-nil) and only renders
+the button when available.
 
 Remote layout — agents:
 
@@ -3255,7 +3303,28 @@ repo/path/to/permissions/
 ```
 
 The browse view discovers `agent.json`, `SKILL.md`, or command `.md`
-files recursively under the registry URL's `tree` path. The install
+files recursively under the registry URL's `tree` path.
+
+**Cross-kind browse scoping** ([internal/registries/browse_scope.go](internal/registries/browse_scope.go)):
+the marker-based browsers (skills → `SKILL.md`, native agents → `agent.json`,
+a2a → `a2a.json`, squads → `squad.json`, permissions → `permissions.json`) scope
+precisely by a unique filename, but three browsers match broadly — `BrowseCommands`
+(any `*.md`), `BrowseAgents`' Claude-format branch (any `*.md`), and `BrowseMCPTools`
+("any `*.json`" fallback). In a **multi-kind** registry laid out as
+`<group>/{skills,agents,commands,mcp,…}/…` those loose matchers would list a sibling
+kind's files (e.g. agent `.md`, `SKILL.md`, skill `references/*.md` showing up under
+Commands, or `agent.json`/`squad.json` under MCP). `belongsToForeignKind(path, selfKind)`
+excludes any file whose basename is another kind's marker **or** that sits under
+another kind's conventional directory (`kindDirOwner` / `kindMarkerOwner`), and those
+three browsers call it. Files not under any recognised kind directory (the
+**single-purpose** layout, where the URL points straight at the kind's own dir) are
+never foreign, so that layout is unchanged. **MCP additionally content-validates**:
+because it accepts "any `*.json`", `BrowseMCPTools` only lists a file that actually
+declares a transport — a stdio `command` or an http `url` (mcp.md or json) — so
+unrelated JSON (plugin/group metadata, `package.json`, …) is not surfaced as a bogus
+MCP server.
+
+The install
 button downloads every file in the matched directory into
 `$OMNIS_HOME/registry/agents/<name>/` (agents) or
 `$OMNIS_HOME/registry/skills/<name>/` (skills). Commands install into

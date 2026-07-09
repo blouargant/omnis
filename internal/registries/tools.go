@@ -311,109 +311,93 @@ func NewTools(deps Deps) []tool.Tool {
 				if err != nil {
 					return browseRegistryOut{}, err
 				}
-				kind := reg.NormalizedKind()
-				out := browseRegistryOut{Kind: kind}
+				out := browseRegistryOut{Kind: reg.NormalizedKind()}
 
-				switch kind {
-				case KindBoth:
-					skillsDir := ""
-					if deps.RegistryDir != nil {
-						skillsDir = deps.RegistryDir()
-					}
-					skills, err := BrowseSkills(ref, token, skillsDir)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Skills = skills
-					agentsDir := ""
-					if deps.AgentsRegistryDir != nil {
-						agentsDir = deps.AgentsRegistryDir()
-					}
-					agents, err := BrowseAgents(ref, token, agentsDir)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Agents = agents
+				// A registry may serve several kinds; browse each into its own
+				// slice. EffectiveKinds expands the legacy "both" alias, so no
+				// KindBoth case is needed here.
+				for _, kind := range reg.EffectiveKinds() {
+					switch kind {
+					case KindSkills:
+						skillsDir := ""
+						if deps.RegistryDir != nil {
+							skillsDir = deps.RegistryDir()
+						}
+						skills, err := BrowseSkills(ref, token, skillsDir)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.Skills = skills
 
-				case KindSkills:
-					skillsDir := ""
-					if deps.RegistryDir != nil {
-						skillsDir = deps.RegistryDir()
-					}
-					skills, err := BrowseSkills(ref, token, skillsDir)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Skills = skills
+					case KindAgents:
+						agentsDir := ""
+						if deps.AgentsRegistryDir != nil {
+							agentsDir = deps.AgentsRegistryDir()
+						}
+						agents, err := BrowseAgents(ref, token, agentsDir)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.Agents = agents
 
-				case KindAgents:
-					agentsDir := ""
-					if deps.AgentsRegistryDir != nil {
-						agentsDir = deps.AgentsRegistryDir()
-					}
-					agents, err := BrowseAgents(ref, token, agentsDir)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Agents = agents
+					case KindMCP:
+						installed := map[string]bool{}
+						if deps.InstalledMCPNames != nil {
+							installed = deps.InstalledMCPNames()
+						}
+						tools, err := BrowseMCPTools(ref, token, installed)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.MCP = tools
 
-				case KindMCP:
-					installed := map[string]bool{}
-					if deps.InstalledMCPNames != nil {
-						installed = deps.InstalledMCPNames()
-					}
-					tools, err := BrowseMCPTools(ref, token, installed)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.MCP = tools
+					case KindSquads:
+						installed := map[string]bool{}
+						if deps.InstalledSquadNames != nil {
+							installed = deps.InstalledSquadNames()
+						}
+						squads, err := BrowseSquads(ref, token, installed)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.Squads = squads
 
-				case KindSquads:
-					installed := map[string]bool{}
-					if deps.InstalledSquadNames != nil {
-						installed = deps.InstalledSquadNames()
-					}
-					squads, err := BrowseSquads(ref, token, installed)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Squads = squads
+					case KindA2A:
+						installed := map[string]bool{}
+						if deps.InstalledA2ANames != nil {
+							installed = deps.InstalledA2ANames()
+						}
+						agents, err := BrowseA2AAgents(ref, token, installed)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.A2A = agents
 
-				case KindA2A:
-					installed := map[string]bool{}
-					if deps.InstalledA2ANames != nil {
-						installed = deps.InstalledA2ANames()
-					}
-					agents, err := BrowseA2AAgents(ref, token, installed)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.A2A = agents
+					case KindCommands:
+						installed := map[string]bool{}
+						if deps.InstalledCommandNames != nil {
+							installed = deps.InstalledCommandNames()
+						}
+						commands, err := BrowseCommands(ref, token, installed)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.Commands = commands
 
-				case KindCommands:
-					installed := map[string]bool{}
-					if deps.InstalledCommandNames != nil {
-						installed = deps.InstalledCommandNames()
-					}
-					commands, err := BrowseCommands(ref, token, installed)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Commands = commands
+					case KindPermissions:
+						var installedPatterns map[string]bool
+						if deps.InstalledPermissionPatterns != nil {
+							installedPatterns = deps.InstalledPermissionPatterns()
+						}
+						perms, err := BrowsePermissions(ref, token, installedPatterns)
+						if err != nil {
+							return browseRegistryOut{}, err
+						}
+						out.Permissions = perms
 
-				case KindPermissions:
-					var installedPatterns map[string]bool
-					if deps.InstalledPermissionPatterns != nil {
-						installedPatterns = deps.InstalledPermissionPatterns()
+					default:
+						return browseRegistryOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 					}
-					perms, err := BrowsePermissions(ref, token, installedPatterns)
-					if err != nil {
-						return browseRegistryOut{}, err
-					}
-					out.Permissions = perms
-
-				default:
-					return browseRegistryOut{}, fmt.Errorf("unsupported registry kind %q", kind)
 				}
 				return out, nil
 			}),
@@ -453,7 +437,7 @@ func NewTools(deps Deps) []tool.Tool {
 				if in.DirPath == "" {
 					return getRemoteItemOut{}, fmt.Errorf("dir_path is required")
 				}
-				kind := reg.NormalizedKind()
+				kind := reg.primaryKind()
 				var body []byte
 				switch kind {
 				case KindSkills, KindBoth:
@@ -521,7 +505,7 @@ func NewTools(deps Deps) []tool.Tool {
 				if in.DirPath == "" {
 					return installRemoteItemOut{}, fmt.Errorf("dir_path is required")
 				}
-				kind := reg.NormalizedKind()
+				kind := reg.primaryKind()
 
 				switch kind {
 				case KindSkills, KindBoth:

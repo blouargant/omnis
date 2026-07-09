@@ -38,6 +38,11 @@ func BrowseCommands(ref RepoRef, token string, installed map[string]bool) ([]Com
 		if e.Type != "blob" || !strings.HasSuffix(e.Path, ".md") {
 			continue
 		}
+		// In a multi-kind registry, skip .md files that belong to another kind
+		// (agent definitions, SKILL.md, skill references/*.md, …).
+		if belongsToForeignKind(e.Path, KindCommands) {
+			continue
+		}
 		base := path.Base(e.Path)
 		nameCandidate := strings.TrimSuffix(base, ".md")
 		// Skip docs (README, NOTES, instruction, etc.)

@@ -291,6 +291,7 @@
 
   "common.edit": "Edit",
   "common.remove": "Remove",
+  "common.install": "Install",
   "common.enabled": "Enabled",
   "set.loading": "Loading…",
 
@@ -638,9 +639,10 @@
   "set.reg.urlHint": "GitHub · GitLab · Gitea (cloud or self-hosted)",
   "set.reg.provider": "Provider",
   "set.reg.autoDetect": "Auto-detect",
-  "set.reg.hosts": "Hosts",
+  "set.reg.hosts": "Content types",
   "set.reg.kindBoth": "Both (Skills + Agents)",
-  "set.reg.kindHint": "Tab where this registry will appear.",
+  "set.reg.kindHint": "Which content types this registry provides (tick all that apply).",
+  "set.reg.kindRequired": "Select at least one content type.",
   "set.reg.accessToken": "Access token",
   "set.reg.tokenOptional": "(optional, for private repos)",
 
@@ -757,7 +759,8 @@
   "set.sched.clearRuns": "Clear runs",
   "set.sched.deleteRun": "Delete this run",
   "set.sched.clearRunsConfirmTitle": "Clear run history?",
-  "set.sched.clearRunsConfirmMsg": "This permanently removes all recorded runs for this routine. It can't be undone.",
+  "set.sched.clearRunsConfirmMsg": "This permanently removes all recorded runs — and the result sessions they created — for this routine. It can't be undone.",
   "set.sched.deleteConfirmTitle": "Delete routine?",
-  "set.sched.deleteConfirmMsg": "Delete the routine “{spec}”? It stops running and is removed permanently."
+  "set.sched.deleteConfirmMsg": "Delete the routine “{spec}”? It stops running and is removed permanently.",
+  "set.sched.deleteWithRuns": "Also delete the result sessions this routine produced"
 }

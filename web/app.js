@@ -2067,6 +2067,32 @@ function scrollBottom(panel, force = false) {
   });
 }
 
+// revealReplyStart positions the view at the BEGINNING of the reply's final
+// message rather than its end. A turn that fans out to several agents/tools emits
+// a lot of intermediate output the end user rarely needs; what matters is the
+// answer to their question — the last assistant message. Streaming keeps the pane
+// pinned to the bottom, so a long final answer (or a pile of tool noise before
+// it) used to leave the user at the end. Once the turn is done we bring the top
+// of that last message (`el`) to the top of the transcript, clamped to the
+// natural bottom so a short final message stays fully visible without opening
+// blank space below it. Geometry is scroll-independent (content coordinates) so
+// it's robust regardless of any pending sticky-scroll rAF from the last token.
+function revealReplyStart(panel, el) {
+  const tr = panel && panel.els && panel.els.transcript;
+  if (!tr || !el || !tr.contains(el)) { if (panel) scrollBottom(panel); return; }
+  requestAnimationFrame(() => {
+    if (!tr.contains(el)) return;
+    const PAD = 12;
+    const anchor = el.closest(".msg-row") || el;
+    const elTop = anchor.getBoundingClientRect().top - tr.getBoundingClientRect().top + tr.scrollTop;
+    const maxScroll = Math.max(0, tr.scrollHeight - tr.clientHeight);
+    const target = Math.max(0, Math.min(elTop - PAD, maxScroll));
+    tr.scrollTop = target;
+    panel._stick = target >= maxScroll - 1; // short final message clamped to the bottom stays sticky
+    updatePinnedForScroll(panel);
+  });
+}
+
 // ─── Tool metadata ──────────────────────────────────────────────────────────
 
 const TOOL_META = [
@@ -6320,6 +6346,7 @@ async function sendMessage(panel) {
   let segAcc = "";          // accumulated text for the current segment
   let segHadToken = false;  // whether we received streaming tokens this segment
   let lastReplyText = "";   // last non-empty text segment — used as the OS-notification preview
+  let lastReplyBubble = null; // DOM node of the last finalized text segment — the "final message" to anchor
 
   function ensureSegment() {
     if (!segBubble) {
@@ -6347,6 +6374,7 @@ async function sendMessage(panel) {
     if (segAcc) {
       streamMdFinalize(segBubble, segAcc);
       lastReplyText = segAcc;
+      lastReplyBubble = segBubble; // remember the final text segment as the anchor
     } else {
       segBubble.remove();
     }
@@ -6757,7 +6785,13 @@ async function sendMessage(panel) {
     // Catch any filesystem changes the turn made that didn't surface a
     // `file_changed` event (e.g. folders created/removed via the Bash tool).
     if (sessionId === activeSessionId) scheduleFoldersRefresh();
-    scrollBottom(panel);
+    // On a completed reply, land the user at the beginning of the final message —
+    // the answer to their question — skipping any intermediate multi-agent/tool
+    // output above it, rather than leaving them at the end of a long answer. Only
+    // when they were still following at the bottom (panel._stick); if they scrolled
+    // up mid-stream to read earlier content, leave their position untouched.
+    if (outcome === "done" && panel._stick && lastReplyBubble) revealReplyStart(panel, lastReplyBubble);
+    else scrollBottom(panel);
   }
 }
 
@@ -9015,17 +9049,30 @@ function uiPrompt({ title, label, value, placeholder, confirmText }) {
   });
 }
 
-function uiConfirm({ title, message, confirmText, cancelText, danger }) {
+// uiConfirm resolves true/false. When a `checkbox` option
+// ({ label, checked? }) is passed it renders an extra toggle below the message
+// and resolves an OBJECT { ok, checked } instead — so existing boolean callers
+// are unaffected and only checkbox callers opt into the richer result.
+function uiConfirm({ title, message, confirmText, cancelText, danger, checkbox }) {
   return new Promise((resolve) => {
     const overlay = uiModalShell(title);
-    overlay.querySelector(".user-cmd-modal-body").innerHTML = `<div class="ui-modal-message"></div>`;
+    const cbHtml = checkbox
+      ? `<label class="ui-modal-check"><input type="checkbox"${checkbox.checked ? " checked" : ""}> <span></span></label>`
+      : "";
+    overlay.querySelector(".user-cmd-modal-body").innerHTML = `<div class="ui-modal-message"></div>${cbHtml}`;
     overlay.querySelector(".ui-modal-message").textContent = message || "Are you sure?";
+    let cbEl = null;
+    if (checkbox) {
+      cbEl = overlay.querySelector(".ui-modal-check input");
+      overlay.querySelector(".ui-modal-check span").textContent = checkbox.label || "";
+    }
     const ok = overlay.querySelector(".ui-modal-ok");
     ok.textContent = confirmText || "OK";
     if (cancelText) overlay.querySelector(".ui-modal-cancel").textContent = cancelText;
     if (danger) ok.classList.add("danger");
     let done = false;
-    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const result = (val) => checkbox ? { ok: val, checked: !!(cbEl && cbEl.checked) } : val;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(result(val)); };
     ok.addEventListener("click", () => close(true));
     overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(false));
     overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(false));

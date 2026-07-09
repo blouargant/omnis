@@ -265,6 +265,7 @@
   "subtab.userCommands": "Commandes utilisateur",
   "common.edit": "Modifier",
   "common.remove": "Supprimer",
+  "common.install": "Installer",
   "common.enabled": "Activé",
   "set.loading": "Chargement…",
   "set.assistant.placeholder": "Demander au Helper",
@@ -591,9 +592,10 @@
   "set.reg.urlHint": "GitHub · GitLab · Gitea (cloud ou auto-hébergé)",
   "set.reg.provider": "Fournisseur",
   "set.reg.autoDetect": "Détection auto",
-  "set.reg.hosts": "Hôtes",
+  "set.reg.hosts": "Types de contenu",
   "set.reg.kindBoth": "Les deux (Skills + Agents)",
-  "set.reg.kindHint": "Onglet où ce registre apparaîtra.",
+  "set.reg.kindHint": "Types de contenu fournis par ce registre (cochez tout ce qui s'applique).",
+  "set.reg.kindRequired": "Sélectionnez au moins un type de contenu.",
   "set.reg.accessToken": "Jeton d'accès",
   "set.reg.tokenOptional": "(facultatif, pour les dépôts privés)",
   "set.a2a.inputsHint": "Déclarez des valeurs demandées à l'utilisateur à la première utilisation. Référencez-les dans les champs des agents avec <code>${input:id}</code>.",
@@ -707,7 +709,8 @@
   "set.sched.clearRuns": "Effacer l’historique",
   "set.sched.deleteRun": "Supprimer cette exécution",
   "set.sched.clearRunsConfirmTitle": "Effacer l’historique des exécutions ?",
-  "set.sched.clearRunsConfirmMsg": "Cela supprime définitivement toutes les exécutions enregistrées de cette routine. Action irréversible.",
+  "set.sched.clearRunsConfirmMsg": "Cela supprime définitivement toutes les exécutions enregistrées — et les sessions de résultats qu’elles ont créées — de cette routine. Action irréversible.",
   "set.sched.deleteConfirmTitle": "Supprimer la routine ?",
-  "set.sched.deleteConfirmMsg": "Supprimer la routine « {spec} » ? Elle cesse de s’exécuter et est supprimée définitivement."
+  "set.sched.deleteConfirmMsg": "Supprimer la routine « {spec} » ? Elle cesse de s’exécuter et est supprimée définitivement.",
+  "set.sched.deleteWithRuns": "Supprimer aussi les sessions de résultats produites par cette routine"
 }

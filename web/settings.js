@@ -1018,13 +1018,22 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!state.agentRemotes) state.agentRemotes = { browsing: null, viewing: null };
     if (!state.squadRemotes) state.squadRemotes = { browsing: null };
 
+    // Semantic reindex is only meaningful when an embedding model is
+    // configured; otherwise recall falls back to glob/browse and the button
+    // would only ever error. Hide it in that case.
+    let reindexAvailable = false;
+    try {
+      const s = await skillsGet("/registries/reindex");
+      reindexAvailable = !!(s && s.available);
+    } catch (_) { reindexAvailable = false; }
+
     host.innerHTML = `
       <div class="agent-split-layout">
         <div class="agent-fleet-panel">
           <div class="agent-fleet-header">
             <span class="agent-fleet-title">REGISTRIES</span>
-            <button type="button" class="add-btn" id="registries-reindex-btn"
-              data-tip="${escHtml(tr("set.reg.reindexTip"))}">${escHtml(tr("set.reg.reindexBtn"))}</button>
+            ${reindexAvailable ? `<button type="button" class="add-btn" id="registries-reindex-btn"
+              data-tip="${escHtml(tr("set.reg.reindexTip"))}">${escHtml(tr("set.reg.reindexBtn"))}</button>` : ""}
           </div>
           <div class="agent-fleet-list" id="registries-kind-list"></div>
         </div>
@@ -1091,7 +1100,8 @@ const BASE_PATH = window.BASE_PATH || "";
       }
     }
 
-    host.querySelector("#registries-reindex-btn").addEventListener("click", async (e) => {
+    const reindexBtn = host.querySelector("#registries-reindex-btn");
+    if (reindexBtn) reindexBtn.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       const original = btn.textContent;
       btn.disabled = true;
@@ -1320,6 +1330,18 @@ const BASE_PATH = window.BASE_PATH || "";
 
   async function renderAutomation() {
     registriesHubRefresh = null;
+    // Snapshot which rows have their run-history / edit panels open so a re-render
+    // (a run firing via the schedule_run SSE, an edit save, a per-run delete)
+    // restores them instead of collapsing everything the user had expanded.
+    const openHistory = new Set(), openEdit = new Set();
+    bodyEl.querySelectorAll(".sched-row").forEach(row => {
+      const rid = row.dataset.id;
+      if (!rid) return;
+      const h = row.querySelector(".sched-history");
+      const ed = row.querySelector(".sched-edit");
+      if (h && !h.hidden) openHistory.add(rid);
+      if (ed && !ed.hidden) openEdit.add(rid);
+    });
     bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     let jobs = [];
     try {
@@ -1359,6 +1381,14 @@ const BASE_PATH = window.BASE_PATH || "";
         </div>
       </div>`;
 
+    // Re-open the panels the user had expanded before this render.
+    const reopen = (ids, sel) => ids.forEach(rid => {
+      const el = bodyEl.querySelector(`.sched-row[data-id="${CSS.escape(rid)}"] ${sel}`);
+      if (el) el.hidden = false;
+    });
+    reopen(openHistory, ".sched-history");
+    reopen(openEdit, ".sched-edit");
+
     const api = (path, opts) => fetch(
       BASE_PATH + "/api/schedules" + path,
       Object.assign({ headers: authHeaders({ "Content-Type": "application/json" }) }, opts)
@@ -1382,34 +1412,33 @@ const BASE_PATH = window.BASE_PATH || "";
         if (act === "history") { const h = row.querySelector(".sched-history"); h.hidden = !h.hidden; return; }
         if (act === "edit") { const ed = row.querySelector(".sched-edit"); ed.hidden = !ed.hidden; return; }
         if (act === "cancel") { row.querySelector(".sched-edit").hidden = true; return; }
-        if (act === "del-run") {
+        if (act === "run") { await api(`/${encodeURIComponent(id)}/run`, { method: "POST" }); }
+        else if (act === "toggle") { await api(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ enabled: !(job && job.enabled) }) }); }
+        else if (act === "del-run") {
+          // Frictionless single-run delete (no popup). The server also deletes the
+          // fresh per-run session it produced; the shared renderAutomation() below
+          // re-renders (expansion preserved), so the open history panel stays open.
           const runId = btn.dataset.run;
           const r = await api(`/${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`, { method: "DELETE" });
           if (!r.ok && r.status !== 204) { const jj = await r.json().catch(() => ({})); setStatus(jj.error || ("error " + r.status), "error"); return; }
-          // Update the DOM in place so the expanded history panel stays open
-          // instead of collapsing on a full re-render.
-          if (job && Array.isArray(job.history)) job.history = job.history.filter(x => x.id !== runId);
-          const runRow = btn.closest(".sched-run");
-          if (runRow) runRow.remove();
-          const list = row.querySelector(".sched-run-list");
-          const remaining = list ? list.querySelectorAll(".sched-run").length : 0;
-          if (remaining === 0) { renderAutomation(); return; }
-          const countEl = row.querySelector(".sched-history-count");
-          if (countEl) countEl.textContent = tr("set.sched.runsCount", { n: remaining });
-          return;
         }
-        if (act === "run") { await api(`/${encodeURIComponent(id)}/run`, { method: "POST" }); }
-        else if (act === "toggle") { await api(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ enabled: !(job && job.enabled) }) }); }
         else if (act === "delete") {
-          const ok = await uiConfirm({
+          // A schedule that ran with no fixed target produced a fresh archived
+          // session per run — offer to delete those too via a toggle.
+          const produced = job && job.kind === "schedule" && Array.isArray(job.history)
+            && job.history.some(r => r.session_id && r.session_id !== (job.session_id || ""));
+          const res = await uiConfirm({
             title: tr("set.sched.deleteConfirmTitle"),
             message: tr("set.sched.deleteConfirmMsg", { spec: (job && job.spec) || "" }),
             confirmText: tr("set.sched.delete"),
             cancelText: tr("common.cancel"),
             danger: true,
+            checkbox: produced ? { label: tr("set.sched.deleteWithRuns"), checked: false } : undefined,
           });
+          const ok = produced ? (res && res.ok) : res;
           if (!ok) return;
-          await api(`/${encodeURIComponent(id)}`, { method: "DELETE" });
+          const withRuns = produced && res.checked;
+          await api(`/${encodeURIComponent(id)}${withRuns ? "?delete_runs=true" : ""}`, { method: "DELETE" });
         }
         else if (act === "clear-history") {
           const ok = await uiConfirm({
@@ -5177,7 +5206,13 @@ const BASE_PATH = window.BASE_PATH || "";
     return "";
   }
 
-  function appRegistryDialog({ title = tr("set.reg.addTitle"), initial = {}, isEdit = false, defaultKind = "skills" } = {}) {
+  // onSubmit (optional): async fn(payload) that performs the add/edit network
+  // call. When provided, the dialog runs it on OK and, on failure, shows the
+  // server's error message INLINE and stays open so the user can fix the input
+  // (rather than closing and reporting the error far away in the header). It
+  // resolves with the payload on success and null on cancel. When omitted the
+  // dialog behaves as before (resolves the payload immediately on OK).
+  function appRegistryDialog({ title = tr("set.reg.addTitle"), initial = {}, isEdit = false, defaultKind = "skills", onSubmit = null } = {}) {
     return new Promise(resolve => {
       const overlay = document.createElement("div");
       overlay.className = "app-dialog-overlay";
@@ -5197,7 +5232,29 @@ const BASE_PATH = window.BASE_PATH || "";
       const tokenPlaceholder = isEdit && initial.hasToken
         ? tr("set.reg.tokenKeepHint")
         : "PAT / PRIVATE-TOKEN / personal token…";
-      const kindVal = initial.kind || defaultKind;
+      // A registry can serve several content kinds. Seed the multi-select from
+      // the canonical `initial.kinds` array, falling back to the legacy single
+      // `initial.kind` (expanding the "both" alias / a joined string), else the
+      // tab's defaultKind.
+      const initialKinds = new Set((() => {
+        if (Array.isArray(initial.kinds) && initial.kinds.length) return initial.kinds;
+        const raw = String(initial.kind || "").trim();
+        if (!raw) return [defaultKind];
+        const out = [];
+        for (const p of raw.split(/[+,\s]+/).filter(Boolean)) {
+          if (p === "both") out.push("skills", "agents"); else out.push(p);
+        }
+        return out.length ? out : [defaultKind];
+      })());
+      const KIND_DEFS = [
+        ["skills",      tr("settings.title.skills")],
+        ["agents",      tr("settings.menu.agent")],
+        ["mcp",         tr("settings.title.mcp")],
+        ["a2a",         tr("settings.title.a2a")],
+        ["squads",      tr("subtab.squads")],
+        ["commands",    tr("settings.title.user-commands")],
+        ["permissions", tr("settings.title.permissions")],
+      ];
       const urlPlaceholder = defaultKind === "agents"
         ? "https://github.com/owner/repo/tree/main/agents"
         : defaultKind === "mcp"
@@ -5235,17 +5292,14 @@ const BASE_PATH = window.BASE_PATH || "";
           </select>
         </div>
         <div class="registry-dialog-field">
-          <label for="reg-dlg-kind">${escHtml(tr("set.reg.hosts"))}</label>
-          <select id="reg-dlg-kind">
-            <option value="skills"${kindVal === "skills" ? " selected" : ""}>${escHtml(tr("settings.title.skills"))}</option>
-            <option value="agents"${kindVal === "agents" ? " selected" : ""}>${escHtml(tr("settings.menu.agent"))}</option>
-            <option value="both"${kindVal === "both" ? " selected" : ""}>${escHtml(tr("set.reg.kindBoth"))}</option>
-            <option value="mcp"${kindVal === "mcp" ? " selected" : ""}>${escHtml(tr("settings.title.mcp"))}</option>
-            <option value="a2a"${kindVal === "a2a" ? " selected" : ""}>${escHtml(tr("settings.title.a2a"))}</option>
-            <option value="squads"${kindVal === "squads" ? " selected" : ""}>${escHtml(tr("subtab.squads"))}</option>
-            <option value="commands"${kindVal === "commands" ? " selected" : ""}>${escHtml(tr("settings.title.user-commands"))}</option>
-            <option value="permissions"${kindVal === "permissions" ? " selected" : ""}>${escHtml(tr("settings.title.permissions"))}</option>
-          </select>
+          <label>${escHtml(tr("set.reg.hosts"))}</label>
+          <div class="registry-dialog-kinds" id="reg-dlg-kinds">
+            ${KIND_DEFS.map(([val, label]) => `
+              <label class="registry-kind-check">
+                <input type="checkbox" value="${val}"${initialKinds.has(val) ? " checked" : ""} />
+                <span>${escHtml(label)}</span>
+              </label>`).join("")}
+          </div>
           <span class="registry-dialog-hint">${escHtml(tr("set.reg.kindHint"))}</span>
         </div>
         <div class="registry-dialog-field">
@@ -5265,6 +5319,14 @@ const BASE_PATH = window.BASE_PATH || "";
         if (detected) providerSelect.value = detected;
       });
 
+      // Inline error line — shows the server's rejection (e.g. a BAD_URL
+      // message) right in the dialog instead of a stray header status.
+      const errEl = document.createElement("p");
+      errEl.className = "registry-dialog-error";
+      errEl.hidden = true;
+      box.appendChild(errEl);
+      const showError = msg => { errEl.textContent = msg || ""; errEl.hidden = !msg; };
+
       const actions = document.createElement("div");
       actions.className = "app-dialog-actions";
 
@@ -5277,23 +5339,43 @@ const BASE_PATH = window.BASE_PATH || "";
       okBtn.className = "btn-primary";
       okBtn.textContent = isEdit ? tr("common.save") : tr("common.add");
 
+      let submitting = false;
       const close = result => { overlay.remove(); resolve(result); };
-      cancelBtn.addEventListener("click", () => close(null));
-      okBtn.addEventListener("click", () => {
+      const doCancel = () => { if (!submitting) close(null); };
+      cancelBtn.addEventListener("click", doCancel);
+      okBtn.addEventListener("click", async () => {
+        if (submitting) return;
         const urlVal = form.querySelector("#reg-dlg-url").value.trim();
-        if (!urlVal) { form.querySelector("#reg-dlg-url").focus(); return; }
-        close({
+        if (!urlVal) { showError(""); form.querySelector("#reg-dlg-url").focus(); return; }
+        const kinds = Array.from(form.querySelectorAll("#reg-dlg-kinds input:checked")).map(i => i.value);
+        if (!kinds.length) { showError(tr("set.reg.kindRequired")); return; }
+        const payload = {
           name:     form.querySelector("#reg-dlg-name").value.trim(),
           url:      urlVal,
           provider: form.querySelector("#reg-dlg-provider").value,
-          kind:     form.querySelector("#reg-dlg-kind").value,
+          kinds:    kinds,
           token:    form.querySelector("#reg-dlg-token").value,
-        });
+        };
+        // Legacy path: no submit handler — resolve immediately as before.
+        if (!onSubmit) { close(payload); return; }
+        showError("");
+        submitting = true;
+        okBtn.disabled = true; cancelBtn.disabled = true;
+        try {
+          await onSubmit(payload);
+          close(payload);
+        } catch (e) {
+          showError(isEdit
+            ? tr("set.reg.updateFailed", { error: e.message })
+            : tr("set.reg.addFailed", { error: e.message }));
+          submitting = false;
+          okBtn.disabled = false; cancelBtn.disabled = false;
+        }
       });
 
-      overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
+      overlay.addEventListener("click", e => { if (e.target === overlay) doCancel(); });
       box.addEventListener("keydown", e => {
-        if (e.key === "Escape") { e.stopPropagation(); close(null); }
+        if (e.key === "Escape") { e.stopPropagation(); doCancel(); }
         if (e.key === "Enter" && e.target.tagName !== "SELECT") {
           e.stopPropagation(); okBtn.click();
         }
@@ -6202,14 +6284,9 @@ const BASE_PATH = window.BASE_PATH || "";
     await refreshRemoteRegList(listEl);
 
     section.querySelector("#remote-reg-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog();
-      if (!result) return;
-      try {
-        await skillsPost("/skills/remotes", result);
-        await refreshRemoteRegList(listEl);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      const ok = await appRegistryDialog({ onSubmit: r => skillsPost("/skills/remotes", r) });
+      if (!ok) return;
+      await refreshRemoteRegList(listEl);
     });
   }
 
@@ -6248,19 +6325,15 @@ const BASE_PATH = window.BASE_PATH || "";
         (registriesHubRefresh || renderSkills)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editRegistry"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
+          onSubmit: result => skillsPut(`/skills/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/skills/remotes/${r.id}`, result);
-          delete remoteSkillsCache[r.id];
-          await refreshRemoteRegList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteSkillsCache[r.id];
+        await refreshRemoteRegList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
@@ -6663,14 +6736,12 @@ const BASE_PATH = window.BASE_PATH || "";
     const container = rightEl.querySelector("#agent-remote-list");
     await refreshAgentRemoteList(container);
     rightEl.querySelector("#agent-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({ title: tr("set.reg.title.addAgent"), defaultKind: "agents" });
-      if (!result) return;
-      try {
-        await skillsPost("/agents/remotes", result);
-        if (onRefresh) await onRefresh(); else await refreshAgentRemoteList(container);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      const ok = await appRegistryDialog({
+        title: tr("set.reg.title.addAgent"), defaultKind: "agents",
+        onSubmit: r => skillsPost("/agents/remotes", r),
+      });
+      if (!ok) return;
+      if (onRefresh) await onRefresh(); else await refreshAgentRemoteList(container);
     });
   }
 
@@ -6686,14 +6757,12 @@ const BASE_PATH = window.BASE_PATH || "";
     const container = rightEl.querySelector("#squad-remote-list");
     await refreshSquadRemoteList(container);
     rightEl.querySelector("#squad-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({ title: tr("set.reg.title.addSquad"), defaultKind: "squads" });
-      if (!result) return;
-      try {
-        await skillsPost("/squads-registry/remotes", result);
-        if (onRefresh) await onRefresh(); else await refreshSquadRemoteList(container);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      const ok = await appRegistryDialog({
+        title: tr("set.reg.title.addSquad"), defaultKind: "squads",
+        onSubmit: r => skillsPost("/squads-registry/remotes", r),
+      });
+      if (!ok) return;
+      if (onRefresh) await onRefresh(); else await refreshSquadRemoteList(container);
     });
   }
 
@@ -6714,7 +6783,12 @@ const BASE_PATH = window.BASE_PATH || "";
     container.innerHTML = "";
     for (const r of remotes) {
       const providerLabel = r.provider ? r.provider.charAt(0).toUpperCase() + r.provider.slice(1) : "";
-      const kindBadge = r.kind === "both" ? ` <span class="remote-reg-provider">${escHtml(tr("set.reg.both"))}</span>` : "";
+      // Show the other content kinds this registry also serves (it's shared
+      // across tabs), e.g. "+ skills, mcp" while viewing it in the Agents tab.
+      const otherKinds = (r.kinds || []).filter(k => k !== "agents");
+      const kindBadge = otherKinds.length
+        ? ` <span class="remote-reg-provider">+ ${escHtml(otherKinds.join(", "))}</span>`
+        : "";
       const row = document.createElement("div");
       row.className = "remote-reg-row";
       row.innerHTML = `
@@ -6733,25 +6807,21 @@ const BASE_PATH = window.BASE_PATH || "";
         refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editAgent"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "agents",
+          onSubmit: result => skillsPut(`/agents/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/agents/remotes/${r.id}`, result);
-          delete remoteAgentsCache[r.id];
-          await refreshAgentRemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteAgentsCache[r.id];
+        await refreshAgentRemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
-        const isBoth = r.kind === "both";
-        const msg = isBoth
-          ? `Remove "${r.name}" from the Agents tab? It will remain in the Skills tab.`
+        const shared = (r.kinds || []).filter(k => k !== "agents");
+        const msg = shared.length
+          ? `Remove "${r.name}" from the Agents tab? It will remain available under: ${shared.join(", ")}.`
           : `Remove registry "${r.name}"?`;
         if (!await appConfirm(msg)) return;
         try {
@@ -7158,20 +7228,16 @@ const BASE_PATH = window.BASE_PATH || "";
         refreshRemotesRightFn ? refreshRemotesRightFn() : renderAgentForm();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editSquad"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "squads",
+          onSubmit: result => skillsPut(`/squads-registry/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/squads-registry/remotes/${r.id}`, result);
-          delete remoteSquadsCache[r.id];
-          await refreshSquadRemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteSquadsCache[r.id];
+        await refreshSquadRemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.confirm.removeSquadRegistry", { name: r.name }))) return;
@@ -7461,17 +7527,13 @@ const BASE_PATH = window.BASE_PATH || "";
     await refreshMCPRemoteList(listEl);
 
     host.querySelector("#mcp-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({
+      const ok = await appRegistryDialog({
         title: tr("set.reg.title.addMcp"),
         defaultKind: "mcp",
+        onSubmit: r => skillsPost("/mcp/remotes", r),
       });
-      if (!result) return;
-      try {
-        await skillsPost("/mcp/remotes", result);
-        await refreshMCPRemoteList(listEl);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      if (!ok) return;
+      await refreshMCPRemoteList(listEl);
     });
   }
 
@@ -7510,20 +7572,16 @@ const BASE_PATH = window.BASE_PATH || "";
         (registriesHubRefresh || renderMCPForm)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editMcp"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "mcp",
+          onSubmit: result => skillsPut(`/mcp/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/mcp/remotes/${r.id}`, result);
-          delete remoteMCPCache[r.id];
-          await refreshMCPRemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteMCPCache[r.id];
+        await refreshMCPRemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
@@ -8149,17 +8207,13 @@ const BASE_PATH = window.BASE_PATH || "";
     await refreshA2ARemoteList(listEl);
 
     host.querySelector("#a2a-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({
+      const ok = await appRegistryDialog({
         title: tr("set.reg.title.addA2a"),
         defaultKind: "a2a",
+        onSubmit: r => skillsPost("/a2a/remotes", r),
       });
-      if (!result) return;
-      try {
-        await skillsPost("/a2a/remotes", result);
-        await refreshA2ARemoteList(listEl);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      if (!ok) return;
+      await refreshA2ARemoteList(listEl);
     });
   }
 
@@ -8198,20 +8252,16 @@ const BASE_PATH = window.BASE_PATH || "";
         (registriesHubRefresh || renderA2AForm)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editA2a"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "a2a",
+          onSubmit: result => skillsPut(`/a2a/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/a2a/remotes/${r.id}`, result);
-          delete remoteA2ACache[r.id];
-          await refreshA2ARemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteA2ACache[r.id];
+        await refreshA2ARemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
@@ -8395,17 +8445,13 @@ const BASE_PATH = window.BASE_PATH || "";
     await refreshCommandsRemoteList(listEl);
 
     host.querySelector("#cmd-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({
+      const ok = await appRegistryDialog({
         title: tr("set.reg.title.addCommand"),
         defaultKind: "commands",
+        onSubmit: r => skillsPost("/commands/remotes", r),
       });
-      if (!result) return;
-      try {
-        await skillsPost("/commands/remotes", result);
-        await refreshCommandsRemoteList(listEl);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      if (!ok) return;
+      await refreshCommandsRemoteList(listEl);
     });
   }
 
@@ -8444,20 +8490,16 @@ const BASE_PATH = window.BASE_PATH || "";
         (registriesHubRefresh || renderUserCommands)();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editCommand"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "commands",
+          onSubmit: result => skillsPut(`/commands/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/commands/remotes/${r.id}`, result);
-          delete remoteCommandsCache[r.id];
-          await refreshCommandsRemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remoteCommandsCache[r.id];
+        await refreshCommandsRemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;
@@ -8737,17 +8779,13 @@ const BASE_PATH = window.BASE_PATH || "";
     await refreshPermissionsRemoteList(listEl);
 
     host.querySelector("#perm-remote-add").addEventListener("click", async () => {
-      const result = await appRegistryDialog({
+      const ok = await appRegistryDialog({
         title: tr("set.reg.title.addPermission"),
         defaultKind: "permissions",
+        onSubmit: r => skillsPost("/permissions-registry/remotes", r),
       });
-      if (!result) return;
-      try {
-        await skillsPost("/permissions-registry/remotes", result);
-        await refreshPermissionsRemoteList(listEl);
-      } catch (e) {
-        setStatus(tr("set.reg.addFailed", { error: e.message }), "error");
-      }
+      if (!ok) return;
+      await refreshPermissionsRemoteList(listEl);
     });
   }
 
@@ -8786,20 +8824,16 @@ const BASE_PATH = window.BASE_PATH || "";
         (registriesHubRefresh || (() => renderPermissionsRemotesSection(container.parentElement)))();
       });
       row.querySelector(".remote-edit-btn").addEventListener("click", async () => {
-        const result = await appRegistryDialog({
+        const ok = await appRegistryDialog({
           title: tr("set.reg.title.editPermission"),
-          initial: { name: r.name, url: r.url, provider: r.provider || "", kind: r.kind, hasToken: !!r.has_token },
+          initial: { name: r.name, url: r.url, provider: r.provider || "", kinds: r.kinds, hasToken: !!r.has_token },
           isEdit: true,
           defaultKind: "permissions",
+          onSubmit: result => skillsPut(`/permissions-registry/remotes/${r.id}`, result),
         });
-        if (!result) return;
-        try {
-          await skillsPut(`/permissions-registry/remotes/${r.id}`, result);
-          delete remotePermissionsCache[r.id];
-          await refreshPermissionsRemoteList(container);
-        } catch (e) {
-          setStatus(tr("set.reg.updateFailed", { error: e.message }), "error");
-        }
+        if (!ok) return;
+        delete remotePermissionsCache[r.id];
+        await refreshPermissionsRemoteList(container);
       });
       row.querySelector(".remote-remove-btn").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.reg.removeConfirm", { name: r.name }))) return;

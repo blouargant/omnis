@@ -265,6 +265,7 @@
   "subtab.userCommands": "Benutzerbefehle",
   "common.edit": "Bearbeiten",
   "common.remove": "Entfernen",
+  "common.install": "Installieren",
   "common.enabled": "Aktiviert",
   "set.loading": "Wird geladen…",
   "set.assistant.placeholder": "Den Helper fragen",
@@ -591,9 +592,10 @@
   "set.reg.urlHint": "GitHub · GitLab · Gitea (Cloud oder selbst gehostet)",
   "set.reg.provider": "Anbieter",
   "set.reg.autoDetect": "Automatisch erkennen",
-  "set.reg.hosts": "Hosts",
+  "set.reg.hosts": "Inhaltstypen",
   "set.reg.kindBoth": "Beide (Skills + Agenten)",
-  "set.reg.kindHint": "Tab, in dem dieses Registry erscheinen wird.",
+  "set.reg.kindHint": "Welche Inhaltstypen diese Registry bereitstellt (alle Zutreffenden ankreuzen).",
+  "set.reg.kindRequired": "Wählen Sie mindestens einen Inhaltstyp aus.",
   "set.reg.accessToken": "Zugriffstoken",
   "set.reg.tokenOptional": "(optional, für private Repos)",
   "set.a2a.inputsHint": "Deklarieren Sie Werte, nach denen der Benutzer bei der ersten Verwendung gefragt wird. Verweisen Sie aus den Agentenfeldern mit <code>${input:id}</code> darauf.",
@@ -707,7 +709,8 @@
   "set.sched.clearRuns": "Verlauf löschen",
   "set.sched.deleteRun": "Diese Ausführung löschen",
   "set.sched.clearRunsConfirmTitle": "Ausführungsverlauf löschen?",
-  "set.sched.clearRunsConfirmMsg": "Dadurch werden alle aufgezeichneten Ausführungen dieser Routine dauerhaft entfernt. Das lässt sich nicht rückgängig machen.",
+  "set.sched.clearRunsConfirmMsg": "Dadurch werden alle aufgezeichneten Ausführungen — und die von ihnen erstellten Ergebnis-Sitzungen — dieser Routine dauerhaft entfernt. Das lässt sich nicht rückgängig machen.",
   "set.sched.deleteConfirmTitle": "Routine löschen?",
-  "set.sched.deleteConfirmMsg": "Die Routine „{spec}“ löschen? Sie wird gestoppt und dauerhaft entfernt."
+  "set.sched.deleteConfirmMsg": "Die Routine „{spec}“ löschen? Sie wird gestoppt und dauerhaft entfernt.",
+  "set.sched.deleteWithRuns": "Auch die von dieser Routine erzeugten Ergebnis-Sitzungen löschen"
 }

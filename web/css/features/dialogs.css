@@ -44,6 +44,19 @@
    * line breaks; single-line messages are unaffected. */
   white-space: pre-line;
 }
+/* Optional toggle rendered below a uiConfirm message (e.g. "also delete the runs
+ * this routine produced" on the Automation delete dialog). */
+.ui-modal-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.ui-modal-check input { cursor: pointer; }
 
 /* Orange "model connection problem" banner shown inside each chat pane — above
  * the composer in an active chat, and above the "Start a new chat" button in an

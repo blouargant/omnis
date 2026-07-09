@@ -199,6 +199,67 @@ func forgetSessionState(d serverDeps, id string) {
 	}
 }
 
+// deleteSession permanently removes a session and all its state: the registry
+// entry, conversation + agent log files, uploads, in-memory scratch state, goal,
+// bound loops, push watcher, and generation pin — then broadcasts session_deleted
+// so open browsers drop it. It fires SessionEnd hooks (async). Returns false when
+// the session id is unknown. This is the shared body of the DELETE /sessions/:id
+// route; it is also called by the scheduler cascade (deleting a routine's fresh
+// per-run archived sessions). Safe to call on an archived session.
+func deleteSession(d serverDeps, id string) bool {
+	// Capture metadata before deleting: display name for the teammate registry
+	// and userID for log file paths.
+	var displayName string
+	userID := sessions.DefaultUserID
+	if meta, ok := d.Registry.Get(id); ok {
+		userID = meta.UserID
+		if meta.Title != "" {
+			displayName = meta.Title
+		} else {
+			displayName = meta.ID
+		}
+	}
+	if !d.Registry.Delete(id) {
+		return false
+	}
+	// Fire SessionEnd hooks. Driven directly (not via the bus EventSessionEnd,
+	// which also runs the reflection/curation pipeline that web-UI sessions
+	// deliberately skip). Async so a slow hook never delays the response.
+	if d.Manager != nil {
+		go d.Manager.Infra().FireHook(context.Background(), hooks.SessionEnd, "", hooks.Input{
+			SessionID: id,
+			Cwd:       bashCwd.get(id),
+			Reason:    "delete",
+		})
+	}
+	if d.UnregisterSession != nil && displayName != "" {
+		_ = d.UnregisterSession(displayName)
+	}
+	sessions.DeleteSessionLogs(userID, id)
+	deleteSessionUploads(id)
+	forgetSessionState(d, id)
+	if d.GoalStore != nil { // permanent removal only on delete (kept across archive)
+		d.GoalStore.Forget(id)
+	}
+	if d.Scheduler != nil {
+		d.Scheduler.RemoveLoopsForSession(id)
+	}
+	if d.PushMgr != nil {
+		d.PushMgr.Stop(id)
+	}
+	// Release the agent generation pin so an old (draining) generation
+	// can be torn down when its last session finishes.
+	if d.Manager != nil {
+		d.Manager.Release(id)
+	}
+	// Tell other open browsers the session is gone so they drop it (and
+	// close any tab holding it).
+	if d.PushEvents != nil {
+		d.PushEvents.broadcast("session_deleted", id)
+	}
+	return true
+}
+
 // parent's working directory and, when given a task, auto-runs it in the
 // background. Uses the server root context so a client disconnect / Stop on the
 // parent turn never cancels the spawn.

@@ -222,5 +222,36 @@
 }
 .registry-dialog-field input:focus,
 .registry-dialog-field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.registry-dialog-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.3rem 0.75rem;
+}
+.registry-kind-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text);
+  cursor: pointer;
+}
+.registry-kind-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.registry-dialog-error {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--danger-fg);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--danger-fg) 12%, transparent);
+  color: var(--danger-fg);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
 
 

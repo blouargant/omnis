@@ -244,6 +244,21 @@ func newEngine(d serverDeps) *gin.Engine {
 	// "Reindex" button in the consolidated Settings → Registries section.
 	// Returns 400 when no embedding model is configured (the index is absent
 	// and every recall path falls back to glob/browse).
+	// GET /api/registries/reindex — report whether the semantic registry index
+	// is available (i.e. an embedding model is configured). The web UI hides the
+	// "Reindex" button when it isn't, since reindexing is a no-op without an
+	// embedder and every recall path falls back to glob/browse.
+	auth.GET("/registries/reindex", func(c *gin.Context) {
+		available := false
+		if d.Manager != nil {
+			if inst := d.Manager.Current(); inst != nil {
+				if idx := d.Manager.Infra().RegistryIndex(c.Request.Context(), inst.Settings); idx != nil {
+					available = true
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"available": available})
+	})
 	auth.POST("/registries/reindex", func(c *gin.Context) {
 		if d.Manager == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no agent instance"})
@@ -379,57 +394,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"sessions": out})
 	})
 	auth.DELETE("/sessions/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		// Capture metadata before deleting: display name for the teammate
-		// registry and userID for log file paths.
-		var displayName string
-		userID := sessions.DefaultUserID
-		if meta, ok := d.Registry.Get(id); ok {
-			userID = meta.UserID
-			if meta.Title != "" {
-				displayName = meta.Title
-			} else {
-				displayName = meta.ID
-			}
-		}
-		if !d.Registry.Delete(id) {
+		if !deleteSession(d, c.Param("id")) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
-		}
-		// Fire SessionEnd hooks. Driven directly (not via the bus EventSessionEnd,
-		// which also runs the reflection/curation pipeline that web-UI sessions
-		// deliberately skip). Async so a slow hook never delays the response.
-		if d.Manager != nil {
-			go d.Manager.Infra().FireHook(context.Background(), hooks.SessionEnd, "", hooks.Input{
-				SessionID: id,
-				Cwd:       bashCwd.get(id),
-				Reason:    "delete",
-			})
-		}
-		if d.UnregisterSession != nil && displayName != "" {
-			_ = d.UnregisterSession(displayName)
-		}
-		sessions.DeleteSessionLogs(userID, id)
-		deleteSessionUploads(id)
-		forgetSessionState(d, id)
-		if d.GoalStore != nil { // permanent removal only on delete (kept across archive)
-			d.GoalStore.Forget(id)
-		}
-		if d.Scheduler != nil {
-			d.Scheduler.RemoveLoopsForSession(id)
-		}
-		if d.PushMgr != nil {
-			d.PushMgr.Stop(id)
-		}
-		// Release the agent generation pin so an old (draining) generation
-		// can be torn down when its last session finishes.
-		if d.Manager != nil {
-			d.Manager.Release(id)
-		}
-		// Tell other open browsers the session is gone so they drop it (and
-		// close any tab holding it).
-		if d.PushEvents != nil {
-			d.PushEvents.broadcast("session_deleted", id)
 		}
 		c.Status(http.StatusNoContent)
 	})

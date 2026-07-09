@@ -265,6 +265,7 @@
   "subtab.userCommands": "Comandos de usuario",
   "common.edit": "Editar",
   "common.remove": "Quitar",
+  "common.install": "Instalar",
   "common.enabled": "Activado",
   "set.loading": "Cargando…",
   "set.assistant.placeholder": "Preguntar al Helper",
@@ -591,9 +592,10 @@
   "set.reg.urlHint": "GitHub · GitLab · Gitea (en la nube o autoalojado)",
   "set.reg.provider": "Proveedor",
   "set.reg.autoDetect": "Detección automática",
-  "set.reg.hosts": "Hosts",
+  "set.reg.hosts": "Tipos de contenido",
   "set.reg.kindBoth": "Ambos (Skills + Agentes)",
-  "set.reg.kindHint": "Pestaña donde aparecerá este registro.",
+  "set.reg.kindHint": "Tipos de contenido que proporciona este registro (marque todos los que correspondan).",
+  "set.reg.kindRequired": "Seleccione al menos un tipo de contenido.",
   "set.reg.accessToken": "Token de acceso",
   "set.reg.tokenOptional": "(opcional, para repos privados)",
   "set.a2a.inputsHint": "Declara valores que se solicitan al usuario en el primer uso. Refiérelos desde los campos de los agentes con <code>${input:id}</code>.",
@@ -707,7 +709,8 @@
   "set.sched.clearRuns": "Borrar ejecuciones",
   "set.sched.deleteRun": "Eliminar esta ejecución",
   "set.sched.clearRunsConfirmTitle": "¿Borrar el historial de ejecuciones?",
-  "set.sched.clearRunsConfirmMsg": "Esto elimina de forma permanente todas las ejecuciones registradas de esta rutina. No se puede deshacer.",
+  "set.sched.clearRunsConfirmMsg": "Esto elimina de forma permanente todas las ejecuciones registradas —y las sesiones de resultados que crearon— de esta rutina. No se puede deshacer.",
   "set.sched.deleteConfirmTitle": "¿Eliminar la rutina?",
-  "set.sched.deleteConfirmMsg": "¿Eliminar la rutina «{spec}»? Deja de ejecutarse y se elimina de forma permanente."
+  "set.sched.deleteConfirmMsg": "¿Eliminar la rutina «{spec}»? Deja de ejecutarse y se elimina de forma permanente.",
+  "set.sched.deleteWithRuns": "Eliminar también las sesiones de resultados que produjo esta rutina"
 }

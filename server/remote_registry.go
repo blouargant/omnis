@@ -26,12 +26,13 @@ func prefixAll(prefix string, names []string) []string {
 
 // publicRemote is the browser-safe shape of a remoteRegistry (no token).
 type publicRemote struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Provider string `json:"provider,omitempty"`
-	Kind     string `json:"kind"`
-	HasToken bool   `json:"has_token"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	URL      string   `json:"url"`
+	Provider string   `json:"provider,omitempty"`
+	Kind     string   `json:"kind"`  // canonical joined form, kept for backward compat
+	Kinds    []string `json:"kinds"` // the content kinds this registry serves
+	HasToken bool     `json:"has_token"`
 }
 
 func toPublicRemote(r registries.Registry) publicRemote {
@@ -41,22 +42,53 @@ func toPublicRemote(r registries.Registry) publicRemote {
 		URL:      r.URL,
 		Provider: r.Provider,
 		Kind:     r.NormalizedKind(),
+		Kinds:    r.EffectiveKinds(),
 		HasToken: r.Token != "",
 	}
 }
 
-// normalizeKindInput coerces a kind value supplied by the web UI to one of
-// the canonical values. An empty input falls back to defaultKind so each
-// tab can choose its preferred default ("skills" for skill UI, "agents" for
-// the agents UI).
-func normalizeKindInput(raw, defaultKind string) string {
-	switch strings.TrimSpace(raw) {
-	case registries.KindSkills, registries.KindAgents, registries.KindBoth, registries.KindMCP, registries.KindA2A, registries.KindSquads, registries.KindCommands, registries.KindPermissions:
-		return strings.TrimSpace(raw)
-	case "":
-		return defaultKind
+// normalizeKinds validates and de-duplicates the content kinds supplied by the
+// web UI. It accepts the canonical `kinds` array and the legacy single `kind`
+// string (which may be the "both" alias); the "both" alias expands to
+// skills+agents. An empty or all-invalid input falls back to defaultKind so
+// each tab keeps its preferred default.
+func normalizeKinds(kinds []string, single, defaultKind string) []string {
+	raw := kinds
+	if len(raw) == 0 && strings.TrimSpace(single) != "" {
+		raw = []string{single}
 	}
-	return defaultKind
+	out := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	add := func(k string) {
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	for _, k := range raw {
+		switch k = strings.TrimSpace(k); {
+		case k == registries.KindBoth:
+			add(registries.KindSkills)
+			add(registries.KindAgents)
+		case registries.ValidKind(k):
+			add(k)
+		}
+	}
+	if len(out) == 0 {
+		return []string{defaultKind}
+	}
+	return out
+}
+
+// containsStr reports whether s is in list.
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // registerRemoteRegistryRoutes mounts the /remotes endpoints on rg.
@@ -202,11 +234,12 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 
 	rg.POST("/remotes", func(c *gin.Context) {
 		var req struct {
-			URL      string `json:"url"`
-			Name     string `json:"name"`
-			Provider string `json:"provider"`
-			Kind     string `json:"kind"`
-			Token    string `json:"token"`
+			URL      string   `json:"url"`
+			Name     string   `json:"name"`
+			Provider string   `json:"provider"`
+			Kind     string   `json:"kind"`
+			Kinds    []string `json:"kinds"`
+			Token    string   `json:"token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, skillsErr("BAD_REQUEST", "invalid JSON"))
@@ -228,16 +261,25 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 			return
 		}
-		kind := normalizeKindInput(req.Kind, defaultKind)
-		// If an entry already exists at this URL, promote it to "both" rather
-		// than rejecting — the user effectively asked for the other kind too.
+		kinds := normalizeKinds(req.Kinds, req.Kind, defaultKind)
+		// If an entry already exists at this URL, union the requested kinds into
+		// it rather than rejecting — the user effectively asked for more kinds.
 		for i, r := range list {
 			if r.URL == rawURL {
-				if r.Serves(kind) {
+				merged := r.EffectiveKinds()
+				grew := false
+				for _, k := range kinds {
+					if !containsStr(merged, k) {
+						merged = append(merged, k)
+						grew = true
+					}
+				}
+				if !grew {
 					c.JSON(http.StatusConflict, skillsErr("DUPLICATE", "a registry with this URL already exists"))
 					return
 				}
-				list[i].Kind = registries.KindBoth
+				list[i].Kinds = merged
+				list[i].Kind = ""
 				if err := registries.SaveRegistries(writePath, list); err != nil {
 					c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))
 					return
@@ -255,7 +297,7 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 			Name:     name,
 			URL:      rawURL,
 			Provider: provider,
-			Kind:     kind,
+			Kinds:    kinds,
 			Token:    strings.TrimSpace(req.Token),
 		}
 		list = append(list, reg)
@@ -269,11 +311,12 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 	rg.PUT("/remotes/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		var req struct {
-			Name     string `json:"name"`
-			URL      string `json:"url"`
-			Provider string `json:"provider"`
-			Kind     string `json:"kind"`
-			Token    string `json:"token"`
+			Name     string   `json:"name"`
+			URL      string   `json:"url"`
+			Provider string   `json:"provider"`
+			Kind     string   `json:"kind"`
+			Kinds    []string `json:"kinds"`
+			Token    string   `json:"token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, skillsErr("BAD_REQUEST", "invalid JSON"))
@@ -300,8 +343,9 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 			reg.Name = newName
 		}
 		reg.Provider = strings.TrimSpace(req.Provider)
-		if req.Kind != "" {
-			reg.Kind = normalizeKindInput(req.Kind, defaultKind)
+		if len(req.Kinds) > 0 || req.Kind != "" {
+			reg.Kinds = normalizeKinds(req.Kinds, req.Kind, defaultKind)
+			reg.Kind = ""
 		}
 		if newToken := strings.TrimSpace(req.Token); newToken != "" {
 			reg.Token = newToken
@@ -331,16 +375,21 @@ func registerRemoteRegistryCRUD(rg *gin.RouterGroup, readPath func() string, wri
 			c.JSON(http.StatusNotFound, skillsErr("NOT_FOUND", "registry not found"))
 			return
 		}
-		// "both" registries are demoted to the other kind rather than removed,
-		// so the sibling tab keeps the entry it added.
-		if list[idx].NormalizedKind() == registries.KindBoth {
-			other := registries.KindAgents
-			if defaultKind == registries.KindAgents {
-				other = registries.KindSkills
+		// A multi-kind registry is only removed when this tab's kind was its
+		// last one; otherwise just this kind is dropped so the sibling tabs
+		// keep the entry they share.
+		served := list[idx].EffectiveKinds()
+		remaining := make([]string, 0, len(served))
+		for _, k := range served {
+			if k != defaultKind {
+				remaining = append(remaining, k)
 			}
-			list[idx].Kind = other
-		} else {
+		}
+		if len(remaining) == 0 {
 			list = append(list[:idx], list[idx+1:]...)
+		} else {
+			list[idx].Kinds = remaining
+			list[idx].Kind = ""
 		}
 		if err := registries.SaveRegistries(writePath, list); err != nil {
 			c.JSON(http.StatusInternalServerError, skillsErr("FS_ERROR", err.Error()))

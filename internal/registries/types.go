@@ -5,6 +5,8 @@
 // remote_registries.json config file, and the same on-disk layout.
 package registries
 
+import "strings"
+
 // Provider identifiers used in remote_registries.json.
 const (
 	ProviderGitHub = "github"
@@ -12,8 +14,10 @@ const (
 	ProviderGitea  = "gitea"
 )
 
-// Kind values for Registry.Kind. An empty value is treated as KindSkills for
-// backwards compatibility with pre-existing remote_registries.json entries.
+// Kind values a registry may serve. KindBoth is a legacy alias that expands to
+// skills+agents; a registry can serve any combination of the real kinds via
+// Registry.Kinds. An empty/absent kind is treated as KindSkills for backwards
+// compatibility with pre-existing remote_registries.json entries.
 const (
 	KindSkills      = "skills"
 	KindAgents      = "agents"
@@ -25,32 +29,106 @@ const (
 	KindPermissions = "permissions"
 )
 
-// Registry is one entry in remote_registries.json.
-type Registry struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Provider string `json:"provider,omitempty"`
-	Kind     string `json:"kind,omitempty"`  // "skills" (default if empty), "agents", "both", "mcp", or "a2a"
-	Token    string `json:"token,omitempty"` // PAT; stored server-side, never exposed to the browser.
+// kindSet is the set of real (non-alias) content kinds.
+var kindSet = map[string]bool{
+	KindSkills: true, KindAgents: true, KindMCP: true, KindA2A: true,
+	KindSquads: true, KindCommands: true, KindPermissions: true,
 }
 
-// NormalizedKind returns r.Kind with the empty-string default applied.
-func (r Registry) NormalizedKind() string {
-	if r.Kind == "" {
-		return KindSkills
-	}
-	return r.Kind
+// ValidKind reports whether k is a recognised content kind. The "both" alias
+// is NOT valid here (it expands to skills+agents via EffectiveKinds).
+func ValidKind(k string) bool { return kindSet[k] }
+
+// Registry is one entry in remote_registries.json. A registry can serve any
+// combination of content kinds. The canonical multi-kind field is Kinds; the
+// legacy single-kind Kind field ("" ⇒ skills, "both" ⇒ skills+agents) is still
+// read for backwards compatibility and superseded by Kinds when both are set.
+type Registry struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	URL      string   `json:"url"`
+	Provider string   `json:"provider,omitempty"`
+	Kind     string   `json:"kind,omitempty"`  // legacy single-kind (read compat)
+	Kinds    []string `json:"kinds,omitempty"` // canonical multi-kind set
+	Token    string   `json:"token,omitempty"` // PAT; stored server-side, never exposed to the browser.
 }
+
+// EffectiveKinds returns the de-duplicated, validated set of content kinds this
+// registry serves. It prefers the canonical Kinds slice and falls back to the
+// legacy Kind string — expanding the "both" alias to skills+agents and applying
+// the empty ⇒ skills default. Order is preserved; the result is never empty.
+func (r Registry) EffectiveKinds() []string {
+	var raw []string
+	if len(r.Kinds) > 0 {
+		raw = r.Kinds
+	} else {
+		s := strings.TrimSpace(r.Kind)
+		if s == "" {
+			return []string{KindSkills}
+		}
+		// Tolerate a legacy joined value ("skills+agents", "skills,mcp") too.
+		raw = strings.FieldsFunc(s, func(c rune) bool { return c == '+' || c == ',' || c == ' ' })
+	}
+	out := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	add := func(k string) {
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	for _, k := range raw {
+		k = strings.TrimSpace(k)
+		if k == KindBoth {
+			add(KindSkills)
+			add(KindAgents)
+			continue
+		}
+		if ValidKind(k) {
+			add(k)
+		}
+	}
+	if len(out) == 0 {
+		return []string{KindSkills}
+	}
+	return out
+}
+
+// CanonicalKind is the "+"-joined EffectiveKinds — a stable string form used
+// for display and for the semantic index's corpus hash (so adding a kind to an
+// existing registry invalidates the index).
+func (r Registry) CanonicalKind() string { return strings.Join(r.EffectiveKinds(), "+") }
+
+// NormalizedKind returns the canonical joined kind set. (Kept under its
+// historical name; it used to return a single kind and now returns the full
+// set as a "+"-joined string.)
+func (r Registry) NormalizedKind() string { return r.CanonicalKind() }
 
 // Serves reports whether the registry exposes content of the given kind.
-// "both" serves either; an empty Kind serves only skills (legacy default).
 func (r Registry) Serves(kind string) bool {
-	k := r.NormalizedKind()
-	if k == KindBoth {
-		return kind == KindSkills || kind == KindAgents
+	for _, k := range r.EffectiveKinds() {
+		if k == kind {
+			return true
+		}
 	}
-	return k == kind
+	return false
+}
+
+// primaryKind collapses the served set to a single dispatch kind for the legacy
+// single-kind get/install paths in tools.go: the skills+agents combo maps back
+// to the historical "both" (skill-oriented) dispatch, a lone kind returns
+// itself, and any other multi-kind set dispatches on its first kind (browse
+// covers the rest).
+func (r Registry) primaryKind() string {
+	ks := r.EffectiveKinds()
+	if len(ks) == 2 {
+		a, b := ks[0], ks[1]
+		if (a == KindSkills && b == KindAgents) || (a == KindAgents && b == KindSkills) {
+			return KindBoth
+		}
+	}
+	return ks[0]
 }
 
 // SkillInfo is one skill returned when browsing a remote registry.

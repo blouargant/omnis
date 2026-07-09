@@ -99,6 +99,13 @@ func BrowseAgents(ref RepoRef, token, agentsRegistryDir string) ([]AgentInfo, er
 		if e.Type != "blob" {
 			continue
 		}
+		// In a multi-kind registry, skip files that belong to another kind so a
+		// command .md or skill reference isn't mis-listed as an agent. (The
+		// native agent.json marker is self-owned, so this only filters the
+		// permissive Claude-format .md branch and any misplaced files.)
+		if belongsToForeignKind(e.Path, KindAgents) {
+			continue
+		}
 
 		// --- native omnis format: .../agent.json ---
 		if strings.HasSuffix(e.Path, suffix) {
