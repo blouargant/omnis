@@ -101,6 +101,39 @@ func TestPackageAddsAgentBehindUserOverride(t *testing.T) {
 	}
 }
 
+// Regression: the server's parsed-agent PUT fan-out rebuilt the agents list as
+// a native Go []string and stored it in the desired map. DiffSection's valueList
+// branch type-asserts []any, which a []string fails — so the whole base fleet
+// used to land in "agents_removed", emptying the fleet after merge (the reported
+// "No agents defined" bug). asAnyList now coerces native slices so a non-[]any
+// desired can never silently tombstone every base entry.
+func TestDiffValueListToleratesNativeStringSlice(t *testing.T) {
+	base := mustParse(t, `{"agents":["leader","investigator","helper"]}`)
+	// desired == base, but agents supplied as a native []string (not []any) —
+	// exactly what the buggy server handler injected.
+	desired := map[string]any{
+		"agents": []string{"leader", "investigator", "helper"},
+	}
+	overlay := DiffSection("agents.json", base, desired)
+	if overlay != nil {
+		if _, bad := overlay["agents_removed"]; bad {
+			t.Fatalf("native []string desired must not tombstone base agents; overlay=%s", toJSON(overlay))
+		}
+	}
+	// The effective merged fleet must still hold every agent.
+	layers := []map[string]any{base}
+	if overlay != nil {
+		layers = append(layers, overlay)
+	}
+	merged := MergeSection("agents.json", layers)
+	got := toStringSlice(merged["agents"])
+	for _, want := range []string{"leader", "investigator", "helper"} {
+		if !contains(got, want) {
+			t.Fatalf("agent %q lost after native-slice diff/merge; got %v", want, got)
+		}
+	}
+}
+
 func TestModelsMapDeepMergeAndEvolution(t *testing.T) {
 	system := mustParse(t, `{
 		"providers": {"prod": {"kind":"openai_compat","base_url":"URL_A","api_key":"K"}},

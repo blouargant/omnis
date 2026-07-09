@@ -83,8 +83,8 @@ func diffCollection(sp collectionSpec, base, desired, overlay map[string]any) {
 
 	switch sp.kind {
 	case valueList:
-		bl, _ := bv.([]any)
-		dl, _ := dv.([]any)
+		bl := asAnyList(bv)
+		dl := asAnyList(dv)
 		added := make([]any, 0)
 		for _, e := range dl {
 			if !containsValue(bl, e) {
@@ -252,6 +252,30 @@ func diffHooks(base, desired, overlay map[string]any) {
 	if len(removedEvents) > 0 {
 		overlay["hooks_removed"] = removedEvents
 	}
+}
+
+// asAnyList coerces a value to []any. JSON-decoded arrays are already []any, so
+// this is a no-op for them; it additionally accepts a native Go slice
+// ([]string, []int, …) so a caller that builds a list in Go and stores it in the
+// desired map does not read as an empty list. That matters because for a
+// valueList diff an empty desired sends EVERY base entry into the "_removed"
+// tombstone — how a []string agents list silently emptied the whole fleet.
+func asAnyList(v any) []any {
+	if v == nil {
+		return nil
+	}
+	if l, ok := v.([]any); ok {
+		return l
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice {
+		return nil
+	}
+	out := make([]any, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out
 }
 
 func indexByID(list []any, idField string) map[string]any {

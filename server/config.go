@@ -942,8 +942,18 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						agentNames = append(agentNames, agentName)
 					}
 
-					// Update the main config to reference agents by name only
-					m["agents"] = agentNames
+					// Update the main config to reference agents by name only.
+					// Store as []any (JSON-shaped), NOT a native []string: the
+					// layered diff engine (configedit.DiffSection's valueList
+					// branch) type-asserts the value as []any. A []string fails
+					// that assertion, so desired.agents reads as empty and EVERY
+					// base agent lands in "agents_removed" — emptying the whole
+					// fleet on merge when a lower layer (/etc/omnis) declares them.
+					agentNamesAny := make([]any, len(agentNames))
+					for i, n := range agentNames {
+						agentNamesAny[i] = n
+					}
+					m["agents"] = agentNamesAny
 
 					// Sweep orphan agent dirs from every write layer we touched
 					// (and the default user layer). Built-ins under /etc/omnis
