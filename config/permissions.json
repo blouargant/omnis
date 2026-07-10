@@ -184,6 +184,11 @@
       "Bash(kubectl config view *)",
       "Bash(kubectl auth can-i *)",
       "Bash(kubectl events *)",
+      {
+        "regex": "\\bkubectl\\b(\\s+-{1,2}[\\w-]+(=\\S+)?(\\s+[^-\\s]\\S*)?)*\\s+(get|describe|logs|top|explain|events|api-resources|api-versions|cluster-info|version|auth\\s+can-i|config\\s+(view|current-context|get-contexts|get-clusters|get-users))\\b",
+        "reason": "read-only kubectl verb — allowed even with global flags (e.g. --context=, -n) before the verb",
+        "tools": ["Bash"]
+      },
       "Bash(make test *)",
       "Bash(make build *)",
       "Bash(make fmt *)",
@@ -278,8 +283,8 @@
         "tools": ["Bash"]
       },
       {
-        "regex": "\\bkubectl\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon|uncordon|create|replace|exec|cp|port-forward)\\b",
-        "reason": "kubectl operation with cluster side effects — confirm",
+        "regex": "\\bkubectl\\b(\\s+-{1,2}[\\w-]+(=\\S+)?(\\s+[^-\\s]\\S*)?)*\\s+(apply|delete|patch|edit|scale|rollout|drain|cordon|uncordon|create|replace|exec|cp|port-forward|annotate|label|taint|set|run|debug|attach|expose)\\b",
+        "reason": "kubectl operation with cluster side effects — confirm (matches even with global flags like --context= before the verb)",
         "tools": ["Bash"]
       },
       {

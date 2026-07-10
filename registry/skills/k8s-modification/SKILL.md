@@ -19,7 +19,9 @@ denied, report it and stop; never retry with a different flag or identity.
 ## Phase 1 — Establish the target and guardrails
 
 1. **Confirm the cluster context.** `kubectl config current-context` and quote
-   it back before doing anything else.
+   it back before doing anything else. If the leader/user named a target
+   context, thread it as `--context=<ctx>` on every command instead — never
+   `kubectl config use-context` (it rewrites the shared kubeconfig).
 2. **Pin the target:** namespace + kind/name + the *exact* intended change.
 3. **Production guardrail.** Never modify production namespaces or contexts
    (name contains `prod`, `prd`, `production`) without an explicit user override.

@@ -22,7 +22,10 @@
   text-align: left;
   cursor: pointer;
   border-radius: 4px;
-  font-size: 0.65rem;
+  /* Match the 13px of the other interactive rows in the left column (collection
+     rows, settings-menu items, session + archived rows) so the footer buttons
+     don't read as smaller than everything above them. */
+  font-size: 13px;
   /* Same muted tone as the ARCHIVED / FOLDERS section labels so the five lower
      labels read as one group; brightens to --text on hover/active. */
   color: var(--text-muted);
@@ -57,32 +60,45 @@
   color: var(--text-muted);
 }
 
-/* ─── In-sidebar settings menu (expands when Settings is open) ────────── */
+/* ─── Settings category menu (lives in the middle #session-pane column) ─────
+ * When Settings is open it replaces the session list and fills the middle
+ * column, carrying that column's right border. Its `hidden` attribute is
+ * toggled by settings.js (see the #session-pane swap rules further down). */
 #settings-menu {
-  /* Shrinkable (flex-shrink:1 + min-height:0) so when the sidebar is short the
-     menu yields vertical space instead of pushing the footer off-screen; its
-     inner list keeps its own overflow-y scrollbar. */
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
-  max-height: 60%;
   overflow: hidden;
+  border-right: 1px solid var(--border);
   animation: settings-menu-expand 0.18s ease-out;
 }
 #settings-menu[hidden] { display: none; }
 
 @keyframes settings-menu-expand {
-  from { max-height: 0; opacity: 0; }
-  to   { max-height: 60%; opacity: 1; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* "Settings" heading reads as the middle column's top bar (matches the session
+ * toolbar height + border). */
+#settings-menu > .sidebar-section-label {
+  min-height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 #settings-menu-list {
   list-style: none;
   margin: 0;
-  padding: 0 6px 6px;
+  padding: 6px;
   overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 #settings-menu-list li {
   display: flex;
@@ -133,69 +149,19 @@
 .settings-panel--client-only .settings-body-toolbar,
 .settings-panel--client-only .settings-header-actions { display: none; }
 
-/* ─── Dark veil over the chat sidebar while Settings is open ────────────
- * When the Settings panel unfolds, the sidebar's chat-navigation sections
- * (header, New-Chat pill, session list, archived + folders panels) read as
- * backgrounded — a translucent dark film is drawn in front of them. Driven
- * purely off the `#chat.chat--settings` class the panel toggles (open() /
- * jumpToSection() add it, close() removes it) via :has(), so it covers the
- * gear, Appearance, and Documentation views alike with no JS change.
- *
- * One `#sidebar::after` overlay spans the whole sidebar; the settings menu
- * and footer are lifted above it (z-index) AND painted with an opaque panel
- * background so the film is hidden *behind* them — otherwise their
- * transparent bodies would let the veil bleed through and they'd look dimmed
- * too. Result: only the sections above the settings menu are veiled.
- * `pointer-events:none` keeps the veil purely visual — the dimmed sessions
- * stay clickable (selecting one closes Settings, exactly as before). */
-body:has(#chat.chat--settings) #sidebar { position: relative; }
-body:has(#chat.chat--settings) #sidebar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  animation: sidebar-veil-in 0.18s ease-out;
-}
-@keyframes sidebar-veil-in { from { opacity: 0; } to { opacity: 1; } }
-/* Lift the settings menu + footer above the veil and make them opaque so the
-   film can't show through (bright + interactive, not dimmed). */
-body:has(#chat.chat--settings) #settings-menu,
-body:has(#chat.chat--settings) #sidebar-footer {
-  position: relative;
-  z-index: 4;
-  background: var(--bg-panel);
-}
-
-/* ─── Yield sidebar height to the settings menu while Settings is open ──────
- * The Folders and Archived panels are `flex-shrink: 0`, so an *expanded* one
- * (its body is up to ~32vh) claims fixed vertical space in the sidebar column.
- * With Settings open, that space is stolen from the shrinkable #settings-menu
- * (`flex: 0 1 auto`), squeezing the category list to zero height — leaving only
- * the dark veil where the menu should be (the reported "clicking Settings shows
- * nothing but the dark panel" bug, seen when Folders is expanded). Those
- * sections are already backgrounded/veiled and not the focus, so collapse their
- * scrollable bodies while Settings is open; the (dimmed) headers stay put and
- * closing Settings restores them. Purely presentational — the panels' own
- * collapsed state (class) is untouched, so app.js sees no change. */
-body:has(#chat.chat--settings) #folders-body,
-body:has(#chat.chat--settings) #folders-resize,
-body:has(#chat.chat--settings) #archived-list {
+/* ─── Middle column becomes the Settings nav while Settings is open ─────────
+ * #settings-menu lives in #session-pane; when Settings is open it replaces the
+ * session list + toolbar. For an autonomous footer section (Appearance /
+ * Documentation) settings.js hides the category menu, so the column has nothing
+ * to show — collapse it and hand its width to the settings body. */
+body:has(#chat.chat--settings) #session-pane > #session-topbar,
+body:has(#chat.chat--settings) #session-pane > #session-list {
   display: none;
 }
-/* …and drop the expanded "card" chrome (features/*.css) so an expanded panel
-   doesn't leave an empty rounded card behind the veil — just a plain, dimmed
-   header row. Closing Settings restores the card. */
-body:has(#chat.chat--settings) #folders-panel:not(.collapsed),
-body:has(#chat.chat--settings) #archived-panel:not(.collapsed) {
-  margin: 0;
+body:has(#chat.chat--settings) #session-pane:has(> #settings-menu[hidden]) {
+  width: 0;
   border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
+  overflow: hidden;
 }
 
 

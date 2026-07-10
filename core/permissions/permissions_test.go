@@ -477,9 +477,16 @@ func TestShippedConfigParity(t *testing.T) {
 		{"Bash", bash("git status"), DecisionAllow},
 		{"Bash", bash("go test ./..."), DecisionAllow},
 		{"Bash", bash("kubectl get pods"), DecisionAllow},
+		// Read-only kubectl verbs stay allowed even when a global flag
+		// (--context=, -n, …) precedes the verb — the plain "kubectl get *"
+		// glob only matches when the verb is the first token.
+		{"Bash", bash("kubectl --context=kubernetes-admin@kubernetes get nodes -o wide 2>&1"), DecisionAllow},
+		{"Bash", bash("kubectl -n kube-system describe pod x"), DecisionAllow},
 		{"Bash", bash("git push origin main"), DecisionAsk},
 		{"Bash", bash("rm file.txt"), DecisionAsk},
 		{"Bash", bash("kubectl delete pod x"), DecisionAsk},
+		// …but a mutating kubectl with a global flag before the verb still asks.
+		{"Bash", bash("kubectl --context=prod delete pod x"), DecisionAsk},
 		{"Read", file("/proj/main.go"), DecisionAllow},
 		// Safe, read-only sub-agent tools must not prompt now that the gate
 		// reaches sub-agents — a web_agent doing a web search, a doc researcher

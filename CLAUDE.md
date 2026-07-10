@@ -1488,10 +1488,29 @@ exactly one** ("move" semantics, flat — no nesting).
   separately in `collections.json` under `$OMNIS_HOME`
   (`sessions.ListCollections`/`AddCollection`/`RenameCollection`/`RemoveCollection`,
   atomic write).
+- **Per-collection colour** — a collection can carry a **palette colour** so a
+  chat's collection is recognisable at a glance: it tints the **selected
+  collection's** left rail, the **selected session row's** left rail, the
+  collection's **folder glyph**, and the **active pane tab's** top border. Stored
+  as a small palette **token** (e.g. `"blue"`, not a hex) in a `colors` map
+  (name→token) alongside the names in `collections.json`, so the actual colour is
+  resolved **theme-side** from `--collection-<token>` tokens defined once in
+  [web/css/features/common.css](web/css/features/common.css) (~10 theme-independent
+  mid-tone hues; keep the CSS list in sync with `COLLECTION_COLORS` in
+  [web/app.js](web/app.js)). Backend: `sessions.CollectionColors` /
+  `SetCollectionColor` / `ValidCollectionColor` (token is a short lowercase slug;
+  the server only persists it, the UI owns the palette); `RenameCollection`
+  migrates the colour key and `RemoveCollection`/`saveFileLocked`'s prune drop
+  orphaned colours. The client applies it by setting a `--col-accent` inline
+  custom property (= `var(--collection-<token>)`) on the row/tab, consumed by the
+  three CSS accent rules; General/uncoloured leaves it unset (falls back to the
+  app accent).
 - **Routes** ([server/collections.go](server/collections.go)): `GET
   /api/collections` (General first + user collections, each with a live session
-  count folded the same way the sidebar filters), `POST /api/collections`,
-  `PATCH /api/collections/:name` (rename + cascade), `DELETE /api/collections/:name`
+  count folded the same way the sidebar filters, **plus its `color` token**),
+  `POST /api/collections` (`{name, color?}`),
+  `PATCH /api/collections/:name` (`{name?, color?}` — rename + cascade and/or
+  recolour; an empty `color` clears it), `DELETE /api/collections/:name`
   (members → General), `POST /api/sessions/:id/collection {collection}` (move;
   empty ⇒ General; an unknown target is rejected). `POST /api/sessions` accepts a
   `collection` so a new chat is filed under the rail's current selection. The
@@ -1511,8 +1530,13 @@ exactly one** ("move" semantics, flat — no nesting).
   DOM) so they still reach sessions in any collection. **Move** = drag a session
   row onto a rail collection (`sessionDrag` + the `dragover`/`drop` handlers) or
   the session **⋯ → Move to** submenu; collection **create/rename/delete** use the
-  themed `uiPrompt`/`uiConfirm` + the shared `showFolderCtxMenu`. New chats pass
-  `activeCollection`. i18n keys under `collections.*` (en/fr/es/de).
+  themed `uiPrompt`/`uiConfirm` + the shared `showFolderCtxMenu`. **Colour** —
+  `collectionDialog` (name + swatch grid, reused by create and the context-menu
+  **Change color…** item) proposes a default via `proposeCollectionColor` (first
+  unused palette colour) and PATCHes the choice; `collectionAccentVar` /
+  `collectionColorByName` / `sessionCollectionColor` map a collection/session to
+  its `--col-accent`. New chats pass `activeCollection`. i18n keys under
+  `collections.*` (en/fr/es/de).
 - **"Folders" panel renamed to "Files"** — the existing filesystem/cwd browser is
   **relabeled "Files" in the UI only** (`folders.label`/`folders.toggle` i18n,
   [web/docs/03-sessions.md](web/docs/03-sessions.md)); its internal identifiers

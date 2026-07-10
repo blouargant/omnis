@@ -174,11 +174,16 @@
   border-color: var(--border);
   color: var(--text, #eee);
   z-index: 1;
+  /* Top accent line coloured by the chat's collection (--col-accent, set in
+   * renderPaneTabs) so an open tab's collection is recognisable at a glance.
+   * Transparent for General/uncoloured sessions in a non-focused pane. */
+  box-shadow: inset 0 2px 0 var(--col-accent, transparent);
 }
-/* Focused pane's active tab: an accent line along the tab top + stronger text. */
+/* Focused pane's active tab: the collection accent line along the tab top +
+ * stronger text; falls back to the app accent for General/uncoloured. */
 .chat-pane.is-focused .pane-tab.active {
   color: var(--text-strong, #fff);
-  box-shadow: inset 0 2px 0 var(--accent, #4a9eff);
+  box-shadow: inset 0 2px 0 var(--col-accent, var(--accent, #4a9eff));
 }
 .pane-tab-name {
   min-width: 0;

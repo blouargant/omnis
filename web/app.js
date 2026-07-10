@@ -1180,6 +1180,12 @@ function renderPaneTabs(panel) {
     tab.setAttribute("role", "tab");
     tab.dataset.tab = key;
     tab.setAttribute("data-tip", draft ? "New chat" : editor ? abs : label);
+    // Session tabs wear their collection's colour as the top accent line (CSS
+    // .pane-tab.active), so an open chat's collection is recognisable at a glance.
+    if (!draft && !editor && !term) {
+      const accent = collectionAccentVar(sessionCollectionColor(key));
+      if (accent) tab.style.setProperty("--col-accent", accent);
+    }
 
     if (editor) {
       const glyph = document.createElement("span");
@@ -2919,8 +2925,8 @@ function addTurnActions(row, sessionId, turnIndex, userText) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "turn-action-btn";
-  btn.setAttribute("data-tip", "Fork or rewind from here");
-  btn.setAttribute("aria-label", "Fork or rewind from here");
+  btn.setAttribute("data-tip", "Copy, fork or rewind from here");
+  btn.setAttribute("aria-label", "Copy, fork or rewind from here");
   btn.innerHTML = ICON_REWIND;
   btn.addEventListener("click", (e) => {
     e.preventDefault();
@@ -2951,6 +2957,7 @@ function openTurnMenu(anchor, sessionId, turnIndex, userText) {
   const menu = document.createElement("div");
   menu.className = "turn-menu";
   const items = [
+    [tr("menu.copyMessage"), () => copyUserMessage(userText)],
     [tr("menu.fork"), () => forkConversation(sessionId, turnIndex, userText)],
     [tr("menu.rewind"), () => rewindConversation(sessionId, turnIndex, userText)],
   ];
@@ -2979,6 +2986,18 @@ function openTurnMenu(anchor, sessionId, turnIndex, userText) {
     window.addEventListener("scroll", closeTurnMenu, true);
     window.addEventListener("resize", closeTurnMenu, true);
   }, 0);
+}
+
+// copyUserMessage copies a sent (user) turn's text to the clipboard. The
+// persisted prompt may carry a "[Sent while working]" steer fold; strip it back
+// out so what lands on the clipboard is exactly what the user typed (the base
+// question, plus any mid-turn steering notes each on their own line).
+function copyUserMessage(userText) {
+  const { base, notes } = splitSteerText(userText || "");
+  const text = [base.replace(/\s+$/, ""), ...notes].filter(Boolean).join("\n");
+  copyTextToClipboard(text).then((ok) => {
+    showToast(ok ? tr("app.copy.messageCopied") : tr("app.copy.failed"), ok ? "ok" : "err");
+  });
 }
 
 // prefillComposer drops `text` into a pane's composer (only when it is empty, so
@@ -4881,6 +4900,11 @@ function squadHue(name) {
 function buildSessionRow(s, { archived }) {
   const li = document.createElement("li");
   li.dataset.id = s.id;
+  // Wear the session's collection colour so the selected (focused) row's left
+  // rail matches its collection. Harmless on non-selected rows (CSS only uses it
+  // on .active-focused). General/uncoloured leaves --col-accent unset.
+  const accent = collectionAccentVar(collectionColorByName(effectiveCollection(s)));
+  if (accent) li.style.setProperty("--col-accent", accent);
   if (panelsWithTab(s.id).length) li.classList.add("active");
   const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const displayName = s.title || s.id;
@@ -5111,6 +5135,48 @@ function setSessionBusy(sessionId, busy) {
 
 const ICON_STAR = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>`;
 const ICON_FOLDER = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+const ICON_SWATCH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5.5 0 10 4.5 10 10a4 4 0 0 1-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/></svg>`;
+
+// COLLECTION_COLORS is the palette of predefined collection colours, in swatch /
+// proposal order. Each key maps to a --collection-<key> theme token defined in
+// web/css/features/common.css — keep the two lists in sync.
+const COLLECTION_COLORS = [
+  "blue", "indigo", "purple", "pink", "red",
+  "orange", "amber", "green", "teal", "cyan",
+];
+
+// collectionAccentVar turns a palette key into the CSS custom-property value used
+// for --col-accent (a var() reference so it retheme-follows), or "" for no colour.
+function collectionAccentVar(color) {
+  return color && COLLECTION_COLORS.includes(color) ? `var(--collection-${color})` : "";
+}
+
+// collectionColorByName returns the palette key assigned to a collection (by
+// name, case-insensitive), or "" when unknown / uncoloured / General.
+function collectionColorByName(name) {
+  if (!name) return "";
+  const lc = name.toLowerCase();
+  const c = collectionsData.find((x) => x.name.toLowerCase() === lc);
+  return c && c.color ? c.color : "";
+}
+
+// sessionCollectionColor resolves the palette key for a session's collection, so
+// its row / tab can wear the collection colour. Empty for General/uncoloured.
+function sessionCollectionColor(id) {
+  const s = (lastSessions || []).find((x) => x.id === id);
+  if (!s) return "";
+  return collectionColorByName(effectiveCollection(s));
+}
+
+// proposeCollectionColor picks a default colour for a new collection: the first
+// palette colour not already in use, else cycling by the collection count so two
+// new collections don't collide.
+function proposeCollectionColor() {
+  const used = new Set(collectionsData.filter((c) => !c.general && c.color).map((c) => c.color));
+  for (const k of COLLECTION_COLORS) if (!used.has(k)) return k;
+  const n = collectionsData.filter((c) => !c.general).length;
+  return COLLECTION_COLORS[n % COLLECTION_COLORS.length];
+}
 
 // loadCollections fetches the collection list (General + user collections with
 // live counts) and repaints the rail. Cheap and idempotent — called at boot and
@@ -5144,6 +5210,10 @@ function buildCollectionRow(c) {
   const li = document.createElement("li");
   li.className = "collection-row";
   li.dataset.name = c.name;
+  // The collection's colour tints its folder glyph (always) and its selected
+  // accent bar (via CSS). General/uncoloured collections leave --col-accent unset.
+  const accent = collectionAccentVar(c.color);
+  if (accent) li.style.setProperty("--col-accent", accent);
   if (c.name.toLowerCase() === activeCollection.toLowerCase()) li.classList.add("active");
   const icon = c.general
     ? `<span class="collection-star">${ICON_STAR}</span>`
@@ -5184,30 +5254,80 @@ function selectCollection(name) {
   renderSessions(lastSessions);
 }
 
-// openCollectionCtxMenu offers Rename / Delete for a user collection, reusing
-// the themed context-menu renderer shared with the Folders/session menus.
+// openCollectionCtxMenu offers Rename / Change colour / Delete for a user
+// collection, reusing the themed context-menu renderer shared with the
+// Folders/session menus.
 function openCollectionCtxMenu(ev, c) {
   showFolderCtxMenu(ev, [
     [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
+    [tr("collections.changeColor"), () => changeCollectionColor(c), { icon: ICON_SWATCH }],
     SEP,
     [tr("common.delete"), () => deleteCollection(c.name), { icon: ICON_DELETE }],
   ]);
 }
 
+// collectionDialog shows a themed modal to create or recolour a collection: an
+// optional name field plus the palette swatch grid (including a "no colour"
+// chip). Resolves { name, color } (color = a palette key or "") or null.
+function collectionDialog({ title, name = "", color = "", withName = true, confirmText }) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(title);
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    const nameField = withName
+      ? `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("collections.name"))}</span><input type="text" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.namePlaceholder"))}" /></label>`
+      : "";
+    const swatches = [
+      `<button type="button" class="collection-swatch collection-swatch-none" data-color="" data-tip="${escHtml(tr("collections.noColor"))}" aria-label="${escHtml(tr("collections.noColor"))}"></button>`,
+      ...COLLECTION_COLORS.map((k) =>
+        `<button type="button" class="collection-swatch" data-color="${k}" style="--sw: var(--collection-${k})" aria-label="${k}"></button>`),
+    ].join("");
+    body.innerHTML = `${nameField}
+      <div class="collection-color-field">
+        <span class="collection-color-label">${escHtml(tr("collections.color"))}</span>
+        <div class="collection-swatches">${swatches}</div>
+      </div>`;
+    const input = body.querySelector("input");
+    if (input) input.value = name;
+    let sel = COLLECTION_COLORS.includes(color) ? color : "";
+    const swEls = [...body.querySelectorAll(".collection-swatch")];
+    const paint = () => swEls.forEach((el) => el.classList.toggle("selected", el.dataset.color === sel));
+    paint();
+    swEls.forEach((el) => el.addEventListener("click", () => { sel = el.dataset.color; paint(); }));
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = confirmText || tr("common.save");
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const submit = () => {
+      const nm = input ? input.value.trim() : name;
+      if (withName && !nm) { if (input) input.focus(); return; }
+      close({ name: nm, color: sel });
+    };
+    ok.addEventListener("click", submit);
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter" && (!input || document.activeElement === input)) { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    if (input) setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
 async function createCollection() {
-  const name = await uiPrompt({
+  const chosen = await collectionDialog({
     title: tr("collections.newTitle"),
-    label: tr("collections.name"),
-    placeholder: tr("collections.namePlaceholder"),
+    color: proposeCollectionColor(),
     confirmText: tr("common.create"),
   });
-  if (name == null) return;
-  const trimmed = name.trim();
+  if (chosen == null) return;
+  const trimmed = chosen.name.trim();
   if (!trimmed) return;
   try {
     const res = await apiFetch("/api/collections", {
       method: "POST",
-      body: JSON.stringify({ name: trimmed }),
+      body: JSON.stringify({ name: trimmed, color: chosen.color || "" }),
     });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
@@ -5216,6 +5336,30 @@ async function createCollection() {
     }
     await loadCollections();
     selectCollection(trimmed);
+  } catch (e) { console.error(e); }
+}
+
+// changeCollectionColor recolours an existing collection (a colour-only PATCH).
+async function changeCollectionColor(c) {
+  const chosen = await collectionDialog({
+    title: tr("collections.colorTitle"),
+    name: c.name,
+    color: c.color || "",
+    withName: false,
+    confirmText: tr("common.save"),
+  });
+  if (chosen == null) return;
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ color: chosen.color || "" }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      showToast(b.error || tr("collections.colorFailed"), "err");
+      return;
+    }
+    await loadCollections();
   } catch (e) { console.error(e); }
 }
 

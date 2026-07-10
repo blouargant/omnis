@@ -27,10 +27,18 @@ const MaxCollectionNameLen = 60
 var collectionsMu sync.Mutex
 
 // collectionsFile is the on-disk shape of collections.json: an ordered list of
-// user-created collection names. General is virtual and never appears here.
+// user-created collection names, plus an optional per-collection colour map
+// (keyed by the canonical stored name). General is virtual and never appears
+// here. The colour is a short palette token (e.g. "blue") chosen by the web UI;
+// the actual rendered colour is resolved theme-side from that token, so no hex
+// value is stored.
 type collectionsFile struct {
-	Collections []string `json:"collections"`
+	Collections []string          `json:"collections"`
+	Colors      map[string]string `json:"colors,omitempty"`
 }
+
+// MaxCollectionColorLen bounds a colour token so it stays a small palette key.
+const MaxCollectionColorLen = 24
 
 // CollectionsPath returns the on-disk path for the collections list. Resolved
 // at each call so tests can redirect via t.Setenv("OMNIS_HOME", ...).
@@ -69,34 +77,63 @@ func ValidCollectionName(name string) bool {
 	return true
 }
 
-// loadCollectionsLocked reads collections.json. A missing/empty file yields an
-// empty list. Must be called with collectionsMu held.
-func loadCollectionsLocked() ([]string, error) {
+// loadFileLocked reads collections.json into its full shape (names + colours). A
+// missing/empty file yields a zero-value struct. Must be called with
+// collectionsMu held.
+func loadFileLocked() (collectionsFile, error) {
 	data, err := os.ReadFile(CollectionsPath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return collectionsFile{}, nil
 		}
-		return nil, err
+		return collectionsFile{}, err
 	}
 	if len(data) == 0 {
-		return nil, nil
+		return collectionsFile{}, nil
 	}
 	var f collectionsFile
 	if err := json.Unmarshal(data, &f); err != nil {
+		return collectionsFile{}, err
+	}
+	return f, nil
+}
+
+// loadCollectionsLocked reads just the ordered name list. Must be called with
+// collectionsMu held.
+func loadCollectionsLocked() ([]string, error) {
+	f, err := loadFileLocked()
+	if err != nil {
 		return nil, err
 	}
 	return f.Collections, nil
 }
 
-// saveCollectionsLocked writes the ordered name list atomically (temp file +
-// rename, like SaveConversationFile). Must be called with collectionsMu held.
-func saveCollectionsLocked(names []string) error {
+// pruneColorsLocked drops colour entries whose collection no longer exists so a
+// deleted/renamed collection never leaves an orphaned colour behind.
+func pruneColorsLocked(f *collectionsFile) {
+	if len(f.Colors) == 0 {
+		return
+	}
+	for key := range f.Colors {
+		if indexOfFold(f.Collections, key) < 0 {
+			delete(f.Colors, key)
+		}
+	}
+	if len(f.Colors) == 0 {
+		f.Colors = nil
+	}
+}
+
+// saveFileLocked writes the full collections file (names + colours) atomically
+// (temp file + rename, like SaveConversationFile). Must be called with
+// collectionsMu held.
+func saveFileLocked(f collectionsFile) error {
+	pruneColorsLocked(&f)
 	dir := paths.ConfigWriteDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(collectionsFile{Collections: names}, "", "  ")
+	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -158,46 +195,50 @@ func AddCollection(name string) ([]string, bool, error) {
 	}
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	names, err := loadCollectionsLocked()
+	f, err := loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
-	if indexOfFold(names, name) >= 0 {
-		return names, false, nil // already present — idempotent
+	if indexOfFold(f.Collections, name) >= 0 {
+		return f.Collections, false, nil // already present — idempotent
 	}
-	names = append(names, name)
-	if err := saveCollectionsLocked(names); err != nil {
+	f.Collections = append(f.Collections, name)
+	if err := saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
-	return names, true, nil
+	return f.Collections, true, nil
 }
 
-// RemoveCollection drops name from the list (case-insensitive). Returns the
-// updated list and whether an entry was removed. Cascading member sessions back
-// to General is the caller's responsibility (it owns the session registry).
+// RemoveCollection drops name from the list (case-insensitive), along with any
+// colour recorded for it. Returns the updated list and whether an entry was
+// removed. Cascading member sessions back to General is the caller's
+// responsibility (it owns the session registry).
 func RemoveCollection(name string) ([]string, bool, error) {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	names, err := loadCollectionsLocked()
+	f, err := loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
-	i := indexOfFold(names, name)
+	i := indexOfFold(f.Collections, name)
 	if i < 0 {
-		return names, false, nil
+		return f.Collections, false, nil
 	}
-	names = append(names[:i:i], names[i+1:]...)
-	if err := saveCollectionsLocked(names); err != nil {
+	if f.Colors != nil {
+		delete(f.Colors, f.Collections[i])
+	}
+	f.Collections = append(f.Collections[:i:i], f.Collections[i+1:]...)
+	if err := saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
-	return names, true, nil
+	return f.Collections, true, nil
 }
 
 // RenameCollection replaces old with newName in the list, preserving its
-// position. Returns the updated list and whether the rename happened. It errors
-// on an invalid newName or when newName collides with a different existing
-// collection. Cascading member sessions to the new name is the caller's
-// responsibility.
+// position (and migrating any colour to the new name). Returns the updated list
+// and whether the rename happened. It errors on an invalid newName or when
+// newName collides with a different existing collection. Cascading member
+// sessions to the new name is the caller's responsibility.
 func RenameCollection(old, newName string) ([]string, bool, error) {
 	newName = strings.TrimSpace(newName)
 	if !ValidCollectionName(newName) {
@@ -205,10 +246,11 @@ func RenameCollection(old, newName string) ([]string, bool, error) {
 	}
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	names, err := loadCollectionsLocked()
+	f, err := loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
+	names := f.Collections
 	i := indexOfFold(names, old)
 	if i < 0 {
 		return names, false, nil
@@ -218,9 +260,85 @@ func RenameCollection(old, newName string) ([]string, bool, error) {
 	if j := indexOfFold(names, newName); j >= 0 && j != i {
 		return names, false, fmt.Errorf("collection %q already exists", newName)
 	}
+	oldCanon := names[i]
+	if f.Colors != nil && !strings.EqualFold(oldCanon, newName) {
+		if c, ok := f.Colors[oldCanon]; ok {
+			delete(f.Colors, oldCanon)
+			f.Colors[newName] = c
+		}
+	}
 	names[i] = newName
-	if err := saveCollectionsLocked(names); err != nil {
+	if err := saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
 	return names, true, nil
+}
+
+// ValidCollectionColor reports whether color is an acceptable palette token: the
+// empty string (meaning "no colour / default"), or a short slug of lowercase
+// letters, digits and hyphens. The web UI owns the actual palette; the server
+// only persists the token, so this is a defensive shape check, not a whitelist.
+func ValidCollectionColor(color string) bool {
+	color = strings.TrimSpace(color)
+	if color == "" {
+		return true
+	}
+	if len(color) > MaxCollectionColorLen {
+		return false
+	}
+	for _, r := range color {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// CollectionColors returns the name→colour map (canonical stored names). A
+// missing file or no recorded colours yields an empty map.
+func CollectionColors() (map[string]string, error) {
+	collectionsMu.Lock()
+	defer collectionsMu.Unlock()
+	f, err := loadFileLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(f.Colors))
+	for k, v := range f.Colors {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// SetCollectionColor sets (or, with an empty color, clears) the colour of an
+// existing collection. The colour is keyed by the collection's canonical stored
+// name. An unknown collection is an error; an invalid colour token is an error.
+func SetCollectionColor(name, color string) error {
+	name = strings.TrimSpace(name)
+	color = strings.TrimSpace(color)
+	if !ValidCollectionColor(color) {
+		return fmt.Errorf("invalid collection colour %q", color)
+	}
+	collectionsMu.Lock()
+	defer collectionsMu.Unlock()
+	f, err := loadFileLocked()
+	if err != nil {
+		return err
+	}
+	i := indexOfFold(f.Collections, name)
+	if i < 0 {
+		return fmt.Errorf("collection %q not found", name)
+	}
+	canon := f.Collections[i]
+	if color == "" {
+		if f.Colors != nil {
+			delete(f.Colors, canon)
+		}
+	} else {
+		if f.Colors == nil {
+			f.Colors = map[string]string{}
+		}
+		f.Colors[canon] = color
+	}
+	return saveFileLocked(f)
 }

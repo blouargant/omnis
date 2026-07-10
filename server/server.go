@@ -674,7 +674,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	// is a virtual bucket for un-filed sessions (empty Collection field).
 	auth.GET("/collections", handleListCollections(d))
 	auth.POST("/collections", handleCreateCollection(d))
-	auth.PATCH("/collections/:name", handleRenameCollection(d))
+	auth.PATCH("/collections/:name", handleUpdateCollection(d))
 	auth.DELETE("/collections/:name", handleDeleteCollection(d))
 	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {

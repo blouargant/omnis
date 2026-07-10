@@ -65,6 +65,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // Documentation pages: ordered list of markdown files served from /assets/docs/.
   // Each entry maps to <web/docs/<file>>; `group` partitions the TOC sidebar.
   const DOC_PAGES = [
+    { id: "about",           file: "00-about.md",           label: "About Omnis",     group: "About" },
     { id: "getting-started", file: "01-getting-started.md", label: "Getting Started", group: "Web UI" },
     { id: "composer",        file: "02-composer.md",        label: "The Composer",    group: "Web UI" },
     { id: "sessions",        file: "03-sessions.md",        label: "Sessions",        group: "Web UI" },
@@ -307,7 +308,7 @@ const BASE_PATH = window.BASE_PATH || "";
     permissionsRemotes: { browsing: null, viewing: null }, // Permissions remotes panel state
     activeRemoteKind: "agents",       // Selected kind in the Agents→Remotes split panel
     activeRegistryKind: "skills",     // Selected kind in the consolidated Registries hub
-    docs: { activePage: "getting-started", cache: {} }, // documentation viewer state
+    docs: { activePage: "about", cache: {}, version: null }, // documentation viewer state
   };
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
@@ -1664,6 +1665,23 @@ const BASE_PATH = window.BASE_PATH || "";
     await loadDocPage(active);
   }
 
+  // Running build version for the About page, read once from the self-update
+  // status route (always registered; reports "dev" for un-versioned builds) and
+  // cached for the panel's lifetime.
+  async function omnisVersion() {
+    if (state.docs.version != null) return state.docs.version;
+    let v = "dev";
+    try {
+      const r = await fetch(BASE_PATH + "/api/update/status", { headers: authHeaders() });
+      if (r.ok) {
+        const st = await r.json();
+        if (st && st.current) v = String(st.current);
+      }
+    } catch (_) { /* best-effort; fall back to "dev" */ }
+    state.docs.version = v;
+    return v;
+  }
+
   async function loadDocPage(id) {
     const page = DOC_PAGES.find(p => p.id === id) || DOC_PAGES[0];
     const host = bodyEl.querySelector(".docs-article-body");
@@ -1680,6 +1698,12 @@ const BASE_PATH = window.BASE_PATH || "";
         host.innerHTML = `<p class="settings-error">${escHtml(tr("set.docs.loadFailed", { error: e.message }))}</p>`;
         return;
       }
+    }
+    // Substitute the live build version for the {{OMNIS_VERSION}} placeholder
+    // (used by the About page). Fetched once from /api/update/status and cached.
+    if (text.includes("{{OMNIS_VERSION}}")) {
+      const v = await omnisVersion();
+      text = text.replace(/\{\{OMNIS_VERSION\}\}/g, () => v);
     }
     if (typeof marked !== "undefined") {
       // Disable `breaks` so soft-wrapped lines in the .md source don't become

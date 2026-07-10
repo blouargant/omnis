@@ -26,9 +26,12 @@ The cleaner treats these labels as the *only* automatic delete signal.
 ## Procedure
 
 1. **Confirm scope.** `kubectl config current-context`; default to the
-   namespace(s) under investigation. Sweep all namespaces (`-A`) only when
-   explicitly asked, and never delete in a production namespace/context
-   (`prod`, `prd`, `production`) without an explicit override.
+   namespace(s) under investigation. If the leader/user named a target
+   context, thread it as `--context=<ctx>` on every command instead — never
+   `kubectl config use-context` (it rewrites the shared kubeconfig). Sweep all
+   namespaces (`-A`) only when explicitly asked, and never delete in a
+   production namespace/context (`prod`, `prd`, `production`) without an
+   explicit override.
 2. **Discover labeled ephemerals** (removable):
    ```bash
    kubectl get pods,jobs,cm,secret,svc,deploy -n <ns> -l omnis.dev/ephemeral=true -o wide

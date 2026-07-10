@@ -13,6 +13,9 @@ import (
 type collectionInfo struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
+	// Color is the palette token chosen for this collection (empty for General
+	// and for uncoloured collections). The client resolves it to a theme colour.
+	Color string `json:"color,omitempty"`
 	// General is true only for the synthetic default bucket, so the client can
 	// pin it on top and hide its rename/delete affordances.
 	General bool `json:"general,omitempty"`
@@ -59,21 +62,27 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		colors, err := sessions.CollectionColors()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		counts := collectionCounts(d, known)
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
 		for _, n := range known {
-			out = append(out, collectionInfo{Name: n, Count: counts[n]})
+			out = append(out, collectionInfo{Name: n, Count: counts[n], Color: colors[n]})
 		}
 		c.JSON(http.StatusOK, gin.H{"collections": out})
 	}
 }
 
-// handleCreateCollection adds a new (empty) collection.
+// handleCreateCollection adds a new collection, optionally with a colour.
 func handleCreateCollection(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			Color string `json:"color"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		name := strings.TrimSpace(body.Name)
@@ -81,54 +90,85 @@ func handleCreateCollection(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection name"})
 			return
 		}
+		color := strings.TrimSpace(body.Color)
+		if !sessions.ValidCollectionColor(color) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection colour"})
+			return
+		}
 		if _, _, err := sessions.AddCollection(name); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
-		}
-		c.JSON(http.StatusCreated, gin.H{"name": name})
-	}
-}
-
-// handleRenameCollection renames a collection and cascades the change onto every
-// session filed under the old name, so no session is orphaned.
-func handleRenameCollection(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		old := strings.TrimSpace(c.Param("name"))
-		if old == "" || strings.EqualFold(old, sessions.GeneralCollection) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection cannot be renamed"})
-			return
-		}
-		var body struct {
-			Name string `json:"name"`
-		}
-		_ = c.ShouldBindJSON(&body)
-		newName := strings.TrimSpace(body.Name)
-		if !sessions.ValidCollectionName(newName) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection name"})
-			return
-		}
-		_, ok, err := sessions.RenameCollection(old, newName)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
-			return
-		}
-		// Cascade onto member sessions (in-memory + persisted).
-		for _, m := range d.Registry.List() {
-			if strings.EqualFold(sessions.NormalizeCollectionName(m.Collection), old) {
-				d.Registry.SetCollection(m.ID, newName)
+		if color != "" {
+			if err := sessions.SetCollectionColor(name, color); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
 			}
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("collections_changed", "")
 		}
-		c.JSON(http.StatusOK, gin.H{"name": newName})
+		c.JSON(http.StatusCreated, gin.H{"name": name, "color": color})
+	}
+}
+
+// handleUpdateCollection renames a collection and/or changes its colour. A
+// rename cascades onto every session filed under the old name, so no session is
+// orphaned. Both fields are optional: send `name` to rename, `color` to recolour
+// (empty string clears the colour), or both.
+func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		old := strings.TrimSpace(c.Param("name"))
+		if old == "" || strings.EqualFold(old, sessions.GeneralCollection) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection cannot be modified"})
+			return
+		}
+		var body struct {
+			Name  string  `json:"name"`
+			Color *string `json:"color"`
+		}
+		_ = c.ShouldBindJSON(&body)
+
+		// Resolve the collection's name after any rename — colour edits key off it.
+		current := old
+		if newName := strings.TrimSpace(body.Name); newName != "" && newName != old {
+			if !sessions.ValidCollectionName(newName) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection name"})
+				return
+			}
+			_, ok, err := sessions.RenameCollection(old, newName)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
+				return
+			}
+			// Cascade onto member sessions (in-memory + persisted).
+			for _, m := range d.Registry.List() {
+				if strings.EqualFold(sessions.NormalizeCollectionName(m.Collection), old) {
+					d.Registry.SetCollection(m.ID, newName)
+				}
+			}
+			current = newName
+		}
+
+		if body.Color != nil {
+			if err := sessions.SetCollectionColor(current, strings.TrimSpace(*body.Color)); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		if d.PushEvents != nil {
+			d.PushEvents.broadcast("collections_changed", "")
+		}
+		out := gin.H{"name": current}
+		if body.Color != nil {
+			out["color"] = strings.TrimSpace(*body.Color)
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 

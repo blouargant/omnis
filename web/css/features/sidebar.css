@@ -94,7 +94,6 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #collections-header,
 #sidebar.collapsed #archived-panel,
 #sidebar.collapsed #folders-panel,
-#sidebar.collapsed #settings-menu,
 #sidebar.collapsed #settings-btn span,
 #sidebar.collapsed #appearance-btn span,
 #sidebar.collapsed #documentation-btn span {
@@ -420,10 +419,12 @@ body.resizing #sidebar { transition: none; }
 #session-list li.active { color: var(--text); }
 /* The chat in the focused pane — the one the user is working in — stands out
  * with the active background, brighter text, and an accent rail on the left. */
+/* The accent rail is coloured by the session's collection (--col-accent, set in
+ * buildSessionRow), falling back to the app accent for General/uncoloured. */
 #session-list li.active-focused {
   background: var(--bg-active);
   color: var(--text-strong);
-  box-shadow: inset 3px 0 0 var(--accent, #4a9eff);
+  box-shadow: inset 3px 0 0 var(--col-accent, var(--accent, #4a9eff));
 }
 .session-name-row {
   display: flex;

@@ -27,10 +27,16 @@ lines).
 
 ## Procedure
 
-1. **Confirm the cluster context.** Run `kubectl config current-context`
-   (or the MCP equivalent) and quote it back before gathering anything.
+1. **Confirm the cluster context.** If the caller (leader or user) named a
+   target context, thread it as `--context=<ctx>` on **every** `kubectl`
+   command below and quote it back. Otherwise run `kubectl config
+   current-context` (or the MCP equivalent) and quote that. **Never run
+   `kubectl config use-context`** — it rewrites the shared kubeconfig default
+   and disturbs other sessions; the per-command `--context=<ctx>` flag is
+   read-only, needs no approval, and is scoped to this investigation.
 2. **Locate the workload.** Namespace + name + selector. Ask if unknown.
-3. **Snapshot the state.** In one batch of read-only calls:
+3. **Snapshot the state.** In one batch of read-only calls (prefix each with
+   `--context=<ctx>` when a target context was chosen):
    - `kubectl get deploy/sts/ds <name> -n <ns> -o wide`
    - `kubectl get pods -n <ns> -l <selector> -o wide`
    - `kubectl describe pod <pod>` (the most recent unhealthy one)

@@ -114,6 +114,77 @@ func TestCollectionsCRUD(t *testing.T) {
 	}
 }
 
+func TestValidCollectionColor(t *testing.T) {
+	valid := []string{"", "blue", "amber", "deep-teal", "gray12"}
+	for _, c := range valid {
+		if !ValidCollectionColor(c) {
+			t.Errorf("ValidCollectionColor(%q) = false, want true", c)
+		}
+	}
+	invalid := []string{"Blue", "#3b82f6", "a b", "under_score", "way-too-long-a-color-token-value"}
+	for _, c := range invalid {
+		if ValidCollectionColor(c) {
+			t.Errorf("ValidCollectionColor(%q) = true, want false", c)
+		}
+	}
+}
+
+func TestCollectionColors(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+
+	if _, _, err := AddCollection("Work"); err != nil {
+		t.Fatalf("AddCollection: %v", err)
+	}
+	// Colouring a missing collection is an error.
+	if err := SetCollectionColor("Nope", "blue"); err == nil {
+		t.Fatalf("expected error colouring a missing collection")
+	}
+	// An invalid colour is rejected.
+	if err := SetCollectionColor("Work", "Blue"); err == nil {
+		t.Fatalf("expected error for invalid colour token")
+	}
+	// Set + read back (case-insensitive name lookup, canonical key stored).
+	if err := SetCollectionColor("work", "blue"); err != nil {
+		t.Fatalf("SetCollectionColor: %v", err)
+	}
+	colors, err := CollectionColors()
+	if err != nil || colors["Work"] != "blue" {
+		t.Fatalf("CollectionColors: %v err=%v", colors, err)
+	}
+	// The name list must survive the colour write (regression: save dropped names).
+	if got, _ := ListCollections(); len(got) != 1 || got[0] != "Work" {
+		t.Fatalf("colour write clobbered the name list: %v", got)
+	}
+
+	// Rename migrates the colour to the new name.
+	if _, ok, err := RenameCollection("Work", "Job"); err != nil || !ok {
+		t.Fatalf("RenameCollection: ok=%v err=%v", ok, err)
+	}
+	colors, _ = CollectionColors()
+	if colors["Job"] != "blue" || colors["Work"] != "" {
+		t.Fatalf("rename did not migrate colour: %v", colors)
+	}
+
+	// Clearing removes the entry.
+	if err := SetCollectionColor("Job", ""); err != nil {
+		t.Fatalf("clear colour: %v", err)
+	}
+	if colors, _ := CollectionColors(); colors["Job"] != "" {
+		t.Fatalf("colour not cleared: %v", colors)
+	}
+
+	// Remove drops any colour with the collection.
+	if err := SetCollectionColor("Job", "green"); err != nil {
+		t.Fatalf("re-set colour: %v", err)
+	}
+	if _, ok, err := RemoveCollection("Job"); err != nil || !ok {
+		t.Fatalf("RemoveCollection: ok=%v err=%v", ok, err)
+	}
+	if colors, _ := CollectionColors(); colors["Job"] != "" {
+		t.Fatalf("remove left an orphan colour: %v", colors)
+	}
+}
+
 func TestSetConversationCollectionPersists(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	id := "teaching-kite"

@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=11" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=12" />
   <link rel="stylesheet" href="assets/css/settings.css?v=8" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -102,10 +102,6 @@
         <ul id="folders-list" aria-label="folder contents"></ul>
       </div>
     </div>
-    <div id="settings-menu" hidden>
-      <div class="sidebar-section-label" data-i18n="settings.label">Settings</div>
-      <ul id="settings-menu-list" aria-label="settings sections"></ul>
-    </div>
     <div id="sidebar-footer">
       <button id="settings-btn" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -172,6 +168,13 @@
       </div>
     </div>
     <ul id="session-list" aria-label="sessions"></ul>
+    <!-- Settings category menu (Skills / Agents / Models / …). Lives in this
+         middle column and replaces the session list while Settings is open;
+         toggled via its `hidden` attribute by settings.js. -->
+    <div id="settings-menu" hidden>
+      <div class="sidebar-section-label" data-i18n="settings.label">Settings</div>
+      <ul id="settings-menu-list" aria-label="settings sections"></ul>
+    </div>
   </aside>
 
   <!-- Chat is a horizontal row of one-or-more independent panes. Each pane is
@@ -431,9 +434,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=29" defer></script>
+  <script src="assets/i18n/locales.js?v=31" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=55" defer></script>
-  <script src="assets/settings.js?v=33" defer></script>
+  <script src="assets/app.js?v=57" defer></script>
+  <script src="assets/settings.js?v=34" defer></script>
 </body>
 </html>

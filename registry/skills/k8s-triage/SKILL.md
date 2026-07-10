@@ -25,15 +25,20 @@ evidence — those live in the `k8s-investigation` skill.
 
 1. **Confirm the cluster context.** Run `kubectl config current-context`
    (or the MCP equivalent) and quote it back to the user before doing
-   anything else.
+   anything else. If you ask the user to pick a context, thread that choice
+   as `--context=<ctx>` on every command and **pass it in the task you
+   delegate** to the k8s_investigator/editor/cleaner so they reuse it — never
+   `kubectl config use-context` (it rewrites the shared kubeconfig and forces
+   a fresh approval in each sub-agent).
 2. **Locate the workload.** Ask for namespace + name if not provided.
 3. **Gather evidence (read-only).** Get a compact, cited snapshot of the
    workload's state — deployment/pod status, the most recent unhealthy pod's
    `describe`, its previous-container logs, and recent namespace events. In a
-   squad, delegate this to the **k8s_investigator** and name the
-   `k8s-investigation` skill (add `k8s-log-investigation` when the failure is
-   log-heavy). Standalone, load `k8s-investigation` and run its snapshot
-   yourself. Never conclude from assumptions when a `kubectl` read can confirm.
+   squad, delegate this to the **k8s_investigator**, name the
+   `k8s-investigation` skill and the chosen `--context=<ctx>` (add
+   `k8s-log-investigation` when the failure is log-heavy). Standalone, load
+   `k8s-investigation` and run its snapshot yourself. Never conclude from
+   assumptions when a `kubectl` read can confirm.
 4. **Classify the failure** into one of:
    - image / pull
    - scheduling (resource, taint, affinity)

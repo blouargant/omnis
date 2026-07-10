@@ -336,7 +336,9 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
+  /* Match the chat/transcript background (var(--bg)) so the slot blends into the
+     pane; the card inside keeps its own var(--bg-panel) surface (below). */
+  background: var(--bg);
 }
 /* Only reserve space ABOVE the floating composer when the slot actually holds a
    question — otherwise (the normal, empty case) it must take zero height so the

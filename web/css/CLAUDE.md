@@ -35,8 +35,11 @@ web/css/
 
 The single source of shared data is **`features/common.css`**: the CSS reset,
 the `:root` colour/size **design tokens** (`--bg`, `--bg-panel`, `--border`,
-`--text`, `--accent`, `--danger-fg`, `--scroll-thumb`, …), the `html`/`body`
-base, and the global scrollbar. **Both** barrels rely on it — `styles.css`
+`--text`, `--accent`, `--danger-fg`, `--scroll-thumb`, the `--collection-*`
+collection palette, …), the `html`/`body` base, and the global scrollbar. The
+`--collection-*` tokens are the ~10 theme-independent hues a user assigns to a
+session Collection (kept in sync with `COLLECTION_COLORS` in `web/app.js`); a row
+/tab wears one via a per-element `--col-accent` inline property. **Both** barrels rely on it — `styles.css`
 imports it first, and `settings.css`'s partials use the same `var(--…)` tokens
 (it loads after `styles.css` in `index.html`, so the tokens are already defined).
 
@@ -59,7 +62,7 @@ same colour/size in multiple partials.
 | File | Owns |
 |---|---|
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
-| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
+| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), the per-collection **colour** accent (`--col-accent` on the active bar + folder glyph) and the colour-picker swatch grid (`.collection-swatch*`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
 | `sidebar.css` | Left sidebar (app chrome + Collections + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, session rows, archived-sessions panel, sidebar resize handle |
 | `folders.css` | Folders browser panel + its right-click context menu |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
@@ -80,7 +83,7 @@ same colour/size in multiple partials.
 | `permissions.css` | Permission-rule editor + skill-contributed (read-only) permissions |
 | `hooks.css` | Lifecycle hooks editor (Settings → Hooks): matcher cards + command rows |
 | `status.css` | Restart-required banner, reload spinner, generation pill, full-page restart overlay |
-| `sidebar.css` | Settings **sidebar chrome**: the gear button, section labels, the in-sidebar settings menu that expands when Settings is open |
+| `sidebar.css` | Settings **sidebar chrome**: the gear button, section labels; **and** the settings category menu (`#settings-menu`, now hosted in the middle `#session-pane` column — it replaces the session list while Settings is open) plus the `#session-pane` swap/collapse rules that drive that |
 | `theme.css` | Theme picker |
 | `skills.css` | Skills panel |
 | `registries.css` | Remote registries split-panel list + browse view + cards |

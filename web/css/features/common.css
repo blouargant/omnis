@@ -64,6 +64,24 @@
   --accent-border-soft: rgba(14, 99, 156, 0.5);
   --accent-hover-bg: #094771;
 
+  /* Collection palette — the ~10 predefined colours a user can assign to a
+     session Collection. Shown as the accent bar on the selected collection, the
+     selected session row, and the active pane tab, so a chat's collection is
+     recognisable at a glance. Theme-independent mid-tone hues (like --brand-mark):
+     they read well as thin accent bars on both light and dark surfaces, so they
+     are defined once here and NOT overridden per theme. Keep this list in sync
+     with COLLECTION_COLORS in web/app.js. */
+  --collection-blue:   #4b8bd6;
+  --collection-indigo: #6b6ee0;
+  --collection-purple: #9b6dd6;
+  --collection-pink:   #d96bab;
+  --collection-red:    #e5534b;
+  --collection-orange: #e07b39;
+  --collection-amber:  #d9a520;
+  --collection-green:  #3fa864;
+  --collection-teal:   #2fa39b;
+  --collection-cyan:   #2f9bc4;
+
   /* Brand mark — the Omnis "sun" glyph (white, theme-independent) used as a
      background image over the --accent surface for the sidebar logo badge
      (.app-logo) and the assistant-reply avatar (.msg-row.assistant::before).
