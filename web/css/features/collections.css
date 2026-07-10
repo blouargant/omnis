@@ -125,6 +125,20 @@
   padding: 8px 8px 8px 12px;
   display: flex;
   align-items: center;
+  position: relative;
+}
+/* A short, subtle vertical divider at the seam between this (center) top bar and
+ * the right column's pane tab bar. The two bars share --bg-panel and read as one
+ * continuous bar; this inset line (a little darker than the bar, not reaching its
+ * top/bottom) just separates the center buttons from the tabs. */
+#session-topbar::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: color-mix(in srgb, var(--bg-panel) 94%, #000);
 }
 .session-bar-row {
   display: flex;
