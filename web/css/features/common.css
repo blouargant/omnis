@@ -19,6 +19,8 @@
 
   /* Layout */
   --sidebar-w: 280px;
+  /* Width of the middle session-list column (features/collections.css). */
+  --session-pane-w: 280px;
   /* Height of the sidebar footer (Settings button, features/sidebar.css
      #sidebar-footer). Kept as a token so other bottom chrome can align to it. */
   --bottom-bar-h: 60px;

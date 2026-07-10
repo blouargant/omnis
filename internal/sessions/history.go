@@ -134,8 +134,12 @@ type ConversationFile struct {
 	// and any fork of it — resumes in the same environment after a server
 	// restart instead of falling back to the process root. Empty means "never
 	// navigated" (resolves to the process root).
-	Cwd   string             `json:"cwd,omitempty"`
-	Turns []ConversationTurn `json:"turns"`
+	Cwd string `json:"cwd,omitempty"`
+	// Collection is the thematic folder ("Collection") the session is filed
+	// under. Empty means the virtual "General" collection. Persisted so the
+	// filing survives a server restart (see SessionMeta.Collection).
+	Collection string             `json:"collection,omitempty"`
+	Turns      []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -371,9 +375,10 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 	}
 	kept := append([]ConversationTurn(nil), src.Turns[:keep]...)
 	dst := &ConversationFile{
-		Title: title,
-		Squad: src.Squad,
-		Turns: kept,
+		Title:      title,
+		Squad:      src.Squad,
+		Collection: src.Collection, // fork stays in the source's collection
+		Turns:      kept,
 	}
 	if err := SaveConversationFile(dstID, dst); err != nil {
 		return nil, err
@@ -409,6 +414,12 @@ func SetConversationSquad(sessionID, squad string) error {
 // SetConversationTitle persists the session title without touching turns.
 func SetConversationTitle(sessionID, title string) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Title = title })
+}
+
+// SetConversationCollection persists the session's collection (thematic folder)
+// without touching turns. An empty value files the session under General.
+func SetConversationCollection(sessionID, collection string) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.Collection = collection })
 }
 
 // SetConversationGoal persists (or clears, when condition is empty) the active
@@ -482,6 +493,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Hidden:     f.Hidden,
 			Goal:       f.Goal,
 			Cwd:        f.Cwd,
+			Collection: f.Collection,
 			UserID:     DefaultUserID,
 			CreatedAt:  f.Turns[0].At,
 			LastUsedAt: f.Turns[len(f.Turns)-1].At,

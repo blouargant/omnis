@@ -34,6 +34,13 @@ type SessionMeta struct {
 	// creation and persisted in the conversation file. Empty means the
 	// default squad (back-compat for pre-squad conversation files).
 	Squad string `json:"squad,omitempty"`
+	// Collection is the thematic folder ("Collection") this session is filed
+	// under, mirrored from the conversation file. Empty means the virtual
+	// "General" collection (see collections.go GeneralCollection): a session is
+	// in exactly one collection, and moving it back to General clears the field.
+	// The set of user-created collections is persisted separately in
+	// collections.json; this only records which one a session belongs to.
+	Collection string `json:"collection,omitempty"`
 	// Harvested is set by the idle harvester after it fires curator evaluation
 	// for this session. A harvested session is skipped by the idle scanner until
 	// new activity (Touch) clears the flag. The flag is persisted in the
@@ -294,6 +301,27 @@ func (r *Registry) SetSquad(id, squad string) bool {
 	go func() {
 		if err := SetConversationSquad(id, squad); err != nil {
 			log.Printf("sessions: failed to persist squad for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
+// SetCollection files a session under a collection (in-memory + persisted to
+// the conversation file asynchronously, mirroring SetSquad). An empty name
+// (the General bucket) clears the field. Returns true when a session was found.
+func (r *Registry) SetCollection(id, collection string) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.Collection = collection
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationCollection(id, collection); err != nil {
+			log.Printf("sessions: failed to persist collection for session %s: %v", id, err)
 		}
 	}()
 	return true

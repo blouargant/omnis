@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=9" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=11" />
   <link rel="stylesheet" href="assets/css/settings.css?v=8" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -42,6 +42,11 @@
   <script src="assets/marked.min.js"></script>
 </head>
 <body>
+  <!-- Left column: app chrome (OMNIS header, New Chat), the Collections list
+       (thematic session folders; "General" is the always-present bucket for
+       un-filed sessions), the Archived panel, and the Settings/Appearance/
+       Documentation footer. Selecting a collection filters the session list in
+       the middle #session-pane column. -->
   <aside id="sidebar">
     <div id="sidebar-header">
       <span class="app-logo" aria-hidden="true"></span>
@@ -69,7 +74,13 @@
       </button>
       <div id="squad-menu" role="menu" hidden></div>
     </div>
-    <ul id="session-list" aria-label="sessions"></ul>
+    <div id="collections-header">
+      <span class="collections-title sidebar-section-label" data-i18n="collections.label">Collections</span>
+      <button id="collections-new" type="button" data-tip="New collection" data-i18n-tip="collections.new" aria-label="New collection">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <ul id="collections-list" aria-label="collections"></ul>
     <div id="archived-panel" class="collapsed" hidden>
       <div id="archived-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle archived sessions" data-i18n-tip="archived.toggle">
         <svg class="archived-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
@@ -81,10 +92,10 @@
     </div>
     <div id="folders-panel" class="collapsed">
       <div id="folders-resize" data-tip="Drag to resize" data-i18n-tip="folders.resize"></div>
-      <div id="folders-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle folder browser" data-i18n-tip="folders.toggle">
+      <div id="folders-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle file browser" data-i18n-tip="folders.toggle">
         <svg class="folders-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
         <svg class="folders-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span class="sidebar-section-label" data-i18n="folders.label">Folders</span>
+        <span class="sidebar-section-label" data-i18n="folders.label">Files</span>
       </div>
       <div id="folders-body">
         <div id="folders-path" data-tip="Current working directory" data-i18n-tip="folders.cwd"></div>
@@ -114,6 +125,54 @@
     </div>
   </aside>
   <div id="sidebar-resize" aria-hidden="true"></div>
+
+  <!-- Middle column: a top toolbar (matching the left header height) + the
+       session list (time-grouped, filtered to the selected collection). The
+       toolbar has three mutually-exclusive rows: normal / search / select. -->
+  <aside id="session-pane">
+    <div id="session-topbar">
+      <!-- Normal state: title+count · search · sort · select · new. -->
+      <div class="session-bar-row" id="session-bar-main">
+        <span id="session-bar-title" class="session-bar-title"></span>
+        <div class="session-bar-actions">
+          <button id="session-search-btn" class="session-bar-btn" type="button" data-tip="Search sessions" data-i18n-tip="sessionbar.search" aria-label="Search sessions">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+          <button id="session-sort-btn" class="session-bar-btn" type="button" data-tip="Sort" data-i18n-tip="sessionbar.sort" aria-haspopup="true" aria-label="Sort sessions">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h12M3 12h9M3 18h6"/><path d="M17 8l3-3 3 3M20 5v14"/></svg>
+          </button>
+          <button id="session-select-btn" class="session-bar-btn" type="button" data-tip="Select" data-i18n-tip="sessionbar.select" aria-label="Select sessions">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>
+          </button>
+          <button id="session-new-btn" class="session-bar-btn" type="button" data-tip="New chat" data-i18n-tip="sessionbar.new" aria-label="New chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+      <!-- Search state. -->
+      <div class="session-bar-row" id="session-search-row" hidden>
+        <svg class="session-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="session-search-input" type="text" placeholder="Search sessions…" data-i18n-placeholder="sessionbar.searchPlaceholder" aria-label="Search sessions" />
+        <button id="session-search-close" class="session-bar-btn" type="button" data-tip="Close search" data-i18n-tip="sessionbar.searchClose" aria-label="Close search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <!-- Select (bulk) state. -->
+      <div class="session-bar-row" id="session-select-row" hidden>
+        <button id="session-selectall-btn" class="session-bar-btn" type="button" data-tip="Select all" data-i18n-tip="sessionbar.selectAll" aria-label="Select all">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>
+        </button>
+        <span id="session-select-count" class="session-bar-title"></span>
+        <div class="session-bar-actions">
+          <button id="session-batch-btn" class="session-bar-btn session-bar-btn-text" type="button" aria-haspopup="true" data-i18n="sessionbar.actions">Actions</button>
+          <button id="session-select-cancel" class="session-bar-btn" type="button" data-tip="Cancel" data-i18n-tip="common.cancel" aria-label="Cancel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <ul id="session-list" aria-label="sessions"></ul>
+  </aside>
 
   <!-- Chat is a horizontal row of one-or-more independent panes. Each pane is
        cloned from #chat-pane-tpl below and bound to its own session. The first
@@ -372,9 +431,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=27" defer></script>
+  <script src="assets/i18n/locales.js?v=29" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=51" defer></script>
+  <script src="assets/app.js?v=55" defer></script>
   <script src="assets/settings.js?v=33" defer></script>
 </body>
 </html>

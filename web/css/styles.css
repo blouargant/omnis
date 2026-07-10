@@ -15,6 +15,7 @@
 @import "features/common.css";
 
 /* App chrome / left column. */
+@import "features/collections.css";
 @import "features/sidebar.css";
 @import "features/folders.css";
 

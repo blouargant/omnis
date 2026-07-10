@@ -285,10 +285,11 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Body is optional: clients that don't care about squads can POST
 		// with no body or `{}` and get the default squad.
 		var body struct {
-			Squad  string `json:"squad"`
-			Title  string `json:"title"`
-			Dir    string `json:"dir"`
-			Hidden bool   `json:"hidden"`
+			Squad      string `json:"squad"`
+			Title      string `json:"title"`
+			Dir        string `json:"dir"`
+			Hidden     bool   `json:"hidden"`
+			Collection string `json:"collection"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		squad := strings.ToLower(strings.TrimSpace(body.Squad))
@@ -334,6 +335,19 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Persist the squad immediately so a server restart before the
 		// first turn still sees the right squad on the session.
 		_ = sessions.SetConversationSquad(meta.ID, squad)
+		// File the new chat under the collection the sidebar has selected (empty ⇒
+		// General). Only honoured when it names an existing collection so a stale
+		// client can't strand the session under a phantom one.
+		if col := sessions.NormalizeCollectionName(body.Collection); col != "" {
+			if known, err := sessions.ListCollections(); err == nil {
+				for _, n := range known {
+					if strings.EqualFold(n, col) {
+						d.Registry.SetCollection(meta.ID, n)
+						break
+					}
+				}
+			}
+		}
 		// Hidden utility sessions (e.g. the in-Settings assistant) are kept out
 		// of the sidebar list but otherwise behave normally.
 		if body.Hidden {
@@ -656,6 +670,13 @@ func newEngine(d serverDeps) *gin.Engine {
 		meta, _ := d.Registry.Get(id)
 		c.JSON(http.StatusOK, meta)
 	})
+	// Collections — thematic folders that group sessions in the sidebar. General
+	// is a virtual bucket for un-filed sessions (empty Collection field).
+	auth.GET("/collections", handleListCollections(d))
+	auth.POST("/collections", handleCreateCollection(d))
+	auth.PATCH("/collections/:name", handleRenameCollection(d))
+	auth.DELETE("/collections/:name", handleDeleteCollection(d))
+	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
 		id := c.Param("id")
 		if _, ok := d.Registry.Get(id); !ok {

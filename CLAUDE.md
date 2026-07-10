@@ -1122,6 +1122,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   ├── agents.json       # editor writes — user config overrides
   ├── permissions.json  # editor writes — user permission overrides
   ├── schedules.json    # durable /schedule routines (scheduler; loops not persisted)
+  ├── collections.json  # ordered user-created session collections (General is virtual)
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
@@ -1424,6 +1425,102 @@ collapse state in `localStorage`), and the TUI `archivedPane` in the left column
 ([internal/tui/tui.go](internal/tui/tui.go), toggled with **Ctrl-A**; `a` archives
 the highlighted session, `u` unarchives, `d` deletes). Viewing an archived session
 disables the composer in both surfaces.
+
+### Session collections (thematic folders, Web UI three-pane layout)
+
+The web UI is a **three-column, email-client layout**
+([web/index.html](web/index.html) + [web/css/features/collections.css](web/css/features/collections.css)):
+- **Left** = `#sidebar` — the app chrome (OMNIS header + New Chat), the
+  **Collections list** (`#collections-list`, below New Chat), the Archived
+  panel, the per-chat **Files** browser (`#folders-panel`), and the
+  Settings/Appearance/Documentation footer. `#sidebar` keeps all its existing
+  collapse-to-rail + resize machinery (that's why the collections list + Files
+  live *inside* it rather than the chrome being moved out).
+- **Middle** = `#session-pane` — a **top toolbar** (`#session-topbar`, matched to
+  the left header's `--topbar-h`) above the time-grouped **session list**
+  (filtered to the selected collection).
+- **Right** = `#chat-area` — chat panes + the settings body.
+
+**Session-pane toolbar** ([web/index.html](web/index.html) `#session-topbar`,
+[web/css/features/collections.css](web/css/features/collections.css),
+[web/app.js](web/app.js) "Session-pane toolbar" section) — three mutually
+exclusive rows toggled by `[hidden]`:
+- **Normal**: a `title · count` label (`activeCollection · currentViewIds.length`)
+  + four icon buttons — **search**, **sort**, **select**, **new**.
+- **Search**: an inline input driving the live `sessionSearch` title filter in
+  `renderSessions`.
+- **Select (bulk)**: `setSelectMode(true)` adds `.selecting` to `#session-pane`,
+  which reveals a per-row checkbox (`.session-check`, absolutely positioned) and
+  makes a row click **toggle selection** (`selectedSessions`) instead of opening
+  the chat. A **Select-all** button ticks every visible row (`currentViewIds`);
+  an **Actions** menu (reusing `showFolderCtxMenu`) batch-**moves** the ticked
+  sessions to a collection, **archives**, or **deletes** them (`runBatch` fans the
+  existing per-session endpoints out with `Promise.all`, then exits select mode
+  and refreshes). Selections are pruned to still-existing sessions on each render.
+
+Sort order (`sessionSort`: `recent` | `created` | `az`, persisted in
+`localStorage`) governs `renderSessions` — **timeframe headers show only for
+`recent`**; `created`/`az` render a flat list. The **new** button calls
+`newChat(fp())` (files into the selected collection). Search + select are mutually
+exclusive. The toolbar is wired once at boot by `wireSessionBar()`.
+
+Because the Files panel and the collections list now share the left sidebar's
+flexible space, `foldersHeightCap` ([web/app.js](web/app.js)) reserves
+`COLLECTIONS_LIST_MIN` against `els.collectionsList` (not the session list, which
+is in the separate middle column).
+
+A **collection** is a thematic folder that groups sessions; **each session is in
+exactly one** ("move" semantics, flat — no nesting).
+
+- **"General" is a virtual default** (`sessions.GeneralCollection`,
+  [internal/sessions/collections.go](internal/sessions/collections.go)): a
+  session whose `Collection` field is empty — **or** names a collection no longer
+  in the list — belongs to General, which is pinned on top of the rail and
+  **cannot be renamed or deleted**. It is never stored, so nothing needs seeding.
+- **Data model** — `Collection string` on `SessionMeta`
+  ([internal/sessions/sessions.go](internal/sessions/sessions.go)) + persisted on
+  `ConversationFile` ([internal/sessions/history.go](internal/sessions/history.go)),
+  mirroring `Squad`/`Archived`: `Registry.SetCollection` +
+  `SetConversationCollection`, mapped in `LoadPersistedSessions`. Forks inherit
+  their source's collection. **The name is stored directly on the session** (not
+  an id), so a rename cascades onto member sessions and a delete clears them back
+  to General. The user-created collection **list** (ordered names) is persisted
+  separately in `collections.json` under `$OMNIS_HOME`
+  (`sessions.ListCollections`/`AddCollection`/`RenameCollection`/`RemoveCollection`,
+  atomic write).
+- **Routes** ([server/collections.go](server/collections.go)): `GET
+  /api/collections` (General first + user collections, each with a live session
+  count folded the same way the sidebar filters), `POST /api/collections`,
+  `PATCH /api/collections/:name` (rename + cascade), `DELETE /api/collections/:name`
+  (members → General), `POST /api/sessions/:id/collection {collection}` (move;
+  empty ⇒ General; an unknown target is rejected). `POST /api/sessions` accepts a
+  `collection` so a new chat is filed under the rail's current selection. The
+  `collection` field rides along in `GET /api/sessions`.
+- **Cross-browser sync** — two events on the multiplexed `/api/events` stream (see
+  "Cross-browser session sync"): **`collections_changed`** (no sid, on
+  create/rename/delete) and **`session_moved`** (sid + `collection`), both handled
+  in [web/app.js](web/app.js) `subscribeGlobalEvents` by re-fetching collections +
+  sessions.
+- **Client** ([web/app.js](web/app.js)) — `loadCollections`/`renderCollections`/
+  `buildCollectionRow`/`selectCollection` paint the rail; `renderSessions`
+  **filters both the active and archived lists** to `activeCollection` via
+  `effectiveCollection` (folding unknown collections to General), while the
+  `archivedSessions` read-only-guard set stays **unfiltered**. `lastSessions`
+  caches the full payload so a rail click re-filters **without a refetch** — and
+  the pane picker + boot layout-validation read `lastSessions` (not the filtered
+  DOM) so they still reach sessions in any collection. **Move** = drag a session
+  row onto a rail collection (`sessionDrag` + the `dragover`/`drop` handlers) or
+  the session **⋯ → Move to** submenu; collection **create/rename/delete** use the
+  themed `uiPrompt`/`uiConfirm` + the shared `showFolderCtxMenu`. New chats pass
+  `activeCollection`. i18n keys under `collections.*` (en/fr/es/de).
+- **"Folders" panel renamed to "Files"** — the existing filesystem/cwd browser is
+  **relabeled "Files" in the UI only** (`folders.label`/`folders.toggle` i18n,
+  [web/docs/03-sessions.md](web/docs/03-sessions.md)); its internal identifiers
+  (`#folders-panel`, `handleFolder`, `/api/sessions/:id/folder`, `foldersDir`)
+  are unchanged, so the new `collection` code never collides with the old
+  `folders` code.
+- **No-op contract**: no `collections.json` ⇒ only General exists and every
+  session shows under it — byte-identical to the pre-collections sidebar.
 
 ### Automatic session titling (Web UI)
 
@@ -2466,7 +2563,13 @@ alongside the local `sessionSending`), optimistically renders the request bubble
 turn from history. A background turn also emits **`context_usage`** +
 **`turn_usage`** frames on this stream (carrying a structured `Data` payload via
 `broadcastData`) so an open session's context ring + budget update live during the
-run, mirroring the per-turn stream's frames (see "Session spawning").
+run, mirroring the per-turn stream's frames (see "Session spawning"). Two further
+events back **session collections** (see "Session collections"):
+**`collections_changed`** (no session id) fires on any collection
+create/rename/delete so open browsers re-fetch the rail + session list, and
+**`session_moved`** (session id + a `collection` `Data` payload) fires when a
+session is filed under a different collection so the rail counts + list filter
+stay in sync.
 
 ### Self-update (new-release detection + in-app install)
 

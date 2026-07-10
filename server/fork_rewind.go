@@ -159,6 +159,11 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		}
 		d.Registry.SetTurns(newMeta.ID, len(kept))
 		d.Registry.SetTitle(newMeta.ID, title) // in-memory; ForkConversation wrote it to disk
+		// Keep the fork in the source's collection (ForkConversation wrote it to
+		// disk; mirror it in-memory so the sidebar files it correctly right away).
+		if meta.Collection != "" {
+			d.Registry.SetCollection(newMeta.ID, meta.Collection)
+		}
 
 		// The fork inherits the source's working directory so its tools/`!cd`
 		// start in the same place.

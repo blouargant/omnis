@@ -59,7 +59,8 @@ same colour/size in multiple partials.
 | File | Owns |
 |---|---|
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
-| `sidebar.css` | Left sidebar, hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, session rows, archived-sessions panel, sidebar resize handle |
+| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
+| `sidebar.css` | Left sidebar (app chrome + Collections + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, session rows, archived-sessions panel, sidebar resize handle |
 | `folders.css` | Folders browser panel + its right-click context menu |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |

@@ -16,6 +16,40 @@ agent produces is scoped by `(userID, buildTimestamp, sessionID)`.
 Two concurrent sessions never share any of this. Deleting a session removes
 the file group above (subject to garbage collection).
 
+## Collections (thematic folders)
+
+The web UI is a **three-column layout**, like an email client:
+
+- **Left column** — the app chrome (the **Omnis** header, **New Chat**), your
+  **Collections** (thematic folders), the **Archived** panel, the per-chat
+  **Files** browser, and the **Settings / Appearance / Documentation** buttons.
+- **Middle column** — a **toolbar** above the **session list** for the selected
+  collection (grouped by time — Today / Yesterday / This week / …).
+- **Right column** — the conversation panes (and the Settings body).
+
+The middle column's **toolbar** carries: the current view's name and session
+count; **Search** (filter the list by title); **Sort** (recent activity / date
+created / A–Z); **Select** (bulk mode — tick multiple sessions, then **Move to** a
+collection, **Archive**, or **Delete** them together, with a Select-all); and a
+**New chat** button that starts a chat in the current collection.
+
+A session lives in **exactly one** collection. **General** is the always-present
+default: every new chat starts there unless another collection is selected, and
+it holds any session you haven't filed elsewhere. General can't be renamed or
+deleted.
+
+- **Create** a collection with the **+** button at the top of the rail.
+- **Select** a collection to filter the middle list to just its sessions. A new
+  chat you start while a collection is selected is filed under it.
+- **Move** a session by dragging its row onto a collection in the rail, or via
+  the session's **⋯ → Move to** menu.
+- **Rename / Delete** a collection from its right-click menu. Deleting a
+  collection moves its sessions back to **General** (nothing is lost).
+
+Collections and each session's filing are persisted (`collections.json` +
+`conversation_<id>.json`) and survive a server restart. Changes sync live across
+open browsers.
+
 ## Session list affordances
 
 - **Active session** is highlighted; a small dot indicates a busy (streaming)

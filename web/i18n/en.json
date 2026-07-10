@@ -6,7 +6,6 @@
   "common.start": "Start",
   "common.delete": "Delete",
   "common.optional": "(optional)",
-
   "update.tip": "A new omnis release is available — click to update",
   "update.label": "Update",
   "sidebar.hide": "Hide sidebar",
@@ -14,13 +13,12 @@
   "newchat.label": "New Chat",
   "squad.choose": "Choose squad",
   "folders.resize": "Drag to resize",
-  "folders.toggle": "Toggle folder browser",
-  "folders.label": "Folders",
+  "folders.toggle": "Toggle file browser",
+  "folders.label": "Files",
   "folders.cwd": "Current working directory",
   "archived.toggle": "Toggle archived sessions",
   "archived.label": "Archived",
   "settings.label": "Settings",
-
   "pane.newtab": "New chat tab",
   "pane.terminal": "Open terminal tab",
   "pane.split": "Split editor right",
@@ -34,7 +32,6 @@
   "picker.newChat": "Start a new chat",
   "picker.or": "or open an existing session",
   "picker.listAria": "open session in this panel",
-
   "composer.attach": "Attach files",
   "composer.uploadComputer": "Upload from computer",
   "composer.addContext": "Add context",
@@ -45,17 +42,14 @@
   "composer.send": "Send",
   "composer.steer": "Steer",
   "composer.steerTip": "Send a steering note to the running turn",
-
   "ctx.header": "Context",
   "ctx.tokensUsed": "Tokens used",
   "ctx.maxContext": "Max context",
   "ctx.percent": "Percent",
   "ctx.budget": "Budget",
   "ctx.compressNow": "Compress Now",
-
   "ctxbrowser.title": "Add Context",
   "ctxbrowser.noFiles": "No files selected",
-
   "usercmd.addTitle": "Add command",
   "usercmd.editTitle": "Edit command",
   "usercmd.name": "Name",
@@ -67,11 +61,9 @@
   "usercmd.promptHint": "Use <code>$1</code>, <code>$2</code> … for positional args, <code>$*</code> for all args.",
   "usercmd.descPlaceholder": "Review the staged changes",
   "usercmd.promptPlaceholder": "Review the staged changes carefully. Focus on $1 if provided.",
-
   "skillmodal.title": "Create skill",
   "skillmodal.nameLabel": "Skill name",
   "skillmodal.nameHint": "lowercase letters, digits, '-' or '.' (1–63 chars)",
-
   "settings.menu.skills": "Skills",
   "settings.menu.agent": "Agents",
   "settings.menu.models": "Models",
@@ -83,7 +75,6 @@
   "settings.menu.registries": "Registries",
   "settings.menu.appearance": "Appearance",
   "settings.menu.documentation": "Documentation",
-
   "settings.title.skills": "Skills",
   "settings.title.agent": "Agent Configuration",
   "settings.title.models": "Models & Providers",
@@ -98,19 +89,16 @@
   "settings.viewForm": "Form",
   "settings.viewRaw": "Raw JSON",
   "settings.discard": "Discard",
-
   "appearance.notifications": "Notifications",
   "appearance.notifyLabel": "Show a desktop notification when a background task finishes, or when a chat reply finishes while you're on another session or app.",
   "appearance.notifyHint": "In-app toasts always appear; this also surfaces a desktop notification (needs browser permission). Your choice is saved on the server.",
   "appearance.themeHint": "Pick a color palette. Applied immediately and saved on the server.",
   "appearance.language": "Language",
   "appearance.languageHint": "Choose the interface language. The page reloads to apply it; your choice is saved on the server.",
-
   "theme.tier.principal": "Principal themes",
   "theme.tier.secondary": "Secondary themes",
   "theme.tone.Dark": "Dark",
   "theme.tone.Light": "Light",
-
   "common.name": "Name",
   "common.create": "Create",
   "common.rename": "Rename",
@@ -122,7 +110,6 @@
   "common.back": "← Back",
   "common.error": "Error",
   "common.gotIt": "Got it",
-
   "app.session.noOthers": "No other sessions yet.",
   "app.newChat.failed": "Couldn't start a new chat: {reason}",
   "app.newChat.failedNoSquad": "Couldn't start a new chat — the server has no squads loaded (a stale agent generation). Reload or restart the server (Settings → Reload), then refresh the page.",
@@ -156,7 +143,6 @@
   "app.ctx.queuing": "Queuing…",
   "app.ctx.queued": "Queued ✓",
   "app.folders.empty": "empty",
-
   "app.folder.deleteFolder": "Delete folder",
   "app.folder.deleteFile": "Delete file",
   "app.folder.deleteMsgFolder": "Permanently delete “{name}” and all its contents? This cannot be undone.",
@@ -167,14 +153,11 @@
   "app.folder.moveTo": "Move to",
   "app.folder.copyTo": "Copy to",
   "app.folder.destDir": "Destination directory",
-
   "app.rewind.title": "Rewind conversation",
   "app.rewind.message": "This permanently removes this turn and everything after it from this conversation. Earlier turns are kept and the model's memory is rewound to match. Continue?",
   "app.rewind.confirm": "Rewind",
-
   "app.notify.allowTitle": "Allow notifications in your browser",
   "app.notify.allowMsg": "Notifications are turned on in Omnis, but your browser is blocking them for this site. {hint} A website can't grant this itself — it has to be allowed in the browser.",
-
   "app.update.installMethod": "Install method:",
   "app.update.sudoPassword": "sudo password",
   "app.update.install": "Install",
@@ -184,7 +167,6 @@
   "app.update.installedRestart": "Installed v{version}. Restart the server to run the new version.",
   "app.update.installFailed": "Install failed.",
   "app.update.showManual": "Show manual steps",
-
   "app.provider.testing": "Testing…",
   "app.provider.tested": "✓ Connected",
   "app.provider.testedCount": "✓ Connected ({count} models)",
@@ -195,26 +177,21 @@
   "app.provider.stillBad": "Still can't connect: {providers}. Check the values and try again.",
   "app.provider.connected": "Connected — agent reloaded.",
   "app.provider.failed": "Failed: {error}",
-
   "app.toast.openSession": "Open the session",
   "app.folder.createFailed": "create failed",
   "app.folder.renameFailed": "rename failed",
   "app.folder.moveFailed": "move failed",
   "app.folder.copyFailed": "copy failed",
   "app.folder.deleteFailed": "delete failed",
-
   "app.notify.unblockFirefox": "Click the permissions icon at the left of the address bar and clear the “Blocked” state for Notifications (or set it to Allow), then reload.",
   "app.notify.unblockSafari": "Open Safari → Settings → Websites → Notifications and set this site to Allow, then reload.",
   "app.notify.unblockChromium": "Click the site-info icon (the tune/ⓘ control just left of the address bar) → Site settings → Notifications → Allow, then reload.",
-
   "app.locale.offerTitle": "Switch language?",
   "app.locale.offerMsg": "Your browser prefers {language}. Would you like to use the Omnis interface in {language}? You can change this any time in Settings → Appearance.",
   "app.locale.useLanguage": "Switch to {language}",
   "app.locale.keepEnglish": "Keep English",
-
   "app.copy.richText": "Rich text",
   "app.copy.plainText": "Plain text",
-
   "askkind.skill": "Skills",
   "askkind.agent": "Agents",
   "askkind.mcp": "MCP servers",
@@ -228,7 +205,6 @@
   "askscope.allowSession": "Allow all installs this session",
   "askscope.allowProject": "Allow in this project",
   "askscope.allowAlways": "Allow always",
-
   "menu.copyName": "Copy name",
   "menu.rename": "Rename",
   "menu.renameDots": "Rename…",
@@ -259,7 +235,6 @@
   "menu.addToChatEditor": "Add to chat editor",
   "menu.open": "Open",
   "menu.save": "Save",
-
   "tool.desc.Bash": "Run shell commands in the working directory.",
   "tool.desc.Read": "Read file contents from the filesystem.",
   "tool.desc.Write": "Write or overwrite files on the filesystem.",
@@ -278,7 +253,6 @@
   "tool.desc.registries": "Skill registry tools: list configured remote registries, browse them, fetch a SKILL.md, install a skill, and link it to an agent.",
   "tool.desc.code_search": "Semantic code search (search_code, reindex_code): find code by meaning over the repo index. Mounted only when an embedding model is configured; otherwise the agent falls back to grep/read.",
   "tool.desc.docs": "Documentation tools: answer questions about omnis from its own docs. Always provides list_docs / read_doc / grep_docs; adds semantic search_docs / reindex_docs when an embedding model is configured.",
-
   "subtab.agents": "Agents",
   "subtab.squads": "Squads",
   "subtab.remotes": "Remotes",
@@ -288,13 +262,11 @@
   "subtab.installed": "Installed",
   "subtab.servers": "Servers",
   "subtab.userCommands": "User Commands",
-
   "common.edit": "Edit",
   "common.remove": "Remove",
   "common.install": "Install",
   "common.enabled": "Enabled",
   "set.loading": "Loading…",
-
   "set.assistant.placeholder": "Ask the Helper",
   "set.assistant.sendTip": "Ask the Helper",
   "set.assistant.title": "Helper",
@@ -307,7 +279,6 @@
   "set.assistant.error": "Sorry, something went wrong. Please try again.",
   "set.assistant.contextPreamble": "(Context: I'm viewing the \"{panel}\" settings panel in the omnis web UI. Help me with it, and apply any setting changes I ask for.)",
   "set.assistant.changedDirty": "Settings changed — discard your unsaved edits to see them.",
-
   "set.cmd.apiUnavailable": "User commands API not available.",
   "set.cmd.empty": "No user commands yet. Click \"Add command\" to create one.",
   "set.cmd.hint": "Slash commands shown in the chat composer. Built-in commands are reserved. User commands expand to a prompt template that is sent to the agent — use <code>$1</code>, <code>$2</code>, … for positional args and <code>$*</code> for all args.",
@@ -319,12 +290,10 @@
   "set.cmd.addBtn": "+ Add command",
   "set.cmd.removeConfirm": "Remove command \"/{name}\"?",
   "set.cmd.deleteFailed": "Delete failed: {error}",
-
   "set.docs.loadFailed": "Could not load documentation: {error}",
   "set.docs.tocAria": "Documentation table of contents",
   "set.appearance.notifyBlockedFallback": "Notifications are turned on in Omnis, but your browser is blocking them. Allow notifications for this site via the site-info icon at the left of the address bar, then reload.",
   "set.appearance.notifyUnsupported": "This browser does not support desktop notifications.",
-
   "set.banner.restartText": "Embedder changed — a server restart is required to apply it (hot-reload can't swap the embedder).",
   "set.banner.restartBtn": "Restart server",
   "set.banner.dismiss": "Dismiss",
@@ -346,7 +315,6 @@
   "set.restart.pageReload": "Server restarting — page will reload shortly…",
   "set.restart.notBack": "Server did not come back within 30s. Reload manually.",
   "set.restart.failed": "Restart failed: {error}",
-
   "set.status.reindexing": "Reindexing registries…",
   "set.status.reindexFailed": "Reindex failed: {error}",
   "set.status.importFailed": "Import failed: {error}",
@@ -364,14 +332,12 @@
   "set.status.archiveOnly": "Only .zip or .tar.gz archives are accepted.",
   "set.status.saving": "Saving…",
   "set.status.saveFailed": "Save failed: {error}",
-
   "set.reg.addFailed": "Failed to add registry: {error}",
   "set.reg.updateFailed": "Failed to update registry: {error}",
   "set.reg.removeFailed": "Failed to remove registry: {error}",
   "set.reg.refreshFailed": "Failed to refresh registry: {error}",
   "set.reg.installFailed": "Install failed: {error}",
   "set.reg.removeConfirm": "Remove registry \"{name}\"?",
-
   "set.confirm.discardTab": "Discard unsaved changes in the current tab?",
   "set.confirm.discardView": "Discard unsaved changes in this view?",
   "set.confirm.discard": "Discard unsaved changes?",
@@ -391,7 +357,6 @@
   "set.confirm.installSquad": "Install squad \"{name}\"? It will be merged into config/agents.json and available after the next reload.",
   "set.confirm.headerNamePrompt": "Header name (e.g. Authorization):",
   "set.confirm.overwriteExists": "\"{name}\" already exists. Overwrite?",
-
   "set.hdr.generalSettings": "General Settings",
   "set.hdr.availableTools": "Available Tools",
   "set.hdr.parallelism": "Parallelism",
@@ -416,7 +381,6 @@
   "set.perm.optRule": "rule",
   "set.perm.optRuleReason": "rule + reason",
   "set.perm.reasonPlaceholder": "reason (optional)",
-
   "set.none": "(none)",
   "set.default": "(default)",
   "set.agent.activeState": "Active State",
@@ -443,9 +407,7 @@
   "set.agent.moveUp": "▲ Move up",
   "set.agent.moveDown": "▼ Move down",
   "set.agent.imported": "Imported: {names}.",
-
   "common.description": "Description",
-
   "set.fleet.squadsTitle": "SQUADS",
   "set.fleet.addSquad": "Add squad",
   "set.fleet.activeFleet": "ACTIVE FLEET",
@@ -454,7 +416,6 @@
   "set.fleet.noAgents": "No agents defined.",
   "set.fleet.agentsLabel": "AGENTS",
   "set.fleet.builtinAgentsLabel": "BUILT-IN AGENTS",
-
   "set.squad.memberCount.one": "{count} member",
   "set.squad.memberCount.other": "{count} members",
   "set.squad.empty": "No squads defined. Click + to add one.",
@@ -468,7 +429,6 @@
   "set.squad.membersHintLeaderless": "Pick exactly one agent — it runs as the squad on its own.",
   "set.squad.membersHint": "Sub-agents the leader can delegate to (the leader itself is not selectable).",
   "set.squad.deleteBtn": "Delete squad",
-
   "set.env.coreDirectories": "CORE DIRECTORIES",
   "set.env.optimization": "OPTIMIZATION",
   "set.env.runtimeConfig": "RUNTIME CONFIG",
@@ -476,7 +436,6 @@
   "set.env.softskillsDesc": "Path where soft-skill playbooks are stored.",
   "set.env.reduceTokens": "Reduce token usage",
   "set.env.showHide": "Show/hide",
-
   "set.block.skillToolWarn": "\"Skill\" tool not enabled — assignments will be ignored until re-enabled in Agent → Agents.",
   "set.block.mcpToolWarn": "\"mcp\" tool not enabled — selections will be ignored until re-enabled above.",
   "set.block.noSkills": "No skills installed.",
@@ -491,7 +450,6 @@
   "set.block.loadingMcp": "Loading MCP servers…",
   "set.block.skillsUnavailable": "Skills unavailable: {error}",
   "set.block.mcpUnavailable": "MCP unavailable: {error}",
-
   "set.model.configuredProviders": "Configured Providers",
   "set.model.providersDesc": "A provider groups a kind (anthropic, openai, openai_compat, gemini) with a base URL and API key. Models reference a provider and inherit its credentials.",
   "set.model.addProvider": "+ Add provider",
@@ -541,7 +499,6 @@
   "set.model.noMatch": "No match",
   "set.model.noModelsLoaded": "No models loaded",
   "set.model.loadModelsTip": "Load models from provider",
-
   "tool.display.Bash": "Shell",
   "tool.display.Read": "File Read",
   "tool.display.Write": "File Write",
@@ -560,7 +517,6 @@
   "tool.display.registries": "Skill Registries",
   "tool.display.code_search": "Code Search",
   "tool.display.docs": "Documentation",
-
   "set.hook.intro": "Shell commands run at lifecycle moments. Each command receives the event as JSON on stdin and runs through the Bash safety floor. Same format as Claude Code hooks.",
   "set.hook.addMatcher": "+ Add matcher",
   "set.hook.noHooks": "No hooks.",
@@ -579,7 +535,6 @@
   "hook.hint.SessionEnd": "When a session ends (CLI/TUI exit, or web session delete).",
   "hook.hint.PreCompact": "Before context compaction. matcher = trigger (manual / auto / hard).",
   "hook.hint.Notification": "On a notification (e.g. a permission / ask-user prompt).",
-
   "common.and": "and",
   "set.mcp.importMergeHint": "Merge servers and inputs from a VS Code or Claude Code <code>mcp.json</code> snippet.",
   "set.mcp.inputsHint": "Declare values the user is prompted for at first use. Reference them from server fields as <code>${input:id}</code>.",
@@ -620,12 +575,9 @@
   "set.mcp.typeStdio": "stdio (local subprocess)",
   "set.mcp.typeHttp": "http (remote server)",
   "set.mcp.url": "URL",
-
   "common.ok": "OK",
   "common.confirm": "Confirm",
-
   "set.tool.serpapiDisabled": "Set serpapi_key in Globals to enable this tool.",
-
   "set.reg.addTitle": "Add Remote Registry",
   "set.reg.tokenKeepHint": "Leave blank to keep existing token",
   "set.reg.namePlaceholder.skills": "My skill registry",
@@ -645,7 +597,6 @@
   "set.reg.kindRequired": "Select at least one content type.",
   "set.reg.accessToken": "Access token",
   "set.reg.tokenOptional": "(optional, for private repos)",
-
   "set.a2a.inputsHint": "Declare values the user is prompted for at first use. Reference them from agent fields as <code>${input:id}</code>.",
   "set.a2a.endpointsHint": "Remote agent endpoints reachable via the <a href=\"https://google.github.io/A2A\" target=\"_blank\" rel=\"noopener\">Agent-to-Agent (A2A)</a> protocol.",
   "set.a2a.noInputs": "No inputs declared. Add one if any agent needs a user-supplied value.",
@@ -659,7 +610,6 @@
   "set.kv.value": "Value",
   "set.mcp.addServer": "Add MCP Server",
   "set.a2a.addAgent": "Add A2A Agent",
-
   "set.reg.installing": "Installing…",
   "set.reg.installed": "Installed",
   "set.reg.title.editRegistry": "Edit Registry",
@@ -694,7 +644,6 @@
   "set.skill.uploadArchive": "Upload archive",
   "set.cmd.remoteHint": "Browse and install slash commands from GitHub, GitLab, or Gitea repositories. Commands use Anthropic's Claude Code format — one markdown file per command, with optional YAML frontmatter (<code>description</code>, <code>argument-hint</code>).",
   "set.perm.remoteHint": "Browse and install permission rule-sets from GitHub, GitLab, or Gitea repositories. Each rule-set is a directory holding a <code>permissions.json</code> (<code>permissions.deny</code> / <code>permissions.ask</code> / <code>permissions.allow</code>; old <code>always_deny</code>/<code>always_allow</code>/<code>ask_user</code> files are auto-converted). Installing merges its rules into your permissions.json (deduped by rule).",
-
   "set.skill.saving": "Saving…",
   "set.skill.saved": "Saved.",
   "set.skill.saveFailed": "Save failed: {error}",
@@ -762,5 +711,36 @@
   "set.sched.clearRunsConfirmMsg": "This permanently removes all recorded runs — and the result sessions they created — for this routine. It can't be undone.",
   "set.sched.deleteConfirmTitle": "Delete routine?",
   "set.sched.deleteConfirmMsg": "Delete the routine “{spec}”? It stops running and is removed permanently.",
-  "set.sched.deleteWithRuns": "Also delete the result sessions this routine produced"
+  "set.sched.deleteWithRuns": "Also delete the result sessions this routine produced",
+  "collections.label": "Collections",
+  "collections.new": "New collection",
+  "collections.moveTo": "Move to",
+  "collections.newTitle": "New collection",
+  "collections.name": "Name",
+  "collections.namePlaceholder": "e.g. Work, Research…",
+  "collections.renameTitle": "Rename collection",
+  "collections.deleteTitle": "Delete collection",
+  "collections.deleteMsg": "Delete the collection “{name}”? Its sessions move to General.",
+  "collections.createFailed": "Could not create the collection.",
+  "collections.renameFailed": "Could not rename the collection.",
+  "collections.deleteFailed": "Could not delete the collection.",
+  "collections.moveFailed": "Could not move the session.",
+  "sessionbar.search": "Search sessions",
+  "sessionbar.searchPlaceholder": "Search sessions…",
+  "sessionbar.searchClose": "Close search",
+  "sessionbar.sort": "Sort",
+  "sessionbar.sortBy": "Sort by",
+  "sessionbar.sortRecent": "Recent activity",
+  "sessionbar.sortCreated": "Date created",
+  "sessionbar.sortAz": "Name (A–Z)",
+  "sessionbar.select": "Select",
+  "sessionbar.selectAll": "Select all",
+  "sessionbar.new": "New chat",
+  "sessionbar.actions": "Actions",
+  "sessionbar.noneSelected": "No sessions selected.",
+  "sessionbar.selected.one": "{count} selected",
+  "sessionbar.selected.other": "{count} selected",
+  "sessionbar.batchDeleteTitle": "Delete sessions",
+  "sessionbar.batchDeleteMsg.one": "Delete {count} selected session? This cannot be undone.",
+  "sessionbar.batchDeleteMsg.other": "Delete {count} selected sessions? This cannot be undone."
 }

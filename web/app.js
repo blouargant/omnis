@@ -147,6 +147,15 @@ const els = {
   squadToggle:   document.getElementById("squad-toggle"),
   squadMenu:     document.getElementById("squad-menu"),
   list:          document.getElementById("session-list"),
+  sessionPane:   document.getElementById("session-pane"),
+  sessionBarMain:   document.getElementById("session-bar-main"),
+  sessionBarTitle:  document.getElementById("session-bar-title"),
+  sessionSearchRow: document.getElementById("session-search-row"),
+  sessionSearchInput: document.getElementById("session-search-input"),
+  sessionSelectRow: document.getElementById("session-select-row"),
+  sessionSelectCount: document.getElementById("session-select-count"),
+  collectionsList: document.getElementById("collections-list"),
+  collectionsNew:  document.getElementById("collections-new"),
   archivedPanel: document.getElementById("archived-panel"),
   archivedHeader:document.getElementById("archived-header"),
   archivedList:  document.getElementById("archived-list"),
@@ -472,11 +481,13 @@ function renderPanePicker(panel) {
   if (!list) return;
   list.innerHTML = "";
   const shown = new Set(panels.flatMap(p => p.tabs));
-  for (const li of els.list.children) {
-    const id = li.dataset.id;
-    if (!id) continue;
-    const nameEl = li.querySelector(".session-name");
-    const name = nameEl ? nameEl.textContent : id;
+  // List every ACTIVE session from the full payload (not the rendered list,
+  // which is filtered to the selected collection) so the picker can jump to a
+  // session in any collection.
+  for (const s of lastSessions) {
+    const id = s.id;
+    if (!id || s.archived) continue;
+    const name = s.title || s.id;
     const item = document.createElement("li");
     item.className = "pane-picker-item";
     item.textContent = name;
@@ -936,6 +947,26 @@ const sessionNotifiedAt = new Map();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const archivedSessions  = new Set(); // sessionIds in the archived (read-only) state
 const sessionTitles     = new Map(); // sessionId → display title (for pane tabs)
+
+// ─── Collections (thematic session folders) ──────────────────────────────────
+// GENERAL_COLLECTION is the virtual default bucket for un-filed sessions (a
+// session whose server-side Collection field is empty, or names a collection no
+// longer in the list). It is pinned on top of the rail and can't be renamed or
+// deleted. Mirrors internal/sessions/collections.go GeneralCollection.
+const GENERAL_COLLECTION = "General";
+let activeCollection = GENERAL_COLLECTION; // which collection the middle list is filtered to
+let collectionsData  = [];                 // [{name,count,general}] from GET /api/collections
+let lastSessions     = [];                 // last GET /api/sessions payload, so a collection
+                                           // click re-filters the list without a refetch
+let sessionDrag      = null;               // sessionId currently being dragged onto the rail
+
+// ─── Session-pane toolbar state (search / sort / bulk-select) ─────────────────
+const SESSION_SORT_KEY = "agent_session_sort";
+let sessionSearch = "";                    // live title filter for the middle list
+let sessionSort   = localStorage.getItem(SESSION_SORT_KEY) || "recent"; // recent | created | az
+let selectMode    = false;                 // bulk multi-select mode toggle
+const selectedSessions = new Set();        // ids ticked in select mode
+let currentViewIds = [];                   // ids currently shown (post filter+sort) — for Select all
 
 // ─── Per-session push event subscriptions ────────────────────────────────────
 // Each open session has a persistent SSE connection to /api/sessions/:id/events
@@ -4827,6 +4858,8 @@ const ICON_RENAME = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`;
 const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
 const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
+// Tick shown inside a session row's select-mode checkbox.
+const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 6"/></svg>`;
 
 // Deterministic per-squad accent hue for the sidebar squad badges, so each
 // squad reads as its own colour (consumed as the inline --sq-h custom property
@@ -4863,7 +4896,9 @@ function buildSessionRow(s, { archived }) {
   const badgeHtml = showBadge
     ? `<span class="session-squad-badge" style="--sq-h:${squadHue(s.squad)}" data-tip="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
     : "";
+  if (selectMode && selectedSessions.has(s.id)) li.classList.add("row-selected");
   li.innerHTML = `
+    <span class="session-check" aria-hidden="true">${ICON_CHECK}</span>
     <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
       <span class="session-busy-dot"></span>
@@ -4880,9 +4915,20 @@ function buildSessionRow(s, { archived }) {
   `;
 
   li.addEventListener("click", (e) => {
+    // In bulk-select mode a row click toggles its checkbox instead of opening it.
+    if (selectMode) { toggleSessionSelect(s.id, li); return; }
     if (e.target.closest(".session-actions")) return;
     selectSession(s.id);
   });
+  // Drag a session row onto a collection in the rail to file it there (disabled
+  // while selecting so a click-drag doesn't fight the checkbox toggle).
+  li.draggable = !selectMode;
+  li.addEventListener("dragstart", (e) => {
+    sessionDrag = s.id;
+    li.classList.add("dragging");
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); }
+  });
+  li.addEventListener("dragend", () => { sessionDrag = null; li.classList.remove("dragging"); });
   li.querySelector(".session-menu-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     openSessionCtxMenu(e, s, archived, li);
@@ -4908,6 +4954,19 @@ function openSessionCtxMenu(ev, s, archived, li) {
   const displayName = s.title || s.id;
   const items = [[tr("menu.copyName"), () => writeClipboard(displayName), { icon: ICON_COPY }]];
   if (!archived) items.push([tr("menu.rename"), () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
+  // Move-to: a flat "Move to <collection>" group (the shared menu has no
+  // submenus). The session's current collection is shown disabled so the target
+  // set is unambiguous. General is always offered.
+  const cur = effectiveCollection(s);
+  const targets = [GENERAL_COLLECTION, ...collectionsData.filter(c => !c.general).map(c => c.name)];
+  if (targets.length > 1) {
+    items.push(SEP);
+    items.push([tr("collections.moveTo"), null, { disabled: true }]);
+    for (const name of targets) {
+      const isCur = name.toLowerCase() === cur.toLowerCase();
+      items.push([name, () => moveSessionToCollection(s.id, name), { icon: ICON_FOLDER, disabled: isCur }]);
+    }
+  }
   items.push(SEP);
   items.push(archived
     ? [tr("menu.unarchive"), () => unarchiveSession(s.id), { icon: ICON_UNARCHIVE }]
@@ -4953,36 +5012,85 @@ function buildTimeframeHeader(label) {
   return li;
 }
 
+// knownUserCollections returns the lowercased set of user-created collection
+// names currently in the rail (General excluded). Used to fold a session that
+// references a deleted/unknown collection back into General.
+function knownUserCollections() {
+  const set = new Set();
+  for (const c of collectionsData) if (!c.general) set.add(c.name.toLowerCase());
+  return set;
+}
+
+// effectiveCollection resolves which collection a session is shown under: its
+// stored Collection, or General when that is empty / names a collection no
+// longer in the list. Mirrors the server's collectionCounts folding.
+function effectiveCollection(sess, known) {
+  const raw = (sess.collection || "").trim();
+  if (!raw || raw.toLowerCase() === GENERAL_COLLECTION.toLowerCase()) return GENERAL_COLLECTION;
+  known = known || knownUserCollections();
+  return known.has(raw.toLowerCase()) ? raw : GENERAL_COLLECTION;
+}
+
 function renderSessions(sessions) {
+  lastSessions = sessions; // remember so a collection click can re-filter without a refetch
   // Keep the archived-state index in sync so the composer read-only guard and
-  // applySessionUI can consult it without re-fetching.
+  // applySessionUI can consult it without re-fetching. This set holds ALL
+  // archived ids (unfiltered) since the read-only guard is collection-agnostic.
   archivedSessions.clear();
+  const known = knownUserCollections();
+  const q = sessionSearch.trim().toLowerCase();
+  const matchQ = (s) => !q || (s.title || s.id).toLowerCase().includes(q);
   const active = [];
   const archived = [];
   for (const s of sessions) {
-    if (s.archived) { archived.push(s); archivedSessions.add(s.id); }
-    else active.push(s);
     sessionTitles.set(s.id, s.title || s.id);
+    if (s.archived) archivedSessions.add(s.id);
+    // Filter both lists to the selected collection so each collection is a
+    // self-contained view (General shows un-filed sessions), plus the search box.
+    if (effectiveCollection(s, known).toLowerCase() !== activeCollection.toLowerCase()) continue;
+    if (!matchQ(s)) continue;
+    if (s.archived) archived.push(s);
+    else active.push(s);
+  }
+  // Drop any ticked selections for sessions that no longer exist (deleted
+  // elsewhere) so a batch action never targets a gone session.
+  if (selectMode) {
+    const allIds = new Set(sessions.map((s) => s.id));
+    for (const id of [...selectedSessions]) if (!allIds.has(id)) selectedSessions.delete(id);
   }
 
-  // Active sessions arrive newest-first; emit a timeframe header whenever the
-  // bucket changes so they read as Today / Yesterday / This week / … sections.
+  // Sort the active list per the toolbar's sort choice. "recent" keeps the
+  // server order (last_used desc) and shows Today/Yesterday/… timeframe headers;
+  // the other orders are a flat list (timeframe headers wouldn't make sense).
+  if (sessionSort === "created") {
+    active.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  } else if (sessionSort === "az") {
+    active.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id));
+  }
+  currentViewIds = active.map((s) => s.id);
+
   els.list.innerHTML = "";
-  const now = new Date();
-  let curGroup = null;
-  for (const s of active) {
-    const tf = sessionTimeframe(new Date(s.last_used_at), now);
-    if (tf.key !== curGroup) {
-      curGroup = tf.key;
-      els.list.appendChild(buildTimeframeHeader(tf.label));
+  if (sessionSort === "recent") {
+    const now = new Date();
+    let curGroup = null;
+    for (const s of active) {
+      const tf = sessionTimeframe(new Date(s.last_used_at), now);
+      if (tf.key !== curGroup) {
+        curGroup = tf.key;
+        els.list.appendChild(buildTimeframeHeader(tf.label));
+      }
+      els.list.appendChild(buildSessionRow(s, { archived: false }));
     }
-    els.list.appendChild(buildSessionRow(s, { archived: false }));
+  } else {
+    for (const s of active) els.list.appendChild(buildSessionRow(s, { archived: false }));
   }
 
   els.archivedList.innerHTML = "";
   for (const s of archived) els.archivedList.appendChild(buildSessionRow(s, { archived: true }));
   els.archivedPanel.hidden = archived.length === 0;
   els.archivedCount.textContent = archived.length ? `(${archived.length})` : "";
+
+  updateSessionBar();
 
   // Reflect each shown session's (possibly changed) archived state, refresh the
   // sidebar highlight, and re-render any open empty-pane pickers.
@@ -4997,6 +5105,330 @@ function renderSessions(sessions) {
 function setSessionBusy(sessionId, busy) {
   const li = els.list.querySelector(`li[data-id="${CSS.escape(sessionId)}"]`);
   if (li) li.classList.toggle("session-busy", busy);
+}
+
+// ─── Collections rail ────────────────────────────────────────────────────────
+
+const ICON_STAR = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>`;
+const ICON_FOLDER = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+
+// loadCollections fetches the collection list (General + user collections with
+// live counts) and repaints the rail. Cheap and idempotent — called at boot and
+// on every collections_changed / session_moved push.
+async function loadCollections() {
+  try {
+    const res = await apiFetch("/api/collections", { cache: "no-store" });
+    const data = await res.json();
+    renderCollections(data.collections || []);
+  } catch (e) { console.error("loadCollections:", e); }
+}
+
+// renderCollections paints the rail and, since the known-collection set may have
+// changed, re-filters the session list against it (this also closes the boot
+// race where sessions render before collections are known).
+function renderCollections(list) {
+  collectionsData = Array.isArray(list) ? list : [];
+  // If the selected collection vanished (deleted here or elsewhere), fall back
+  // to General so the middle list never shows an empty phantom filter.
+  if (activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()
+      && !collectionsData.some(c => c.name.toLowerCase() === activeCollection.toLowerCase())) {
+    activeCollection = GENERAL_COLLECTION;
+  }
+  els.collectionsList.innerHTML = "";
+  for (const c of collectionsData) els.collectionsList.appendChild(buildCollectionRow(c));
+  // Re-filter the (already loaded) session list against the current selection.
+  renderSessions(lastSessions);
+}
+
+function buildCollectionRow(c) {
+  const li = document.createElement("li");
+  li.className = "collection-row";
+  li.dataset.name = c.name;
+  if (c.name.toLowerCase() === activeCollection.toLowerCase()) li.classList.add("active");
+  const icon = c.general
+    ? `<span class="collection-star">${ICON_STAR}</span>`
+    : `<span class="collection-icon">${ICON_FOLDER}</span>`;
+  li.innerHTML = `${icon}<span class="collection-name"></span><span class="collection-count"></span>`;
+  li.querySelector(".collection-name").textContent = c.name;
+  li.querySelector(".collection-count").textContent = c.count > 0 ? String(c.count) : "";
+  li.addEventListener("click", () => selectCollection(c.name));
+  // Right-click → rename/delete (user collections only; General is fixed).
+  if (!c.general) {
+    li.addEventListener("contextmenu", (ev) => openCollectionCtxMenu(ev, c));
+  }
+  // Drop target: dragging a session row onto a collection files it there.
+  li.addEventListener("dragover", (ev) => {
+    if (!sessionDrag) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "move";
+    li.classList.add("drag-over");
+  });
+  li.addEventListener("dragleave", () => li.classList.remove("drag-over"));
+  li.addEventListener("drop", (ev) => {
+    li.classList.remove("drag-over");
+    if (!sessionDrag) return;
+    ev.preventDefault();
+    moveSessionToCollection(sessionDrag, c.name);
+  });
+  return li;
+}
+
+// selectCollection switches the middle list's filter. No refetch — we already
+// hold every session in lastSessions.
+function selectCollection(name) {
+  if (activeCollection.toLowerCase() === name.toLowerCase()) return;
+  activeCollection = name;
+  for (const row of els.collectionsList.children) {
+    row.classList.toggle("active", row.dataset.name.toLowerCase() === name.toLowerCase());
+  }
+  renderSessions(lastSessions);
+}
+
+// openCollectionCtxMenu offers Rename / Delete for a user collection, reusing
+// the themed context-menu renderer shared with the Folders/session menus.
+function openCollectionCtxMenu(ev, c) {
+  showFolderCtxMenu(ev, [
+    [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
+    SEP,
+    [tr("common.delete"), () => deleteCollection(c.name), { icon: ICON_DELETE }],
+  ]);
+}
+
+async function createCollection() {
+  const name = await uiPrompt({
+    title: tr("collections.newTitle"),
+    label: tr("collections.name"),
+    placeholder: tr("collections.namePlaceholder"),
+    confirmText: tr("common.create"),
+  });
+  if (name == null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  try {
+    const res = await apiFetch("/api/collections", {
+      method: "POST",
+      body: JSON.stringify({ name: trimmed }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      showToast(b.error || tr("collections.createFailed"), "err");
+      return;
+    }
+    await loadCollections();
+    selectCollection(trimmed);
+  } catch (e) { console.error(e); }
+}
+
+async function renameCollection(oldName) {
+  const name = await uiPrompt({
+    title: tr("collections.renameTitle"),
+    label: tr("collections.name"),
+    value: oldName,
+    confirmText: tr("common.rename"),
+  });
+  if (name == null) return;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === oldName) return;
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(oldName)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: trimmed }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      showToast(b.error || tr("collections.renameFailed"), "err");
+      return;
+    }
+    if (activeCollection.toLowerCase() === oldName.toLowerCase()) activeCollection = trimmed;
+    await loadCollections();
+    await loadSessions(); // member sessions now carry the new name
+  } catch (e) { console.error(e); }
+}
+
+async function deleteCollection(name) {
+  const ok = await uiConfirm({
+    title: tr("collections.deleteTitle"),
+    message: tr("collections.deleteMsg", { name }),
+    confirmText: tr("common.delete"),
+    cancelText: tr("common.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      showToast(b.error || tr("collections.deleteFailed"), "err");
+      return;
+    }
+    if (activeCollection.toLowerCase() === name.toLowerCase()) activeCollection = GENERAL_COLLECTION;
+    await loadCollections();
+    await loadSessions(); // members fell back to General
+  } catch (e) { console.error(e); }
+}
+
+// moveSessionToCollection files a session under `target` (GENERAL_COLLECTION ⇒
+// clear). Optimistically nothing — we just POST and refresh both lists.
+async function moveSessionToCollection(sessionId, target) {
+  const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/collection`, {
+      method: "POST",
+      body: JSON.stringify({ collection }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      showToast(b.error || tr("collections.moveFailed"), "err");
+      return;
+    }
+    await loadSessions();
+    await loadCollections(); // counts changed
+  } catch (e) { console.error(e); }
+}
+
+// ─── Session-pane toolbar (search / sort / bulk-select / new) ─────────────────
+
+// updateSessionBar refreshes the title+count (normal state) and the "n selected"
+// label + Select-all lit state (select state). Called at the end of every
+// renderSessions and whenever a selection toggles.
+function updateSessionBar() {
+  if (els.sessionBarTitle) {
+    els.sessionBarTitle.textContent = `${activeCollection} · ${currentViewIds.length}`;
+  }
+  if (selectMode && els.sessionSelectCount) {
+    els.sessionSelectCount.textContent = trN("sessionbar.selected", selectedSessions.size, { count: selectedSessions.size });
+    const allSel = currentViewIds.length > 0 && currentViewIds.every((id) => selectedSessions.has(id));
+    const btn = document.getElementById("session-selectall-btn");
+    if (btn) btn.classList.toggle("is-active", allSel);
+  }
+}
+
+function toggleSessionSelect(id, li) {
+  if (selectedSessions.has(id)) selectedSessions.delete(id);
+  else selectedSessions.add(id);
+  li.classList.toggle("row-selected", selectedSessions.has(id));
+  updateSessionBar();
+}
+
+// setSearchMode shows/hides the search row. Leaving it clears the query.
+function setSearchMode(on) {
+  if (on) setSelectMode(false); // search + select are mutually exclusive
+  els.sessionSearchRow.hidden = !on;
+  els.sessionBarMain.hidden = on;
+  if (on) {
+    els.sessionSearchInput.focus();
+  } else if (sessionSearch) {
+    els.sessionSearchInput.value = "";
+    sessionSearch = "";
+    renderSessions(lastSessions);
+  }
+}
+
+// setSelectMode toggles bulk-select. Entering clears any prior ticks; leaving
+// drops the selection and re-renders (removing the checkboxes).
+function setSelectMode(on) {
+  if (selectMode === on) return;
+  selectMode = on;
+  selectedSessions.clear();
+  els.sessionPane.classList.toggle("selecting", on);
+  els.sessionSelectRow.hidden = !on;
+  els.sessionBarMain.hidden = on;
+  if (on) { els.sessionSearchRow.hidden = true; }
+  renderSessions(lastSessions);
+}
+
+// toggleSelectAll ticks every visible row, or clears them if all are already on.
+function toggleSelectAll() {
+  const allSel = currentViewIds.length > 0 && currentViewIds.every((id) => selectedSessions.has(id));
+  if (allSel) selectedSessions.clear();
+  else for (const id of currentViewIds) selectedSessions.add(id);
+  for (const li of els.list.children) {
+    if (li.dataset.id) li.classList.toggle("row-selected", selectedSessions.has(li.dataset.id));
+  }
+  updateSessionBar();
+}
+
+// openSortMenu offers the three orderings; the active one carries a ✓.
+function openSortMenu(ev) {
+  const opt = (key, label) => [
+    (sessionSort === key ? "✓ " : "    ") + label,
+    () => setSessionSort(key),
+  ];
+  showFolderCtxMenu(ev, [
+    [tr("sessionbar.sortBy"), null, { disabled: true }],
+    opt("recent", tr("sessionbar.sortRecent")),
+    opt("created", tr("sessionbar.sortCreated")),
+    opt("az", tr("sessionbar.sortAz")),
+  ]);
+}
+function setSessionSort(key) {
+  if (sessionSort === key) return;
+  sessionSort = key;
+  localStorage.setItem(SESSION_SORT_KEY, key);
+  renderSessions(lastSessions);
+}
+
+// openBatchMenu offers the batch actions for the ticked sessions: move to a
+// collection, archive, delete. A no-op when nothing is selected.
+function openBatchMenu(ev) {
+  if (selectedSessions.size === 0) { showToast(tr("sessionbar.noneSelected"), "err"); return; }
+  const items = [[tr("collections.moveTo"), null, { disabled: true }]];
+  const targets = [GENERAL_COLLECTION, ...collectionsData.filter((c) => !c.general).map((c) => c.name)];
+  for (const name of targets) items.push([name, () => batchMove(name), { icon: ICON_FOLDER }]);
+  items.push(SEP);
+  items.push([tr("menu.archive"), () => batchArchive(), { icon: ICON_ARCHIVE }]);
+  items.push([tr("menu.delete"), () => batchDelete(), { icon: ICON_DELETE }]);
+  showFolderCtxMenu(ev, items);
+}
+
+// runBatch applies fn to every selected id (bounded concurrency via Promise.all),
+// then exits select mode and refreshes. ids are snapshotted first so the set can
+// be cleared safely.
+async function runBatch(fn) {
+  const ids = [...selectedSessions];
+  await Promise.all(ids.map((id) => fn(id).catch((e) => console.error("batch:", id, e))));
+  setSelectMode(false);
+  await loadSessions();
+  await loadCollections();
+}
+function batchMove(target) {
+  const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
+  return runBatch((id) =>
+    apiFetch(`/api/sessions/${encodeURIComponent(id)}/collection`, { method: "POST", body: JSON.stringify({ collection }) }));
+}
+function batchArchive() {
+  return runBatch((id) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: "POST" }));
+}
+async function batchDelete() {
+  const n = selectedSessions.size;
+  const ok = await uiConfirm({
+    title: tr("sessionbar.batchDeleteTitle"),
+    message: trN("sessionbar.batchDeleteMsg", n, { count: n }),
+    confirmText: tr("common.delete"),
+    cancelText: tr("common.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+  const ids = [...selectedSessions];
+  await runBatch((id) => apiFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  for (const id of ids) forgetSession(id);
+}
+
+// wireSessionBar attaches the toolbar's listeners once at boot.
+function wireSessionBar() {
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+  on("session-search-btn", "click", () => setSearchMode(true));
+  on("session-search-close", "click", () => setSearchMode(false));
+  if (els.sessionSearchInput) {
+    els.sessionSearchInput.addEventListener("input", () => { sessionSearch = els.sessionSearchInput.value; renderSessions(lastSessions); });
+    els.sessionSearchInput.addEventListener("keydown", (e) => { if (e.key === "Escape") setSearchMode(false); });
+  }
+  on("session-sort-btn", "click", (e) => openSortMenu(e));
+  on("session-select-btn", "click", () => setSelectMode(true));
+  on("session-select-cancel", "click", () => setSelectMode(false));
+  on("session-selectall-btn", "click", () => toggleSelectAll());
+  on("session-batch-btn", "click", (e) => openBatchMenu(e));
+  on("session-new-btn", "click", () => newChat(fp()));
 }
 
 // closeTabEverywhere removes `id` as a tab from every pane that holds it.
@@ -5508,6 +5940,11 @@ async function newChat(panel, squadOverride, dirOverride) {
   try {
     const body = { squad };
     if (dirOverride) body.dir = dirOverride;
+    // File the new chat under the collection the rail has selected (General ⇒
+    // leave un-filed). The server ignores an unknown collection.
+    if (activeCollection && activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
+      body.collection = activeCollection;
+    }
     const res = await apiFetch("/api/sessions", {
       method: "POST",
       body: JSON.stringify(body),
@@ -5679,6 +6116,17 @@ async function subscribeGlobalEvents() {
           loadSessions();
         } else if (event === "session_renamed" && sid) {
           // Title changed elsewhere — re-render the sidebar to pick it up.
+          loadSessions();
+        } else if (event === "collections_changed") {
+          // A collection was created/renamed/deleted (here or elsewhere) —
+          // repaint the rail and re-fetch sessions (a rename/delete cascaded
+          // onto their Collection field).
+          loadCollections();
+          loadSessions();
+        } else if (event === "session_moved" && sid) {
+          // A session was filed under a different collection (here or elsewhere)
+          // — refresh both lists so counts + filtering stay correct.
+          loadCollections();
           loadSessions();
         } else if (event === "session_rewound" && sid) {
           // The session was rewound (here or in another browser) — rebuild the
@@ -8670,21 +9118,22 @@ els.foldersHeader.addEventListener("keydown", (e) => {
 // reloads. Dragging up grows the list, down shrinks it.
 const FOLDERS_H_KEY = "agent_folders_height";
 const FOLDERS_H_MIN = 60;
-// Reserve at least this much for the session list (~two rows + a timeframe
-// header) when capping how tall the folders panel may grow. Mirrors the
-// #session-list min-height floor in features/sidebar.css.
-const SESSION_LIST_MIN = 130;
+// Reserve at least this much for the collections list (~a few rows) when capping
+// how tall the Files panel may grow. Files and the collections list share the
+// left sidebar's flexible space; the session list lives in the separate middle
+// #session-pane column, so it no longer factors into this cap.
+const COLLECTIONS_LIST_MIN = 96;
 // foldersHeightCap is the largest the folder listing may grow to. The folder
-// listing and the session list share the sidebar's flexible space (everything
-// else is fixed chrome); we leave SESSION_LIST_MIN of it for the sessions. When
-// the panel is collapsed or not yet laid out (clientHeight 0) that measurement
-// is unreliable, so fall back to a viewport-based cap that still reserves the
-// session minimum (and the footer's room).
+// listing and the collections list share the sidebar's flexible space
+// (everything else is fixed chrome); we leave COLLECTIONS_LIST_MIN of it for the
+// collections. When the panel is collapsed or not yet laid out (clientHeight 0)
+// that measurement is unreliable, so fall back to a viewport-based cap that still
+// reserves the collections minimum (and the footer's room).
 function foldersHeightCap() {
-  const viewCap = Math.max(FOLDERS_H_MIN, window.innerHeight - 60 - SESSION_LIST_MIN);
-  const flexible = els.foldersList.clientHeight + els.list.clientHeight;
-  if (flexible <= SESSION_LIST_MIN + FOLDERS_H_MIN) return viewCap; // unreliable
-  return Math.max(FOLDERS_H_MIN, Math.min(viewCap, flexible - SESSION_LIST_MIN));
+  const viewCap = Math.max(FOLDERS_H_MIN, window.innerHeight - 60 - COLLECTIONS_LIST_MIN);
+  const flexible = els.foldersList.clientHeight + els.collectionsList.clientHeight;
+  if (flexible <= COLLECTIONS_LIST_MIN + FOLDERS_H_MIN) return viewCap; // unreliable
+  return Math.max(FOLDERS_H_MIN, Math.min(viewCap, flexible - COLLECTIONS_LIST_MIN));
 }
 function applyFoldersHeight(px) {
   const h = Math.round(Math.min(foldersHeightCap(), Math.max(FOLDERS_H_MIN, px)));
@@ -10016,11 +10465,20 @@ async function restoreLayout(rec, liveIds) {
   const updateBtn = document.getElementById("update-btn");
   if (updateBtn) updateBtn.addEventListener("click", openUpdateDialog);
   checkForUpdate(); // fire-and-forget
+  // Wire the collections rail's "+ New" button and load the collection list
+  // BEFORE sessions so the very first render already knows which collection each
+  // session belongs to (no fold-to-General flash for filed sessions).
+  if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
+  wireSessionBar();
+  await loadCollections();
   await loadSessions();
 
-  // Collect live session ids for layout validation.
+  // Collect live session ids for layout validation. Use the full session
+  // payload (lastSessions), NOT the rendered list — the list is filtered to the
+  // active collection, so reading the DOM would drop tabs for sessions filed
+  // under other collections when the saved layout is validated.
   const liveIds = new Set();
-  for (const li of els.list.children) if (li.dataset.id) liveIds.add(li.dataset.id);
+  for (const s of lastSessions) if (s.id) liveIds.add(s.id);
 
   const saved = loadSavedLayout();
   let restored = false;

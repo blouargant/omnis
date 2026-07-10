@@ -1,0 +1,230 @@
+/* Collections list + the middle session-pane column.
+ *
+ * The three-column layout is: #sidebar (left: app chrome + Collections list +
+ * Archived + footer) → #session-pane (middle: session list + Files browser) →
+ * #chat-area (right). The Collections list lives INSIDE #sidebar (below New
+ * Chat); selecting a collection filters the session list in #session-pane.
+ * "General" is pinned on top as the always-present bucket for un-filed sessions. */
+
+/* ─── Collections section (inside the left #sidebar) ──────────── */
+#collections-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 4px 14px;
+  flex-shrink: 0;
+}
+.collections-title { flex: 1; margin: 0; }
+#collections-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#collections-new:hover { background: var(--bg-raised-hover); color: var(--text); }
+
+/* The list grows to fill the sidebar's free space so Archived + the footer sit
+ * at the bottom. It scrolls internally once collections overflow. */
+#collections-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px 6px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  user-select: none;
+  position: relative;
+}
+.collection-row:hover { background: var(--bg-raised); }
+.collection-row.active { background: var(--bg-active); }
+.collection-row.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-strong);
+}
+/* Drop target while dragging a session row onto a collection. */
+.collection-row.drag-over {
+  background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
+  outline: 1px dashed var(--accent-strong);
+  outline-offset: -2px;
+}
+
+.collection-star {
+  display: inline-flex;
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+.collection-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.collection-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.collection-row.active .collection-count { color: var(--text); }
+
+/* ─── Middle column: session list + Files browser ─────────────── */
+#session-pane {
+  width: var(--session-pane-w, 280px);
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* The column divider lives on the session list, not the pane, so it stops at the
+ * toolbar — the center toolbar and the right pane tab bar then read as one
+ * continuous top strip with no vertical line between them. */
+#session-pane #session-list { border-right: 1px solid var(--border); }
+/* While a session row is being dragged onto a collection, dim it. */
+#session-list li.dragging { opacity: 0.45; }
+
+/* ─── Session-pane top toolbar ─────────────────────────────────
+ * A bar matching the left header height (--topbar-h). Three mutually-exclusive
+ * rows share it (normal / search / select); only one is visible at a time. */
+#session-topbar {
+  min-height: var(--topbar-h);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 8px 8px 12px;
+  display: flex;
+  align-items: center;
+}
+.session-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.session-bar-row[hidden] { display: none; }
+.session-bar-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.session-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.session-bar-btn:hover { background: var(--bg-raised-hover); color: var(--text); }
+.session-bar-btn.is-active { background: var(--bg-active); color: var(--text); }
+.session-bar-btn-text {
+  width: auto;
+  padding: 0 10px;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Search row: the input fills the bar between the leading icon and the ✕. */
+#session-search-row { padding-right: 2px; }
+.session-search-icon { flex-shrink: 0; color: var(--text-muted); }
+#session-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 2px;
+  outline: none;
+}
+#session-search-input::placeholder { color: var(--text-faint); }
+
+/* Select (bulk) row: the select-all checkbox lights up when everything shown is
+ * already selected. */
+#session-selectall-btn.is-active { background: var(--accent); color: #fff; }
+#session-select-count { flex: 1; }
+
+/* ─── Select mode: per-row checkboxes ──────────────────────────
+ * When #session-pane carries .selecting, each session row shows a leading
+ * checkbox and a row click toggles selection instead of opening the chat. */
+#session-pane.selecting #session-list li:not(.session-group) {
+  cursor: default;
+  padding-left: 34px; /* room for the absolutely-positioned checkbox */
+}
+.session-check {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+  color: transparent;
+}
+#session-pane.selecting #session-list li:not(.session-group) .session-check { display: inline-flex; }
+#session-pane.selecting #session-list li.row-selected .session-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+#session-pane.selecting #session-list li.row-selected {
+  background: color-mix(in srgb, var(--accent-strong) 16%, transparent);
+}
+/* Hide the hover action buttons while selecting (row click = toggle, not open). */
+#session-pane.selecting #session-list li .session-actions { display: none; }
