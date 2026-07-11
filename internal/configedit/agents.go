@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -93,9 +94,12 @@ func WriteAgentEntry(name string, entry map[string]any) (path, layer string, err
 	if instr, ok := entry["instruction"].(string); ok {
 		instruction = instr
 	}
+	// Keep real config fields; drop the instruction (saved separately) and any
+	// empty scalar/null value (no override intent), so an unchanged or
+	// restored-to-system agent produces an empty overlay and forks no shadow.
 	clean := make(map[string]any, len(entry))
 	for k, v := range entry {
-		if k == "instruction" {
+		if k == "instruction" || isEmptyOverlayValue(v) {
 			continue
 		}
 		clean[k] = v
@@ -103,25 +107,48 @@ func WriteAgentEntry(name string, entry map[string]any) (path, layer string, err
 
 	layer = AgentTargetLayer(name, AgentSkills(clean))
 	dir := filepath.Join(paths.AgentsRegistryWriteDirForLayer(layer), name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", fmt.Errorf("mkdir registry agent: %w", err)
-	}
 
 	// Persist only the delta against the merge of this agent's lower registry
-	// layers, so a per-user edit stays minimal and package updates to the
-	// agent's other fields keep flowing through.
+	// layers. An empty delta (agent unchanged / restored to defaults) writes
+	// nothing and REMOVES any pre-existing overlay so the shipped definition is
+	// used instead of a shadow copy that would shadow package updates.
 	out, merr := AgentEntryOverlayBytes(name, layer, clean, paths.AgentsRegistrySearchDirs())
 	if merr != nil {
 		return "", "", fmt.Errorf("marshal agent: %w", merr)
 	}
+	writeAgent := strings.TrimSpace(string(out)) != "{}"
+
+	// The instruction is an override only when it differs from the merged base
+	// from the layers below the write layer; equal ⇒ remove any override.
+	base := agentInstructionBaseBelow(name, layer)
+	writeInstr := instruction != "" && strings.TrimRight(instruction, "\n") != base
+
 	path = filepath.Join(dir, "agent.json")
-	if werr := AtomicWriteFile(path, out); werr != nil {
-		return "", "", fmt.Errorf("write agent: %w", werr)
+	instrPath := filepath.Join(dir, "instruction.md")
+
+	if writeAgent || writeInstr {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", "", fmt.Errorf("mkdir registry agent: %w", err)
+		}
 	}
-	if instruction != "" {
-		if werr := AtomicWriteFile(filepath.Join(dir, "instruction.md"), []byte(instruction)); werr != nil {
+	if writeAgent {
+		if werr := AtomicWriteFile(path, out); werr != nil {
+			return "", "", fmt.Errorf("write agent: %w", werr)
+		}
+	} else {
+		_ = os.Remove(path) // restore-to-system: drop the overlay
+	}
+	if writeInstr {
+		if werr := AtomicWriteFile(instrPath, []byte(instruction)); werr != nil {
 			return "", "", fmt.Errorf("write instruction: %w", werr)
 		}
+	} else {
+		_ = os.Remove(instrPath) // restore-to-system: drop the shadow
+	}
+	// Drop a now-empty override dir so the user layer carries nothing for a
+	// package agent left at (or restored to) its shipped defaults.
+	if !writeAgent && !writeInstr {
+		_ = os.Remove(dir) // succeeds only when the dir is empty
 	}
 	return path, layer, nil
 }

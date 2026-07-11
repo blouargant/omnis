@@ -883,60 +883,92 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						layer := agentTargetLayer(agentName, declaredSkills)
 						touchedAgentLayers[layer] = true
 						agentsRegistry := paths.AgentsRegistryWriteDirForLayer(layer)
-
-						// Write the agent to <registry>/{name}/agent.json
 						agentDir := filepath.Join(agentsRegistry, agentName)
-						if err := os.MkdirAll(agentDir, 0o755); err != nil {
-							c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("mkdir registry agent: %v", err)})
-							return
-						}
 
-						// Extract and save instruction separately if provided
+						// Instruction is stored separately (never inside agent.json).
 						var instruction string
 						if instr, ok := agentMap["instruction"].(string); ok {
 							instruction = instr
 						}
 
-						// Convert the agent map to a clean AgentEntry (remove fields that shouldn't be saved)
+						// Build a clean AgentEntry: keep only real config fields (drop
+						// instruction + display-only keys) and DROP empty scalar/null
+						// values. The GET hands back every agent with its full resolved
+						// config — including empty "model"/"mcp_config_path"/… and null
+						// lists — so without this an UNCHANGED agent would diff non-empty
+						// against the shipped agent.json and fork a pointless overlay.
+						// Empty arrays are kept: a cleared list (e.g. skills: []) is a
+						// deliberate override of a non-empty shipped value.
 						cleanAgent := map[string]any{}
 						for k, v := range agentMap {
-							// Skip empty values and instruction (saves separately) to keep files clean
-							if k == "name" || k == "description" || k == "enabled" || k == "leader" ||
-								k == "builtin" || k == "model_ref" || k == "provider" || k == "model" || k == "base_url" ||
-								k == "api_key" || k == "tools" || k == "skills" || k == "softskills_dir" ||
-								k == "allow_file_attachments" || k == "mcp_config_path" || k == "mcp_servers" ||
-								k == "permissions_config_path" || k == "a2a_agents" || k == "max_instances" ||
-								k == "resumable_sessions" {
-								if k != "instruction" { // instruction is saved separately
-									cleanAgent[k] = v
+							switch k {
+							case "name", "description", "enabled", "leader", "builtin",
+								"model_ref", "provider", "model", "base_url", "api_key",
+								"tools", "skills", "softskills_dir", "allow_file_attachments",
+								"mcp_config_path", "mcp_servers", "permissions_config_path",
+								"a2a_agents", "max_instances", "resumable_sessions":
+								if isEmptyOverlayValue(v) {
+									continue
 								}
+								cleanAgent[k] = v
 							}
 						}
 
-						// Persist only the delta of this agent's entry against the
-						// merge of its registry layers below the write layer, so
-						// editing one field of a package-shipped agent writes just
-						// that field and package updates to its other fields keep
-						// flowing through.
+						// Persist only the delta of this agent's entry against the merge
+						// of its registry layers below the write layer, so editing one
+						// field of a package-shipped agent writes just that field and
+						// package updates to its other fields keep flowing through. When
+						// the delta is empty — the agent was left unchanged or RESTORED to
+						// system defaults — nothing is written and any pre-existing overlay
+						// is removed, so the shipped definition is used instead of a shadow
+						// copy. (Root-cause fix: the GET returns every agent's full config +
+						// instruction, so a save used to round-trip all of them back into
+						// the user layer, mirroring the whole registry and shadowing package
+						// updates.)
 						agentJSON, err := configedit.AgentEntryOverlayBytes(agentName, layer, cleanAgent, paths.AgentsRegistrySearchDirs())
 						if err != nil {
 							c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal agent: %v", err)})
 							return
 						}
+						writeAgentJSON := strings.TrimSpace(string(agentJSON)) != "{}"
+
+						// The instruction is an override only when it differs from what the
+						// agent resolves to with NO user file (the merged instruction body
+						// from the layers below the write layer). Equal ⇒ unchanged/restored
+						// ⇒ remove the override; different ⇒ write it.
+						baseInstruction := agent.ReadAgentInstructionBelowLayer(agentName, layer)
+						writeInstruction := instruction != "" &&
+							strings.TrimRight(instruction, "\n") != baseInstruction
 
 						agentPath := filepath.Join(agentDir, "agent.json")
-						if err := atomicWriteFile(agentPath, agentJSON); err != nil {
-							c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write agent: %v", err)})
-							return
-						}
+						instructionPath := filepath.Join(agentDir, "instruction.md")
 
-						// Save instruction to registry/agents/{name}/instruction.md if provided
-						if instruction != "" {
-							instructionPath := filepath.Join(agentDir, "instruction.md")
+						if writeAgentJSON || writeInstruction {
+							if err := os.MkdirAll(agentDir, 0o755); err != nil {
+								c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("mkdir registry agent: %v", err)})
+								return
+							}
+						}
+						if writeAgentJSON {
+							if err := atomicWriteFile(agentPath, agentJSON); err != nil {
+								c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write agent: %v", err)})
+								return
+							}
+						} else {
+							_ = os.Remove(agentPath) // restore-to-system: drop the overlay
+						}
+						if writeInstruction {
 							if err := atomicWriteFile(instructionPath, []byte(instruction)); err != nil {
 								c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write instruction: %v", err)})
 								return
 							}
+						} else {
+							_ = os.Remove(instructionPath) // restore-to-system: drop the shadow
+						}
+						// Drop a now-empty override dir so the user layer carries nothing for
+						// a package agent left at (or restored to) its shipped defaults.
+						if !writeAgentJSON && !writeInstruction {
+							_ = os.Remove(agentDir) // succeeds only when the dir is empty
 						}
 
 						agentNames = append(agentNames, agentName)
@@ -1049,4 +1081,21 @@ func describeConfigFile(name, path string) configFileInfo {
 // implementation.
 func atomicWriteFile(path string, data []byte) error {
 	return configedit.AtomicWriteFile(path, data)
+}
+
+// isEmptyOverlayValue reports whether a per-agent field carries no override
+// intent — a nil (JSON null) or an empty/whitespace string. Booleans, numbers,
+// and arrays (including an empty one, which is a deliberate "cleared" list) are
+// NOT empty. It lets a save drop the noisy empty scalars the GET echoes back
+// (empty "model"/"mcp_config_path"/null lists) so an unchanged agent produces an
+// empty overlay and no user-layer shadow is forked.
+func isEmptyOverlayValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(t) == ""
+	default:
+		return false
+	}
 }

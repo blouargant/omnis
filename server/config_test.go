@@ -422,6 +422,109 @@ func TestLayerAwareWrite_ParsedAgentRoutesPerAgent(t *testing.T) {
 	}
 }
 
+// TestParsedAgentSave_NoShadowForUnchangedAgents locks in the fix for the bug
+// where editing (or reverting) ONE agent in the web UI forked the WHOLE registry
+// into the user layer: the editor GET returns every agent with its full resolved
+// config + instruction, and a save PUTs the whole list back, so the fan-out used
+// to write a verbatim user-layer copy of every agent — shadowing package updates
+// (first-wins instruction.md). The save must now write only genuine deltas and
+// leave unchanged/restored agents entirely in the shipped (system) layer.
+func TestParsedAgentSave_NoShadowForUnchangedAgents(t *testing.T) {
+	// Isolate in a cwd with no .agents layer; temp user + system layers.
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proj := t.TempDir()
+	if err := os.Chdir(proj); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	sys := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", sys)
+	t.Setenv("OMNIS_HOME", home)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "") // hermetic: ignore any /etc/agentskills
+
+	seedSysAgent := func(name, agentJSON, instr string) {
+		dir := filepath.Join(sys, "registry/agents", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "agent.json"), []byte(agentJSON), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "instruction.md"), []byte(instr), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alphaJSON := `{"name":"alpha","description":"Alpha agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"high","skills":[],"softskills_dir":"","tools":["Read"]}`
+	betaJSON := `{"name":"beta","description":"Beta agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"low","skills":[],"softskills_dir":"","tools":["Grep"]}`
+	alphaInstr := "# Alpha\n\nDo alpha things.\n"
+	betaInstr := "# Beta\n\nDo beta things.\n"
+	seedSysAgent("alpha", alphaJSON, alphaInstr)
+	seedSysAgent("beta", betaJSON, betaInstr)
+	if err := os.WriteFile(filepath.Join(sys, "agents.json"), []byte(`{"agents":["alpha","beta"]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build the payload the way the editor does: the WHOLE agent list, each agent
+	// carrying its full config (incl. the empty scalars / null lists the GET
+	// echoes back) + its instruction. alpha is edited (description); beta is
+	// unchanged.
+	toPayload := func(seed, instr string, mutate func(map[string]any)) map[string]any {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(seed), &m); err != nil {
+			t.Fatal(err)
+		}
+		m["model"] = ""
+		m["mcp_config_path"] = ""
+		m["permissions_config_path"] = ""
+		m["mcp_servers"] = nil
+		m["a2a_agents"] = nil
+		m["instruction"] = instr
+		if mutate != nil {
+			mutate(m)
+		}
+		return m
+	}
+	alpha := toPayload(alphaJSON, alphaInstr, func(m map[string]any) { m["description"] = "Alpha agent EDITED" })
+	beta := toPayload(betaJSON, betaInstr, nil)
+
+	r := newTestEngine(t, editorFiles())
+	w := do(t, r, http.MethodPut, "/api/config/parsed/agent", map[string]any{
+		"data": map[string]any{"agents": []any{alpha, beta}},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("put parsed: %d %s", w.Code, w.Body.String())
+	}
+
+	// Core regression: the unchanged agent is NOT forked into the user layer.
+	if _, err := os.Stat(filepath.Join(home, "registry/agents/beta")); err == nil {
+		t.Fatalf("unchanged agent beta must not be forked into the user layer")
+	}
+	// The edited agent gets a minimal agent.json overlay...
+	overlayPath := filepath.Join(home, "registry/agents/alpha/agent.json")
+	ov, oerr := os.ReadFile(overlayPath)
+	if oerr != nil {
+		t.Fatalf("edited agent alpha should have a user-layer agent.json overlay: %v", oerr)
+	}
+	// ...but NO instruction.md shadow (its instruction was unchanged).
+	if _, err := os.Stat(filepath.Join(home, "registry/agents/alpha/instruction.md")); err == nil {
+		t.Fatalf("alpha instruction was unchanged — no instruction.md shadow should be written")
+	}
+	if !strings.Contains(string(ov), "EDITED") {
+		t.Fatalf("alpha overlay should carry the edited description, got: %s", ov)
+	}
+	for _, unexpected := range []string{"model_ref", "\"tools\"", "instruction"} {
+		if strings.Contains(string(ov), unexpected) {
+			t.Fatalf("alpha overlay should be a minimal delta, but contains %q: %s", unexpected, ov)
+		}
+	}
+}
+
 func TestRestartEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
