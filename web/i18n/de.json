@@ -42,6 +42,8 @@
   "composer.send": "Senden",
   "composer.steer": "Lenken",
   "composer.steerTip": "Eine Lenkungsnotiz an den laufenden Zug senden",
+  "reply.navToStart": "Zurück zum Anfang der Antwort",
+  "reply.navToEnd": "Zum Ende der Antwort springen",
   "ctx.header": "Kontext",
   "ctx.tokensUsed": "Verwendete Token",
   "ctx.maxContext": "Maximaler Kontext",
@@ -750,5 +752,11 @@
   "sessionbar.selected.other": "{count} ausgewählt",
   "sessionbar.batchDeleteTitle": "Sitzungen löschen",
   "sessionbar.batchDeleteMsg.one": "{count} ausgewählte Sitzung löschen? Dies kann nicht rückgängig gemacht werden.",
-  "sessionbar.batchDeleteMsg.other": "{count} ausgewählte Sitzungen löschen? Dies kann nicht rückgängig gemacht werden."
+  "sessionbar.batchDeleteMsg.other": "{count} ausgewählte Sitzungen löschen? Dies kann nicht rückgängig gemacht werden.",
+  "menu.export": "Chat exportieren",
+  "sessionbar.import": "Chat importieren",
+  "app.export.failed": "Export fehlgeschlagen.",
+  "app.import.badFile": "Diese Datei ist kein gültiger Omnis-Sitzungsexport.",
+  "app.import.failed": "Import fehlgeschlagen.",
+  "app.import.done": "Chat importiert."
 }

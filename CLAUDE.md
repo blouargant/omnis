@@ -2703,6 +2703,49 @@ conversation and switches to it with no prefill (nothing was dropped). Styles:
 [web/css/features/messages.css](web/css/features/messages.css). CLI/TUI are
 untouched (no routes, no reseed callers) — byte-identical no-op there.
 
+### Session export / import (portable JSON, Web UI)
+
+A whole conversation can be **exported to a JSON file from one Omnis instance and
+re-imported into another** — the durable session state is entirely the
+`ConversationFile` (title + squad + collection + turns), so a session round-trips
+as a single self-contained file. Server-only routes + a Web UI entry point; the
+engine is [server/export_import.go](server/export_import.go).
+
+- **Export** — `GET /api/sessions/:id/export` (`handleExportSession`) loads the
+  `ConversationFile`, wraps it in a versioned envelope
+  (`sessionExport{kind:"omnis.session.export", version:1, exported_at, source_id,
+  conversation}`, the registry title preferred over the on-disk one), and streams
+  it as `Content-Disposition: attachment; filename="omnis-session-<id>.json"`.
+- **Import** — `POST /api/import/session` (`handleImportSession`) reads the body
+  (`maxImportBytes`=32 MiB cap), parses it via `parseImportedConversation` which
+  accepts **three shapes** — the export envelope, a bare `ConversationFile`, or a
+  legacy plain-array transcript — then mints a **fresh session** seeded from the
+  turns and wires it up exactly like `POST /sessions` (register + pin + watch +
+  `ReseedSessionContext` from the turns + `session_created` broadcast +
+  `SessionStart` hook). **Portability sanitisation:** the squad is validated
+  against *this* instance (`Manager.HasSquad`; unknown/blank → router else
+  `DefaultSquadName`, reported as `squad_changed`), the collection is kept only if
+  it already exists here (else General), and the machine-specific / transient
+  fields (`cwd`, `goal`, `harvested`, `archived`, `hidden`) are **dropped** so an
+  import always lands as a normal active chat rooted at the process cwd. Returns
+  `{session_id, squad, title, turns, squad_changed}`.
+- **Route placement**: import lives at `/api/import/session` (a distinct top-level
+  path), **not** `/api/sessions/import`, because a static `import` segment would
+  conflict with the `/api/sessions/:id/…` wildcard in gin's route tree (panic at
+  startup). `TestExportImportRoundTrip`
+  ([server/export_import_test.go](server/export_import_test.go)) drives the real
+  router, so it also locks in that the route registers cleanly.
+- **Web UI** ([web/app.js](web/app.js)): `exportSession(id)` fetches the export
+  with the auth header and triggers a client-side blob download (a plain
+  `<a href>` can't carry the token — same pattern as `downloadHostFile`); it's a
+  **session context-menu** item (`openSessionCtxMenu`, `menu.export`).
+  `importSessionPrompt()` opens a hidden file picker, validates the JSON parses,
+  POSTs it, then refreshes collections + sessions and opens the new chat; it's
+  wired to the **session-pane toolbar** import button (`#session-import-btn`,
+  `sessionbar.import`, beside New chat). Toasts on success/failure. i18n keys
+  `menu.export` / `sessionbar.import` / `app.export.failed` / `app.import.{badFile,
+  failed,done}` (en/fr/es/de). CLI/TUI are untouched.
+
 ### Session spawning (`/spawn` + `spawn_session`)
 
 Spawn a **fresh** session that starts with an **empty context** (unlike fork,

@@ -396,6 +396,44 @@
 .copy-msg-btn.copied { color: #4caf50; border-color: #4caf50; }
 .copy-msg-btn.copied + .copy-msg-caret { border-left-color: #4caf50; }
 
+/* In-reply jump button: a small floating FAB (bottom-right, above the floating
+   composer) that scrolls between the start and end of a long, overflowing reply.
+   Shown/hidden + direction driven by updateReplyNav in app.js; the `.down`
+   modifier flips the up-arrow to a down-arrow. Positioned in the transparent
+   right gutter above the composer so it never overlaps the editor card. */
+.reply-nav-btn {
+  position: absolute;
+  right: 22px;
+  bottom: calc(var(--composer-overlay-h, 0px) + 18px);
+  /* Above the floating composer (z-index 3) + its fade so the pill isn't washed
+     by the transparent→bg gradient; still below the pane-picker overlay, and
+     hidden on draft/editor/terminal tabs anyway (see updateReplyNav). */
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.82;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+}
+.reply-nav-btn:hover {
+  opacity: 1;
+  background: var(--bg-panel);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.reply-nav-btn svg { transition: transform 0.18s ease; }
+.reply-nav-btn.down svg { transform: rotate(180deg); }
+.reply-nav-btn[hidden] { display: none; }
+
 /* Error */
 .bubble-error {
   max-width: min(var(--col-w), 100%);

@@ -42,6 +42,8 @@
   "composer.send": "Enviar",
   "composer.steer": "Orientar",
   "composer.steerTip": "Enviar una nota de orientación al turno en curso",
+  "reply.navToStart": "Volver al inicio de la respuesta",
+  "reply.navToEnd": "Ir al final de la respuesta",
   "ctx.header": "Contexto",
   "ctx.tokensUsed": "Tokens usados",
   "ctx.maxContext": "Contexto máximo",
@@ -750,5 +752,11 @@
   "sessionbar.selected.other": "{count} seleccionadas",
   "sessionbar.batchDeleteTitle": "Eliminar sesiones",
   "sessionbar.batchDeleteMsg.one": "¿Eliminar {count} sesión seleccionada? Esto no se puede deshacer.",
-  "sessionbar.batchDeleteMsg.other": "¿Eliminar {count} sesiones seleccionadas? Esto no se puede deshacer."
+  "sessionbar.batchDeleteMsg.other": "¿Eliminar {count} sesiones seleccionadas? Esto no se puede deshacer.",
+  "menu.export": "Exportar chat",
+  "sessionbar.import": "Importar chat",
+  "app.export.failed": "Error al exportar.",
+  "app.import.badFile": "Ese archivo no es una exportación de sesión de Omnis válida.",
+  "app.import.failed": "Error al importar.",
+  "app.import.done": "Chat importado."
 }

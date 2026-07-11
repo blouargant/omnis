@@ -60,6 +60,23 @@ open browsers.
 - **Squad badge** appears next to sessions running on a non-default squad,
   so you can tell at a glance which configuration each conversation uses.
 
+## Export and import a conversation
+
+A conversation can be moved between Omnis instances as a single JSON file.
+
+- **Export** — open a session's **⋯ menu** and choose **Export chat**. The whole
+  conversation (title, squad, collection, and every turn) downloads as
+  `omnis-session-<id>.json`.
+- **Import** — click the **Import** button in the session-list toolbar (next to
+  **New chat**) and pick a previously exported file. Omnis creates a **new**
+  chat seeded with the imported transcript and opens it.
+
+Imports are made portable automatically: if the exported squad doesn't exist on
+the target instance it falls back to the default (routing) squad, an unknown
+collection lands the chat in **General**, and machine-specific details (the
+working directory, an in-progress goal, archived/hidden flags) are dropped so the
+import always arrives as a normal, active chat.
+
 ## Squads, and the Omnis router
 
 A **squad** is a named group `{ leader, members[] }` defined in

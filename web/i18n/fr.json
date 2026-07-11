@@ -42,6 +42,8 @@
   "composer.send": "Envoyer",
   "composer.steer": "Orienter",
   "composer.steerTip": "Envoyer une note d'orientation au tour en cours",
+  "reply.navToStart": "Revenir au début de la réponse",
+  "reply.navToEnd": "Aller à la fin de la réponse",
   "ctx.header": "Contexte",
   "ctx.tokensUsed": "Jetons utilisés",
   "ctx.maxContext": "Contexte maximal",
@@ -750,5 +752,11 @@
   "sessionbar.selected.other": "{count} sélectionnées",
   "sessionbar.batchDeleteTitle": "Supprimer des sessions",
   "sessionbar.batchDeleteMsg.one": "Supprimer {count} session sélectionnée ? Cette action est irréversible.",
-  "sessionbar.batchDeleteMsg.other": "Supprimer {count} sessions sélectionnées ? Cette action est irréversible."
+  "sessionbar.batchDeleteMsg.other": "Supprimer {count} sessions sélectionnées ? Cette action est irréversible.",
+  "menu.export": "Exporter la conversation",
+  "sessionbar.import": "Importer une conversation",
+  "app.export.failed": "Échec de l’export.",
+  "app.import.badFile": "Ce fichier n’est pas un export de session Omnis valide.",
+  "app.import.failed": "Échec de l’import.",
+  "app.import.done": "Conversation importée."
 }

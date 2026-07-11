@@ -246,6 +246,7 @@ function bindPaneEls(root) {
   for (const k in PANE_EL_IDS) e[k] = root.querySelector("#" + PANE_EL_IDS[k]);
   e.promptHighlight = root.querySelector(".prompt-highlight");
   e.ctxRingFill = root.querySelector(".ctx-ring-fill");
+  e.replyNav    = root.querySelector(".reply-nav-btn");
   e.askSlot     = root.querySelector("#ask-user-slot");
   e.editorWrap  = root.querySelector(".pane-editor");
   e.editorHost  = root.querySelector(".pane-editor-host");
@@ -761,7 +762,11 @@ function attachPaneHandlers(panel) {
   pe.transcript.addEventListener("scroll", () => {
     panel._stick = isAtBottom(pe.transcript);
     updatePinnedForScroll(panel);
+    scheduleReplyNav(panel);
   });
+
+  // In-reply jump button (jump between the start and end of a long reply).
+  if (pe.replyNav) pe.replyNav.addEventListener("click", () => jumpReplyNav(panel));
 
   // The composer floats over the transcript, so publish its measured height as
   // --composer-overlay-h on the pane root: #transcript's bottom padding and the
@@ -777,6 +782,7 @@ function attachPaneHandlers(panel) {
       panel.root.style.setProperty("--composer-overlay-h", h + "px");
       updateAskCardBounds(panel);
       if (panel._stick) scrollBottom(panel);
+      scheduleReplyNav(panel);
     });
     ro.observe(pe.composerWrap);
     if (pe.promptHeader && pe.promptHeader.parentElement) ro.observe(pe.promptHeader.parentElement);
@@ -2127,7 +2133,111 @@ function revealReplyStart(panel, el) {
     tr.scrollTop = target;
     panel._stick = target >= maxScroll - 1; // short final message clamped to the bottom stays sticky
     updatePinnedForScroll(panel);
+    scheduleReplyNav(panel);
   });
+}
+
+// ─── In-reply navigation button ──────────────────────────────────────────────
+//
+// A long assistant reply that overflows the viewport gets a small floating
+// button (bottom-right, above the composer) to jump between its two ends: while
+// the beginning is on screen it offers "jump to end"; once you've scrolled past
+// the start it offers "back to start". It targets the overflowing assistant
+// reply that occupies most of the viewport, so it follows whichever long reply
+// you are reading. All geometry is in scroll-content coordinates (like
+// revealReplyStart) so it's robust to any pending sticky-scroll rAF.
+const REPLYNAV_FADE_PX = 52;   // matches #transcript bottom padding fade (messages.css)
+const REPLYNAV_PAD_PX = 12;    // breathing room at the anchored edge
+const REPLYNAV_THRESH_PX = 24; // hysteresis so a hair of over/underscroll doesn't flip the button
+const REPLYNAV_MIN_OVERFLOW_PX = 24; // ignore replies that all-but fit the readable area
+
+// replyNavGeometry measures the transcript's readable viewport (excluding the
+// area masked by the floating composer + fade) and picks the overflowing
+// assistant reply with the greatest overlap, returning null when none needs it.
+function replyNavGeometry(panel) {
+  const tr = panel && panel.els && panel.els.transcript;
+  if (!tr || !tr.clientHeight) return null;
+  const overlayH = panel.els.composerWrap ? panel.els.composerWrap.offsetHeight : 0;
+  const bottomClear = REPLYNAV_FADE_PX + overlayH;
+  const viewTop = tr.scrollTop;
+  const readableH = tr.clientHeight - bottomClear;
+  if (readableH <= 0) return null;
+  const viewBottom = viewTop + readableH;
+  const trTop = tr.getBoundingClientRect().top;
+  let best = null, bestOverlap = 0;
+  for (const row of tr.querySelectorAll(".msg-row.assistant")) {
+    const h = row.offsetHeight;
+    if (h <= readableH + REPLYNAV_MIN_OVERFLOW_PX) continue; // fits — no nav needed
+    const top = row.getBoundingClientRect().top - trTop + viewTop;
+    const bottom = top + h;
+    const overlap = Math.min(bottom, viewBottom) - Math.max(top, viewTop);
+    if (overlap > bestOverlap) { bestOverlap = overlap; best = { row, top, bottom }; }
+  }
+  if (!best || bestOverlap <= 0) return null;
+  best.viewTop = viewTop;
+  best.viewBottom = viewBottom;
+  best.bottomClear = bottomClear;
+  best.maxScroll = Math.max(0, tr.scrollHeight - tr.clientHeight);
+  return best;
+}
+
+// scheduleReplyNav coalesces updateReplyNav to one call per frame — cheap enough
+// to drive from the scroll listener and resize observer without churn.
+function scheduleReplyNav(panel) {
+  if (!panel || panel._replyNavPending) return;
+  panel._replyNavPending = true;
+  requestAnimationFrame(() => { panel._replyNavPending = false; updateReplyNav(panel); });
+}
+
+function updateReplyNav(panel) {
+  const btn = panel && panel.els && panel.els.replyNav;
+  if (!btn) return;
+  const g = replyNavGeometry(panel);
+  if (!g) { hideReplyNav(panel); return; }
+  const startAbove = g.top < g.viewTop - REPLYNAV_THRESH_PX;    // beginning scrolled off the top
+  const endBelow   = g.bottom > g.viewBottom + REPLYNAV_THRESH_PX; // end still below the readable area
+  let dir;
+  if (startAbove) dir = "up";        // reached/passed the start → offer "back to start"
+  else if (endBelow) dir = "down";   // sitting at the start, more below → offer "jump to end"
+  else { hideReplyNav(panel); return; } // whole reply already visible
+  panel._replyNavTarget = g.row;
+  panel._replyNavDir = dir;
+  btn.classList.toggle("down", dir === "down");
+  btn.setAttribute("data-tip", tr(dir === "down" ? "reply.navToEnd" : "reply.navToStart"));
+  if (btn.hasAttribute("hidden")) { btn.hidden = false; btn.removeAttribute("aria-hidden"); }
+}
+
+function hideReplyNav(panel) {
+  const btn = panel && panel.els && panel.els.replyNav;
+  if (!btn || btn.hasAttribute("hidden")) return;
+  btn.hidden = true;
+  btn.setAttribute("aria-hidden", "true");
+  panel._replyNavTarget = null;
+  panel._replyNavDir = null;
+}
+
+// jumpReplyNav scrolls the current target reply to the requested edge. "up"
+// puts its top near the transcript top (like revealReplyStart); "down" puts its
+// bottom just above the composer fade. It then re-evaluates so the button flips.
+function jumpReplyNav(panel) {
+  const tr = panel && panel.els && panel.els.transcript;
+  const row = panel && panel._replyNavTarget;
+  if (!tr || !row || !tr.contains(row)) { hideReplyNav(panel); return; }
+  const trTop = tr.getBoundingClientRect().top;
+  const top = row.getBoundingClientRect().top - trTop + tr.scrollTop;
+  const bottom = top + row.offsetHeight;
+  const maxScroll = Math.max(0, tr.scrollHeight - tr.clientHeight);
+  const overlayH = panel.els.composerWrap ? panel.els.composerWrap.offsetHeight : 0;
+  let target;
+  if (panel._replyNavDir === "down") {
+    target = bottom - tr.clientHeight + REPLYNAV_FADE_PX + overlayH + REPLYNAV_PAD_PX;
+  } else {
+    target = top - REPLYNAV_PAD_PX;
+  }
+  tr.scrollTop = Math.max(0, Math.min(target, maxScroll));
+  panel._stick = tr.scrollTop >= maxScroll - 1;
+  updatePinnedForScroll(panel);
+  scheduleReplyNav(panel);
 }
 
 // ─── Tool metadata ──────────────────────────────────────────────────────────
@@ -4877,6 +4987,7 @@ const ICON_RENAME = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`;
 const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
 const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
+const ICON_EXPORT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg>`;
 // Tick shown inside a session row's select-mode checkbox.
 const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 6"/></svg>`;
 
@@ -4992,11 +5103,67 @@ function openSessionCtxMenu(ev, s, archived, li) {
     }
   }
   items.push(SEP);
+  items.push([tr("menu.export"), () => exportSession(s.id), { icon: ICON_EXPORT }]);
   items.push(archived
     ? [tr("menu.unarchive"), () => unarchiveSession(s.id), { icon: ICON_UNARCHIVE }]
     : [tr("menu.archive"), () => archiveSession(s.id), { icon: ICON_ARCHIVE }]);
   items.push([tr("menu.delete"), () => deleteSession(s.id, li), { icon: ICON_DELETE }]);
   showFolderCtxMenu(ev, items);
+}
+
+// exportSession downloads a session's whole conversation as a portable JSON file
+// (title + squad + collection + turns) so it can be re-imported into another
+// Omnis instance via importSessionPrompt / POST /api/import/session. The fetch
+// carries the auth header (a plain <a href> download can't), then triggers a
+// client-side blob download — the same pattern as downloadHostFile.
+async function exportSession(id) {
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/export`, { cache: "no-store" });
+    if (!res.ok) { showToast(tr("app.export.failed"), "err"); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `omnis-session-${id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch { showToast(tr("app.export.failed"), "err"); }
+}
+
+// importSessionPrompt asks for an exported session JSON file, validates it is
+// parseable, POSTs it to /api/import/session (which mints a fresh session seeded
+// from the transcript), then refreshes the sidebar and opens the new chat.
+function importSessionPrompt() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.style.display = "none";
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    input.remove();
+    if (!file) return;
+    let text;
+    try { text = await file.text(); JSON.parse(text); }
+    catch { showToast(tr("app.import.badFile"), "err"); return; }
+    try {
+      const res = await apiFetch("/api/import/session", { method: "POST", body: text });
+      if (!res.ok) {
+        let msg = tr("app.import.failed");
+        try { const e = await res.json(); if (e && e.error) msg = e.error; } catch {}
+        showToast(msg, "err");
+        return;
+      }
+      const data = await res.json();
+      await loadCollections();
+      await loadSessions();
+      if (data.session_id) selectSession(data.session_id);
+      showToast(tr("app.import.done"), "ok");
+    } catch { showToast(tr("app.import.failed"), "err"); }
+  });
+  document.body.appendChild(input);
+  input.click();
 }
 
 // sessionTimeframe buckets a session by its last-activity date relative to
@@ -5573,6 +5740,7 @@ function wireSessionBar() {
   on("session-selectall-btn", "click", () => toggleSelectAll());
   on("session-batch-btn", "click", (e) => openBatchMenu(e));
   on("session-new-btn", "click", () => newChat(fp()));
+  on("session-import-btn", "click", () => importSessionPrompt());
 }
 
 // closeTabEverywhere removes `id` as a tab from every pane that holds it.
@@ -5814,6 +5982,7 @@ async function activateTab(panel, key) {
     panel.root.classList.add("editing");
     panel.root.classList.remove("terminal");
     hidePanePicker(panel);
+    hideReplyNav(panel);
     mountInPanel(panel, null);
     clearPinnedPrompt(panel);
     setFocusedPanel(panel.id);
@@ -5830,6 +5999,7 @@ async function activateTab(panel, key) {
     panel.root.classList.add("terminal");
     panel.root.classList.remove("editing");
     hidePanePicker(panel);
+    hideReplyNav(panel);
     mountInPanel(panel, null);
     clearPinnedPrompt(panel);
     setFocusedPanel(panel.id);
@@ -5847,6 +6017,7 @@ async function activateTab(panel, key) {
   if (isDraft(key)) {
     panel.activeTab = key;
     panel.sessionId = null;
+    hideReplyNav(panel);
     requeueHiddenWizards(panel, null);
     mountInPanel(panel, null);
     clearPinnedPrompt(panel);
@@ -5900,6 +6071,7 @@ async function activateTab(panel, key) {
   if (container.childNodes.length > 0) {
     mountInPanel(panel, id);
     scrollBottom(panel, true);
+    scheduleReplyNav(panel);
     await appendNewPushTurns(id);
     return;
   }
@@ -5932,6 +6104,7 @@ async function activateTab(panel, key) {
       setReplyTime(bubble, turn.duration_ms);
     }
     scrollBottom(panel, true);
+    scheduleReplyNav(panel);
   } catch (e) {
     console.error("failed to load session history:", e);
   }
@@ -6592,7 +6765,7 @@ async function rerenderSessionFromHistory(sessionId) {
       setReplyTime(bubble, t.duration_ms);
     }
     sessionTurnCounts.set(sessionId, turns.length);
-    for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => scrollBottom(p));
+    for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
   } catch (e) {
     console.error("rerenderSessionFromHistory failed:", e);
   }
@@ -6624,7 +6797,7 @@ async function appendNewPushTurns(sessionId) {
 
     for (const p of panelsForSession(sessionId)) {
       // Defer scroll until after the browser has reflowed the rendered markdown.
-      requestAnimationFrame(() => scrollBottom(p));
+      requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
       showPushBanner(container);
     }
     // Refresh sidebar turn counter.
@@ -7384,6 +7557,7 @@ async function sendMessage(panel) {
     // up mid-stream to read earlier content, leave their position untouched.
     if (outcome === "done" && panel._stick && lastReplyBubble) revealReplyStart(panel, lastReplyBubble);
     else scrollBottom(panel);
+    scheduleReplyNav(panel);
   }
 }
 

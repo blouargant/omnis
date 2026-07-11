@@ -796,6 +796,11 @@ func newEngine(d serverDeps) *gin.Engine {
 	// from the kept turns (see server/fork_rewind.go).
 	auth.POST("/sessions/:id/rewind", handleRewind(d))
 	auth.POST("/sessions/:id/fork", handleFork(d))
+	// Export a session as a portable JSON file / re-import one into a fresh
+	// session (see server/export_import.go). Import lives outside the /sessions/:id
+	// tree (it has no source id) so it can't collide with the :id wildcard.
+	auth.GET("/sessions/:id/export", handleExportSession(d))
+	auth.POST("/import/session", handleImportSession(d))
 	// Spawn a fresh session (empty context) inheriting this session's working
 	// directory; an initial task runs in the background (see server/spawn.go).
 	auth.POST("/sessions/:id/spawn", handleSpawn(d))

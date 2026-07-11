@@ -42,6 +42,8 @@
   "composer.send": "Send",
   "composer.steer": "Steer",
   "composer.steerTip": "Send a steering note to the running turn",
+  "reply.navToStart": "Back to start of reply",
+  "reply.navToEnd": "Jump to end of reply",
   "ctx.header": "Context",
   "ctx.tokensUsed": "Tokens used",
   "ctx.maxContext": "Max context",
@@ -750,5 +752,11 @@
   "sessionbar.selected.other": "{count} selected",
   "sessionbar.batchDeleteTitle": "Delete sessions",
   "sessionbar.batchDeleteMsg.one": "Delete {count} selected session? This cannot be undone.",
-  "sessionbar.batchDeleteMsg.other": "Delete {count} selected sessions? This cannot be undone."
+  "sessionbar.batchDeleteMsg.other": "Delete {count} selected sessions? This cannot be undone.",
+  "menu.export": "Export chat",
+  "sessionbar.import": "Import chat",
+  "app.export.failed": "Export failed.",
+  "app.import.badFile": "That file isn’t a valid Omnis session export.",
+  "app.import.failed": "Import failed.",
+  "app.import.done": "Chat imported."
 }

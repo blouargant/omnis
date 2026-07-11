@@ -736,9 +736,18 @@ func routerHandoffProtocolBlock() string {
 	return "\n\n## Out-of-scope requests\n\n" +
 		"You were given this conversation by the Omnis router because it matched your squad. " +
 		"Handle everything within your scope directly. If the user later asks for something " +
-		"clearly outside your squad's domain and skills, call `handoff_to_router` with their " +
-		"request in `prompt` instead of attempting it — the router will pick a better squad. " +
-		"Do not hand back requests you can reasonably handle.\n"
+		"clearly outside your squad's domain and skills, call `handoff_to_router` (with a " +
+		"one-line `reason`) instead of attempting it — the request is forwarded to the router " +
+		"automatically and it will pick a better squad.\n\n" +
+		"**A dead end is a routing signal too.** If you genuinely try and cannot fulfil the " +
+		"request because it needs capabilities your squad lacks — including when your searches " +
+		"or tools turn up nothing and the request looks like it really belongs to a different " +
+		"squad — hand it back with `handoff_to_router` rather than replying \"I couldn't find " +
+		"anything\" and stopping. State in the `reason` what you looked for and why it seems to " +
+		"belong elsewhere, so the router can re-route it well. Two guards: do NOT hand back a " +
+		"request you can reasonably handle, and do NOT hand back merely because a legitimate, " +
+		"in-scope search returned no results (for an in-scope question, an honest \"nothing " +
+		"found\" IS the answer — give it).\n"
 }
 
 // defaultRouterInstruction is the built-in router prompt used when no
@@ -797,6 +806,20 @@ Routing heuristics:
   route these to the research / fact-finding squad, never the omnis-capabilities
   squad. The tell is the subject: omnis/you → capabilities squad; the world or a
   programming ecosystem → research squad.
+- The bare word "tool" (or "a way", "a utility", "a CLI") is ambiguous — it does
+  NOT by itself mean a omnis tool. When a request is about a general computing
+  task with external software, especially when it names or compares to real-world
+  software ("… like vLLM does", "similar to rsync"), it is a world-software /
+  research question → research squad, even though it starts with "is there a tool
+  …" (e.g. "Is there a tool to download models from Hugging Face, like vLLM can
+  do?" → research squad). Treat "is there a tool/skill/agent for X" as a
+  capabilities-squad question only when omnis (or "you") is clearly the subject.
+  When unsure between the two, ask_squad the more likely one or ask the user —
+  do not default to the capabilities squad just because "tool" appears.
+- A squad may hand a conversation back not only on a topic change but because it
+  searched and found nothing (a mis-route signal). Read the handoff reason and
+  re-route — typically to the research squad when the reason points at external
+  software — and never route back to a squad that already declined this turn.
 - A general-purpose / coordinator squad is a last resort, not a catch-all: route
   there only for open-ended, hands-on work when no more specific squad fits.
 
