@@ -8,6 +8,7 @@
   "name": "knowledge_leader",
   "skills": [
     "ask-user",
+    "deep-research",
     "review"
   ],
   "softskills_dir": "",

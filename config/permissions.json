@@ -137,6 +137,7 @@
       "skill_editor",
       "helper",
       "agentmd_reviewer",
+      "research_critic",
       "k8s_investigator",
       "doc_agent",
       "code_scout",

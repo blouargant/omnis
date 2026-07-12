@@ -18,6 +18,7 @@
     "k8s_auditor",
     "knowledge_leader",
     "doc_agent",
+    "research_critic",
     "coder",
     "code_scout",
     "code_docs",
@@ -66,6 +67,7 @@
       "members": [
         "doc_agent",
         "web_agent",
+        "research_critic",
         "summariser"
       ]
     },

@@ -266,7 +266,7 @@ main.go / server/
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer
             │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
-            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · summariser
+            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic (read-only fresh-eyes brief reviewer) · summariser (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering)
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
             │    └── "Helper"      ← leaderless single specialist (helper)
             ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
