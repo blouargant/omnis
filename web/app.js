@@ -142,6 +142,7 @@ const els = {
   sidebar:       document.getElementById("sidebar"),
   sidebarResize: document.getElementById("sidebar-resize"),
   sidebarToggle: document.getElementById("sidebar-toggle"),
+  navScrim:      document.getElementById("nav-scrim"),
   newChat:       document.getElementById("new-chat"),
   newChatWrap:   document.getElementById("new-chat-wrap"),
   squadToggle:   document.getElementById("squad-toggle"),
@@ -256,6 +257,7 @@ function bindPaneEls(root) {
   e.editorReload = root.querySelector(".pane-editor-reload");
   e.terminalWrap = root.querySelector(".pane-terminal");
   e.terminalHost = root.querySelector(".pane-terminal-host");
+  e.ptr         = root.querySelector(".ptr-indicator");
   e.termBtn     = root.querySelector(".pane-term-btn");
   e.toolbar     = root.querySelector(".pane-toolbar");
   e.splitBtn    = root.querySelector(".pane-split-btn");
@@ -263,6 +265,7 @@ function bindPaneEls(root) {
   e.tabbar      = root.querySelector(".pane-tabbar");
   e.tabs        = root.querySelector(".pane-tabs");
   e.newTabBtn   = root.querySelector(".pane-newtab-btn");
+  e.menuBtn     = root.querySelector(".pane-menu-btn");
   e.picker      = root.querySelector(".pane-picker");
   e.pickerNew   = root.querySelector(".pane-picker-new");
   e.pickerSquad = root.querySelector(".pane-picker-squad");
@@ -417,6 +420,9 @@ let paneDividerDrag = null;
 // ─── Split / close ─────────────────────────────────────────────────────────
 
 function splitPanel(after) {
+  // Side-by-side panes need horizontal room a phone doesn't have; responsive.css
+  // hides the split button and shows only the focused pane there.
+  if (isMobileLayout()) return;
   // The new pane takes half of `after`'s width.
   const half = Math.max(PANE_MIN_W, (after.width || els.chat.clientWidth / panels.length) / 2);
   const np = createPanel(null);
@@ -598,6 +604,11 @@ function attachPaneHandlers(panel) {
     refreshGoal(sid);
   });
   renderGoalChip(panel);
+
+  // Small-screen drawer trigger (hidden on desktop by responsive.css).
+  if (pe.menuBtn) pe.menuBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleNav(); });
+
+  wirePullToRefresh(panel);
 
   // Toolbar: terminal / split / close.
   if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
@@ -1247,6 +1258,30 @@ function renderPaneTabs(panel) {
     tab.addEventListener("dragend", onTabDragEnd);
     strip.appendChild(tab);
   }
+  scrollActiveTabIntoView(panel);
+}
+
+// The tab strip is an overflow-x scroller, and renderPaneTabs rebuilds it from
+// scratch (innerHTML = ""), which resets scrollLeft to 0 — so a newly created or
+// activated tab sitting past the visible width was simply never shown. Nothing
+// scrolled it back. Barely noticeable on a wide desktop strip; on a phone the
+// strip is only ~200px, so a new chat's tab landed off-screen (or half-cut).
+//
+// Called at the end of every render, which is also the only place scrollLeft is
+// reset — so this never fights a manual scroll (that scroll is already gone).
+// Measured with rects rather than offsetLeft, which would be relative to the
+// nearest positioned ancestor (.pane-tabbar), not the scroller.
+function scrollActiveTabIntoView(panel) {
+  const strip = panel.els.tabs;
+  if (!strip) return;
+  const el = strip.querySelector(".pane-tab.active");
+  if (!el) return;
+  const sr = strip.getBoundingClientRect();
+  const tr = el.getBoundingClientRect();
+  if (!sr.width || !tr.width) return; // pane not laid out yet (hidden/detached)
+  const pad = 8; // don't leave the tab flush against the strip's edge
+  if (tr.left < sr.left) strip.scrollLeft -= sr.left - tr.left + pad;
+  else if (tr.right > sr.right) strip.scrollLeft += tr.right - sr.right + pad;
 }
 
 // ─── Tab drag-and-drop (reorder within a pane / move between panes) ───────────
@@ -2346,8 +2381,21 @@ function stripCuratorSoftskill(xml) {
 // ─── Markdown ────────────────────────────────────────────────────────────────
 
 // Escape raw HTML blocks so agent output cannot inject scripts via markdown.
+// Also require ~~double~~ tildes for strikethrough: GFM's `del` rule accepts a
+// single ~, so a reply using ~ for "approximately" ("(~2 GB) … (~23 GB)") struck
+// out everything between the two. Returning undefined (never false, which marked
+// treats as "fall back to the built-in tokenizer") leaves a lone ~ as text.
 if (typeof marked !== "undefined") {
-  marked.use({ renderer: { html(token) { return escHtml(token.raw); } } });
+  marked.use({
+    renderer: { html(token) { return escHtml(token.raw); } },
+    tokenizer: {
+      del(src) {
+        const m = /^~~(?=[^\s~])([\s\S]*?[^\s~])~~(?=[^~]|$)/.exec(src);
+        if (!m) return undefined;
+        return { type: "del", raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+    },
+  });
 }
 
 function renderMarkdown(el, text) {
@@ -2863,12 +2911,19 @@ function withStableScroll(panel, mutate) {
 // Show the user prompt text in the floating header above the transcript.
 // Attachments are intentionally NOT rendered here — they live in the inline
 // user bubble so the floating header stays compact.
-function setPinnedPrompt(panel, text, _files) {
+// `turn` ({index, text}) carries the pinned question's identity so the header
+// gets the same ↺ copy/fork/rewind control as the inline bubble it stands in
+// for — the bubble is off-screen by then, so without it those actions are
+// unreachable for the very turn the user is reading. Absent for a synthetic
+// echo with no persisted index.
+function setPinnedPrompt(panel, text, _files, turn) {
   const ph = panel.els.promptHeader;
   const label = pinnedPromptLabel(text);
+  const turnIndex = turn && Number.isInteger(turn.index) ? turn.index : null;
   // Called on every scroll tick — skip the rebuild (and the forced reflow it
   // would cost) when the visible header already shows this prompt.
-  if (ph.classList.contains("visible") && ph._pinnedLabel === label) return;
+  if (ph.classList.contains("visible") && ph._pinnedLabel === label &&
+      ph._pinnedTurn === turnIndex) return;
   withStableScroll(panel, () => {
     ph.innerHTML = "";
     if (label) {
@@ -2877,7 +2932,11 @@ function setPinnedPrompt(panel, text, _files) {
       renderUserText(textEl, label, panel.sessionId);
       ph.appendChild(textEl);
     }
+    if (panel.sessionId && turnIndex !== null && turnIndex >= 0) {
+      addTurnActions(ph, panel.sessionId, turnIndex, turn.text || "");
+    }
     ph._pinnedLabel = label;
+    ph._pinnedTurn = turnIndex;
     ph.classList.add("visible");
   });
 }
@@ -3029,8 +3088,11 @@ const ICON_REWIND =
   'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M8 8h6a5 5 0 0 1 0 10H7"/><polyline points="8 4 4 8 8 12"/></svg>';
 
-// addTurnActions attaches the hover ↺ button to a user-turn row. Clicking it
-// opens the fork/rewind menu anchored to the button.
+// addTurnActions attaches the hover ↺ button to a user turn's host element —
+// the inline row, or the floating pinned-prompt header standing in for it once
+// the row has scrolled away. Both hosts are `position: relative`, which the
+// button's absolute placement anchors to. Clicking it opens the copy/fork/rewind
+// menu anchored to the button.
 function addTurnActions(row, sessionId, turnIndex, userText) {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -3366,7 +3428,13 @@ function updatePinnedForScroll(panel) {
       const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
       files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
     }
-    setPinnedPrompt(panel, text, files);
+    // The turn's own control acts on the *persisted* prompt (steer fold included),
+    // exactly like the inline bubble's — so pass dataset.text, not the pinned label.
+    const idx = Number(activeBubble.parentElement.dataset.turnIndex);
+    const turn = Number.isInteger(idx) && idx >= 0
+      ? { index: idx, text: activeBubble.dataset.text ?? "" }
+      : null;
+    setPinnedPrompt(panel, text, files, turn);
   } else {
     clearPinnedPrompt(panel);
   }
@@ -3380,6 +3448,7 @@ function clearPinnedPrompt(panel) {
   withStableScroll(panel, () => {
     ph.innerHTML = "";
     ph._pinnedLabel = "";
+    ph._pinnedTurn = null;
     ph.classList.remove("visible");
   });
 }
@@ -5869,6 +5938,9 @@ function startRename(li, id, currentTitle) {
 // session, just focus that pane; otherwise bind it into the focused pane.
 async function selectSession(id) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
+  // On a phone the drawer covers the chat it just opened — get out of the way.
+  // Done up front so it applies to both exit paths below.
+  closeNav();
   // Already open as a tab somewhere → focus that pane and surface the tab.
   const existing = panelsWithTab(id)[0];
   if (existing) { setFocusedPanel(existing.id); await activateTab(existing, id); return; }
@@ -6248,6 +6320,7 @@ function currentSquadChoice() {
 // fixed initial root. Returns the new id.
 async function newChat(panel, squadOverride, dirOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
+  closeNav(); // "New Chat" lives in the drawer; dismiss it so the composer is visible.
   panel = panel || fp();
   if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
   // Preserve the outgoing tab's half-typed message (it returns when reselected);
@@ -9294,6 +9367,119 @@ async function onCompactClick(e, panel) {
 
 // ─── Sidebar resize & toggle ─────────────────────────────────────────────────
 
+// ─── Small-screen nav drawer ──────────────────────────────────
+// Below this width the two left columns (#sidebar + #session-pane) are lifted
+// out of the flow into a single off-canvas drawer and #chat-area takes the whole
+// viewport — see css/features/responsive.css, which owns all the layout. This
+// module only drives `body.nav-open` (drawer in/out) and suppresses the
+// desktop-only affordances. Keep the query in step with the media query there.
+const MOBILE_MQ = window.matchMedia("(max-width: 820px)");
+function isMobileLayout() { return MOBILE_MQ.matches; }
+function navOpen() { return document.body.classList.contains("nav-open"); }
+function setNavOpen(open) { document.body.classList.toggle("nav-open", !!open); }
+function closeNav() { setNavOpen(false); }
+function toggleNav() { setNavOpen(!navOpen()); }
+
+els.navScrim.addEventListener("click", closeNav);
+// The Settings nav lives in the drawer's lower half but its panel renders in the
+// chat area behind it — so picking a section must dismiss the drawer, or the
+// user navigates to a page they can't see. Delegated (the list is built later by
+// settings.js) and inert on desktop, where nav-open is never set.
+document.getElementById("settings-menu")?.addEventListener("click", (e) => {
+  if (e.target.closest("li[data-file]")) closeNav();
+});
+// Crossing back to a wide viewport must not strand `nav-open` on the desktop
+// layout (where the drawer classes mean nothing but the scrim would still eat
+// clicks if it were left interactive).
+MOBILE_MQ.addEventListener("change", closeNav);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && navOpen()) closeNav();
+});
+
+// ─── Pull to refresh (touch) ──────────────────────────────────
+// The standard mobile idiom, done in-app rather than leaning on the browser's
+// native gesture. We can't use the native one: omnis is a fixed app shell
+// (`body { overflow: hidden }`), so the document never scrolls and Chrome has no
+// root overscroll to hook — and iOS Safari has no pull-to-refresh at all.
+//
+// Owning it is also *better* here. Native PTR fires on any root overscroll, and
+// in a chat UI the natural "pull down" is scrolling up through history — so
+// reaching the top of a conversation and pulling a little further would reload
+// the page by accident. This only arms at the very top of the transcript and
+// only fires past a deliberate threshold.
+//
+// Reloading is safe: sessions are persisted server-side and an in-flight turn is
+// re-attached by the resilient-streaming path, so nothing is lost.
+const PTR_ARM_PX = 64;    // travel needed before the pull will reload
+const PTR_MAX_PX = 96;    // clamp, so it can't be dragged forever
+const PTR_RESIST = 0.5;   // finger→travel damping, mimicking the OS feel
+const PTR_PARK_PX = -44;  // resting offset: tucked behind the (opaque) tab bar
+
+function wirePullToRefresh(panel) {
+  const el = panel.els.transcript;
+  const ind = panel.els.ptr;
+  if (!el || !ind) return;
+
+  let startY = 0, startX = 0, tracking = false, travel = 0, armed = false, firing = false;
+
+  const draw = () => {
+    ind.style.transform = `translateY(${PTR_PARK_PX + travel}px)`;
+    ind.style.opacity = String(Math.min(1, travel / PTR_ARM_PX));
+    ind.classList.toggle("is-armed", armed);
+  };
+  const release = () => {
+    tracking = false; travel = 0; armed = false;
+    ind.classList.add("is-returning");
+    ind.classList.remove("is-armed");
+    ind.style.transform = "";   // back to the parked transform in CSS
+    ind.style.opacity = "";
+    setTimeout(() => ind.classList.remove("is-returning"), 240);
+  };
+
+  el.addEventListener("touchstart", (e) => {
+    if (firing || !isMobileLayout() || e.touches.length !== 1) return;
+    // Only arm at the very top — anywhere else this is an ordinary scroll.
+    if (el.scrollTop > 0) return;
+    startY = e.touches[0].clientY;
+    startX = e.touches[0].clientX;
+    tracking = true;
+    travel = 0;
+  }, { passive: true });
+
+  el.addEventListener("touchmove", (e) => {
+    if (!tracking || firing) return;
+    const dy = e.touches[0].clientY - startY;
+    const dx = e.touches[0].clientX - startX;
+    // Upward, sideways, or the transcript scrolled away from the top under us →
+    // this isn't a pull. Hand the gesture back rather than fighting the scroll.
+    if (dy <= 0 || Math.abs(dx) > Math.abs(dy) || el.scrollTop > 0) {
+      if (travel) release(); else tracking = false;
+      return;
+    }
+    // We own the gesture now: stop the transcript scrolling under the spinner.
+    // (Listener is non-passive precisely so this is allowed.)
+    e.preventDefault();
+    travel = Math.min(PTR_MAX_PX, dy * PTR_RESIST);
+    armed = travel >= PTR_ARM_PX;
+    draw();
+  }, { passive: false });
+
+  const end = () => {
+    if (!tracking || firing) { tracking = false; return; }
+    if (!armed) { release(); return; }
+    firing = true;
+    tracking = false;
+    // Hold the spinner at the armed position and spin it while the page reloads.
+    ind.classList.add("is-loading");
+    ind.classList.add("is-returning");
+    travel = PTR_ARM_PX;
+    draw();
+    location.reload();
+  };
+  el.addEventListener("touchend", end, { passive: true });
+  el.addEventListener("touchcancel", () => { if (tracking && !firing) release(); }, { passive: true });
+}
+
 const SIDEBAR_MIN_W   = 140;
 const SIDEBAR_MAX_W   = 500;
 const SIDEBAR_W_KEY   = "agent_toolkit_sidebar_w";
@@ -9388,6 +9574,21 @@ els.sidebarToggle.addEventListener("click", () => {
 els.sidebar.addEventListener("transitionend", (e) => {
   if (e.target === els.sidebar && e.propertyName === "width") layoutWidths();
 });
+
+// Clicking anywhere in the sidebar while Settings is showing returns to the chat
+// view: everything in it (New Chat, collections, archived, Files) acts on a chat,
+// so touching it means the user is done with Settings. Capture-phase so it still
+// fires for the handlers that stopPropagation, and it never stops the click — the
+// folder/collection/archived action still runs, now against a visible chat area.
+// Excluded: the footer buttons (they own the Settings/Appearance/Documentation
+// toggle), the collapse chevron, the update button, and the Files resize grip —
+// none of those mean "go back to chat".
+const SIDEBAR_KEEPS_SETTINGS = "#sidebar-footer, #sidebar-toggle, #update-btn, #folders-resize";
+els.sidebar.addEventListener("click", (e) => {
+  if (!window.Settings || !window.Settings.isOpen()) return;
+  if (e.target.closest && e.target.closest(SIDEBAR_KEEPS_SETTINGS)) return;
+  window.Settings.close();
+}, true);
 
 // ─── Archived sessions panel collapse ─────────────────────────────────────────
 

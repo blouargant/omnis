@@ -3826,6 +3826,87 @@ read-only summary. On tab-hide the wizard requeues only its **unanswered**
 questions into `queuedAskWidgets` and is torn down (rebuilt fresh on reselect);
 session delete clears `askWizards`.
 
+### Web UI small-screen layout (phone drawer)
+
+The desktop shell is a three-column flex row — `#sidebar` (280px) | `#session-pane`
+(280px) | `#chat-area` ([common.css](web/css/features/common.css) `body { display: flex }`).
+That is ~560px of chrome before the chat starts, so on a 390px phone the chat was
+pushed **entirely off-screen**. Below **820px** the two left columns are lifted out
+of the flow into a **single off-canvas drawer** and the chat takes the whole viewport.
+
+Nearly all of it is CSS, in one partial ([web/css/features/responsive.css](web/css/features/responsive.css),
+imported **last** in [styles.css](web/css/styles.css) so its media-query rules win):
+
+- **The drawer** — `#sidebar` + `#session-pane` become `position: fixed`, stacked
+  **vertically** (sidebar on top, capped at `--m-nav-split`; session list below),
+  both `translateX(-100%)`. `body.nav-open` slides them in; `#nav-scrim` is the
+  backdrop. Stacking them (rather than shrinking the sidebar to its icon rail) keeps
+  **both columns' labels readable** and keeps Archived/Files/Settings reachable — the
+  rail hides those (`#sidebar.collapsed #folders-panel { display: none }`).
+- **`!important` is load-bearing.** The theme sheets are linked **after** `styles.css`
+  and carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
+  z-index: 1 }` (it anchors their drop-shadow onto the chat). Without `!important` on
+  `position`/`z-index` the sidebar stays **in flow** and sinks under the scrim. Their
+  drop-shadow is also zeroed — parked off-canvas, the sidebar's right edge sits at
+  x=0 and the shadow bleeds back in as a stray strip down the chat.
+- **`#collections-list` gets `flex: 0 0 auto` + the sidebar scrolls.** On the desktop
+  the list takes `flex: 1` and absorbs the column's slack; inside the height-capped
+  drawer that same rule squeezes it to ~2 rows and **slices the third mid-height**.
+- **Single pane** — `.chat-pane` drops its `min-width: 360px`; dividers and the split
+  button are hidden and only the focused pane shows (`#chat:not(.solo) .chat-pane:not(.is-focused)`).
+  The multi-pane **layout/localStorage is left untouched**, so rotating back to a wide
+  screen restores the user's real split. The inline flex widths from `layoutWidths()`
+  need `!important` to override. Hiding the split button must be written
+  `.pane-toolbar .pane-split-btn` — a bare `.pane-split-btn` (0,1,0) **loses to
+  `.pane-toolbar button { display: inline-flex }` (0,1,1)** no matter the import order,
+  and the button stays visible. (Being imported last only breaks ties at *equal*
+  specificity — the recurring trap in this partial; see the theme `!important` note above.)
+- **The transcript gets the screen.** The desktop reading column is far too expensive
+  here, and three costs compound: `--col-w` (90%) is applied on `.msg-row` **and again**
+  on the bubble inside it; `.msg-row.assistant` is inset a further **56px** to read as
+  "recessed" under the user prompt; and each row carries 20px of side padding. On a
+  390px phone that left the assistant text **220px wide — 44% of the screen was
+  margin**. So the band sets `--col-w: 100%`, drops the assistant recess, and trims the
+  row padding to 12px (→ 354px, 91%). `--col-w` is the **shared** chat-column token
+  (messages, tool blocks, composer, ask-user card), so all of them widen in step. A
+  nested `600–820px` query restores a 24px gutter, since 12px makes a small tablet's
+  text hug the screen edges at ~95 characters a line. Desktop keeps 90% / 613px.
+- **`100dvh`** (not `100vh`, which sits under the mobile URL bar) + `env(safe-area-inset-bottom)`
+  on the composer.
+- **`@media (pointer: coarse)`** reveals the hover-only controls (`.turn-action-btn`,
+  the tab `×`) so they are tappable. Keyed on input device, not width.
+- **Pull-to-refresh** (`wirePullToRefresh` in [web/app.js](web/app.js), `.ptr-indicator`
+  in the pane template) is implemented **in-app, not by the browser**. The native gesture
+  cannot work here: omnis is a fixed app shell (`body { overflow: hidden }`), so the
+  document never scrolls and Chrome has no root overscroll to hook — and iOS Safari has
+  no pull-to-refresh at all. Owning it is also *safer*: native PTR fires on any root
+  overscroll, and in a chat UI the natural "pull down" is scrolling up through history,
+  so reaching the top of a conversation and pulling further would reload by accident.
+  Ours only arms at `transcript.scrollTop === 0` and only fires past a deliberate
+  threshold (64px of travel, finger movement damped ×0.5); a sideways or upward drag
+  hands the gesture back. The `touchmove` listener is **non-passive** so it can
+  `preventDefault()` the transcript's scroll once it owns the pull. The spinner parks at
+  `translateY(-44px)` behind the opaque, `z-index: 8` tab bar (it is `z-index: 6`) and is
+  drawn down by the gesture; JS writes `transform` directly during the drag (no easing —
+  it must track the finger), and `.is-returning` adds the transition only on release.
+  Reloading is safe: sessions are persisted server-side and an in-flight turn re-attaches
+  via the resilient-streaming path.
+
+JS is a thin driver ([web/app.js](web/app.js) "Small-screen nav drawer"): `MOBILE_MQ`
+(**keep the 820px query in step with the media query**), `body.nav-open` toggling, and
+three behaviour hooks — `splitPanel` early-returns, `selectSession`/`newChat` call
+`closeNav()` (the drawer covers the chat it just opened), and picking a **Settings**
+section closes it too (the nav lives in the drawer's lower half but its panel renders
+in the chat area *behind* it). The `.pane-menu-btn` hamburger is the first item in each
+pane's tab bar (`display: none` on desktop).
+
+**No-op contract:** every layout rule is scoped inside the media query, so the desktop
+shell is byte-identical to before. **Known gaps (follow-ups):** drag-and-drop (tab
+reorder, session→collection move) has no touch port — the ⋯ → "Move to" menu is the
+touch path; right-click context menus need a long-press synthesiser; Settings panels
+render and are navigable, but wide cards (e.g. a Models row) scroll **inside**
+`.settings-body-content` (`overflow-x: auto`) rather than wrapping.
+
 ### Web UI split panels (VS Code-style)
 
 `#chat` is a horizontal flex **row** of one-or-more independent `.chat-pane`
@@ -3846,7 +3927,15 @@ strip (`.pane-tabs` in the `.pane-tabbar`, one `.pane-tab` per key — drafts ge
 `.pane-tab-draft` — plus a `+` `.pane-newtab-btn`) is rebuilt by
 `renderPaneTabs(panel)`; clicking a tab `activateTab`s it (a draft key shows the
 start picker, a session key mounts its transcript), the `×`/middle-click
-`closeTab`s it. Tabs are **drag-and-drop reorderable** (native HTML5 DnD): every
+`closeTab`s it. `.pane-tabs` is an **`overflow-x` scroller**, and `renderPaneTabs`
+rebuilds it with `innerHTML = ""` — which **resets `scrollLeft` to 0** — so a newly
+created/activated tab past the visible width was never shown and nothing scrolled it
+back. `scrollActiveTabIntoView(panel)` (called at the end of every render, the only
+place `scrollLeft` is reset, so it never fights a manual scroll) keeps `.pane-tab.active`
+in view. Barely visible on a wide desktop strip; on a phone the strip is ~200px, so from
+the 4th tab on the new tab landed fully off-screen. It measures with `getBoundingClientRect`,
+**not `offsetLeft`** — the tab's `offsetParent` is the positioned `.pane-tabbar`, not the
+scroller. Tabs are **drag-and-drop reorderable** (native HTML5 DnD): every
 `.pane-tab` is `draggable`, the `.pane-tabbar` is the drop zone (`wireTabDrag`,
 wired once per pane since it survives `renderPaneTabs`), and `moveTab(fromPanel,
 key, toPanel, toIndex)` performs the relocation — a **same-pane reorder** (splice)

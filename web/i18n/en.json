@@ -20,6 +20,7 @@
   "archived.label": "Archived",
   "settings.label": "Settings",
   "pane.newtab": "New chat tab",
+  "pane.menu": "Show sessions",
   "pane.terminal": "Open terminal tab",
   "pane.split": "Split editor right",
   "pane.close": "Close panel",

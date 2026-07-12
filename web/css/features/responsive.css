@@ -1,0 +1,218 @@
+/* Phone / small-screen layout: off-canvas nav drawer + full-width chat.
+   Part of web/css/styles.css — edit this partial, not the @import barrel.
+
+   The desktop shell is a three-column flex row: #sidebar (chrome + collections)
+   | #session-pane (session list) | #chat-area. That is ~560px of chrome before
+   the chat starts, so on a phone the chat is pushed entirely off-screen.
+
+   Below --m-bp the two left columns are lifted out of the flow into a single
+   fixed drawer, stacked vertically (sidebar on top, session list below) so both
+   keep their full width and their labels stay readable. #chat-area then takes
+   the whole viewport on its own, with no change to its internals. `body.nav-open`
+   slides the drawer in; #nav-scrim closes it.
+
+   Everything here is scoped inside the media query, so the desktop layout is
+   byte-identical to before. */
+
+:root {
+  /* Breakpoint is duplicated in app.js (MOBILE_MQ) — keep the two in step. */
+  --m-drawer-w: min(88vw, 340px);
+  /* Height given to the sidebar half of the drawer; the session list takes the
+     rest. The sidebar's own chrome (header, New Chat, collections header,
+     Archived, Files, footer) is ~345px before a single collection row, so a
+     tighter split would scroll it from the start. Sized to fit a handful of
+     collections outright; beyond that the sidebar scrolls. */
+  --m-nav-split: min(56vh, 500px);
+}
+
+/* The drawer scrim: only ever visible in mobile mode (see the media query). */
+#nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+/* The drawer trigger lives in each pane's tab bar; desktop never shows it. */
+.pane-menu-btn { display: none; }
+
+@media (max-width: 820px) {
+  /* Mobile browser chrome (URL bar) eats into 100vh, which would push the
+     composer under it. dvh tracks the *visible* viewport. */
+  body { height: 100dvh; }
+  #chat-area { height: 100dvh; }
+
+  /* ─── The nav drawer ─────────────────────────────────────── */
+  /* Both columns become one fixed, off-canvas drawer. They are siblings in the
+     DOM, so the split is done with explicit geometry rather than a wrapper. */
+  /* !important throughout: the theme sheets are linked AFTER styles.css and
+     carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
+     z-index: 1 }` (it anchors their drop-shadow onto the chat). Without this the
+     sidebar stays in flow and sinks under the scrim. `fixed` keeps their shadow
+     working — it establishes a stacking context just as `relative` did. */
+  #sidebar,
+  #session-pane {
+    position: fixed !important;
+    left: 0;
+    width: var(--m-drawer-w) !important;  /* beats the inline --sidebar-w drag width */
+    z-index: 60 !important;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+  #sidebar {
+    top: 0;
+    height: var(--m-nav-split);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  /* The themes hang a drop-shadow off the sidebar's right edge to feather it
+     onto the chat. Parked off-canvas that edge sits exactly at x=0, so the
+     shadow bleeds back in as a stray strip down the side of the chat. The scrim
+     already supplies the drawer's depth, so drop it. */
+  #sidebar, #session-pane { box-shadow: none !important; }
+  #session-pane {
+    top: var(--m-nav-split);
+    bottom: 0;
+    border-right: none;
+  }
+  body.nav-open #sidebar,
+  body.nav-open #session-pane { transform: translateX(0); }
+  body.nav-open #nav-scrim { opacity: 1; pointer-events: auto; }
+
+  /* On the desktop the sidebar is full-height, so #collections-list takes
+     `flex: 1` and absorbs the slack. Inside the height-capped drawer that same
+     rule squeezes it to ~2 rows and slices the third mid-height. Give the list
+     its natural height instead and let the *sidebar* scroll as a whole, so
+     every collection row is either fully shown or scrolled to. */
+  #collections-list { flex: 0 0 auto; }
+  #sidebar { overflow-y: auto; }
+
+  /* The drawer is never resized by dragging on touch. */
+  #sidebar-resize { display: none; }
+  /* Collapsing to an icon rail makes no sense inside the drawer — the drawer
+     itself is the show/hide affordance. */
+  #sidebar-toggle { display: none; }
+
+  /* ─── Chat takes the whole viewport ──────────────────────── */
+  /* The drawer is position:fixed, so it is out of flow and #chat-area is the
+     only flex child left; it simply fills the row. */
+  #chat-area { width: 100%; min-width: 0; }
+
+  /* Split panes are a desktop affordance. Show only the focused pane and hide
+     the split machinery; the layout (and localStorage) is left untouched, so
+     rotating back to a wide screen restores the user's real split. The inline
+     flex widths set by layoutWidths() need !important to be overridden. */
+  #chat .chat-pane {
+    min-width: 0;
+    flex: 1 1 auto !important;
+    width: auto !important;
+  }
+  #chat:not(.solo) .chat-pane:not(.is-focused) { display: none; }
+  .pane-divider { display: none; }
+  /* Must out-specify `.pane-toolbar button { display: inline-flex }` (0,1,1) —
+     a bare `.pane-split-btn` (0,1,0) loses to it no matter the import order. */
+  .pane-toolbar .pane-split-btn { display: none; }
+
+  /* The drawer trigger, first item in the tab bar. */
+  .pane-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    margin-left: 4px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .pane-menu-btn:hover { background: var(--bg-raised); color: var(--text); }
+
+  /* ─── Give the transcript the screen ─────────────────────── */
+  /* The desktop reading column is far too expensive on a phone. Three costs
+     compound: `--col-w` (90%) is applied on .msg-row AND again on the bubble
+     inside it; the assistant row is inset a further 56px to read as "recessed"
+     under the user prompt; and each row carries 20px of side padding. On a
+     390px phone that left the assistant text just 220px wide — 44% of the
+     screen was margin.
+
+     `--col-w` is the shared chat-column token (messages, tool blocks, composer,
+     ask-user card), so widening it here widens all of them in step. The recess
+     and the centred column are wide-screen affordances: at this width there is
+     nothing to centre against, so drop them and keep only a small gutter. */
+  :root { --col-w: 100%; }
+  .msg-row { padding-left: 12px; padding-right: 12px; }
+  .msg-row.assistant { max-width: min(var(--col-w), 100%); }
+
+  /* ─── Touch ergonomics ───────────────────────────────────── */
+
+  /* Keep the composer clear of the home indicator / gesture bar. */
+  #composer-wrap { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* Dragging the composer taller is a mouse affordance. */
+  #composer-resize { display: none; }
+}
+
+/* Hover-only affordances don't exist on touch: reveal the controls that are
+   otherwise only shown on :hover, so they are reachable by tap. Keyed on the
+   input device, not width, so a touch laptop gets them too. */
+@media (pointer: coarse) {
+  .turn-action-btn { opacity: 1; }
+  .pane-tab .pane-tab-close { opacity: 1; }
+}
+
+/* A 12px gutter is right for a ~390px phone, but in the upper half of the
+   small-screen band (small tablets) it makes the text hug the screen edges and
+   run to ~95 characters a line. Same full-width column, just more breathing
+   room. Still inside the drawer band, so the layout above is unchanged. */
+@media (min-width: 600px) and (max-width: 820px) {
+  .msg-row { padding-left: 24px; padding-right: 24px; }
+}
+
+/* ─── Pull to refresh ──────────────────────────────────────────
+   The standard mobile idiom, implemented in-app rather than relying on the
+   browser's native gesture: omnis is a fixed app shell (`body { overflow:
+   hidden }`), so the document never scrolls and there is no root overscroll for
+   Chrome's native pull-to-refresh to hook — and iOS Safari has no such gesture
+   at all. Doing it ourselves also means it can only fire from the top of the
+   transcript with a deliberate pull, so scrolling up through a long conversation
+   never reloads the page by accident (the classic native-PTR trap in a chat UI).
+
+   The spinner parks behind the opaque, z-index-8 tab bar and is drawn down by
+   the gesture. Hidden outside the small-screen band; the JS is gated on the same
+   breakpoint (see wirePullToRefresh in app.js). */
+.ptr-indicator {
+  position: absolute;
+  top: var(--topbar-h);
+  left: 50%;
+  z-index: 6;                    /* under .pane-tabbar (8), so it slides out from behind it */
+  display: none;                 /* desktop/mouse: never */
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -16px;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  opacity: 0;
+  transform: translateY(-44px);  /* parked out of sight above the transcript */
+  pointer-events: none;          /* never eats a touch meant for the transcript */
+}
+@media (max-width: 820px) {
+  .ptr-indicator { display: flex; }
+}
+/* Only transition on release — during the drag the spinner must track the finger
+   1:1, so JS writes `transform` directly with no easing. */
+.ptr-indicator.is-returning { transition: transform 0.22s ease, opacity 0.22s ease; }
+.ptr-indicator.is-armed { color: var(--accent); border-color: var(--accent); }
+.ptr-indicator.is-loading .ptr-icon { animation: ptr-spin 0.8s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator.is-loading .ptr-icon { animation: none; }
+}

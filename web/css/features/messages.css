@@ -155,7 +155,11 @@
   transition: opacity .12s ease, color .12s ease, background .12s ease;
 }
 .msg-row-user:hover .turn-action-btn,
-.msg-row-user:focus-within .turn-action-btn { opacity: 1; }
+.msg-row-user:focus-within .turn-action-btn,
+/* Same control on the floating pinned prompt (it hosts the button once the
+   inline row has scrolled off), revealed on hovering the header card. */
+#prompt-header:hover .turn-action-btn,
+#prompt-header:focus-within .turn-action-btn { opacity: 1; }
 .turn-action-btn:hover {
   color: var(--accent-strong);
   background: var(--bubble-user-bg);

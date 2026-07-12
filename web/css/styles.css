@@ -33,3 +33,7 @@
 /* Overlays / popovers. */
 @import "features/dialogs.css";
 @import "features/notifications.css";
+
+/* Small-screen layout (off-canvas nav drawer, full-width chat). Last, so its
+   media-query rules win over the desktop layout they override. */
+@import "features/responsive.css";
