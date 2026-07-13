@@ -163,6 +163,7 @@
 @media (pointer: coarse) {
   .turn-action-btn { opacity: 1; }
   .pane-tab .pane-tab-close { opacity: 1; }
+  .code-copy-btn { opacity: 1; }
 }
 
 /* A 12px gutter is right for a ~390px phone, but in the upper half of the

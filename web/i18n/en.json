@@ -195,6 +195,8 @@
   "app.locale.keepEnglish": "Keep English",
   "app.copy.richText": "Rich text",
   "app.copy.plainText": "Plain text",
+  "app.copy.code": "Copy code",
+  "app.copy.codeCopied": "Copied",
   "app.copy.messageCopied": "Message copied",
   "app.copy.failed": "Copy failed",
   "askkind.skill": "Skills",

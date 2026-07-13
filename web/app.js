@@ -2411,6 +2411,49 @@ function renderMarkdown(el, text) {
   if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
   rewriteLocalImages(el);
   linkifyFilePaths(el);
+  decorateCodeBlocks(el);
+}
+
+// ─── Code-block copy button ──────────────────────────────────────────────────
+// Every fenced code block in a rendered reply gets a hover-revealed copy button.
+// The <pre> is itself an overflow-x scroller, so the button cannot live inside
+// it (a long line would scroll it out of view): each <pre> is wrapped in a
+// positioned .code-block div that hosts the button instead. Idempotent — an
+// already-wrapped block is skipped — so it is safe to re-run on a re-render and
+// on each mid-stream block flush.
+function decorateCodeBlocks(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll("pre").forEach((pre) => {
+    if (pre.parentElement && pre.parentElement.classList.contains("code-block")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "code-block";
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy-btn";
+    btn.dataset.tip = tr("app.copy.code");
+    btn.setAttribute("aria-label", tr("app.copy.code"));
+    btn.innerHTML = ICON_COPY;
+    btn.addEventListener("click", () => copyCodeBlock(pre, btn));
+    wrap.appendChild(btn);
+  });
+}
+
+function copyCodeBlock(pre, btn) {
+  const code = pre.querySelector("code");
+  copyTextToClipboard((code || pre).textContent || "").then((ok) => {
+    if (!ok) { showToast(tr("app.copy.failed"), "err"); return; }
+    btn.classList.add("copied");
+    btn.innerHTML = ICON_CHECK;
+    btn.dataset.tip = tr("app.copy.codeCopied");
+    setTimeout(() => {
+      btn.classList.remove("copied");
+      btn.innerHTML = ICON_COPY;
+      btn.dataset.tip = tr("app.copy.code");
+    }, 1500);
+  });
 }
 
 // ─── Local image rendering ───────────────────────────────────────────────────
@@ -2810,6 +2853,7 @@ function streamMdFlushBlock(bubble, text) {
   const wrap = document.createElement("div");
   wrap.innerHTML = marked.parse(text);
   rewriteLocalImages(wrap);
+  decorateCodeBlocks(wrap);
   while (wrap.firstChild) bubble.insertBefore(wrap.firstChild, s.tailEl);
   if (AgentDebug.enabled) AgentDebug.render(performance.now() - t0);
 }

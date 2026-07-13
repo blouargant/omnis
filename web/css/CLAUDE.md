@@ -68,7 +68,7 @@ same colour/size in multiple partials.
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |
 | `terminal.css` | xterm.js terminal tabs (`.pane-terminal`, `.xterm-*`) |
-| `messages.css` | User bubble / pinned prompt, transcript, message rows, assistant markdown, copy button, in-reply jump button (`.reply-nav-btn`), error, inline images, `@file` ref links |
+| `messages.css` | User bubble / pinned prompt, transcript, message rows, assistant markdown, copy buttons (whole-message split-button `.copy-msg-*`, per-code-block `.code-block` / `.code-copy-btn`), in-reply jump button (`.reply-nav-btn`), error, inline images, `@file` ref links |
 | `tools.css` | Tool-call blocks, todo plan widget, bash `!`-escape block, badge colour variants |
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |
 | `context.css` | Context ring, context popup, context browser modal |
