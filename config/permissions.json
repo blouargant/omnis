@@ -139,6 +139,7 @@
       "helper",
       "agentmd_reviewer",
       "research_critic",
+      "web_fetcher",
       "k8s_investigator",
       "doc_agent",
       "code_scout",

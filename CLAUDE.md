@@ -603,8 +603,9 @@ agent; 0/absent = uncapped) — see "Per-agent cap" under "Per-turn spend budget
 Note it interacts with `max_instances`: the cap is keyed by agent **name**, so a
 fan-out's parallel instances **share** it. **Native fan-out also changes what the cap
 counts:** each parallel call is now its own charged tool call, where one batch call
-(carrying up to `max_instances` tasks) used to cost **1**. `research_critic`'s cap was
-raised 8 → 12 to compensate.
+(carrying up to `max_instances` tasks) used to cost **1**. So a cap must be sized in
+**fan-out waves**, not calls (`research_critic` × `web_fetcher` ×10 ⇒ one wave = 10
+calls); a cap that fires on honest work just gets ignored or removed.
 The web UI Settings → Agent panel exposes it as a **Max parallel instances**
 numeric field (a `Parallelism` section, hidden for the leader and curator
 since both are excluded from fan-out); the value round-trips through the
@@ -1338,8 +1339,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_OVERRIDE_MODEL_REF` | Single-model override: names the catalogue model to force onto **every** agent; non-empty also **enables** the override. See `models.json` `override_model_ref` / `applyModelOverride` |
 | `OMNIS_OVERRIDE_MODEL_ENABLED` | `true`/`false` — final say on the single-model-override toggle (independent of `OMNIS_OVERRIDE_MODEL_REF`), overriding `override_model_enabled` in `models.json` |
 | `OMNIS_GOAL_MAX_TURNS` | Hard ceiling on how many turns one `/goal` may drive before the loop stops regardless of the condition (default `30`) |
-| `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `100`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
-| `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `2000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
+| `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `2000`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
+| `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `10000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
@@ -2559,7 +2560,17 @@ It matters because **a sub-agent's cost is quadratic in its tool calls**: it run
 its own flow loop and re-sends its entire accumulated context — every fetched page
 included — on each model call. `research_critic` reached **9.1M prompt tokens from
 ~20 fetches × 2 invocations**; capping N is worth far more than capping tokens.
-Shipped: `research_critic` at **12** ([registry/agents/research_critic/agent.json](registry/agents/research_critic/agent.json)).
+Shipped: `research_critic` at **40** ([registry/agents/research_critic/agent.json](registry/agents/research_critic/agent.json)).
+
+**Size a cap against the agent's FAN-OUT, not against a bare number.** The same
+"a limit that fires on honest work gets disabled" rule applies here, and it bites
+harder because the cap is **shared across parallel instances** (see the GOTCHA
+below). `research_critic` was shipped at **12** while its `web_fetcher` team fans
+out to **10** — so a *single* wave of parallel fetches consumed 10 of its 12 calls
+and the critic was told to conclude before it had judged anything. A cap must be
+worth **several fan-out waves plus the judgment calls around them**, which is what
+40 buys (≈3 waves of 10). When you give a capped agent a fan-out team, the cap's
+unit is a *wave*, not a call.
 
 - **A notice is only an instruction — so it escalates.** A live run showed a capped
   `web_agent` issue **16 further tool calls across 13 model round-trips** after
@@ -2586,16 +2597,37 @@ Shipped: `research_critic` at **12** ([registry/agents/research_critic/agent.jso
   its own charged tool call; a batch call carrying up to `max_instances` tasks used to
   cost **1**. So an unchanged cap silently got up to `max_instances`× tighter when the
   batch tool was replaced by the semaphore (see "Sub-agent fan-out"). `research_critic`
-  was raised 8 → 12 for exactly this reason. When you give a capped agent a fan-out
-  team, re-check its cap.
+  was raised for exactly this reason. When you give a capped agent a fan-out team,
+  re-check its cap — its unit is a *wave*, not a call.
 
 - **Config**: `turn_budget: {max_tool_calls, max_tokens}` in `agents.json` (pointer
   fields, so an explicit `0` = "no ceiling on this axis" is distinguishable from
   absent = "use the default"), overridden by `OMNIS_TURN_MAX_TOOL_CALLS` /
-  `OMNIS_TURN_MAX_TOKENS`. Defaults **100 calls / 2M tokens** — chosen so an
-  ordinary turn never sees the gate. **Both axes 0 ⇒ unbounded turns**, byte-identical
-  to before. Read from the **current** generation (`serverDeps.turnLimits`), so a
-  hot-reload applies on the next turn of every session.
+  `OMNIS_TURN_MAX_TOKENS`. Defaults **2000 calls / 10M tokens**. **Both axes 0 ⇒
+  unbounded turns**, byte-identical to before. Read from the **current** generation
+  (`serverDeps.turnLimits`), so a hot-reload applies on the next turn of every session.
+
+- **A ceiling that fires on honest work is worse than no ceiling.** The user answers
+  *"continue without limit"*, and from then on the mechanism protects nothing — so a
+  limit that trips routinely is a limit that gets disabled. The numbers therefore
+  buy as much headroom as they can while still catching a turn no honest turn
+  resembles. They are calibrated against **real recorded per-turn usage**, not
+  guessed: median **271k** tokens, p90 **2.55M**, heaviest legitimate turn (a 3–7
+  minute research turn) **4.0M**, heaviest deep research with the critic **8.75M**,
+  and the runaway this was written for **15.2M** (295 calls, 39 min). The previous
+  **2M** ceiling therefore sat *below the p90 of honest turns* — it fired on roughly
+  **one turn in ten**, including ordinary multi-minute research. 10M clears every
+  honest turn on record (with room to spare, since the sub-agent output shaper has
+  roughly halved sub-agent cost) and still catches the runaway well before 39 minutes.
+- **Tokens are the axis that matters**; the call ceiling is only a backstop for a
+  turn that loops **cheaply** — note the known runaway made just **295 calls**, so
+  that axis would never have caught it anyway. It sits above the largest burst ever
+  observed. At **500** it was the axis most likely to **misfire**, because native
+  fan-out charges each parallel sub-agent call separately (one deep-research wave
+  with `web_agent` ×10 + `web_fetcher` ×10 reaches three digits on its own). If it
+  ever fires on honest work, set it to `0` and let tokens do the work. Its
+  predecessor `100` did exactly that, halting a routine deep-research turn at
+  **101 calls / 365k tokens** — 18% of the token budget.
 - **Armed by the surface**: `serverDeps.startTurnBudget` ([server/budget.go](server/budget.go))
   is called by **both** server turn rails — the interactive producer
   ([server/sse.go](server/sse.go) `handleMessages`) and the injected one

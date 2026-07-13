@@ -18,12 +18,38 @@ package budget
 
 import "sync"
 
-// Defaults chosen so an ordinary turn never sees the gate: a normal chat turn
-// spends a handful of tool calls and well under 500k tokens, while the runaway
-// this was written for reached ~295 tool calls / 15.2M tokens.
+// A ceiling exists to stop a turn that has gone WILD — not to ration honest work.
+// That distinction sets the numbers, because a ceiling that trips on legitimate
+// deep research does not merely annoy: the user answers "continue without limit",
+// and from then on the mechanism protects nothing. A limit that fires routinely is
+// a limit that gets disabled. So the defaults are deliberately generous, and the
+// only turn they are meant to catch is one no honest turn resembles.
+//
+// Calibrated against real per-turn usage rather than guessed (66 recorded turns):
+//
+//	median turn                              271k tokens
+//	p90 turn                                 2.55M
+//	heaviest LEGITIMATE turn (3-7 min)       4.0M
+//	heaviest deep research w/ critic         8.75M
+//	the runaway this package was written for 15.2M  (295 tool calls, 39 min)
+//
+// The old 2M ceiling therefore sat BELOW the p90 of honest turns — it fired on
+// roughly one turn in ten, including several 3-6 minute research turns that were
+// simply doing their job. 10M clears every honest turn on record (with headroom,
+// since the sub-agent output shaper has since roughly halved sub-agent cost) while
+// still catching the runaway well before it burns 39 minutes.
+//
+// Tokens are the axis that tracks real cost and the axis that actually catches a
+// runaway. The call ceiling is only a backstop for a turn that loops CHEAPLY — note
+// the known runaway made just 295 calls, so this axis would never have caught it.
+// It is set above the largest burst ever observed: at 500 it was the axis most
+// likely to misfire, because native fan-out charges each parallel sub-agent call
+// separately (one deep-research wave with web_agent x10 + web_fetcher x10 reaches
+// three digits on its own). If it ever fires on honest work, set it to 0 and let
+// tokens do the work.
 const (
-	DefaultMaxToolCalls = 100
-	DefaultMaxTokens    = 2_000_000
+	DefaultMaxToolCalls = 2000
+	DefaultMaxTokens    = 10_000_000
 )
 
 // Limits is a per-turn ceiling. A zero field means "no limit on that axis";

@@ -500,6 +500,11 @@ func TestShippedConfigParity(t *testing.T) {
 		// path (logs/agent_feedback_<suffix>.json) with no model-controlled path
 		// component, exactly like the already-allowed curate_session.
 		{"record_session_feedback", map[string]any{"question": "are we good to wrap?", "answer": "yes"}, DecisionAllow},
+		// A nested gatherer is a sub-agent like any other: it only retrieves and
+		// quotes, so dispatching it must not prompt. web_fetcher is reached from
+		// research_critic's own tool list rather than a squad leader's, which is
+		// exactly why it was missed when the read-only sub-agents were allowlisted.
+		{"web_fetcher", map[string]any{"request": "does vLLM support GPTQ 4-bit?"}, DecisionAllow},
 		// …but a sub-agent's mutating tools still prompt (fall through to ask).
 		{"Write", file("/proj/x.go"), DecisionAsk},
 		{"Edit", file("/proj/x.go"), DecisionAsk},
