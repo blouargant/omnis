@@ -761,5 +761,8 @@
   "app.export.failed": "Export fehlgeschlagen.",
   "app.import.badFile": "Diese Datei ist kein gültiger Omnis-Sitzungsexport.",
   "app.import.failed": "Import fehlgeschlagen.",
-  "app.import.done": "Chat importiert."
+  "app.import.done": "Chat importiert.",
+  "set.hdr.team": "Team",
+  "set.agent.teamHint": "Agenten, an die dieser Agent delegieren darf. Ein Sammler nimmt den Großteil des Abgerufenen — Seiten, Grep-Treffer, Logs — in seinen eigenen, günstigen Kontext auf und liefert nur die destillierten Belege zurück; der Kontext dieses Agenten (und die Rechnung) bleibt damit klein. Zu unterscheiden von den Mitgliedern eines Squads, an die der Leader delegieren darf.",
+  "set.block.noTeamCandidates": "Kein anderer aktivierter Agent kann von hier aus beauftragt werden."
 }

@@ -1,19 +1,19 @@
 {
   "allow_file_attachments": false,
   "builtin": false,
-  "description": "Read-only fresh-eyes reviewer for a research brief. Given the user's original question and a draft brief, it hunts for unchallenged premises, load-bearing claims with no fetched source, alternatives never considered, and overclaims — verifying with its own web searches. Returns blockers/should-fix/nits to the author; never writes the brief itself.",
+  "description": "Read-only fresh-eyes reviewer for a research brief. Given the user's original question and a draft brief, it hunts for unchallenged premises, load-bearing claims with no fetched source, alternatives never considered, and overclaims — delegating every web lookup to its web_fetcher team and judging the quotes they bring back. Returns blockers/should-fix/nits to the author; never writes the brief itself.",
   "enabled": true,
   "leader": false,
-  "max_tool_calls": 12,
+  "max_tool_calls": 8,
   "model_ref": "high",
   "name": "research_critic",
   "skills": [],
   "softskills_dir": "",
+  "subagents": [
+    "web_fetcher"
+  ],
   "tools": [
     "Skill",
-    "serpapi",
-    "ddg",
-    "web",
     "calc",
     "softskills"
   ]

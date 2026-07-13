@@ -786,6 +786,18 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if !a.ResumableSessions {
 							agentMap["resumable_sessions"] = false
 						}
+						// Same discipline for the agent's own team and its per-turn
+						// tool-call cap: surface them only when set, so an agent that has
+						// neither keeps a clean agent.json. Both MUST round-trip through
+						// the editor — a `subagents` list silently dropped on save would
+						// strip a specialist's gatherer and hand its retrieval back to the
+						// expensive model.
+						if len(a.SubAgents) > 0 {
+							agentMap["subagents"] = a.SubAgents
+						}
+						if a.MaxToolCalls > 0 {
+							agentMap["max_tool_calls"] = a.MaxToolCalls
+						}
 						agents = append(agents, agentMap)
 					}
 					// Sort agents: built-in first, then custom
@@ -906,7 +918,13 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								"model_ref", "provider", "model", "base_url", "api_key",
 								"tools", "skills", "softskills_dir", "allow_file_attachments",
 								"mcp_config_path", "mcp_servers", "permissions_config_path",
-								"a2a_agents", "max_instances", "resumable_sessions":
+								"a2a_agents", "max_instances", "resumable_sessions",
+								// A key missing from this list is DROPPED on save. `subagents`
+								// and `max_tool_calls` must be here or editing any unrelated
+								// field of research_critic would silently strip its gatherer
+								// team and its cap, handing retrieval back to the expensive
+								// model — the exact regression this feature exists to prevent.
+								"subagents", "max_tool_calls":
 								if isEmptyOverlayValue(v) {
 									continue
 								}

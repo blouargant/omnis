@@ -532,13 +532,18 @@ func NewTools(deps Deps) []tool.Tool {
 					if err != nil {
 						return installRemoteItemOut{}, err
 					}
-					// Resolve the skills and MCP servers the agent declares so it
-					// is actually usable, mirroring the web-UI install route. The
+					// Resolve the skills, MCP servers and SUB-AGENTS the agent declares
+					// so it is actually usable, mirroring the web-UI install route. The
 					// remote manifest is the source of truth (no disk-layer guess).
+					// The subagents cascade is the load-bearing one: a dangling edge
+					// makes the runtime config fail to resolve outright.
 					var installedDeps, warnings []string
 					if raw, ferr := FetchAgentJSON(ref, token, in.DirPath); ferr == nil {
-						skills, mcpServers := parseAgentDeps(raw)
+						skills, mcpServers, subAgents := parseAgentDeps(raw)
 						installedDeps, warnings = deps.resolveAgentDeps(skills, mcpServers)
+						si, sw := deps.resolveSubAgentDeps(subAgents, 0)
+						installedDeps = append(installedDeps, si...)
+						warnings = append(warnings, sw...)
 					}
 					reloaded := deps.requestReload()
 					return installRemoteItemOut{

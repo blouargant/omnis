@@ -266,7 +266,11 @@ main.go / server/
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer
             │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
-            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic (read-only fresh-eyes brief reviewer) · summariser (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering)
+            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic · summariser (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering)
+            │    │    └── research_critic (high, read-only fresh-eyes brief reviewer; NO web tools)
+            │    │         └── web_fetcher   ← NESTED sub-agent (hosted): retrieves + quotes, never judges.
+            │    │                             Not a squad member, so the leader never sees it. See
+            │    │                             "Nested sub-agents (`subagents`) — the gatherer doctrine".
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
             │    └── "Helper"      ← leaderless single specialist (helper)
             ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
@@ -281,6 +285,94 @@ same generation can use different squads. Squads only *reference* agents
 — skills, tools and MCP servers stay on the agent definitions, so two
 squads that share a member also share that member's wiring (and the MCP
 pool dedups any subprocess backing it).
+
+### Nested sub-agents (`subagents`) — the gatherer doctrine
+
+Any agent may declare **`subagents: [...]`** in its `agent.json`: its OWN delegable
+team, mounted as agenttool wrappers on its tool list exactly as a squad root mounts
+its members ([agent/nested_subagents.go](agent/nested_subagents.go),
+[agent/build_subagents.go](agent/build_subagents.go)). Previously only a squad ROOT
+could delegate — `toolsForAgentConfig` resolves tool *groups*, and the agenttool
+wrappers were appended only to the root — which was arbitrary (an agenttool is just
+a tool; an llmagent can hold one at any depth) and **expensive**: it forced the
+agent with the strongest, costliest model to also be the one accumulating raw
+retrieved data.
+
+**Why it matters — retrieval cost is QUADRATIC in one agent's tool calls.** An
+agent runs its own flow loop and re-sends its whole accumulated context — every
+fetched page, grep hit, or pod log — on *each* model call. So **who holds the bulk
+decides the bill**, and the expensive model must never be the one holding it.
+`research_critic` reached **9.1M prompt tokens** doing its own fetching. The fleet
+already believed this at the *leader* level (`investigator`, `code_scout`,
+`k8s_investigator`, `web_agent`, `summariser` are all gatherers); `subagents` simply
+removes the restriction that only a coordinator may delegate.
+
+**The contract that makes it safe** (identical in every domain — web, code, kubectl):
+
+> **The cheap model does RETRIEVAL. The expensive model does JUDGMENT. The interface
+> between them is evidence with provenance** — a quote + URL, a `file:line` +
+> snippet, a pod + timestamp + log line — **never a verdict and never a summary.**
+
+A gatherer allowed to *conclude* ("yes, the docs support this") puts the judgment
+you are paying the strong model for into the weak one. A gatherer that may only
+report *what it found* cannot make that mistake, and its output is small by
+construction. This is why `code_scout` returning `file:line` works, and why
+[registry/agents/web_fetcher/](registry/agents/web_fetcher/) (`hosted`, the first
+consumer) is forbidden from judging: it searches, fetches, and returns the verbatim
+quote. `research_critic` (`high`) then has **no web tools at all** — it dispatches
+`web_fetcher` and judges the quotes, so a fetched page never lands in its context.
+
+**Semantics.** Squad `members` = what the LEADER may delegate to; an agent's
+`subagents` = what IT may delegate to. The build resolves the transitive closure
+(`subAgentClosure`) so a **nested-only** gatherer is built even though it is not a
+squad member, orders it topologically (`topoOrderSubAgents` — wiring a nested tool
+needs its target built first), and mounts **only the direct members** on the leader.
+So a specialist can gain a helper without growing the coordinator's tool list —
+`web_fetcher` is enabled in `agents.json` but is deliberately **not** a Knowledge
+member. A gatherer shared by two callers is built **once** but gets a **fresh
+wrapper per mount point** (`wrapSubAgentTool`): the non-concurrent wrapper's mutex
+and the resumable wrapper's handle map are per-tool state, so a shared wrapper would
+make one caller's in-flight call report the agent "already running" to the other.
+
+**Validation is fatal, by design.** `validateSubAgentGraph` (called from
+`ResolveRuntimeSettings`) rejects an unknown/disabled target, a self-reference, the
+`curator`, a duplicate edge, or a **cycle** (unbuildable: wiring a needs b, and b
+needs a). A bad edge therefore fails the whole config on reload rather than silently
+crippling one agent. Consequences: the **install cascade must follow `subagents`**
+(recursively, `maxSubAgentInstallDepth` = 4) or installing a specialist would brick
+the config — wired in both `internal/registries/agent_deps.go` (`resolveSubAgentDeps`,
+the helper's `install_remote_item`) and `server/install_helpers.go`
+(`tryAutoInstallAgentsDepth`, the web-UI route), each installing its targets
+**enabled**; and the config GET/PUT **must round-trip the `subagents` key**
+([server/config.go](server/config.go) — a key missing from the PUT whitelist is
+DROPPED, so editing any unrelated field would silently strip a specialist's team).
+Settings → Agent exposes a **Team** picker (`renderAgentTeamBlock` in
+[web/settings.js](web/settings.js)) which excludes candidates that already
+(transitively) depend on this agent, so a cycle cannot be saved from the UI.
+
+**Everything else composes for free**, because each layer is attached PER AGENT in
+the same build loop: the turn budget + per-agent `max_tool_calls`, the output shaper,
+the permission gate, the lifecycle hooks, and the steering yield (which cascades —
+depth-2 unwinds to depth-1, whose own yield unwinds to the leader) all reach a nested
+agent with no extra wiring.
+
+**GOTCHA — `max_instances > 1` needs a caller strong enough for the batch schema.**
+A fan-out agent is exposed as a **batch** tool (`{tasks: [...]}`, `newParallelAgentTool`)
+rather than a plain call. **The `high` model will not invoke that schema**: with
+`web_fetcher` at `max_instances: 8` the critic silently never called it and wrote
+*"I cannot confirm this claim without fetching"* — a **silent** degradation (the tool
+was correctly mounted and declared; the model just would not use it). Dropping to
+`max_instances: 1` made it call `web_fetcher` immediately and correctly. Every
+pre-existing fan-out agent (`web_agent` ×10, `code_scout` ×5, `doc_agent` ×5) happens
+to be called by a **`premium`** leader, which handles the batch schema — `web_fetcher`
+was the first fan-out agent with a non-premium caller, which is why this surfaced now.
+**Costs nothing to give up:** context isolation — the thing that actually kills the
+quadratic — comes from agenttool minting a **fresh session per call**, not from
+parallelism; `max_instances` only buys latency. So a gatherer called by a
+non-`premium` agent should stay at `max_instances: 1`.
+
+**No-op contract:** a fleet declaring no `subagents` builds exactly the direct
+members in declared order — byte-identical to the pre-nesting build.
 
 **Leaderless squads** — a squad with `leader` set to `"none"` (or empty)
 and **exactly one member** runs that single agent **directly as the runner
@@ -3166,9 +3258,23 @@ picks **one** action by mode, decided at save time:
    should expose it (omit the entry to keep an agent reserved for one
    squad). If a squad omits the agent, the squad's leader won't see it
    as a delegable tool.
+   **Or, for a helper that serves ONE specialist rather than the coordinator**
+   (a cheap gatherer — see "Nested sub-agents (`subagents`) — the gatherer
+   doctrine"), leave it out of every `members` list and instead add its name to
+   that specialist's **`subagents`** in its `agent.json`. It is still enabled in
+   `agents.json`, still built, still event-wired — but only its caller sees it,
+   so the leader's tool list does not grow. Every name must be an enabled agent
+   and the graph must stay acyclic, or the config fails to resolve.
 5. `agent.NewAgent()` auto-discovers the agent via `runtime.Agents`; no
    Go code change needed unless you want custom tool wiring
    (`defaultToolKeys`).
+6. If the agent is a **gatherer**, hold it to the retrieval/judgment contract:
+   it returns **evidence with provenance** (a quote + URL, a `file:line` +
+   snippet, a pod + timestamp + log line) and is explicitly forbidden from
+   concluding — that is what makes it safe to run on a cheap model. And leave
+   `max_instances` at 1 unless its caller runs on `premium`: a fan-out agent is
+   exposed as a batch (`{tasks: […]}`) tool, and a weaker caller silently will
+   not invoke that schema (see the GOTCHA in the gatherer-doctrine section).
 
 ### Adding a new squad
 

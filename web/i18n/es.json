@@ -761,5 +761,8 @@
   "app.export.failed": "Error al exportar.",
   "app.import.badFile": "Ese archivo no es una exportación de sesión de Omnis válida.",
   "app.import.failed": "Error al importar.",
-  "app.import.done": "Chat importado."
+  "app.import.done": "Chat importado.",
+  "set.hdr.team": "Equipo",
+  "set.agent.teamHint": "Agentes a los que este agente puede delegar. Un recolector absorbe en su propio contexto — barato — el grueso de lo que recupera (páginas, resultados de grep, registros) y solo devuelve la evidencia destilada, de modo que el contexto de este agente (y la factura) sigue siendo pequeño. Distinto de los miembros de un squad, que es a lo que puede delegar el líder.",
+  "set.block.noTeamCandidates": "Ningún otro agente habilitado puede recibir delegación desde aquí."
 }

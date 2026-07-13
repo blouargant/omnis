@@ -71,6 +71,18 @@ type AgentEntry struct {
 	// revert the sub-agent to a stateless pure function. Composes with
 	// MaxInstances (each parallel task gets its own handle).
 	ResumableSessions *bool `json:"resumable_sessions,omitempty"`
+	// SubAgents is this agent's OWN team: agents it may delegate to, mounted as
+	// agenttool wrappers on its tool list exactly as a squad root mounts its
+	// members. It is how an expensive specialist pushes bulk retrieval into a
+	// cheap gatherer's context instead of accumulating it in its own (see
+	// nested_subagents.go for why that matters and the contract that makes it
+	// safe). Names must be enabled agents; the graph must be acyclic.
+	//
+	// Distinct from a squad's `members`, which is what the LEADER may delegate to.
+	// An agent reachable only through `subagents` is built but never handed to the
+	// leader, so a pure gatherer can serve one specialist without cluttering the
+	// coordinator's tool list.
+	SubAgents []string `json:"subagents,omitempty"`
 }
 
 // ProviderEntry describes one reusable provider profile in models.json.
@@ -277,6 +289,9 @@ type RuntimeAgentConfig struct {
 	// re-attachable sub-agent sessions: true unless the agent explicitly opted out.
 	// The leader can resume a prior call via its returned handle. See AgentEntry.
 	ResumableSessions bool
+	// SubAgents is this agent's own delegable team (see AgentEntry.SubAgents).
+	// Validated as an acyclic graph over enabled agents by validateSubAgentGraph.
+	SubAgents []string
 }
 
 // RuntimeSquadConfig is one normalized squad: a named group composed of an
@@ -592,6 +607,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			MaxInstances:                      maxInstances,
 			MaxToolCalls:                      maxInt(e.MaxToolCalls, 0),
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
+			SubAgents:                         normalizeNames(e.SubAgents),
 		})
 	}
 	return out, nil
@@ -703,6 +719,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		MaxInstances:                      maxInt(in.MaxInstances, 1),
 		MaxToolCalls:                      maxInt(in.MaxToolCalls, 0),
 		ResumableSessions:                 in.ResumableSessions,
+		SubAgents:                         normalizeNames(in.SubAgents),
 	}
 }
 
@@ -1141,6 +1158,13 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	applyModelOverride(&out)
 	out.Agents, err = withInheritedModels(out.Agents)
 	if err != nil {
+		return RuntimeSettings{}, err
+	}
+
+	// Nested delegation (`subagents`) is validated against the final agent
+	// catalogue: an unknown/disabled target or a cycle can never be built, so it
+	// must fail here — loudly, on reload — rather than mid-turn.
+	if err := validateSubAgentGraph(out.Agents); err != nil {
 		return RuntimeSettings{}, err
 	}
 

@@ -81,7 +81,9 @@ func NewTools(deps Deps) []tool.Tool {
 			"Change one agent's definition (registry/agents/<name>/agent.json) and hot-reload. Argument `name` "+
 				"is required; provide only the fields to change: `model_ref` (a key from models.json), `model` "+
 				"(a raw model id), `enabled`, `description`, `tools` (string list), `skills` (string list), "+
-				"`max_instances`, `resumable_sessions`. The agent must already exist (use the registry tools to "+
+				"`max_instances`, `max_tool_calls`, `resumable_sessions`, `subagents` (string list — the agents "+
+				"THIS agent may delegate to; every name must be an enabled agent and the graph must stay acyclic, "+
+				"or the config will fail to reload). The agent must already exist (use the registry tools to "+
 				"install a new one). Covers \"switch agent X to model Y\".",
 			setAgent(deps)),
 
@@ -296,6 +298,12 @@ type setAgentIn struct {
 	Skills            *[]string `json:"skills,omitempty"`
 	MaxInstances      *int      `json:"max_instances,omitempty"`
 	ResumableSessions *bool     `json:"resumable_sessions,omitempty"`
+	MaxToolCalls      *int      `json:"max_tool_calls,omitempty"`
+	// SubAgents is the agent's own delegable team. Every name must be an enabled
+	// agent and the graph must stay acyclic — a dangling or circular edge makes the
+	// runtime config fail to resolve, so a bad value here breaks the next reload
+	// rather than merely degrading one agent.
+	SubAgents *[]string `json:"subagents,omitempty"`
 }
 
 func setAgent(deps Deps) functiontool.Func[setAgentIn, writeResult] {
@@ -343,6 +351,22 @@ func setAgent(deps Deps) functiontool.Func[setAgentIn, writeResult] {
 				delete(entry, "resumable_sessions")
 			} else {
 				entry["resumable_sessions"] = false
+			}
+		}
+		if in.MaxToolCalls != nil {
+			if *in.MaxToolCalls > 0 {
+				entry["max_tool_calls"] = *in.MaxToolCalls
+			} else {
+				delete(entry, "max_tool_calls")
+			}
+		}
+		if in.SubAgents != nil {
+			// Keep the key absent when empty so agent.json stays clean for the
+			// overwhelmingly common no-team case.
+			if len(*in.SubAgents) > 0 {
+				entry["subagents"] = *in.SubAgents
+			} else {
+				delete(entry, "subagents")
 			}
 		}
 		path, layer, werr := configedit.WriteAgentEntry(name, entry)

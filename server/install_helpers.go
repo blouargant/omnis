@@ -143,12 +143,25 @@ func tryAutoInstallMCP(serverNames []string, mcpConfigRead, mcpConfigWrite, remo
 	return
 }
 
+// maxAgentInstallDepth bounds the recursive `subagents` cascade below. A gatherer
+// may itself have a team, but a deep chain almost certainly means a mis-authored
+// registry rather than a real topology, and we must not walk one forever.
+const maxAgentInstallDepth = 4
+
 // tryAutoInstallAgents checks which agents in agentNames are not installed/enabled
 // and attempts to install and enable them from configured agent registries. Returns
 // lists of successfully auto-installed names and warning messages for agents not
 // found in any registry.
 func tryAutoInstallAgents(agentNames []string, agentsRegistryDir string, agentsConfigRead func() string, agentsConfigWrite, remoteRegistriesPath string) (installed []string, warnings []string) {
+	return tryAutoInstallAgentsDepth(agentNames, agentsRegistryDir, agentsConfigRead, agentsConfigWrite, remoteRegistriesPath, 0)
+}
+
+func tryAutoInstallAgentsDepth(agentNames []string, agentsRegistryDir string, agentsConfigRead func() string, agentsConfigWrite, remoteRegistriesPath string, depth int) (installed []string, warnings []string) {
 	if len(agentNames) == 0 {
+		return
+	}
+	if depth >= maxAgentInstallDepth {
+		warnings = append(warnings, fmt.Sprintf("stopped resolving `subagents` at depth %d: the chain %v is suspiciously deep", depth, agentNames))
 		return
 	}
 
@@ -193,6 +206,17 @@ func tryAutoInstallAgents(agentNames []string, agentsRegistryDir string, agentsC
 							_, _ = appendAgentToConfig(agentsConfigRead(), configWrite, agentName)
 							installed = append(installed, agentName)
 							found = true
+
+							// The agent we just installed may itself declare a team.
+							// Follow it: a dangling `subagents` edge does not merely
+							// degrade the agent, it makes the whole runtime config fail
+							// to resolve.
+							_, _, nested := parseAgentJSONDeps(filepath.Join(agentsRegistryDir, agentName, "agent.json"))
+							if len(nested) > 0 {
+								ni, nw := tryAutoInstallAgentsDepth(nested, agentsRegistryDir, agentsConfigRead, agentsConfigWrite, remoteRegistriesPath, depth+1)
+								installed = append(installed, ni...)
+								warnings = append(warnings, nw...)
+							}
 						}
 					}
 					break
@@ -211,7 +235,7 @@ func tryAutoInstallAgents(agentNames []string, agentsRegistryDir string, agentsC
 
 // parseAgentJSONDeps extracts the skills and mcp_servers dependency lists
 // from an on-disk agent.json file.
-func parseAgentJSONDeps(agentJSONPath string) (skills, mcpServers []string) {
+func parseAgentJSONDeps(agentJSONPath string) (skills, mcpServers, subAgents []string) {
 	data, err := os.ReadFile(agentJSONPath)
 	if err != nil {
 		return
@@ -219,16 +243,21 @@ func parseAgentJSONDeps(agentJSONPath string) (skills, mcpServers []string) {
 	// AgentEntry accepts both the snake_case "mcp_servers" and the camelCase
 	// "mcpServers" alias, so read both and merge to avoid missing a dependency
 	// declared in a Claude-format / converted agent.json.
+	//
+	// `subagents` is the agent's own delegable team. Unlike a missing skill or MCP
+	// server — which degrade the agent — a dangling `subagents` edge makes the
+	// whole runtime config fail to resolve, so it MUST be cascaded.
 	var entry struct {
 		Skills        []string `json:"skills"`
 		MCPServers    []string `json:"mcp_servers"`
 		MCPServersAlt []string `json:"mcpServers"`
+		SubAgents     []string `json:"subagents"`
 	}
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return
 	}
 	mcpServers = append(entry.MCPServers, entry.MCPServersAlt...)
-	return entry.Skills, mcpServers
+	return entry.Skills, mcpServers, entry.SubAgents
 }
 
 // parseSkillMDDeps extracts the commands and permissions dependency lists

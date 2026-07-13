@@ -761,5 +761,8 @@
   "app.export.failed": "Échec de l’export.",
   "app.import.badFile": "Ce fichier n’est pas un export de session Omnis valide.",
   "app.import.failed": "Échec de l’import.",
-  "app.import.done": "Conversation importée."
+  "app.import.done": "Conversation importée.",
+  "set.hdr.team": "Équipe",
+  "set.agent.teamHint": "Agents auxquels cet agent peut déléguer. Un collecteur absorbe dans son propre contexte — bon marché — le gros de ce qu'il récupère (pages, résultats de grep, logs) et ne renvoie que les preuves distillées : le contexte de cet agent (et la facture) reste donc réduit. À distinguer des membres d'un squad, qui définissent ce à quoi le leader peut déléguer.",
+  "set.block.noTeamCandidates": "Aucun autre agent activé ne peut recevoir de délégation depuis ici."
 }

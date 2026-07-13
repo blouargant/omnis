@@ -58,11 +58,12 @@ func buildSubAgents(
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
-// sub-agent. Returns:
-//   - subAgentMap   : name → agent
+// sub-agent, plus every agent reachable from one through `subagents` (nested
+// delegation). Returns:
+//   - subAgentMap   : name → agent (the whole closure, nested agents included)
 //   - subAgents     : ordered slice for AgentLoader
-//   - leaderSubTools: agenttool wrappers (non-concurrent) to append to the
-//     leader's tool list, in declaration order.
+//   - leaderSubTools: agenttool wrappers to append to the leader's tool list, for
+//     the DIRECT members only, in declaration order.
 //   - mcpHandles   : pooled MCP handles acquired for sub-agent overrides,
 //     to be released by the calling Instance on Close.
 //
@@ -77,7 +78,10 @@ func buildSubAgents(
 // (the per-turn spend ceiling — a sub-agent's tool calls and tokens are charged to
 // the same session bucket as the leader's, so a max_instances fan-out cannot run an
 // unbounded search loop behind the leader's back). All are nil-safe: nil ⇒ that
-// layer is skipped, byte-identical to a sub-agent built without it.
+// layer is skipped, byte-identical to a sub-agent built without it. Because every
+// one of them is attached PER AGENT in this loop, they all reach a nested agent
+// too — the budget, the per-agent cap, the shaper, the permission gate, the hooks
+// and the steering yield compose at any depth with no extra wiring.
 func buildSubAgentsFromConfigs(
 	ctx context.Context,
 	configs []RuntimeAgentConfig,
@@ -103,18 +107,27 @@ func buildSubAgentsFromConfigs(
 	mcpHandles []*mcpcfg.Handle,
 	err error,
 ) {
+	// A squad's `members` are what the LEADER may delegate to; an agent's own
+	// `subagents` are what IT may delegate to. Expand the member set with every
+	// agent reachable through those edges, then order the closure so each agent is
+	// built AFTER the agents it delegates to — wiring a nested delegation tool
+	// needs the target's agent object to already exist.
+	closure, cErr := subAgentClosure(configs, runtime.Agents)
+	if cErr != nil {
+		return nil, nil, nil, nil, cErr
+	}
+	ordered, oErr := topoOrderSubAgents(closure)
+	if oErr != nil {
+		return nil, nil, nil, nil, oErr
+	}
+	closureByName := make(map[string]RuntimeAgentConfig, len(closure))
+	for _, c := range closure {
+		closureByName[c.Name] = c
+	}
+
 	subAgentMap = map[string]adkagent.Agent{}
-	seenNames := map[string]bool{}
 
-	for _, cfg := range configs {
-		if !cfg.Enabled {
-			continue
-		}
-		if seenNames[cfg.Name] {
-			continue
-		}
-		seenNames[cfg.Name] = true
-
+	for _, cfg := range ordered {
 		agentLLM, mErr := modelForAgent(cfg)
 		if mErr != nil {
 			return nil, nil, nil, nil, mErr
@@ -132,6 +145,31 @@ func buildSubAgentsFromConfigs(
 		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, false, nil)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
+
+		// Nested delegation: this agent's OWN team, mounted with the same agenttool
+		// mechanism a squad root uses, one level down. This is what lets an expensive
+		// specialist push bulk retrieval into a cheap gatherer's context instead of
+		// accumulating it in its own — retrieval cost is quadratic in ONE agent's tool
+		// calls, so who holds the pages decides the bill. The targets are already
+		// built (topological order), and each mount point gets a FRESH wrapper.
+		if len(cfg.SubAgents) > 0 {
+			nestedCfgs := make([]RuntimeAgentConfig, 0, len(cfg.SubAgents))
+			for _, dep := range cfg.SubAgents {
+				depAgent, ok := subAgentMap[dep]
+				if !ok {
+					return nil, nil, nil, nil, fmt.Errorf("agent %q: subagent %q was not built", cfg.Name, dep)
+				}
+				depTool, wErr := wrapSubAgentTool(depAgent, closureByName[dep])
+				if wErr != nil {
+					return nil, nil, nil, nil, fmt.Errorf("agent %q: %w", cfg.Name, wErr)
+				}
+				subTools = append(subTools, depTool)
+				nestedCfgs = append(nestedCfgs, closureByName[dep])
+			}
+			// Same capabilities block the squad root gets: the delegation contract and
+			// each teammate's description are how this agent knows what its team is for.
+			instr += buildSubAgentCapabilitiesBlock(nestedCfgs, runtime)
+		}
 
 		// Mid-turn steering for sub-agents: while a sub-agent runs the leader is
 		// parked, so this callback yields control BACK to the leader the moment a
@@ -204,34 +242,64 @@ func buildSubAgentsFromConfigs(
 
 		subAgents = append(subAgents, sa)
 		subAgentMap[cfg.Name] = sa
+	}
 
-		// resumable_sessions swaps the throwaway per-call agenttool for one that
-		// keeps durable, re-attachable sessions (the leader resumes via a returned
-		// handle). It implements the same runnableTool interface, so the parallel /
-		// non-concurrent wrappers below are unchanged — each parallel task still
-		// gets its own handle, so durability and fan-out compose.
-		var wrapped runnableTool
-		if cfg.ResumableSessions {
-			rt, rErr := newResumableAgentTool(sa)
-			if rErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("resumable sub-agent %q: %w", cfg.Name, rErr)
-			}
-			wrapped = rt
-		} else {
-			w, ok := agenttool.New(sa, &agenttool.Config{}).(runnableTool)
-			if !ok {
-				return nil, nil, nil, nil, fmt.Errorf("agenttool for %q is not runnable", cfg.Name)
-			}
-			wrapped = w
+	// Leader tools: the DIRECT members only, in declared order. An agent reachable
+	// solely through another agent's `subagents` (a pure gatherer serving one
+	// specialist) is built and event-wired, but never handed to the coordinator —
+	// that is what keeps the leader's tool list from growing every time a
+	// specialist gains a helper.
+	mounted := make(map[string]bool, len(configs))
+	for _, cfg := range configs {
+		if !cfg.Enabled || mounted[cfg.Name] {
+			continue
 		}
-		// max_instances > 1 exposes a batch/fan-out tool that runs several
-		// independent invocations of this sub-agent in parallel; <= 1 keeps the
-		// single-task, one-at-a-time tool (today's behaviour).
-		if cfg.MaxInstances > 1 {
-			leaderSubTools = append(leaderSubTools, newParallelAgentTool(wrapped, cfg.MaxInstances))
-		} else {
-			leaderSubTools = append(leaderSubTools, newNonConcurrentTool(wrapped))
+		sa, ok := subAgentMap[cfg.Name]
+		if !ok {
+			continue
 		}
+		mounted[cfg.Name] = true
+		lt, wErr := wrapSubAgentTool(sa, cfg)
+		if wErr != nil {
+			return nil, nil, nil, nil, wErr
+		}
+		leaderSubTools = append(leaderSubTools, lt)
 	}
 	return subAgentMap, subAgents, leaderSubTools, mcpHandles, nil
+}
+
+// wrapSubAgentTool turns a built agent into a delegable tool for ONE mount point.
+//
+// resumable_sessions swaps the throwaway per-call agenttool for one that keeps
+// durable, re-attachable sessions (the caller resumes via a returned handle). It
+// implements the same runnableTool interface, so the parallel / non-concurrent
+// wrappers are unchanged — each parallel task still gets its own handle, so
+// durability and fan-out compose. max_instances > 1 exposes a batch/fan-out tool;
+// <= 1 keeps the single-task, one-at-a-time tool.
+//
+// A FRESH wrapper is made per mount point, deliberately: the non-concurrent
+// wrapper's mutex and the resumable wrapper's handle map are per-tool state, so
+// sharing one wrapper between the leader and a nested caller would make them
+// contend — a nested call would spuriously report the agent "already running" for
+// the leader. The underlying agent is stateless (agenttool builds a session per
+// call), so several wrappers over one agent are safe.
+func wrapSubAgentTool(sa adkagent.Agent, cfg RuntimeAgentConfig) (tool.Tool, error) {
+	var wrapped runnableTool
+	if cfg.ResumableSessions {
+		rt, err := newResumableAgentTool(sa)
+		if err != nil {
+			return nil, fmt.Errorf("resumable sub-agent %q: %w", cfg.Name, err)
+		}
+		wrapped = rt
+	} else {
+		w, ok := agenttool.New(sa, &agenttool.Config{}).(runnableTool)
+		if !ok {
+			return nil, fmt.Errorf("agenttool for %q is not runnable", cfg.Name)
+		}
+		wrapped = w
+	}
+	if cfg.MaxInstances > 1 {
+		return newParallelAgentTool(wrapped, cfg.MaxInstances), nil
+	}
+	return newNonConcurrentTool(wrapped), nil
 }

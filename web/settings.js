@@ -3828,6 +3828,30 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(resSec);
     }
 
+    // ── Team (subagents) ──
+    // This agent's OWN delegable team, mounted as tools exactly as a squad leader
+    // mounts its members. It is how an expensive specialist pushes bulk retrieval
+    // into a cheap gatherer's context instead of accumulating it in its own —
+    // retrieval cost is quadratic in ONE agent's tool calls, so who holds the
+    // fetched pages decides the bill.
+    //
+    // Offered for every agent EXCEPT the curator (a process-wide post-session hook,
+    // never delegable and never a delegator).
+    if ((a.name || "").toLowerCase() !== "curator") {
+      const teamSec = document.createElement("section");
+      teamSec.className = "agent-detail-section";
+      const teamHdr = document.createElement("div");
+      teamHdr.className = "agent-section-hdr";
+      teamHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><h3>${escHtml(tr("set.hdr.team"))}</h3>`;
+      teamSec.appendChild(teamHdr);
+
+      const teamBody = document.createElement("div");
+      teamBody.className = "agent-block-body";
+      renderAgentTeamBlock(teamBody, a, d.agents, onChange);
+      teamSec.appendChild(teamBody);
+      body.appendChild(teamSec);
+    }
+
     // ── Skills ──
     const skillsSec = document.createElement("section");
     skillsSec.className = "agent-detail-section" + (cur.has("Skill") ? "" : " section-inactive");
@@ -5661,6 +5685,106 @@ const BASE_PATH = window.BASE_PATH || "";
     } catch (e) {
       container.innerHTML = `<p class="settings-error">${escHtml(tr("set.block.skillsUnavailable", { error: e.message }))}</p>`;
     }
+  }
+
+  // ─── Team — per-agent `subagents` picker (mirrors the MCP picker pattern) ───
+  //
+  // An agent's `subagents` are the agents IT may delegate to — distinct from a
+  // squad's `members`, which is what the LEADER may delegate to. An agent
+  // reachable only through `subagents` is built for its caller without ever being
+  // handed to the coordinator, so a specialist can gain a helper without growing
+  // the leader's tool list.
+  //
+  // Cycles are excluded here rather than left to the server: a → b → a can never
+  // be built (wiring a's nested tool needs b's agent object, and b's needs a's),
+  // so ResolveRuntimeSettings rejects the whole config. Saving one would leave the
+  // running generation intact but fail every reload until it was fixed by hand —
+  // so the picker simply does not offer an agent that already depends on this one.
+  function subAgentDependsOn(agents, fromName, targetName) {
+    const byName = new Map(agents.map(x => [(x.name || "").toLowerCase(), x]));
+    const seen = new Set();
+    const walk = (name) => {
+      const key = (name || "").toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      if (key === targetName.toLowerCase()) return true;
+      const node = byName.get(key);
+      const subs = Array.isArray(node?.subagents) ? node.subagents : [];
+      return subs.some(walk);
+    };
+    return (Array.isArray(byName.get(fromName.toLowerCase())?.subagents) ? byName.get(fromName.toLowerCase()).subagents : []).some(walk);
+  }
+
+  function renderAgentTeamBlock(container, agent, allAgents, onChange) {
+    container.innerHTML = "";
+
+    const self = (agent.name || "").toLowerCase();
+    // Candidates: every enabled agent except this one, the curator, and any agent
+    // that (transitively) already delegates to this one — see the cycle note above.
+    const candidates = (allAgents || []).filter(x => {
+      const n = (x.name || "").toLowerCase();
+      if (!n || n === self || n === "curator") return false;
+      if (x.enabled === false) return false;
+      if (subAgentDependsOn(allAgents, n, self)) return false;
+      return true;
+    });
+
+    if (!Array.isArray(agent.subagents)) agent.subagents = [];
+    const selected = new Set(agent.subagents.map(n => (n || "").toLowerCase()));
+
+    const hint = document.createElement("p");
+    hint.className = "agent-gen-hint";
+    hint.textContent = tr("set.agent.teamHint");
+    container.appendChild(hint);
+
+    if (!candidates.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = tr("set.block.noTeamCandidates");
+      container.appendChild(p);
+      return;
+    }
+
+    const teamIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+
+    const grid = document.createElement("div");
+    grid.className = "agent-tools-grid";
+
+    const sorted = [...candidates].sort((x, y) =>
+      Number(selected.has((y.name || "").toLowerCase())) - Number(selected.has((x.name || "").toLowerCase())));
+
+    for (const cand of sorted) {
+      const name = cand.name || "";
+      let isOn = selected.has(name.toLowerCase());
+      const card = document.createElement("div");
+      card.className = "agent-tool-card" + (isOn ? " tool-on" : "");
+      card.dataset.subagent = name;
+      const meta = [];
+      if (cand.model_ref) meta.push(cand.model_ref);
+      if (Number(cand.max_instances) > 1) meta.push(`×${cand.max_instances}`);
+      const desc = cand.description || meta.join(" · ");
+      card.innerHTML = `
+        <div class="agent-tool-icon">${teamIcon}</div>
+        <div class="agent-tool-info">
+          <span class="agent-tool-name">${escHtml(name)}${meta.length ? ` <span class="agent-tool-meta">${escHtml(meta.join(" · "))}</span>` : ""}</span>
+          <span class="agent-tool-desc">${escHtml(desc)}</span>
+        </div>
+        <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
+      `;
+      card.addEventListener("click", () => {
+        isOn = !isOn;
+        if (isOn) selected.add(name.toLowerCase()); else selected.delete(name.toLowerCase());
+        // Preserve the catalogue's declaration order, and keep the key absent when
+        // empty so agent.json stays clean for the (overwhelmingly common) no-team case.
+        const next = candidates.map(x => x.name).filter(n => selected.has((n || "").toLowerCase()));
+        if (next.length) agent.subagents = next; else delete agent.subagents;
+        card.classList.toggle("tool-on", isOn);
+        card.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (isOn ? "pill-on" : "pill-off");
+        onChange();
+      });
+      grid.appendChild(card);
+    }
+    container.appendChild(grid);
   }
 
   // ─── MCP — agent picker (mirrors the Skills picker pattern) ──────────

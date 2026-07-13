@@ -12,6 +12,7 @@ func TestParseAgentDeps(t *testing.T) {
 		raw       string
 		wantSkill []string
 		wantMCP   []string
+		wantSubs  []string
 	}{
 		{
 			name:      "snake_case",
@@ -46,15 +47,27 @@ func TestParseAgentDeps(t *testing.T) {
 			wantSkill: []string{"gitops-knowledge", "gitops-repo-audit"},
 			wantMCP:   []string{"flux-operator-mcp"},
 		},
+		{
+			// The agent's own delegable team. This is the one dependency whose
+			// absence is FATAL rather than degrading — a dangling `subagents` edge
+			// makes the whole runtime config fail to resolve — so the cascade must
+			// see it.
+			name:     "subagents",
+			raw:      `{"name":"research_critic","subagents":["web_fetcher"]}`,
+			wantSubs: []string{"web_fetcher"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			skills, mcp := parseAgentDeps([]byte(tc.raw))
+			skills, mcp, subs := parseAgentDeps([]byte(tc.raw))
 			if !reflect.DeepEqual(skills, tc.wantSkill) {
 				t.Errorf("skills = %v, want %v", skills, tc.wantSkill)
 			}
 			if !reflect.DeepEqual(mcp, tc.wantMCP) {
 				t.Errorf("mcp = %v, want %v", mcp, tc.wantMCP)
+			}
+			if !reflect.DeepEqual(subs, tc.wantSubs) {
+				t.Errorf("subagents = %v, want %v", subs, tc.wantSubs)
 			}
 		})
 	}

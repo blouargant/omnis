@@ -140,31 +140,37 @@ func (d Deps) requestReload() bool {
 	return d.RequestReload()
 }
 
-// parseAgentDeps extracts the skills and mcp_servers dependency lists declared
-// in a remote agent's manifest. AgentEntry accepts both the snake_case
+// parseAgentDeps extracts the skills, mcp_servers and subagents dependency lists
+// declared in a remote agent's manifest. AgentEntry accepts both the snake_case
 // "mcp_servers" and the camelCase "mcpServers" alias, so both are read and
 // merged.
+//
+// `subagents` (the agent's own delegable team) is the one dependency whose absence
+// is FATAL rather than degrading: a dangling edge makes the whole runtime config
+// fail to resolve. See resolveSubAgentDeps.
 //
 // A Claude-format markdown manifest (a .md file whose skills/mcpServers live in
 // YAML frontmatter) is not valid JSON, so the native parse fails — we then fall
 // back to the shared Claude-format parser so the dependency cascade also fires
-// for markdown agents. This mirrors the web-UI install route, which reads the
-// deps from the normalised on-disk agent.json that InstallAgent writes after
+// for markdown agents. That format has no `subagents` concept, so a markdown
+// agent never declares a team. This mirrors the web-UI install route, which reads
+// the deps from the normalised on-disk agent.json that InstallAgent writes after
 // converting either format.
-func parseAgentDeps(raw []byte) (skills, mcpServers []string) {
+func parseAgentDeps(raw []byte) (skills, mcpServers, subAgents []string) {
 	var entry struct {
 		Skills        []string `json:"skills"`
 		MCPServers    []string `json:"mcp_servers"`
 		MCPServersAlt []string `json:"mcpServers"`
+		SubAgents     []string `json:"subagents"`
 	}
 	if err := json.Unmarshal(raw, &entry); err == nil {
-		return entry.Skills, append(entry.MCPServers, entry.MCPServersAlt...)
+		return entry.Skills, append(entry.MCPServers, entry.MCPServersAlt...), entry.SubAgents
 	}
 	defs, err := claudeformat.Parse(raw)
 	if err != nil || len(defs) == 0 || defs[0] == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return defs[0].Skills, defs[0].MCPServers
+	return defs[0].Skills, defs[0].MCPServers, nil
 }
 
 // resolveAgentDeps installs the skills and MCP servers an agent declares but
@@ -273,6 +279,102 @@ func (d Deps) resolveAgentDeps(skills, mcpServers []string) (installed, warnings
 		}
 		if !found {
 			warnings = append(warnings, fmt.Sprintf("MCP server %q is required but was not found in any configured registry", name))
+		}
+	}
+	return installed, warnings
+}
+
+// maxSubAgentInstallDepth bounds the recursive `subagents` cascade. A gatherer may
+// itself have a team, but a deep chain almost certainly means a mis-authored
+// registry rather than a real topology, and we must not walk one forever.
+const maxSubAgentInstallDepth = 4
+
+// resolveSubAgentDeps installs the agents an agent delegates to via `subagents`,
+// recursively (a gatherer may have a team of its own).
+//
+// This cascade is NOT best-effort in the way the skills/MCP ones are. A dangling
+// `subagents` edge is FATAL: validateSubAgentGraph rejects the whole runtime
+// config, so a specialist installed without its team does not merely lose a
+// capability — it breaks every squad until the config is fixed. The warning it
+// emits therefore has to say so, loudly, rather than read as a soft note.
+//
+// Each installed sub-agent is ENABLED (the graph rejects a disabled target), and
+// is left out of every squad's members: an agent reachable only through
+// `subagents` is built for its caller without being handed to the coordinator.
+func (d Deps) resolveSubAgentDeps(subAgents []string, depth int) (installed, warnings []string) {
+	if len(subAgents) == 0 {
+		return nil, nil
+	}
+	if depth >= maxSubAgentInstallDepth {
+		return nil, []string{fmt.Sprintf("stopped resolving `subagents` at depth %d: the chain %v is suspiciously deep", depth, subAgents)}
+	}
+	if d.InstallAgent == nil {
+		return nil, []string{fmt.Sprintf("agents %v are required as sub-agents but agent install is unavailable in this surface", subAgents)}
+	}
+
+	var regs []Registry
+	if d.ConfigPath != nil {
+		regs, _ = LoadRegistries(d.ConfigPath())
+	}
+	agentsDir := ""
+	if d.AgentsRegistryDir != nil {
+		agentsDir = d.AgentsRegistryDir()
+	}
+
+	for _, name := range subAgents {
+		if name == "" {
+			continue
+		}
+		if agentsDir != "" {
+			if _, err := os.Stat(filepath.Join(agentsDir, name, "agent.json")); err == nil {
+				continue // already installed
+			}
+		}
+		found := false
+		for _, reg := range regs {
+			// Every registry, not just agents-kind ones — same reasoning as the
+			// skills/MCP loops: a repo bundling a specialist with its gatherers is
+			// commonly registered under one kind, and BrowseAgents simply finds
+			// nothing in a registry without agent manifests.
+			ref, err := ParseRepoRef(reg.URL, reg.Provider)
+			if err != nil {
+				continue
+			}
+			items, err := BrowseAgents(ref, reg.Token, agentsDir)
+			if err != nil {
+				continue
+			}
+			for _, it := range items {
+				if it.Name != name {
+					continue
+				}
+				// enable=true: the graph rejects a disabled target, so an installed
+				// sub-agent that is not enabled would still break the config.
+				if _, _, err := d.InstallAgent(ref, reg.Token, it.DirPath, true); err != nil {
+					break
+				}
+				installed = append(installed, "agent:"+name)
+				found = true
+
+				// Its own dependencies, including its own team.
+				if raw, ferr := FetchAgentJSON(ref, reg.Token, it.DirPath); ferr == nil {
+					skills, mcpServers, nested := parseAgentDeps(raw)
+					di, dw := d.resolveAgentDeps(skills, mcpServers)
+					installed = append(installed, di...)
+					warnings = append(warnings, dw...)
+					ni, nw := d.resolveSubAgentDeps(nested, depth+1)
+					installed = append(installed, ni...)
+					warnings = append(warnings, nw...)
+				}
+				break
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf(
+				"agent %q is required as a sub-agent but was not found in any configured registry — the config will FAIL to load until it is installed or the `subagents` edge is removed", name))
 		}
 	}
 	return installed, warnings

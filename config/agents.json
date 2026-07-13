@@ -19,6 +19,7 @@
     "knowledge_leader",
     "doc_agent",
     "research_critic",
+    "web_fetcher",
     "coder",
     "code_scout",
     "code_docs",

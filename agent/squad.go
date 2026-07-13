@@ -13,6 +13,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	adkagent "google.golang.org/adk/agent"
@@ -422,10 +423,29 @@ func buildSquadInstance(
 		LeaderCfg:                  rootCfg,
 		LeaderAllowFileAttachments: rootCfg.AllowFileAttachments,
 	}
-	subAgentNames := make([]string, 0, len(memberCfgs))
+	// Every agent that can be INVOKED as a sub-agent, not just the squad's direct
+	// members: a nested gatherer (reachable only through another agent's
+	// `subagents`) is invoked exactly like a member, so it must be in this set or
+	// registerSubAgentEvents would never re-emit EventSubAgentStart/End for it and
+	// the reflection pipeline would be blind to the calls. Members first (declared
+	// order), then the nested-only agents, sorted for determinism.
+	subAgentNames := make([]string, 0, len(subAgentMap))
+	listed := make(map[string]bool, len(subAgentMap))
 	for _, cfg := range memberCfgs {
-		subAgentNames = append(subAgentNames, cfg.Name)
+		if _, built := subAgentMap[cfg.Name]; built && !listed[cfg.Name] {
+			listed[cfg.Name] = true
+			subAgentNames = append(subAgentNames, cfg.Name)
+		}
 	}
+	nested := make([]string, 0, len(subAgentMap))
+	for name := range subAgentMap {
+		if !listed[name] {
+			nested = append(nested, name)
+		}
+	}
+	sort.Strings(nested)
+	subAgentNames = append(subAgentNames, nested...)
+
 	return &squadBuildResult{
 		Squad:         sq,
 		PluginCloser:  squadCloser,

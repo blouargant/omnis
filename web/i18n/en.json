@@ -761,5 +761,8 @@
   "app.export.failed": "Export failed.",
   "app.import.badFile": "That file isn’t a valid Omnis session export.",
   "app.import.failed": "Import failed.",
-  "app.import.done": "Chat imported."
+  "app.import.done": "Chat imported.",
+  "set.hdr.team": "Team",
+  "set.agent.teamHint": "Agents this agent may delegate to. A gatherer absorbs the bulk of what it retrieves — pages, grep hits, logs — into its own cheap context, and hands back only the distilled evidence, so this agent's context (and bill) stays small. Distinct from a squad's members, which is what the leader may delegate to.",
+  "set.block.noTeamCandidates": "No other enabled agent can be delegated to from here."
 }

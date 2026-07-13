@@ -140,9 +140,12 @@ func registerRemoteAgentRegistryRoutes(
 			enabled = added
 		}
 
-		// Resolve skill and MCP server dependencies declared in the installed agent.json.
+		// Resolve the skill, MCP server and sub-agent dependencies declared in the
+		// installed agent.json. The sub-agent cascade is the load-bearing one: a
+		// missing skill or MCP server degrades the agent, but a dangling `subagents`
+		// edge makes the whole runtime config fail to resolve.
 		var warnings []string
-		skills, mcpServers := parseAgentJSONDeps(filepath.Join(agentsRegistryDir, agentName, "agent.json"))
+		skills, mcpServers, subAgents := parseAgentJSONDeps(filepath.Join(agentsRegistryDir, agentName, "agent.json"))
 		if len(skills) > 0 {
 			_, skillWarns := tryAutoInstallSkills(skills, skillsReadDir, skillsWriteDir, readPath())
 			warnings = append(warnings, skillWarns...)
@@ -150,6 +153,12 @@ func registerRemoteAgentRegistryRoutes(
 		if len(mcpServers) > 0 {
 			_, mcpWarns := tryAutoInstallMCP(mcpServers, mcpConfigRead(), mcpConfigWrite, readPath())
 			warnings = append(warnings, mcpWarns...)
+		}
+		if len(subAgents) > 0 {
+			// tryAutoInstallAgents enables each one in agents.json — the graph rejects
+			// a disabled target, so a merely-downloaded sub-agent would still break it.
+			_, subWarns := tryAutoInstallAgents(subAgents, agentsRegistryDir, agentsConfigRead, agentsConfigWrite, readPath())
+			warnings = append(warnings, subWarns...)
 		}
 
 		resp := gin.H{"name": agentName, "enabled": enabled}
