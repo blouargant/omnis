@@ -269,13 +269,24 @@
 .msg-row.assistant {
   align-items: flex-start;
   max-width: calc(min(var(--col-w), 100%) - 56px);
+  /* Reserve a strip under the reply for the .msg-actions cluster (26px tall,
+     absolutely positioned at the row's bottom edge). The bubble fills the row's
+     full width, so the cluster has nowhere to sit beside the text — without this
+     padding it lands on top of the reply's last line. */
+  padding-bottom: 34px;
 }
-/* Beside the avatar the reply fills the remaining width (margins reset, flex:1)
-   rather than centering. Scoped to the reply row so asides / placeholders /
-   spawn-result bubbles keep their own centering. */
+/* The reply fills its row (margins reset, flex:1) rather than centering inside
+   it — the row itself is what's centred. max-width MUST be reset to 100% here:
+   the generic .bubble-assistant caps at min(--col-w, 100%), which inside the row
+   re-applies the 90% column a second time; with the auto margins gone and the
+   row being a flex-start container, that leftover ~10% all lands on the right
+   and drags the text column visibly left of the composer / user bubble.
+   Scoped to the reply row so asides / placeholders / spawn-result bubbles keep
+   their own centering. */
 .msg-row.assistant .bubble-assistant {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   margin-left: 0;
   margin-right: 0;
 }
@@ -400,11 +411,14 @@
 /* Copy split-button on assistant messages: an icon (copy as Markdown) joined to
    a caret (copy as Slack / Jira / Rich text / Plain). */
 .msg-row.assistant { position: relative; }
-/* Bottom-right action cluster: reply-time chip + copy split-button. */
+/* Action cluster (reply-time chip + copy split-button): sits in the strip the
+   row reserves below the reply (.msg-row.assistant padding-bottom), right-aligned
+   with the text column (right = the row's 20px side padding) rather than the row's
+   border edge, so it tracks the reply's right margin. */
 .msg-actions {
   position: absolute;
   bottom: 4px;
-  right: 4px;
+  right: 20px;
   display: flex;
   align-items: center;
   gap: 8px;
