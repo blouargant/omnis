@@ -104,6 +104,7 @@
       "AskUserQuestion",
       "bg_list",
       "curate_session",
+      "record_session_feedback",
       "recall_softskills",
       "recall_precedents",
       "search_code",

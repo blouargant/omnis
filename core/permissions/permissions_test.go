@@ -495,6 +495,11 @@ func TestShippedConfigParity(t *testing.T) {
 		{"WebFetch", map[string]any{"url": "https://go.dev"}, DecisionAllow},
 		{"html_to_markdown", map[string]any{"html": "<p>x</p>"}, DecisionAllow},
 		{"calculate", map[string]any{"expression": "2+2"}, DecisionAllow},
+		// The wrap-session soft-skill's closing question must not dead-end in a
+		// permission card: record_session_feedback writes one fixed, session-derived
+		// path (logs/agent_feedback_<suffix>.json) with no model-controlled path
+		// component, exactly like the already-allowed curate_session.
+		{"record_session_feedback", map[string]any{"question": "are we good to wrap?", "answer": "yes"}, DecisionAllow},
 		// …but a sub-agent's mutating tools still prompt (fall through to ask).
 		{"Write", file("/proj/x.go"), DecisionAsk},
 		{"Edit", file("/proj/x.go"), DecisionAsk},

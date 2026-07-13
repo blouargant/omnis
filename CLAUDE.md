@@ -1440,6 +1440,15 @@ loaders, and read-only `Read`/Bash builtins. Mutating/executing tools (`Write`,
 locks this in. When adding a new sub-agent tool group, decide whether its tools
 are read-only-safe (add to the allow-list) or mutating (leave gated).
 
+**Two session-lifecycle writers are deliberate allow-list exceptions**:
+`curate_session` and `record_session_feedback` (the wrap-session soft-skill's
+persistence tool — see "Soft-skill reflection pipeline"). Both write, but each
+writes **one fixed path derived from the session suffix** with no model- or
+user-controlled path component, so the "mutating ⇒ gate it" rule buys nothing
+here — and gating `record_session_feedback` made the wrap-up question dead-end in
+a permission card, which is exactly the friction that skill exists to avoid.
+Don't "clean these up" back into the gated set.
+
 **No ask-user / permission timeout — wait, don't auto-deny.** An unanswered
 ask-user or permission card **waits indefinitely** rather than being dropped on a
 timer: denying an action a task needs is worse than waiting for the user to come
