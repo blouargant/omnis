@@ -188,6 +188,45 @@ func (ce *codingEfficiency) afterTool(tc tool.Context, t tool.Tool, args, result
 	return nil, nil
 }
 
+// subAgentShaperCallback returns the universal output shaper as a standalone
+// AfterToolCallback for sub-agents.
+//
+// The shaper exists so one runaway tool result cannot flood a context — but it
+// lived only in the runner plugin above, and runner plugins do NOT reach a
+// sub-agent (agenttool runs it in its own plugin-less runner). So every
+// sub-agent's tool output was unshaped, and that is expensive in a way the
+// leader's is not: a sub-agent runs its own flow loop, re-sending its entire
+// accumulated context on every model call. Each unshaped WebFetch page therefore
+// gets re-billed once per subsequent step, making cost QUADRATIC in tool calls.
+// research_critic reached 9.1M prompt tokens (60% of a turn's cost) that way,
+// and web_agent 5.35M. Capping each result at ~8k tokens roughly halves it.
+//
+// Only the shaper is attached — deliberately not the other two transforms:
+//
+//   - dedup would be WRONG here. It replaces a re-read with an "unchanged" stub,
+//     which is only safe because the reader already has that content in its own
+//     context. Sharing one cache across the leader and its sub-agents would hand
+//     a sub-agent a stub for a file it has never seen.
+//   - fusion is the leader's edit→verify loop and needs the LSP manager; a
+//     sub-agent's edit results are small anyway.
+//
+// Stateless, so there is no cache to key, invalidate, or leak.
+func subAgentShaperCallback() llmagent.AfterToolCallback {
+	return func(_ tool.Context, t tool.Tool, _ map[string]any, result map[string]any, _ error) (map[string]any, error) {
+		if result == nil || t == nil {
+			return nil, nil
+		}
+		name := t.Name()
+		if shaperExempt[name] {
+			return nil, nil
+		}
+		if shaped, ok := shapeResult(name, result); ok {
+			return shaped, nil
+		}
+		return nil, nil
+	}
+}
+
 // fuse appends the diagnostics delta for the edited file(s) to an edit result.
 // Returns nil (no change) on a failed/no-op edit, when no server is running for
 // any touched file, or when there's nothing to report.

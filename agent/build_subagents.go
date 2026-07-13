@@ -177,6 +177,13 @@ func buildSubAgentsFromConfigs(
 		if hooksAfterTool != nil {
 			afterTool = append(afterTool, hooksAfterTool)
 		}
+		// Cap this sub-agent's tool output. The runner-level shaper never reached
+		// here (plugins don't cross into agenttool's runner), so a fetched page
+		// landed whole in the sub-agent's context and was re-billed on every
+		// subsequent model call of its private flow loop — the quadratic blow-up
+		// behind research_critic's 9.1M prompt tokens. Last in the chain, so a hook
+		// that rewrote the result is shaped too.
+		afterTool = append(afterTool, subAgentShaperCallback())
 
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                 cfg.Name,

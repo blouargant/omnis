@@ -184,3 +184,126 @@ func TestUnlimitedLimitsArmNothing(t *testing.T) {
 		t.Fatal("an unlimited StartTurn should not arm a turn")
 	}
 }
+
+func TestPerAgentCapIsIndependentOfTheTurnCeiling(t *testing.T) {
+	s := New()
+	// No global ceiling at all — only a per-agent cap. The turn must still arm,
+	// otherwise a per-agent design limit would silently depend on the user having
+	// configured a spend budget.
+	s.StartTurn("sid", Limits{PerAgent: map[string]int{"research_critic": 3}})
+
+	for i := 1; i <= 3; i++ {
+		if over, _ := s.ChargeAgent("sid", "research_critic"); over {
+			t.Fatalf("call %d: capped early, want the first 3 to pass", i)
+		}
+	}
+	if over, _ := s.ChargeAgent("sid", "research_critic"); !over {
+		t.Fatal("4th call was not capped")
+	}
+	// Still capped afterwards.
+	if over, _ := s.ChargeAgent("sid", "research_critic"); !over {
+		t.Fatal("5th call escaped the cap")
+	}
+	// An uncapped agent in the same turn is untouched.
+	for i := 0; i < 50; i++ {
+		if over, _ := s.ChargeAgent("sid", "web_agent"); over {
+			t.Fatal("an agent with no configured cap was capped")
+		}
+	}
+	// The global gate is unaffected: no MaxToolCalls was set.
+	for i := 0; i < 20; i++ {
+		if v := s.Gate("sid", nil); v != Proceed {
+			t.Fatalf("global gate halted with no MaxToolCalls set: %v", v)
+		}
+	}
+}
+
+// A "Continue" grant buys more turn budget; it must not re-open an agent's
+// bounded verification pass — that cap expresses how the agent is designed to
+// work, not how much the user is willing to spend.
+func TestContinueDoesNotRaiseAPerAgentCap(t *testing.T) {
+	s := New()
+	s.StartTurn("sid", Limits{MaxToolCalls: 1, PerAgent: map[string]int{"research_critic": 1}})
+
+	if over, _ := s.ChargeAgent("sid", "research_critic"); over {
+		t.Fatal("first call capped")
+	}
+	if v := s.Gate("sid", func(Usage) Outcome { return OutcomeContinue }); v != Proceed {
+		t.Fatalf("got %v, want Proceed", v)
+	}
+	// Turn budget was extended, but the critic's own cap still holds.
+	if over, _ := s.ChargeAgent("sid", "research_critic"); !over {
+		t.Fatal("a Continue grant re-opened the per-agent cap")
+	}
+}
+
+func TestStartTurnResetsPerAgentCounters(t *testing.T) {
+	s := New()
+	l := Limits{PerAgent: map[string]int{"research_critic": 2}}
+	s.StartTurn("sid", l)
+	_, _ = s.ChargeAgent("sid", "research_critic")
+	_, _ = s.ChargeAgent("sid", "research_critic")
+	if over, _ := s.ChargeAgent("sid", "research_critic"); !over {
+		t.Fatal("3rd call not capped")
+	}
+	s.StartTurn("sid", l) // next turn
+	if n := s.AgentCalls("sid", "research_critic"); n != 0 {
+		t.Fatalf("agent counter = %d after StartTurn, want a clean slate", n)
+	}
+	if over, _ := s.ChargeAgent("sid", "research_critic"); over {
+		t.Fatal("capped on the first call of a fresh turn")
+	}
+}
+
+// A per-agent cap is per-TURN and keyed by agent NAME, so every parallel
+// instance of a max_instances fan-out agent draws from the SAME counter. That
+// makes it a total work budget for that agent in the turn, not a per-instance
+// one — capping a 10-way fan-out at 12 gives each researcher barely one call.
+// This is why the cap is set on research_critic (max_instances: 1) and NOT on
+// web_agent (max_instances: 10), whose cost is bounded by the output shaper
+// instead. Locking the semantics in so the trap is visible if someone changes it.
+func TestPerAgentCapIsSharedAcrossParallelInstances(t *testing.T) {
+	s := New()
+	s.StartTurn("sid", Limits{PerAgent: map[string]int{"web_agent": 4}})
+
+	// Two concurrent instances of the same agent (a fan-out) share the counter.
+	var over int
+	for i := 0; i < 6; i++ {
+		if blocked, _ := s.ChargeAgent("sid", "web_agent"); blocked {
+			over++
+		}
+	}
+	if got := s.AgentCalls("sid", "web_agent"); got != 6 {
+		t.Fatalf("agent calls = %d, want 6 counted across instances", got)
+	}
+	if over != 2 {
+		t.Fatalf("%d calls over cap, want 2 (the cap is a shared total, not per-instance)", over)
+	}
+}
+
+// overBy is what lets the caller escalate from "please stop" to "you are stopped".
+// A notice is only an instruction: in a live run a capped web_agent issued 16
+// further tool calls across 13 model round-trips after being told to stop, and
+// nothing would ever have ended that — its flow loop has no iteration cap, and a
+// blocked call is not charged to the shared turn budget. overBy counts how far
+// past the cap each blocked call is, so the caller can terminate the loop for
+// real once its grace is spent.
+func TestChargeAgentReportsHowFarPastTheCap(t *testing.T) {
+	s := New()
+	s.StartTurn("sid", Limits{PerAgent: map[string]int{"research_critic": 2}})
+
+	for i := 1; i <= 2; i++ {
+		if over, by := s.ChargeAgent("sid", "research_critic"); over || by != 0 {
+			t.Fatalf("call %d: over=%v by=%d, want under the cap", i, over, by)
+		}
+	}
+	for want := 1; want <= 5; want++ {
+		over, by := s.ChargeAgent("sid", "research_critic")
+		if !over {
+			t.Fatalf("blocked call %d reported under the cap", want)
+		}
+		if by != want {
+			t.Fatalf("overBy = %d, want %d (it must keep climbing so the caller can escalate)", by, want)
+		}
+	}
+}

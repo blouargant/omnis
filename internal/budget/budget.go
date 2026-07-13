@@ -27,14 +27,29 @@ const (
 )
 
 // Limits is a per-turn ceiling. A zero field means "no limit on that axis";
-// both zero means the turn is unbounded.
+// all zero/empty means the turn is unbounded.
 type Limits struct {
 	MaxToolCalls int
 	MaxTokens    int64
+
+	// PerAgent caps how many tool calls ONE agent may make in a turn (agent name
+	// → cap; absent or 0 = uncapped). This is a different instrument from
+	// MaxToolCalls: that one is a spend ceiling on the whole turn and asks the
+	// user when it trips, whereas this is a per-agent DESIGN limit — "the critic
+	// verifies with at most N searches" — that simply tells the agent to conclude.
+	//
+	// It exists because a sub-agent's cost is quadratic in its tool calls: it runs
+	// its own flow loop, re-sending its whole accumulated context (including every
+	// fetched page) on each model call. research_critic reached 9.1M prompt tokens
+	// from ~20 fetches × 2 invocations. Bounding N is therefore worth far more than
+	// bounding the tokens directly.
+	PerAgent map[string]int
 }
 
 // Unlimited reports whether the limits impose no ceiling at all.
-func (l Limits) Unlimited() bool { return l.MaxToolCalls <= 0 && l.MaxTokens <= 0 }
+func (l Limits) Unlimited() bool {
+	return l.MaxToolCalls <= 0 && l.MaxTokens <= 0 && len(l.PerAgent) == 0
+}
 
 // Usage is what a turn has spent so far, plus the ceiling it is spending against.
 type Usage struct {
@@ -65,8 +80,9 @@ type turn struct {
 	mu        sync.Mutex
 	toolCalls int
 	tokens    int64
-	limits    Limits // current ceiling; raised by each grant
-	grant     Limits // the slice added per "Continue" (the original limits)
+	agents    map[string]int // agent name → tool calls it has made this turn
+	limits    Limits         // current ceiling; raised by each grant
+	grant     Limits         // the slice added per "Continue" (the original limits)
 	grants    int
 	halted    bool
 	unlimited bool
@@ -124,7 +140,56 @@ func (s *Store) StartTurn(sid string, l Limits) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[sid] = &turn{limits: l, grant: l}
+	s.m[sid] = &turn{limits: l, grant: l, agents: map[string]int{}}
+}
+
+// ChargeAgent counts one tool call made by `agent` and reports whether that
+// agent has now exceeded its OWN per-turn cap (Limits.PerAgent).
+//
+// Unlike Gate this never asks the user: a per-agent cap is a design limit on how
+// much work that agent does, not a surprise bill, so the caller simply tells the
+// agent to conclude with what it has. An uncapped agent (or an unarmed session)
+// always reports false, so this is a no-op unless a cap is configured.
+//
+// A "Continue" grant on the shared turn budget deliberately does NOT raise a
+// per-agent cap: the user agreeing to spend more should not silently re-open an
+// agent's bounded verification pass.
+// overBy is how far past the cap this call is: 1 for the first blocked call, 2
+// for the second, and so on. The caller uses it to escalate — a notice is only
+// an instruction, and a model that ignores it would otherwise keep issuing tool
+// calls forever (its flow loop has no iteration cap, and a blocked call is not
+// charged to the shared turn budget, so nothing else would ever stop it).
+func (s *Store) ChargeAgent(sid, agent string) (over bool, overBy int) {
+	t := s.get(sid)
+	if t == nil || agent == "" {
+		return false, 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	limit := t.limits.PerAgent[agent]
+	if limit <= 0 {
+		return false, 0 // uncapped agent
+	}
+	if t.agents == nil {
+		t.agents = map[string]int{}
+	}
+	t.agents[agent]++
+	if n := t.agents[agent]; n > limit {
+		return true, n - limit
+	}
+	return false, 0
+}
+
+// AgentCalls reports how many tool calls `agent` has made in the session's
+// current turn.
+func (s *Store) AgentCalls(sid, agent string) int {
+	t := s.get(sid)
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.agents[agent]
 }
 
 // Forget drops a session's budget (session deleted / turn finished).

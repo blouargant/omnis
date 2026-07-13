@@ -476,6 +476,10 @@ and returns `{ results: [ … ] }`. Because ADK dispatches function calls via
 (not the inner) via the local `packToolDecl` (a copy of ADK's unexported
 `toolutils.PackTool`) so the model gets the batch declaration and the runner
 dispatches the fan-out. `max_instances` defaults to `1` and is per-agent.
+An agent may also declare **`max_tool_calls`** (per-turn tool-call cap for that
+agent; 0/absent = uncapped) — see "Per-agent cap" under "Per-turn spend budget".
+Note it interacts with `max_instances`: the cap is keyed by agent **name**, so a
+fan-out's parallel instances **share** it.
 The web UI Settings → Agent panel exposes it as a **Max parallel instances**
 numeric field (a `Parallelism` section, hidden for the leader and curator
 since both are excluded from fan-out); the value round-trips through the
@@ -793,6 +797,22 @@ compose (fusion → dedup → shaper):
    context. **Universal-with-exemptions** (`shaperExempt`: `ask_user`, the
    routing tools, `todo_*`), so a newly added high-volume tool is capped by
    default. No paging (v1) — the note pushes a precise re-query instead.
+
+**The shaper is ALSO attached to every sub-agent** (`subAgentShaperCallback`,
+[agent/coding_efficiency_plugin.go](agent/coding_efficiency_plugin.go), appended in
+[agent/build_subagents.go](agent/build_subagents.go)) — the plugin above is a
+*runner* plugin, and runner plugins do not cross into agenttool's private runner,
+so a sub-agent's tool output was **unshaped**. That is far more expensive than an
+unshaped leader result: a sub-agent runs its **own flow loop**, re-sending its
+entire accumulated context on every model call, so one whole fetched page gets
+**re-billed once per subsequent step** — cost **quadratic** in tool calls. That is
+how `research_critic` reached **9.1M** prompt tokens (60% of a turn's cost) and
+`web_agent` **5.35M**; capping each result at ~8k tokens roughly halves it.
+**Only the shaper is attached**, deliberately: `dedup` would be *wrong* there (it
+replaces a re-read with an "unchanged" stub, which is only safe because the reader
+already has that content in *its* context — one shared cache would hand a sub-agent
+a stub for a file it has never seen), and `fusion` is the leader's edit→verify loop.
+The shaper is stateless, so there is no cache to key, invalidate, or leak.
 
 `dominantString` picks each tool's largest string field, so the plugin works
 across tools without hard-coding output keys. **No-op contract:** with nothing
@@ -2392,6 +2412,43 @@ guarantee.**
   from the material you have already gathered, and state plainly which parts are
   unverified"). Verified end-to-end: the model stops calling tools and writes an
   honest incomplete answer.
+**Per-agent cap (`max_tool_calls`) — a different instrument.** An agent's
+`agent.json` may set `"max_tool_calls": N`, capping how many tool calls **that
+agent** makes in one turn (0/absent = uncapped; folded into `Limits.PerAgent` by
+`ResolveRuntimeSettings`, so it hot-reloads). It is a **design limit** ("the critic
+verifies with at most N searches"), not a spend ceiling: it **never asks the user**
+— it returns `agentCapNotice` telling the agent to conclude with what it has.
+Checked **before** the shared gate, so a call it rejects is not charged to the turn
+budget (it is work that never happened).
+
+It matters because **a sub-agent's cost is quadratic in its tool calls**: it runs
+its own flow loop and re-sends its entire accumulated context — every fetched page
+included — on each model call. `research_critic` reached **9.1M prompt tokens from
+~20 fetches × 2 invocations**; capping N is worth far more than capping tokens.
+Shipped: `research_critic` at **12** ([registry/agents/research_critic/agent.json](registry/agents/research_critic/agent.json)).
+
+- **A notice is only an instruction — so it escalates.** A live run showed a capped
+  `web_agent` issue **16 further tool calls across 13 model round-trips** after
+  being told to stop, and *nothing* would have ended that: the flow loop has no
+  iteration cap, and a blocked call is not charged to the turn budget. So
+  `ChargeAgent` returns **`overBy`** (how far past the cap this call is): the first
+  `agentCapGraceCalls` (3) blocked calls carry the notice alone — enough for a
+  cooperative agent to stop and write up its partial findings (the salvage) — and
+  past that the callback sets **`tc.Actions().SkipSummarization = true`**, which
+  makes the function-response event `IsFinalResponse()` and **terminates the flow
+  loop**. Host-side guarantee, same mechanism the routing tools use.
+- **The two layers compose** (verified live): the per-agent cap bounds a
+  *sub-agent's* loop; the *leader's* re-delegation loop (it re-invokes a capped
+  sub-agent) is bounded by the shared turn budget, which asks the user.
+- **GOTCHA — a cap is shared across a fan-out.** It is per-turn and keyed by agent
+  **name**, so every parallel instance of a `max_instances` agent draws from the
+  **same** counter: it is a *total* work budget for that agent in the turn, not a
+  per-instance one. Capping a 10-way `web_agent` fan-out at 12 would give each
+  researcher barely one call. This is why the cap is set on `research_critic`
+  (`max_instances: 1`) and **not** on `web_agent` (`max_instances: 10`), whose cost
+  is bounded by the output shaper instead. Locked in by
+  `TestPerAgentCapIsSharedAcrossParallelInstances`.
+
 - **Config**: `turn_budget: {max_tool_calls, max_tokens}` in `agents.json` (pointer
   fields, so an explicit `0` = "no ceiling on this axis" is distinguishable from
   absent = "use the default"), overridden by `OMNIS_TURN_MAX_TOOL_CALLS` /

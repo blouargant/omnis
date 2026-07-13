@@ -46,6 +46,14 @@ var budgetExemptTools = map[string]bool{
 	"compact_now":       true,
 }
 
+// agentCapGraceCalls is how many blocked tool calls an over-cap agent may make
+// while being told, by tool result alone, to stop and write up its findings.
+// Past that we stop asking and end its flow loop. Small but non-zero: a
+// cooperative agent needs at least one turn to see the notice and comply (that
+// is how we keep its partial work), while a stubborn one must not be able to
+// spin indefinitely.
+const agentCapGraceCalls = 3
+
 // Choice labels. Stop is first and is the default: the safe answer to "this
 // turn is running away" is to stop it, and a user who hits Enter on the card
 // should not accidentally buy another 2M tokens.
@@ -62,6 +70,15 @@ const (
 const budgetHaltNotice = "[BUDGET REACHED] The user stopped further research for this turn. " +
 	"Do NOT call any more tools. Write your final answer now from the material you have already gathered, " +
 	"and state plainly which parts are unverified or incomplete."
+
+// agentCapNotice replaces the result of a tool call an agent makes past its own
+// per-turn cap. Like budgetHaltNotice it is phrased as an instruction rather than
+// an error: the agent must stop calling tools AND still deliver, from what it has.
+func agentCapNotice(agentName string) string {
+	return fmt.Sprintf("[TOOL BUDGET REACHED] %s has used its tool-call budget for this turn. "+
+		"Do NOT call any more tools. Produce your result now from the material you have already gathered, "+
+		"and state plainly what you were unable to verify.", agentName)
+}
 
 // budgetSessionID resolves the user-facing session id from any callback context.
 // A sub-agent runs under an ephemeral agenttool session, so its own SessionID()
@@ -93,6 +110,29 @@ func budgetCallbacks(store *budget.Store, reg *askuser.Registry, limits budget.L
 		sid := realSessionID(tc)
 		if sid == "" {
 			return nil, nil
+		}
+		// Per-agent cap first. It is a design limit ("the critic verifies with at
+		// most N searches"), not a spend surprise, so it never asks the user — it
+		// just tells the agent to conclude. Checked before the shared gate so a
+		// call this cap rejects is not charged to the turn's budget: it is work
+		// that never happened.
+		if agentName := tc.AgentName(); agentName != "" {
+			if over, overBy := store.ChargeAgent(sid, agentName); over {
+				// The notice is an instruction, and a model may simply ignore it: in a
+				// live run a capped web_agent issued 16 more tool calls across 13 model
+				// round-trips after being told to stop. Nothing else would end that —
+				// the flow loop has no iteration cap, and a blocked call is not charged
+				// to the shared turn budget. So: a few blocked calls carry the notice
+				// alone, which is enough for a cooperative agent to stop and write up
+				// what it has (the salvage we want); past that, terminate its flow loop
+				// for real. SkipSummarization makes this function-response event
+				// IsFinalResponse(), which ends the loop — a host-side guarantee, the
+				// same one the routing tools rely on, rather than another instruction.
+				if overBy > agentCapGraceCalls {
+					tc.Actions().SkipSummarization = true
+				}
+				return map[string]any{"output": agentCapNotice(agentName)}, nil
+			}
 		}
 		verdict := store.Gate(sid, func(u budget.Usage) budget.Outcome {
 			// tc carries the run context, so an unanswered card is ended by a

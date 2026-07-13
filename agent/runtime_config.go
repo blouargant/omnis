@@ -51,6 +51,18 @@ type AgentEntry struct {
 	// run in parallel from a single tool call. <= 1 (the default) keeps the
 	// classic one-at-a-time tool; > 1 exposes a batch/fan-out tool.
 	MaxInstances int `json:"max_instances,omitempty"`
+	// MaxToolCalls caps how many tool calls this agent may make in ONE user turn.
+	// 0 (the default) = uncapped.
+	//
+	// This is a design limit, not a spend ceiling (that is agents.json
+	// `turn_budget`): it bounds how much work the agent does, and when it trips
+	// the agent is told to conclude with what it has — the user is never asked.
+	// It matters most for a sub-agent, whose cost is QUADRATIC in its tool calls:
+	// it runs its own flow loop and re-sends its entire accumulated context —
+	// every fetched page included — on each model call. research_critic reached
+	// 9.1M prompt tokens from ~20 fetches across 2 invocations, so capping N is
+	// worth far more than capping tokens.
+	MaxToolCalls int `json:"max_tool_calls,omitempty"`
 	// ResumableSessions controls durable, re-attachable sessions for this
 	// sub-agent: each call returns a `session` handle the leader can pass back as
 	// `resume_session` to continue that exact conversation (keeping its prior
@@ -259,6 +271,8 @@ type RuntimeAgentConfig struct {
 	A2AAgents []string
 	// MaxInstances is the resolved parallel-invocation cap (always >= 1).
 	MaxInstances int
+	// MaxToolCalls is this agent's per-turn tool-call cap (0 = uncapped).
+	MaxToolCalls int
 	// ResumableSessions is the resolved (opt-out default applied) flag for durable,
 	// re-attachable sub-agent sessions: true unless the agent explicitly opted out.
 	// The leader can resume a prior call via its returned handle. See AgentEntry.
@@ -576,6 +590,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			PermissionsConfigPath:             strings.TrimSpace(e.PermissionsConfigPath),
 			A2AAgents:                         normalizeNames(e.A2AAgents),
 			MaxInstances:                      maxInstances,
+			MaxToolCalls:                      maxInt(e.MaxToolCalls, 0),
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
 		})
 	}
@@ -686,6 +701,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		PermissionsConfigPath:             strings.TrimSpace(in.PermissionsConfigPath),
 		A2AAgents:                         normalizeNames(in.A2AAgents),
 		MaxInstances:                      maxInt(in.MaxInstances, 1),
+		MaxToolCalls:                      maxInt(in.MaxToolCalls, 0),
 		ResumableSessions:                 in.ResumableSessions,
 	}
 }
@@ -1146,6 +1162,20 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// squad are injected by ensureRouterSquad in the build path, not here, so
 	// config-only tests see an unmodified squad list.
 	out.RouterSquad = resolveRouterSquadName(cfg.RouterSquad)
+
+	// Fold each agent's own `max_tool_calls` into the turn budget, so the per-turn
+	// gate enforces both the shared spend ceiling and the per-agent design limits
+	// from one place. Derived from the resolved agents (after every override), so
+	// a hot-reload picks up a changed cap. No caps ⇒ the map stays nil and
+	// Limits.Unlimited() is unaffected.
+	for _, a := range out.Agents {
+		if a.MaxToolCalls > 0 {
+			if out.TurnBudget.PerAgent == nil {
+				out.TurnBudget.PerAgent = map[string]int{}
+			}
+			out.TurnBudget.PerAgent[a.Name] = a.MaxToolCalls
+		}
+	}
 
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
 	out.ModelsConfigPath = filepath.Clean(out.ModelsConfigPath)
