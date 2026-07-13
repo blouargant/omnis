@@ -11,8 +11,17 @@
      so the transcript shows + scrolls behind them. Kept below the pane-picker
      overlay (z-index 4) so a draft/empty pane still hides it. */
   position: absolute;
-  left: 0;
-  right: 0;
+  /* Stop short of the transcript's scrollbar gutters (features/messages.css):
+     the wrap paints ABOVE the transcript (z-index 3), so an edge-to-edge veil
+     would cover the bottom of the chat scrollbar — the thumb vanished behind
+     the fade exactly when the transcript was scrolled near the end, which is
+     where it lives most of the time. Inset BOTH edges, not just the right one:
+     the transcript reserves a symmetric gutter on each side, so the composer
+     card stays centred on the message column only if it loses the same width
+     on both sides. The gutters carry no chat text (message rows live inside the
+     transcript's content box), so nothing is left unfaded. */
+  left: var(--scroll-gutter);
+  right: var(--scroll-gutter);
   bottom: 0;
   z-index: 3;
   flex-shrink: 0;
