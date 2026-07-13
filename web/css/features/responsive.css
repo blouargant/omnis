@@ -149,6 +149,13 @@
   .msg-row { padding-left: 12px; padding-right: 12px; }
   .msg-row.assistant { max-width: min(var(--col-w), 100%); }
 
+  /* The wide, grabbable transcript scrollbar (features/messages.css) is a
+     mouse affordance: a touch user flicks the transcript and never drags it,
+     so here it would only spend 2×14px of the width this band just reclaimed.
+     Shrink it back — --scroll-gutter drives both the reserved gutter and the
+     bar's width, so the pinned prompt stays aligned. */
+  :root { --scroll-gutter: 6px; }
+
   /* ─── Touch ergonomics ───────────────────────────────────── */
 
   /* Keep the composer clear of the home indicator / gesture bar. */

@@ -84,6 +84,51 @@
    * sideways shift when the scrollbar appears/disappears. */
   scrollbar-gutter: stable both-edges;
 }
+/* The chat bar is the one scrollbar users actually drag, so it is wider than
+   the 6px app-wide bar in features/common.css and keeps the browser's own
+   behaviour: a visible track (click above/below the thumb pages the transcript,
+   as in any native scrollbar) and a thumb that never shrinks below a grabbable
+   height on a long conversation. The 14px width is the full hit area; the 2px
+   transparent border + background-clip inset the *painted* thumb to 10px, which
+   keeps a hair of track showing on each side. Keep the width equal to
+   --scroll-gutter (the floating prompt header mirrors it — see
+   .prompt-header-wrap above).
+
+   Ink: the theme's --scroll-thumb is tuned for the incidental 6px bars and is
+   far too faint for a bar meant to be seen and grabbed — on the default light
+   theme it is #d9d6c7 on a #f5f0e8 canvas, near-invisible. Both the thumb and
+   the track are therefore pulled toward --text, which resolves per theme to
+   "more contrast against the canvas": darker on a light palette, lighter on a
+   dark one. Deriving from the tokens (rather than hard-coding a grey) keeps all
+   12 themes correct with no per-theme edits. */
+#transcript {
+  --chat-scroll-thumb: color-mix(in srgb, var(--scroll-thumb) 55%, var(--text));
+  --chat-scroll-thumb-hover: color-mix(in srgb, var(--scroll-thumb-hover) 38%, var(--text));
+  --chat-scroll-track: color-mix(in srgb, var(--scroll-thumb) 45%, transparent);
+}
+#transcript::-webkit-scrollbar { width: var(--scroll-gutter); }
+#transcript::-webkit-scrollbar-track { background: var(--chat-scroll-track); }
+#transcript::-webkit-scrollbar-thumb {
+  background: var(--chat-scroll-thumb);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  min-height: 44px;
+}
+#transcript::-webkit-scrollbar-thumb:hover {
+  background: var(--chat-scroll-thumb-hover);
+  background-clip: content-box;
+  border-width: 1px; /* the thumb thickens under the cursor, like a native bar */
+}
+/* Firefox ignores the ::-webkit-* pseudo-elements and already ships a
+   full-width, click-to-page scrollbar — it only needs the theme colours. Scoped
+   behind @supports because in Chromium `scrollbar-color` would *override* the
+   pseudo-element styling above and lose the width/min-height. */
+@supports not selector(::-webkit-scrollbar) {
+  #transcript {
+    scrollbar-color: var(--chat-scroll-thumb) var(--chat-scroll-track);
+  }
+}
 /* When an ask-user / permission card is showing it sits in-flow between the
    transcript and the floating composer, so the transcript no longer needs to
    reserve the composer's clearance (52px + overlay-h) — the card provides the

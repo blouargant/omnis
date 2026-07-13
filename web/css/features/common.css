@@ -33,10 +33,13 @@
      with the window. Leaves a margin on each side (not full-bleed). */
   --col-w: 90%;
   /* Per-edge scrollbar gutter reserved by #transcript (scrollbar-gutter:
-     both-edges reserves the 6px ::-webkit-scrollbar width on each side). The
-     floating prompt header lives outside the scroll container, so its wrapper
-     reserves the same gutter to keep the two prompt boxes pixel-aligned. */
-  --scroll-gutter: 6px;
+     both-edges reserves the transcript's ::-webkit-scrollbar width on each
+     side). The floating prompt header lives outside the scroll container, so
+     its wrapper reserves the same gutter to keep the two prompt boxes
+     pixel-aligned. Keep this equal to the #transcript scrollbar width set in
+     features/messages.css — the chat bar is deliberately wider than the 6px
+     app-wide one so it is easy to find and grab. */
+  --scroll-gutter: 14px;
 
   /* Surfaces */
   --bg: #1e1e1e;
