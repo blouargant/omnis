@@ -367,7 +367,7 @@ func buildSquadInstance(
 	// the root's runner plugin; buildHooksPlugin reads the same hooksEngine).
 	suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel)
+	plugins, pluginCloser, err := buildPlugins(infra, runtime, opts, orchestratorLLM, suffix, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel)
 	if err != nil {
 		permGateClose()
 		for _, h := range allMCPHandles {

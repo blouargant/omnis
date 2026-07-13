@@ -23,24 +23,29 @@ import (
 )
 
 // buildPlugins wires the runner-level plugins (events bridge, permissions,
-// cache stats, compression) and registers the file event logger on the
-// shared bus. The bus must already be created so per-agent callbacks can
-// be attached at sub-agent construction time.
+// cache stats, compression) for one squad. The bus must already be created so
+// per-agent callbacks can be attached at sub-agent construction time.
 //
 // suffix is the function used to derive a per-session filename suffix
-// from (userID, sessionID). buildTimestamp is the global build-level
-// timestamp used for the (process-wide) event log filename.
+// from (userID, sessionID).
 //
-// The returned closer detaches the file-logger subscriptions and closes the
-// event log file. Call it when the agent generation owning these plugins is
-// being torn down (Manager.Reload).
+// NOTE: the event *file logger* is deliberately NOT built here. buildPlugins
+// runs once per squad and again for every squad of every hot-reloaded
+// generation, while the audit log is one file per build subscribed to one
+// process-wide bus — opening it here duplicated every line once per live squad
+// and let the independent per-instance writers interleave mid-line. It lives on
+// Infrastructure instead (EventLog, memoised sync.Once, closed by
+// Infrastructure.Close); the call below is the idempotent "make sure it exists".
+//
+// The returned closer detaches this squad's own per-generation subscriptions.
+// Call it when the agent generation owning these plugins is being torn down
+// (Manager.Reload).
 func buildPlugins(
+	infra *Infrastructure,
 	runtime RuntimeSettings,
 	opts Options,
-	bus *events.Bus,
 	orchestratorLLM model.LLM,
 	suffix func(userID, sessionID string) string,
-	buildTimestamp string,
 	permPlugin *plugin.Plugin,
 	hooksEngine *hooks.Reloader,
 	steerStore *steer.Store,
@@ -49,39 +54,17 @@ func buildPlugins(
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
-	logsDir := paths.LogsDir()
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		return nil, nil, err
-	}
-	logger, closeLog, err := events.FileLoggerWithOptions(
-		filepath.Join(logsDir, "agent_events_"+buildTimestamp+".log"),
-		events.FileLoggerOptions{FullPayload: opts.DebugLogging},
-	)
-	if err != nil {
+	bus := infra.Bus
+	// Process-wide, opened + subscribed exactly once however many squads and
+	// generations call this.
+	if err := infra.EventLog(opts.DebugLogging); err != nil {
 		return nil, nil, err
 	}
 
-	var loggerSubs []*events.Subscription
-	for _, ev := range []string{
-		events.EventBeforeTool, events.EventAfterTool,
-		events.EventBeforeModel, events.EventAfterModel,
-		events.EventToolError,
-		events.EventSessionStart, events.EventSessionEnd,
-		events.EventRunStart, events.EventRunEnd,
-		events.EventCurateNow,
-	} {
-		loggerSubs = append(loggerSubs, bus.Subscribe(ev, logger))
-	}
 	var extraCleanups []func()
 	closer = func() error {
-		for _, sub := range loggerSubs {
-			sub.Off()
-		}
 		for _, c := range extraCleanups {
 			c()
-		}
-		if closeLog != nil {
-			return closeLog()
 		}
 		return nil
 	}

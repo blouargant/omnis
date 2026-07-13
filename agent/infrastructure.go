@@ -132,6 +132,12 @@ type Infrastructure struct {
 	// lazily, survives hot-reload like the MCP pool; servers index whole
 	// projects, so they must not be rebuilt per generation.
 	lsp lspCache
+
+	// eventLog memoises the process-wide event audit log — ONE file + ONE bus
+	// subscription per build (see EventLog). It must not be per-squad or
+	// per-generation: every extra subscription on the shared bus writes every
+	// event again, and independent writers on one path interleave mid-line.
+	eventLog eventLogCache
 }
 
 // BuildInfrastructure constructs the shared infrastructure for the agent.
@@ -355,6 +361,10 @@ func (i *Infrastructure) Close() error {
 		return nil
 	}
 	i.shutdownLSP()
+	// The event audit log outlives every agent generation (a hot-reload must not
+	// close a file the next generation keeps writing to), so it is closed here —
+	// at process shutdown — and nowhere else.
+	_ = i.closeEventLog()
 	if i.Backend == nil {
 		return nil
 	}

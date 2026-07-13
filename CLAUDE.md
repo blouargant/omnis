@@ -664,7 +664,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
 | `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor) |
 | `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
-| `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle |
+| `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle. `FileLoggerWithOptions` composes each record into one `[]byte` and does a **single `f.Write`** (one `write(2)` to an `O_APPEND` fd is atomic against other appenders on POSIX, so a line can never be interleaved mid-record). The audit log is **process-wide — one file per build, ONE bus subscription**: it is owned by `Infrastructure.EventLog` ([agent/event_log.go](agent/event_log.go)), never by a squad/generation (see "Event audit log") |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
 | `internal/bg/` | Per-session background task queue + **task registry**: `bash_background` (one-shot), `monitor` (streaming line-matcher, [monitor.go](internal/bg/monitor.go)), and lifecycle `bg_list`/`bg_cancel`/`bg_output` ([tasks.go](internal/bg/tasks.go)) — named with a `bg_` prefix to avoid colliding with the `planning` group's task-graph `task_list`. Every launch registers a `Task{ID,Kind,Status,…}`; completions/streamed matches push a `Notification` consumed by the host (see "Background task notifications") |
@@ -3186,6 +3186,49 @@ returns `errDaemonUnsupported` so cross-platform builds stay green). Stale PID
 files are always reconciled via the liveness probe, so a crash/self-exit never
 wedges `start`/`status`.
 
+### Event audit log (`agent_events_<buildTimestamp>.log`)
+
+The event log is a **process-wide audit trail: one file per build, ONE writer,
+ONE bus subscription** — owned by `Infrastructure.EventLog(fullPayload)`
+([agent/event_log.go](agent/event_log.go), memoised `sync.Once` like the MCP
+pool / LSP manager / hooks engine) and closed by `Infrastructure.Close`
+(**never** on generation teardown — an old generation draining must not close a
+file the current one is still writing to). `buildPlugins` merely calls the
+idempotent `infra.EventLog(...)`; it does **not** own the logger.
+
+This is load-bearing, and getting it wrong is subtle: `buildPlugins` runs **once
+per squad** (7 in the shipped config) and **again for every squad of every
+hot-reloaded generation**. It used to open a fresh `events.FileLoggerWithOptions`
+on the same path each time and subscribe it to the same process-wide `infra.Bus`,
+so (a) every event was written **once per live logger** (a `before_tool` line
+duplicated **14×** = 7 squads × 2 generations — which made 1 tool call read as 4
+while debugging) and (b) each instance held its **own private mutex** while
+emitting a record as five separate `Fprintf` calls, so concurrent writers spliced
+fragments into each other's lines and the log became unparseable.
+
+Two invariants keep it honest — **keep both** when touching this:
+
+1. **One subscription per path.** Every extra `bus.Subscribe(ev, logger)` on the
+   shared bus writes every event again. Anything process-wide (one file per
+   build, per [server/gc.go](server/gc.go)) belongs on `Infrastructure`, not in a
+   per-squad builder.
+2. **One `write(2)` per record.** `FileLoggerWithOptions`
+   ([core/events/events.go](core/events/events.go)) composes each record into a
+   single `[]byte` (`summaryLine` / `fullPayloadLine`) and hands it to exactly one
+   `f.Write`; a lone write to an `O_APPEND` fd is atomic against other appenders
+   on POSIX, so the **format stays robust even if two writers (or two processes)
+   ever share the path again**. Never go back to incremental `Fprintf`s.
+
+On-disk format is unchanged: `[15:04:05.000] event tool=… dur=… err=…`, or JSONL
+`{timestamp,event,payload}` per line under `-d` (`Options.DebugLogging`, a
+process-level flag — so the first caller's `fullPayload` value is exact; a
+hot-reload cannot change it). Regression coverage:
+[core/events/file_logger_test.go](core/events/file_logger_test.go) (concurrent
+writers ⇒ every line well-formed, each event exactly once; plus a two-writers-
+one-path test pinning the O_APPEND guarantee) and
+[agent/event_log_test.go](agent/event_log_test.go) (14 concurrent `EventLog`
+calls ⇒ one file, one subscription, one line per event).
+
 ### Hot reload (server mode)
 
 The HTTP server supports rebuilding the agent generation without
@@ -3199,7 +3242,8 @@ The model is a two-layer build split across [agent/infrastructure.go](agent/infr
 
 - **Infrastructure** is process-wide and survives every reload: mailbox
   backend, session registry, event bus, ask_user registry, MCP subprocess
-  pool, and the session-scoped state holders (tasks, todo, bg queues).
+  pool, the **event audit log** (see below), and the session-scoped state
+  holders (tasks, todo, bg queues).
 - **Instance** is one agent generation: a map of **SquadInstance** entries
   (leader + sub-agents + plugins + runner per squad) derived from a
   snapshot of RuntimeSettings. Each reload bumps the generation number

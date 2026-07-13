@@ -6,6 +6,7 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -449,6 +450,17 @@ func FileLogger(path string) (Handler, func() error, error) {
 }
 
 // FileLoggerWithOptions writes events to a log file with configurable payload detail.
+//
+// Atomicity contract: an event is composed into a single []byte and handed to
+// exactly ONE f.Write. A lone write(2) to a fd opened O_APPEND is atomic against
+// other appenders on POSIX, so a record can never be interleaved mid-line — even
+// if two handlers (or two processes) end up sharing the same path. The mutex
+// serialises this handler's own callers and keeps the on-disk order consistent
+// with the timestamps it stamps.
+//
+// This log is a process-wide audit trail (one file per build). Subscribe ONE
+// handler per path to the bus: every extra subscription writes every event
+// again. See agent.Infrastructure.EventLog, which owns the single instance.
 func FileLoggerWithOptions(path string, opts FileLoggerOptions) (Handler, func() error, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -458,29 +470,43 @@ func FileLoggerWithOptions(path string, opts FileLoggerOptions) (Handler, func()
 	h := func(event string, payload map[string]any) {
 		mu.Lock()
 		defer mu.Unlock()
+		var line []byte
 		if opts.FullPayload {
-			writeFullPayloadEvent(f, event, payload)
-			return
+			line = fullPayloadLine(event, payload)
+		} else {
+			line = summaryLine(event, payload)
 		}
-		ts := time.Now().Format("15:04:05.000")
-		fmt.Fprintf(f, "[%s] %s", ts, event)
-		if payload != nil {
-			if t, ok := payload["tool"]; ok {
-				fmt.Fprintf(f, " tool=%v", t)
-			}
-			if d, ok := payload["duration"]; ok {
-				fmt.Fprintf(f, " dur=%v", d)
-			}
-			if e, ok := payload["error"]; ok {
-				fmt.Fprintf(f, " err=%v", e)
-			}
-		}
-		fmt.Fprintln(f)
+		_, _ = f.Write(line)
 	}
 	return h, f.Close, nil
 }
 
-func writeFullPayloadEvent(f *os.File, event string, payload map[string]any) {
+// summaryLine renders the one-line human-readable event record:
+//
+//	[15:04:05.000] before_tool tool=Bash dur=1.2s err=boom
+//
+// Composed into one buffer so the whole line is a single write.
+func summaryLine(event string, payload map[string]any) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "[%s] %s", time.Now().Format("15:04:05.000"), event)
+	if payload != nil {
+		if t, ok := payload["tool"]; ok {
+			fmt.Fprintf(&b, " tool=%v", t)
+		}
+		if d, ok := payload["duration"]; ok {
+			fmt.Fprintf(&b, " dur=%v", d)
+		}
+		if e, ok := payload["error"]; ok {
+			fmt.Fprintf(&b, " err=%v", e)
+		}
+	}
+	b.WriteByte('\n')
+	return b.Bytes()
+}
+
+// fullPayloadLine renders one JSONL record with the complete payload (debug
+// mode). Returns the trailing newline so the caller writes exactly once.
+func fullPayloadLine(event string, payload map[string]any) []byte {
 	record := map[string]any{
 		"timestamp": time.Now().Format(time.RFC3339Nano),
 		"event":     event,
@@ -492,11 +518,11 @@ func writeFullPayloadEvent(f *os.File, event string, payload map[string]any) {
 		record["payload_error"] = err.Error()
 		data, err = json.Marshal(record)
 		if err != nil {
-			fmt.Fprintf(f, `{"timestamp":%q,"event":%q,"payload_error":%q}`+"\n", time.Now().Format(time.RFC3339Nano), event, err.Error())
-			return
+			return fmt.Appendf(nil, `{"timestamp":%q,"event":%q,"payload_error":%q}`+"\n",
+				time.Now().Format(time.RFC3339Nano), event, err.Error())
 		}
 	}
-	f.Write(append(data, '\n'))
+	return append(data, '\n')
 }
 
 // Counter tallies events of a given name and prints a summary on demand.
