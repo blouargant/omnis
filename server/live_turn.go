@@ -30,6 +30,13 @@ type liveTurn struct {
 	notify   chan struct{} // closed-to-broadcast wakeup, replaced on each emit
 	finished bool          // set by finish(); consumers drain then return
 	cancel   context.CancelFunc
+
+	// prompt is the user text this turn is answering. A turn is persisted only
+	// when it completes, so mid-flight this is the ONLY record of what was asked:
+	// it is what /api/sessions/:id/turn hands a browser that loads the page while
+	// the turn is already running, so the question can be rendered instead of the
+	// session looking idle. Immutable after start.
+	prompt string
 }
 
 type bufFrame struct {
@@ -52,13 +59,24 @@ const maxBufferBytes = 8 << 20 // 8 MiB
 // (start = cursor - firstSeq + 1 lands mid-buffer). With the seed a stale cursor
 // is ≤ seedSeq < the new turn's firstSeq, so stream() either replays from the
 // start or takes the reload path — never a silent skip.
-func newLiveTurn(cancel context.CancelFunc, seedSeq int) *liveTurn {
+func newLiveTurn(cancel context.CancelFunc, seedSeq int, prompt string) *liveTurn {
 	return &liveTurn{
 		firstSeq: seedSeq + 1,
 		seq:      seedSeq,
 		notify:   make(chan struct{}),
 		cancel:   cancel,
+		prompt:   prompt,
 	}
+}
+
+// active reports whether the turn is still running, along with the prompt it is
+// answering. A finished-but-retained turn (kept ~60s for tail replay) reports
+// false, so a browser opening the session then renders history rather than a
+// spinner for work that is already done.
+func (lt *liveTurn) active() (bool, string) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	return !lt.finished, lt.prompt
 }
 
 // currentSeq returns the last assigned sequence number.
@@ -181,7 +199,7 @@ func newLiveTurnRegistry() *liveTurnRegistry {
 
 // start registers a fresh live turn for sessionID, replacing any prior one (the
 // run-guard guarantees the prior turn has finished before a new one starts).
-func (r *liveTurnRegistry) start(sessionID string, cancel context.CancelFunc) *liveTurn {
+func (r *liveTurnRegistry) start(sessionID string, cancel context.CancelFunc, prompt string) *liveTurn {
 	r.mu.Lock()
 	// Continue the sequence past the previous (still-retained) turn's high-water
 	// mark so a stale reconnect cursor from that turn can't alias this one's
@@ -192,7 +210,7 @@ func (r *liveTurnRegistry) start(sessionID string, cancel context.CancelFunc) *l
 	if prev := r.m[sessionID]; prev != nil {
 		seed = prev.currentSeq()
 	}
-	lt := newLiveTurn(cancel, seed)
+	lt := newLiveTurn(cancel, seed, prompt)
 	r.m[sessionID] = lt
 	r.mu.Unlock()
 	return lt

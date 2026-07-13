@@ -576,6 +576,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/steer/` | Per-session **mid-turn steering** store (extra info the user types while a turn is computing): `Enqueue`/`Drain`/`TakeConsumed`/`TakePending`/`Forget`. Drained into the running turn by the steering plugin and looped by each surface (see "Mid-turn steering") |
 | `internal/scheduler/` | Timer that runs prompts on a schedule, backing `/loop` (in-memory, session-bound) and `/schedule` (durable cron/interval/one-shot routines, persisted to `schedules.json`): `Job`, `Scheduler` (process-wide, one `Run` goroutine + `fire` callback), `ParseSpec` (interval/`in`/`at`/cron via `robfig/cron/v3`). Surface-agnostic — each surface supplies the `fire` callback (see "Scheduled prompts") |
 | `internal/goal/` | Per-session **completion goals** backing `/goal`: `Store` (process-wide, one `Goal` per session — condition/turns/last-reason/achieved), `MaxTurns` (hard turn cap, `OMNIS_GOAL_MAX_TURNS`), `Directive` (the not-yet-met continuation prompt), `IsClearAlias`, `CleanCondition`. Surface-agnostic; the LLM judge is `Manager.EvaluateGoal` ([agent/goal_eval.go](agent/goal_eval.go)). See "Goals (`/goal`)" |
+| `internal/budget/` | Per-turn **spend ceiling** (tool calls + tokens): `Limits`, `Store` (`StartTurn`/`AddTokens`/`Gate`/`Usage`/`Forget`), `Verdict` (Proceed/Halted), `Outcome` (Stop/Continue/Unlimited). `Gate` single-flights the user prompt across a parallel fan-out. See "Per-turn spend budget" |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
 | `internal/deps/` | Runtime tool-dependency gate: `Requirement`/`Install` (a binary that must be on PATH + a scalar-or-per-OS install command, parsed from YAML **and** JSON), `Present`/`Missing` (PATH check via `exec.LookPath`), and `Ensure` (check → ask user → install via the Bash safety floor → recheck). `NewAskuserConfirmer` + `BashInstaller` adapters. Backs the skill `requires:` load_skill gate, the MCP `requires` connect gate, the LSP `requires` server gate, and the `ast-grep` binary gate |
@@ -852,7 +853,7 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 
 | File | Purpose |
 |---|---|
-| `agents.json` | List of enabled agent names, squad composition, global paths, and `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables) |
+| `agents.json` | List of enabled agent names, squad composition, global paths, `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables), and `turn_budget` (`{max_tool_calls, max_tokens}` — the per-turn spend ceiling before the user is asked whether to continue; both `0` ⇒ unbounded. See "Per-turn spend budget") |
 | `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache"` (tri-state `*bool`) adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy; **default ON for `openai_compat`, OFF for plain `openai`**, explicit `true`/`false` overrides (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model). Top-level `"override_model_ref"` + `"override_model_enabled"` implement the **single-model override** ("run the whole fleet on one model"): when enabled, `applyModelOverride` ([agent/runtime_config.go](agent/runtime_config.go)) forces **every** agent onto that one model (overwriting each agent's own `model_ref`-resolved connection + pricing) at `ResolveRuntimeSettings` time — so it's hot-reloadable; disabling restores the per-agent config. The ref is kept while disabled so the toggle flips cleanly. Scoped to **agents only** — the internal embedder + `/goal` evaluator are untouched (and an `embedding:true` ref is ignored). Web UI: Settings → Models → General card ("Use one model for all agents"). Env: `OMNIS_OVERRIDE_MODEL_REF`/`OMNIS_OVERRIDE_MODEL_ENABLED` |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
@@ -1192,6 +1193,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_OVERRIDE_MODEL_REF` | Single-model override: names the catalogue model to force onto **every** agent; non-empty also **enables** the override. See `models.json` `override_model_ref` / `applyModelOverride` |
 | `OMNIS_OVERRIDE_MODEL_ENABLED` | `true`/`false` — final say on the single-model-override toggle (independent of `OMNIS_OVERRIDE_MODEL_REF`), overriding `override_model_enabled` in `models.json` |
 | `OMNIS_GOAL_MAX_TURNS` | Hard ceiling on how many turns one `/goal` may drive before the loop stops regardless of the condition (default `30`) |
+| `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `100`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
+| `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `2000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
@@ -2337,6 +2340,120 @@ pattern (no new runner/topology).
 **No-op contract:** with no active goal the loop branch is a map-check no-op and
 behaviour is byte-identical to before; with no `eval_model_ref` the evaluator
 silently uses the leader model.
+
+### Per-turn spend budget (tool calls + tokens)
+
+A turn cannot run away. Every turn spends against a **ceiling** (tool calls and
+tokens); when it runs out, the **user** — not the model — decides whether to keep
+going. This exists because **nothing else in the stack can stop a turn**: the ADK
+LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go)
+`Flow.Run`) has **no iteration cap** — it ends only when the model returns a
+tool-call-free response — and a sub-agent runs inside agenttool's **private,
+plugin-less runner**, invisible to the surface that started the turn. So a squad
+whose instructions say "iterate until satisfied" (the deep-research playbook:
+*"iterate while a wave keeps opening material rows"*, *"loop on the blockers until
+none remain"*) can search indefinitely. One did: **~295 `WebSearch` calls, 15.2M
+tokens, 39 minutes** for a single question, most of it burned by a `research_critic`
+sub-agent that has its own web tools. **An instruction is advice; this is the
+guarantee.**
+
+- **Store** = [internal/budget/](internal/budget/) `Store` on `Infrastructure.Budget`
+  (process-wide, survives hot-reload like `SteerStore`/`GoalStore`): one live
+  budget per **user-facing session**. `StartTurn(sid, limits)` arms/resets it,
+  `AddTokens` accumulates, `Gate(sid, ask)` counts one tool call and returns
+  `Proceed`/`Halted`, `Usage` snapshots, `Forget` drops it.
+- **`Gate` single-flights the ask.** A `max_instances` fan-out has N sub-agents
+  crossing the ceiling at the same instant; the first raises the card while the
+  rest **queue on a per-session ask-lock and then re-check** against the (possibly
+  raised) ceiling. The user sees **one** card, not ten, and every queued agent is
+  paused until they answer — nothing races ahead while the decision is pending.
+  `Outcome`: `Stop` (halt), `Continue` (grant one more slice of the same size),
+  `Unlimited` (drop the ceiling for the rest of this turn).
+- **Wired exactly like the permission gate** ([agent/budget_plugin.go](agent/budget_plugin.go)
+  `budgetCallbacks` → a `BeforeToolCallback` + an `AfterModelCallback`): the pair is
+  built **once per squad** in [agent/squad.go](agent/squad.go), mounted on the squad
+  **root** as a runner plugin (`budgetPlugin`, in [agent/build_plugins.go](agent/build_plugins.go))
+  **and attached to every sub-agent** ([agent/build_subagents.go](agent/build_subagents.go)),
+  so leader and fan-out spend from **one bucket**. The sub-agent half is the
+  load-bearing one: a reviewer/researcher sub-agent can burn millions of prompt
+  tokens across its private flow loop while making only a couple of tool calls the
+  leader can see (`research_critic`: 9.1M prompt tokens across **2** invocations).
+  The session key is resolved via `steerSessionID`/`events.RootSessionFromContext`
+  (a sub-agent's own `SessionID()` is an ephemeral agenttool one).
+- **Mounted last in the before-tool chain** (events → perms → hooks → budget) so a
+  call already denied by the user or a hook is **not charged**.
+- **Exempt tools** (`budgetExemptTools`): `ask_user` (it is how the budget question
+  itself reaches the user — gating it would deadlock), the routing tools
+  (`route_to_squad`/`handoff_to_router`/`ask_squad` — a squad's only way to hand
+  control back), and the `todo_*` bookkeeping tools.
+- **On Stop**, every subsequent tool call is short-circuited with `budgetHaltNotice`
+  — phrased as an *instruction*, not an error, because it has two jobs: end the loop
+  **and** salvage the work ("Do NOT call any more tools. Write your final answer now
+  from the material you have already gathered, and state plainly which parts are
+  unverified"). Verified end-to-end: the model stops calling tools and writes an
+  honest incomplete answer.
+- **Config**: `turn_budget: {max_tool_calls, max_tokens}` in `agents.json` (pointer
+  fields, so an explicit `0` = "no ceiling on this axis" is distinguishable from
+  absent = "use the default"), overridden by `OMNIS_TURN_MAX_TOOL_CALLS` /
+  `OMNIS_TURN_MAX_TOKENS`. Defaults **100 calls / 2M tokens** — chosen so an
+  ordinary turn never sees the gate. **Both axes 0 ⇒ unbounded turns**, byte-identical
+  to before. Read from the **current** generation (`serverDeps.turnLimits`), so a
+  hot-reload applies on the next turn of every session.
+- **Armed by the surface**: `serverDeps.startTurnBudget` ([server/budget.go](server/budget.go))
+  is called by **both** server turn rails — the interactive producer
+  ([server/sse.go](server/sse.go) `handleMessages`) and the injected one
+  ([server/mailbox_push.go](server/mailbox_push.go) `injectTurnRouted`: mailbox
+  delivery, background-task notifications, scheduled routines, spawned tasks). An
+  unattended runaway is *worse* than an interactive one — nobody is watching it
+  burn. Counters reset per turn, so a grant does not carry over.
+- **No-op contract**: a session for which `StartTurn` was never called is unbounded,
+  so **CLI/TUI are unchanged** (they never arm it — a follow-up if wanted). With no
+  ask-user registry (a CLI one-shot, an example) the gate **fails safe and halts**
+  rather than letting an unattended runaway keep spending.
+
+**Known follow-ups (not done):** `research_critic` still carries the full web
+toolset (`serpapi`/`ddg`/`web`) on the `high` model, so the "adversarial reviewer"
+can run its own unbounded research — it was the single biggest spender. The
+deep-research skill's trigger is also broad enough to grab a simple A-vs-B hardware
+question. The budget now bounds both, but neither is *fixed*.
+
+### Live-turn visibility (a turn in flight is never invisible)
+
+A turn is persisted **only when it completes** ([server/sse.go](server/sse.go)
+`AppendConversationTurnFull`). Mid-flight it therefore exists in **no place a page
+load can see**: reopening a session (or just reloading) rendered history, found the
+turn absent, and showed an **idle composer with the user's question gone** — while
+the agent was in fact still working on it. A 39-minute research turn looked lost.
+Two additions close it; both reuse the existing `remoteBusy` rail that
+background/spawned turns already use (so the question bubble, the spinner and the
+Steer button come for free):
+
+- **`turn_started` is now broadcast for interactive turns too**, not just spawned
+  ones ([server/sse.go](server/sse.go) `handleMessages`, carrying `req.Prompt`;
+  previously only [server/spawn.go](server/spawn.go) `runSpawnedTask` fired it). Any
+  **already-connected** browser shows the request + processing state live. The tab
+  that started the turn ignores the echo (`sessionSending` guard) — it is streaming
+  locally.
+- **`GET /api/sessions/:id/turn`** (`handleTurnStatus`) → `{active, prompt}` for the
+  browser that **loads the page after the turn began** and so missed the broadcast.
+  The prompt is carried on the `liveTurn` (`liveTurn.prompt`, immutable after
+  `start`) — mid-flight it is the **only** record of what was asked. A
+  **finished-but-retained** turn (kept ~60s for tail replay) reports `active:false`,
+  so the browser renders history rather than spinning forever on completed work.
+  Client: `syncLiveTurn(id)` ([web/app.js](web/app.js)) is called at both exits of
+  `activateTab`, so session-open **and** boot layout-restore are covered.
+- **Completion renders the answer**: the `chat_reply` handler now calls
+  `endRemoteBusy` + `appendNewPushTurns` when this tab was only *watching*
+  (`!sessionSending && remoteBusy`), so the optimistic bubble is replaced by the real
+  persisted turn. The **sending** tab is left alone (it renders through the send
+  path) — the `remoteBusy` half of that guard is what prevents a double render.
+
+**Deliberate limit:** this is *not* a full re-attach to the token stream. The
+streaming renderer (`processStreamEvent`/`consume`) is a closure bound to the send
+path's local state, so tokens already produced are **not** replayed on re-attach —
+the user sees the question, a working state, then the finished answer. Live token
+replay would need that renderer hoisted to module scope; the reconnect endpoint
+(`GET …/messages/stream?from=<seq>`) and its buffer already exist for it.
 
 ### Mid-turn steering (type while computing)
 

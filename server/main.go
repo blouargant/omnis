@@ -386,6 +386,7 @@ func run() error {
 		RunGuard:            runGuard,
 		LiveTurns:           newLiveTurnRegistry(),
 		SteerStore:          infra.SteerStore,
+		Budget:              infra.Budget,
 		GoalStore:           infra.GoalStore,
 		Scheduler:           infra.Scheduler,
 		PushMgr:             pushMgr,

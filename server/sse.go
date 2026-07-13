@@ -200,8 +200,23 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// a concurrent turn on another session — the process-wide event bus would
 		// otherwise leak another session's sub-agent frames + token usage here.
 		runCtx = events.WithRootSession(runCtx, meta.ID)
-		lt := d.LiveTurns.start(meta.ID, cancel)
+		// Arm the per-turn spend ceiling. Counters reset here, so each turn gets a
+		// fresh budget (an extension granted last turn does not carry over), and
+		// the gate covers the whole dispatch loop — every hop, every sub-agent.
+		d.startTurnBudget(meta.ID)
+		lt := d.LiveTurns.start(meta.ID, cancel, req.Prompt)
 		turnStart := time.Now()
+
+		// Announce the turn on the persistent /api/events stream, exactly as a
+		// spawned turn does. A turn is only persisted when it COMPLETES, so until
+		// then it exists nowhere a fresh page load can see it: reload mid-turn and
+		// the session rendered from history looked idle, with the question the user
+		// had just asked simply gone. This tells every other browser — and this one
+		// after a reload — that a turn is in flight and what was asked. The tab that
+		// started it ignores the echo (it is already streaming locally).
+		if d.PushEvents != nil {
+			d.PushEvents.broadcastWithText("turn_started", meta.ID, req.Prompt)
+		}
 
 		// Producer: drives the (possibly multi-hop) turn to completion regardless
 		// of whether any client is still attached. It owns the run-guard release.
@@ -467,6 +482,40 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 // the turn finishes. When no turn is in flight (it already completed and its
 // buffer was released, or none ever started) it returns 204 so the client falls
 // back to reloading the session history.
+// handleTurnStatus reports whether a turn is currently in flight for a session,
+// and what it is answering.
+//
+// This is what stops an in-flight turn from looking lost. A turn is persisted
+// only when it COMPLETES, so while it runs it exists nowhere a page load can
+// see: a browser that reopened a session mid-turn rendered history, found the
+// turn absent, and showed an idle composer — the question the user asked minutes
+// ago had simply vanished, with no hint the agent was still working on it. The
+// `turn_started` broadcast tells browsers that are already connected; this tells
+// the one that loads the page afterwards.
+func handleTurnStatus(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		if _, ok := d.Registry.Get(id); !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		lt := d.LiveTurns.get(id)
+		if lt == nil {
+			c.JSON(http.StatusOK, gin.H{"active": false})
+			return
+		}
+		// A finished-but-retained turn (kept ~60s for tail replay) is NOT active:
+		// its result is already persisted, so the browser should render history
+		// rather than sit on a spinner for work that is done.
+		active, prompt := lt.active()
+		if !active {
+			c.JSON(http.StatusOK, gin.H{"active": false})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"active": true, "prompt": prompt})
+	}
+}
+
 func handleMessageStream(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

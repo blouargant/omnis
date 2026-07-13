@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
@@ -45,6 +46,8 @@ func buildPlugins(
 	steerStore *steer.Store,
 	lspMgr *lsp.Manager,
 	isRouterSquad bool,
+	budgetBeforeTool llmagent.BeforeToolCallback,
+	budgetAfterModel llmagent.AfterModelCallback,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	logsDir := paths.LogsDir()
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -100,6 +103,15 @@ func buildPlugins(
 	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
 	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
+	}
+	// Per-turn spend ceiling. Counts the root's tool calls + tokens against the
+	// session's budget (the same callbacks are attached to every sub-agent, so the
+	// whole turn spends from one bucket) and asks the user whether to continue
+	// once it runs out. Mounted after the permission/hook gates so a rejected call
+	// is not charged. nil callbacks (router squad, or no ceiling configured) ⇒
+	// no plugin, byte-identical to before.
+	if bp, berr := budgetPlugin("budget", budgetBeforeTool, budgetAfterModel); berr == nil && bp != nil {
+		plugins = append(plugins, bp)
 	}
 	// Mid-turn steering: inject notes the user types while a turn is computing
 	// into the running turn at its next model call. Mounted on answering squad

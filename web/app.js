@@ -6145,6 +6145,7 @@ async function activateTab(panel, key) {
     scrollBottom(panel, true);
     scheduleReplyNav(panel);
     await appendNewPushTurns(id);
+    await syncLiveTurn(id);
     return;
   }
 
@@ -6179,6 +6180,44 @@ async function activateTab(panel, key) {
     scheduleReplyNav(panel);
   } catch (e) {
     console.error("failed to load session history:", e);
+  }
+  await syncLiveTurn(id);
+}
+
+// syncLiveTurn re-attaches the UI to a turn that is ALREADY running when we open
+// a session.
+//
+// A turn is persisted only when it completes, so mid-flight it is in no history
+// this tab can load — and `turn_started` only reaches browsers that were already
+// connected when the turn began. Without this, reopening a session mid-turn (or
+// simply reloading the page) showed an idle composer with the user's question
+// gone, while the agent was in fact still working: the exact failure that made a
+// 39-minute research turn look like it had been lost.
+//
+// It hooks into the same `remoteBusy` rail that background/spawned turns use, so
+// the question, the spinner and the Steer button all come for free, and the
+// completing `chat_reply` renders the answer from history.
+//
+// Deliberately not a full re-attach to the token stream: the streaming renderer
+// is bound to the send path's local state. Tokens already produced are not
+// replayed — the user sees the question and a working state, then the finished
+// answer. Live token replay on re-attach would need that renderer hoisted out.
+async function syncLiveTurn(id) {
+  if (!id) return;
+  // This tab is streaming the turn itself, or is already watching it.
+  if (sessionSending.has(id) || remoteBusy.has(id)) return;
+  try {
+    const res = await apiFetch(`/api/sessions/${id}/turn`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.active) return;
+    // Re-check: an await ago this tab may have started sending.
+    if (sessionSending.has(id) || remoteBusy.has(id)) return;
+    startRemoteBusy(id, data.prompt || "");
+  } catch (e) {
+    // A failed probe must never block opening the session — worst case the
+    // session looks idle until the reply lands, which is the old behaviour.
+    console.error("failed to probe in-flight turn:", e);
   }
 }
 
@@ -6481,6 +6520,16 @@ async function subscribeGlobalEvents() {
           // this session" check, and the notification's tag coalesces with any
           // duplicate the initiating tab's send path raised, so at most one shows.
           notifyChatReply(sid, (data && data.text) || "");
+          // If we were only WATCHING this turn (it was started elsewhere, or by
+          // this browser before a reload), the reply exists solely in history —
+          // nothing streamed into our transcript. Clear the watching state and
+          // render the finished turn, so the answer actually appears instead of
+          // the spinner running forever. A tab streaming the turn itself renders
+          // it through the send path and must be left alone.
+          if (!sessionSending.has(sid) && remoteBusy.has(sid)) {
+            endRemoteBusy(sid);
+            await appendNewPushTurns(sid);
+          }
         } else if (event === "update_available") {
           // The self-update poller found a newer stable release — refresh the
           // sidebar button without waiting for a page reload.

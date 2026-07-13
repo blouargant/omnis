@@ -18,6 +18,7 @@ import (
 	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/compress"
 	goalpkg "github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/hooks"
@@ -68,6 +69,12 @@ type serverDeps struct {
 	// types while a turn is computing). Backs the /steer endpoint; drained into
 	// the running turn by the steering plugin and folded/looped by the producer.
 	SteerStore *steer.Store
+	// Budget holds the per-turn spend ceiling (tool calls + tokens). Every turn
+	// the server starts — interactive, spawned, scheduled, mailbox-injected —
+	// arms it with StartTurn; the budget callbacks on the squad root and every
+	// sub-agent then spend from that one bucket and ask the user whether to keep
+	// going when it runs out. Nil ⇒ turns are unbounded, as before.
+	Budget *budget.Store
 	// GoalStore holds the per-session /goal completion condition. Backs the
 	// /api/sessions/:id/goal routes; the producer loop evaluates it after each
 	// turn and keeps working (or stops) accordingly.
@@ -770,6 +777,9 @@ func newEngine(d serverDeps) *gin.Engine {
 
 	auth.POST("/sessions/:id/messages", handleMessages(d))
 	auth.GET("/sessions/:id/messages/stream", handleMessageStream(d))
+	// Lets a browser that just loaded the page discover a turn already in flight
+	// (it missed the turn_started broadcast) so the session doesn't look idle.
+	auth.GET("/sessions/:id/turn", handleTurnStatus(d))
 	auth.POST("/sessions/:id/cancel", handleCancel(d))
 	auth.POST("/sessions/:id/steer", handleSteer(d))
 	// /goal — set / inspect / clear a session completion goal. The agent keeps

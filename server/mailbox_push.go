@@ -445,6 +445,12 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// stream, not the bus, so the tag is purely to protect other sessions' streams.
 	ctx = events.WithRootSession(ctx, sessionID)
 
+	// Arm the per-turn spend ceiling for this injected turn too. A spawned task or
+	// a scheduled routine runs unattended, so an unbounded one is worse here than
+	// in the interactive path: nobody is watching it burn. The gate's ask lands on
+	// this session, where the user sees it whenever they open it.
+	d.startTurnBudget(sessionID)
+
 	routerSquad := d.Manager.RouterSquad()
 
 	// Per-agent token usage accumulated across every answering hop, persisted on

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -177,10 +178,23 @@ type runtimeConfigFile struct {
 	// A pointer so we can distinguish absent (nil → default to "omnis") from an
 	// explicit opt-out ("none"/""). Overridable by OMNIS_ROUTER_SQUAD.
 	RouterSquad *string `json:"router_squad,omitempty"`
+	// TurnBudget caps what one turn may spend before the user is asked whether
+	// to continue. Absent → the defaults; either field set to 0 removes that
+	// axis; both 0 makes turns unbounded (the pre-budget behaviour).
+	// Overridable by OMNIS_TURN_MAX_TOOL_CALLS / OMNIS_TURN_MAX_TOKENS.
+	TurnBudget *turnBudgetFile `json:"turn_budget,omitempty"`
 	// Models is no longer a supported field in agents.json. It is detected
 	// here only to produce a clear migration error. Move the block to
 	// models.json (see RuntimeSettings.ModelsConfigPath).
 	LegacyModels json.RawMessage `json:"models,omitempty"`
+}
+
+// turnBudgetFile is the agents.json shape of the per-turn spend ceiling.
+// Pointers so an explicit 0 ("no ceiling on this axis") is distinguishable from
+// an absent field ("use the default").
+type turnBudgetFile struct {
+	MaxToolCalls *int   `json:"max_tool_calls,omitempty"`
+	MaxTokens    *int64 `json:"max_tokens,omitempty"`
 }
 
 // RuntimeProviderConfig is one normalized provider profile.
@@ -321,6 +335,10 @@ type RuntimeSettings struct {
 	// server fires an automatic curation run (OMNIS_CURATOR_IDLE_TIMEOUT).
 	// Zero means disabled.
 	CuratorIdleTimeout time.Duration
+	// TurnBudget is the resolved per-turn spend ceiling. When a turn crosses it
+	// the user is asked whether to continue; an unlimited value (both axes zero)
+	// disables the gate entirely. See internal/budget and agent/budget_plugin.go.
+	TurnBudget budget.Limits
 }
 
 // AgentConfig returns the effective config for one agent name.
@@ -929,6 +947,10 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		Providers:               map[string]RuntimeProviderConfig{},
 		Models:                  map[string]RuntimeModelConfig{},
 		Agents:                  defaultAgents(),
+		TurnBudget: budget.Limits{
+			MaxToolCalls: budget.DefaultMaxToolCalls,
+			MaxTokens:    budget.DefaultMaxTokens,
+		},
 	}
 
 	explicitConfig := strings.TrimSpace(opts.ConfigPath) != ""
@@ -991,6 +1013,16 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if cfg.BashTimeoutSeconds > 0 {
 		out.BashTimeoutSeconds = cfg.BashTimeoutSeconds
 	}
+	// Per-turn spend ceiling. Each axis is set independently so a config can
+	// cap tokens but not tool calls (or vice-versa) by pinning the other to 0.
+	if tb := cfg.TurnBudget; tb != nil {
+		if tb.MaxToolCalls != nil {
+			out.TurnBudget.MaxToolCalls = *tb.MaxToolCalls
+		}
+		if tb.MaxTokens != nil {
+			out.TurnBudget.MaxTokens = *tb.MaxTokens
+		}
+	}
 	if strings.TrimSpace(cfg.MCPConfigPath) != "" {
 		out.MCPConfigPath = strings.TrimSpace(cfg.MCPConfigPath)
 	}
@@ -1028,6 +1060,14 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// ENV
 	if v, ok := parseBoolEnv("OMNIS_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
+	}
+	// Per-turn spend ceiling. `>= 0` (not `> 0`) so an explicit 0 is honoured as
+	// "no ceiling on this axis" — setting both to 0 restores unbounded turns.
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOOL_CALLS"))); err == nil && v >= 0 {
+		out.TurnBudget.MaxToolCalls = v
+	}
+	if v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOKENS")), 10, 64); err == nil && v >= 0 {
+		out.TurnBudget.MaxTokens = v
 	}
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_CURATOR_MIN_TURNS"))); err == nil && v > 0 {
 		out.CuratorMinTurns = v

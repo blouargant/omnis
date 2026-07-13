@@ -16,6 +16,7 @@ import (
 	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/binpath"
+	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/lsp"
@@ -83,6 +84,14 @@ type Infrastructure struct {
 	// (Manager.EvaluateGoal) and either keeps working (injects a follow-up turn)
 	// or clears the goal. Process-wide so it survives hot-reload, like SteerStore.
 	GoalStore *goal.Store
+
+	// Budget holds the per-turn spend ceiling (tool calls + tokens) for each
+	// session. A surface arms it with StartTurn before running a turn; the
+	// budget callbacks on the squad root AND every sub-agent spend from that one
+	// bucket, and ask the user whether to continue when it runs out. A surface
+	// that never calls StartTurn leaves turns unbounded, exactly as before.
+	// Process-wide so it survives hot-reload, like SteerStore.
+	Budget *budget.Store
 
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
@@ -239,6 +248,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		SteerStore:      steer.New(),
 		Scheduler:       scheduler.New(paths.SchedulesPath()),
 		GoalStore:       goal.New(),
+		Budget:          budget.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),

@@ -38,6 +38,8 @@ func buildSubAgents(
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
 	hooksAfterTool llmagent.AfterToolCallback,
+	budgetBeforeTool llmagent.BeforeToolCallback,
+	budgetAfterModel llmagent.AfterModelCallback,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -52,7 +54,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -70,9 +72,12 @@ func buildSubAgents(
 // NOT inherit runner-level plugins, everything a sub-agent needs is attached as
 // agent-level callbacks here: `callbacks` (its tool/model activity reaches the
 // shared event bus), `permGate` (the permission gate — its tool calls are
-// asked/denied like the leader's), and `hooksBeforeTool`/`hooksAfterTool` (the
-// PreToolUse/PostToolUse lifecycle hooks). The last three are nil-safe: nil ⇒
-// that layer is skipped, byte-identical to a sub-agent built without it.
+// asked/denied like the leader's), `hooksBeforeTool`/`hooksAfterTool` (the
+// PreToolUse/PostToolUse lifecycle hooks), and `budgetBeforeTool`/`budgetAfterModel`
+// (the per-turn spend ceiling — a sub-agent's tool calls and tokens are charged to
+// the same session bucket as the leader's, so a max_instances fan-out cannot run an
+// unbounded search loop behind the leader's back). All are nil-safe: nil ⇒ that
+// layer is skipped, byte-identical to a sub-agent built without it.
 func buildSubAgentsFromConfigs(
 	ctx context.Context,
 	configs []RuntimeAgentConfig,
@@ -89,6 +94,8 @@ func buildSubAgentsFromConfigs(
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
 	hooksAfterTool llmagent.AfterToolCallback,
+	budgetBeforeTool llmagent.BeforeToolCallback,
+	budgetAfterModel llmagent.AfterModelCallback,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -137,6 +144,15 @@ func buildSubAgentsFromConfigs(
 			beforeModel = append(beforeModel, subAgentSteerYield(steerStore))
 		}
 
+		// The sub-agent's model calls are charged to the turn's token budget. This
+		// is the half that matters most: a reviewer/researcher sub-agent can burn
+		// millions of prompt tokens across its private flow loop while making only
+		// a couple of tool calls the leader can see.
+		afterModel := []llmagent.AfterModelCallback{callbacks.AfterModel}
+		if budgetAfterModel != nil {
+			afterModel = append(afterModel, budgetAfterModel)
+		}
+
 		// A sub-agent runs in agenttool's own plugin-less runner, so the
 		// runner-level permissions AND hooks plugins never see its tool calls —
 		// attach their tool-level callbacks here so a sub-agent's
@@ -151,6 +167,11 @@ func buildSubAgentsFromConfigs(
 		}
 		if hooksBeforeTool != nil {
 			beforeTool = append(beforeTool, hooksBeforeTool)
+		}
+		// Last in the chain: a call the user or a hook already rejected must not
+		// be charged to the turn's budget.
+		if budgetBeforeTool != nil {
+			beforeTool = append(beforeTool, budgetBeforeTool)
 		}
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {
@@ -168,7 +189,7 @@ func buildSubAgentsFromConfigs(
 			AfterToolCallbacks:   afterTool,
 			OnToolErrorCallbacks: []llmagent.OnToolErrorCallback{callbacks.OnToolError},
 			BeforeModelCallbacks: beforeModel,
-			AfterModelCallbacks:  []llmagent.AfterModelCallback{callbacks.AfterModel},
+			AfterModelCallbacks:  afterModel,
 		})
 		if sErr != nil {
 			return nil, nil, nil, nil, sErr

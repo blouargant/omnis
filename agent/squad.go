@@ -241,6 +241,15 @@ func buildSquadInstance(
 	hooksEngine := infra.Hooks(runtime)
 	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, isRouter)
 
+	// ── Per-turn spend ceiling, shared like the gate ──
+	// Same two-place wiring, for the same reason: the plugin (buildPlugins) counts
+	// the root's tool calls + tokens, and the SAME callbacks are attached to every
+	// sub-agent so a max_instances fan-out spends from one bucket instead of N
+	// invisible ones. Without the sub-agent half a leader could delegate an
+	// unbounded search loop and never be charged for it — which is exactly what a
+	// runaway deep-research turn did. Nil for the router squad / unlimited config.
+	budgetBeforeTool, budgetAfterModel := budgetCallbacks(infra.Budget, infra.AskUserRegistry, runtime.TurnBudget, isRouter)
+
 	// ── Sub-agents + coordinator-only session tools (skipped when leaderless) ──
 	subAgentMap := map[string]adkagent.Agent{}
 	var subAgents []adkagent.Agent
@@ -271,6 +280,7 @@ func buildSquadInstance(
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
 			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
+			budgetBeforeTool, budgetAfterModel,
 		)
 		if berr != nil {
 			permGateClose()
@@ -356,7 +366,7 @@ func buildSquadInstance(
 	// the root's runner plugin; buildHooksPlugin reads the same hooksEngine).
 	suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad)
+	plugins, pluginCloser, err := buildPlugins(runtime, opts, infra.Bus, orchestratorLLM, suffix, infra.BuildTimestamp, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel)
 	if err != nil {
 		permGateClose()
 		for _, h := range allMCPHandles {
