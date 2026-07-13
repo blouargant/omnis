@@ -34,10 +34,10 @@ const (
 // Unlike agenttool — which builds a throwaway session.InMemoryService per call —
 // it owns ONE persistent service + runner and a handle→session map, so the leader
 // can resume a prior conversation by passing back the `session` handle the tool
-// returned. It implements runnableTool, so it plugs into newNonConcurrentTool /
-// newParallelAgentTool exactly like the plain agenttool: durability and parallel
-// fan-out are orthogonal because each call (each parallel task) gets its OWN
-// handle — resume always addresses one specific handle, never "the agent".
+// returned. It implements runnableTool, so it plugs into newConcurrentAgentTool
+// exactly like the plain agenttool: durability and parallel fan-out are orthogonal
+// because each call gets its OWN handle — resume always addresses one specific
+// handle, never "the agent".
 type resumableAgentTool struct {
 	runnableTool // underlying agenttool: provides Name / IsLongRunning / the base Declaration / ProcessRequest
 

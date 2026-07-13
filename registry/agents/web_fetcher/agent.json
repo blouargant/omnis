@@ -1,13 +1,14 @@
 {
   "allow_file_attachments": false,
   "builtin": false,
-  "description": "Bulk web evidence gatherer. Give it ONE specific question plus (optionally) a URL, and it searches/fetches and returns the exact passages that bear on it — each with its source URL and a verbatim quote. It never judges, concludes, or recommends: it reports what the sources say and, when they say nothing, reports that. Call it once per question. Use it whenever you need to READ the web: it absorbs the pages into its own cheap context so yours stays small.",
+  "description": "Bulk web evidence gatherer. Give it ONE specific question plus (optionally) a URL, and it searches/fetches and returns the exact passages that bear on it — each with its source URL and a verbatim quote. It never judges, concludes, or recommends: it reports what the sources say and, when they say nothing, reports that. One call = one question; when you have several, issue several calls at once rather than packing them into one. Use it whenever you need to READ the web: it absorbs the pages into its own cheap context so yours stays small.",
   "enabled": true,
   "leader": false,
   "model_ref": "hosted",
   "name": "web_fetcher",
   "skills": [],
   "softskills_dir": "",
+  "max_instances": 10,
   "tools": [
     "serpapi",
     "ddg",

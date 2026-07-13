@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"reflect"
+	"strings"
 	"testing"
 
 	adkagent "google.golang.org/adk/agent"
@@ -51,6 +52,11 @@ func buildTree(t *testing.T, members []RuntimeAgentConfig, catalogue []RuntimeAg
 // it "cannot verify" and answers from memory.
 func agentToolNames(t *testing.T, a adkagent.Agent) []string {
 	t.Helper()
+	return toolNames(agentTools(t, a))
+}
+
+func agentTools(t *testing.T, a adkagent.Agent) []tool.Tool {
+	t.Helper()
 	v := reflect.ValueOf(a)
 	for v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -67,7 +73,50 @@ func agentToolNames(t *testing.T, a adkagent.Agent) []string {
 	if !ok {
 		t.Fatalf("State.Tools is %T, want []tool.Tool", tf.Interface())
 	}
-	return toolNames(tools)
+	return tools
+}
+
+// The end-to-end guard for the SHIPPED shape: research_critic (high, resumable)
+// delegating to web_fetcher (max_instances 10). Unit tests on the wrapper prove the
+// wrapper; this proves the tree the config actually builds.
+//
+// It exists because the previous failure was invisible to every other test: the
+// gatherer was built, mounted and declared correctly, and the critic still never
+// called it — because max_instances > 1 handed the model a BATCH schema
+// ({tasks: [...]}) that a non-premium caller silently declines to construct. Nothing
+// errored; the critic just wrote "I cannot confirm this claim without fetching". So
+// the assertion that matters is on the SCHEMA the model receives, not on the wiring.
+func TestShippedGathererIsMountedWithASingleTaskSchema(t *testing.T) {
+	critic := RuntimeAgentConfig{
+		Name: "research_critic", Enabled: true, ResumableSessions: true,
+		SubAgents: []string{"web_fetcher"},
+	}
+	fetcher := RuntimeAgentConfig{
+		Name: "web_fetcher", Enabled: true, ResumableSessions: true,
+		Description:  "Bulk web evidence gatherer.",
+		MaxInstances: 10,
+	}
+	subAgents, _ := buildTree(t, []RuntimeAgentConfig{critic}, []RuntimeAgentConfig{critic, fetcher})
+
+	var gatherer tool.Tool
+	for _, tl := range agentTools(t, subAgents["research_critic"]) {
+		if tl.Name() == "web_fetcher" {
+			gatherer = tl
+		}
+	}
+	if gatherer == nil {
+		t.Fatal("web_fetcher is not mounted on research_critic — the critic cannot delegate retrieval at all")
+	}
+
+	decl := gatherer.(declaredTool).Declaration()
+	if _, isBatch := decl.Parameters.Properties["tasks"]; isBatch {
+		t.Fatalf("web_fetcher is declared with a BATCH schema; a non-premium caller silently will not "+
+			"construct it. Properties: %+v", decl.Parameters.Properties)
+	}
+	if !strings.Contains(gatherer.Description(), "up to 10") {
+		t.Fatalf("max_instances=10 is not advertised to the caller, so it will never fan out: %q",
+			gatherer.Description())
+	}
 }
 
 func toolNames(tools []tool.Tool) []string {

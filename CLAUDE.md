@@ -356,20 +356,19 @@ the permission gate, the lifecycle hooks, and the steering yield (which cascades
 depth-2 unwinds to depth-1, whose own yield unwinds to the leader) all reach a nested
 agent with no extra wiring.
 
-**GOTCHA — `max_instances > 1` needs a caller strong enough for the batch schema.**
-A fan-out agent is exposed as a **batch** tool (`{tasks: [...]}`, `newParallelAgentTool`)
-rather than a plain call. **The `high` model will not invoke that schema**: with
-`web_fetcher` at `max_instances: 8` the critic silently never called it and wrote
-*"I cannot confirm this claim without fetching"* — a **silent** degradation (the tool
-was correctly mounted and declared; the model just would not use it). Dropping to
-`max_instances: 1` made it call `web_fetcher` immediately and correctly. Every
-pre-existing fan-out agent (`web_agent` ×10, `code_scout` ×5, `doc_agent` ×5) happens
-to be called by a **`premium`** leader, which handles the batch schema — `web_fetcher`
-was the first fan-out agent with a non-premium caller, which is why this surfaced now.
-**Costs nothing to give up:** context isolation — the thing that actually kills the
-quadratic — comes from agenttool minting a **fresh session per call**, not from
-parallelism; `max_instances` only buys latency. So a gatherer called by a
-non-`premium` agent should stay at `max_instances: 1`.
+**`max_instances` is a concurrency LIMIT, never a schema switch** — see
+"Sub-agent fan-out" below for the wrapper. This was learned the hard way: it used to
+swap the sub-agent for a **batch** tool (`{tasks: [...]}`), and **the `high` model
+would not invoke that schema at all**. With `web_fetcher` at `max_instances: 8` the
+critic silently never called it and wrote *"I cannot confirm this claim without
+fetching"* — the tool was correctly mounted and correctly declared; the model just
+would not construct the batch. Every *pre-existing* fan-out agent (`web_agent` ×10,
+`code_scout` ×5, `doc_agent` ×5) happened to be called by a **`premium`** leader,
+which did handle it, so nothing had ever exercised the weak-caller path. A gatherer's
+whole point is to be called by a **cheaper** agent, so `web_fetcher` was the first to
+hit it. The wrapper now always advertises the sub-agent's **own single-task schema**
+and lets ADK's native concurrent dispatch do the fan-out, so a fan-out agent works for
+**any** caller regardless of model strength.
 
 **No-op contract:** a fleet declaring no `subagents` builds exactly the direct
 members in declared order — byte-identical to the pre-nesting build.
@@ -545,33 +544,67 @@ behaviour is unchanged.
 
 Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on
 the leader (not via `transfer_to_agent`), so control always returns to
-the leader after a sub-agent call. By default each sub-agent runs one at a
-time ([agent/non_concurrent_tool.go](agent/non_concurrent_tool.go)
-`newNonConcurrentTool`, single-task schema): a mutex rejects a duplicate
-concurrent call of the same sub-agent with an "already running" error. The
-wrapper's `ProcessRequest` packs **itself** (via `packToolDecl`), not the
-inner agenttool — ADK dispatches function calls by the object stored in
-`req.Tools[name]`, so registering the inner there would call the inner's
-`Run` directly and bypass the mutex (the declaration is identical either way,
-so the model sees no difference). Setting an agent's
-`max_instances > 1` in its `agent.json` swaps that wrapper for
-[agent/parallel_agent_tool.go](agent/parallel_agent_tool.go)
-`newParallelAgentTool`: the leader then sees a **batch/fan-out** tool whose
-schema is `{ tasks: [ <inner-input>, … ] }` (the per-task shape mirrors the
-sub-agent's own input schema), capped at `max_instances`. `Run` fans the
-tasks out concurrently — each via the inner `agenttool.Run`, which builds
-its own runner+session per call, so concurrent invocations of one
-stateless sub-agent are safe — bounded by a semaphore of width
-`max_instances`, preserves order, isolates per-task errors into their slot,
-and returns `{ results: [ … ] }`. Because ADK dispatches function calls via
-`req.Tools[name]`, the parallel tool's `ProcessRequest` packs **itself**
-(not the inner) via the local `packToolDecl` (a copy of ADK's unexported
-`toolutils.PackTool`) so the model gets the batch declaration and the runner
-dispatches the fan-out. `max_instances` defaults to `1` and is per-agent.
+the leader after a sub-agent call.
+
+**Sub-agent fan-out (`max_instances`) — a semaphore, not a batch.** Every mount
+point goes through ONE wrapper
+([agent/concurrent_agent_tool.go](agent/concurrent_agent_tool.go)
+`newConcurrentAgentTool`), and `max_instances` (default `1`, per-agent) is simply the
+width of its semaphore. The wrapper **always advertises the sub-agent's own
+single-task schema, unchanged** — one call = one job.
+
+**The fan-out is ADK's, not ours.** `Flow.handleFunctionCalls`
+([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go))
+dispatches **every function call in one model response concurrently** (a
+`sync.WaitGroup` + a goroutine each) against the single shared tool object from
+`toolsDict`. So a caller that wants three lookups just emits three calls and they
+overlap — no special schema is needed to *get* parallelism, only to *cap* it, which
+is all the semaphore does. Excess siblings **queue** (the wait selects on the tool
+context, so a Stop/session-end releases them instead of stranding a goroutine).
+
+**Why not a batch tool.** `max_instances > 1` used to swap in a **batch** tool
+(`{tasks: [ … ]}`), i.e. it changed the *schema*. Two things were wrong with that:
+a weak caller **silently refuses to construct the batch** (the `high` critic never
+called `web_fetcher` at all — see the GOTCHA under the gatherer doctrine), and the
+`max_instances <= 1` wrapper's `TryLock` **rejected** the model's native parallel
+siblings with "already running", **throwing the work away**: four concurrent
+`web_fetcher` calls in one critic response ran **once** and lost three retrievals.
+Queueing runs all four. Locked in by `TestNativeFanOutIsNeverThrownAway`
+([agent/concurrent_agent_tool_test.go](agent/concurrent_agent_tool_test.go)), which
+fails with `ok=1 failed=3` against the old wrapper.
+
+**Consequence for the leader's prompt:** "batch related questions into one sub-agent
+call" is now **wrong advice** and was removed from the `leader` / `knowledge_leader` /
+`k8s_leader` instructions. It funnels N questions' raw material (files, fetched pages,
+pod logs) into a **single** sub-agent context — the very quadratic the gatherer
+doctrine exists to kill — and it serialises what would otherwise overlap. The rule is
+now **one call per independent question, several in the same response**; combine two
+questions only when the second genuinely *depends* on the first one's answer. The
+"you may call me several times at once" invitation is generated **by the wrapper's
+`Description()` from `max_instances`**, so it cannot drift from the config the way a
+hand-written instruction does.
+
+**Dispatch contract (do not break):** the wrapper's `ProcessRequest` packs **itself**
+(via the local `packToolDecl`, a copy of ADK's unexported `toolutils.PackTool`), not
+the inner agenttool. ADK dispatches function calls by the object stored in
+`req.Tools[name]`, so registering the inner there would call the inner's `Run`
+directly and **the semaphore would silently not exist**. The declaration is the
+inner's either way, so the model sees no difference.
+
+Concurrency is safe at the agent level because `agenttool.Run` builds its **own
+runner + session service + session per call**; the resumable wrapper keys durable
+state by **per-call handle**, so durability and fan-out compose. The semaphore is a
+*policy* limit (how much parallel work one caller may provoke), not a correctness
+lock, and it is **per mount point** — a gatherer shared by two specialists gives each
+its own width rather than making them contend.
+
 An agent may also declare **`max_tool_calls`** (per-turn tool-call cap for that
 agent; 0/absent = uncapped) — see "Per-agent cap" under "Per-turn spend budget".
 Note it interacts with `max_instances`: the cap is keyed by agent **name**, so a
-fan-out's parallel instances **share** it.
+fan-out's parallel instances **share** it. **Native fan-out also changes what the cap
+counts:** each parallel call is now its own charged tool call, where one batch call
+(carrying up to `max_instances` tasks) used to cost **1**. `research_critic`'s cap was
+raised 8 → 12 to compensate.
 The web UI Settings → Agent panel exposes it as a **Max parallel instances**
 numeric field (a `Parallelism` section, hidden for the leader and curator
 since both are excluded from fan-out); the value round-trips through the
@@ -2546,9 +2579,15 @@ Shipped: `research_critic` at **12** ([registry/agents/research_critic/agent.jso
   **same** counter: it is a *total* work budget for that agent in the turn, not a
   per-instance one. Capping a 10-way `web_agent` fan-out at 12 would give each
   researcher barely one call. This is why the cap is set on `research_critic`
-  (`max_instances: 1`) and **not** on `web_agent` (`max_instances: 10`), whose cost
-  is bounded by the output shaper instead. Locked in by
-  `TestPerAgentCapIsSharedAcrossParallelInstances`.
+  (`max_instances: 1`, so its counter is its own) and **not** on `web_agent` or
+  `web_fetcher` (both ×10), whose cost is bounded by the output shaper + context
+  isolation instead. Locked in by `TestPerAgentCapIsSharedAcrossParallelInstances`.
+- **GOTCHA — native fan-out made the cap finer-grained.** Each parallel call is now
+  its own charged tool call; a batch call carrying up to `max_instances` tasks used to
+  cost **1**. So an unchanged cap silently got up to `max_instances`× tighter when the
+  batch tool was replaced by the semaphore (see "Sub-agent fan-out"). `research_critic`
+  was raised 8 → 12 for exactly this reason. When you give a capped agent a fan-out
+  team, re-check its cap.
 
 - **Config**: `turn_budget: {max_tool_calls, max_tokens}` in `agents.json` (pointer
   fields, so an explicit `0` = "no ceiling on this axis" is distinguishable from
@@ -3324,10 +3363,13 @@ picks **one** action by mode, decided at save time:
 6. If the agent is a **gatherer**, hold it to the retrieval/judgment contract:
    it returns **evidence with provenance** (a quote + URL, a `file:line` +
    snippet, a pod + timestamp + log line) and is explicitly forbidden from
-   concluding — that is what makes it safe to run on a cheap model. And leave
-   `max_instances` at 1 unless its caller runs on `premium`: a fan-out agent is
-   exposed as a batch (`{tasks: […]}`) tool, and a weaker caller silently will
-   not invoke that schema (see the GOTCHA in the gatherer-doctrine section).
+   concluding — that is what makes it safe to run on a cheap model.
+7. Set **`max_instances`** to how many calls to it may run **at once** (default 1).
+   It is a concurrency limit only — the schema stays single-task, so a fan-out agent
+   is invokable by a caller on **any** model (see "Sub-agent fan-out"). Raise it for
+   anything whose jobs are independent and IO-bound (retrieval, search, log pulls).
+   Then check the caller's **`max_tool_calls`**: each parallel call is charged
+   separately, so a capped caller can exhaust its cap on one wave.
 
 ### Adding a new squad
 

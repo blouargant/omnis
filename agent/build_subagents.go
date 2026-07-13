@@ -272,17 +272,20 @@ func buildSubAgentsFromConfigs(
 //
 // resumable_sessions swaps the throwaway per-call agenttool for one that keeps
 // durable, re-attachable sessions (the caller resumes via a returned handle). It
-// implements the same runnableTool interface, so the parallel / non-concurrent
-// wrappers are unchanged — each parallel task still gets its own handle, so
-// durability and fan-out compose. max_instances > 1 exposes a batch/fan-out tool;
-// <= 1 keeps the single-task, one-at-a-time tool.
+// implements the same runnableTool interface, so the concurrency wrapper is
+// unchanged — each parallel call still mints its own handle, so durability and
+// fan-out compose.
 //
-// A FRESH wrapper is made per mount point, deliberately: the non-concurrent
-// wrapper's mutex and the resumable wrapper's handle map are per-tool state, so
-// sharing one wrapper between the leader and a nested caller would make them
-// contend — a nested call would spuriously report the agent "already running" for
-// the leader. The underlying agent is stateless (agenttool builds a session per
-// call), so several wrappers over one agent are safe.
+// max_instances is then just the width of that wrapper's semaphore: the schema the
+// model sees is always the sub-agent's own single-task shape, and ADK's own
+// concurrent dispatch of the calls in one model response is what produces the
+// fan-out (see concurrentAgentTool).
+//
+// A FRESH wrapper is made per mount point, deliberately: the semaphore and the
+// resumable wrapper's handle map are per-tool state, so sharing one wrapper between
+// the leader and a nested caller would make them contend for each other's slots —
+// one caller's fan-out would throttle the other's. The underlying agent is stateless
+// (agenttool builds a session per call), so several wrappers over one agent are safe.
 func wrapSubAgentTool(sa adkagent.Agent, cfg RuntimeAgentConfig) (tool.Tool, error) {
 	var wrapped runnableTool
 	if cfg.ResumableSessions {
@@ -298,8 +301,5 @@ func wrapSubAgentTool(sa adkagent.Agent, cfg RuntimeAgentConfig) (tool.Tool, err
 		}
 		wrapped = w
 	}
-	if cfg.MaxInstances > 1 {
-		return newParallelAgentTool(wrapped, cfg.MaxInstances), nil
-	}
-	return newNonConcurrentTool(wrapped), nil
+	return newConcurrentAgentTool(wrapped, cfg.MaxInstances), nil
 }
