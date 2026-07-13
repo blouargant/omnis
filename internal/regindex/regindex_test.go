@@ -3,7 +3,9 @@ package regindex
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/blouargant/omnis/internal/registries"
 	"github.com/blouargant/omnis/internal/semindex"
@@ -56,6 +58,15 @@ func openTest(t *testing.T) *Index {
 	if idx == nil {
 		t.Fatal("expected a non-nil index with a real embedder")
 	}
+	// Open registers a PROCESS-GLOBAL registries.OnSave hook bound to this index.
+	// Without clearing it the hook outlives the test: a later test's
+	// writeRegistries would fire a rebuild on this now-dead index — whose
+	// OMNIS_HOME temp dir the framework has already deleted — corrupting that
+	// test's state (a concurrent rebuild resets the corpus hash, so
+	// TestStaleRebuildOnRegistrySetChange sees stale()==false) and blocking it on
+	// the dead index's rebuild. Under -count=2 that cost 86s; under -count=10 the
+	// package never finished.
+	t.Cleanup(func() { registries.SetOnSave(nil) })
 	return idx
 }
 
@@ -162,6 +173,15 @@ func TestStaleRebuildOnRegistrySetChange(t *testing.T) {
 	writeRegistries(t, registries.Registry{ID: "r1", URL: "https://github.com/x/y", Kind: registries.KindSkills})
 
 	idx := openTest(t)
+	// This test is about the LAZY path: Search self-heals when the corpus hash
+	// has drifted. Open also wires the PROACTIVE path (registries.OnSave → a
+	// background rebuild), and the writeRegistries below would fire it — that
+	// rebuild races us to refresh the very corpus hash we are about to assert is
+	// stale, so the assertion fails whenever the goroutine wins. Detach the
+	// proactive hook and let the lazy path be the only rebuilder here;
+	// TestOnSaveTriggersRebuild covers the proactive one.
+	registries.SetOnSave(nil)
+
 	idx.browse = fakeBrowse(map[string][]semindex.Item{
 		"r1": {newItem(registries.Registry{ID: "r1"}, kindSkill, "deployer", "ops/deployer", "deploy kubernetes", nil, false)},
 		"r2": {newItem(registries.Registry{ID: "r2"}, kindSkill, "migrator", "db/migrator", "database migration", nil, false)},
@@ -272,4 +292,47 @@ func TestOnSaveTriggersRebuild(t *testing.T) {
 	// assert the hook is installed and re-entrant-safe (no panic, coalesces).
 	idx.onRegistriesSaved()
 	idx.onRegistriesSaved()
+}
+
+// registries.SaveRegistries fires the OnSave hook SYNCHRONOUSLY, so the hook
+// must never wait on anything. It used to take the same mutex Reindex holds for
+// its entire duration — and Reindex holds it across the network browse of every
+// configured registry. So a registry edit or a skill install (both of which call
+// SaveRegistries) stalled — an HTTP handler or a tool call blocked — until an
+// unrelated in-flight reindex had finished walking the network.
+//
+// Here a rebuild is made to hold the index mutex; a save must still return
+// promptly instead of queueing behind it.
+func TestSaveDoesNotBlockOnInFlightRebuild(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	writeRegistries(t, registries.Registry{ID: "r1", URL: "https://github.com/x/y", Kind: registries.KindSkills})
+
+	idx := openTest(t)
+	release := make(chan struct{})
+	browsing := make(chan struct{})
+	var once sync.Once
+	idx.browse = func(registries.Registry, Config) []semindex.Item {
+		// Stand in for a slow network browse, which Reindex performs while
+		// holding i.mu.
+		once.Do(func() { close(browsing) })
+		<-release
+		return nil
+	}
+
+	go func() { _, _ = idx.Reindex(context.Background()) }()
+	<-browsing // the rebuild now holds i.mu
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		idx.onRegistriesSaved() // what fireOnSave calls, on the saver's goroutine
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("onRegistriesSaved blocked behind an in-flight rebuild; a registry edit or skill install would stall on it")
+	}
+	close(release)
 }

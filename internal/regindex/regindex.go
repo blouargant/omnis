@@ -98,8 +98,19 @@ type Index struct {
 	// production wiring leaves it as defaultBrowse (browse via the providers).
 	browse func(reg registries.Registry, cfg Config) []semindex.Item
 
-	mu      sync.Mutex // serialises Reindex (one rebuild at a time)
-	running bool       // an OnSave-triggered background rebuild is in flight
+	mu sync.Mutex // serialises Reindex (one rebuild at a time)
+
+	// runMu guards `running` and MUST NOT be `mu`. Reindex holds `mu` for its
+	// whole duration — including the network browse of every configured registry
+	// — so a coalescing check that took `mu` would block its caller for the
+	// length of a full rebuild. And its caller is the SAVER: fireOnSave runs the
+	// hook synchronously inside registries.SaveRegistries, so a registry edit or
+	// a skill install would stall (an HTTP handler, a tool call) until an
+	// unrelated in-flight reindex finished walking the network. A separate small
+	// mutex keeps onRegistriesSaved O(1) and non-blocking, which is what a
+	// "trigger a background rebuild" hook is supposed to be.
+	runMu   sync.Mutex
+	running bool // an OnSave-triggered background rebuild is in flight
 }
 
 // Open opens (or creates) the registries index at $OMNIS_HOME/index/registries,
@@ -411,22 +422,25 @@ func (i *Index) Search(ctx context.Context, query string, k int) ([]Hit, error) 
 // onRegistriesSaved is the registries.OnSave hook: a registry was added,
 // edited, or removed via the web UI or a tool install, so rebuild in the
 // background. A single rebuild runs at a time; concurrent saves coalesce.
+// It must never block its caller: fireOnSave invokes it synchronously from
+// inside registries.SaveRegistries, so anything it waits on stalls the save
+// itself. Hence runMu (not mu — see the field comment).
 func (i *Index) onRegistriesSaved() {
 	if i == nil {
 		return
 	}
-	i.mu.Lock()
+	i.runMu.Lock()
 	if i.running {
-		i.mu.Unlock()
+		i.runMu.Unlock()
 		return
 	}
 	i.running = true
-	i.mu.Unlock()
+	i.runMu.Unlock()
 	go func() {
 		defer func() {
-			i.mu.Lock()
+			i.runMu.Lock()
 			i.running = false
-			i.mu.Unlock()
+			i.runMu.Unlock()
 		}()
 		_, _ = i.Reindex(context.Background())
 	}()
