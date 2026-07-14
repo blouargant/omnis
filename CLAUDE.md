@@ -4304,8 +4304,22 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
   text hug the screen edges at ~95 characters a line. Desktop keeps 90% / 613px.
 - **`100dvh`** (not `100vh`, which sits under the mobile URL bar) + `env(safe-area-inset-bottom)`
   on the composer.
-- **`@media (pointer: coarse)`** reveals the hover-only controls (`.turn-action-btn`,
-  the tab `×`) so they are tappable. Keyed on input device, not width.
+- **`@media (pointer: coarse)`** is the **touch block** — keyed on input device, not
+  width, so a touch laptop gets it too. It does two things. (1) **Reveals every
+  hover-only control**: `.turn-action-btn`, the tab `×`, `.code-copy-btn`,
+  `.copy-msg-group`, the dimmed `.pane-toolbar`, and — the one that actually blocked
+  users — the **per-session-row ⋮ / delete stack** (`.session-actions`, revealed by
+  `#session-list li:hover`, so on touch it was reachable only via the sticky `:hover`
+  a tap sometimes leaves behind, and *that same tap opens the session*). Covers
+  `#archived-list` too (same class). Bulk-select still hides them
+  (`#session-pane.selecting … { display: none }` out-specifies the reveal).
+  (2) **Enlarges the touch targets** the mouse-sized chrome makes too small
+  (24–28px): session-row buttons 34px, session-pane toolbar 36px, pane hamburger
+  36px / tab × 24px / `+` 40px / split-close 32px, composer icon buttons 34px,
+  message-copy 32px. The session-row stack must also **turn horizontal** — two
+  enlarged buttons stacked would outgrow the ~52px row they are centred in — so the
+  row's reserved right gutter widens from 30px to 84px (name/meta ellipsis absorbs
+  it).
 - **Pull-to-refresh** (`wirePullToRefresh` in [web/app.js](web/app.js), `.ptr-indicator`
   in the pane template) is implemented **in-app, not by the browser**. The native gesture
   cannot work here: omnis is a fixed app shell (`body { overflow: hidden }`), so the

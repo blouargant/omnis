@@ -174,6 +174,47 @@
   .turn-action-btn { opacity: 1; }
   .pane-tab .pane-tab-close { opacity: 1; }
   .code-copy-btn { opacity: 1; }
+  .copy-msg-group { opacity: 1; }
+  /* The pane toolbar dims to .55 until the pane is hovered/focused. */
+  .pane-toolbar { opacity: 1; }
+
+  /* The per-session ⋮ / delete stack is revealed by `#session-list li:hover`,
+     so on touch it was reachable only by the sticky :hover a tap sometimes
+     leaves behind — and that same tap opens the session. Always show it.
+     Covers the archived list too (same class, same hover rule). */
+  #session-list li .session-actions,
+  #archived-list li .session-actions { opacity: 1; pointer-events: auto; }
+
+  /* ─── Touch targets ──────────────────────────────────────────
+     The chrome buttons are sized for a mouse pointer (24–28px). Enlarge the
+     ones a touch user actually taps. Sizes only — no layout/behaviour change —
+     except the session actions, which must go horizontal: two enlarged buttons
+     stacked would outgrow the ~52px row they are centred in. Widen the row's
+     reserved right gutter to match (the base rule reserves 30px for the narrow
+     stack; the name/meta ellipsis absorbs the difference). */
+  .session-actions { flex-direction: row; gap: 4px; right: 8px; }
+  .session-action-btn { width: 34px; height: 34px; }
+  #session-list li:not(.session-group),
+  #archived-list li { padding-right: 84px; }
+
+  /* Session-pane toolbar (search / sort / select / new / import). The text
+     variant keeps its intrinsic width — it is padded, not square. */
+  .session-bar-btn { height: 36px; }
+  .session-bar-btn:not(.session-bar-btn-text) { width: 36px; }
+
+  /* Pane chrome: drawer hamburger, tab close, "+" new tab, split/close. */
+  .pane-menu-btn { width: 36px; height: 36px; }
+  .pane-tab-close { width: 24px; height: 24px; }
+  .pane-newtab-btn { width: 40px; }
+  .pane-toolbar button { width: 32px; height: 32px; }
+
+  /* Composer icon buttons (slash menu, attach). */
+  #slash-btn, #attach-btn { width: 34px; height: 34px; }
+
+  /* Whole-message copy split-button under an assistant reply. */
+  .copy-msg-btn, .copy-msg-caret { height: 32px; }
+  .copy-msg-btn { width: 32px; }
+  .copy-msg-caret { width: 24px; }
 }
 
 /* A 12px gutter is right for a ~390px phone, but in the upper half of the

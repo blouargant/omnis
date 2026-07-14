@@ -74,7 +74,7 @@ same colour/size in multiple partials.
 | `context.css` | Context ring, context popup, context browser modal |
 | `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card |
 | `notifications.css` | Background-task / monitor toast notifications (`#task-toast-layer`, `.task-toast`) |
-| `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` + `#session-pane` out of the flow into one off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` reveal of hover-only controls |
+| `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` + `#session-pane` out of the flow into one off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` **touch block**: reveals every hover-only control (session-row actions, turn/copy buttons, tab ×) and enlarges the chrome buttons to tappable sizes |
 
 ### `settings/` — Settings panel (barrel: `settings.css`)
 
