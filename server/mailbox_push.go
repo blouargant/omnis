@@ -92,6 +92,14 @@ type pushMsg struct {
 	// Text carries an optional payload (e.g. a short reply preview for the
 	// chat_reply event); empty for events that only need the session id.
 	Text string
+	// Client is the id of the browser that ORIGINATED the turn this event
+	// concerns (chat_reply only), serialised as the SSE data field's "client_id".
+	// Empty for a turn no browser started (spawned/scheduled/mailbox/A2A), which
+	// every client should act on. A browser uses it to tell its own completed turn
+	// apart from one another of the user's devices started — without it, every
+	// connected browser treats a session it is not currently displaying as "away"
+	// and raises an OS notification.
+	Client string
 	// Data carries an optional structured payload merged into the SSE data object
 	// alongside session_id (e.g. the context_usage / turn_usage frames delivered
 	// for a background turn, which has no per-turn SSE stream). Nil for most events.
@@ -182,10 +190,17 @@ func (b *sessionPushBroadcaster) broadcast(event, sessionID string) {
 // chat_reply to ship a short reply preview to every open browser so an
 // OS notification can show the first lines of the answer.
 func (b *sessionPushBroadcaster) broadcastWithText(event, sessionID, text string) {
+	b.broadcastFrom(event, sessionID, text, "")
+}
+
+// broadcastFrom is broadcastWithText plus the id of the browser that originated
+// the turn (see pushMsg.Client). An empty clientID means "no browser origin", so
+// every client acts on the event — which is what broadcastWithText delegates.
+func (b *sessionPushBroadcaster) broadcastFrom(event, sessionID, text, clientID string) {
 	b.mu.RLock()
 	for ch := range b.all {
 		select {
-		case ch <- pushMsg{Event: event, SID: sessionID, Text: text}:
+		case ch <- pushMsg{Event: event, SID: sessionID, Text: text, Client: clientID}:
 		default:
 		}
 	}

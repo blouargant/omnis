@@ -961,6 +961,33 @@ const sessionStatus     = new Map(); // sessionId → status string
 // This lets the first one win and suppress the redundant second for that turn.
 const sessionNotifiedAt = new Map();
 
+// CLIENT_ID identifies THIS browser (stable across reloads; per browser profile,
+// so every tab shares it). It rides along on each turn POST and comes back on
+// that turn's `chat_reply` event, letting a browser tell "I started this turn"
+// from "another of the user's devices did". Without it every connected browser
+// counts as "away" from a session it is not currently displaying, so a chat
+// started on a phone raised an OS notification on the desktop — which had
+// nothing to do with it.
+const CLIENT_ID = (() => {
+  const KEY = "agent_toolkit_client_id";
+  let id = "";
+  try { id = localStorage.getItem(KEY) || ""; } catch { /* storage unavailable */ }
+  if (!id) {
+    // crypto.randomUUID needs a secure context and omnis is routinely served over
+    // plain http on a LAN, so fall back to getRandomValues, then to Math.random.
+    try { id = crypto.randomUUID(); } catch { /* not available here */ }
+    if (!id) {
+      try {
+        const b = new Uint8Array(16);
+        crypto.getRandomValues(b);
+        id = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+      } catch { id = Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    }
+    try { localStorage.setItem(KEY, id); } catch { /* ignore */ }
+  }
+  return id;
+})();
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const archivedSessions  = new Set(); // sessionIds in the archived (read-only) state
 const sessionTitles     = new Map(); // sessionId → display title (for pane tabs)
@@ -6563,7 +6590,15 @@ async function subscribeGlobalEvents() {
           // notifyChatReply self-gates on the preference + the "user is away from
           // this session" check, and the notification's tag coalesces with any
           // duplicate the initiating tab's send path raised, so at most one shows.
-          notifyChatReply(sid, (data && data.text) || "");
+          //
+          // Only the browser that STARTED the turn notifies: the event reaches
+          // every connected browser, and one displaying some other session counts
+          // as "away", so a turn started on the phone would otherwise ping the
+          // desktop too. A turn with no browser origin (spawned, scheduled,
+          // mailbox, A2A — or an older client that sends no client_id) carries an
+          // empty client_id and still notifies everyone, which is what we want.
+          const origin = (data && data.client_id) || "";
+          if (!origin || origin === CLIENT_ID) notifyChatReply(sid, (data && data.text) || "");
           // If we were only WATCHING this turn (it was started elsewhere, or by
           // this browser before a reload), the reply exists solely in history —
           // nothing streamed into our transcript. Clear the watching state and
@@ -7656,7 +7691,7 @@ async function sendMessage(panel) {
     try {
       const res = await apiFetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ prompt, ...(filePaths.length > 0 && { files: filePaths }) }),
+        body: JSON.stringify({ prompt, client_id: CLIENT_ID, ...(filePaths.length > 0 && { files: filePaths }) }),
         signal: ctrl.signal,
       });
       if (!res.ok) {

@@ -2817,7 +2817,9 @@ reply** while the user is away (`notifyChatReply`). Both live in
 [web/app.js](web/app.js) and only fire when the user is **away** —
 `document.hidden || !document.hasFocus()` for tasks; for chat replies that **plus**
 `panelsForSession(sessionId).length === 0` (the finished session isn't the active
-tab in any visible pane, i.e. the user switched to another session). `notifyChatReply`
+tab in any visible pane, i.e. the user switched to another session) — **and, for the
+global `chat_reply` path, that this browser is the one that started the turn** (see
+"Origin-scoped" below). `notifyChatReply`
 is called from **two** places: the send-path `finally` on `outcome === "done" ||
 "reload"` (the initiating tab, immediate, rich live preview), **and** the
 persistent `/api/events` global stream's **`chat_reply`** event (robust to a
@@ -2845,11 +2847,33 @@ title (session name) convention.
 
 The `chat_reply` event is broadcast server-side from the turn producer in
 [server/sse.go](server/sse.go) `handleMessages` after the reply is persisted
-(`d.PushEvents.broadcastWithText("chat_reply", id, replyNotificationPreview(text))`);
+(`d.PushEvents.broadcastFrom("chat_reply", id, replyNotificationPreview(text), clientID)`);
 `replyNotificationPreview` is the server-side markdown→snippet reducer mirroring
 the client's (also multi-line: ≤4 lines joined with `\n`). `pushMsg` carries an optional `Text` payload
 ([server/mailbox_push.go](server/mailbox_push.go) `broadcastWithText`), serialised
 as the SSE data field's `text` ([server/server.go](server/server.go) `/api/events`).
+
+**Origin-scoped: only the browser that STARTED a turn notifies for it.** The
+`chat_reply` event reaches **every** connected browser, and the away-check counts a
+browser as away from any session it isn't currently displaying — so a chat started
+on a **phone** raised an OS notification on the **desktop**, which had nothing to do
+with it (and the phone, whose session *was* the active tab, stayed quiet). So each
+browser mints a stable per-profile **`CLIENT_ID`** ([web/app.js](web/app.js),
+`localStorage["agent_toolkit_client_id"]`; `crypto.randomUUID` needs a secure
+context and omnis is routinely served over plain http on a LAN, so it falls back to
+`getRandomValues`). It rides along on the turn POST (`messageRequest.ClientID`,
+`client_id` in the body), is carried through on `pushMsg.Client`, and comes back as
+the `chat_reply` data field's **`client_id`**; the client's handler calls
+`notifyChatReply` only when that id is **its own**. **No-op contract:** a turn no
+browser started — spawned, scheduled, mailbox, A2A — or one from an older cached
+client that sends no `client_id`, carries an **empty** origin and still notifies
+everyone, exactly as before. Regression coverage:
+[server/chat_reply_origin_test.go](server/chat_reply_origin_test.go) (drives the
+real `/api/events` router). **Known gap:** notification *permission* is still
+per-browser while the *intent* is per-user, and a mobile browser suspends the SSE
+stream when the screen is off — so the phone that started a turn will not be
+notified while backgrounded. Closing that needs a service worker + Web Push
+(the current design depends on a live SSE connection in an open page).
 
 - **Source of truth.** The durable choice is the server-side **`preferences.json`**
   ([server/preferences.go](server/preferences.go), `preferences.Notifications *bool`,

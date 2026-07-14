@@ -32,6 +32,11 @@ import (
 type messageRequest struct {
 	Prompt string   `json:"prompt"`
 	Files  []string `json:"files,omitempty"` // absolute paths of uploaded files
+	// ClientID identifies the browser starting this turn; echoed back on the
+	// turn's chat_reply event so the user's OTHER devices know they did not start
+	// it and stay quiet. Absent for a non-browser caller (⇒ no origin, everyone
+	// notifies, the pre-existing behaviour).
+	ClientID string `json:"client_id,omitempty"`
 }
 
 // handleMessages drives one user turn against the lead agent and streams the
@@ -60,6 +65,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "prompt or files are required"})
 			return
 		}
+		clientID := strings.TrimSpace(req.ClientID)
 
 		// SSE response headers.
 		h := c.Writer.Header()
@@ -374,12 +380,14 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 						log.Printf("server: failed to persist turn: %v", err)
 					}
 					// Announce the completed reply on the persistent /api/events stream
-					// so any browser away from this session can raise an OS
-					// notification — robust to a backgrounded tab whose per-turn stream
-					// the browser suspended (the same reliable channel background-task
-					// notifications use). Carries a short preview of the answer.
+					// so the browser that started this turn can raise an OS notification
+					// even when its own per-turn stream was suspended (a backgrounded
+					// tab) — the same reliable channel background-task notifications use.
+					// Carries a short preview of the answer, plus the originating client
+					// id so the user's other devices can tell this turn is not theirs.
 					if d.PushEvents != nil {
-						d.PushEvents.broadcastWithText("chat_reply", meta.ID, replyNotificationPreview(assistantText))
+						d.PushEvents.broadcastFrom("chat_reply", meta.ID,
+							replyNotificationPreview(assistantText), clientID)
 					}
 				}
 

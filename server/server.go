@@ -549,6 +549,9 @@ func newEngine(d serverDeps) *gin.Engine {
 				if msg.Text != "" {
 					payload["text"] = msg.Text
 				}
+				if msg.Client != "" {
+					payload["client_id"] = msg.Client
+				}
 				data, _ := json.Marshal(payload)
 				_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", msg.Event, data)
 				flush()
