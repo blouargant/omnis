@@ -339,6 +339,10 @@ func buildSquadInstance(
 			// router when a request falls outside its scope.
 			rootInstruction += routerHandoffProtocolBlock()
 		}
+		// Reply in the user's language, delegate in English, and never let a
+		// paraphrase strip the scope their wording carried (see
+		// languagePolicyBlock).
+		rootInstruction += languagePolicyBlock(!leaderless)
 		// Make the root aware it can be steered mid-turn and should forward a
 		// relevant note to a delegated sub-agent (see steeringAwarenessBlock).
 		if infra.SteerStore != nil {

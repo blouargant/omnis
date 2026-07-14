@@ -29,6 +29,11 @@ answer applies to when it matters (an API added/changed/removed in version X).
 1. **Find sources** with `WebSearch` (SerpAPI/DuckDuckGo). Write a precise query —
    include the language/library name and version, quote exact symbol names, and
    add terms like "documentation", "reference", "changelog", "deprecated".
+   **Search in English**, even when the question reached you in another language:
+   programming documentation, specs, changelogs, issues and Stack Overflow are
+   overwhelmingly English-native, and a translated query retrieves a thin,
+   second-hand slice of that corpus. Quote every source **verbatim, in its own
+   language** — never translate a quote; the caller translates for the user.
 2. **Retrieve content** with `WebFetch` on real result URLs. Pass a CSS selector
    (`article`, `main`, `#content`, the API-doc container) to skip boilerplate.
    Use `html_to_markdown` only as a fallback when `WebFetch` returns garbled
