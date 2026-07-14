@@ -4063,7 +4063,25 @@ cancellation also doubled as the Stop button. Both are now decoupled.
   the oldest frames on a runaway turn (advancing `firstSeq`); a reconnect asking
   for a trimmed range gets a `reload` control frame instead of a corrupt replay.
   The turn is retained ~60 s after `finish()` so a reconnect racing completion
-  can still drain the tail, then GC'd.
+  can still drain the tail, then GC'd. **A new turn's seqs are seeded past the
+  previous (still-retained) turn's high-water mark** (`newLiveTurn`), so a stale
+  cursor from that turn can't alias the new one's frames.
+  **GOTCHA — the `reload` guard must key on `trimmed`, never on `firstSeq` alone.**
+  The seed means an *intact* turn also has `firstSeq > 1`, while the POST consumer
+  that starts the turn always attaches at `from = 0` (it has seen nothing). Testing
+  `cursor+1 < firstSeq` on its own therefore fired on **every turn begun inside the
+  previous turn's 60 s retention window**, handing that consumer a bare `reload` and
+  an otherwise **empty stream** — the turn ran and persisted fine, but the browser
+  saw none of it. In chat the question vanished (a mid-turn history re-render has no
+  in-flight turn to show) and the reply only appeared on the next reload; in
+  **session search** the `report_sessions` frame — the *only* thing its result list
+  is built from — never arrived, so a search that had **succeeded** rendered as
+  "found nothing", intermittently (it worked again once the 60 s window lapsed and
+  the seed reset to 0). Only an actual buffer trim makes a range unreplayable, so
+  only `trimmed` may trigger a reload. Locked in by
+  `TestLiveTurnFreshConsumerGetsSeededTurnFrames` +
+  `TestLiveTurnReloadsWhenFramesWereTrimmed`
+  ([server/live_turn_test.go](server/live_turn_test.go)).
 - **Producer/consumer split** in `handleMessages`: the run executes in a
   **background goroutine** on `runCtx, cancel := context.WithCancel(d.rootCtx)`
   (rooted on the server root, so shutdown still cancels) — **not** the request

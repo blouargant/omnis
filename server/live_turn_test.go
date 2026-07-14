@@ -45,6 +45,72 @@ func TestLiveTurnSeqContinuesAcrossTurns(t *testing.T) {
 	}
 }
 
+// TestLiveTurnFreshConsumerGetsSeededTurnFrames guards the POST /messages
+// consumer, which always attaches at from=0 (it starts the turn; it has seen
+// nothing).
+//
+// The seq seeding above makes a new turn's firstSeq continue past the previous
+// turn's high-water mark. firstSeq doubles as "the seq of frames[0]", and
+// stream() used it to detect a consumer asking for a range that had been TRIMMED
+// — but a seeded turn has firstSeq > 1 with nothing trimmed, so `cursor+1 <
+// firstSeq` was true for a from=0 attach and the consumer was handed a bare
+// "reload" and an otherwise EMPTY stream. Any turn started within the previous
+// turn's ~60s retention window therefore streamed nothing at all: in chat the
+// question vanished (a mid-turn history re-render has no in-flight turn to show),
+// and the session-search agent's report_sessions frame — the only thing its
+// result list is built from — never reached the browser, so a search that had in
+// fact succeeded rendered as "found nothing".
+func TestLiveTurnFreshConsumerGetsSeededTurnFrames(t *testing.T) {
+	r := newLiveTurnRegistry()
+
+	t1 := r.start("sess", func() {}, "")
+	t1.emit("token", []byte(`{"t":"a"}`))
+	t1.finish() // retained ~60s for tail replay, so it still seeds the next turn
+
+	t2 := r.start("sess", func() {}, "")
+	t2.emit("tool_call", []byte(`{"name":"report_sessions"}`))
+	t2.emit("done", []byte(`{}`))
+	t2.finish()
+
+	var buf bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	t2.stream(ctx, &buf, func() {}, 0) // a fresh consumer: it has seen nothing
+
+	got := buf.String()
+	if strings.Contains(got, "event: reload") {
+		t.Fatalf("a fresh consumer was told to reload instead of being streamed the turn:\n%s", got)
+	}
+	if !strings.Contains(got, `"report_sessions"`) || !strings.Contains(got, "event: done") {
+		t.Fatalf("the turn's frames never reached the consumer:\n%s", got)
+	}
+}
+
+// The reload directive still has a real job: when the buffer overflowed and the
+// front was trimmed, a consumer whose cursor precedes the retained window cannot
+// be replayed without corrupting its transcript, so it must reload from history.
+func TestLiveTurnReloadsWhenFramesWereTrimmed(t *testing.T) {
+	lt := newLiveTurn(func() {}, 0, "")
+	big := bytes.Repeat([]byte("x"), maxBufferBytes/2)
+	lt.emit("token", big)
+	lt.emit("token", big)
+	lt.emit("token", big) // pushes past the cap, trimming frame 1
+	lt.finish()
+
+	if lt.firstSeq == 1 {
+		t.Fatal("nothing was trimmed; the test no longer exercises the trim path")
+	}
+
+	var buf bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lt.stream(ctx, &buf, func() {}, 0) // cursor precedes the retained window
+
+	if !strings.Contains(buf.String(), "event: reload") {
+		t.Fatal("a consumer asking for trimmed frames was replayed a partial (corrupt) stream instead of being told to reload")
+	}
+}
+
 // A turn is persisted only when it completes, so while it runs the liveTurn's
 // prompt is the ONLY record of what the user asked. handleTurnStatus serves it
 // to a browser that loaded the page mid-turn, which is what stops the question

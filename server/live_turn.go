@@ -24,8 +24,15 @@ import (
 type liveTurn struct {
 	mu       sync.Mutex
 	frames   []bufFrame
-	firstSeq int           // seq of frames[0]; advances when the front is trimmed
-	seq      int           // last assigned seq (monotonic, 1-based)
+	firstSeq int // seq of frames[0]; seeded past the previous turn, then advances when the front is trimmed
+	seq      int // last assigned seq (monotonic, 1-based)
+	// trimmed records that the front of the buffer was actually dropped by the
+	// size cap. It is what makes a frame range genuinely unreplayable — and it is
+	// deliberately NOT the same thing as `firstSeq > 1`, which is also true of a
+	// perfectly intact turn whose seqs were seeded past the previous turn (see
+	// newLiveTurn). Conflating the two made stream() tell a fresh consumer to
+	// reload instead of streaming it the turn.
+	trimmed  bool
 	bytes    int           // approximate retained payload bytes (for the cap)
 	notify   chan struct{} // closed-to-broadcast wakeup, replaced on each emit
 	finished bool          // set by finish(); consumers drain then return
@@ -109,6 +116,7 @@ func (lt *liveTurn) trimLocked() {
 		lt.frames = lt.frames[1:]
 		lt.bytes -= len(f.data) + len(f.event)
 		lt.firstSeq = f.seq + 1
+		lt.trimmed = true
 	}
 }
 
@@ -131,7 +139,14 @@ func (lt *liveTurn) stream(reqCtx context.Context, w io.Writer, flush func(), fr
 		// The client is resuming after a frame we've already trimmed: we can't
 		// replay the gap, so tell it to reload history instead of corrupting the
 		// transcript with a partial replay.
-		if cursor+1 < lt.firstSeq {
+		//
+		// This must key on `trimmed`, NOT on `cursor+1 < firstSeq` alone: a turn
+		// whose seqs were seeded past the previous turn (newLiveTurn) has a high
+		// firstSeq with its buffer fully intact, and the POST consumer that started
+		// the turn always attaches at cursor=0. Testing firstSeq alone therefore
+		// fired on every turn begun inside the previous turn's ~60s retention
+		// window, handing that consumer a bare "reload" and an empty stream.
+		if lt.trimmed && cursor+1 < lt.firstSeq {
 			lt.mu.Unlock()
 			writeSSEFrame(w, 0, "reload", []byte("{}"))
 			flush()
