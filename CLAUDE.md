@@ -199,6 +199,7 @@ go run . -d                             # debug: log full payloads (any mode)
 go run . curate --user u --session s    # manual soft-skill curation
 go run . reindex-precedents              # rebuild the cross-session precedent index (needs an embedder)
 go run . reindex-docs                    # rebuild the documentation semantic index (needs an embedder)
+go run . reindex-sessions                # rebuild the past-session search index (needs an embedder)
 go run . version                        # version info
 
 # Examples (opt-in; not part of `make build`)
@@ -272,7 +273,14 @@ main.go / server/
             │    │                             Not a squad member, so the leader never sees it. See
             │    │                             "Nested sub-agents (`subagents`) — the gatherer doctrine".
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
-            │    └── "Helper"      ← leaderless single specialist (helper)
+            │    ├── "Helper"      ← leaderless single specialist (helper)
+            │    │    └── session_search ← NESTED sub-agent (hosted): finds PAST CHAT SESSIONS.
+            │    │                         Not a squad member, so it is reached only through the
+            │    │                         Helper (in chat) or the hidden Session Search squad
+            │    │                         (the web UI search box). See "Session search".
+            │    └── "Session Search" ← HIDDEN leaderless squad (session_search) — machine-facing
+            │                           entry point for the web UI search box; never offered in the
+            │                           squad picker and never routable (SquadEntry.Hidden)
             ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
             └── curator             ← process-wide post-session soft-skill distiller (one hook per generation)
 ```
@@ -717,10 +725,11 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
-| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`. Backs all five recall features; nil-embedder handles degrade with `ErrNoEmbedder` |
+| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/regindex/` | Semantic index over **remote registry** items of **all seven kinds** (skills, agents, mcp, a2a, squads, commands, permissions) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
+| `internal/sessindex/` | Search over **past chat sessions** (see "Session search"): a semantic index over `semindex` at `index/sessions` (one chunk per TURN — user text + assistant text only, never tool calls; per-session content-hash incremental; hits folded **by session**, best turn wins) **plus** `Scan` — a direct, literal walk of the conversation files used when no embedder is configured *and* when the index is still cold. `SearchOrScan` is the one entry point both the tool and the HTTP route call. The `sessions` tool group (`search_sessions`/`read_session`/`list_sessions`/`report_sessions`) mounts **unconditionally** (the scan fallback makes it work with no embedder). Unloads itself from RAM after `OMNIS_SESSION_INDEX_IDLE` of no searching |
 | `internal/docindex/` | Semantic index over **omnis's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/omnis/docs`; roots from `Roots()`, override `OMNIS_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
 | `internal/configedit/` | Layer-aware config read/write shared by the HTTP server (web-UI editor) and the in-process `settings` tools: `SourceLayer`/`AgentsConfigLayer`/`AgentTargetLayer` (moved from `server/layers.go`), `AtomicWriteFile`, `ConfigFileNames`, `ReadSection`/`WriteSection`, `ReadAgentEntry`/`WriteAgentEntry`, `ReadPreferences`/`SetPreference`, `EmbedderFingerprint`, and JSON-pointer `SetByPointer`/`RemoveByPointer`. Also the **layered deep-merge engine** ([merge.go](internal/configedit/merge.go) `MergeSection`/`LoadMergedSection`/`MergedBytes`/`MergeGeneric`, [diff.go](internal/configedit/diff.go) `DiffSection`/`DiffGeneric`, [overlay.go](internal/configedit/overlay.go) `OverlayBytes`/`AgentEntryOverlayBytes`/`BaseBelowLayer`) that merges every config file across layers and writes only the delta — see "Layered deep-merge" under Configuration files. Depends only on `internal/paths` + stdlib (no server/agent import), so both surfaces share one "where does this write land". `server/layers.go`/`config.go`/`preferences.go` delegate to it |
 | `internal/settings/` | The **`settings` tool group** mounted on the Helper: `get_settings`, `set_preference`, `set_agent`, `set_model`, `update_config`, `remove_config` (see "Settings management via chat"). All IO via `configedit`; sensitive changes gated by a process-wide `Confirmer` (`SetConfirmer`); `Deps{RequestReload}` for hot-reload; `LoaderProtocol` instruction addendum |
@@ -735,7 +744,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 
 ### Semantic recall (embedder + vector indexes)
 
-Five **additive, embedder-gated** recall features share `core/embed` +
+Six **additive, embedder-gated** recall features share `core/embed` +
 `internal/semindex` (a wrapper over the `go-turbovec` pure-Go ANN index,
 BitWidth 4 + UnitNorm cosine):
 
@@ -788,9 +797,17 @@ BitWidth 4 + UnitNorm cosine):
    the background at server startup ([server/docs_indexer.go](server/docs_indexer.go)
    `startDocsIndexer`): the incremental `Reindex` builds on first boot and after
    docs/embedder change, no-op otherwise. Backfill via `omnis reindex-docs`.
+6. **`search_sessions`** (the `sessions` tool group / the web UI search box) —
+   semantic search over **past chat sessions**, including archived ones
+   ([internal/sessindex/](internal/sessindex/)); see "Session search". It is the
+   ONE exception to the mounting contract below: the tool is mounted **whether or
+   not** an embedder resolves, because its fallback is not glob/grep but a direct
+   `Scan` of the conversation files — the same results, literal and slower.
+   Backfill via `omnis reindex-sessions`.
 
 The embedder and all index handles are process-wide on `Infrastructure`
-(`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()` in [agent/embedder.go](agent/embedder.go)),
+(`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()`,
+`SessionIndex()` in [agent/embedder.go](agent/embedder.go)),
 built lazily and surviving hot-reload. **Contract: when no embedder resolves,
 none of the recall tools are mounted and every path falls back to glob/grep —
 behaviour is byte-identical to a build without these features.** See
@@ -840,6 +857,143 @@ Two mechanisms keep the matrix cost bounded:
   without forcing the load, so an unchanged-corpus restart (docs Reindex is a
   no-op, registries `EnsureBuilt` is a no-op) never reconstructs a matrix — boot
   reaches `ListenAndServe` immediately and the QR happens lazily on first search.
+
+### Session search (find a past conversation)
+
+Search every past chat session — **including archived ones** — from the web UI's
+new-tab landing page, or from a chat. The corpus is the persisted conversation
+files: **only what was presented to the user** (each turn's `user_text` +
+`assistant_text`), never tool calls. **Hidden sessions are excluded** from
+indexing *and* results — the Settings assistant and the search agent's own session
+would otherwise pollute the results with the searching itself.
+
+**Two searches behind one box, and the split is the whole design:**
+
+- **Typing** hits `GET /api/search/sessions` — the semantic index when an embedder
+  resolves, a **direct scan** of the conversation files when not. No model, no
+  cost, results as you type.
+- **Enter / the Ask button** means *"the list I can see is not enough"* and hands
+  the query to the **`session_search` agent**, which rewords it, re-searches,
+  **opens the candidates to verify them**, and reports only what it could confirm.
+
+**The scan is not just the no-embedder path** ([internal/sessindex/scan.go](internal/sessindex/scan.go)) —
+it also answers a **cold index** (first ever search, or a rebuild after the
+embedding model changed) while the build runs in the background, so the search box
+is never dead. The response's `warning` says which (`no_embedder` ⇒ the UI warns it
+may be slow; `indexing` ⇒ "results will improve shortly"), and `mode` says how it
+was answered. Scan matching is an **AND over the query terms** (a long
+natural-language query would otherwise match any session sharing one common word),
+ranked by match count then recency.
+
+**Ranking is HYBRID: semantic + a literal-term boost** (`lexicalWeight` = 0.3,
+[internal/sessindex/scan.go](internal/sessindex/scan.go)). Pure cosine is weak
+exactly where a search *box* is used: people type two keywords, and a short query
+embeds poorly against long conversational chunks. Observed live — for `azure AI`,
+the session literally titled *"Azure AI Subscription Tier Upgrade"* ranked **5th**
+(0.545) behind four sessions merely discussing AI models (0.645, 0.598, …). The
+boost adds `0.3 × (fraction of query terms present verbatim)`, which reorders
+near-ties without letting an irrelevant hit overtake a strong semantic one. Term
+matching is **whole-word** (`words()`): substring matching would make a short term
+like `ai` match inside *said*, *available*, *again* — i.e. boost everything.
+
+**Results are folded BY SESSION, best-scoring turn wins.** The user is looking for
+a conversation, not a paragraph. Chunk metadata deliberately stores **no title /
+collection / archived flag** — those are mutable, and freezing them would render
+stale rows; `Enrich` resolves them from the conversation file at query time (and
+drops hits whose session was deleted). A result carries its `turn_index`, so
+clicking one opens the session **and scrolls to the matching exchange**
+(`scrollToTurn`, flashing it).
+
+**The agent's `report_sessions` tool call IS the result list.** `session_search`
+([registry/agents/session_search/](registry/agents/session_search/), `hosted`)
+must call it once as its final tool call, listing the verified sessions + a
+one-line reason each; the web UI renders those args as the rows (falling back to
+the live results when the model skips it). This is a deliberate contract: parsing
+session ids out of free prose is what would break.
+
+**Reached two ways, both of which need the agent to be *directly* runnable:**
+- **In a chat** — `session_search` is a **nested `subagents` entry on `helper`**
+  (the gatherer doctrine: the cheap model retrieves, the caller judges). The Helper
+  squad's description tells the router to send "find the chat where we…" there.
+- **From the search box** — a **hidden leaderless squad** (`Session Search`) whose
+  single member IS the agent, so the query reaches it with **no leader in between**.
+
+**`SquadEntry.Hidden`** ([agent/runtime_config.go](agent/runtime_config.go)) is
+what makes that safe: a hidden squad is filtered out of `routerSquadCatalogue` /
+`routerCatalogueBlock` ([agent/routing.go](agent/routing.go)) and `GET /api/squads`
+([server/config.go](server/config.go)), but stays resolvable by name
+(`Manager.LookupSquad`), so it is runnable without being chooseable or routable.
+**GOTCHA:** the `hidden` key must round-trip through the config GET-parsed →
+editor → PUT path, or the next Settings save DELETES it and the squad surfaces in
+the picker and becomes a routing target ([server/config.go](server/config.go)
+rebuilds the squad list from resolved settings — a key omitted there is dropped).
+
+**A LEADERLESS root now builds its own `subagents`** ([agent/squad.go](agent/squad.go)):
+`buildSquadInstance` used to skip sub-agent building entirely when leaderless ("no
+members to coordinate ⇒ no team"), which conflated *is a coordinator* with *may
+delegate* — the exact conflation `subagents` exists to undo. The Helper squad is
+leaderless, so its specialist was built into the catalogue and then **mounted on
+nothing**, and the failure is silent (the model just says it can't). The root's
+delegable set is now `squad.Members` (coordinating) **or** `rootCfg.SubAgents`
+(leaderless); the session-lifecycle tools (`curate_session`,
+`record_session_feedback`) stay keyed on `!leaderless`, so a leaderless root with a
+team does **not** become a session coordinator. Locked in by
+[agent/leaderless_subagents_test.go](agent/leaderless_subagents_test.go).
+
+**Index lifecycle — built in the background, dropped when idle:**
+- **Freshness rides the EXISTING idle-indexer rail.** `registerSessionIndexHook`
+  ([server/session_search.go](server/session_search.go)) subscribes to
+  `EventSessionIndexNow` — already fired for a session idle ≥5 min and on archive
+  (the same trigger the precedent index uses). Two things come free: on a fresh
+  boot every persisted session is un-indexed, so the **first scan pass doubles as
+  the backfill** (no boot-time build), and it is hash-gated, so later boots are a
+  no-op. The **first keystroke** in the search box additionally fires
+  `POST /api/search/sessions/refresh` (single-flighted) to catch sessions too fresh
+  for the idle rail. `omnis reindex-sessions` builds it all now.
+- **The content hash covers only the indexed text**, so flipping an unrelated flag
+  (archived, harvested, cwd) does not re-embed the conversation.
+- **Idle unload.** Sessions accumulate without bound and their text lives in the
+  metadata map, so unlike docs/registries this index is only worth holding while it
+  is used: `StartIdleSweeper` drops it after `OMNIS_SESSION_INDEX_IDLE` (default
+  **10 min**) with no search *and* no indexing. This needed a new
+  **`semindex.Store.Unload()`** ([internal/semindex/semindex.go](internal/semindex/semindex.go)):
+  it saves if dirty, then drops the vectors **and** the metadata map, re-arming the
+  deferred load so the next `Query` re-reads both from disk. `Len`/`Manifest` keep
+  answering from the retained manifest snapshot (the sweeper and the cold-index
+  check both ask). The index is likewise **opened lazily** — `Infrastructure.SessionIndex`
+  is passed around as a **thunk** (`sessionIndexFn`), never a resolved value, so a
+  server nobody searches never parses its sidecar.
+- **Every agent search is a STATELESS turn** — `POST /sessions/:id/messages` with
+  **`reset_context: true`** ([server/sse.go](server/sse.go) `messageRequest`), which
+  drops the hidden session's history and clears the model's in-memory context
+  (`resetSessionContext`) **before running, under the run guard**.
+
+  **GOTCHA — do NOT do this as a separate `POST /rewind` before the turn.** That was
+  the first implementation and it is racy: `/rewind` is `tryAcquire`-and-**409-if-
+  busy**, while a turn **QUEUES** on the same guard (`RunGuard.acquire`). So a reset
+  fired while any turn was in flight was rejected, the client silently swallowed the
+  409, and the search ran on the **previous search's context**. Observed live: the
+  hidden session accumulated 3 turns, and from the second search on, the agent
+  replied *"you are asking again — I already found one session"* and **stopped
+  calling `report_sessions`** — so the user was shown "found nothing" for a query it
+  had in fact answered correctly, intermittently. Because the result list is built
+  from that tool call, a stateful search agent is not a cosmetic problem, it is a
+  silent wrong answer. Doing the reset inside the turn makes concurrent searches
+  harmless by construction (the second one waits, resets, runs clean).
+
+**Routes** ([server/session_search.go](server/session_search.go)): `GET
+/api/search/sessions?q=&k=&exclude_archived=`, `GET /api/search/sessions/status`
+(`{semantic, chunks, indexing, squad}` — lets the UI warn about a slow scan
+*before* the user types), `POST /api/search/sessions/refresh`. **They live under
+`/api/search/…`, NOT `/api/sessions/search`** — a static `search` segment there
+would collide with the `/api/sessions/:id/…` wildcard in gin's route tree and panic
+at startup (same reason import lives at `/api/import/session`).
+`TestSearchSessionsRoute` drives the real router, so it guards that too.
+
+**No-op contract:** with no embedder the index is nil, nothing is ever embedded,
+and every path falls back to `Scan` — the feature works, it is just literal and
+slower. CLI/TUI are untouched (server-only UI; the `sessions` tool group works
+anywhere the agent is mounted).
 
 ### Coding squad (token-efficient code intelligence)
 
@@ -1281,6 +1435,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   ├── registries.tvim + .meta.json   # search_registries index (remote skills+agents)
   │   ├── docs.tvim + .meta.json         # search_docs index (omnis's own docs)
   │   │                 #   + docs.files.json (per-file hash→chunk-ids)
+  │   ├── sessions.tvim + .meta.json     # session-search index (past chats)
+  │   │                 #   + sessions.files.json (per-session hash→chunk-ids)
   │   └── <repo-hash>/  #   per-repo code index: codebase.tvim + .meta.json
   │                     #   + codebase.files.json (per-file hash→chunk-ids)
   ├── softskills/       # curator-distilled procedures (read AND write)
@@ -1342,6 +1498,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `2000`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
 | `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `10000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
+| `OMNIS_SESSION_INDEX_IDLE` | How long the past-session search index may sit unused before it is dropped from memory (Go duration, default `10m`; `0` keeps it resident once loaded). The next search transparently re-reads it from disk. See "Session search" |
 | `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
 | `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
 | `OMNIS_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |

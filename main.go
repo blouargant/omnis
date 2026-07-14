@@ -93,6 +93,7 @@ Usage:
   omnis [flags] curate ...       run the soft-skill curator one-shot
   omnis [flags] reindex-precedents  rebuild the cross-session precedent index
   omnis [flags] reindex-docs        rebuild the documentation semantic index
+  omnis [flags] reindex-sessions    rebuild the past-session search index
   omnis [flags] embed-test [text]   probe the configured embedder (semantic recall)
   omnis import-agent <file|-|URL> import a Claude Code sub-agent (.md or .json)
   omnis version                  print version information
@@ -139,6 +140,8 @@ func run(ctx context.Context, opts options, args []string) error {
 			return runReindexPrecedents(ctx, opts, args[1:])
 		case "reindex-docs":
 			return runReindexDocs(ctx, opts, args[1:])
+		case "reindex-sessions":
+			return runReindexSessions(ctx, opts, args[1:])
 		case "embed-test":
 			return runEmbedTest(ctx, opts, args[1:])
 		case "tui":

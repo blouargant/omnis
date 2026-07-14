@@ -37,6 +37,7 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/regindex"
 	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/settings"
 	"github.com/blouargant/omnis/internal/skills"
 	"github.com/blouargant/omnis/internal/softskills"
@@ -222,7 +223,16 @@ func defaultToolKeys(name string) []string {
 // stays mounted) instead of rebuilding a per-agent glob loader, and — when emb
 // is non-nil — advertises recall in its instruction. Sub-agents and leaderless
 // roots pass asLeader=false (per-agent glob soft-skills, no recall).
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+// sessionIndexFn resolves the process-wide past-session search index on demand.
+// It is a thunk rather than a resolved *sessindex.Index because that index is
+// deliberately opened late and dropped between bursts of searching (see
+// Infrastructure.SessionIndex): resolving it eagerly at every squad build — and
+// every hot-reload — would parse its metadata sidecar for nothing. Nil, or a
+// thunk returning nil, means "no embedder": search_sessions then scans the
+// conversation files directly.
+type sessionIndexFn func() *sessindex.Index
+
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -333,6 +343,15 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			if docIdx != nil {
 				agentTools = append(agentTools, docIdx.Tools()...)
 			}
+		case "sessions":
+			// Search past chat sessions (search_sessions / read_session /
+			// list_sessions / report_sessions). Unlike the other semantic groups
+			// this one mounts unconditionally: search_sessions falls back to a
+			// direct scan of the conversation files when no embedder is
+			// configured, so the agent works either way. The index is passed as a
+			// thunk so it is opened on the first call rather than at every squad
+			// build — it is used in bursts and unloads itself in between.
+			agentTools = append(agentTools, sessindex.NewTools(sessindex.Deps{Index: sessIdx})...)
 		case "settings":
 			// Read/write omnis settings on the user's behalf (theme, agents,
 			// models, permissions, hooks, …). Sensitive changes are gated by the

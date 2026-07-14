@@ -653,6 +653,14 @@ func ptrBool(b bool) *bool {
 func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
 	t.Helper()
 	t.Setenv("OMNIS_HOME", baseDir)
+	// Isolate from the machine's INSTALLED registry. These agents land in the user
+	// layer, and a per-agent agent.json is deep-merged across layers — so a test
+	// agent named "helper" or "leader" silently inherits fields from /etc/omnis's
+	// shipped definition of the same name. That made these tests depend on whatever
+	// omnis happens to be installed: shipping `subagents` on the real helper broke
+	// three of them, because the test's own agents list did not enable the target.
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", filepath.Join(baseDir, "no-system-layer"))
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "")
 	registryDir := filepath.Join(baseDir, "registry", "agents")
 	if err := os.MkdirAll(registryDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", registryDir, err)

@@ -23,6 +23,7 @@ import (
 	goalpkg "github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/scheduler"
+	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/blouargant/omnis/internal/steer"
 )
@@ -111,6 +112,19 @@ type serverDeps struct {
 	// Version is the running server build version (ldflags-injected); reported
 	// by /api/update/status and used to gate the self-update check.
 	Version string
+	// SessionIndex resolves the past-session search index (nil when no embedder
+	// is configured — search then scans the conversation files directly). A thunk,
+	// not a value: the index is opened on first use and unloads itself between
+	// bursts of searching, so a server nobody searches never pays for it.
+	SessionIndex func() *sessindex.Index
+}
+
+// sessionIndex resolves the session search index, nil-safe.
+func (d serverDeps) sessionIndex() *sessindex.Index {
+	if d.SessionIndex == nil {
+		return nil
+	}
+	return d.SessionIndex()
 }
 
 // agentBusEvent is a single event from the shared event bus forwarded to an
@@ -814,6 +828,12 @@ func newEngine(d serverDeps) *gin.Engine {
 	// tree (it has no source id) so it can't collide with the :id wildcard.
 	auth.GET("/sessions/:id/export", handleExportSession(d))
 	auth.POST("/import/session", handleImportSession(d))
+	// Search past sessions (see server/session_search.go). Mounted under /search
+	// rather than /sessions/search: a static segment there would collide with the
+	// /sessions/:id wildcard in gin's route tree.
+	auth.GET("/search/sessions", handleSearchSessions(d))
+	auth.GET("/search/sessions/status", handleSessionSearchStatus(d))
+	auth.POST("/search/sessions/refresh", handleRefreshSessionIndex(d))
 	// Spawn a fresh session (empty context) inheriting this session's working
 	// directory; an initial task runs in the background (see server/spawn.go).
 	auth.POST("/sessions/:id/spawn", handleSpawn(d))

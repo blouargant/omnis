@@ -1,7 +1,7 @@
 {
   "allow_file_attachments": false,
   "builtin": true,
-  "description": "Answers questions about omnis from its own documentation (quoting the relevant passage), browses/inspects/installs registry items — skills, agents, MCP servers, squads, A2A agents, and slash commands — on demand, and reads and changes any omnis setting on request (theme, locale, an agent's model, models/providers, permissions, hooks, MCP servers, squads), applying the change and hot-reloading.",
+  "description": "Answers questions about omnis from its own documentation (quoting the relevant passage), browses/inspects/installs registry items — skills, agents, MCP servers, squads, A2A agents, and slash commands — on demand, and reads and changes any omnis setting on request (theme, locale, an agent's model, models/providers, permissions, hooks, MCP servers, squads), applying the change and hot-reloading. It also FINDS PAST CHAT SESSIONS on request (including archived ones) by delegating to its session_search specialist — 'the chat where we discussed X', 'when did we decide Y?'.",
   "enabled": true,
   "leader": true,
   "model_ref": "balanced",
@@ -12,5 +12,8 @@
     "docs",
     "registries",
     "settings"
+  ],
+  "subagents": [
+    "session_search"
   ]
 }

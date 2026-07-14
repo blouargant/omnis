@@ -30,6 +30,7 @@ import (
 	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/softskills"
 	"github.com/blouargant/omnis/internal/teammates"
 	"github.com/blouargant/omnis/internal/worktree"
@@ -141,13 +142,17 @@ func buildSquadInstance(
 	codeIdx := infra.CodeIndex(ctx, runtime)
 	regIdx := infra.RegistryIndex(ctx, runtime)
 	docIdx := infra.DocIndex(ctx, runtime)
+	// Resolved lazily on the first search_sessions call, not here: the session
+	// index is used in bursts and unloads itself between them, so opening it at
+	// every squad build (and every hot-reload) would be pure cost.
+	sessIdx := sessionIndexFn(func() *sessindex.Index { return infra.SessionIndex(ctx, runtime) })
 
 	// ── Root capability tools — config-driven from rootCfg.Tools ──
 	// A coordinating leader (asLeader=true) keeps embedder-backed soft-skill
 	// recall; a leaderless root uses sub-agent (glob) soft-skill semantics.
 	capTools, capToolsets, capInstruction, capHandles := toolsForAgentConfig(
 		ctx, rootCfg, runtime, skillTS, softSkillTS, leaderHandles,
-		infra.MCPPool, codeIdx, regIdx, docIdx, !leaderless, emb)
+		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, !leaderless, emb)
 	allMCPHandles = append(allMCPHandles, capHandles...)
 
 	leadTools := append([]tool.Tool{}, capTools...)
@@ -251,18 +256,35 @@ func buildSquadInstance(
 	// runaway deep-research turn did. Nil for the router squad / unlimited config.
 	budgetBeforeTool, budgetAfterModel := budgetCallbacks(infra.Budget, infra.AskUserRegistry, runtime.TurnBudget, isRouter)
 
-	// ── Sub-agents + coordinator-only session tools (skipped when leaderless) ──
+	// ── Sub-agents + coordinator-only session tools ──
+	//
+	// What the ROOT may delegate to differs by squad shape:
+	//   - a coordinating leader delegates to the squad's `members`;
+	//   - a LEADERLESS root has no members to coordinate, but it may still have a
+	//     team of its OWN — the `subagents` declared on its agent.json. That is
+	//     what lets the Helper (a leaderless single specialist) hand a
+	//     "find the chat where we…" request to session_search without the Helper
+	//     squad growing a coordinator. `subagents` exists precisely to decouple
+	//     "may delegate" from "is a coordinator" (see the gatherer doctrine), so a
+	//     leaderless root is not a reason to skip building a team.
+	// The coordinator-only session-lifecycle tools below stay leader-only.
 	subAgentMap := map[string]adkagent.Agent{}
 	var subAgents []adkagent.Agent
 	var memberCfgs []RuntimeAgentConfig
-	if !leaderless {
+	var delegable []string
+	if leaderless {
+		delegable = rootCfg.SubAgents
+	} else {
+		delegable = squad.Members
+	}
+	if len(delegable) > 0 {
 		subAgentCallbacks := infra.Bus.AgentCallbacks(events.PluginOptions{IncludeModelRequest: opts.DebugLogging})
 
-		// Resolve the member agent configs (preserving declared order).
-		// buildSubAgents loops over this filtered list rather than the full
-		// catalogue, so other squads' members don't get wired in.
-		memberCfgs = make([]RuntimeAgentConfig, 0, len(squad.Members))
-		for _, m := range squad.Members {
+		// Resolve the delegable agent configs (preserving declared order).
+		// buildSubAgentsFromConfigs loops over this filtered list rather than the
+		// full catalogue, so other squads' members don't get wired in.
+		memberCfgs = make([]RuntimeAgentConfig, 0, len(delegable))
+		for _, m := range delegable {
 			cfg, ok := runtime.AgentConfig(m)
 			if !ok || !cfg.Enabled {
 				continue
@@ -279,7 +301,7 @@ func buildSquadInstance(
 		subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, berr = buildSubAgentsFromConfigs(
 			ctx, memberCfgs, runtime,
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
-			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, infra.SteerStore,
+			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
 			budgetBeforeTool, budgetAfterModel,
 		)
@@ -292,8 +314,12 @@ func buildSquadInstance(
 		}
 		allMCPHandles = append(allMCPHandles, subAgentMCPHandles...)
 		leadTools = append(leadTools, subAgentLeaderTools...)
+	}
 
-		// Session-lifecycle tools belong to a coordinator that owns the session.
+	// Session-lifecycle tools belong to a COORDINATOR that owns the session —
+	// keyed on leaderless, not on "has a team": a leaderless root may now hold its
+	// own `subagents` (above) without thereby becoming a session coordinator.
+	if !leaderless {
 		leadTools = append(leadTools, curateSessionTool())
 		// record_session_feedback persists the wrap-session answer to
 		// $OMNIS_HOME/logs/agent_feedback_<suffix>.json so the post-session
@@ -329,9 +355,12 @@ func buildSquadInstance(
 		// mounted (skills, soft-skills + recall, registries, MCP, A2A); prepend it
 		// so the tool docs precede the agent's own prompt.
 		rootInstruction = capInstruction + rootInstruction
-		if !leaderless {
-			// Only describe this squad's members so two squads can specialise the
-			// same agent.json by exposing different subsets.
+		if len(memberCfgs) > 0 {
+			// Describe exactly the agents THIS root can delegate to — a
+			// coordinating leader's squad members, or a leaderless root's own
+			// `subagents` — so two squads can specialise the same agent.json by
+			// exposing different subsets, and so a leaderless root actually knows
+			// about the team it was just given.
 			rootInstruction += buildSubAgentCapabilitiesBlock(memberCfgs, runtime)
 		}
 		if routingEnabled {

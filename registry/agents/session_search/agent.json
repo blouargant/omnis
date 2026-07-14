@@ -1,0 +1,15 @@
+{
+  "allow_file_attachments": false,
+  "builtin": true,
+  "description": "Finds PAST CHAT SESSIONS, including archived ones. Give it what the user remembers about a conversation ('the chat where we set up the k8s auditor', 'when did we discuss embedding dimensions?') and it searches every past session's requests and replies, opens the candidates to verify them, and reports the sessions that actually contain it — each with its id, title, date, and a verbatim quote. It searches only what was presented to the user, never tool calls. It reports evidence, never speculation: a session it did not open is a session it does not report.",
+  "enabled": true,
+  "leader": false,
+  "max_tool_calls": 30,
+  "model_ref": "hosted",
+  "name": "session_search",
+  "skills": [],
+  "softskills_dir": "",
+  "tools": [
+    "sessions"
+  ]
+}

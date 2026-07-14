@@ -60,6 +60,38 @@ open browsers.
 - **Squad badge** appears next to sessions running on a non-default squad,
   so you can tell at a glance which configuration each conversation uses.
 
+## Searching past sessions
+
+Open a new tab (or an empty pane) and use the **search box under "Start a new
+chat"**. It searches what was actually said — your requests and the agent's
+replies — across every past session, **including archived ones**. Tool calls are
+not searched. Clicking a result opens that session and jumps to the matching
+exchange.
+
+There are two searches behind the one box, and the difference matters:
+
+- **As you type**, you get an immediate ranked list. When an embedding model is
+  configured it is a *semantic* search: "how much does the auditor cost" finds a
+  conversation that said "premium is 140× for the same accuracy", even with no
+  word in common. With no embedding model it falls back to a **direct scan** of
+  every conversation — literal (every word must appear) and slower on a large
+  history, which the box tells you.
+- **Press Enter** (or click **Ask**) when that list is not good enough. The query
+  goes to the **session_search agent**, which rewords it, searches again, *opens*
+  the candidate sessions to check them, and reports back only the sessions it
+  could actually confirm — each with the reason it matters. It is slower and costs
+  a model call; it is the right tool when you half-remember a conversation and the
+  obvious keywords are not in it.
+
+The semantic index builds itself in the background (a session is indexed shortly
+after it goes quiet, and when you archive it) and is dropped from memory when you
+stop searching. To build it all at once — after a fresh install, or after changing
+the embedding model — run `omnis reindex-sessions`.
+
+In a **chat**, ask the same thing in words ("find the chat where we discussed the
+k8s auditor") and the router hands it to the **Helper** squad, which delegates to
+the same specialist.
+
 ## Export and import a conversation
 
 A conversation can be moved between Omnis instances as a single JSON file.

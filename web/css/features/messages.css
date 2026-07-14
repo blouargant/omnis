@@ -580,3 +580,14 @@
 .msg-row.goal-achieved .goal-divider-chip { color: var(--accent); border-style: solid; }
 
 
+
+/* A turn arrived at from a search result: flash it so the user sees WHICH
+   exchange matched, rather than landing mid-transcript with no anchor. */
+.msg-row.turn-flash {
+  animation: turn-flash 1.8s ease-out;
+  border-radius: 8px;
+}
+@keyframes turn-flash {
+  0%   { background: color-mix(in srgb, var(--accent, #4a9eff) 22%, transparent); }
+  100% { background: transparent; }
+}

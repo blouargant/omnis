@@ -16,6 +16,7 @@ import (
 	"github.com/blouargant/omnis/internal/precedents"
 	"github.com/blouargant/omnis/internal/regindex"
 	"github.com/blouargant/omnis/internal/registries"
+	"github.com/blouargant/omnis/internal/sessindex"
 )
 
 // embedderProbeTimeout bounds the one-shot startup health check so a hung or
@@ -224,6 +225,40 @@ func (i *Infrastructure) RegistryIndex(ctx context.Context, runtime RuntimeSetti
 		i.regIndex.index = idx
 	})
 	return i.regIndex.index
+}
+
+// sessIndexCache memoises the process-wide past-session search index.
+type sessIndexCache struct {
+	once  sync.Once
+	index *sessindex.Index
+}
+
+// SessionIndex lazily opens and caches the semantic index over past chat
+// sessions, backed by the process-wide embedder. Returns nil when no embedder is
+// configured — the `sessions` tool group and the search route then fall back to
+// sessindex.Scan (a direct walk of the conversation files), so search still
+// works, just slower and literally.
+//
+// Unlike the other indexes this one is resolved lazily by a thunk at tool-call /
+// request time rather than at squad-build time: it is only used in bursts, and
+// it unloads itself between them (see sessindex.StartIdleSweeper).
+func (i *Infrastructure) SessionIndex(ctx context.Context, runtime RuntimeSettings) *sessindex.Index {
+	if i == nil {
+		return nil
+	}
+	emb := i.Embedder(ctx, runtime)
+	if emb == nil {
+		return nil
+	}
+	i.sessIndex.once.Do(func() {
+		idx, err := sessindex.Open(emb)
+		if err != nil {
+			log.Printf("sessindex: index unavailable: %v", err)
+			return
+		}
+		i.sessIndex.index = idx
+	})
+	return i.sessIndex.index
 }
 
 // docIndexCache memoises the process-wide documentation semantic index.

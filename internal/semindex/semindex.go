@@ -80,6 +80,8 @@ type Store struct {
 	meta        map[uint64]json.RawMessage
 	manifest    Manifest
 	pendingLoad bool // a compatible persisted .tvim exists but hasn't been read yet
+	pendingMeta bool // the meta sidecar was dropped by Unload and must be re-read
+	dirty       bool // in-memory changes not yet persisted by Save
 }
 
 // Open loads an existing index (<path>.tvim + <path>.meta.json) if present and
@@ -130,10 +132,21 @@ func Open(path string, emb embed.Embedder) (*Store, error) {
 	return s, nil
 }
 
-// ensureLoadedLocked materialises the deferred persisted index (see Open). It
-// must be called with s.mu held before any operation that touches s.idx. A load
-// failure leaves s.idx nil so the caller rebuilds from the corpus.
+// ensureLoadedLocked materialises the deferred persisted index (see Open) and,
+// after an Unload, the metadata sidecar that was dropped with it. It must be
+// called with s.mu held before any operation that touches s.idx or s.meta. A
+// load failure leaves s.idx nil so the caller rebuilds from the corpus.
 func (s *Store) ensureLoadedLocked() {
+	if s.pendingMeta {
+		s.pendingMeta = false
+		if mf, err := loadMetaFile(s.metaPath()); err == nil && mf != nil {
+			for k, v := range mf.Meta {
+				if id, perr := parseUint(k); perr == nil {
+					s.meta[id] = v
+				}
+			}
+		}
+	}
 	if !s.pendingLoad {
 		return
 	}
@@ -141,6 +154,52 @@ func (s *Store) ensureLoadedLocked() {
 	if idx, lerr := goturbovec.LoadIdMapFile(s.tvimPath()); lerr == nil {
 		s.idx = idx
 	}
+}
+
+// Unload releases the in-memory index and metadata, keeping only the manifest
+// snapshot (so Len/Manifest stay answerable) and re-arming the deferred load —
+// the next Query/Upsert/Save re-reads both the .tvim and the .meta.json from
+// disk. Unsaved changes are persisted first, so nothing is lost.
+//
+// This is what lets an index that is only used in bursts (session search) hold
+// no memory between them: the vectors AND the metadata map — which for a
+// text-carrying index like sessions/docs is the bulk of the footprint — are
+// dropped, along with go-turbovec's O(dim²) matrices. Idempotent: unloading an
+// already-unloaded (or never-loaded) store is a no-op.
+func (s *Store) Unload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.idx == nil && !s.pendingLoad {
+		// Nothing materialised. Still drop any eagerly-read metadata (Open reads
+		// the sidecar up front) so an opened-but-unused store costs nothing.
+		if len(s.meta) > 0 {
+			s.meta = map[uint64]json.RawMessage{}
+			s.pendingMeta = true
+		}
+		return nil
+	}
+	if s.dirty {
+		if err := s.saveLocked(); err != nil {
+			return err
+		}
+	}
+	// A persisted .tvim exists (we just saved, or it was never modified), so the
+	// index can be re-read on demand.
+	if _, err := os.Stat(s.tvimPath()); err == nil {
+		s.pendingLoad = true
+		s.pendingMeta = true
+		s.idx = nil
+		s.meta = map[uint64]json.RawMessage{}
+	}
+	return nil
+}
+
+// Loaded reports whether the index currently holds its vectors in memory. Used
+// by idle sweepers to skip a no-op Unload.
+func (s *Store) Loaded() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.idx != nil
 }
 
 func (s *Store) tvimPath() string { return s.base + ".tvim" }
@@ -193,6 +252,8 @@ func (s *Store) Reset() {
 	s.manifest.CorpusHash = ""
 	s.manifest.Count = 0
 	s.pendingLoad = false // discarding everything — no need to read the old file
+	s.pendingMeta = false
+	s.dirty = true
 	s.mu.Unlock()
 }
 
@@ -250,6 +311,7 @@ func (s *Store) Upsert(ctx context.Context, items []Item) error {
 	for _, it := range items {
 		s.meta[it.ID] = it.Meta
 	}
+	s.dirty = true
 	return nil
 }
 
@@ -300,6 +362,7 @@ func (s *Store) Remove(ids ...uint64) error {
 		}
 		delete(s.meta, id)
 	}
+	s.dirty = true
 	return nil
 }
 
@@ -316,6 +379,11 @@ func (s *Store) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureLoadedLocked()
+	return s.saveLocked()
+}
+
+// saveLocked is Save with s.mu already held (and the deferred load resolved).
+func (s *Store) saveLocked() error {
 	if s.idx == nil {
 		return nil
 	}
@@ -348,7 +416,12 @@ func (s *Store) Save() error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.metaPath())
+	if err := os.Rename(tmp, s.metaPath()); err != nil {
+		return err
+	}
+	s.manifest.Count = mf.Manifest.Count
+	s.dirty = false
+	return nil
 }
 
 func loadMetaFile(path string) (*metaFile, error) {

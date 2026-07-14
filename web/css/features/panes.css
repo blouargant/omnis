@@ -430,3 +430,172 @@
 }
 
 
+
+/* ── Search past sessions (empty-pane picker) ───────────────────────────────
+   The input searches live as you type (index or direct scan); the Ask button —
+   or Enter — hands the query to the session_search agent, whose curated result
+   list replaces the live one. `.pane-picker-inner` is a flex column with a
+   max-height, so the results list is the part allowed to grow and scroll. */
+.pane-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 30px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--bg-raised, #2a2d2e);
+}
+.pane-search:focus-within { border-color: var(--accent, #4a9eff); }
+.pane-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.pane-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 0;
+  border: none;
+  background: none;
+  color: var(--text, #eee);
+  font-size: 13px;
+  font-family: inherit;
+}
+.pane-search-input:focus { outline: none; }
+/* Chrome/Safari draw their own clear affordance on type=search; we have Escape. */
+.pane-search-input::-webkit-search-cancel-button { display: none; }
+.pane-search-ask {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-dim, #888);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pane-search-ask:hover { background: var(--bg-raised-hover, #333); color: var(--text, #eee); }
+
+/* While the agent search runs the same button becomes a spinner + Stop — it must
+   stay clickable (that is the whole point), so this is an accent, never a disable. */
+.pane-search-ask .pane-search-stop-label,
+.pane-search-ask .pane-search-spinner { display: none; }
+.pane-search-ask.is-busy .pane-search-ask-label { display: none; }
+.pane-search-ask.is-busy .pane-search-stop-label { display: inline; }
+.pane-search-ask.is-busy .pane-search-spinner { display: inline-block; }
+.pane-search-ask.is-busy {
+  color: var(--danger, #d64545);
+  border-color: var(--danger, #d64545);
+}
+.pane-search-ask.is-busy:hover {
+  background: var(--danger, #d64545);
+  color: var(--bg, #fff);
+}
+
+/* Ring drawn in currentColor, so it follows the button through its hover invert
+   without a second colour rule. Also used inline in the status note, hence the
+   base display: inside the button the rules above hide/show it. */
+.pane-search-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.4em;
+  vertical-align: -0.12em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pane-search-spin 0.7s linear infinite;
+}
+@keyframes pane-search-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pane-search-spinner { animation: none; }
+}
+
+/* One line of context under the box: how the search was answered (a direct scan
+   may be slow), that the agent is working, or what it concluded. */
+.pane-search-note {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-dim, #888);
+  padding: 0 2px;
+}
+.pane-search-note[hidden] { display: none; }
+.pane-search-note.is-warn { color: var(--warn, #d89614); }
+.pane-search-note.is-agent { color: var(--text, #eee); }
+
+.pane-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+.pane-search-results[hidden] { display: none; }
+.pane-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  border-left: 2px solid transparent;
+}
+.pane-search-item:last-child { border-bottom: none; }
+.pane-search-item:hover { background: var(--bg-raised-hover, #333); }
+.pane-search-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text, #eee);
+}
+.pane-search-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pane-search-date {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim, #888);
+}
+.pane-search-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border, #333);
+  font-size: 10px;
+  color: var(--text-dim, #888);
+}
+/* The snippet is the evidence — two lines of the matching exchange. */
+.pane-search-snippet {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim, #888);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pane-search-snippet mark {
+  background: none;
+  color: var(--accent, #4a9eff);
+  font-weight: 600;
+}
+/* The agent's own reason for reporting this session, when it ran. */
+.pane-search-reason {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text, #eee);
+}
+.pane-search-item.is-agent { border-left-color: var(--accent, #4a9eff); }

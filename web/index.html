@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=15" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=18" />
   <link rel="stylesheet" href="assets/css/settings.css?v=8" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -279,6 +279,20 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             <span data-i18n="picker.newChat">Start a new chat</span>
           </button>
+          <!-- Search past sessions. Typing queries the index live; Enter (or the
+               button) escalates to the session_search agent, i.e. "the list I can
+               see is not enough — go and actually look". -->
+          <form class="pane-search" autocomplete="off">
+            <svg class="pane-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input class="pane-search-input" type="search" placeholder="Search past sessions…" aria-label="Search past sessions" data-i18n-placeholder="search.placeholder" data-i18n-aria-label="search.placeholder" />
+            <button class="pane-search-ask" type="submit" data-tip="Ask the search agent to look properly (Enter)" data-i18n-tip="search.askTip">
+              <span class="pane-search-spinner" aria-hidden="true"></span>
+              <span class="pane-search-ask-label" data-i18n="search.ask">Ask</span>
+              <span class="pane-search-stop-label" data-i18n="search.stop">Stop</span>
+            </button>
+          </form>
+          <div class="pane-search-note" hidden></div>
+          <ul class="pane-search-results" aria-label="search results" data-i18n-aria-label="search.resultsAria" hidden></ul>
           <div class="pane-picker-or" data-i18n="picker.or">or open an existing session</div>
           <ul class="pane-picker-list" aria-label="open session in this panel" data-i18n-aria-label="picker.listAria"></ul>
         </div>
@@ -456,9 +470,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=37" defer></script>
+  <script src="assets/i18n/locales.js?v=39" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=68" defer></script>
+  <script src="assets/app.js?v=72" defer></script>
   <script src="assets/settings.js?v=35" defer></script>
 </body>
 </html>

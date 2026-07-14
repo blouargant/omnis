@@ -597,6 +597,12 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			}
 		}
 		for _, sqCfg := range settings.Squads {
+			// A hidden squad is a machine-facing entry point (the Session Search
+			// squad the search box runs directly), not something a user starts a
+			// chat with — keep it out of the picker and the badge lookup.
+			if sqCfg.Hidden {
+				continue
+			}
 			members := append([]string(nil), sqCfg.Members...)
 			memberDescs := map[string]string{}
 			for _, m := range members {
@@ -820,12 +826,21 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					// above hit a cached lower-precedence file path.
 					squads := make([]any, 0, len(settings.Squads))
 					for _, sq := range settings.Squads {
-						squads = append(squads, map[string]any{
+						entry := map[string]any{
 							"name":        sq.Name,
 							"description": sq.Description,
 							"leader":      sq.Leader,
 							"members":     sq.Members,
-						})
+						}
+						// Round-trip `hidden`: this map is what the editor PUTs
+						// back, so a key omitted here is a key DELETED from
+						// agents.json on the next save — which would make the
+						// Session Search squad surface in the picker and become a
+						// routing target the moment the user edits anything else.
+						if sq.Hidden {
+							entry["hidden"] = true
+						}
+						squads = append(squads, entry)
 					}
 					m["squads"] = squads
 				}

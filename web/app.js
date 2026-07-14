@@ -273,6 +273,11 @@ function bindPaneEls(root) {
   e.pickerSquadName   = root.querySelector(".pane-picker-squad-name");
   e.pickerSquadMenu   = root.querySelector(".pane-picker-squad-menu");
   e.pickerList  = root.querySelector(".pane-picker-list");
+  e.searchForm  = root.querySelector(".pane-search");
+  e.searchInput = root.querySelector(".pane-search-input");
+  e.searchAsk   = root.querySelector(".pane-search-ask");
+  e.searchNote  = root.querySelector(".pane-search-note");
+  e.searchList  = root.querySelector(".pane-search-results");
   return e;
 }
 
@@ -482,6 +487,414 @@ function hidePanePicker(panel) {
   if (panel.els.picker) panel.els.picker.hidden = true;
 }
 
+// ─── Search past sessions (in the empty-pane picker) ──────────────────────────
+//
+// Two searches, one box, and the difference is deliberate:
+//
+//   - TYPING runs the cheap search (GET /api/search/sessions): the semantic index
+//     when the server has an embedder, a direct scan of the conversation files
+//     when it doesn't. No model, no cost, results as you type.
+//   - ENTER (or the Ask button) means "the list I can see is not good enough".
+//     That hands the query to the session_search AGENT, which rephrases it,
+//     re-searches, opens the candidates to verify them, and reports back only the
+//     sessions it could actually confirm — each with its reason. Its report_sessions
+//     tool call IS the result list rendered here.
+//
+// The agent runs in a hidden session pinned to the leaderless "Session Search"
+// squad, so the query reaches session_search directly with no leader in between.
+
+const SEARCH_SESSION_KEY = "agent_toolkit_search_session";
+// Must match SessionSearchSquad in server/session_search.go. Hidden squad: it is
+// deliberately absent from the squad picker and from the router's catalogue.
+const SEARCH_SQUAD = "session search";
+const SEARCH_DEBOUNCE_MS = 180;
+
+// Publish the cached hidden-session id at boot so subscribeGlobalEvents skips its
+// events from the very first frame, not only after the first search.
+if (localStorage.getItem(SEARCH_SESSION_KEY)) {
+  window.__omnisSearchSessionId = localStorage.getItem(SEARCH_SESSION_KEY);
+}
+
+// One index refresh per page load: the first keystroke asks the server to pick up
+// sessions that are still too fresh for the idle indexer to have reached.
+let searchIndexRefreshed = false;
+function kickSearchIndexRefresh() {
+  if (searchIndexRefreshed) return;
+  searchIndexRefreshed = true;
+  apiFetch("/api/search/sessions/refresh", { method: "POST" }).catch(() => {});
+}
+
+function paneSearchState(panel) {
+  if (!panel._search) {
+    panel._search = {
+      seq: 0, timer: null, busy: false,
+      abort: null,      // AbortController for the in-flight agent stream
+      sid: "",          // the hidden search session the agent runs in (to cancel it)
+      cancelled: false, // set by the Stop button, so the AbortError isn't read as a failure
+    };
+  }
+  return panel._search;
+}
+
+// clearPaneSearch returns the picker to its plain "open an existing session" list.
+function clearPaneSearch(panel) {
+  const pe = panel.els;
+  const st = paneSearchState(panel);
+  st.seq++; // invalidate any in-flight response
+  clearTimeout(st.timer);
+  if (pe.searchList) { pe.searchList.hidden = true; pe.searchList.innerHTML = ""; }
+  if (pe.searchNote) { pe.searchNote.hidden = true; pe.searchNote.textContent = ""; }
+  if (pe.pickerList) pe.pickerList.hidden = false;
+  const or = pe.picker && pe.picker.querySelector(".pane-picker-or");
+  if (or) or.hidden = false;
+}
+
+// setSearchNote writes the one-line status under the box. `spinner` prepends the
+// live spinner — the agent search runs for tens of seconds, and this line is
+// where the user is looking, so a static "Searching…" reads as a hung UI.
+// textContent (never innerHTML) keeps the agent's own reply text inert.
+function setSearchNote(panel, text, kind, spinner) {
+  const el = panel.els.searchNote;
+  if (!el) return;
+  el.textContent = text || "";
+  if (text && spinner) {
+    const sp = document.createElement("span");
+    sp.className = "pane-search-spinner";
+    sp.setAttribute("aria-hidden", "true");
+    el.prepend(sp);
+  }
+  el.hidden = !text;
+  el.classList.toggle("is-warn", kind === "warn");
+  el.classList.toggle("is-agent", kind === "agent");
+}
+
+// searchDate renders a hit's timestamp the way the session list does: the user is
+// recognising a conversation, and "when" is most of how they do it.
+function searchDate(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const days = (Date.now() - d.getTime()) / 86400000;
+    if (days < 1) return d.toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" });
+    if (days < 365) return d.toLocaleDateString(I18N.locale, { day: "numeric", month: "short" });
+    return d.toLocaleDateString(I18N.locale, { month: "short", year: "numeric" });
+  } catch (_) { return ""; }
+}
+
+// highlightTerms marks the query's words inside a snippet. Escapes first, then
+// wraps — never the other way round.
+function highlightTerms(text, query) {
+  const safe = escHtml(text || "");
+  const terms = (query || "").toLowerCase().split(/\s+/).filter(t => t.length > 1);
+  if (!terms.length) return safe;
+  const rx = new RegExp("(" + terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+  return safe.replace(rx, "<mark>$1</mark>");
+}
+
+// sessionMetaById reads the sidebar payload we already hold, so an agent result
+// (which carries only a session id and a reason) still renders with its title and
+// date without another round-trip.
+function sessionMetaById(id) {
+  return (lastSessions || []).find(s => s.id === id) || null;
+}
+
+function renderSearchResults(panel, results, opts = {}) {
+  const pe = panel.els;
+  if (!pe.searchList) return;
+  const { query = "", agent = false } = opts;
+
+  pe.searchList.innerHTML = "";
+  pe.searchList.hidden = false;
+  // The search owns the panel while it has something to show.
+  if (pe.pickerList) pe.pickerList.hidden = true;
+  const or = pe.picker && pe.picker.querySelector(".pane-picker-or");
+  if (or) or.hidden = true;
+
+  if (!results.length) {
+    const empty = document.createElement("li");
+    empty.className = "pane-picker-empty";
+    empty.textContent = agent ? tr("search.agentNone") : tr("search.none");
+    pe.searchList.appendChild(empty);
+    return;
+  }
+
+  for (const r of results) {
+    const meta = sessionMetaById(r.session_id);
+    const title = r.title || (meta && meta.title) || r.session_id;
+    const when = r.at || (meta && meta.last_used_at) || "";
+    const archived = r.archived != null ? r.archived : !!(meta && meta.archived);
+
+    const li = document.createElement("li");
+    li.className = "pane-search-item" + (agent ? " is-agent" : "");
+
+    const head = document.createElement("div");
+    head.className = "pane-search-head";
+    const t = document.createElement("span");
+    t.className = "pane-search-title";
+    t.textContent = title;
+    head.appendChild(t);
+    if (archived) {
+      const badge = document.createElement("span");
+      badge.className = "pane-search-badge";
+      badge.textContent = tr("search.archived");
+      head.appendChild(badge);
+    }
+    const d = document.createElement("span");
+    d.className = "pane-search-date";
+    d.textContent = searchDate(when);
+    head.appendChild(d);
+    li.appendChild(head);
+
+    // The agent's reason is better evidence than a raw snippet — it says WHY this
+    // session answers the question — so it replaces the snippet when present.
+    if (agent && r.reason) {
+      const reason = document.createElement("div");
+      reason.className = "pane-search-reason";
+      reason.textContent = r.reason;
+      li.appendChild(reason);
+    } else if (r.snippet) {
+      const snip = document.createElement("div");
+      snip.className = "pane-search-snippet";
+      snip.innerHTML = highlightTerms(r.snippet, query);
+      li.appendChild(snip);
+    }
+
+    li.addEventListener("click", () => openSearchResult(panel, r));
+    pe.searchList.appendChild(li);
+  }
+}
+
+// openSearchResult opens the session and jumps to the turn that matched — the
+// point of the search is to land back IN the conversation, not merely next to it.
+function openSearchResult(panel, r) {
+  const id = r.session_id;
+  if (!id) return;
+  const existing = panelsWithTab(id)[0];
+  if (existing && existing !== panel) {
+    setFocusedPanel(existing.id);
+    activateTab(existing, id);
+  } else {
+    bindSessionToPanel(panel, id);
+  }
+  if (Number.isInteger(r.turn_index) && r.turn_index >= 0) scrollToTurn(id, r.turn_index);
+}
+
+// scrollToTurn waits for the transcript to render (opening a session loads its
+// history asynchronously), then scrolls the matching turn into view and flashes
+// it. Gives up quietly rather than scrolling to the wrong place.
+function scrollToTurn(sessionId, turnIndex, tries = 0) {
+  const cont = getContainer(sessionId);
+  const row = cont && cont.querySelector(`[data-turn-index="${turnIndex}"]`);
+  if (!row) {
+    if (tries < 25) setTimeout(() => scrollToTurn(sessionId, turnIndex, tries + 1), 120);
+    return;
+  }
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.add("turn-flash");
+  setTimeout(() => row.classList.remove("turn-flash"), 1800);
+}
+
+// runLiveSearch — the as-you-type path. Last keystroke wins (stale responses are
+// dropped by sequence number).
+async function runLiveSearch(panel, query) {
+  const st = paneSearchState(panel);
+  const seq = ++st.seq;
+  try {
+    const res = await apiFetch(`/api/search/sessions?q=${encodeURIComponent(query)}&k=8`);
+    if (!res.ok) throw new Error(String(res.status));
+    const j = await res.json();
+    if (seq !== st.seq) return; // a newer keystroke already answered
+    const results = j.results || [];
+    renderSearchResults(panel, results, { query });
+
+    // Be honest about how the search was answered: a scan with no embedder is
+    // literal (and slow on a big history), and a cold index is about to warm up.
+    const bits = [];
+    if (j.warning === "no_embedder") bits.push(tr("search.noEmbedder"));
+    else if (j.warning === "indexing") bits.push(tr("search.indexing"));
+    bits.push(results.length ? trN("search.count", results.length) : tr("search.none"));
+    bits.push(tr("search.askHint"));
+    setSearchNote(panel, bits.join(" · "), j.warning === "no_embedder" ? "warn" : "");
+  } catch (_) {
+    if (seq !== st.seq) return;
+    setSearchNote(panel, tr("search.failed"), "warn");
+  }
+}
+
+// ensureSearchSession returns the hidden session the search agent runs in,
+// creating it on first use. One per browser profile, reused across searches.
+async function ensureSearchSession() {
+  const cached = localStorage.getItem(SEARCH_SESSION_KEY);
+  if (cached) { window.__omnisSearchSessionId = cached; return cached; }
+  const res = await apiFetch("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ squad: SEARCH_SQUAD, hidden: true, title: "Session search" }),
+  });
+  if (!res.ok) throw new Error("cannot create the search session");
+  const j = await res.json();
+  localStorage.setItem(SEARCH_SESSION_KEY, j.session_id);
+  window.__omnisSearchSessionId = j.session_id;
+  return j.session_id;
+}
+
+// runAgentSearch — the Enter path. Every search is INDEPENDENT: the turn carries
+// `reset_context`, so the server clears the hidden session's history and the
+// model's context (under the run guard) before running it.
+//
+// This must not be done as a separate POST /rewind before the turn: that call is
+// tryAcquire-and-409-if-busy while a turn QUEUES on the same guard, so a reset
+// racing an in-flight turn was silently dropped and the search ran on the
+// previous search's context. The agent then answered "you already asked me that,
+// I already found it" and never called report_sessions again — and since the
+// result list is built from that call, the user saw "found nothing" for a query
+// the agent had in fact answered correctly.
+async function runAgentSearch(panel) {
+  const pe = panel.els;
+  const st = paneSearchState(panel);
+
+  // While a search is running the button IS the Stop button, so a second
+  // activation (click or Enter) cancels rather than queueing another turn.
+  if (st.busy) { cancelAgentSearch(panel); return; }
+
+  const query = (pe.searchInput.value || "").trim();
+  if (!query) return;
+
+  const ac = new AbortController();
+  st.busy = true;
+  st.cancelled = false;
+  st.abort = ac;
+  // Claim the sequence: any in-flight live search must not overwrite the agent's
+  // results, and if the box is cleared (or retyped) while we run, `mySeq` goes
+  // stale and we write nothing back over what replaced us.
+  const mySeq = ++st.seq;
+  const stale = () => mySeq !== st.seq;
+  setSearchBusy(panel, true);
+  setSearchNote(panel, tr("search.agentWorking"), "agent", true /*spinner*/);
+
+  try {
+    let sid = await ensureSearchSession();
+    st.sid = sid;
+    let res = await sendSearchTurn(sid, query, ac.signal);
+    if (res.status === 404) {
+      // The hidden session was deleted (a cleaned home dir, another browser).
+      localStorage.removeItem(SEARCH_SESSION_KEY);
+      sid = await ensureSearchSession();
+      st.sid = sid;
+      res = await sendSearchTurn(sid, query, ac.signal);
+    }
+    if (!res.ok) throw new Error(String(res.status));
+
+    let reported = null; // null = the agent never reported; [] = it found nothing
+    let reply = "";
+    let done = false;
+    for await (const { event, data } of parseSSE(res)) {
+      if (event === "tool_call" && data.name === "report_sessions") {
+        const list = (data.args && data.args.sessions) || [];
+        reported = list.filter(s => s && s.session_id);
+      } else if (event === "token") {
+        reply += data.text || "";
+      } else if (event === "message") {
+        if (data.text) reply = data.text;
+      } else if (event === "reload") {
+        // The server can't replay this turn's frames (its buffer was trimmed).
+        // The agent is still running and will answer — we just can't see it. Say
+        // so; do NOT fall through to "found nothing", which would report a
+        // failure to watch as a failure to find.
+        break;
+      } else if (event === "error") {
+        throw new Error(data.error || "search failed");
+      } else if (event === "done") {
+        done = true;
+        break;
+      }
+    }
+
+    if (stale()) return;
+    if (reported) {
+      renderSearchResults(panel, reported, { query, agent: true });
+      setSearchNote(panel, reply.trim() || tr("search.agentDone"), "agent");
+    } else if (st.cancelled) {
+      setSearchNote(panel, tr("search.agentStopped"), "");
+    } else if (!done) {
+      // The stream ended without the agent finishing. We know nothing about what
+      // it found, so claim nothing: keep the live results on screen.
+      setSearchNote(panel, tr("search.agentFailed"), "warn");
+    } else {
+      // The agent finished and chose not to report any session. Keep whatever the
+      // live search found and show what it said, rather than blanking the list.
+      setSearchNote(panel, reply.trim() || tr("search.agentNone"), "agent");
+    }
+  } catch (e) {
+    // Aborting the stream is how Stop works — it is not a failure.
+    if (stale()) { /* superseded: whatever replaced us owns the box now */ }
+    else if (st.cancelled || e.name === "AbortError") setSearchNote(panel, tr("search.agentStopped"), "");
+    else setSearchNote(panel, tr("search.agentFailed"), "warn");
+  } finally {
+    st.busy = false;
+    st.abort = null;
+    setSearchBusy(panel, false);
+  }
+}
+
+// cancelAgentSearch stops the running search: it aborts the server-side run (the
+// same endpoint the chat Stop button uses — the turn outlives its HTTP request by
+// design, so merely dropping the stream would leave the agent working) and then
+// detaches this client's stream.
+function cancelAgentSearch(panel) {
+  const st = paneSearchState(panel);
+  if (!st.busy) return;
+  st.cancelled = true;
+  if (st.sid) apiFetch(`/api/sessions/${st.sid}/cancel`, { method: "POST" }).catch(() => {});
+  if (st.abort) st.abort.abort();
+}
+
+// setSearchBusy flips the Ask button into its Stop state. The button stays
+// enabled — cancelling is exactly what we want the user to be able to click.
+function setSearchBusy(panel, busy) {
+  const btn = panel.els.searchAsk;
+  if (!btn) return;
+  btn.classList.toggle("is-busy", busy);
+  btn.setAttribute("data-tip", tr(busy ? "search.stopTip" : "search.askTip"));
+}
+
+// sendSearchTurn posts the query as a stateless turn (see reset_context).
+async function sendSearchTurn(sid, query, signal) {
+  return apiFetch(`/api/sessions/${sid}/messages`, {
+    method: "POST",
+    signal,
+    body: JSON.stringify({ prompt: query, client_id: CLIENT_ID, reset_context: true }),
+  });
+}
+
+function wirePaneSearch(panel) {
+  const pe = panel.els;
+  if (!pe.searchForm || !pe.searchInput) return;
+
+  pe.searchInput.addEventListener("input", () => {
+    const st = paneSearchState(panel);
+    const query = pe.searchInput.value.trim();
+    clearTimeout(st.timer);
+    if (!query) { clearPaneSearch(panel); return; }
+    kickSearchIndexRefresh();
+    st.timer = setTimeout(() => runLiveSearch(panel, query), SEARCH_DEBOUNCE_MS);
+  });
+
+  pe.searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      cancelAgentSearch(panel); // Escape abandons the search, agent run included
+      pe.searchInput.value = "";
+      clearPaneSearch(panel);
+    }
+  });
+
+  // Enter (form submit) and the Ask button both escalate to the agent.
+  pe.searchForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    runAgentSearch(panel);
+  });
+}
+
 function renderPanePicker(panel) {
   renderPickerSquad(panel);
   const list = panel.els.pickerList;
@@ -511,6 +924,16 @@ function renderPanePicker(panel) {
     empty.className = "pane-picker-empty";
     empty.textContent = tr("app.session.noOthers");
     list.appendChild(empty);
+  }
+
+  // A live search owns the list area while it is showing results (this function
+  // re-runs on every session-list refresh, which would otherwise un-hide the
+  // plain list underneath the search results).
+  const pe = panel.els;
+  if (pe.searchList && !pe.searchList.hidden) {
+    list.hidden = true;
+    const or = pe.picker && pe.picker.querySelector(".pane-picker-or");
+    if (or) or.hidden = true;
   }
 }
 
@@ -650,6 +1073,7 @@ function attachPaneHandlers(panel) {
     const squad = (pe.pickerSquad && !pe.pickerSquad.hidden) ? panel._pickerSquad : undefined;
     newChat(panel, squad);
   });
+  wirePaneSearch(panel);
 
   // Composer submit.
   pe.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(panel); });
@@ -6515,11 +6939,11 @@ async function subscribeGlobalEvents() {
       backoff = 1000; // connected — reset backoff
       for await (const { event, data } of parseSSE(res)) {
         const sid = data && typeof data === "object" ? data.session_id : null;
-        // The in-Settings "Settings assistant" runs on a hidden Helper session
-        // that owns its own stream + UI (settings.js). Skip all of its
-        // session-scoped global events here so it never spawns a pane
-        // ask-widget, an OS notification, or a sidebar entry.
-        if (sid && sid === window.__omnisSettingsSessionId) continue;
+        // The in-Settings "Settings assistant" and the picker's session-search
+        // agent each run on a hidden session that owns its own stream + UI. Skip
+        // all of their session-scoped global events here so they never spawn a
+        // pane ask-widget, an OS notification, or a sidebar entry.
+        if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId)) continue;
         if (event === "mailbox_push" && sid) {
           endRemoteBusy(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);

@@ -37,6 +37,19 @@ type messageRequest struct {
 	// it and stay quiet. Absent for a non-browser caller (⇒ no origin, everyone
 	// notifies, the pre-existing behaviour).
 	ClientID string `json:"client_id,omitempty"`
+	// ResetContext runs this turn as if the session were brand new: the prior
+	// turns are dropped and the model's in-memory context is cleared FIRST, under
+	// the run guard, so the turn cannot see anything that came before it.
+	//
+	// This exists for a STATELESS assistant on a reused session — the picker's
+	// session-search agent, where every query is independent and remembering the
+	// last one is actively harmful (the agent answers "you already asked me that,
+	// I already found it" instead of searching again, and stops reporting its
+	// results). Doing it here rather than as a separate POST /rewind before the
+	// turn is the whole point: a separate call races the run guard (rewind is
+	// tryAcquire → 409-if-busy, while a turn QUEUES on the guard), so a reset that
+	// lost the race was silently dropped and the turn ran on dirty context.
+	ResetContext bool `json:"reset_context,omitempty"`
 }
 
 // handleMessages drives one user turn against the lead agent and streams the
@@ -91,6 +104,14 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// (otherwise the session would stay on its old generation until the
 		// idle-rebind scanner releases it, which can be many seconds).
 		d.Manager.MigrateToCurrent(meta.ID)
+
+		// Stateless turn: drop the session's history and clear the model's context
+		// before running, so this turn starts from nothing. Done HERE, under the
+		// run guard, precisely so it cannot race a concurrent turn (see
+		// messageRequest.ResetContext).
+		if req.ResetContext {
+			resetSessionContext(d, meta)
+		}
 
 		// Resolve the starting squad inside the (now-current) generation — both
 		// to decide attachment handling and as the entry point for the Omnis

@@ -34,6 +34,7 @@ func buildSubAgents(
 	codeIdx *codeindex.Index,
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
+	sessIdx sessionIndexFn,
 	steerStore *steer.Store,
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
@@ -54,7 +55,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -94,6 +95,7 @@ func buildSubAgentsFromConfigs(
 	codeIdx *codeindex.Index,
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
+	sessIdx sessionIndexFn,
 	steerStore *steer.Store,
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
@@ -142,7 +144,7 @@ func buildSubAgentsFromConfigs(
 			instr = defaultAgentInstruction(cfg.Name)
 		}
 
-		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, false, nil)
+		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, false, nil)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 

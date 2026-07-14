@@ -7,6 +7,7 @@
     "image_generator",
     "skill_editor",
     "helper",
+    "session_search",
     "summariser",
     "agentmd_reviewer",
     "curator",
@@ -84,7 +85,7 @@
     },
     {
       "name": "Helper",
-      "description": "Answers questions about omnis itself and its capabilities, finds/inspects/installs omnis registry items (skills, agents, MCP servers, squads, A2A peers, commands), AND reads or changes any omnis SETTING on request. Use this when the user asks whether OMNIS has an agent/skill/tool/MCP server for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, asks what omnis can do or how it works, OR wants to view or change a setting/configuration — e.g. 'change the theme', 'switch the coder agent to model X', 'set my language to French', 'allow kubectl get', 'add an MCP server', 'edit a permission/hook', 'which model does agent Y use', OR wants to UNDO/REVERT a settings change ('revert that', 'undo your last change', 'go back to the initial state') — i.e. omnis (or 'you') is the subject. NOT for general world-knowledge or research questions about whether some software/library exists (e.g. 'is there an HTTP proxy library in Rust?') — those go to the Knowledge squad. Leaderless: the Helper agent runs directly, limited to its own docs + registries + settings tools.",
+      "description": "Answers questions about omnis itself and its capabilities, finds/inspects/installs omnis registry items (skills, agents, MCP servers, squads, A2A peers, commands), AND reads or changes any omnis SETTING on request. Use this when the user asks whether OMNIS has an agent/skill/tool/MCP server for a task (even a specialised one like Flux CD or Kubernetes), wants to discover or install one, asks what omnis can do or how it works, OR wants to view or change a setting/configuration — e.g. 'change the theme', 'switch the coder agent to model X', 'set my language to French', 'allow kubectl get', 'add an MCP server', 'edit a permission/hook', 'which model does agent Y use', OR wants to UNDO/REVERT a settings change ('revert that', 'undo your last change', 'go back to the initial state') — i.e. omnis (or 'you') is the subject. NOT for general world-knowledge or research questions about whether some software/library exists (e.g. 'is there an HTTP proxy library in Rust?') — those go to the Knowledge squad. ALSO route here to FIND A PAST CHAT SESSION or recall what was said in one — 'the chat where we discussed X', 'when did we decide Y?', 'find our conversation about Z' — including archived sessions. Leaderless: the Helper agent runs directly, limited to its own docs + registries + settings tools.",
       "leader": "none",
       "members": [
         "helper"
@@ -100,6 +101,15 @@
         "reviewer",
         "refactorer"
       ]
+    },
+    {
+      "name": "Session Search",
+      "description": "Searches past chat sessions (including archived ones) and reports the ones that answer the user's question. Leaderless and HIDDEN: it is run directly by the web UI search box, never chosen for a chat and never routed to — in a chat, session search is reached through the Helper squad.",
+      "leader": "none",
+      "members": [
+        "session_search"
+      ],
+      "hidden": true
     }
   ],
   "token_optimization": true

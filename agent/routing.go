@@ -503,12 +503,14 @@ func synthesizeRouterAgentConfig(rs RuntimeSettings, name string) (RuntimeAgentC
 	return cfg, true
 }
 
-// routerSquadCatalogue returns the squad names (excluding the router) that the
-// router may route to, in declaration order, lower-cased.
+// routerSquadCatalogue returns the squad names (excluding the router, and any
+// hidden squad) that the router may route to, in declaration order, lower-cased.
+// A hidden squad is a machine-facing entry point (see SquadEntry.Hidden) — the
+// router must not know it exists, or it would route conversations into it.
 func routerSquadCatalogue(runtime RuntimeSettings) []string {
 	out := make([]string, 0, len(runtime.Squads))
 	for _, sq := range runtime.Squads {
-		if sq.Name == runtime.RouterSquad {
+		if sq.Name == runtime.RouterSquad || sq.Hidden {
 			continue
 		}
 		out = append(out, sq.Name)
@@ -524,7 +526,7 @@ func routerCatalogueBlock(runtime RuntimeSettings) string {
 	b.WriteString("## Available squads\n\n")
 	b.WriteString("Route the user's request to exactly one of these squads using `route_to_squad`:\n\n")
 	for _, sq := range runtime.Squads {
-		if sq.Name == runtime.RouterSquad {
+		if sq.Name == runtime.RouterSquad || sq.Hidden {
 			continue
 		}
 		desc := strings.TrimSpace(sq.Description)

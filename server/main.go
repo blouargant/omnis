@@ -54,12 +54,14 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/blouargant/omnis/agent"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/paths"
+	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -303,6 +305,25 @@ func run() error {
 	// configured registry (no-op when a fresh persisted index is already loaded).
 	startRegistryIndexer(rootCtx, infra, firstInst.Settings)
 
+	// Past-session search index. Deliberately NOT warmed at boot, unlike the docs
+	// and registry indexes: it is only used in bursts and drops itself from memory
+	// between them, so it is opened on first use (a search, or the first session
+	// the idle indexer reports) and its idle sweeper is started with it.
+	var sessionIndexOnce sync.Once
+	sessionIndex := func() *sessindex.Index {
+		idx := infra.SessionIndex(rootCtx, firstInst.Settings)
+		if idx == nil {
+			return nil
+		}
+		sessionIndexOnce.Do(func() { idx.StartIdleSweeper(rootCtx) })
+		return idx
+	}
+	// Keep it current in the background: the idle-indexer rail above already fires
+	// EventSessionIndexNow for every session that goes quiet (and on archive), so
+	// this needs no scanner of its own — and on a fresh boot that same pass
+	// backfills the whole history.
+	registerSessionIndexHook(rootCtx, infra.Bus, sessionIndex)
+
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
 
@@ -398,6 +419,7 @@ func run() error {
 		Restart:             restart,
 		Updates:             updates,
 		Version:             version,
+		SessionIndex:        sessionIndex,
 	}
 	engine := newEngine(deps)
 

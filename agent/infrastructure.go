@@ -122,6 +122,12 @@ type Infrastructure struct {
 	// survives reloads, refreshed by the startup docs indexer.
 	docIndex docIndexCache
 
+	// sessIndex memoises the process-wide semantic index over past chat sessions
+	// (see SessionIndex). Backed by the same embedder; on-disk so it survives
+	// reloads, refreshed by the idle indexer and by the search UI. Unlike the
+	// others it unloads itself from memory between bursts of searching.
+	sessIndex sessIndexCache
+
 	// hooks memoises the process-wide Claude Code-style hooks engine (a
 	// hot-reloading Reloader over hooks.json plus the fire-and-forget lifecycle
 	// bus listeners, wired exactly once). Built lazily from the first

@@ -24,6 +24,17 @@ type SquadEntry struct {
 	Description string   `json:"description"`
 	Leader      string   `json:"leader"`
 	Members     []string `json:"members"`
+	// Hidden keeps the squad out of the user-facing squad catalogue: it is not
+	// offered in the web UI squad picker and the Omnis router is never told it
+	// exists, so it can neither be chosen for a new chat nor routed to. It is
+	// still fully built and remains resolvable by name (Manager.LookupSquad), so
+	// a surface that knows to ask for it can run it directly.
+	//
+	// This is what lets a squad exist purely as a machine-facing entry point —
+	// the Session Search squad, which the search box runs directly so the query
+	// reaches the session_search agent with no leader in between, but which has
+	// no business appearing as a squad a user starts a chat with.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // AgentEntry describes one agent in the JSON runtime config. Model selection
@@ -303,6 +314,9 @@ type RuntimeSquadConfig struct {
 	Description string
 	Leader      string
 	Members     []string
+	// Hidden — see SquadEntry.Hidden. Excluded from the router catalogue and the
+	// web UI squad list; still built and resolvable by name.
+	Hidden bool
 }
 
 // DefaultSquadName is the name of the squad used when a session does not
@@ -826,6 +840,7 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 			Description: strings.TrimSpace(e.Description),
 			Leader:      leader,
 			Members:     members,
+			Hidden:      e.Hidden,
 		})
 	}
 	return out, nil
