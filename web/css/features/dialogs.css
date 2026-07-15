@@ -278,12 +278,52 @@
 .collection-ctx-modal .cc-grow-mem { min-height: 0; }
 .collection-ctx-modal .cc-grow-instr { flex: 3 1 0; }
 .collection-ctx-modal .cc-grow-mem { flex: 2 1 0; }
+/* Each editor textarea sits in a relative wrap so its floating Assistant button
+   anchors to the textarea's own bottom-right, clear of the field's label /
+   "Generate" head / hint. The wrap takes the field's flex slack; the textarea
+   fills the wrap. */
+.collection-ctx-modal .cc-ta-wrap {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 72px;
+  display: flex;
+}
 .collection-ctx-modal .cc-instr,
 .collection-ctx-modal .cc-mem {
   flex: 1 1 0;
-  min-height: 72px;
+  min-height: 0;
+  width: 100%;
   overflow-y: auto;
   resize: none;
+}
+/* Floating per-field entry point to the drafting assistant, anchored inside the
+   textarea (bottom-right). Subtle until hovered/active so it never fights the
+   text underneath. */
+.cc-field-asst {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.82;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.cc-field-asst:hover,
+.cc-field-asst.active {
+  opacity: 1;
+  color: var(--accent, #0e639c);
+  border-color: var(--accent, #0e639c);
 }
 .cc-mem-head {
   display: flex;
@@ -323,22 +363,35 @@
   background: var(--bg-panel, var(--bg));
 }
 .cc-asst[hidden] { display: none; }
-.cc-asst-toggle {
+.cc-asst-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cc-asst-title {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 12px;
-  padding: 3px 9px;
-  margin-left: auto;
-  margin-right: 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-raised);
+  font-weight: 600;
   color: var(--text);
+}
+.cc-asst-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
 }
-.cc-asst-toggle:hover { border-color: var(--accent, #0e639c); }
-.cc-asst-toggle.active { border-color: var(--accent, #0e639c); color: var(--accent, #0e639c); }
+.cc-asst-close:hover { color: var(--text); background: var(--bg-active); }
 .cc-asst-transcript {
   flex: 1 1 auto;
   min-height: 0;

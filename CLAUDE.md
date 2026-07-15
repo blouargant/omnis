@@ -1963,8 +1963,15 @@ fully-automatic idle-triggered distiller (Phase 3) remains unwired by design.
   fenced ```instructions / ```memory blocks. The client extracts those blocks
   (`extractCollectionDrafts`) and renders **Apply** buttons that fill the editable
   textareas — **propose-then-commit** again: nothing is written until the user
-  reviews and clicks Save. The modal splits into `[fields | chat]` when the header
-  **Assistant** toggle is on (`.cc-split` / `.cc-asst` in
+  reviews and clicks Save. The entry point is a **floating `.cc-field-asst`
+  button anchored inside EACH field textarea** (`attachFieldBtn` wraps the
+  textarea in a `position:relative` `.cc-ta-wrap` so the pill sits at the
+  textarea's bottom-right, clear of the label/"Generate" head/hint) rather than a
+  single generic header toggle — so the assistant's purpose reads off the field it
+  sits on; clicking a field's button opens the chat and, when the composer is
+  empty, seeds a per-field starter (`collections.asstStarter{Instr,Mem}`). The
+  modal splits into `[fields | chat]` (`.cc-split` / `.cc-asst`, closed via the
+  assistant panel's own `.cc-asst-close`, in
   [web/css/features/dialogs.css](web/css/features/dialogs.css)); context resets per
   editor open (`reset_context` on the first send). No Go changes — it reuses the
   Helper squad and the existing message/SSE endpoints.

@@ -79,11 +79,11 @@ selected. Everything is stored under `$OMNIS_HOME/collections/<name>/` (prose)
 and `collections.json` (defaults), and follows the collection through renames.
 **General** has no context — it's the catch-all bucket.
 
-If you're not sure what to write, click **Assistant** in the editor's header to
-open a chat that helps you draft the instructions and adapt the memory. Describe
-your workstream and it proposes text with **Apply to instructions** / **Apply to
-memory** buttons that drop the draft into the field — you still review and
-**Save**, so nothing changes until you approve it.
+If you're not sure what to write, click the **Assistant** button that floats in
+the corner of the **Instructions** or **Memory** box to open a chat that helps
+you draft that field. Describe your workstream and it proposes text with **Apply
+to instructions** / **Apply to memory** buttons that drop the draft into the
+field — you still review and **Save**, so nothing changes until you approve it.
 
 ## Session list affordances
 

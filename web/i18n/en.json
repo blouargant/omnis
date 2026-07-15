@@ -1,4 +1,6 @@
 {
+  "collections.asstStarterInstr": "Help me write clear instructions for this collection.",
+  "collections.asstStarterMem": "Help me refine the memory for this collection.",
   "common.close": "Close",
   "common.cancel": "Cancel",
   "common.add": "Add",

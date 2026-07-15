@@ -1,4 +1,6 @@
 {
+  "collections.asstStarterInstr": "Aidez-moi à rédiger des instructions claires pour cette collection.",
+  "collections.asstStarterMem": "Aidez-moi à affiner la mémoire de cette collection.",
   "common.close": "Fermer",
   "common.cancel": "Annuler",
   "common.add": "Ajouter",

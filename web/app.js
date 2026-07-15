@@ -6164,12 +6164,14 @@ function extractCollectionDrafts(md) {
   return out;
 }
 
-// wireCollectionAssistant restructures the context modal into [fields | chat],
-// adds the header toggle, and wires the drafting chat. It captures the two field
-// textareas so "Apply" fills them directly.
+// wireCollectionAssistant restructures the context modal into [fields | chat]
+// and wires the drafting chat. Its entry points are a floating "Assistant"
+// button anchored inside EACH field textarea (so the assistant's purpose reads
+// off the field it sits on), not one generic header toggle; it captures the two
+// field textareas so a per-field button can seed a tuned starter and "Apply"
+// can fill them directly.
 function wireCollectionAssistant(overlay, name) {
   const modalEl = overlay.querySelector(".ui-modal");
-  const header = overlay.querySelector(".user-cmd-modal-header");
   const bodyEl = overlay.querySelector(".user-cmd-modal-body");
   const instr = bodyEl.querySelector(".cc-instr");
   const mem = bodyEl.querySelector(".cc-mem");
@@ -6183,6 +6185,13 @@ function wireCollectionAssistant(overlay, name) {
   aside.className = "cc-asst";
   aside.hidden = true;
   aside.innerHTML =
+    `<div class="cc-asst-head">` +
+    `<span class="cc-asst-title">` +
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>` +
+    `<span>${escHtml(tr("collections.assistant"))}</span></span>` +
+    `<button type="button" class="cc-asst-close" data-tip="${escHtml(tr("common.close"))}" aria-label="${escHtml(tr("common.close"))}">` +
+    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
+    `</button></div>` +
     `<div class="cc-asst-transcript"></div>` +
     `<div class="cc-asst-status"></div>` +
     `<form class="cc-asst-composer">` +
@@ -6192,33 +6201,15 @@ function wireCollectionAssistant(overlay, name) {
     `</button></form>`;
   split.appendChild(aside);
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "cc-asst-toggle";
-  toggle.setAttribute("data-tip", tr("collections.asstTip"));
-  toggle.innerHTML =
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>` +
-    `<span>${escHtml(tr("collections.assistant"))}</span>`;
-  header.insertBefore(toggle, header.querySelector(".ui-modal-close"));
-
   const transcript = aside.querySelector(".cc-asst-transcript");
   const statusLine = aside.querySelector(".cc-asst-status");
   const input = aside.querySelector(".cc-asst-input");
   const sendBtn = aside.querySelector(".cc-asst-send");
   const form = aside.querySelector(".cc-asst-composer");
+  const closeBtn = aside.querySelector(".cc-asst-close");
+  const fieldBtns = [];
   let sending = false;
   let greeted = false;
-
-  const setOpen = (open) => {
-    aside.hidden = !open;
-    modalEl.classList.toggle("cc-asst-open", open);
-    toggle.classList.toggle("active", open);
-    if (open) {
-      if (!greeted) { greeted = true; addBot(tr("collections.asstGreeting")); }
-      setTimeout(() => input.focus(), 0);
-    }
-  };
-  toggle.addEventListener("click", () => setOpen(aside.hidden));
 
   const scrollBottom = () => { transcript.scrollTop = transcript.scrollHeight; };
   const addUser = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-user"; el.textContent = t; transcript.appendChild(el); scrollBottom(); };
@@ -6243,6 +6234,46 @@ function wireCollectionAssistant(overlay, name) {
   };
 
   const autoGrowInput = () => { input.style.height = "auto"; input.style.height = Math.min(120, input.scrollHeight) + "px"; };
+
+  const setOpen = (open) => {
+    aside.hidden = !open;
+    modalEl.classList.toggle("cc-asst-open", open);
+    fieldBtns.forEach((b) => b.classList.toggle("active", open));
+    if (open) {
+      if (!greeted) { greeted = true; addBot(tr("collections.asstGreeting")); }
+      setTimeout(() => input.focus(), 0);
+    }
+  };
+  closeBtn.addEventListener("click", () => setOpen(false));
+
+  // A floating "Assistant" button lives inside each field's textarea. Clicking it
+  // opens the chat and, when the composer is empty, seeds a starter tuned to that
+  // field — so the button's purpose is unambiguous from where it sits. The
+  // textarea is wrapped so the button anchors to its bottom-right (clear of the
+  // label / "Generate" head / hint) and scrolls with neither.
+  const attachFieldBtn = (ta, starterKey) => {
+    if (!ta) return;
+    const wrap = document.createElement("div");
+    wrap.className = "cc-ta-wrap";
+    ta.parentNode.insertBefore(wrap, ta);
+    wrap.appendChild(ta);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cc-field-asst";
+    b.setAttribute("data-tip", tr("collections.asstTip"));
+    b.innerHTML =
+      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg>` +
+      `<span>${escHtml(tr("collections.assistant"))}</span>`;
+    b.addEventListener("click", () => {
+      setOpen(true);
+      if (!(input.value || "").trim()) { input.value = tr(starterKey); autoGrowInput(); }
+      setTimeout(() => input.focus(), 0);
+    });
+    wrap.appendChild(b);
+    fieldBtns.push(b);
+  };
+  attachFieldBtn(instr, "collections.asstStarterInstr");
+  attachFieldBtn(mem, "collections.asstStarterMem");
 
   async function send() {
     if (sending) return;
