@@ -1951,6 +1951,23 @@ fully-automatic idle-triggered distiller (Phase 3) remains unwired by design.
   "recalled-memory-that-is-wrong" hazard the codebase guards against elsewhere.
   Degrades cleanly: `503` with no Manager, `400` when the collection has no chats
   to learn from yet.
+- **Drafting assistant (web UI)** — the context editor embeds a small Helper chat
+  ([web/app.js](web/app.js) `wireCollectionAssistant`) that helps the user *write*
+  the instructions and *adapt* the memory, mirroring the in-Settings assistant: a
+  **hidden, reusable Helper session** (`squad:"helper", hidden:true`, cached in
+  `localStorage`, published as `window.__omnisCollectionAsstSessionId` so
+  `subscribeGlobalEvents` skips its events), driven over `POST
+  /api/sessions/:id/messages` + `parseSSE`. Each turn prepends a preamble naming
+  the collection + the **current field values** (so it adapts to unsaved edits)
+  and instructing the model to draft, not call tools, and wrap proposed text in
+  fenced ```instructions / ```memory blocks. The client extracts those blocks
+  (`extractCollectionDrafts`) and renders **Apply** buttons that fill the editable
+  textareas — **propose-then-commit** again: nothing is written until the user
+  reviews and clicks Save. The modal splits into `[fields | chat]` when the header
+  **Assistant** toggle is on (`.cc-split` / `.cc-asst` in
+  [web/css/features/dialogs.css](web/css/features/dialogs.css)); context resets per
+  editor open (`reset_context` on the first send). No Go changes — it reuses the
+  Helper squad and the existing message/SSE endpoints.
 - **No-op contract**: a collection with no profile + no prose is byte-identical to
   before (resolver returns `""`, seed falls through to the router/default, plugin
   is a no-op). CLI/TUI leave the resolver nil ⇒ no injection.

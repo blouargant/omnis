@@ -6097,6 +6097,9 @@ function collectionContextDialog(name, snap) {
         genBtn.textContent = orig;
       }
     });
+    // Embed the drafting assistant (help write instructions / adapt memory).
+    caFreshOpen = true;
+    wireCollectionAssistant(overlay, name);
     const ok = overlay.querySelector(".ui-modal-ok");
     ok.textContent = tr("common.save");
     let done = false;
@@ -6118,6 +6121,186 @@ function collectionContextDialog(name, snap) {
     document.addEventListener("keydown", onKey, true);
     setTimeout(() => body.querySelector(".cc-instr").focus(), 0);
   });
+}
+
+// ── Collection context assistant ────────────────────────────────────────────
+// A small Helper-backed chat embedded in the collection context editor that
+// helps the user WRITE the instructions and ADAPT the memory. Mirrors the
+// in-Settings assistant (a hidden, reusable Helper session; SSE via parseSSE),
+// but its output lands as a DRAFT in the editable fields (propose-then-commit):
+// the assistant proposes text inside fenced ```instructions / ```memory blocks,
+// which the client turns into "Apply" buttons that fill the textareas. Nothing
+// is written to disk until the user reviews it and clicks the dialog's Save.
+const CA_SESSION_KEY = "agent_toolkit_collection_assistant";
+let caSession = null;   // cached hidden Helper session id
+let caFreshOpen = true; // reset the assistant context on the first send per editor open
+
+async function ensureCollectionAsstSession() {
+  if (caSession) return caSession;
+  const cached = localStorage.getItem(CA_SESSION_KEY);
+  if (cached) { caSession = cached; window.__omnisCollectionAsstSessionId = cached; return cached; }
+  return await createCollectionAsstSession();
+}
+async function createCollectionAsstSession() {
+  const res = await apiFetch("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ squad: "helper", hidden: true, title: "Collection assistant" }),
+  });
+  if (!res.ok) throw new Error("could not create collection assistant session");
+  const j = await res.json();
+  caSession = j.session_id;
+  localStorage.setItem(CA_SESSION_KEY, caSession);
+  window.__omnisCollectionAsstSessionId = caSession;
+  return caSession;
+}
+
+// extractCollectionDrafts pulls ```instructions / ```memory fenced blocks out of
+// the assistant's markdown so the client can offer to apply them to the fields.
+function extractCollectionDrafts(md) {
+  const out = {};
+  const re = /```(instructions|memory)[ \t]*\r?\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(md || "")) !== null) out[m[1]] = m[2].replace(/\s+$/, "");
+  return out;
+}
+
+// wireCollectionAssistant restructures the context modal into [fields | chat],
+// adds the header toggle, and wires the drafting chat. It captures the two field
+// textareas so "Apply" fills them directly.
+function wireCollectionAssistant(overlay, name) {
+  const modalEl = overlay.querySelector(".ui-modal");
+  const header = overlay.querySelector(".user-cmd-modal-header");
+  const bodyEl = overlay.querySelector(".user-cmd-modal-body");
+  const instr = bodyEl.querySelector(".cc-instr");
+  const mem = bodyEl.querySelector(".cc-mem");
+
+  // Lay the fields and the chat side by side: [header, split[body, aside], footer].
+  const split = document.createElement("div");
+  split.className = "cc-split";
+  modalEl.insertBefore(split, bodyEl);
+  split.appendChild(bodyEl);
+  const aside = document.createElement("aside");
+  aside.className = "cc-asst";
+  aside.hidden = true;
+  aside.innerHTML =
+    `<div class="cc-asst-transcript"></div>` +
+    `<div class="cc-asst-status"></div>` +
+    `<form class="cc-asst-composer">` +
+    `<textarea class="cc-asst-input" rows="1" spellcheck="false" placeholder="${escHtml(tr("collections.asstPlaceholder"))}"></textarea>` +
+    `<button type="submit" class="cc-asst-send" data-tip="${escHtml(tr("collections.asstSend"))}" aria-label="${escHtml(tr("collections.asstSend"))}">` +
+    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>` +
+    `</button></form>`;
+  split.appendChild(aside);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "cc-asst-toggle";
+  toggle.setAttribute("data-tip", tr("collections.asstTip"));
+  toggle.innerHTML =
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>` +
+    `<span>${escHtml(tr("collections.assistant"))}</span>`;
+  header.insertBefore(toggle, header.querySelector(".ui-modal-close"));
+
+  const transcript = aside.querySelector(".cc-asst-transcript");
+  const statusLine = aside.querySelector(".cc-asst-status");
+  const input = aside.querySelector(".cc-asst-input");
+  const sendBtn = aside.querySelector(".cc-asst-send");
+  const form = aside.querySelector(".cc-asst-composer");
+  let sending = false;
+  let greeted = false;
+
+  const setOpen = (open) => {
+    aside.hidden = !open;
+    modalEl.classList.toggle("cc-asst-open", open);
+    toggle.classList.toggle("active", open);
+    if (open) {
+      if (!greeted) { greeted = true; addBot(tr("collections.asstGreeting")); }
+      setTimeout(() => input.focus(), 0);
+    }
+  };
+  toggle.addEventListener("click", () => setOpen(aside.hidden));
+
+  const scrollBottom = () => { transcript.scrollTop = transcript.scrollHeight; };
+  const addUser = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-user"; el.textContent = t; transcript.appendChild(el); scrollBottom(); };
+  const addErr = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-error"; el.textContent = t; transcript.appendChild(el); scrollBottom(); };
+  const addBot = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-bot"; renderMarkdown(el, t); transcript.appendChild(el); scrollBottom(); return el; };
+  const newBubble = () => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-bot"; transcript.appendChild(el); scrollBottom(); return el; };
+
+  const applyBar = (drafts, bubble) => {
+    const mkBtn = (labelKey, target, value) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cc-asst-apply-btn";
+      b.textContent = tr(labelKey);
+      b.addEventListener("click", () => { target.value = value; target.focus(); showToast(tr("collections.applied"), "ok"); });
+      return b;
+    };
+    const bar = document.createElement("div");
+    bar.className = "cc-asst-apply";
+    if (drafts.instructions != null) bar.appendChild(mkBtn("collections.applyInstructions", instr, drafts.instructions));
+    if (drafts.memory != null) bar.appendChild(mkBtn("collections.applyMemory", mem, drafts.memory));
+    if (bar.children.length) { bubble.appendChild(bar); scrollBottom(); }
+  };
+
+  const autoGrowInput = () => { input.style.height = "auto"; input.style.height = Math.min(120, input.scrollHeight) + "px"; };
+
+  async function send() {
+    if (sending) return;
+    const text = (input.value || "").trim();
+    if (!text) return;
+    input.value = ""; autoGrowInput();
+    addUser(text);
+    sending = true; sendBtn.disabled = true;
+    statusLine.textContent = tr("collections.asstThinking");
+    const prompt =
+      tr("collections.asstPreamble", { name }) + "\n\n" +
+      "CURRENT INSTRUCTIONS:\n" + (instr.value.trim() || "(empty)") + "\n\n" +
+      "CURRENT MEMORY:\n" + (mem.value.trim() || "(empty)") + "\n\n" +
+      "USER REQUEST:\n" + text;
+    try {
+      let sid = await ensureCollectionAsstSession();
+      const post = (s) => apiFetch(`/api/sessions/${s}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ prompt, reset_context: caFreshOpen }),
+      }).catch(() => null);
+      let res = await post(sid);
+      if (res && res.status === 404) {
+        localStorage.removeItem(CA_SESSION_KEY); caSession = null;
+        sid = await createCollectionAsstSession(); res = await post(sid);
+      }
+      caFreshOpen = false;
+      if (!res || !res.ok) { addErr(tr("collections.asstError")); return; }
+      let bubble = null, acc = "";
+      const ensure = () => { if (!bubble) bubble = newBubble(); return bubble; };
+      const finalize = () => {
+        if (bubble && acc) { renderMarkdown(bubble, acc); applyBar(extractCollectionDrafts(acc), bubble); }
+        else if (bubble && !acc) bubble.remove();
+        bubble = null; acc = "";
+      };
+      for await (const { event, data } of parseSSE(res)) {
+        switch (event) {
+          case "token": ensure(); acc += (data.text || ""); renderMarkdown(bubble, acc); scrollBottom(); statusLine.textContent = tr("collections.asstStreaming"); break;
+          case "message": if (!acc) { ensure(); acc = data.text || ""; renderMarkdown(bubble, acc); scrollBottom(); } break;
+          case "tool_call": if (!(typeof isRoutingTool === "function" && isRoutingTool(data.name))) statusLine.textContent = tr("collections.asstWorking"); break;
+          case "heartbeat": statusLine.textContent = tr("collections.asstThinking"); break;
+          case "error": finalize(); addErr(data.message || tr("collections.asstError")); break;
+          case "done": finalize(); return;
+        }
+      }
+      finalize();
+    } catch (_) {
+      addErr(tr("collections.asstError"));
+    } finally {
+      sending = false; sendBtn.disabled = false; statusLine.textContent = "";
+    }
+  }
+
+  input.addEventListener("input", autoGrowInput);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    else if (e.key === "Escape") { e.stopPropagation(); } // don't close the modal while typing
+  });
+  form.addEventListener("submit", (e) => { e.preventDefault(); send(); });
 }
 
 // collectionDialog shows a themed modal to create or recolour a collection: an
@@ -7062,11 +7245,12 @@ async function subscribeGlobalEvents() {
       backoff = 1000; // connected — reset backoff
       for await (const { event, data } of parseSSE(res)) {
         const sid = data && typeof data === "object" ? data.session_id : null;
-        // The in-Settings "Settings assistant" and the picker's session-search
-        // agent each run on a hidden session that owns its own stream + UI. Skip
-        // all of their session-scoped global events here so they never spawn a
-        // pane ask-widget, an OS notification, or a sidebar entry.
-        if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId)) continue;
+        // The in-Settings "Settings assistant", the picker's session-search
+        // agent, and the collection context assistant each run on a hidden
+        // session that owns its own stream + UI. Skip all of their session-scoped
+        // global events here so they never spawn a pane ask-widget, an OS
+        // notification, or a sidebar entry.
+        if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId || sid === window.__omnisCollectionAsstSessionId)) continue;
         if (event === "mailbox_push" && sid) {
           endRemoteBusy(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
