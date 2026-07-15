@@ -53,8 +53,8 @@ Key points:
 - **Models** — model profiles (provider, model ID, base URL, API key,
   context length, pricing) referenced by each agent's `model_ref`.
 - **Global Environment** — fleet-wide settings: `softskills_dir`,
-  `token_optimization`, `bash_timeout_seconds`, `serpapi_key`, and
-  path overrides.
+  `token_optimization`, `bash_timeout_seconds`, the web-search API keys
+  (`serper_key`, `serpapi_key`), and path overrides.
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.

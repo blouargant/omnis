@@ -10,7 +10,7 @@
   "softskills_dir": "",
   "max_instances": 10,
   "tools": [
-    "serpapi",
+    "serper",
     "ddg",
     "web"
   ]

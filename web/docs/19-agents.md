@@ -80,8 +80,9 @@ adds or removes it from the agent's `tools` list in `agent.json`.
 | `Skill` | Load authored skill playbooks (`load_skill`, `list_skills`). |
 | `softskills` | Load curator-distilled soft skills (`load_softskill`, `list_softskills`). |
 | `calc` | Math / expression evaluator. |
-| `ddg` | Web search via DuckDuckGo. Mutually exclusive with `serpapi`. |
-| `serpapi` | Web search via SerpAPI (requires `serpapi_key` in Global Environment). Mutually exclusive with `ddg`. |
+| `ddg` | Web search via DuckDuckGo (no API key). Mutually exclusive with `serper` and `serpapi`. |
+| `serper` | Web search via Serper.dev (Google) — the recommended, cheaper provider (requires `serper_key` in Global Environment). Mutually exclusive with `ddg` and `serpapi`. |
+| `serpapi` | Web search via SerpAPI (requires `serpapi_key` in Global Environment). Mutually exclusive with `ddg` and `serper`. |
 | `web` | Browser tool (fetch and parse web pages). |
 | `registries` | Browse and install skills and agents from remote registries. |
 | `code_search` | Semantic code search (`search_code`, `reindex_code`). Mounted only when an embedding model is configured; otherwise falls back to grep/read. |
@@ -267,4 +268,5 @@ top level of `agents.json`.
 
 | Field | Description |
 |---|---|
-| `serpapi_key` | API key for SerpAPI web search. Required when any agent uses the `serpapi` tool. Shown masked. |
+| `serper_key` | API key for [Serper.dev](https://serper.dev/) web search — the recommended, cheaper provider. Required when any agent uses the `serper` tool. Resolved as an environment-variable name first (falls back to the literal value). Shown masked. |
+| `serpapi_key` | API key for SerpAPI web search. Required when any agent uses the `serpapi` tool. Resolved as an environment-variable name first. Shown masked. |

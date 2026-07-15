@@ -225,7 +225,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const RESTART_REQUIRED_FLAG = "agent_toolkit_restart_required";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
-  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serpapi", "web", "registries", "code_search", "docs"];
+  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serper", "serpapi", "web", "registries", "code_search", "docs"];
   const TOOL_DESCRIPTIONS = {
     Bash:       tr("tool.desc.Bash"),
     Read:       tr("tool.desc.Read"),
@@ -240,14 +240,21 @@ const BASE_PATH = window.BASE_PATH || "";
     softskills: tr("tool.desc.softskills"),
     calc:       tr("tool.desc.calc"),
     ddg:        tr("tool.desc.ddg"),
+    serper:     tr("tool.desc.serper"),
     serpapi:    tr("tool.desc.serpapi"),
     web:        tr("tool.desc.web"),
     registries: tr("tool.desc.registries"),
     code_search: tr("tool.desc.code_search"),
     docs: tr("tool.desc.docs"),
   };
-  // Tools that are mutually exclusive: selecting one auto-deselects the other.
-  const TOOL_MUTEX = { ddg: "serpapi", serpapi: "ddg" };
+  // Web-search providers are mutually exclusive (each registers a "WebSearch"
+  // tool; ADK rejects two tools with the same name). Selecting one auto-deselects
+  // the others. Each value is the list of peers to turn off.
+  const TOOL_MUTEX = {
+    ddg:     ["serper", "serpapi"],
+    serper:  ["ddg", "serpapi"],
+    serpapi: ["ddg", "serper"],
+  };
 
   const AGENT_SUBTABS = [
     { id: "agents",  label: tr("subtab.agents")  },
@@ -2215,29 +2222,36 @@ const BASE_PATH = window.BASE_PATH || "";
     // EXTERNAL API KEYS
     el.appendChild(envSection(tr("set.env.externalApiKeys"), null, body => {
       body.className += " env-section-keys";
-      const wrap = document.createElement("div");
-      wrap.className = "env-field";
-      const lbl = document.createElement("label");
-      lbl.className = "env-field-label";
-      lbl.textContent = "serpapi_key";
-      const inputWrap = document.createElement("div");
-      inputWrap.className = "env-secret-wrap";
-      const inp = document.createElement("input");
-      inp.type = "password";
-      inp.className = "env-field-input";
-      inp.value = d.serpapi_key == null ? "" : String(d.serpapi_key);
-      inp.addEventListener("input", () => { d.serpapi_key = inp.value; onChange(); });
-      const eye = document.createElement("button");
-      eye.type = "button";
-      eye.className = "env-secret-eye";
-      eye.setAttribute("data-tip", tr("set.env.showHide"));
-      eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-      eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
-      inputWrap.appendChild(inp);
-      inputWrap.appendChild(eye);
-      wrap.appendChild(lbl);
-      wrap.appendChild(inputWrap);
-      body.appendChild(wrap);
+      // A masked secret field bound to d[key]. serper_key is the recommended,
+      // cheaper web-search provider, so it is shown first; serpapi_key stays for
+      // users who prefer SerpAPI.
+      const secretField = (key) => {
+        const wrap = document.createElement("div");
+        wrap.className = "env-field";
+        const lbl = document.createElement("label");
+        lbl.className = "env-field-label";
+        lbl.textContent = key;
+        const inputWrap = document.createElement("div");
+        inputWrap.className = "env-secret-wrap";
+        const inp = document.createElement("input");
+        inp.type = "password";
+        inp.className = "env-field-input";
+        inp.value = d[key] == null ? "" : String(d[key]);
+        inp.addEventListener("input", () => { d[key] = inp.value; onChange(); });
+        const eye = document.createElement("button");
+        eye.type = "button";
+        eye.className = "env-secret-eye";
+        eye.setAttribute("data-tip", tr("set.env.showHide"));
+        eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+        eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
+        inputWrap.appendChild(inp);
+        inputWrap.appendChild(eye);
+        wrap.appendChild(lbl);
+        wrap.appendChild(inputWrap);
+        return wrap;
+      };
+      body.appendChild(secretField("serper_key"));
+      body.appendChild(secretField("serpapi_key"));
     }));
   }
 
@@ -3329,6 +3343,7 @@ const BASE_PATH = window.BASE_PATH || "";
     softskills: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     calc:       `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="12" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/><line x1="16" y1="10" x2="16" y2="18"/></svg>`,
     ddg:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+    serper:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
     serpapi:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
     web:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
     registries: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
@@ -3340,7 +3355,7 @@ const BASE_PATH = window.BASE_PATH || "";
     Grep: tr("tool.display.Grep"), Glob: tr("tool.display.Glob"), revert: tr("tool.display.revert"), mime: tr("tool.display.mime"),
     mcp: tr("tool.display.mcp"), Skill: tr("tool.display.Skill"),
     softskills: tr("tool.display.softskills"), calc: tr("tool.display.calc"), ddg: tr("tool.display.ddg"),
-    serpapi: tr("tool.display.serpapi"), web: tr("tool.display.web"), registries: tr("tool.display.registries"),
+    serper: tr("tool.display.serper"), serpapi: tr("tool.display.serpapi"), web: tr("tool.display.web"), registries: tr("tool.display.registries"),
     code_search: tr("tool.display.code_search"), docs: tr("tool.display.docs"),
   };
 
@@ -3606,8 +3621,9 @@ const BASE_PATH = window.BASE_PATH || "";
 
     for (const t of TOOL_GROUPS) {
       const isSerpDisabled = t === "serpapi" && !d.serpapi_key;
+      const isSerperDisabled = t === "serper" && !d.serper_key;
       const isCodeSearchDisabled = t === "code_search" && !embedConfigured;
-      const isDisabledTool = isSerpDisabled || isCodeSearchDisabled;
+      const isDisabledTool = isSerpDisabled || isSerperDisabled || isCodeSearchDisabled;
       const isOn = cur.has(t);
       const btn = document.createElement("div");
       btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isDisabledTool ? " tool-disabled" : "");
@@ -3629,11 +3645,12 @@ const BASE_PATH = window.BASE_PATH || "";
             btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
           } else {
             cur.add(t);
-            const peer = TOOL_MUTEX[t];
-            if (peer && btnByTool[peer]) {
-              cur.delete(peer);
-              btnByTool[peer].classList.remove("tool-on");
-              btnByTool[peer].querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
+            for (const peer of (TOOL_MUTEX[t] || [])) {
+              if (btnByTool[peer]) {
+                cur.delete(peer);
+                btnByTool[peer].classList.remove("tool-on");
+                btnByTool[peer].querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
+              }
             }
             btn.classList.add("tool-on");
             btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-on";
@@ -5489,6 +5506,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   function toolsField(label, val, onChange, opts) {
     const serpApiKeySet = opts && !!opts.serpApiKeySet;
+    const serperKeySet = opts && !!opts.serperKeySet;
     const row = document.createElement("div");
     row.className = "form-row form-row-tools";
     const span = document.createElement("span");
@@ -5505,20 +5523,26 @@ const BASE_PATH = window.BASE_PATH || "";
       cb.type = "checkbox";
       cb.dataset.tool = t;
       cb.checked = cur.has(t);
-      // serpapi requires its API key; disable checkbox when key is absent.
+      // serpapi/serper require their API key; disable checkbox when key is absent.
       if (t === "serpapi" && !serpApiKeySet) {
         cb.disabled = true;
         lab.className += " tools-check-disabled";
         lab.setAttribute("data-tip", tr("set.tool.serpapiDisabled"));
       }
+      if (t === "serper" && !serperKeySet) {
+        cb.disabled = true;
+        lab.className += " tools-check-disabled";
+        lab.setAttribute("data-tip", tr("set.tool.serperDisabled"));
+      }
       cb.addEventListener("change", () => {
         if (cb.checked) {
           cur.add(t);
-          // Auto-deselect the mutually-exclusive peer.
-          const peer = TOOL_MUTEX[t];
-          if (peer && cbByTool[peer]) {
-            cur.delete(peer);
-            cbByTool[peer].checked = false;
+          // Auto-deselect the mutually-exclusive peers.
+          for (const peer of (TOOL_MUTEX[t] || [])) {
+            if (cbByTool[peer]) {
+              cur.delete(peer);
+              cbByTool[peer].checked = false;
+            }
           }
         } else {
           cur.delete(t);

@@ -277,9 +277,10 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	}
 
 	// namedTools allows individual tool names (e.g. "Bash", "Read") to be
-	// listed directly in agent.json alongside group keys. SerpAPI WebSearch
-	// overwrites the DDG version when a key is configured.
-	namedTools := buildNamedToolMap(runtime.SerpAPIKey)
+	// listed directly in agent.json alongside group keys. A key-backed WebSearch
+	// provider overwrites the DDG version; Serper wins over SerpAPI when both are
+	// configured (Serper is the recommended provider).
+	namedTools := buildNamedToolMap(runtime.SerpAPIKey, runtime.SerperKey)
 
 	agentTools := []tool.Tool{}
 	toolsets := []tool.Toolset{}
@@ -312,6 +313,8 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			agentTools = append(agentTools, fstools.NewDDGTools()...)
 		case "serpapi":
 			agentTools = append(agentTools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
+		case "serper":
+			agentTools = append(agentTools, fstools.NewSerperTools(runtime.SerperKey)...)
 		case "web":
 			agentTools = append(agentTools, fstools.NewWebTools()...)
 		case "tests":
@@ -965,9 +968,10 @@ func defaultSubAgentUsageGuidance(name string) string {
 
 // buildNamedToolMap returns a flat map of tool-name → tool covering all
 // individually-mountable tools. Callers can list "Bash", "Read", etc. directly
-// in agent.json instead of the "fs" group key. SerpAPI WebSearch overwrites
-// the DDG entry when an API key is available.
-func buildNamedToolMap(serpAPIKey string) map[string]tool.Tool {
+// in agent.json instead of the "fs" group key. A key-backed WebSearch provider
+// overwrites the DDG entry; when both keys are set Serper wins over SerpAPI
+// (Serper is the recommended, cheaper provider), so it is applied last.
+func buildNamedToolMap(serpAPIKey, serperKey string) map[string]tool.Tool {
 	m := make(map[string]tool.Tool)
 	for _, t := range fstools.New() {
 		m[t.Name()] = t
@@ -983,6 +987,11 @@ func buildNamedToolMap(serpAPIKey string) map[string]tool.Tool {
 	}
 	if serpAPIKey != "" {
 		for _, t := range fstools.NewSerpAPITools(serpAPIKey) {
+			m[t.Name()] = t
+		}
+	}
+	if serperKey != "" {
+		for _, t := range fstools.NewSerperTools(serperKey) {
 			m[t.Name()] = t
 		}
 	}

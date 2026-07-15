@@ -198,6 +198,7 @@ type runtimeConfigFile struct {
 	PermissionsConfigPath string `json:"permissions_config_path"`
 	HooksConfigPath       string `json:"hooks_config_path"`
 	SerpAPIKey            string `json:"serpapi_key"`
+	SerperKey             string `json:"serper_key"`
 	// EmbedModelRef names the model in models.json used for internal semantic
 	// embedding (softskill/precedent/codebase recall). It must reference a
 	// model entry flagged `"embedding": true`. Empty disables semantic recall
@@ -345,6 +346,9 @@ type RuntimeSettings struct {
 	// A2A agent endpoints that any agent's `a2a_agents` list can reference.
 	A2AConfigPath string
 	SerpAPIKey    string
+	// SerperKey is the Serper.dev API key (recommended, cheaper web-search
+	// provider). Resolved as an env-var name first, like SerpAPIKey.
+	SerperKey string
 	// EmbedModelRef names the model in Models used as the internal embedder for
 	// semantic recall. Empty means no config-selected embedder (the OMNIS_EMBED_*
 	// environment may still provide one).
@@ -1082,6 +1086,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
 		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))
+	}
+	if strings.TrimSpace(cfg.SerperKey) != "" {
+		out.SerperKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerperKey))
 	}
 	if strings.TrimSpace(cfg.EmbedModelRef) != "" {
 		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(cfg.EmbedModelRef))

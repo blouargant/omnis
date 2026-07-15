@@ -2,7 +2,8 @@
 // The agent searches the web, picks a result, fetches the page as
 // markdown, then summarises. Requires outbound network access.
 //
-// Set SERPAPI_KEY to swap DuckDuckGo for the SerpAPI Google engine.
+// Set SERPER_API_KEY (recommended, cheaper) or SERPAPI_KEY to swap DuckDuckGo
+// for a Google engine.
 package main
 
 import (
@@ -21,11 +22,14 @@ func main() {
 	must(err)
 
 	tools := fstools.NewWebTools()
-	if key := os.Getenv("SERPAPI_KEY"); key != "" {
+	if key := os.Getenv("SERPER_API_KEY"); key != "" {
+		fmt.Fprintln(os.Stderr, "(web_search backed by Serper.dev / Google)")
+		tools = append(tools, fstools.NewSerperTools(key)...)
+	} else if key := os.Getenv("SERPAPI_KEY"); key != "" {
 		fmt.Fprintln(os.Stderr, "(web_search backed by SerpAPI / Google)")
 		tools = append(tools, fstools.NewSerpAPITools(key)...)
 	} else {
-		fmt.Fprintln(os.Stderr, "(web_search backed by DuckDuckGo — set SERPAPI_KEY for Google)")
+		fmt.Fprintln(os.Stderr, "(web_search backed by DuckDuckGo — set SERPER_API_KEY for Google)")
 		tools = append(tools, fstools.NewDDGTools()...)
 	}
 

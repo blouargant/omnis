@@ -11,7 +11,7 @@
   "max_instances": 10,
   "tools": [
     "Skill",
-    "serpapi",
+    "serper",
     "ddg",
     "web",
     "softskills"
