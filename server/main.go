@@ -267,6 +267,21 @@ func run() error {
 
 	registry := sessions.NewRegistry()
 
+	// Inject a collection's persistent context (instructions + memory) into the
+	// answering root's system instruction for every session filed under it. The
+	// resolver maps a session id to its (normalised) collection name; the
+	// collection-context plugin then loads that collection's prose. General/blank
+	// collections resolve to "" ⇒ no injection. Process-wide (the registry
+	// survives hot-reload), server-only: CLI/TUI leave it nil.
+	agent.SetCollectionResolver(func(sessionID string) string {
+		m, ok := registry.Get(sessionID)
+		if !ok {
+			return ""
+		}
+		return sessions.NormalizeCollectionName(m.Collection)
+	})
+	defer agent.SetCollectionResolver(nil)
+
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous
 	// run are cleaned up before the server starts accepting traffic.

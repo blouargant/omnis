@@ -313,18 +313,34 @@ func newEngine(d serverDeps) *gin.Engine {
 			Collection string `json:"collection"`
 		}
 		_ = c.ShouldBindJSON(&body)
-		squad := strings.ToLower(strings.TrimSpace(body.Squad))
-		if squad == "" {
-			// New chats default to the Omnis router squad when routing is
-			// enabled, so the first message is routed to the best-suited squad;
-			// fall back to the default squad when routing is disabled.
-			squad = toolkitagent.DefaultSquadName
-			if d.Manager != nil {
-				if rs := d.Manager.RouterSquad(); rs != "" {
-					squad = rs
+		// Resolve the target collection first (canonical stored casing, "" for
+		// General or an unknown name) — its per-session profile can seed the
+		// starting squad + cwd below, so it must be known before the squad default.
+		collection := ""
+		if col := sessions.NormalizeCollectionName(body.Collection); col != "" {
+			if known, err := sessions.ListCollections(); err == nil {
+				for _, n := range known {
+					if strings.EqualFold(n, col) {
+						collection = n
+						break
+					}
 				}
 			}
 		}
+		profSquad, profCwd := "", ""
+		if collection != "" {
+			profSquad, profCwd = sessions.CollectionProfile(collection)
+		}
+		// Choose the starting squad: explicit body.Squad wins; else the collection's
+		// seeded default squad (a hint, not a lock — routing still runs); else the
+		// router / default. See resolveStartingSquad.
+		var hasSquad func(string) bool
+		routerSquad := ""
+		if d.Manager != nil {
+			hasSquad = d.Manager.HasSquad
+			routerSquad = d.Manager.RouterSquad()
+		}
+		squad := resolveStartingSquad(body.Squad, profSquad, hasSquad, routerSquad)
 		// Reject unknown squad names so the client sees the misconfiguration
 		// immediately rather than silently falling back to default later.
 		if d.Manager != nil && !d.Manager.HasSquad(squad) {
@@ -339,14 +355,19 @@ func newEngine(d serverDeps) *gin.Engine {
 		// initial root without ever persisting it, so a server restart in a
 		// different process cwd would silently move the session to the wrong
 		// folder. Persisting the starting dir at creation — the "Open Chat here"
-		// dir when pinned, else the root the session would use anyway — lets it
-		// resume in the same environment after a restart (the bashCwd hook writes
-		// it to the conversation file; boot seeds it back). Mirrors what fork and
-		// spawn already do for their inherited cwd.
+		// dir when pinned, else the collection's default cwd, else the root the
+		// session would use anyway — lets it resume in the same environment after a
+		// restart (the bashCwd hook writes it to the conversation file; boot seeds
+		// it back). Mirrors what fork and spawn already do for their inherited cwd.
 		startDir := bashCwd.get(meta.ID) // fixed initial root unless overridden below
 		if dir := strings.TrimSpace(body.Dir); dir != "" {
 			if info, err := os.Stat(dir); err == nil && info.IsDir() {
 				startDir = dir
+			}
+		} else if profCwd != "" {
+			// Seed from the collection's default cwd when the client didn't pin one.
+			if info, err := os.Stat(profCwd); err == nil && info.IsDir() {
+				startDir = profCwd
 			}
 		}
 		bashCwd.set(meta.ID, startDir)
@@ -356,18 +377,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Persist the squad immediately so a server restart before the
 		// first turn still sees the right squad on the session.
 		_ = sessions.SetConversationSquad(meta.ID, squad)
-		// File the new chat under the collection the sidebar has selected (empty ⇒
-		// General). Only honoured when it names an existing collection so a stale
-		// client can't strand the session under a phantom one.
-		if col := sessions.NormalizeCollectionName(body.Collection); col != "" {
-			if known, err := sessions.ListCollections(); err == nil {
-				for _, n := range known {
-					if strings.EqualFold(n, col) {
-						d.Registry.SetCollection(meta.ID, n)
-						break
-					}
-				}
-			}
+		// File the new chat under the resolved collection (empty ⇒ General).
+		if collection != "" {
+			d.Registry.SetCollection(meta.ID, collection)
 		}
 		// Hidden utility sessions (e.g. the in-Settings assistant) are kept out
 		// of the sidebar list but otherwise behave normally.
@@ -700,6 +712,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.POST("/collections", handleCreateCollection(d))
 	auth.PATCH("/collections/:name", handleUpdateCollection(d))
 	auth.DELETE("/collections/:name", handleDeleteCollection(d))
+	auth.GET("/collections/:name/context", handleGetCollectionContext(d))
+	auth.PUT("/collections/:name/context", handleSetCollectionContext(d))
 	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
 		id := c.Param("id")

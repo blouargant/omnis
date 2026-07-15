@@ -50,6 +50,31 @@ Collections and each session's filing are persisted (`collections.json` +
 `conversation_<id>.json`) and survive a server restart. Changes sync live across
 open browsers.
 
+### Collection context (instructions, memory, defaults)
+
+A collection can carry **persistent context** that applies to every chat filed
+under it — useful for a *thematic, cross-repo* workstream (a client, a research
+topic) that a per-directory `AGENT.md` can't cover. Open a collection's
+right-click menu → **Edit context…**:
+
+- **Instructions** — hand-authored, stable guidance prepended to every chat in
+  the collection (tone, stack, do/don't). This is an `AGENT.md` scoped to the
+  collection instead of a folder.
+- **Memory** — facts about the workstream that persist across its chats (which
+  repos are involved, decisions taken, conventions). Today you type it yourself.
+- **Default squad** — new chats in the collection start on this squad instead of
+  asking the router. It's a **hint, not a lock**: routing still runs, so a chat
+  that drifts off-topic is handed back to the router automatically. Leave it on
+  **Router** to let Omnis choose as usual.
+- **Default folder** — the working directory new chats in the collection start
+  in (optional).
+
+Instructions and memory are injected into the assistant's context on every turn;
+the squad/folder defaults apply when you start a new chat while the collection is
+selected. Everything is stored under `$OMNIS_HOME/collections/<name>/` (prose)
+and `collections.json` (defaults), and follows the collection through renames.
+**General** has no context — it's the catch-all bucket.
+
 ## Session list affordances
 
 - **Active session** is highlighted; a small dot indicates a busy (streaming)

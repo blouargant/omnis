@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -35,6 +36,72 @@ var collectionsMu sync.Mutex
 type collectionsFile struct {
 	Collections []string          `json:"collections"`
 	Colors      map[string]string `json:"colors,omitempty"`
+	// Profiles carries per-collection scalar defaults seeded onto new chats
+	// filed under the collection (keyed by the canonical stored name). The prose
+	// (instructions/memory) lives in per-collection files under internal/collectionctx;
+	// only these small scalars live in this atomic single-file.
+	Profiles map[string]collectionProfile `json:"profiles,omitempty"`
+}
+
+// collectionProfile is a collection's per-session defaults. Squad is the
+// starting squad a new chat in this collection seeds onto (a hint, not a lock —
+// routing still runs and the squad can hand back to the router); Cwd is the
+// directory a new chat starts in. Both empty ⇒ the collection carries no
+// defaults and new chats behave exactly as before.
+type collectionProfile struct {
+	Squad string `json:"squad,omitempty"`
+	Cwd   string `json:"cwd,omitempty"`
+}
+
+// CollectionProfile returns the stored per-collection defaults (squad, cwd). A
+// missing collection or no recorded profile yields a zero-value profile (both
+// fields empty), which callers read as "no defaults".
+func CollectionProfile(name string) (squad, cwd string) {
+	collectionsMu.Lock()
+	defer collectionsMu.Unlock()
+	f, err := loadFileLocked()
+	if err != nil {
+		return "", ""
+	}
+	i := indexOfFold(f.Collections, name)
+	if i < 0 {
+		return "", ""
+	}
+	p := f.Profiles[f.Collections[i]]
+	return p.Squad, p.Cwd
+}
+
+// SetCollectionProfile sets (or, with both empty, clears) a collection's
+// per-session defaults, keyed by its canonical stored name. An unknown
+// collection is an error. The server validates the squad against the live squad
+// catalogue and the cwd against the filesystem before calling this; the storage
+// layer only persists the tokens.
+func SetCollectionProfile(name, squad, cwd string) error {
+	name = strings.TrimSpace(name)
+	squad = strings.TrimSpace(squad)
+	cwd = strings.TrimSpace(cwd)
+	collectionsMu.Lock()
+	defer collectionsMu.Unlock()
+	f, err := loadFileLocked()
+	if err != nil {
+		return err
+	}
+	i := indexOfFold(f.Collections, name)
+	if i < 0 {
+		return fmt.Errorf("collection %q not found", name)
+	}
+	canon := f.Collections[i]
+	if squad == "" && cwd == "" {
+		if f.Profiles != nil {
+			delete(f.Profiles, canon)
+		}
+	} else {
+		if f.Profiles == nil {
+			f.Profiles = map[string]collectionProfile{}
+		}
+		f.Profiles[canon] = collectionProfile{Squad: squad, Cwd: cwd}
+	}
+	return saveFileLocked(f)
 }
 
 // MaxCollectionColorLen bounds a colour token so it stays a small palette key.
@@ -124,11 +191,29 @@ func pruneColorsLocked(f *collectionsFile) {
 	}
 }
 
+// pruneProfilesLocked drops profile entries whose collection no longer exists,
+// mirroring pruneColorsLocked so a deleted/renamed collection leaves no orphaned
+// profile behind.
+func pruneProfilesLocked(f *collectionsFile) {
+	if len(f.Profiles) == 0 {
+		return
+	}
+	for key := range f.Profiles {
+		if indexOfFold(f.Collections, key) < 0 {
+			delete(f.Profiles, key)
+		}
+	}
+	if len(f.Profiles) == 0 {
+		f.Profiles = nil
+	}
+}
+
 // saveFileLocked writes the full collections file (names + colours) atomically
 // (temp file + rename, like SaveConversationFile). Must be called with
 // collectionsMu held.
 func saveFileLocked(f collectionsFile) error {
 	pruneColorsLocked(&f)
+	pruneProfilesLocked(&f)
 	dir := paths.ConfigWriteDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -224,13 +309,20 @@ func RemoveCollection(name string) ([]string, bool, error) {
 	if i < 0 {
 		return f.Collections, false, nil
 	}
+	canon := f.Collections[i]
 	if f.Colors != nil {
-		delete(f.Colors, f.Collections[i])
+		delete(f.Colors, canon)
+	}
+	if f.Profiles != nil {
+		delete(f.Profiles, canon)
 	}
 	f.Collections = append(f.Collections[:i:i], f.Collections[i+1:]...)
 	if err := saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
+	// Best-effort: drop the collection's prose (instructions/memory) too. A
+	// failure here leaves an orphaned dir but never blocks the delete.
+	_ = collectionctx.RemoveDir(canon)
 	return f.Collections, true, nil
 }
 
@@ -261,15 +353,27 @@ func RenameCollection(old, newName string) ([]string, bool, error) {
 		return names, false, fmt.Errorf("collection %q already exists", newName)
 	}
 	oldCanon := names[i]
-	if f.Colors != nil && !strings.EqualFold(oldCanon, newName) {
+	renamed := !strings.EqualFold(oldCanon, newName)
+	if f.Colors != nil && renamed {
 		if c, ok := f.Colors[oldCanon]; ok {
 			delete(f.Colors, oldCanon)
 			f.Colors[newName] = c
 		}
 	}
+	if f.Profiles != nil && renamed {
+		if p, ok := f.Profiles[oldCanon]; ok {
+			delete(f.Profiles, oldCanon)
+			f.Profiles[newName] = p
+		}
+	}
 	names[i] = newName
 	if err := saveFileLocked(f); err != nil {
 		return nil, false, err
+	}
+	// Best-effort: migrate the prose dir so instructions/memory follow the new
+	// name. A case-only change resolves to the same dir (no-op inside RenameDir).
+	if renamed {
+		_ = collectionctx.RenameDir(oldCanon, newName)
 	}
 	return names, true, nil
 }

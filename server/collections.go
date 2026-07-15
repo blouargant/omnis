@@ -2,8 +2,10 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +21,13 @@ type collectionInfo struct {
 	// General is true only for the synthetic default bucket, so the client can
 	// pin it on top and hide its rename/delete affordances.
 	General bool `json:"general,omitempty"`
+	// Squad / Cwd are the collection's per-session defaults seeded onto new chats
+	// (empty when unset). HasContext reports whether the collection has any
+	// instructions/memory prose, so the UI can badge configured collections
+	// without shipping the full text.
+	Squad      string `json:"squad,omitempty"`
+	Cwd        string `json:"cwd,omitempty"`
+	HasContext bool   `json:"has_context,omitempty"`
 }
 
 // collectionCounts tallies non-hidden sessions by their effective collection.
@@ -71,7 +80,15 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
 		for _, n := range known {
-			out = append(out, collectionInfo{Name: n, Count: counts[n], Color: colors[n]})
+			squad, cwd := sessions.CollectionProfile(n)
+			out = append(out, collectionInfo{
+				Name:       n,
+				Count:      counts[n],
+				Color:      colors[n],
+				Squad:      squad,
+				Cwd:        cwd,
+				HasContext: collectionctx.HasContext(n),
+			})
 		}
 		c.JSON(http.StatusOK, gin.H{"collections": out})
 	}
@@ -126,10 +143,12 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 		var body struct {
 			Name  string  `json:"name"`
 			Color *string `json:"color"`
+			Squad *string `json:"squad"`
+			Cwd   *string `json:"cwd"`
 		}
 		_ = c.ShouldBindJSON(&body)
 
-		// Resolve the collection's name after any rename — colour edits key off it.
+		// Resolve the collection's name after any rename — colour/profile edits key off it.
 		current := old
 		if newName := strings.TrimSpace(body.Name); newName != "" && newName != old {
 			if !sessions.ValidCollectionName(newName) {
@@ -156,6 +175,34 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 
 		if body.Color != nil {
 			if err := sessions.SetCollectionColor(current, strings.TrimSpace(*body.Color)); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		// Per-session defaults (squad / cwd). Merge with the stored profile so a
+		// PATCH that touches only one field doesn't clear the other; an empty
+		// string clears that field. Validate the squad against the live catalogue
+		// and the cwd against the filesystem before persisting.
+		if body.Squad != nil || body.Cwd != nil {
+			curSquad, curCwd := sessions.CollectionProfile(current)
+			if body.Squad != nil {
+				curSquad = strings.TrimSpace(*body.Squad)
+			}
+			if body.Cwd != nil {
+				curCwd = strings.TrimSpace(*body.Cwd)
+			}
+			if curSquad != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(curSquad)) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + curSquad})
+				return
+			}
+			if curCwd != "" {
+				if info, err := os.Stat(curCwd); err != nil || !info.IsDir() {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "default folder is not a directory"})
+					return
+				}
+			}
+			if err := sessions.SetCollectionProfile(current, curSquad, curCwd); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -199,6 +246,93 @@ func handleDeleteCollection(d serverDeps) gin.HandlerFunc {
 			d.PushEvents.broadcast("collections_changed", "")
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+// resolveKnownCollection returns the canonical stored name for a collection path
+// param, or "" (with a written 4xx response) when it is General or unknown. The
+// context routes only operate on real, existing user collections.
+func resolveKnownCollection(c *gin.Context) (string, bool) {
+	name := strings.TrimSpace(c.Param("name"))
+	if name == "" || strings.EqualFold(name, sessions.GeneralCollection) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection has no context"})
+		return "", false
+	}
+	known, err := sessions.ListCollections()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return "", false
+	}
+	for _, n := range known {
+		if strings.EqualFold(n, name) {
+			return n, true
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
+	return "", false
+}
+
+// handleGetCollectionContext returns a full editor snapshot for one collection:
+// its instructions + memory prose plus its per-session defaults (squad, cwd,
+// color). Writes are split — prose via PUT …/context, scalars via PATCH — but a
+// single GET hands the editor everything it needs.
+func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name, ok := resolveKnownCollection(c)
+		if !ok {
+			return
+		}
+		squad, cwd := sessions.CollectionProfile(name)
+		colors, _ := sessions.CollectionColors()
+		c.JSON(http.StatusOK, gin.H{
+			"name":         name,
+			"instructions": collectionctx.ReadInstructions(name),
+			"memory":       collectionctx.ReadMemory(name),
+			"squad":        squad,
+			"cwd":          cwd,
+			"color":        colors[name],
+		})
+	}
+}
+
+// handleSetCollectionContext replaces a collection's prose. Both fields are
+// optional: send `instructions` and/or `memory` to overwrite that file (an empty
+// string removes it). Per-session defaults (squad/cwd) go through PATCH, not here.
+func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name, ok := resolveKnownCollection(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Instructions *string `json:"instructions"`
+			Memory       *string `json:"memory"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if body.Instructions != nil {
+			if err := collectionctx.WriteInstructions(name, *body.Instructions); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if body.Memory != nil {
+			if err := collectionctx.WriteMemory(name, *body.Memory); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if d.PushEvents != nil {
+			d.PushEvents.broadcast("collections_changed", "")
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"name":         name,
+			"has_context":  collectionctx.HasContext(name),
+			"instructions": collectionctx.ReadInstructions(name),
+			"memory":       collectionctx.ReadMemory(name),
+		})
 	}
 }
 

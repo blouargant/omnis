@@ -245,12 +245,26 @@
   outline: none;
 }
 .user-cmd-field input:focus,
-.user-cmd-field textarea:focus { border-color: var(--accent, #0e639c); }
+.user-cmd-field textarea:focus,
+.user-cmd-field select:focus { border-color: var(--accent, #0e639c); }
 .user-cmd-field textarea {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   resize: vertical;
   min-height: 96px;
 }
+.user-cmd-field select {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+/* The collection context editor packs more fields than a rename prompt, so it
+   gets a roomier shell (the two prose textareas need width to be usable). */
+.collection-ctx-modal { width: min(560px, 92vw); }
 .user-cmd-name-row {
   display: flex;
   align-items: stretch;

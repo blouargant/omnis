@@ -724,6 +724,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
+| `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` + `memory.md` (`$OMNIS_HOME/collections/<name>/`) into a `<collection-context>` block with a per-name mtime cache; `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`. Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on answering roots per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
@@ -1423,7 +1424,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   ├── agents.json       # editor writes — user config overrides
   ├── permissions.json  # editor writes — user permission overrides
   ├── schedules.json    # durable /schedule routines (scheduler; loops not persisted)
-  ├── collections.json  # ordered user-created session collections (General is virtual)
+  ├── collections.json  # ordered user-created session collections + colours + per-collection {squad,cwd} profiles (General is virtual)
+  ├── collections/      # per-collection context prose: <name>/instructions.md + memory.md (internal/collectionctx)
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
@@ -1860,6 +1862,73 @@ exactly one** ("move" semantics, flat — no nesting).
   `folders` code.
 - **No-op contract**: no `collections.json` ⇒ only General exists and every
   session shows under it — byte-identical to the pre-collections sidebar.
+
+### Collection context (per-collection instructions + memory)
+
+A collection is no longer a pure UI folder — it can carry **persistent context
+that follows a workstream across repos**. Where AGENT.md (see "Project memory")
+scopes memory to a *working directory*, a collection scopes it to a *theme*: a
+hand-authored **instructions** block plus a **memory** block, injected into the
+answering root's system instruction for every session filed under the collection,
+plus **per-session defaults** (a seeded starting **squad** and **cwd**) applied to
+new chats. Everything is **per-session** — nothing crosses the generation
+boundary — so it composes with the existing squad/cwd machinery and needs no
+per-collection generations. This is Phase 1 (deterministic, hand-authored); a
+Phase-2 auto-distiller into `memory.md` is designed-for but not wired.
+
+- **Storage split**: scalars in `collections.json` (a `profiles` map keyed by
+  canonical name, `{squad, cwd}`, beside `colors`), prose in files under
+  `$OMNIS_HOME/collections/<name>/{instructions.md,memory.md}`.
+  [internal/collectionctx/](internal/collectionctx/) owns the files (`Resolve`,
+  `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`); it
+  imports **only** `internal/paths` + stdlib, so `agent` can resolve the injected
+  block with **no import cycle** (the same cycle that blocks `agent`→`sessions`).
+  `safeSegment` rejects `.`/`..`/separators so a name that reaches disk can't
+  escape the base dir. Cascade: [internal/sessions/collections.go](internal/sessions/collections.go)
+  `RenameCollection`/`RemoveCollection` migrate/drop the `profiles` key **and**
+  call `collectionctx.RenameDir`/`RemoveDir` (best-effort); `SetCollectionProfile`
+  /`CollectionProfile` are the scalar accessors; `pruneProfilesLocked` mirrors the
+  colours prune.
+- **Injection** = [agent/collection_plugin.go](agent/collection_plugin.go), a
+  near-clone of `agentMDPlugin` (reuses `prependAgentMD`). It keys on the
+  session's **collection name** via a process-wide resolver hook
+  (`agent.SetCollectionResolver`, mirroring `fstools.SetCwdResolver`) the server
+  installs from the registry ([server/main.go](server/main.go), returning
+  `NormalizeCollectionName(meta.Collection)` — General/blank ⇒ `""` ⇒ no-op).
+  Registered in [agent/build_plugins.go](agent/build_plugins.go) **gated
+  `!isRouterSquad`** (unlike the ungated AGENT.md plugin — the router stays
+  neutral so a workstream's guidance never colours a routing decision), prepended
+  after AGENT.md (workstream framing outermost, project specifics next). Root-only
+  injection means `ctx.SessionID()` is always the real user-facing session, so the
+  resolver keys correctly. Block shape: `<collection-context name="…"><instructions>…
+  </instructions><memory>…</memory></collection-context>`; empty sections omitted;
+  both empty ⇒ `""`. Stable per collection across turns ⇒ prompt cache still hits.
+- **Squad/cwd seed** = new-chat creation ([server/server.go](server/server.go)
+  `POST /sessions`). The collection is resolved **before** the squad default so
+  its profile can seed both: `resolveStartingSquad`
+  ([server/session_seed.go](server/session_seed.go), pure + unit-tested) picks
+  explicit-wins → collection default squad (only when it still `HasSquad` — a
+  **seed, not a lock**: routing still runs and the squad can `handoff_to_router`;
+  a stale squad falls through) → router → default; the cwd seeds from
+  `profile.Cwd` when the client pins no `dir`. Seed is deliberately observable —
+  because routing still runs, the seeded squad's handoff rate is the signal for a
+  future hard-pin.
+- **Routes** ([server/collections.go](server/collections.go)): `PATCH
+  /api/collections/:name` gained `squad?`/`cwd?` (merged with the stored profile,
+  squad validated via `HasSquad`, cwd via `os.Stat`); `GET /api/collections/:name/context`
+  → full editor snapshot `{instructions, memory, squad, cwd, color}`; `PUT
+  …/context` writes the prose (an empty field removes the file). `GET
+  /api/collections` rows gained `squad`/`cwd`/`has_context`. The `:name/context`
+  sub-path nests under the `:name` param (normal pattern) — no route-tree clash.
+- **Web UI** ([web/app.js](web/app.js)): the collection rail context menu gained
+  **"Edit context…"** → `editCollectionContext` → `collectionContextDialog` (squad
+  `<select>` + cwd field + instructions/memory textareas, `.collection-ctx-modal`
+  in [web/css/features/dialogs.css](web/css/features/dialogs.css)); save = PATCH
+  (scalars) then PUT `…/context` (prose). i18n keys under `collections.*`
+  (en/fr/es/de); "Squad" is kept untranslated per the glossary.
+- **No-op contract**: a collection with no profile + no prose is byte-identical to
+  before (resolver returns `""`, seed falls through to the router/default, plugin
+  is a no-op). CLI/TUI leave the resolver nil ⇒ no injection.
 
 ### Automatic session titling (Web UI)
 

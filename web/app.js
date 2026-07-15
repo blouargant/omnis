@@ -5990,11 +5990,106 @@ function selectCollection(name) {
 // Folders/session menus.
 function openCollectionCtxMenu(ev, c) {
   showFolderCtxMenu(ev, [
+    [tr("collections.editContext"), () => editCollectionContext(c), { icon: ICON_FOLDER }],
     [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
     [tr("collections.changeColor"), () => changeCollectionColor(c), { icon: ICON_SWATCH }],
     SEP,
     [tr("common.delete"), () => deleteCollection(c.name), { icon: ICON_DELETE }],
   ]);
+}
+
+// editCollectionContext loads a collection's full snapshot (per-session defaults
+// + instructions/memory prose) and opens the context editor. Saving splits the
+// write: scalars (squad/cwd) via PATCH, prose via PUT …/context.
+async function editCollectionContext(c) {
+  let snap = {};
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}/context`);
+    if (res.ok) snap = await res.json();
+  } catch (e) { console.error(e); }
+  const chosen = await collectionContextDialog(c.name, snap);
+  if (chosen == null) return;
+  try {
+    const p = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd }),
+    });
+    if (!p.ok) {
+      const b = await p.json().catch(() => ({}));
+      showToast(b.error || tr("collections.contextFailed"), "err");
+      return;
+    }
+    const q = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}/context`, {
+      method: "PUT",
+      body: JSON.stringify({ instructions: chosen.instructions, memory: chosen.memory }),
+    });
+    if (!q.ok) {
+      const b = await q.json().catch(() => ({}));
+      showToast(b.error || tr("collections.contextFailed"), "err");
+      return;
+    }
+    showToast(tr("collections.contextSaved"), "ok");
+    await loadCollections();
+  } catch (e) { console.error(e); }
+}
+
+// collectionContextDialog is the per-collection context editor: a starting-squad
+// picker + default-folder field (the seeded per-session defaults) and two prose
+// textareas (stable instructions, evolving memory). Resolves
+// { squad, cwd, instructions, memory } or null.
+function collectionContextDialog(name, snap) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(tr("collections.contextTitle", { name }));
+    overlay.querySelector(".ui-modal").classList.add("collection-ctx-modal");
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    const opts = ['<option value="">' + escHtml(tr("collections.squadRouter")) + "</option>"]
+      .concat((availableSquads || []).map((s) => {
+        const sel = (snap.squad || "").toLowerCase() === (s.name || "").toLowerCase() ? " selected" : "";
+        return `<option value="${escHtml(s.name)}"${sel}>${escHtml(s.name)}</option>`;
+      })).join("");
+    body.innerHTML = `
+      <label class="user-cmd-field">
+        <span class="user-cmd-field-label">${escHtml(tr("collections.defaultSquad"))}</span>
+        <select class="cc-squad">${opts}</select>
+        <span class="user-cmd-field-hint">${escHtml(tr("collections.defaultSquadHint"))}</span>
+      </label>
+      <label class="user-cmd-field">
+        <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
+        <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
+      </label>
+      <label class="user-cmd-field">
+        <span class="user-cmd-field-label">${escHtml(tr("collections.instructions"))}</span>
+        <textarea class="cc-instr" rows="6" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
+      </label>
+      <label class="user-cmd-field">
+        <span class="user-cmd-field-label">${escHtml(tr("collections.memory"))}</span>
+        <textarea class="cc-mem" rows="5" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
+        <span class="user-cmd-field-hint">${escHtml(tr("collections.memoryHint"))}</span>
+      </label>`;
+    body.querySelector(".cc-cwd").value = snap.cwd || "";
+    body.querySelector(".cc-instr").value = snap.instructions || "";
+    body.querySelector(".cc-mem").value = snap.memory || "";
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = tr("common.save");
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const submit = () => close({
+      squad: body.querySelector(".cc-squad").value,
+      cwd: body.querySelector(".cc-cwd").value.trim(),
+      instructions: body.querySelector(".cc-instr").value,
+      memory: body.querySelector(".cc-mem").value,
+    });
+    ok.addEventListener("click", submit);
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      // Enter inside a textarea inserts a newline; only Escape closes.
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    setTimeout(() => body.querySelector(".cc-instr").focus(), 0);
+  });
 }
 
 // collectionDialog shows a themed modal to create or recolour a collection: an
