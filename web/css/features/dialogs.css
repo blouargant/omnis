@@ -275,8 +275,12 @@
   overflow-y: hidden;
   resize: none;
 }
-.collection-ctx-modal .cc-instr { min-height: 132px; }
-.collection-ctx-modal .cc-mem { min-height: 108px; }
+/* Floors are viewport-relative so the editor fills most of the screen by default
+   (no wasted space above/below the centred modal) rather than hugging the text.
+   autoGrow reads these as its default height and still grows past them for longer
+   content; the body scrolls only once the whole modal would exceed the 88vh cap. */
+.collection-ctx-modal .cc-instr { min-height: 26vh; }
+.collection-ctx-modal .cc-mem { min-height: 20vh; }
 .cc-mem-head {
   display: flex;
   align-items: center;
