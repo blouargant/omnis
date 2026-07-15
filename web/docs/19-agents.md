@@ -6,7 +6,7 @@ globals) and to individual files under `registry/agents/<name>/` (per-agent
 definitions and instructions).
 
 The panel has five sub-tabs: **Agents**, **Squads**, **Remotes**, **Models**,
-and **Global Environment**.
+and **Global configuration**.
 
 ---
 
@@ -238,22 +238,33 @@ Profile names are case-insensitive keys; agents reference them via
 
 ---
 
-## Global Environment sub-tab
+## Global configuration sub-tab
 
 Shared settings that apply across the entire agent fleet. Stored at the
 top level of `agents.json`.
-
-### CORE DIRECTORIES
-
-| Field | Description |
-|---|---|
-| `softskills_dir` | Path to the directory where the curator writes distilled soft-skill playbooks. Agents read from here when `load_softskill` is called. |
 
 ### OPTIMIZATION
 
 | Toggle | Description |
 |---|---|
 | `token_optimization` | Enable bash-output filtering to reduce token usage. Filter patterns are read from `.agents/filters/`. |
+
+### EXTERNAL API KEYS
+
+Each key has a **Test** button that verifies access against the provider with one
+minimal search (the key is checked on the server, never in the browser), reporting
+"Access OK" or the provider's error.
+
+| Field | Description |
+|---|---|
+| `serper_key` | API key for [Serper.dev](https://serper.dev/) web search — the recommended, cheaper provider. Required when any agent uses the `serper` tool. Resolved as an environment-variable name first (falls back to the literal value). Shown masked. |
+| `serpapi_key` | API key for SerpAPI web search. Required when any agent uses the `serpapi` tool. Resolved as an environment-variable name first. Shown masked. |
+
+### CORE DIRECTORIES
+
+| Field | Description |
+|---|---|
+| `softskills_dir` | Path to the directory where the curator writes distilled soft-skill playbooks. Agents read from here when `load_softskill` is called. |
 
 ### RUNTIME CONFIG
 
@@ -263,10 +274,3 @@ top level of `agents.json`.
 | `bash_timeout_seconds` | Maximum time in seconds a bash command may run before it is killed. |
 | `mcp_config_path` | Override the default `mcp_config.json` path for all agents. |
 | `permissions_config_path` | Override the default `permissions.json` path for all agents. |
-
-### EXTERNAL API KEYS
-
-| Field | Description |
-|---|---|
-| `serper_key` | API key for [Serper.dev](https://serper.dev/) web search — the recommended, cheaper provider. Required when any agent uses the `serper` tool. Resolved as an environment-variable name first (falls back to the literal value). Shown masked. |
-| `serpapi_key` | API key for SerpAPI web search. Required when any agent uses the `serpapi` tool. Resolved as an environment-variable name first. Shown masked. |

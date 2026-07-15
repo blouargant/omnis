@@ -37,7 +37,7 @@ fail with a stale-mtime error — reload the panel and retry.
 ## Editing Agents
 
 The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
-**Models**, and **Global Environment**. See the dedicated
+**Models**, and **Global configuration**. See the dedicated
 [Agents Settings](19-agents.md) page for full field-by-field reference.
 
 Key points:
@@ -52,9 +52,10 @@ Key points:
   repositories. Switch between Agents and Squads registry views.
 - **Models** — model profiles (provider, model ID, base URL, API key,
   context length, pricing) referenced by each agent's `model_ref`.
-- **Global Environment** — fleet-wide settings: `softskills_dir`,
-  `token_optimization`, `bash_timeout_seconds`, the web-search API keys
-  (`serper_key`, `serpapi_key`), and path overrides.
+- **Global configuration** — fleet-wide settings, in order: token optimization
+  (`token_optimization`), the web-search API keys (`serper_key`, `serpapi_key`,
+  each with a **Test** button), then `softskills_dir`, `bash_timeout_seconds`,
+  and path overrides.
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.

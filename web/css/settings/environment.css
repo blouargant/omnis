@@ -1,4 +1,4 @@
-/* Global Environment panel
+/* Global configuration panel (Agents → Global configuration sub-tab)
    Part of web/css/settings.css — edit this partial, not the @import barrel. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -117,5 +117,28 @@
   align-items: center;
 }
 .env-secret-eye:hover { background: var(--bg-raised-hover); color: var(--text); }
+
+.env-key-test {
+  flex: 0 0 auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+.env-key-test:hover { background: var(--bg-raised-hover); }
+.env-key-test:disabled { opacity: 0.6; cursor: default; }
+
+.env-key-test-status {
+  font-size: 0.78rem;
+  min-height: 1em;
+  margin-top: 0.1rem;
+}
+.env-key-test-status.testing { color: var(--text-muted); }
+.env-key-test-status.ok { color: var(--success, #4caf50); }
+.env-key-test-status.fail { color: var(--danger-fg); }
 
 

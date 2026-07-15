@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -46,6 +47,48 @@ type serperResult struct {
 
 type serperResponse struct {
 	Organic []serperResult `json:"organic"`
+}
+
+// TestSerperKey verifies apiKey authenticates against Serper.dev with one
+// minimal search request. Returns nil on success, or an error describing the
+// failure (network error, or a non-200 status such as an auth rejection).
+// Backs the "Test" button in Settings → Global configuration → External API.
+func TestSerperKey(ctx context.Context, apiKey string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return fmt.Errorf("no API key set")
+	}
+
+	payload, err := json.Marshal(map[string]any{"q": "omnis connectivity test", "num": 1})
+	if err != nil {
+		return err
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(cctx, http.MethodPost, serperEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-API-KEY", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			return fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
+	}
+	return nil
 }
 
 func runSerperSearch(ctx context.Context, apiKey string, in DDGIn) (string, error) {

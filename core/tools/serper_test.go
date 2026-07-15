@@ -108,6 +108,47 @@ func TestRunSerperSearchClampsAndDefaults(t *testing.T) {
 	}
 }
 
+// TestTestSerperKey verifies the connectivity probe behind the settings "Test"
+// button: nil on a 200, a descriptive error on a non-200 (e.g. a rejected key),
+// and a clear error for an empty key without any network call.
+func TestTestSerperKey(t *testing.T) {
+	if err := TestSerperKey(context.Background(), ""); err == nil {
+		t.Fatal("empty key: expected error, got nil")
+	}
+
+	// Success: 200 + a valid key echoed in the header.
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-KEY") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		io.WriteString(w, `{"organic":[]}`)
+	}))
+	defer okSrv.Close()
+	orig := serperEndpoint
+	serperEndpoint = okSrv.URL
+	if err := TestSerperKey(context.Background(), "good-key"); err != nil {
+		t.Errorf("valid key: expected nil, got %v", err)
+	}
+	serperEndpoint = orig
+
+	// Failure: a 401 with a body is surfaced as an error including the status.
+	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"message":"Unauthorized"}`)
+	}))
+	defer badSrv.Close()
+	serperEndpoint = badSrv.URL
+	defer func() { serperEndpoint = orig }()
+	err := TestSerperKey(context.Background(), "bad-key")
+	if err == nil {
+		t.Fatal("rejected key: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should mention the status code, got %q", err.Error())
+	}
+}
+
 // TestRunSerperSearchNoResults verifies the empty-organic path.
 func TestRunSerperSearchNoResults(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

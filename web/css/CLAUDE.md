@@ -88,7 +88,7 @@ same colour/size in multiple partials.
 | `theme.css` | Theme picker |
 | `skills.css` | Skills panel |
 | `registries.css` | Remote registries split-panel list + browse view + cards |
-| `environment.css` | Global Environment panel |
+| `environment.css` | Global configuration panel (token opt · external API keys + Test button · directories · runtime config) |
 | `models.css` | Models panel, model cards, add-model dialog, embedding-model selector |
 | `mcp.css` | MCP server cards + the key/value list editor (`.kv-list`) |
 | `agents.css` | Agents panel (master-detail split: fleet list + detail) |

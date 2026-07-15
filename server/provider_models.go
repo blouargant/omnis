@@ -16,6 +16,7 @@ import (
 
 	"github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/embed"
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/gin-gonic/gin"
 )
 
@@ -233,6 +234,59 @@ func registerProviderModelsRoute(rg *gin.RouterGroup) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "model_count": len(models)})
+	})
+
+	// POST /providers/websearch-test verifies a web-search provider key ("serper"
+	// or "serpapi") with one minimal search, backing the "Test" button in
+	// Settings → Global configuration → External API. The body is {provider, key};
+	// a blank key falls back to the saved, env-resolved key. A typed key is
+	// resolved as an env-var name first and travels in the body (not the URL) so
+	// it never lands in an access log. Response: {ok} or {ok:false, error}.
+	rg.POST("/providers/websearch-test", func(c *gin.Context) {
+		var req struct {
+			Provider string `json:"provider"`
+			Key      string `json:"key"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+			return
+		}
+
+		provider := strings.ToLower(strings.TrimSpace(req.Provider))
+		key := strings.TrimSpace(req.Key)
+		if key != "" {
+			key = resolveEnvRef(key)
+		} else if settings, err := agent.ResolveRuntimeSettings(agent.Options{}); err == nil {
+			switch provider {
+			case "serper":
+				key = settings.SerperKey
+			case "serpapi":
+				key = settings.SerpAPIKey
+			}
+		}
+		if key == "" {
+			c.JSON(http.StatusOK, gin.H{"ok": false, "error": "no API key set"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		defer cancel()
+
+		var terr error
+		switch provider {
+		case "serper":
+			terr = fstools.TestSerperKey(ctx, key)
+		case "serpapi":
+			terr = fstools.TestSerpAPIKey(ctx, key)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown provider"})
+			return
+		}
+		if terr != nil {
+			c.JSON(http.StatusOK, gin.H{"ok": false, "error": truncate(terr.Error(), 300)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 }
 

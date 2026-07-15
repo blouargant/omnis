@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -24,6 +25,34 @@ func NewSerpAPITools(apiKey string) []tool.Tool {
 				return DDGOut{Results: out}, nil
 			}),
 	}
+}
+
+// TestSerpAPIKey verifies apiKey authenticates against SerpAPI with one minimal
+// search. Returns nil on success, or an error describing the failure. The
+// SerpAPI client does not accept a context; ctx is kept for a call site uniform
+// with TestSerperKey. Backs the settings "Test" button.
+func TestSerpAPIKey(ctx context.Context, apiKey string) error {
+	_ = ctx
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return fmt.Errorf("no API key set")
+	}
+
+	setting := serpapi.NewSerpApiClientSetting(apiKey)
+	client := serpapi.NewClient(setting)
+
+	data, err := client.Search(map[string]string{
+		"engine": "google",
+		"q":      "omnis connectivity test",
+		"num":    "1",
+	})
+	if err != nil {
+		return err
+	}
+	if e, ok := data["error"].(string); ok && strings.TrimSpace(e) != "" {
+		return fmt.Errorf("%s", e)
+	}
+	return nil
 }
 
 func runSerpAPISearch(apiKey string, in DDGIn) (string, error) {

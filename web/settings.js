@@ -2177,13 +2177,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
     el.innerHTML = "";
 
-    // CORE DIRECTORIES
-    el.appendChild(envSection(tr("set.env.coreDirectories"), tr("set.env.softskillsDesc"), body => {
-      const g = document.createElement("div");
-      g.className = "env-grid-2";
-      g.appendChild(envText("softskills_dir"));
-      body.appendChild(g);
-    }));
+    // Section order (per product): token optimization first, then external API
+    // keys, then the rest (core directories, runtime config).
 
     // OPTIMIZATION
     el.appendChild(envSection(tr("set.env.optimization"), null, body => {
@@ -2208,24 +2203,14 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(chip);
     }));
 
-    // RUNTIME CONFIG
-    el.appendChild(envSection(tr("set.env.runtimeConfig"), null, body => {
-      const g = document.createElement("div");
-      g.className = "env-grid-2";
-      g.appendChild(envText("bash_output_filters_dir"));
-      g.appendChild(envNum("bash_timeout_seconds"));
-      g.appendChild(envText("mcp_config_path"));
-      g.appendChild(envText("permissions_config_path"));
-      body.appendChild(g);
-    }));
-
     // EXTERNAL API KEYS
     el.appendChild(envSection(tr("set.env.externalApiKeys"), null, body => {
       body.className += " env-section-keys";
-      // A masked secret field bound to d[key]. serper_key is the recommended,
-      // cheaper web-search provider, so it is shown first; serpapi_key stays for
-      // users who prefer SerpAPI.
-      const secretField = (key) => {
+      // A masked secret field bound to d[key], with a "Test" button that probes
+      // the key against the provider server-side (POST /providers/websearch-test).
+      // serper_key is the recommended, cheaper web-search provider, so it is
+      // shown first; serpapi_key stays for users who prefer SerpAPI.
+      const secretField = (key, provider) => {
         const wrap = document.createElement("div");
         wrap.className = "env-field";
         const lbl = document.createElement("label");
@@ -2244,14 +2229,66 @@ const BASE_PATH = window.BASE_PATH || "";
         eye.setAttribute("data-tip", tr("set.env.showHide"));
         eye.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
         eye.addEventListener("click", () => { inp.type = inp.type === "password" ? "text" : "password"; });
+        const test = document.createElement("button");
+        test.type = "button";
+        test.className = "env-key-test";
+        test.textContent = tr("set.env.testKey");
+        const status = document.createElement("span");
+        status.className = "env-key-test-status";
+        test.addEventListener("click", async () => {
+          test.disabled = true;
+          status.className = "env-key-test-status testing";
+          status.textContent = tr("set.env.testKeyTesting");
+          try {
+            const r = await fetch(BASE_PATH + "/api/providers/websearch-test", {
+              method: "POST",
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ provider, key: d[key] || "" }),
+            });
+            const j = await r.json();
+            if (r.ok && j.ok) {
+              status.className = "env-key-test-status ok";
+              status.textContent = tr("set.env.testKeyOk");
+            } else {
+              status.className = "env-key-test-status fail";
+              status.textContent = tr("set.env.testKeyFail", { error: j.error || r.statusText });
+            }
+          } catch (e) {
+            status.className = "env-key-test-status fail";
+            status.textContent = tr("set.env.testKeyFail", { error: (e && e.message) || String(e) });
+          } finally {
+            test.disabled = false;
+          }
+        });
         inputWrap.appendChild(inp);
         inputWrap.appendChild(eye);
+        inputWrap.appendChild(test);
         wrap.appendChild(lbl);
         wrap.appendChild(inputWrap);
+        wrap.appendChild(status);
         return wrap;
       };
-      body.appendChild(secretField("serper_key"));
-      body.appendChild(secretField("serpapi_key"));
+      body.appendChild(secretField("serper_key", "serper"));
+      body.appendChild(secretField("serpapi_key", "serpapi"));
+    }));
+
+    // CORE DIRECTORIES
+    el.appendChild(envSection(tr("set.env.coreDirectories"), tr("set.env.softskillsDesc"), body => {
+      const g = document.createElement("div");
+      g.className = "env-grid-2";
+      g.appendChild(envText("softskills_dir"));
+      body.appendChild(g);
+    }));
+
+    // RUNTIME CONFIG
+    el.appendChild(envSection(tr("set.env.runtimeConfig"), null, body => {
+      const g = document.createElement("div");
+      g.className = "env-grid-2";
+      g.appendChild(envText("bash_output_filters_dir"));
+      g.appendChild(envNum("bash_timeout_seconds"));
+      g.appendChild(envText("mcp_config_path"));
+      g.appendChild(envText("permissions_config_path"));
+      body.appendChild(g);
     }));
   }
 
