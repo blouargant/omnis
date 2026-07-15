@@ -263,8 +263,13 @@
   outline: none;
 }
 /* The collection context editor packs more fields than a rename prompt, so it
-   gets a roomier shell (the two prose textareas need width to be usable). */
-.collection-ctx-modal { width: min(560px, 92vw); }
+   gets a roomier shell — wide, and tall enough that the two prose textareas are
+   comfortable to edit in. The body grows toward the .ui-modal 88vh cap and
+   scrolls past it; each textarea stays user-resizable (resize: vertical). */
+.collection-ctx-modal { width: min(860px, 95vw); }
+.collection-ctx-modal .user-cmd-modal-body { max-height: min(78vh, 760px); }
+.collection-ctx-modal .cc-instr { min-height: 220px; }
+.collection-ctx-modal .cc-mem { min-height: 180px; }
 .cc-mem-head {
   display: flex;
   align-items: center;
