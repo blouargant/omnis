@@ -263,13 +263,20 @@
   outline: none;
 }
 /* The collection context editor packs more fields than a rename prompt, so it
-   gets a roomier shell — wide, and tall enough that the two prose textareas are
-   comfortable to edit in. The body grows toward the .ui-modal 88vh cap and
-   scrolls past it; each textarea stays user-resizable (resize: vertical). */
+   gets a roomier shell. The two prose editors AUTO-GROW to their content (JS in
+   collectionContextDialog), so the panel adapts to how much you are editing and
+   shows no scrollbar until the whole modal would exceed the .ui-modal 88vh cap.
+   min-height is the floor when empty; overflow is hidden because the height
+   tracks the content (no inner scrollbar) and resize is off because JS owns the
+   height. (No body max-height override — the modal sizes to its content.) */
 .collection-ctx-modal { width: min(860px, 95vw); }
-.collection-ctx-modal .user-cmd-modal-body { max-height: min(78vh, 760px); }
-.collection-ctx-modal .cc-instr { min-height: 220px; }
-.collection-ctx-modal .cc-mem { min-height: 180px; }
+.collection-ctx-modal .cc-instr,
+.collection-ctx-modal .cc-mem {
+  overflow-y: hidden;
+  resize: none;
+}
+.collection-ctx-modal .cc-instr { min-height: 132px; }
+.collection-ctx-modal .cc-mem { min-height: 108px; }
 .cc-mem-head {
   display: flex;
   align-items: center;
