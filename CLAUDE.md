@@ -1873,8 +1873,9 @@ answering root's system instruction for every session filed under the collection
 plus **per-session defaults** (a seeded starting **squad** and **cwd**) applied to
 new chats. Everything is **per-session** — nothing crosses the generation
 boundary — so it composes with the existing squad/cwd machinery and needs no
-per-collection generations. This is Phase 1 (deterministic, hand-authored); a
-Phase-2 auto-distiller into `memory.md` is designed-for but not wired.
+per-collection generations. Phase 1 is the deterministic hand-authored layer;
+Phase 2 adds an **assisted, user-initiated memory distiller** (below). A
+fully-automatic idle-triggered distiller (Phase 3) remains unwired by design.
 
 - **Storage split**: scalars in `collections.json` (a `profiles` map keyed by
   canonical name, `{squad, cwd}`, beside `colors`), prose in files under
@@ -1926,6 +1927,30 @@ Phase-2 auto-distiller into `memory.md` is designed-for but not wired.
   in [web/css/features/dialogs.css](web/css/features/dialogs.css)); save = PATCH
   (scalars) then PUT `…/context` (prose). i18n keys under `collections.*`
   (en/fr/es/de); "Squad" is kept untranslated per the glossary.
+- **Memory distiller (Phase 2, assisted + user-initiated)** — the memory block can
+  be **generated from the collection's own recent chats** instead of typed by hand.
+  `Manager.DistillCollectionMemory` ([agent/collection_memory.go](agent/collection_memory.go))
+  is the **same one-off-LLM pattern** as `EvaluateGoal` (eval model → leader
+  fallback via `evalModel`, no runner/tools/bus): given the current memory + the
+  gathered material it returns a **reconciled** memory (a strict "MERGE new durable
+  facts, **SUPERSEDE/remove** the obsolete, do NOT append, stay concise" prompt),
+  input- and output-capped (`collectionMaterialCap` / `collectionMemoryOutputCap`).
+  `buildDistillRequest` is extracted so the caps/prompt shape are unit-testable
+  without a live model. The server gathers material
+  ([server/collection_memory.go](server/collection_memory.go)
+  `gatherCollectionMaterial`: the collection's recent, non-hidden, non-empty
+  sessions, most-recent-first, **user+assistant turn text only** — mirroring the
+  session-search corpus — capped) and the route `POST
+  /api/collections/:name/memory/distill` returns `{proposed, current}` and
+  **deliberately does NOT write** `memory.md`. **Propose-then-commit is the
+  safeguard**: the web UI's **"Generate from recent chats"** button (in the memory
+  section of the context editor, [web/app.js](web/app.js) `collectionContextDialog`)
+  fills the *editable* memory field with the draft; it is saved only when the user
+  reviews it and clicks Save (PUT `…/context`). So an evolving memory can never
+  silently inject a stale/wrong fact into every new chat — the exact
+  "recalled-memory-that-is-wrong" hazard the codebase guards against elsewhere.
+  Degrades cleanly: `503` with no Manager, `400` when the collection has no chats
+  to learn from yet.
 - **No-op contract**: a collection with no profile + no prose is byte-identical to
   before (resolver returns `""`, seed falls through to the router/default, plugin
   is a no-op). CLI/TUI leave the resolver nil ⇒ no injection.

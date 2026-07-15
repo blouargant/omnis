@@ -714,6 +714,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.DELETE("/collections/:name", handleDeleteCollection(d))
 	auth.GET("/collections/:name/context", handleGetCollectionContext(d))
 	auth.PUT("/collections/:name/context", handleSetCollectionContext(d))
+	auth.POST("/collections/:name/memory/distill", handleDistillCollectionMemory(d))
 	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
 		id := c.Param("id")

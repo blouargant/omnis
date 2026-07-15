@@ -6061,14 +6061,42 @@ function collectionContextDialog(name, snap) {
         <span class="user-cmd-field-label">${escHtml(tr("collections.instructions"))}</span>
         <textarea class="cc-instr" rows="6" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
       </label>
-      <label class="user-cmd-field">
-        <span class="user-cmd-field-label">${escHtml(tr("collections.memory"))}</span>
+      <div class="user-cmd-field">
+        <div class="cc-mem-head">
+          <span class="user-cmd-field-label">${escHtml(tr("collections.memory"))}</span>
+          <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
+        </div>
         <textarea class="cc-mem" rows="5" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
         <span class="user-cmd-field-hint">${escHtml(tr("collections.memoryHint"))}</span>
-      </label>`;
+      </div>`;
     body.querySelector(".cc-cwd").value = snap.cwd || "";
     body.querySelector(".cc-instr").value = snap.instructions || "";
     body.querySelector(".cc-mem").value = snap.memory || "";
+    // "Generate from recent chats": distil the collection's recent sessions into a
+    // proposed memory. Propose-then-commit — the draft only fills the (editable)
+    // field; it is saved to disk with the rest on the dialog's Save.
+    const genBtn = body.querySelector(".cc-mem-gen");
+    genBtn.addEventListener("click", async () => {
+      if (genBtn.disabled) return;
+      genBtn.disabled = true;
+      const orig = genBtn.textContent;
+      genBtn.textContent = tr("collections.memoryGenerating");
+      try {
+        const res = await apiFetch(`/api/collections/${encodeURIComponent(name)}/memory/distill`, { method: "POST" });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) { showToast(b.error || tr("collections.memoryGenFailed"), "err"); return; }
+        const mem = body.querySelector(".cc-mem");
+        mem.value = b.proposed || "";
+        mem.focus();
+        showToast(tr("collections.memoryGenDone"), "ok");
+      } catch (e) {
+        console.error(e);
+        showToast(tr("collections.memoryGenFailed"), "err");
+      } finally {
+        genBtn.disabled = false;
+        genBtn.textContent = orig;
+      }
+    });
     const ok = overlay.querySelector(".ui-modal-ok");
     ok.textContent = tr("common.save");
     let done = false;

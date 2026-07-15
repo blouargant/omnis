@@ -265,6 +265,23 @@
 /* The collection context editor packs more fields than a rename prompt, so it
    gets a roomier shell (the two prose textareas need width to be usable). */
 .collection-ctx-modal { width: min(560px, 92vw); }
+.cc-mem-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cc-mem-gen {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+.cc-mem-gen:hover:not(:disabled) { border-color: var(--accent, #0e639c); }
+.cc-mem-gen:disabled { opacity: 0.6; cursor: default; }
 .user-cmd-name-row {
   display: flex;
   align-items: stretch;

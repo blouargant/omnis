@@ -61,7 +61,11 @@ right-click menu → **Edit context…**:
   the collection (tone, stack, do/don't). This is an `AGENT.md` scoped to the
   collection instead of a folder.
 - **Memory** — facts about the workstream that persist across its chats (which
-  repos are involved, decisions taken, conventions). Today you type it yourself.
+  repos are involved, decisions taken, conventions). Type it yourself, or click
+  **Generate from recent chats** to have Omnis draft it from the collection's own
+  recent conversations. The draft only fills the (editable) field — nothing is
+  saved until you review it and click **Save**, so an out-of-date fact can never
+  slip into your chats unnoticed.
 - **Default squad** — new chats in the collection start on this squad instead of
   asking the router. It's a **hint, not a lock**: routing still runs, so a chat
   that drifts off-topic is handed back to the router automatically. Leave it on
