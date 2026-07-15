@@ -6057,37 +6057,21 @@ function collectionContextDialog(name, snap) {
         <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
         <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
       </label>
-      <label class="user-cmd-field">
+      <label class="user-cmd-field cc-grow-instr">
         <span class="user-cmd-field-label">${escHtml(tr("collections.instructions"))}</span>
-        <textarea class="cc-instr" rows="6" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
+        <textarea class="cc-instr" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
       </label>
-      <div class="user-cmd-field">
+      <div class="user-cmd-field cc-grow-mem">
         <div class="cc-mem-head">
           <span class="user-cmd-field-label">${escHtml(tr("collections.memory"))}</span>
           <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
         </div>
-        <textarea class="cc-mem" rows="5" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
+        <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
         <span class="user-cmd-field-hint">${escHtml(tr("collections.memoryHint"))}</span>
       </div>`;
     body.querySelector(".cc-cwd").value = snap.cwd || "";
     body.querySelector(".cc-instr").value = snap.instructions || "";
     body.querySelector(".cc-mem").value = snap.memory || "";
-    // Auto-grow the two prose editors so the panel adapts to the amount of text
-    // and shows no scrollbar until the whole modal would exceed its 88vh cap. Each
-    // textarea keeps its CSS min-height as a floor.
-    const autoGrow = (el) => {
-      const cs = getComputedStyle(el);
-      const border = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
-      const min = parseFloat(cs.minHeight) || 0;
-      el.style.height = "auto";
-      el.style.height = Math.max(min, el.scrollHeight + border) + "px";
-    };
-    const ccInstr = body.querySelector(".cc-instr");
-    const ccMem = body.querySelector(".cc-mem");
-    ccInstr.addEventListener("input", () => autoGrow(ccInstr));
-    ccMem.addEventListener("input", () => autoGrow(ccMem));
-    // Size to the initial content once laid out (scrollHeight needs layout).
-    requestAnimationFrame(() => { autoGrow(ccInstr); autoGrow(ccMem); });
     // "Generate from recent chats": distil the collection's recent sessions into a
     // proposed memory. Propose-then-commit — the draft only fills the (editable)
     // field; it is saved to disk with the rest on the dialog's Save.
@@ -6103,7 +6087,6 @@ function collectionContextDialog(name, snap) {
         if (!res.ok) { showToast(b.error || tr("collections.memoryGenFailed"), "err"); return; }
         const mem = body.querySelector(".cc-mem");
         mem.value = b.proposed || "";
-        autoGrow(mem);
         mem.focus();
         showToast(tr("collections.memoryGenDone"), "ok");
       } catch (e) {
