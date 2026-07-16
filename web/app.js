@@ -6195,7 +6195,7 @@ function wireCollectionAssistant(overlay, name) {
     `<div class="cc-asst-transcript"></div>` +
     `<div class="cc-asst-status"></div>` +
     `<form class="cc-asst-composer">` +
-    `<textarea class="cc-asst-input" rows="1" spellcheck="false" placeholder="${escHtml(tr("collections.asstPlaceholder"))}"></textarea>` +
+    `<textarea class="cc-asst-input" rows="2" spellcheck="false" placeholder="${escHtml(tr("collections.asstPlaceholder"))}"></textarea>` +
     `<button type="submit" class="cc-asst-send" data-tip="${escHtml(tr("collections.asstSend"))}" aria-label="${escHtml(tr("collections.asstSend"))}">` +
     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>` +
     `</button></form>`;

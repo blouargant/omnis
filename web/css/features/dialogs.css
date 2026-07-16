@@ -445,6 +445,7 @@
 .cc-asst-input {
   flex: 1 1 auto;
   resize: none;
+  min-height: 52px; /* ~2 lines by default (grows with content up to max-height) */
   max-height: 120px;
   overflow-y: auto;
   background: var(--bg-raised);
@@ -453,6 +454,7 @@
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
+  line-height: 1.4;
   padding: 7px 9px;
   outline: none;
 }
