@@ -299,13 +299,25 @@ func NewTools(d Deps) []tool.Tool {
 			"the user interface renders the reported sessions as the clickable result list, so a session you " +
 			"do not report here is not shown. Report only sessions you verified; report none if none match. " +
 			"Arguments: `sessions` (array of {`session_id`, `reason`}, required).",
-	}, func(_ tool.Context, in reportIn) (reportOut, error) {
+	}, func(ctx tool.Context, in reportIn) (reportOut, error) {
 		n := 0
 		for _, s := range in.Sessions {
 			if strings.TrimSpace(s.SessionID) != "" {
 				n++
 			}
 		}
+		// The report IS the deliverable: the web UI builds its result list from
+		// this tool call and DISCARDS any prose the model writes afterwards. So
+		// end the run the instant it reports — SkipSummarization makes this
+		// function-response event final (session.Event.IsFinalResponse), stopping
+		// the ADK flow loop, which otherwise only halts when the model voluntarily
+		// returns a tool-call-free response. Without this the model made one more
+		// model call to generate a summary nobody reads; on a gateway with
+		// generation-throughput variance that trailing call added up to ~2 minutes
+		// to a search whose answer was already ready. Same host-side guarantee the
+		// routing tools use (see agent/routing.go). Mirror the "call this ONCE, as
+		// your final tool call" instruction in code.
+		ctx.Actions().SkipSummarization = true
 		return reportOut{OK: true, Count: n}, nil
 	}); err == nil {
 		out = append(out, report)

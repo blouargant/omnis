@@ -962,6 +962,23 @@ one-line reason each; the web UI renders those args as the rows (falling back to
 the live results when the model skips it). This is a deliberate contract: parsing
 session ids out of free prose is what would break.
 
+**`report_sessions` ends the turn host-side** — a successful call sets
+`ctx.Actions().SkipSummarization = true` ([internal/sessindex/tools.go](internal/sessindex/tools.go)),
+making its function-response event `IsFinalResponse()` so the ADK flow loop stops
+immediately (the same guarantee `route_to_squad`/`handoff_to_router` use — the loop
+otherwise only halts when the model voluntarily returns a tool-call-free response).
+This is not an optimisation nicety: the report is the deliverable and the UI
+**discards any prose written after it**, but the model would still make one more
+model call to generate that unread summary — and on a gateway with
+generation-throughput variance that single trailing call was observed adding **~2
+minutes** to a `litellm` search whose answer (search → read → report) was ready in
+**~40 s**. A *failed* report (e.g. the model omitted `session_id`) does NOT end the
+turn: validation runs before the handler, so only a valid report is final and a
+malformed one is retried. The remaining latency is the ~4–5 sequential model
+round-trips the agent genuinely needs (search → read/verify → report), each a full
+gateway call — inherent to the agent path, which is why the live (as-you-type)
+search stays model-free.
+
 **Reached two ways, both of which need the agent to be *directly* runnable:**
 - **In a chat** — `session_search` is a **nested `subagents` entry on `helper`**
   (the gatherer doctrine: the cheap model retrieves, the caller judges). The Helper
