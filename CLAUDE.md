@@ -11,6 +11,56 @@ After every major change (new agent, new squad, new tool, new skill, new config 
 - Add any new gotchas, precedence rules, or patterns where they belong (e.g. write-layer routing, MCP dedup, session pinning across hot-reload).
 - Keep the configuration precedence chain and search chain accurate when either changes.
 - Keep this file as the single source of truth for AI sessions working on this project.
+- **When you ship a user-facing feature, add a bullet to `internal/features/FEATURES.md`** under the current minor version (see "What's-new feature tracking (FEATURES.md)" below).
+
+## What's-new feature tracking (FEATURES.md)
+
+The web UI shows a **"What's new"** modal once per upgrade, driven by
+**[internal/features/FEATURES.md](internal/features/FEATURES.md)** — an
+**embedded** (`go:embed`), hand-maintained release-notes file. **Whenever you add
+a user-facing feature, add a one-line bullet to this file.** It is the single
+source of truth for the modal; nothing is generated from git history at runtime.
+
+**Format (enforced by [internal/features/features.go](internal/features/features.go)'s
+parser):**
+- One `## A.B — <one-line summary>` section per **minor** version, **newest
+  first**. The summary after the em dash is shown on its own when the section is
+  compacted, so keep it to a single line.
+- Under each section, `- **Title** — description.` bullets — **user-facing
+  features only** (no refactors/internal plumbing; those belong in CLAUDE.md).
+- **The patch digit `C` in `A.B.C` is bug-fixes only — never add a `## A.B.C`
+  section.** Two builds differing only in `C` show nothing new.
+- Features **still in development** go under a `## A.B (in development)` section
+  whose version is **above** the latest release tag. The modal filters out any
+  section above the running build, so unreleased notes never leak into a shipped
+  binary — but they're staged so they appear the instant that minor is tagged.
+- **English only** (release notes follow the same policy as `web/docs`).
+
+**How it works** (all embedder-independent, no external calls):
+- `internal/features` embeds + parses FEATURES.md, then `WhatsNew(current,
+  lastSeen)` returns the compacted feed. The compare is on **A.B only** (patch
+  ignored); sections above `current` are dropped; **oldest shown versions are
+  compacted the most** (newest ≤2 full → next few headline + a few bullets +
+  "+N more" → oldest headline-only). A `dev`/unparseable current, or being caught
+  up, yields `show=false`.
+- The version derives from the `main.version` ldflag (git-describe, e.g.
+  `v1.7.0-14-g…`, which parses to `1.7`). A literal `dev` build never prompts.
+- Server: `GET /api/whatsnew` (side-effect free) + `POST /api/whatsnew/seen`
+  ([server/whatsnew.go](server/whatsnew.go)). The **last-seen version** is
+  persisted in `preferences.json` as `whats_new_version`
+  ([server/preferences.go](server/preferences.go)); **absent ⇒ assume `1.0.0`**
+  (a fresh install sees the full, compacted history once).
+- Web: `maybePromptWhatsNew` ([web/app.js](web/app.js)) runs once at boot after
+  the locale/notification prompts, renders the modal (`openWhatsNewModal`,
+  `.whatsnew-*` in [web/css/features/dialogs.css](web/css/features/dialogs.css)),
+  and POSTs `seen` the moment it opens so it shows **at most once per upgrade**.
+  Chrome strings are i18n keys `app.whatsnew.*` (en/fr/es/de); feature text stays
+  English. Bump the `app.js` `?v=` in [web/index.html](web/index.html) when
+  editing app.js.
+- **No-op contract:** a `dev` build, an unparseable version, or a caught-up
+  client shows nothing — byte-identical to before. Tests live in
+  [internal/features/features_test.go](internal/features/features_test.go)
+  (including a guard that the embedded doc parses to ≥1 section).
 
 ## Vendored frontend library upkeep
 

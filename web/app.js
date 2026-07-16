@@ -7669,6 +7669,75 @@ async function maybePromptNotifications() {
   } catch (e) { console.error("notification opt-in failed:", e); }
 }
 
+// maybePromptWhatsNew runs once per upgrade. It asks the server for the feature
+// feed between the version last seen (recorded in preferences.json — assumed
+// 1.0.0 when none is recorded) and the running build; when the minor version
+// changed, a "What's new" modal lists what's new (older versions compacted). The
+// server returns show=false for a "dev" build or when already caught up, so this
+// is a no-op then. The feed is marked seen the moment the modal opens, so it
+// appears at most once regardless of how the user dismisses it.
+async function maybePromptWhatsNew() {
+  try {
+    const res = await apiFetch("/api/whatsnew");
+    if (!res.ok) return;
+    const payload = await res.json();
+    if (!payload || !payload.show || !Array.isArray(payload.sections) || !payload.sections.length) return;
+    openWhatsNewModal(payload);
+  } catch (e) { console.error("what's-new check failed:", e); }
+}
+
+// wnInline renders a feature bullet's minimal markdown (**bold** only) safely.
+function wnInline(s) {
+  return escHtml(String(s)).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+function whatsNewSectionHtml(sec) {
+  const head =
+    `<div class="whatsnew-sec-head">` +
+    `<span class="whatsnew-ver">v${escHtml(sec.version)}</span>` +
+    (sec.summary ? `<span class="whatsnew-sum">${escHtml(sec.summary)}</span>` : "") +
+    `</div>`;
+  let bodyHtml = "";
+  const more = sec.more || 0;
+  if (sec.display === "headline") {
+    if (more > 0) bodyHtml = `<div class="whatsnew-more">${escHtml(trN("app.whatsnew.updates", more, { count: more }))}</div>`;
+  } else {
+    const lis = (sec.items || []).map((it) => `<li>${wnInline(it)}</li>`).join("");
+    bodyHtml = `<ul class="whatsnew-list">${lis}</ul>`;
+    if (more > 0) bodyHtml += `<div class="whatsnew-more">${escHtml(trN("app.whatsnew.more", more, { count: more }))}</div>`;
+  }
+  return `<section class="whatsnew-sec whatsnew-${escHtml(sec.display)}">${head}${bodyHtml}</section>`;
+}
+
+function openWhatsNewModal(payload) {
+  // Record it as seen immediately so it never re-shows, even if the user closes
+  // the tab without clicking the button. Fire-and-forget.
+  apiFetch("/api/whatsnew/seen", { method: "POST" }).catch(() => {});
+
+  const overlay = uiModalShell(tr("app.whatsnew.title"));
+  overlay.querySelector(".ui-modal").classList.add("whatsnew-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  const sections = payload.sections.map(whatsNewSectionHtml).join("");
+  body.innerHTML =
+    `<div class="whatsnew-sub">${escHtml(tr("app.whatsnew.subtitle", { version: payload.current || "?" }))}</div>` +
+    `<div class="whatsnew-body">${sections}</div>`;
+
+  // Single primary action; no cancel for a purely informational modal.
+  const cancel = overlay.querySelector(".ui-modal-cancel");
+  if (cancel) cancel.hidden = true;
+  const ok = overlay.querySelector(".ui-modal-ok");
+  ok.textContent = tr("app.whatsnew.gotIt");
+
+  let done = false;
+  const close = () => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); close(); } };
+  ok.addEventListener("click", close);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey, true);
+  setTimeout(() => ok.focus(), 0);
+}
+
 function showTaskToast(sid) {
   let layer = document.getElementById("task-toast-layer");
   if (!layer) {
@@ -11915,6 +11984,7 @@ async function restoreLayout(rec, liveIds) {
   // so chain the notification opt-in after it to avoid two stacked modals.
   (async () => {
     await maybePromptLocale(); // may location.reload() when the user switches
-    maybePromptNotifications();
+    await maybePromptNotifications();
+    maybePromptWhatsNew(); // once per upgrade; no-op on dev builds / when caught up
   })();
 })();

@@ -914,7 +914,9 @@ func newEngine(d serverDeps) *gin.Engine {
 	if d.Updates != nil {
 		registerUpdateRoutes(auth, d.Updates, d.Version)
 	}
-	registerPreferencesRoutes(auth, newPreferencesStore(d.ConfigFiles))
+	prefStore := newPreferencesStore(d.ConfigFiles)
+	registerPreferencesRoutes(auth, prefStore)
+	registerWhatsNewRoutes(auth, d.Version, prefStore)
 	userCmdStore := newUserCommandsStore()
 	registerUserCommandsRoutes(auth, userCmdStore)
 	registerCommandsRoutes(auth.Group("/commands"), userCmdStore)

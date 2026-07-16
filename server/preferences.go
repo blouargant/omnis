@@ -33,6 +33,11 @@ type preferences struct {
 	// explicit choice; when unset the web UI falls back to the browser language
 	// then to English. Reconciled across devices on boot by the web UI.
 	Locale *string `json:"locale,omitempty"`
+	// WhatsNewVersion records the version whose "What's new" feed the user last
+	// saw, so the modal is shown at most once per upgrade. A pointer so an absent
+	// value (never recorded) is distinguishable from an explicit one; when unset
+	// the web UI assumes the previous install was 1.0.0 (see internal/features).
+	WhatsNewVersion *string `json:"whats_new_version,omitempty"`
 }
 
 // preferencesStore persists preferences to a JSON file next to the YAML
