@@ -6247,10 +6247,11 @@ function wireCollectionAssistant(overlay, name) {
   closeBtn.addEventListener("click", () => setOpen(false));
 
   // A floating "Assistant" button lives inside each field's textarea. Clicking it
-  // opens the chat and, when the composer is empty, seeds a starter tuned to that
-  // field — so the button's purpose is unambiguous from where it sits. The
-  // textarea is wrapped so the button anchors to its bottom-right (clear of the
-  // label / "Generate" head / hint) and scrolls with neither.
+  // opens the chat and points its composer PLACEHOLDER at that field — a hint, not
+  // pre-filled text (which the user would have to delete before typing) — so the
+  // button's purpose is unambiguous from where it sits. The textarea is wrapped so
+  // the button anchors to its bottom-right (clear of the label / "Generate" head /
+  // hint) and scrolls with neither.
   const attachFieldBtn = (ta, starterKey) => {
     if (!ta) return;
     const wrap = document.createElement("div");
@@ -6266,7 +6267,7 @@ function wireCollectionAssistant(overlay, name) {
       `<span>${escHtml(tr("collections.assistant"))}</span>`;
     b.addEventListener("click", () => {
       setOpen(true);
-      if (!(input.value || "").trim()) { input.value = tr(starterKey); autoGrowInput(); }
+      input.placeholder = tr(starterKey);
       setTimeout(() => input.focus(), 0);
     });
     wrap.appendChild(b);
