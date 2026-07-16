@@ -40,9 +40,10 @@ func (u *updateState) set(st selfupdate.UpdateStatus) {
 }
 
 // updateCheckEnabled reports whether the background poller should run. It is off
-// for "dev" builds (no real version to compare) and can be disabled explicitly
-// via OMNIS_UPDATE_CHECK=false.
-func updateCheckEnabled(currentVersion string) bool {
+// for "dev" builds (no real version to compare). Precedence for the on/off
+// decision (highest first): the OMNIS_UPDATE_CHECK env var, the server.yaml
+// update_check setting (cfg), then the default (enabled).
+func updateCheckEnabled(currentVersion string, cfg *bool) bool {
 	if currentVersion == "" || currentVersion == "dev" {
 		return false
 	}
@@ -50,6 +51,9 @@ func updateCheckEnabled(currentVersion string) bool {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
+	}
+	if cfg != nil {
+		return *cfg
 	}
 	return true
 }
@@ -73,8 +77,8 @@ func updateInterval() time.Duration {
 // stable release, caches the result on state, and fires an "update_available"
 // SSE the first time an update is found so open tabs light the button without
 // polling. It is a no-op when updateCheckEnabled returns false.
-func startUpdatePoller(ctx context.Context, state *updateState, currentVersion string, push *sessionPushBroadcaster) {
-	if !updateCheckEnabled(currentVersion) {
+func startUpdatePoller(ctx context.Context, state *updateState, currentVersion string, cfgUpdateCheck *bool, push *sessionPushBroadcaster) {
+	if !updateCheckEnabled(currentVersion, cfgUpdateCheck) {
 		log.Printf("server: self-update check disabled (version=%s)", currentVersion)
 		return
 	}

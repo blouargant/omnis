@@ -1603,7 +1603,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
 | `OMNIS_LLM_STREAM_STALL_TIMEOUT` | Max idle gap between streamed chunks before the LLM read is aborted (Go duration, default `10m`; `0` disables). Guards against an upstream/gateway that streams partial text then goes silent without `[DONE]` or closing — otherwise the turn freezes "mid sentence". This is the *per-chunk* control; `OMNIS_LLM_HTTP_TIMEOUT` is the total-request cap, and the default (15m) sits above this guard so a frozen stream is caught here first. Applies to both the OpenAI/compat and Anthropic adapters ([core/llm/stall.go](core/llm/stall.go)). |
 | `OMNIS_LLM_HTTP_TIMEOUT` | Total duration cap for a single LLM HTTP request — connection + reading the whole (possibly streamed) body (Go duration, default `15m`; `0` disables entirely, leaving only the stall guard + request context). Sits **above** `OMNIS_LLM_STREAM_STALL_TIMEOUT` (10m) so a genuinely frozen stream trips the stall guard first (clear message) rather than this raw client timeout. Raise it for slow backends whose generation intermittently blocks for minutes under load (e.g. a Scaleway-hosted model) — the previous hard 5-minute cap killed such legitimate long generations with `Client.Timeout … while reading body`. Both adapters ([core/llm/stall.go](core/llm/stall.go) `httpClientTimeout`, applied in [core/llm/openai.go](core/llm/openai.go) + [core/llm/anthropic.go](core/llm/anthropic.go)). |
-| `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). See "Self-update". |
+| `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). Overrides the `server.yaml` `update_check` setting; when the env var is unset, `update_check: false` in `server.yaml` disables the poller. See "Self-update". |
 | `OMNIS_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
 
 ### Permission nomenclature (Claude Code-style) + grant scopes
@@ -3344,9 +3344,16 @@ the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
   asset (package-manager install). The result is cached in `updateState` on
   `serverDeps`.
 - **Poller.** `startUpdatePoller` runs a goroutine (15 s after boot, then every
-  `OMNIS_UPDATE_INTERVAL`, default `6h`, gated by `OMNIS_UPDATE_CHECK`) that
+  `OMNIS_UPDATE_INTERVAL`, default `6h`, gated by `updateCheckEnabled`) that
   re-checks and, the first time an update appears, fires the `update_available`
   SSE via `PushEvents.broadcast` so open tabs light the button without polling.
+- **Enable/disable precedence** (`updateCheckEnabled`, [server/selfupdate.go](server/selfupdate.go)):
+  a `dev`/empty version is always off; otherwise `OMNIS_UPDATE_CHECK` (env) wins,
+  then `server.yaml`'s **`update_check`** (`ServerConfig.UpdateCheck *bool` —
+  tri-state: absent ⇒ default-on, `false` ⇒ off, `true` ⇒ on; threaded from
+  `serverCfg.UpdateCheck` in [server/main.go](server/main.go)), then the
+  enabled-by-default fallback. So an operator can turn the poller off purely in
+  `/etc/omnis/server.yaml` with `update_check: false`, no env var needed.
 - **Routes** (auth group, registered in [server/server.go](server/server.go)):
   `GET /api/update/status` (cached `{current, latest, available, method,
   asset_name, manual_steps, release_url}`, never the password),
@@ -3366,8 +3373,9 @@ the server wiring + routes in [server/selfupdate.go](server/selfupdate.go).
   Styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)
   (`.update-btn`) and [web/css/features/dialogs.css](web/css/features/dialogs.css)
   (`.update-*`).
-- **No-op contract:** a `dev` build or `OMNIS_UPDATE_CHECK=false` runs no poller,
-  shows no button, and is byte-identical to before.
+- **No-op contract:** a `dev` build, `OMNIS_UPDATE_CHECK=false`, or `server.yaml`
+  `update_check: false` runs no poller, shows no button, and is byte-identical to
+  before.
 
 ### Conversation fork & rewind (Web UI)
 

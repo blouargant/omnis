@@ -343,9 +343,10 @@ func run() error {
 	pushEvents := newSessionPushBroadcaster()
 
 	// Self-update: cache the latest-release check and poll GitHub in the
-	// background (no-op for "dev" builds or when OMNIS_UPDATE_CHECK=false).
+	// background (no-op for "dev" builds, when OMNIS_UPDATE_CHECK=false, or when
+	// server.yaml sets update_check: false).
 	updates := newUpdateState(version)
-	startUpdatePoller(rootCtx, updates, version, pushEvents)
+	startUpdatePoller(rootCtx, updates, version, serverCfg.UpdateCheck, pushEvents)
 
 	// Active wake (a completed background task injects a synthetic turn) is on by
 	// default; OMNIS_TASK_NOTIFY=false demotes it to a passive UI toast.

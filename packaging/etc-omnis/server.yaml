@@ -26,3 +26,9 @@ a2a_port: 8090
 # Directory containing the static web UI files (HTML, CSS, JS).
 # Override with OMNIS_WEB_DIR environment variable.
 web_dir: /usr/share/omnis/web
+
+# Background self-update check: the server periodically asks GitHub whether a
+# newer stable release exists and lights an "Update" button in the web UI.
+# Set to false to disable it entirely (no outbound calls to GitHub).
+# Always off for "dev" builds. Overridden by the OMNIS_UPDATE_CHECK env var.
+# update_check: true

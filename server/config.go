@@ -53,6 +53,11 @@ type ServerConfig struct {
 	// added automatically if omitted; a trailing slash is trimmed.
 	// Leave empty to serve from the root (default).
 	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty"`
+	// UpdateCheck controls the background self-update poller that checks GitHub
+	// for a newer stable release. Tri-state: absent (nil) leaves it enabled
+	// (the default), false disables it, true forces it on. Always off for "dev"
+	// builds. Overridden by OMNIS_UPDATE_CHECK when that env var is set.
+	UpdateCheck *bool `yaml:"update_check,omitempty" json:"update_check,omitempty"`
 }
 
 // agentSourceLayer returns the config-chain layer ("local", "user", or "system")

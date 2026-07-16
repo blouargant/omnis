@@ -24,3 +24,9 @@ a2a_port: 8090
 # Example: base_path: /my-company/myself
 # Override with OMNIS_SERVER_BASE_PATH environment variable.
 # base_path: ""
+
+# Background self-update check: the server periodically asks GitHub whether a
+# newer stable release exists and lights an "Update" button in the web UI.
+# Set to false to disable it entirely (no outbound calls to GitHub).
+# Always off for "dev" builds. Overridden by the OMNIS_UPDATE_CHECK env var.
+# update_check: true
