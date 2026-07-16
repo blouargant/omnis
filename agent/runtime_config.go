@@ -321,9 +321,10 @@ type RuntimeSquadConfig struct {
 }
 
 // DefaultSquadName is the name of the squad used when a session does not
-// specify one. Always present in RuntimeSettings.Squads after resolution
-// (synthesised when the config file does not declare one).
-const DefaultSquadName = "default"
+// specify one (the general-purpose, hands-on local/system squad). Always
+// present in RuntimeSettings.Squads after resolution (synthesised when the
+// config file does not declare one).
+const DefaultSquadName = "system"
 
 // RuntimeSettings is the merged runtime configuration after precedence
 // resolution: defaults -> JSON -> ENV -> Options.
@@ -850,10 +851,10 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 	return out, nil
 }
 
-// synthesizeDefaultSquad builds a `default` squad from the enabled agents
-// when no `squads:` block is present. The leader is the agent named
-// "leader" (mandatory); members are every other enabled agent except
-// "curator" (which is process-wide).
+// synthesizeDefaultSquad builds the fallback squad (named DefaultSquadName)
+// from the enabled agents when no `squads:` block is present. The leader is
+// the agent named "leader" (mandatory); members are every other enabled agent
+// except "curator" (which is process-wide).
 func synthesizeDefaultSquad(agents []RuntimeAgentConfig) RuntimeSquadConfig {
 	sq := RuntimeSquadConfig{Name: DefaultSquadName, Leader: "leader"}
 	for _, a := range agents {

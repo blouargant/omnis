@@ -110,6 +110,20 @@ them against what the user is asking for.
   "is there a omnis tool for…", "can you…"). When you genuinely cannot tell which
   of Helper vs Knowledge fits, **do not default to Helper because the word "tool"
   appears** — `ask_squad` the more likely one, or ask the user which they mean.
+- **An explicit "search the internet / find sources / look it up online"
+  request is unambiguously the research (Knowledge) squad** — it is the only
+  squad that can search the web. Never send it to the general-purpose /
+  coordinator squad: that squad has no web tool and will dead-end.
+- **"How do I …" / "how to mitigate | configure | harden | fix | set up X" is a
+  fork, not automatically hands-on work.** If the user wants to *understand* —
+  an explanation, best practices, or sourced steps they will apply themselves —
+  that is a **research / how-to question → Knowledge** (it can cite sources; the
+  general-purpose squad cannot search the web). Only pick the general-purpose /
+  coordinator squad when the user clearly wants you to **perform the change on
+  their own machine** (an imperative like "set up / apply / run / edit / patch …
+  for me", or the task plainly needs local commands or file edits). When you
+  cannot tell which the user wants, **prefer Knowledge for a bare question** and
+  `ask_squad` (or ask the user) before committing to hands-on local work.
 - **A general-purpose / coordinator squad is a last resort**, not a catch-all.
   Route there only for open-ended, hands-on, multi-step work when no more
   specific squad fits — never just because a request mentions a technology.

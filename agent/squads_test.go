@@ -23,7 +23,7 @@ func TestSquadsExplicit(t *testing.T) {
   "agents": ["leader", "investigator", "web_agent", "summariser"],
   "squads": [
     {
-      "name": "default",
+      "name": "system",
       "description": "Full team",
       "leader": "leader",
       "members": ["investigator", "web_agent", "summariser"]
@@ -300,7 +300,7 @@ func TestSquadsAutoPrependDefault(t *testing.T) {
 func TestSquadAccessors(t *testing.T) {
 	runtime := RuntimeSettings{
 		Squads: []RuntimeSquadConfig{
-			{Name: "default", Leader: "leader"},
+			{Name: "system", Leader: "leader"},
 			{Name: "research", Leader: "leader"},
 		},
 	}

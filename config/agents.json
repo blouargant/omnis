@@ -40,15 +40,13 @@
       ]
     },
     {
-      "name": "Default",
-      "description": "General-purpose coordinator for coding and local-system tasks. Web research lives in the Knowledge squad and Kubernetes work in the Kubernetes squad.",
+      "name": "System",
+      "description": "Operating-system and local-host administration coordinator. Handles shell/command execution, package management, services and processes, filesystem and log inspection, configuration files, cron/systemd, networking, and other hands-on tasks on the local machine. Route here for OS/system-administration work and general hands-on local tasks that are NOT substantial software development (Coding squad), Kubernetes (Kubernetes squad), or web research/fact-finding (Knowledge squad). Also the general-purpose fallback when no more specific squad fits.",
       "leader": "leader",
       "members": [
         "investigator",
         "summariser",
-        "image_generator",
-        "helper",
-        "agentmd_reviewer"
+        "helper"
       ]
     },
     {
@@ -64,13 +62,14 @@
     },
     {
       "name": "Knowledge",
-      "description": "Information retrieval & document creation specialist. Web research and fact-finding, extracting text from PDFs/DOCX/PPTX/XLSX/images (including OCR), and converting or generating documents across formats (Markdown, DOCX, PDF, HTML, LaTeX). Route here for research/'who is'/'what is'/'find or summarise information about…' questions, including whether some software/library/tool exists out in the world (e.g. 'is there a transparent HTTP proxy in Rust?'), document parsing/extraction, OCR, and format conversion or generation.",
+      "description": "Information retrieval & content creation specialist. Web research and fact-finding, extracting text from PDFs/DOCX/PPTX/XLSX/images (including OCR), converting or generating documents across formats (Markdown, DOCX, PDF, HTML, LaTeX), and generating images from a text prompt. Route here for research/'who is'/'what is'/'find or summarise information about…' questions, including whether some software/library/tool exists out in the world (e.g. 'is there a transparent HTTP proxy in Rust?'), document parsing/extraction, OCR, format conversion or generation, and image generation.",
       "leader": "knowledge_leader",
       "members": [
         "doc_agent",
         "web_agent",
         "research_critic",
-        "summariser"
+        "summariser",
+        "image_generator"
       ]
     },
     {
@@ -99,7 +98,8 @@
         "code_scout",
         "code_docs",
         "reviewer",
-        "refactorer"
+        "refactorer",
+        "agentmd_reviewer"
       ]
     },
     {
