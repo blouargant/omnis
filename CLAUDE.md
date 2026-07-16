@@ -305,19 +305,17 @@ main.go / server/
             ├── Squads              ← one wired tree per squad in agents.json (see config/agents.json for the live set)
             │    ├── "Omnis"        ← Omnis ROUTER squad (default for new chats) — leaderless
             │    │    └── omnis              ← routes each request to the best squad (route_to_squad), then steps out
-            │    ├── "Default"     ← leader + full team (used when a session omits a squad / routed to)
-            │    │    ├── leader              ← coordinator (fs tools + planning + mailbox + handoff_to_router)
+            │    ├── "System"      ← OS/local-host administration coordinator + general fallback (== DefaultSquadName; used when a session omits a squad / routed to)
+            │    │    ├── leader              ← coordinator (fs/shell tools + planning + mailbox + handoff_to_router)
             │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │    │    ├── summariser          ← condenses bulk output
-            │    │    ├── image_generator      ← image generation
-            │    │    ├── helper               ← docs/registry/settings operator
-            │    │    └── agentmd_reviewer     ← read-only fresh-eyes verifier for /init-generated AGENT.md
+            │    │    └── helper               ← docs/registry/settings operator
             │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
             │    │    ├── coder               ← plans/edits + verify loop
-            │    │    └── code_scout · code_docs · reviewer · refactorer
+            │    │    └── code_scout · code_docs · reviewer · refactorer · agentmd_reviewer (read-only fresh-eyes verifier for /init-generated AGENT.md)
             │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
-            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic · summariser (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering)
+            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic · summariser · image_generator (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering; also hosts image generation)
             │    │    └── research_critic (high, read-only fresh-eyes brief reviewer; NO web tools)
             │    │         └── web_fetcher   ← NESTED sub-agent (hosted): retrieves + quotes, never judges.
             │    │                             Not a squad member, so the leader never sees it. See
@@ -956,11 +954,24 @@ clicking one opens the session **and scrolls to the matching exchange**
 (`scrollToTurn`, flashing it).
 
 **The agent's `report_sessions` tool call IS the result list.** `session_search`
-([registry/agents/session_search/](registry/agents/session_search/), `hosted`)
+([registry/agents/session_search/](registry/agents/session_search/), `balanced`)
 must call it once as its final tool call, listing the verified sessions + a
 one-line reason each; the web UI renders those args as the rows (falling back to
 the live results when the model skips it). This is a deliberate contract: parsing
 session ids out of free prose is what would break.
+
+**Model choice — `balanced`, not `hosted`.** Session search is interactive and
+low-volume, so latency dominates the decision. A matched-query benchmark (5 cold
+queries, gateway response-cache defeated) put `balanced` at **~2.4× faster**
+(median ~11 s vs ~26 s; e.g. `litellm` 24 s vs 59 s) for **~8.7× the cash cost** —
+but the absolute cost is ≤1.5¢/search, and the `hosted` tier is a self-hosted model
+priced at ~1/10 its true compute cost, so in real terms the two are roughly
+cost-neutral while `balanced` is materially faster. (`hosted` is the bigger model
+on modest hardware; `balanced` is smaller on faster infra.) `balanced` also reads a
+few more candidate sessions per search than `hosted` — inflating both its tokens and
+its latency — so its instruction's "verify the top candidates" discipline is the
+lever if that ever needs tightening. The heavy delegating leaders stay on `hosted`,
+where the 8.7× would actually bite.
 
 **`report_sessions` ends the turn host-side** — a successful call sets
 `ctx.Actions().SkipSummarization = true` ([internal/sessindex/tools.go](internal/sessindex/tools.go)),
@@ -3800,9 +3811,9 @@ Squads compose existing agents. Add a `SquadEntry` to the top-level
 
 Rules enforced at resolution time:
 
-- A squad named `default` is always present; the resolver synthesises
-  one (from enabled agents) when missing or when the user adds only a
-  non-default squad in the editor.
+- A squad named `system` (the value of `DefaultSquadName`) is always
+  present; the resolver synthesises one (from enabled agents) when missing
+  or when the user adds only a non-default squad in the editor.
 - `leader` and every `members[i]` must reference an enabled agent;
   `curator` cannot be a member (it is process-wide).
 - A non-`"none"` `leader` must be an agent marked `leader: true`.
