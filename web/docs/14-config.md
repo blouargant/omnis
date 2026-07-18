@@ -29,7 +29,7 @@ single root).
 - `squads` — named groups `{ leader, members[] }` composed from
   `agents:` and picked per chat session. A squad named `default` is
   always present; the resolver synthesises one when missing. Edit
-  squads through the **Squads** sub-tab under Settings → Agents.
+  squads by selecting a squad node in the **Fleet** (Settings → Agents).
 
 Each agent's definition lives in its own directory under
 `registry/agents/<name>/`, mirroring the skills layout. An `agent.json`
@@ -37,8 +37,9 @@ holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
 omnis (`leader`, `skill_editor`, `helper`, `summariser`,
-`curator`, `reflector`); the Web UI displays them under a **Built-in
-Agents** section, separate from user-added **Custom Agents**.
+`curator`, `reflector`); the Web UI's Fleet locks some of their fields
+(the binary bakes in defaults) and hides destructive actions like Delete,
+unlike fully-editable user-added **Custom Agents**.
 
 The registry directory follows the same lookup described below:
 `.agents/registry/agents` (and `agents/registry/agents` when present),

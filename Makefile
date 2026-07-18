@@ -80,6 +80,12 @@ i18n: ## Regenerate web/i18n/locales.js from the per-locale web/i18n/<locale>.js
 .PHONY: test
 test: ## Run unit tests
 	$(GO) test ./...
+	$(MAKE) test-web
+
+.PHONY: test-web
+test-web: ## Run the web/fleet JS unit tests (node --test)
+	node --test web/fleet/store.test.js
+	node --test web/fleet/canvas.test.js
 
 .PHONY: unit-tests
 unit-tests: test ## Run unit tests

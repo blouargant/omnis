@@ -224,7 +224,6 @@ const BASE_PATH = window.BASE_PATH || "";
   // change in models.json; cleared only by an actual restart.
   const RESTART_REQUIRED_FLAG = "agent_toolkit_restart_required";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
-  const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
   const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serper", "serpapi", "web", "registries", "code_search", "docs"];
   const TOOL_DESCRIPTIONS = {
     Bash:       tr("tool.desc.Bash"),
@@ -256,12 +255,542 @@ const BASE_PATH = window.BASE_PATH || "";
     serpapi: ["ddg", "serper"],
   };
 
-  const AGENT_SUBTABS = [
-    { id: "agents",  label: tr("subtab.agents")  },
-    { id: "squads",  label: tr("subtab.squads")  },
-    { id: "remotes", label: tr("subtab.remotes") },
-    { id: "globals", label: tr("subtab.globalEnv") },
-  ];
+  // The server-owned default (fallback) squad name — the squad whose name the
+  // editor treats as read-only. Fetched once from GET /api/squads `default_squad`
+  // and cached; degrades to "system" (the current DefaultSquadName) on any error,
+  // matching the store's own fallback so behaviour is identical offline.
+  let _fleetDefaultSquad = null;
+  async function fleetDefaultSquadName() {
+    if (_fleetDefaultSquad) return _fleetDefaultSquad;
+    try {
+      const r = await fetch(BASE_PATH + "/api/squads", { headers: authHeaders() });
+      if (r.ok) { const j = await r.json(); _fleetDefaultSquad = j.default_squad || "system"; }
+    } catch { /* offline / no server — fall through to the default */ }
+    return _fleetDefaultSquad || "system";
+  }
+
+  // Fleet pane (Phase 2): selectable tree (left) + editor host (right) + a
+  // Fleet-local Save/Discard bar driven by the store's dirty state. One store
+  // instance per mount; edits mutate its draft, Save PUTs store.serialize().
+  function renderFleetPane(host, cfg, defaultSquad) {
+    let store = window.FleetStore.create(cfg, { defaultSquad });
+    let selected = null; // { type, name }
+    host.innerHTML = `
+      <div class="fleet-shell">
+        <div class="fleet-shell-header">
+          <div class="fleet-shell-peers">
+            <span class="fleet-peer fleet-peer-home is-current">${escHtml(tr("subtab.fleet"))}</span>
+            <button type="button" class="fleet-peer" data-peer="models">${escHtml(tr("subtab.models"))}</button>
+            <button type="button" class="fleet-peer" data-peer="registry">${escHtml(tr("settings.menu.registries"))}</button>
+            <button type="button" class="fleet-peer" data-peer="global">${escHtml(tr("subtab.globalEnv"))}</button>
+          </div>
+          <div class="fleet-shell-actions">
+            <button type="button" class="fleet-shell-add" id="fleet-add" data-tip="${escHtml(tr("fleet.create.tip"))}" aria-label="${escHtml(tr("fleet.create.tip"))}">＋</button>
+            <button type="button" class="fleet-shell-reload" id="fleet-reload" data-tip="${escHtml(tr("fleet.shell.reloadTip"))}" aria-label="${escHtml(tr("fleet.shell.reloadTip"))}">⟳</button>
+          </div>
+        </div>
+        <div class="fleet-pane">
+          <div class="fleet-pane-tree" id="fleet-tree"></div>
+          <div class="fleet-pane-editor" id="fleet-editor"></div>
+        </div>
+        <div class="fleet-canvas-wrap">
+          <button type="button" class="fleet-canvas-toggle" id="fleet-canvas-toggle" aria-expanded="false">
+            <span class="fleet-canvas-chevron">▸</span> <span>${escHtml(tr("fleet.canvas.title"))}</span>
+          </button>
+          <div class="fleet-canvas-body" id="fleet-canvas-body" hidden></div>
+        </div>
+        <div class="fleet-actionbar" id="fleet-actions" hidden>
+          <span class="fleet-dirty-note">${escHtml(tr("fleet.editor.unsaved"))}</span>
+          <button type="button" class="fleet-discard" id="fleet-discard">${escHtml(tr("fleet.editor.discard"))}</button>
+          <button type="button" class="fleet-save" id="fleet-save">${escHtml(tr("fleet.editor.save"))}</button>
+        </div>
+        <div class="fleet-slideover" id="fleet-slideover" hidden>
+          <div class="fleet-slideover-backdrop" id="fleet-slideover-backdrop"></div>
+          <div class="fleet-slideover-panel" role="dialog" aria-modal="true">
+            <div class="fleet-slideover-head">
+              <span class="fleet-slideover-title" id="fleet-slideover-title"></span>
+              <button type="button" class="fleet-slideover-close" id="fleet-slideover-close" aria-label="${escHtml(tr("common.close"))}">✕</button>
+            </div>
+            <div class="fleet-slideover-body" id="fleet-slideover-body"></div>
+          </div>
+        </div>
+      </div>`;
+    const treeHost = host.querySelector("#fleet-tree");
+    const editorHost = host.querySelector("#fleet-editor");
+    const actions = host.querySelector("#fleet-actions");
+    const canvasBody = host.querySelector("#fleet-canvas-body");
+    const canvasToggle = host.querySelector("#fleet-canvas-toggle");
+
+    // ── Header shell + slide-over host (Phase 4) ──
+    const slideover  = host.querySelector("#fleet-slideover");
+    const slideBody  = host.querySelector("#fleet-slideover-body");
+    const slideTitle = host.querySelector("#fleet-slideover-title");
+    let slideOnClose = null;
+    function slideEsc(e) { if (e.key === "Escape") closeFleetSlideover(); }
+    function openFleetSlideover(title, buildBody, onClose) {
+      if (!slideover.hidden) closeFleetSlideover();   // fire a prior panel's onClose + drop its Esc listener
+      slideOnClose = onClose || null;
+      slideTitle.textContent = title;
+      slideBody.className = "fleet-slideover-body";    // drop classes a prior builder added (e.g. env-sections)
+      slideBody.innerHTML = "";
+      slideover.hidden = false;
+      document.addEventListener("keydown", slideEsc);
+      buildBody(slideBody);
+    }
+    function closeFleetSlideover() {
+      if (slideover.hidden) return;
+      slideover.hidden = true;
+      slideBody.innerHTML = "";
+      document.removeEventListener("keydown", slideEsc);
+      const cb = slideOnClose; slideOnClose = null;
+      if (typeof cb === "function") cb();
+    }
+    host.querySelector("#fleet-slideover-close").addEventListener("click", closeFleetSlideover);
+    host.querySelector("#fleet-slideover-backdrop").addEventListener("click", closeFleetSlideover);
+
+    // ── Shared context-menu dropdown (Phase 5) ──
+    // Body-appended, position:fixed so it escapes the pane's overflow; dismissed
+    // on any outside click / scroll / Escape / resize. `items` entries are
+    // "SEP" | { label, action?, submenu?, disabled?, danger? }. A submenu opens a
+    // nested fleetMenu anchored to the item (used by the candidate pickers).
+    let openMenuEl = null;
+    function closeFleetMenu() {
+      if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+      document.removeEventListener("click", closeFleetMenu, true);
+      document.removeEventListener("scroll", closeFleetMenu, true);
+      window.removeEventListener("resize", closeFleetMenu);
+      document.removeEventListener("keydown", menuEsc);
+    }
+    function menuEsc(e) { if (e.key === "Escape") closeFleetMenu(); }
+    function fleetMenu(ev, items) {
+      closeFleetMenu();
+      const menu = document.createElement("div");
+      menu.className = "fleet-ctx-menu";
+      items.forEach(it => {
+        if (it === "SEP") { const d = document.createElement("div"); d.className = "fleet-ctx-sep"; menu.appendChild(d); return; }
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "fleet-ctx-item" + (it.danger ? " danger" : "");
+        b.textContent = it.submenu ? `${it.label} ▸` : it.label;
+        if (it.disabled) b.disabled = true;
+        else b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (it.submenu) {
+            const r = b.getBoundingClientRect();
+            fleetMenu({ clientX: r.right, clientY: r.top }, it.submenu());
+          } else { closeFleetMenu(); it.action && it.action(); }
+        });
+        menu.appendChild(b);
+      });
+      document.body.appendChild(menu);
+      // Position within the viewport (flip left/up if it would overflow).
+      const vw = window.innerWidth, vh = window.innerHeight, r = menu.getBoundingClientRect();
+      let x = ev.clientX, y = ev.clientY;
+      if (x + r.width > vw) x = Math.max(4, vw - r.width - 4);
+      if (y + r.height > vh) y = Math.max(4, vh - r.height - 4);
+      menu.style.left = x + "px"; menu.style.top = y + "px";
+      openMenuEl = menu;
+      // Defer listener attach so the opening click doesn't immediately close it.
+      setTimeout(() => {
+        document.addEventListener("click", closeFleetMenu, true);
+        document.addEventListener("scroll", closeFleetMenu, true);
+        window.addEventListener("resize", closeFleetMenu);
+        document.addEventListener("keydown", menuEsc);
+      }, 0);
+    }
+
+    // Slide-over content builders. Stubs here; replaced by later tasks:
+    //   buildGlobalSlideover   → Task 2   buildModelsSlideover → Task 4
+    //   buildRegistrySlideover → Task 6
+    // Global config edits agent.json top-level keys, which the Fleet store's
+    // draft already owns and round-trips. Render the existing globals editor
+    // against store.draft() and route its onChange to store.touch(), so the
+    // Fleet Save bar (saveFleet → store.serialize()) persists it — one draft,
+    // one save. No separate save button here.
+    function buildGlobalSlideover(body) {
+      body.classList.add("env-sections");
+      renderAgentGlobals(store.draft(), { host: body, onChange: () => store.touch() });
+    }
+    // Models & Providers slide-over. models.json is a separate file the Fleet
+    // store does not own, so this has its OWN Save (via saveParsedFile), which
+    // preserves the embedder-restart banner. Reuses the host-parameterized
+    // renderProvidersPanel / renderModelsPanel (NOT renderModelsForm, which is
+    // bound to bodyEl + the classic footer).
+    let modelsSlideSub = state.activeModelsSubtab || "models";
+    async function buildModelsSlideover(body) {
+      if (!state.parsed.models) {
+        try { await loadParsed("models"); }
+        catch { body.innerHTML = `<p class="settings-error">${escHtml(tr("set.none"))}</p>`; return; }
+      }
+      const d = state.parsed.models.value;
+      if (!d.providers || typeof d.providers !== "object") d.providers = {};
+      if (!d.models || typeof d.models !== "object") d.models = {};
+
+      body.innerHTML = `
+        <div class="settings-form">
+          <div class="settings-subtabs" role="tablist">
+            ${MODELS_SUBTABS.map(t => `<button type="button" data-subtab="${t.id}" class="${modelsSlideSub === t.id ? "active" : ""}">${escHtml(t.label)}</button>`).join("")}
+          </div>
+          <div class="settings-subtab-body" id="fleet-models-panel"></div>
+        </div>
+        <div class="fleet-slideover-foot">
+          <span class="fleet-dirty-note" id="fleet-models-dirty" hidden>${escHtml(tr("fleet.editor.unsaved"))}</span>
+          <button type="button" class="fleet-save" id="fleet-models-save">${escHtml(tr("fleet.editor.save"))}</button>
+        </div>`;
+
+      const panel = body.querySelector("#fleet-models-panel");
+      const dirtyNote = body.querySelector("#fleet-models-dirty");
+      function refreshDirty() { dirtyNote.hidden = !(state.parsed.models && state.parsed.models.dirty); }
+      function paintPanel() {
+        if (modelsSlideSub === "providers") renderProvidersPanel(d, panel);
+        else renderModelsPanel(d, panel);
+        refreshDirty();
+      }
+      body.querySelectorAll(".settings-subtabs button").forEach(b => {
+        b.addEventListener("click", () => {
+          if (modelsSlideSub === b.dataset.subtab) return;
+          modelsSlideSub = b.dataset.subtab;
+          state.activeModelsSubtab = modelsSlideSub;
+          body.querySelectorAll(".settings-subtabs button").forEach(x => x.classList.toggle("active", x.dataset.subtab === modelsSlideSub));
+          paintPanel();
+        });
+      });
+      body.querySelector("#fleet-models-save").addEventListener("click", async () => {
+        setStatus(tr("set.status.saving"));
+        try {
+          const { restartRequired } = await saveParsedFile("models");
+          setStatus(restartRequired
+            ? "Saved. Restart the server to apply the embedder change."
+            : tr("set.status.savedReload"), "success");
+          showBanner(restartRequired);
+          if (!restartRequired) await doReload();
+          refreshDirty();
+        } catch (e) {
+          setStatus(tr("set.status.saveFailed", { error: e.message }), "error");
+        }
+      });
+
+      // The panels re-render themselves after add/edit and call
+      // markFormDirty("models"); keep the footer's dirty note in step by
+      // re-reading the flag on pointer interactions within the panel.
+      panel.addEventListener("click", () => setTimeout(refreshDirty, 0));
+      panel.addEventListener("input", () => setTimeout(refreshDirty, 0));
+
+      paintPanel();
+    }
+    // Registries hub, mounted in the slide-over. Installs can change agent.json
+    // server-side, so opening is dirty-guarded (openPeer) and closing re-syncs
+    // the store from disk (resyncFromServer). renderRegistriesHub is async; it
+    // paints into `body` itself.
+    function buildRegistrySlideover(body) {
+      renderRegistriesHub(body);
+    }
+
+    const PEER = {
+      models:   { title: tr("subtab.models"),            build: buildModelsSlideover,   onClose: () => paintEditor() },
+      registry: { title: tr("settings.menu.registries"), build: buildRegistrySlideover, onClose: () => resyncFromServer() },
+      global:   { title: tr("subtab.globalEnv"),         build: buildGlobalSlideover,   onClose: null },
+    };
+    function openPeer(id) {
+      const p = PEER[id];
+      if (!p) return;
+      if ((id === "registry" || id === "models") && store.dirty()) { setStatus(tr("fleet.shell.dirtyBlock"), "error"); return; }
+      openFleetSlideover(p.title, p.build, p.onClose);
+    }
+    host.querySelectorAll(".fleet-peer[data-peer]").forEach(btn => {
+      btn.addEventListener("click", () => openPeer(btn.dataset.peer));
+    });
+
+    // ⟳ reload. A reload rebuilds the pane from the on-disk config, discarding
+    // any unsaved Fleet draft — so confirm first when the store is dirty.
+    host.querySelector("#fleet-reload").addEventListener("click", async () => {
+      if (store.dirty() && !await appConfirm(tr("fleet.shell.reloadDirty"))) return;
+      await doReload();
+    });
+
+    host.querySelector("#fleet-add").addEventListener("click", (ev) => {
+      fleetMenu(ev, [
+        { label: tr("fleet.create.squad"), action: async () => {
+          const name = store.addSquad();
+          const chosen = await appPrompt(tr("fleet.create.squadName"), name);
+          const sq = store.squad(name);
+          if (chosen && sq) { sq.name = chosen; store.touch(); }
+          select({ type: "squad", name: (chosen || name) });
+        } },
+        { label: tr("fleet.create.agent"), action: async () => {
+          const name = store.addAgent();
+          const chosen = await appPrompt(tr("fleet.create.agentName"), name);
+          const a = store.agent(name);
+          if (chosen && a) { a.name = chosen; store.touch(); }
+          select({ type: "agent", name: (chosen || name) });
+        } },
+        { label: tr("fleet.create.importAgent"), action: async () => {
+          if (store.dirty() && !await appConfirm(tr("fleet.shell.reloadDirty"))) return;
+          const result = await importAgentDialog();
+          if (!result) return;
+          try {
+            const res = await skillsPost("/agents/import", { content: result.content, enable: result.enable });
+            const names = (res.agents || []).map(a => a.name).join(", ");
+            if ((res.agents || []).some(a => a.enabled)) {
+              await doReload();   // rebuilds the Fleet from disk via reloadRebuild (resyncFromServer)
+            } else {
+              setStatus(tr("set.agent.imported", { names }), "success");
+            }
+          } catch (e) {
+            setStatus(tr("set.status.importFailed", { error: e.message }), "error");
+          }
+        } },
+      ]);
+    });
+
+    const CANVAS_KEY = "agent_toolkit_fleet_canvas_open";
+    let canvasOpen = localStorage.getItem(CANVAS_KEY) === "1";
+    function paintCanvas() { if (canvasOpen) window.FleetCanvas.render(canvasBody, store.model()); }
+    function applyCanvasState() {
+      canvasBody.hidden = !canvasOpen;
+      canvasToggle.setAttribute("aria-expanded", canvasOpen ? "true" : "false");
+      canvasToggle.querySelector(".fleet-canvas-chevron").textContent = canvasOpen ? "▾" : "▸";
+      if (canvasOpen) paintCanvas();
+    }
+    canvasToggle.addEventListener("click", () => {
+      canvasOpen = !canvasOpen; localStorage.setItem(CANVAS_KEY, canvasOpen ? "1" : "0"); applyCanvasState();
+    });
+
+    // Per-node context menu. Agent vs squad menus land in Tasks 6/7.
+    function openNodeMenu(ref, ev, node) {
+      if (ref.type === "squad") return openSquadNodeMenu(ref, ev, node);
+      if (ref.type === "agent") return openAgentNodeMenu(ref, ev, node);
+    }
+    // Squad node menu. Router squads never reach here (no kebab). The default
+    // squad is protected: no remove, no leaderless.
+    function openSquadNodeMenu(ref, ev, node) {
+      const name = ref.name;
+      const sq = store.squad(name);
+      if (!sq) return;
+      const m = store.model();
+      const kind = (m.squads.find(s => s.name === name) || {}).kind;
+      if (kind === "router") return; // defensive — router has no kebab
+      const isDefault = store.isDefaultSquad(name);
+      const leaderless = kind === "leaderless";
+      const items = [];
+
+      // Add member… — enabled agents not already the leader/a member.
+      const memberCands = (m.agents || [])
+        .filter(x => x && x.name && (x.enabled === undefined || x.enabled) && x.name.toLowerCase() !== "curator")
+        .filter(x => x.name.toLowerCase() !== (sq.leader || "").toLowerCase()
+          && !(sq.members || []).some(mm => mm.toLowerCase() === x.name.toLowerCase()))
+        .map(x => x.name);
+      items.push({ label: leaderless ? tr("fleet.menu.setMember") : tr("fleet.menu.addMember"),
+        disabled: memberCands.length === 0,
+        submenu: () => memberCands.map(cn => ({ label: cn, action: () => { store.addMember(name, cn); } })) });
+
+      // Make leader… — leader-eligible agents (never for the leaderless kind,
+      // whose "leader" is the leader dropdown's (none) option; use the editor).
+      if (!leaderless) {
+        const isLeaderAgent = x => !!x.leader || (x.name || "").toLowerCase() === "leader";
+        const leaderCands = (m.agents || [])
+          .filter(x => x && x.name && (x.enabled === undefined || x.enabled) && x.name.toLowerCase() !== "curator" && isLeaderAgent(x))
+          .filter(x => x.name.toLowerCase() !== (sq.leader || "").toLowerCase())
+          .map(x => x.name);
+        items.push({ label: tr("fleet.menu.setLeader"), disabled: leaderCands.length === 0,
+          submenu: () => leaderCands.map(cn => ({ label: cn, action: () => { store.setLeader(name, cn); } })) });
+      }
+
+      items.push("SEP");
+      items.push({ label: tr("fleet.menu.duplicate"), action: () => {
+        const nn = store.duplicateSquad(name); if (nn) select({ type: "squad", name: nn }); } });
+
+      if (!isDefault) {
+        items.push("SEP");
+        items.push({ label: tr("fleet.menu.deleteSquad"), danger: true, action: async () => {
+          if (!await appConfirm(tr("set.confirm.deleteSquad", { name }))) return;
+          store.removeSquad(name);
+          if (selected && selected.type === "squad" && selected.name.toLowerCase() === name.toLowerCase()) { selected = null; paintEditor(); }
+        } });
+      }
+
+      fleetMenu(ev, items);
+    }
+    // Agent node menu. `node.kind` is leader|member|sole|subagent|unused;
+    // `node.squadName` (when present) is the squad this instance appears under.
+    function openAgentNodeMenu(ref, ev, node) {
+      const name = ref.name;
+      const a = store.agent(name);
+      if (!a) return;
+      const m = store.model();
+      const squadName = node && node.squadName;
+      // The router squad is auto-managed; never offer mutating actions on its
+      // member (disabling/deleting it would brick routing).
+      if (squadName) {
+        const rsq = m.squads.find(s => s.name.toLowerCase() === squadName.toLowerCase());
+        if (rsq && rsq.kind === "router") return;
+      }
+      const isBuiltin = isBuiltinAgent(name);
+      const isEnabled = name === "leader" ? true : a.enabled !== false;
+      const items = [];
+
+      // Add to team… — sub-agents this agent may delegate to (cycle-safe).
+      const teamCands = store.teamCandidates(name).filter(c =>
+        !((a.subagents || []).some(s => s.toLowerCase() === c.toLowerCase())));
+      items.push({ label: tr("fleet.menu.addTeam"), disabled: teamCands.length === 0,
+        submenu: () => teamCands.map(c => ({ label: c, action: () => { store.addToTeam(name, c); } })) });
+
+      // Add to squad… — squads (non-router) that don't already include this agent.
+      const squadCands = m.squads.filter(sq => sq.kind !== "router")
+        .filter(sq => sq.leader.toLowerCase() !== name.toLowerCase()
+          && !(sq.members || []).some(mm => mm.toLowerCase() === name.toLowerCase()))
+        .map(sq => sq.name);
+      items.push({ label: tr("fleet.menu.addSquad"), disabled: squadCands.length === 0,
+        submenu: () => squadCands.map(sn => ({ label: sn, action: () => { store.addMember(sn, name); } })) });
+
+      // Make leader (of the squad this node appears under) — only for a member
+      // node in a real (non-leaderless, non-router) squad, and only if the agent
+      // is leader-eligible.
+      const sq = squadName ? store.squad(squadName) : null;
+      const sqKind = sq ? m.squads.find(s => s.name === sq.name).kind : null;
+      const isLeaderAgent = !!a.leader || name.toLowerCase() === "leader";
+      if (node && node.kind === "member" && sqKind === "squad" && isLeaderAgent) {
+        items.push({ label: tr("fleet.menu.makeLeader"), action: () => { store.setLeader(squadName, name); } });
+      }
+
+      items.push("SEP");
+      items.push({ label: isEnabled ? tr("fleet.menu.disable") : tr("fleet.menu.enable"),
+        disabled: name === "leader", action: () => { store.setEnabled(name, !isEnabled); } });
+      items.push({ label: tr("fleet.menu.duplicate"), action: () => {
+        const nn = store.duplicateAgent(name); if (nn) select({ type: "agent", name: nn }); } });
+
+      items.push("SEP");
+      // Remove-from-squad for a member/leader appearance; delete for the agent
+      // itself (unused pool) — built-ins can be disabled but never deleted.
+      if (node && node.kind === "member" && squadName) {
+        items.push({ label: tr("fleet.menu.removeFromSquad"), danger: true,
+          action: () => { store.toggleMember(squadName, name); } });
+      } else if (node && node.kind === "leader" && squadName) {
+        items.push({ label: tr("fleet.menu.removeFromSquad"), danger: true,
+          disabled: true, action: () => {} }); // leader removal is via the squad editor's leader dropdown
+      }
+      if (!isBuiltin) {
+        items.push({ label: tr("fleet.menu.deleteAgent"), danger: true, action: async () => {
+          if (!await appConfirm(tr("set.confirm.removeAgent", { name }))) return;
+          store.removeAgent(name);
+          if (selected && selected.type === "agent" && selected.name.toLowerCase() === name.toLowerCase()) { selected = null; paintEditor(); }
+        } });
+      }
+
+      fleetMenu(ev, items);
+    }
+
+    function paintTree() {
+      window.FleetTree.render(treeHost, store.model(), {
+        selectedRef: selected,
+        onSelect: select,
+        onMenu: openNodeMenu,
+        onReorder: (sq, from, to) => store.reorderMember(sq, from, to),
+        onDropMember: (sq, agent) => { store.addMember(sq, agent); },
+      });
+    }
+    function paintActions() { actions.hidden = !store.dirty(); }
+    // onEditorRename keeps `selected` pointed at the entity being edited when
+    // the open squad/agent editor renames it in place. store.commit() re-clones
+    // the draft into a new object, so after a save the editors re-fetch by
+    // NAME (store.squad(name)/store.agent(name)) — if `selected.name` were
+    // left stale at the pre-rename value, that lookup would miss and the
+    // editor would silently collapse to the "select a node" prompt even
+    // though the rename itself saved fine. This does not repaint by itself —
+    // it runs synchronously before the mutation's own store.touch(), so the
+    // tree/action-bar repaint that touch() triggers already sees the fresh name.
+    function onEditorRename(newName) {
+      if (selected) selected = { type: selected.type, name: newName };
+    }
+    function paintEditor() {
+      if (!selected) { editorHost.innerHTML = `<div class="fleet-editor-empty">${escHtml(tr("fleet.editor.selectPrompt"))}</div>`; return; }
+      if (selected.type === "router") return window.FleetEditor.renderRouterInfo(editorHost, store, selected.name);
+      if (selected.type === "squad")  return window.FleetEditor.renderSquadEditor(editorHost, store, selected.name, onEditorRename);
+      if (selected.type === "agent")  return window.FleetEditor.renderAgentEditor(editorHost, store, selected.name, onEditorRename, () => openPeer("models"));
+      editorHost.innerHTML = "";
+    }
+    function select(ref) { selected = ref; paintTree(); paintEditor(); }
+
+    // Any store mutation repaints the tree (labels/badges) + the action bar.
+    // Editors repaint themselves; tree/actions repaint here. The minimap
+    // repaints too, but only when it's open (paintCanvas no-ops otherwise).
+    store.onChange(() => { paintTree(); paintActions(); if (canvasOpen) paintCanvas(); });
+
+    host.querySelector("#fleet-discard").addEventListener("click", async () => {
+      if (!store.dirty()) return;
+      if (!await appConfirm(tr("set.confirm.discard"))) return;
+      store.discard(); paintEditor();
+    });
+    host.querySelector("#fleet-save").addEventListener("click", () => saveFleet(store, () => { paintTree(); paintActions(); paintEditor(); }));
+
+    // Rebuild the store from a fresh agent.json (e.g. after a registry install
+    // changed it server-side). Safe only when the current store is clean — the
+    // caller guarantees that. Preserves the selected node by name.
+    async function resyncFromServer() {
+      try {
+        delete state.parsed["agent"];
+        await loadParsed("agent");
+      } catch { return; } // leave the current store in place on failure
+      const fresh = state.parsed["agent"].value;
+      store = window.FleetStore.create(fresh, { defaultSquad });
+      store.onChange(() => { paintTree(); paintActions(); if (canvasOpen) paintCanvas(); });
+      // Drop a selection that no longer resolves in the fresh config.
+      if (selected && selected.type === "agent" && !store.agent(selected.name)) selected = null;
+      if (selected && selected.type === "squad" && !store.squad(selected.name)) selected = null;
+      paintTree(); paintEditor(); paintActions(); if (canvasOpen) paintCanvas();
+    }
+
+    // Repaint the Fleet in place after a config reload (instead of renderBody
+    // tearing down the whole settings body). resyncFromServer re-reads agent.json
+    // and rebuilds the store + tree/editor, preserving the selection by name; any
+    // open slide-over (e.g. the Registries hub during an install) is left mounted.
+    reloadRebuild = () => resyncFromServer();
+
+    paintTree(); paintEditor(); paintActions(); applyCanvasState();
+  }
+
+  // Map a store.validate() error to a localized, actionable Save-blocked message.
+  function fleetInvalidMessage(err) {
+    const key = {
+      "dup-squad": "dupSquad", "leaderless-count": "leaderlessCount",
+      "leader-missing": "leaderMissing", "leader-disabled": "leaderDisabled",
+      "member-missing": "memberMissing", "member-disabled": "memberDisabled",
+      "subagent-missing": "subagentMissing", "subagent-disabled": "subagentDisabled",
+    }[err.code] || "dupSquad";
+    return tr("fleet.invalid." + key, err);
+  }
+
+  // saveFleet — saves the Fleet draft through the SAME route + prepare step
+  // the classic editor uses (server does the per-agent fan-out + layered
+  // delta-write), then adopts the saved value as the new base and
+  // hot-reloads the fleet.
+  async function saveFleet(store, after) {
+    if (!store.dirty()) return;
+    const v = store.validate();
+    if (!v.ok) { setStatus(fleetInvalidMessage(v.errors[0]), "error"); return; }
+    setStatus(tr("set.status.saving"));
+    try {
+      const p = state.parsed["agent"];
+      const payload = prepareForSave("agent", store.serialize()); // agent case: identity clone
+      const r = await fetch(BASE_PATH + `/api/config/parsed/agent`, {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ data: payload, mtime: p ? p.mtime : 0 }),
+      });
+      if (!r.ok) throw new Error(await errText(r));
+      const j = await r.json();
+      // Keep the classic editor's parsed cache in sync with what we saved.
+      if (p) { p.value = deepClone(store.serialize()); p.data = deepClone(p.value); p.mtime = j.mtime; p.dirty = false; }
+      store.commit();                 // adopt draft as the new base (dirty → false)
+      delete state.raw["agent"];      // invalidate raw view cache
+      setStatus(tr("set.status.savedReload"), "success");
+      showBanner(false);              // agent.json never carries the embedder identity → no restart
+      await doReload();               // hot-reload so the edit takes effect
+      if (typeof after === "function") after();
+    } catch (e) {
+      setStatus(tr("set.status.saveFailed", { error: e.message }), "error");
+    }
+  }
 
   const MODELS_SUBTABS = [
     { id: "providers", label: tr("subtab.providers") },
@@ -294,16 +823,12 @@ const BASE_PATH = window.BASE_PATH || "";
     // opened from an autonomous Appearance/Documentation view.
     lastMenuFile: "skills",
     activeView: "form", // 'form' | 'raw'
-    activeAgentSubtab: "agents", // only used when activeFile === 'agent'
     activeModelsSubtab: "models", // only used when activeFile === 'models'
     activeProviderName: null,     // selected provider in the Providers sub-tab
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
     activeMCPSubtab: "servers",    // only used when activeFile === 'mcp'
     activeA2ASubtab: "agents",     // only used when activeFile === 'a2a'
     activeCommandsSubtab: "user",  // only used when activeFile === USER_COMMANDS_ID
-    activeAgentIdx: 0,            // selected agent in the fleet list
-    activeAgentInitialized: false, // true once localStorage restore has been attempted
-    activeSquadIdx: 0,            // selected squad in the squads list
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
@@ -330,6 +855,13 @@ const BASE_PATH = window.BASE_PATH || "";
   // so the standalone per-kind "Remotes" sub-tabs behave exactly as before.
   // (Agents / Squads use the separate refreshRemotesRightFn indirection.)
   let registriesHubRefresh = null;
+
+  // When the Fleet pane is mounted, it registers a `reloadRebuild` so that a
+  // config reload repaints the Fleet in place instead of rebuilding the whole
+  // settings body (which would eject the user from an open slide-over — e.g. a
+  // registry install). Cleared by renderBody() on any full-body rebuild so a
+  // stale Fleet closure never fires after navigating away.
+  let reloadRebuild = null;
 
   function escHtml(s) {
     return String(s)
@@ -533,7 +1065,8 @@ const BASE_PATH = window.BASE_PATH || "";
       // either persisted or discarded by the hasAnyUnsaved check above.
       for (const k of Object.keys(state.parsed)) delete state.parsed[k];
       for (const k of Object.keys(state.raw)) delete state.raw[k];
-      if (state.activeFile) renderBody();
+      if (reloadRebuild) { try { await reloadRebuild(); } catch (_) { if (state.activeFile) renderBody(); } }
+      else if (state.activeFile) renderBody();
       // Notify the main app shell so it can refresh anything cached from the
       // server side (squad picker, etc.) without a full page reload.
       window.dispatchEvent(new CustomEvent("omnis:config-reloaded", { detail: { generation: body.generation } }));
@@ -971,6 +1504,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // ─── Rendering ─────────────────────────────────────────────────────────
   async function renderBody() {
+    reloadRebuild = null; // a full-body rebuild supersedes any Fleet in-place hook
     bodyEl.innerHTML = `<p class="settings-loading">${escHtml(tr("set.loading"))}</p>`;
     setStatus("");
     applyClientOnlyChrome();
@@ -1771,350 +2305,25 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // ── agent.json form ──
   async function renderAgentForm() {
+    reloadRebuild = null; // renderFleetPane re-sets its own in-place reload hook on mount
     await loadBuiltinAgents();
     const id = "agent";
     const d = state.parsed[id].value;
     if (!Array.isArray(d.agents)) d.agents = [];
     if (!Array.isArray(d.squads)) d.squads = [];
-    // Models now live in models.json; ensure the parsed cache is warm so
-    // the agent's "Model Reference" dropdown sees the catalogue without a
-    // race against its own render.
     if (!state.parsed.models) {
       try { await loadParsed("models"); }
       catch { /* missing models.json is fine — dropdown shows (none) */ }
     }
-
-    const sub = state.activeAgentSubtab;
-    bodyEl.innerHTML = `
-      <div class="settings-form">
-        <div class="settings-subtabs" role="tablist">
-          ${AGENT_SUBTABS.map(t => `
-            <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
-          `).join("")}
-        </div>
-        <div class="settings-subtab-body"></div>
-      </div>
-    `;
-
-    bodyEl.querySelectorAll(".settings-subtabs button").forEach(b => {
-      b.addEventListener("click", () => {
-        if (state.activeAgentSubtab === b.dataset.subtab) {
-          if (b.dataset.subtab === "remotes" && state.agentRemotes &&
-              (state.agentRemotes.browsing || state.agentRemotes.viewing || state.squadRemotes?.browsing)) {
-            state.agentRemotes = { browsing: null, viewing: null };
-            state.squadRemotes = { browsing: null };
-            renderAgentForm();
-          }
-          return;
-        }
-        if (b.dataset.subtab === "remotes") {
-          state.agentRemotes = { browsing: null, viewing: null };
-          state.squadRemotes = { browsing: null };
-        }
-        state.activeAgentSubtab = b.dataset.subtab;
-        renderAgentForm();
-      });
-    });
-
-    const host = bodyEl.querySelector(".settings-subtab-body");
-    if (sub === "globals") {
-      host.innerHTML = `<div id="agent-globals-host" class="env-sections"></div>`;
-      renderAgentGlobals(d);
-    } else if (sub === "squads") {
-      // Surface a synthesised `default` squad in the editor whenever it is
-      // missing, so users see what the server already provides as fallback
-      // and never end up saving a squads list without one. Marking the
-      // form dirty here writes the default into agent.json on Save —
-      // intentional, so it round-trips cleanly through the JSON view.
-      if (!d.squads.some(sq => (sq.name || "").toLowerCase() === "default")) {
-        d.squads.unshift(synthesizeDefaultSquad(d.agents));
-        markFormDirty(id);
-      }
-      host.innerHTML = `
-        <div class="agent-split-layout">
-          <div class="agent-fleet-panel">
-            <div class="agent-fleet-header">
-              <span class="agent-fleet-title">${escHtml(tr("set.fleet.squadsTitle"))}</span>
-              <button type="button" class="agent-fleet-add" id="add-squad" data-tip="${escHtml(tr("set.fleet.addSquad"))}">+</button>
-            </div>
-            <div class="agent-fleet-list" id="squad-list"></div>
-          </div>
-          <div class="agent-detail-panel" id="squad-detail-panel"></div>
-        </div>
-      `;
-      bodyEl.querySelector("#add-squad").addEventListener("click", () => {
-        const isLeader = a => !!a.leader || (a.name || "").toLowerCase() === "leader";
-        const leaderName = (d.agents.find(a => isLeader(a)) || d.agents.find(a => a.name === "leader") || d.agents[0] || { name: "leader" }).name;
-        d.squads.push({ name: "new-squad", description: "", leader: leaderName, members: [] });
-        state.activeSquadIdx = d.squads.length - 1;
-        markFormDirty(id);
-        renderAgentSquads(d);
-      });
-      renderAgentSquads(d);
-    } else if (sub === "remotes") {
-      renderAgentRemotesTab(d, host);
-    } else {
-      host.innerHTML = `
-        <div class="agent-split-layout">
-          <div class="agent-fleet-panel">
-            <div class="agent-fleet-header">
-              <span class="agent-fleet-title">${escHtml(tr("set.fleet.activeFleet"))}</span>
-              <button type="button" class="agent-fleet-import" id="import-agent" data-tip="${escHtml(tr("set.fleet.importAgent"))}">&#8595;</button>
-              <button type="button" class="agent-fleet-add" id="add-agent" data-tip="${escHtml(tr("set.fleet.addAgent"))}">+</button>
-            </div>
-            <div class="agent-fleet-list" id="agent-fleet-list"></div>
-          </div>
-          <div class="agent-detail-panel" id="agent-detail-panel"></div>
-        </div>
-      `;
-      bodyEl.querySelector("#add-agent").addEventListener("click", () => {
-        d.agents.push({ name: "new-agent", enabled: true, tools: [] });
-        state.activeAgentIdx = d.agents.length - 1;
-        markFormDirty(id);
-        renderAgentAgents(d);
-      });
-      bodyEl.querySelector("#import-agent").addEventListener("click", async () => {
-        const result = await importAgentDialog();
-        if (!result) return;
-        try {
-          const res = await skillsPost("/agents/import", { content: result.content, enable: result.enable });
-          const names = (res.agents || []).map(a => a.name).join(", ");
-          const anyEnabled = (res.agents || []).some(a => a.enabled);
-          if (anyEnabled) {
-            await doReload();
-            await loadParsed("agent");
-            state.activeAgentSubtab = "agents";
-            const lastName = (res.agents || []).filter(a => a.enabled).map(a => a.name).pop();
-            const newAgents = (state.parsed["agent"].value || {}).agents || [];
-            const newIdx = lastName ? newAgents.findIndex(a => a.name === lastName) : newAgents.length - 1;
-            state.activeAgentIdx = newIdx >= 0 ? newIdx : newAgents.length - 1;
-            renderAgentForm();
-          } else {
-            setStatus(tr("set.agent.imported", { names }), "success");
-          }
-        } catch (e) {
-          setStatus(tr("set.status.importFailed", { error: e.message }), "error");
-        }
-      });
-      renderAgentAgents(d);
-    }
+    bodyEl.innerHTML = `<div class="settings-form"><div id="fleet-host"></div></div>`;
+    // Learn the protected default squad name from the server (renamed "default"→"system").
+    renderFleetPane(bodyEl.querySelector("#fleet-host"), d, await fleetDefaultSquadName());
     updateFooter();
   }
 
-  // synthesizeDefaultSquad mirrors the server-side logic for the editor:
-  // build a `default` squad from the enabled agents so the user always sees
-  // it in the Squads sub-tab — even when the JSON file has no squads block.
-  function synthesizeDefaultSquad(agents) {
-    const enabled = (Array.isArray(agents) ? agents : [])
-      .filter(a => a && a.name && (a.enabled === undefined || a.enabled));
-    let leader = (enabled.find(a => (a.name || "").toLowerCase() === "leader") || enabled[0] || { name: "leader" }).name;
-    const members = enabled
-      .map(a => a.name)
-      .filter(n => n && n.toLowerCase() !== "leader" && n.toLowerCase() !== "curator");
-    return {
-      name: "default",
-      description: "General-purpose squad — automatically generated.",
-      leader,
-      members,
-    };
-  }
-
-  // ── Squads sub-tab: list + detail editor ──
-  // Squads compose existing agents (by name) into named profiles. The
-  // editor mirrors the Agents sub-tab visually: a left-hand list of
-  // squads with an inline detail panel for the selected entry.
-  function renderAgentSquads(d) {
-    const id = "agent";
-    const listEl = bodyEl.querySelector("#squad-list");
-    if (!listEl) return;
-    if (!Array.isArray(d.squads)) d.squads = [];
-    if (state.activeSquadIdx >= d.squads.length) state.activeSquadIdx = Math.max(0, d.squads.length - 1);
-
-    listEl.innerHTML = "";
-    d.squads.forEach((sq, idx) => {
-      const item = document.createElement("div");
-      item.className = "agent-fleet-item" + (idx === state.activeSquadIdx ? " active" : "");
-      const isDefault = (sq.name || "").toLowerCase() === "default";
-      const memberCount = Array.isArray(sq.members) ? sq.members.length : 0;
-      item.innerHTML = `
-        <div class="agent-fleet-item-name">${escHtml(sq.name || tr("app.askuser.unnamed"))} ${isDefault ? '<span class="squad-default-tag">default</span>' : ""}</div>
-        <div class="agent-fleet-item-meta">${escHtml(trN("set.squad.memberCount", memberCount))}</div>
-      `;
-      item.addEventListener("click", () => { state.activeSquadIdx = idx; renderAgentSquads(d); });
-      listEl.appendChild(item);
-    });
-
-    renderSquadDetail(d, state.activeSquadIdx);
-  }
-
-  function renderSquadDetail(d, idx) {
-    const panel = bodyEl.querySelector("#squad-detail-panel");
-    if (!panel) return;
-    if (!Array.isArray(d.squads) || d.squads.length === 0) {
-      panel.innerHTML = `<div class="agent-detail-empty">${escHtml(tr("set.squad.empty"))}</div>`;
-      return;
-    }
-    const sq = d.squads[idx];
-    if (!sq) {
-      panel.innerHTML = `<div class="agent-detail-empty">${escHtml(tr("set.squad.selectPrompt"))}</div>`;
-      return;
-    }
-    // Leader candidates: only agents marked `leader: true` (the agent named
-    // "leader" is the canonical default — auto-flagged when the field is
-    // absent, matching the server-side resolver).
-    const isLeaderAgent = a => !!a.leader || (a.name || "").toLowerCase() === "leader";
-    const leaderCandidates = d.agents
-      .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator" && isLeaderAgent(a))
-      .map(a => a.name);
-    const memberCandidates = d.agents
-      .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator");
-    const members = Array.isArray(sq.members) ? sq.members : [];
-    const isDefault = (sq.name || "").toLowerCase() === "default";
-    // A leaderless squad (leader "" or "none") runs a single member agent
-    // directly, with no coordinator. The default squad always needs a leader.
-    const leaderless = !isDefault && (!sq.leader || (sq.leader || "").toLowerCase() === "none");
-
-    // Sort: selected members first (in the order they appear in `members`),
-    // then the rest. The leader of the squad is forced last and rendered
-    // as disabled — a squad cannot list its own leader as a member.
-    const memberOrder = (a) => {
-      if (a.name === sq.leader) return 2;
-      return members.includes(a.name) ? 0 : 1;
-    };
-    const sortedMembers = [...memberCandidates].sort((a, b) => {
-      const ra = memberOrder(a), rb = memberOrder(b);
-      if (ra !== rb) return ra - rb;
-      if (ra === 0) return members.indexOf(a.name) - members.indexOf(b.name);
-      return 0;
-    });
-
-    const agentIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
-
-    panel.innerHTML = `
-      <div class="agent-detail-section">
-        <div class="agent-detail-field">
-          <label class="agent-detail-label">${escHtml(tr("common.name"))}</label>
-          <input type="text" class="agent-detail-input" id="squad-name" value="${escHtml(sq.name || "")}" ${isDefault ? "disabled" : ""} />
-          ${isDefault ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.defaultNameHint"))}</div>` : ""}
-        </div>
-        <div class="agent-detail-field">
-          <label class="agent-detail-label">${escHtml(tr("common.description"))}</label>
-          <input type="text" class="agent-detail-input" id="squad-desc" value="${escHtml(sq.description || "")}" placeholder="${escHtml(tr("set.squad.descPlaceholder"))}" />
-        </div>
-        <div class="agent-detail-field">
-          <label class="agent-detail-label">${escHtml(tr("set.squad.leader"))}</label>
-          <select class="agent-detail-input" id="squad-leader">
-            ${isDefault ? "" : `<option value="none" ${leaderless ? "selected" : ""}>${escHtml(tr("set.squad.leaderNone"))}</option>`}
-            ${leaderCandidates.map(n => `<option value="${escHtml(n)}" ${!leaderless && n === sq.leader ? "selected" : ""}>${escHtml(n)}</option>`).join("")}
-          </select>
-          ${leaderless ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.leaderlessHint"))}</div>` : ""}
-        </div>
-        <div class="agent-detail-field">
-          <label class="agent-detail-label">${escHtml(tr("set.squad.members"))}</label>
-          <div class="agent-tools-grid" id="squad-members">
-            ${sortedMembers.map(a => {
-              const isOn = members.includes(a.name);
-              const isLeaderRow = a.name === sq.leader;
-              const desc = a.description || "";
-              return `
-              <div class="agent-tool-card${isOn ? " tool-on" : ""}${isLeaderRow ? " tool-disabled" : ""}" data-name="${escHtml(a.name)}" data-tip="${escHtml(desc)}">
-                <div class="agent-tool-icon">${agentIcon}</div>
-                <div class="agent-tool-info">
-                  <span class="agent-tool-name">${escHtml(a.name)}</span>
-                  <span class="agent-tool-desc">${escHtml(desc)}</span>
-                </div>
-                <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
-              </div>
-            `;
-            }).join("")}
-          </div>
-          <div class="agent-detail-hint">${escHtml(leaderless ? tr("set.squad.membersHintLeaderless") : tr("set.squad.membersHint"))}</div>
-        </div>
-        ${!isDefault ? `<div class="squad-detail-actions"><button type="button" class="agent-detail-remove" id="squad-remove">${escHtml(tr("set.squad.deleteBtn"))}</button></div>` : ""}
-      </div>
-    `;
-
-    const onChange = () => { markFormDirty("agent"); };
-
-    const nameInput = panel.querySelector("#squad-name");
-    if (nameInput && !isDefault) {
-      nameInput.addEventListener("input", () => {
-        sq.name = nameInput.value;
-        // Re-render the list so the label tracks the input. Keep selection.
-        renderAgentSquads(d);
-        // Restore focus / caret to the still-mounted input.
-        const ref = bodyEl.querySelector("#squad-name");
-        if (ref) { ref.focus(); ref.setSelectionRange(ref.value.length, ref.value.length); }
-        onChange();
-      });
-    }
-    panel.querySelector("#squad-desc").addEventListener("input", (e) => {
-      sq.description = e.target.value; onChange();
-    });
-    panel.querySelector("#squad-leader").addEventListener("change", (e) => {
-      sq.leader = e.target.value;
-      if ((sq.leader || "").toLowerCase() === "none") {
-        // Leaderless: keep at most one member so the single agent runs directly.
-        if (Array.isArray(sq.members) && sq.members.length > 1) {
-          sq.members = [sq.members[0]];
-        }
-      } else if (Array.isArray(sq.members)) {
-        // Drop the new leader from the members list (a squad cannot list its
-        // own leader as a member).
-        sq.members = sq.members.filter(m => m !== sq.leader);
-      }
-      onChange();
-      renderSquadDetail(d, idx);
-    });
-    panel.querySelectorAll("#squad-members .agent-tool-card").forEach(card => {
-      if (card.classList.contains("tool-disabled")) return;
-      card.addEventListener("click", () => {
-        const name = card.dataset.name;
-        if (!Array.isArray(sq.members)) sq.members = [];
-        if (leaderless) {
-          // Single-agent selection: clicking an agent makes it the sole member;
-          // clicking the selected one clears it.
-          sq.members = sq.members.includes(name) ? [] : [name];
-        } else if (sq.members.includes(name)) {
-          sq.members = sq.members.filter(m => m !== name);
-        } else {
-          sq.members.push(name);
-        }
-        // Reflect the new selection in place instead of re-rendering the whole
-        // grid. A full renderAgentSquads(d) re-sorts members (selected first),
-        // so the just-clicked chip would jump to the front of the list. Keeping
-        // each card where it is until the next real render (page/server reload)
-        // is far less jarring while toggling several members.
-        const paint = (el, on) => {
-          el.classList.toggle("tool-on", on);
-          const pill = el.querySelector(".agent-tool-toggle-pill");
-          if (pill) { pill.classList.toggle("pill-on", on); pill.classList.toggle("pill-off", !on); }
-        };
-        paint(card, sq.members.includes(name));
-        if (leaderless) {
-          // Single-select: clear the visual state of every other member card.
-          panel.querySelectorAll("#squad-members .agent-tool-card").forEach(other => {
-            if (other === card || other.classList.contains("tool-disabled")) return;
-            paint(other, false);
-          });
-        }
-        onChange();
-      });
-    });
-    if (!isDefault) {
-      panel.querySelector("#squad-remove").addEventListener("click", async () => {
-        if (!await appConfirm(tr("set.confirm.deleteSquad", { name: sq.name }))) return;
-        d.squads.splice(idx, 1);
-        state.activeSquadIdx = Math.max(0, idx - 1);
-        markFormDirty("agent");
-        renderAgentSquads(d);
-      });
-    }
-  }
-
-  function renderAgentGlobals(d) {
-    const el = bodyEl.querySelector("#agent-globals-host");
-    const onChange = () => markFormDirty("agent");
+  function renderAgentGlobals(d, opts) {
+    const el = (opts && opts.host) || bodyEl.querySelector("#agent-globals-host");
+    const onChange = (opts && opts.onChange) || (() => markFormDirty("agent"));
 
     function envText(key) {
       const wrap = document.createElement("div");
@@ -3395,683 +3604,6 @@ const BASE_PATH = window.BASE_PATH || "";
     serper: tr("tool.display.serper"), serpapi: tr("tool.display.serpapi"), web: tr("tool.display.web"), registries: tr("tool.display.registries"),
     code_search: tr("tool.display.code_search"), docs: tr("tool.display.docs"),
   };
-
-  // updateFleetModelLine syncs the model display under a fleet-list item with
-  // the agent's current model_ref / recommended_model. Handles three states:
-  // a resolved model_ref, a recommended (angle-bracketed) fallback, or empty.
-  function updateFleetModelLine(fleetItem, a) {
-    const info = fleetItem.querySelector(".agent-fleet-info");
-    if (!info) return;
-    let modelEl = info.querySelector(".agent-fleet-model");
-    const desired = a.model_ref
-      ? { text: a.model_ref, recommended: false }
-      : (a.recommended_model ? { text: `<${a.recommended_model}>`, recommended: true } : null);
-    if (!desired) {
-      if (modelEl) modelEl.remove();
-      return;
-    }
-    if (!modelEl) {
-      modelEl = document.createElement("span");
-      modelEl.className = "agent-fleet-model";
-      info.appendChild(modelEl);
-    }
-    modelEl.textContent = desired.text;
-    modelEl.classList.toggle("agent-fleet-model-recommended", desired.recommended);
-  }
-
-  function renderAgentAgents(d) {
-    const fleetList = bodyEl.querySelector("#agent-fleet-list");
-    const detailPanel = bodyEl.querySelector("#agent-detail-panel");
-    if (!fleetList || !detailPanel) return;
-
-    if (!d.agents.length) {
-      fleetList.innerHTML = `<p class="empty" style="padding:1rem">${escHtml(tr("set.fleet.noAgents"))}</p>`;
-      detailPanel.innerHTML = "";
-      return;
-    }
-
-    if (!state.activeAgentInitialized) {
-      state.activeAgentInitialized = true;
-      const savedName = localStorage.getItem(ACTIVE_AGENT_KEY);
-      let idx = savedName ? d.agents.findIndex(a => a.name === savedName) : -1;
-      // No valid prior selection: default to the leader if one exists,
-      // otherwise the first agent in the list.
-      if (idx < 0) {
-        const isLeader = a => !!a.leader || (a.name || "").toLowerCase() === "leader";
-        idx = d.agents.findIndex(isLeader);
-      }
-      state.activeAgentIdx = idx >= 0 ? idx : 0;
-    }
-
-    if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = d.agents.length - 1;
-    if (state.activeAgentIdx < 0) state.activeAgentIdx = 0;
-
-    const activeName = d.agents[state.activeAgentIdx]?.name;
-    if (activeName) localStorage.setItem(ACTIVE_AGENT_KEY, activeName);
-
-    // Fleet list
-    fleetList.innerHTML = "";
-
-    // Separate agents into built-in and custom strictly by the on-disk
-    // `builtin` flag — the source of truth. (The read-only / undeletable
-    // treatment is a separate axis driven by isBuiltinAgent(): agents wired
-    // into the binary. So a shipped-but-customizable agent can sit in the
-    // built-in group yet stay editable.)
-    const isBuiltinFlag = (a) => a.builtin === true;
-    const byName = (x, y) => (x.name || "").localeCompare(y.name || "", undefined, { sensitivity: "base" });
-    const builtinAgents = d.agents.filter(isBuiltinFlag).sort(byName);
-    const customAgents = d.agents.filter(a => !isBuiltinFlag(a)).sort(byName);
-
-    const renderAgentGroup = (agents, label) => {
-      if (agents.length === 0) return;
-
-      // Add section header
-      const header = document.createElement("div");
-      header.className = "agent-fleet-section-header";
-      header.innerHTML = `<div class="section-label">${label}</div>`;
-      fleetList.appendChild(header);
-
-      // Add agents in this section
-      agents.forEach((a) => {
-        const item = document.createElement("div");
-        const originalIdx = d.agents.indexOf(a);
-        item.className = "agent-fleet-item" + (originalIdx === state.activeAgentIdx ? " active" : "");
-        const agentSourceBadge = a.source === "local"
-          ? `<span class="source-badge source-badge-local">local</span>`
-          : "";
-        let modelHtml = "";
-        if (a.model_ref) {
-          modelHtml = `<span class="agent-fleet-model">${escHtml(a.model_ref)}</span>`;
-        } else if (a.recommended_model) {
-          // Frontmatter declared a model the local catalog doesn't ship —
-          // render it greyed in angle brackets to flag the recommendation.
-          modelHtml = `<span class="agent-fleet-model agent-fleet-model-recommended">&lt;${escHtml(a.recommended_model)}&gt;</span>`;
-        }
-        item.innerHTML = `
-          <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
-          <div class="agent-fleet-info">
-            <span class="agent-fleet-name">${escHtml(a.name || tr("app.askuser.unnamed"))} ${agentSourceBadge}</span>
-            ${modelHtml}
-          </div>
-        `;
-        item.addEventListener("click", () => { state.activeAgentIdx = originalIdx; renderAgentAgents(d); });
-        fleetList.appendChild(item);
-      });
-    };
-
-    // Render custom agents first (labelled simply "AGENTS"), then built-in
-    renderAgentGroup(customAgents, tr("set.fleet.agentsLabel"));
-    renderAgentGroup(builtinAgents, tr("set.fleet.builtinAgentsLabel"));
-
-    // Detail panel
-    const modelsCatalog = state.parsed.models?.value?.models;
-    const modelOptions = modelsCatalog && typeof modelsCatalog === "object" ? Object.keys(modelsCatalog) : [];
-    renderAgentDetail(d, state.activeAgentIdx, modelOptions);
-  }
-
-  function renderAgentDetail(d, idx, modelOptions) {
-    const detailPanel = bodyEl.querySelector("#agent-detail-panel");
-    const a = d.agents[idx];
-    if (!a) { detailPanel.innerHTML = ""; return; }
-
-    const isLeader = a.name === "leader";
-    const isBuiltin = isBuiltinAgent(a.name);
-    const builtinDefaults = (state.builtinAgents && state.builtinAgents[a.name]) || null;
-    const onChange = () => markFormDirty("agent");
-
-    detailPanel.innerHTML = "";
-
-    // Title bar
-    const titleBar = document.createElement("div");
-    titleBar.className = "agent-detail-titlebar";
-    const isEnabled = isLeader ? true : a.enabled !== false;
-    const detailSourceBadge = a.source === "local"
-      ? `<span class="source-badge source-badge-local">local</span>`
-      : "";
-    titleBar.innerHTML = `
-      <div class="agent-detail-title-left">
-        <h2 class="agent-detail-name">${escHtml(a.name || tr("app.askuser.unnamed"))}</h2>
-        ${detailSourceBadge}
-        <span class="agent-live-badge">LIVE</span>
-      </div>
-      <div class="agent-detail-title-right">
-        <label class="agent-active-toggle-wrap">
-          <span class="agent-active-toggle-label">${escHtml(tr("set.agent.activeState"))}</span>
-          <span class="agent-toggle-switch">
-            <input type="checkbox" class="agent-toggle-input" ${isEnabled ? "checked" : ""} ${isLeader ? "disabled" : ""}>
-            <span class="agent-toggle-slider"></span>
-          </span>
-        </label>
-        ${isBuiltin ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
-      </div>
-    `;
-    titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
-      a.enabled = e.target.checked;
-      // update dot in fleet list
-      const dot = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-dot");
-      if (dot) { dot.className = "agent-fleet-dot " + (a.enabled ? "dot-live" : "dot-off"); }
-      onChange();
-    });
-    if (!isBuiltin) {
-      titleBar.querySelector(".agent-remove-link").addEventListener("click", async () => {
-        if (!await appConfirm(tr("set.confirm.removeAgent", { name: a.name }))) return;
-        d.agents.splice(idx, 1);
-        if (state.activeAgentIdx >= d.agents.length) state.activeAgentIdx = Math.max(0, d.agents.length - 1);
-        markFormDirty("agent"); renderAgentAgents(d);
-      });
-    }
-    detailPanel.appendChild(titleBar);
-
-    const body = document.createElement("div");
-    body.className = "agent-detail-body";
-
-    // ── General Settings ──
-    const genSection = document.createElement("section");
-    genSection.className = "agent-detail-section";
-    const genHdr = document.createElement("div");
-    genHdr.className = "agent-section-hdr";
-    genHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><h3>${escHtml(tr("set.hdr.generalSettings"))}</h3>`;
-    genSection.appendChild(genHdr);
-
-    const genGrid = document.createElement("div");
-    genGrid.className = "agent-gen-grid";
-
-    function genField(labelText, buildInput) {
-      const f = document.createElement("div");
-      f.className = "agent-gen-field";
-      const lbl = document.createElement("label");
-      lbl.className = "agent-gen-label";
-      lbl.textContent = labelText;
-      f.appendChild(lbl);
-      buildInput(f);
-      return f;
-    }
-
-    // Agent Display Name
-    genGrid.appendChild(genField(tr("set.agent.displayName"), f => {
-      const inp = document.createElement("input");
-      inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a.name || "";
-      if (isLeader) inp.disabled = true;
-      inp.addEventListener("input", () => {
-        a.name = inp.value;
-        detailPanel.querySelector(".agent-detail-name").textContent = a.name || tr("app.askuser.unnamed");
-        const nameEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-name");
-        if (nameEl) nameEl.textContent = a.name || tr("app.askuser.unnamed");
-        onChange();
-      });
-      f.appendChild(inp);
-    }));
-
-    // Model Reference
-    genGrid.appendChild(genField(tr("set.agent.modelRef"), f => {
-      const sel = document.createElement("select");
-      sel.className = "agent-gen-input";
-      for (const o of ["", ...modelOptions]) {
-        const opt = document.createElement("option");
-        opt.value = o; opt.textContent = o || tr("set.none");
-        if (o === (a.model_ref || "")) opt.selected = true;
-        sel.appendChild(opt);
-      }
-      sel.addEventListener("change", () => {
-        a.model_ref = sel.value;
-        const fleetItem = bodyEl.querySelectorAll(".agent-fleet-item")[idx];
-        if (fleetItem) updateFleetModelLine(fleetItem, a);
-        onChange();
-      });
-      f.appendChild(sel);
-
-      // Surface a frontmatter "model:" hint that the local catalog can't
-      // resolve as a recommended model in angle brackets.
-      if (a.recommended_model) {
-        const hint = document.createElement("span");
-        hint.className = "agent-model-recommendation";
-        hint.textContent = `<${a.recommended_model}>`;
-        hint.setAttribute("data-tip", tr("set.agent.recommendedTip"));
-        f.appendChild(hint);
-      }
-    }));
-
-    genSection.appendChild(genGrid);
-    body.appendChild(genSection);
-
-    // ── Available Tools ──
-    const toolSection = document.createElement("section");
-    toolSection.className = "agent-detail-section";
-    const toolHdr = document.createElement("div");
-    toolHdr.className = "agent-section-hdr";
-    toolHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><h3>${escHtml(tr("set.hdr.availableTools"))}</h3>`;
-    toolSection.appendChild(toolHdr);
-
-    const toolGrid = document.createElement("div");
-    toolGrid.className = "agent-tools-grid";
-    const effectiveTools = (isLeader && (!a.tools || !a.tools.length)) ? [...TOOL_GROUPS] : (a.tools || []);
-    const cur = new Set(effectiveTools);
-    const btnByTool = {};
-    const toolEntries = [];
-
-    // code_search only mounts when a semantic embedder is configured. Mirror
-    // the serpapi pattern and grey it out when no embedding model is selected
-    // (agents.json override wins, else models.json embed_model_ref). Env-only
-    // (OMNIS_EMBED_*) config isn't visible here — same limitation as serpapi_key.
-    const embedRef = (d.embed_model_ref || state.parsed.models?.value?.embed_model_ref || "").toString().trim();
-    const embedConfigured = !!embedRef;
-
-    for (const t of TOOL_GROUPS) {
-      const isSerpDisabled = t === "serpapi" && !d.serpapi_key;
-      const isSerperDisabled = t === "serper" && !d.serper_key;
-      const isCodeSearchDisabled = t === "code_search" && !embedConfigured;
-      const isDisabledTool = isSerpDisabled || isSerperDisabled || isCodeSearchDisabled;
-      const isOn = cur.has(t);
-      const btn = document.createElement("div");
-      btn.className = "agent-tool-card" + (isOn ? " tool-on" : "") + (isDisabledTool ? " tool-disabled" : "");
-      btn.setAttribute("data-tip", TOOL_DISPLAY[t] || "");
-      btn.innerHTML = `
-        <div class="agent-tool-icon">${TOOL_ICONS[t] || ""}</div>
-        <div class="agent-tool-info">
-          <span class="agent-tool-name">${escHtml(t)}</span>
-          <span class="agent-tool-desc">${escHtml(TOOL_DISPLAY[t] || "")}</span>
-        </div>
-        <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
-      `;
-      if (!isDisabledTool) {
-        btn.addEventListener("click", () => {
-          const wasOn = cur.has(t);
-          if (wasOn) {
-            cur.delete(t);
-            btn.classList.remove("tool-on");
-            btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
-          } else {
-            cur.add(t);
-            for (const peer of (TOOL_MUTEX[t] || [])) {
-              if (btnByTool[peer]) {
-                cur.delete(peer);
-                btnByTool[peer].classList.remove("tool-on");
-                btnByTool[peer].querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-off";
-              }
-            }
-            btn.classList.add("tool-on");
-            btn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill pill-on";
-          }
-          a.tools = Array.from(cur);
-          if (t === "Skill") {
-            skillsSec.classList.toggle("section-inactive", !cur.has("Skill"));
-          }
-          if (t === "mcp") {
-            mcpSec.classList.toggle("section-inactive", !cur.has("mcp"));
-          }
-          onChange();
-        });
-      }
-      btnByTool[t] = btn;
-      toolEntries.push({ btn, isOn });
-    }
-
-    // ── Feature toggle cards (Leader, Allow File Attachments) ──
-    // The "Leader" toggle marks an agent as eligible to lead a squad. The
-    // canonical agent named "leader" is auto-flagged and the toggle is
-    // locked on (cannot be unmarked).
-    const featureCards = [
-      {
-        key: "leader", label: "leader", desc: tr("set.agent.canLead"),
-        icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"/><path d="M5 20V8l7-4 7 4v12"/><path d="M9 20v-6h6v6"/></svg>`,
-        getValue: () => isLeader ? true : !!a.leader,
-        setValue: v => { a.leader = v; onChange(); },
-        locked: isLeader,
-      },
-      {
-        key: "allow_file_attachments", label: "files", desc: tr("set.agent.fileAttachments"),
-        icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
-        getValue: () => !!a.allow_file_attachments,
-        setValue: v => { a.allow_file_attachments = v; onChange(); },
-      },
-    ];
-    for (const fc of featureCards) {
-      let fcOn = fc.getValue();
-      const fcBtn = document.createElement("div");
-      fcBtn.className = "agent-tool-card" + (fcOn ? " tool-on" : "") + (fc.locked ? " tool-disabled" : "");
-      fcBtn.setAttribute("data-tip", fc.desc || "");
-      fcBtn.innerHTML = `
-        <div class="agent-tool-icon">${fc.icon}</div>
-        <div class="agent-tool-info">
-          <span class="agent-tool-name">${escHtml(fc.label)}</span>
-          <span class="agent-tool-desc">${escHtml(fc.desc)}</span>
-        </div>
-        <div class="agent-tool-toggle-pill ${fcOn ? "pill-on" : "pill-off"}"></div>
-      `;
-      if (!fc.locked) {
-        fcBtn.addEventListener("click", () => {
-          fcOn = !fcOn;
-          fc.setValue(fcOn);
-          fcBtn.classList.toggle("tool-on", fcOn);
-          fcBtn.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (fcOn ? "pill-on" : "pill-off");
-        });
-      }
-      toolEntries.push({ btn: fcBtn, isOn: fcOn });
-    }
-
-    // selected first, then unselected
-    toolEntries.sort((a, b) => Number(b.isOn) - Number(a.isOn));
-    for (const { btn } of toolEntries) toolGrid.appendChild(btn);
-
-    toolSection.appendChild(toolGrid);
-    body.appendChild(toolSection);
-
-    // ── Parallelism (max_instances) ──
-    // Only meaningful for sub-agents: it caps how many invocations the leader
-    // may fan out in a single tool call. The leader is never fanned out and the
-    // curator is a process-wide hook (both excluded by buildSubAgents), so the
-    // setting is inert for them — hide the control.
-    if (!isLeader && (a.name || "").toLowerCase() !== "curator") {
-      const parSec = document.createElement("section");
-      parSec.className = "agent-detail-section";
-      const parHdr = document.createElement("div");
-      parHdr.className = "agent-section-hdr";
-      parHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="21"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="18" y1="3" x2="18" y2="21"/></svg><h3>${escHtml(tr("set.hdr.parallelism"))}</h3>`;
-      parSec.appendChild(parHdr);
-      const parBody = document.createElement("div");
-      parBody.className = "agent-gen-grid";
-      const parField = document.createElement("div");
-      parField.className = "agent-gen-field";
-      const parLbl = document.createElement("label");
-      parLbl.className = "agent-gen-label";
-      parLbl.textContent = tr("set.agent.maxInstances");
-      // App tooltip (themed #tip-layer via data-tip), not the native browser
-      // title bubble, to match the rest of the settings UI.
-      const parInfo = document.createElement("span");
-      parInfo.className = "agent-gen-info";
-      parInfo.textContent = "?";
-      parInfo.setAttribute("data-tip", tr("set.agent.maxInstancesTip"));
-      parLbl.appendChild(parInfo);
-      // Custom stepper so the +/- controls match the app look & feel instead of
-      // the browser's native number spinner.
-      const parWrap = document.createElement("div");
-      parWrap.className = "num-stepper";
-      const parInp = document.createElement("input");
-      parInp.type = "number"; parInp.min = "1"; parInp.step = "1";
-      parInp.className = "agent-gen-input num-stepper-input";
-      parInp.value = String(Math.max(1, parseInt(a.max_instances, 10) || 1));
-      const parDec = document.createElement("button");
-      parDec.type = "button";
-      parDec.className = "num-stepper-btn";
-      parDec.textContent = "−";
-      parDec.setAttribute("aria-label", tr("set.agent.decrease"));
-      const parInc = document.createElement("button");
-      parInc.type = "button";
-      parInc.className = "num-stepper-btn";
-      parInc.textContent = "+";
-      parInc.setAttribute("aria-label", tr("set.agent.increase"));
-      const applyMax = () => {
-        let n = parseInt(parInp.value, 10);
-        if (!Number.isFinite(n) || n < 1) n = 1;
-        parInp.value = String(n);
-        parDec.disabled = n <= 1;
-        // Keep the file clean: only persist when it opts into parallelism.
-        if (n > 1) a.max_instances = n; else delete a.max_instances;
-        onChange();
-      };
-      const bump = (delta) => {
-        parInp.value = String((parseInt(parInp.value, 10) || 1) + delta);
-        applyMax();
-      };
-      parDec.addEventListener("click", () => bump(-1));
-      parInc.addEventListener("click", () => bump(1));
-      parInp.addEventListener("input", applyMax);
-      parInp.addEventListener("change", applyMax);
-      parDec.disabled = (parseInt(parInp.value, 10) || 1) <= 1;
-      parWrap.appendChild(parDec);
-      parWrap.appendChild(parInp);
-      parWrap.appendChild(parInc);
-      const parHint = document.createElement("p");
-      parHint.className = "agent-gen-hint";
-      parHint.textContent = tr("set.agent.maxInstancesHint");
-      parField.appendChild(parLbl);
-      parField.appendChild(parWrap);
-      parField.appendChild(parHint);
-      parBody.appendChild(parField);
-      parSec.appendChild(parBody);
-      body.appendChild(parSec);
-
-      // ── Sessions (resumable_sessions) ──
-      // Durable, re-attachable sub-agent sessions are ON by default (opt-out):
-      // each call returns a `session` handle the leader can pass back as
-      // resume_session to CONTINUE that exact conversation instead of starting
-      // fresh. Toggle OFF to make this sub-agent a stateless pure function (a
-      // throwaway session per call). Persist-clean: only the opt-out (false) is
-      // written; the default-on case leaves the key absent. Same leader/curator
-      // gate as Parallelism (both inert for non-fan-out roots).
-      const resSec = document.createElement("section");
-      resSec.className = "agent-detail-section";
-      const resHdr = document.createElement("div");
-      resHdr.className = "agent-section-hdr";
-      resHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><h3>${escHtml(tr("set.hdr.sessions"))}</h3>`;
-      resSec.appendChild(resHdr);
-      const resBody = document.createElement("div");
-      resBody.className = "agent-gen-grid";
-      const resField = document.createElement("div");
-      resField.className = "agent-gen-field";
-      const resRow = document.createElement("div");
-      resRow.className = "agent-toggle-row";
-      resRow.setAttribute("data-tip", tr("set.agent.resumableTip"));
-      const resSwitch = document.createElement("label");
-      resSwitch.className = "agent-toggle-switch";
-      const resCb = document.createElement("input");
-      resCb.type = "checkbox";
-      resCb.className = "agent-toggle-input";
-      // Opt-out default: checked unless explicitly disabled (resumable_sessions === false).
-      resCb.checked = a.resumable_sessions !== false;
-      resCb.addEventListener("change", () => {
-        if (resCb.checked) delete a.resumable_sessions; else a.resumable_sessions = false;
-        onChange();
-      });
-      const resSlider = document.createElement("span");
-      resSlider.className = "agent-toggle-slider";
-      resSwitch.appendChild(resCb);
-      resSwitch.appendChild(resSlider);
-      const resText = document.createElement("span");
-      resText.className = "agent-toggle-text";
-      resText.textContent = tr("set.agent.resumable");
-      resRow.appendChild(resSwitch);
-      resRow.appendChild(resText);
-      const resHint = document.createElement("p");
-      resHint.className = "agent-gen-hint";
-      resHint.textContent = tr("set.agent.resumableHint");
-      resField.appendChild(resRow);
-      resField.appendChild(resHint);
-      resBody.appendChild(resField);
-      resSec.appendChild(resBody);
-      body.appendChild(resSec);
-    }
-
-    // ── Team (subagents) ──
-    // This agent's OWN delegable team, mounted as tools exactly as a squad leader
-    // mounts its members. It is how an expensive specialist pushes bulk retrieval
-    // into a cheap gatherer's context instead of accumulating it in its own —
-    // retrieval cost is quadratic in ONE agent's tool calls, so who holds the
-    // fetched pages decides the bill.
-    //
-    // Offered for every agent EXCEPT the curator (a process-wide post-session hook,
-    // never delegable and never a delegator).
-    if ((a.name || "").toLowerCase() !== "curator") {
-      const teamSec = document.createElement("section");
-      teamSec.className = "agent-detail-section";
-      const teamHdr = document.createElement("div");
-      teamHdr.className = "agent-section-hdr";
-      teamHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><h3>${escHtml(tr("set.hdr.team"))}</h3>`;
-      teamSec.appendChild(teamHdr);
-
-      const teamBody = document.createElement("div");
-      teamBody.className = "agent-block-body";
-      renderAgentTeamBlock(teamBody, a, d.agents, onChange);
-      teamSec.appendChild(teamBody);
-      body.appendChild(teamSec);
-    }
-
-    // ── Skills ──
-    const skillsSec = document.createElement("section");
-    skillsSec.className = "agent-detail-section" + (cur.has("Skill") ? "" : " section-inactive");
-    const skillsHdr = document.createElement("div");
-    skillsHdr.className = "agent-section-hdr";
-    skillsHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><h3>${escHtml(tr("settings.title.skills"))}</h3>`;
-    skillsSec.appendChild(skillsHdr);
-    const skillsBody = document.createElement("div");
-    skillsBody.className = "skills-agent-body";
-    skillsSec.appendChild(skillsBody);
-    populateAgentSkillBlock(skillsBody, a, cur.has("Skill"), onChange);
-    body.appendChild(skillsSec);
-
-    // ── MCP Servers ──
-    const mcpSec = document.createElement("section");
-    mcpSec.className = "agent-detail-section" + (cur.has("mcp") ? "" : " section-inactive");
-    const mcpHdr = document.createElement("div");
-    mcpHdr.className = "agent-section-hdr";
-    mcpHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/><line x1="8" y1="16" x2="8" y2="20"/><line x1="16" y1="16" x2="16" y2="20"/></svg><h3>${escHtml(tr("settings.title.mcp"))}</h3>`;
-    mcpSec.appendChild(mcpHdr);
-    const mcpBody = document.createElement("div");
-    mcpBody.className = "skills-agent-body";
-    mcpSec.appendChild(mcpBody);
-    populateAgentMCPBlock(mcpBody, a, cur.has("mcp"), onChange);
-    body.appendChild(mcpSec);
-
-    // ── A2A Agents ──
-    const a2aSec = document.createElement("section");
-    a2aSec.className = "agent-detail-section";
-    const a2aHdr = document.createElement("div");
-    a2aHdr.className = "agent-section-hdr";
-    a2aHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg><h3>${escHtml(tr("settings.title.a2a"))}</h3>`;
-    a2aSec.appendChild(a2aHdr);
-    const a2aBody = document.createElement("div");
-    a2aBody.className = "skills-agent-body";
-    a2aSec.appendChild(a2aBody);
-    populateAgentA2ABlock(a2aBody, a, onChange);
-    body.appendChild(a2aSec);
-
-    // ── Instruction Set ──
-    const instrSection = document.createElement("section");
-    instrSection.className = "agent-detail-section";
-    const instrHdr = document.createElement("div");
-    instrHdr.className = "agent-section-hdr";
-    instrHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><h3>${escHtml(tr("set.hdr.instructionSet"))}</h3>`;
-    instrSection.appendChild(instrHdr);
-
-    const instrBody = document.createElement("div");
-    instrBody.className = "agent-instr-body";
-
-    // Public Description
-    const descF = document.createElement("div");
-    descF.className = "agent-instr-field";
-    const descLbl = document.createElement("label");
-    descLbl.className = "agent-instr-label";
-    descLbl.textContent = tr("set.agent.publicDesc");
-    if (isBuiltin) {
-      const tag = document.createElement("span");
-      tag.className = "agent-builtin-tag";
-      tag.textContent = tr("set.agent.builtin");
-      descLbl.appendChild(tag);
-    }
-    const descInp = document.createElement("input");
-    descInp.type = "text"; descInp.className = "agent-gen-input";
-    descInp.placeholder = tr("set.agent.descPlaceholder");
-    const descVal = isBuiltin && builtinDefaults ? (builtinDefaults.description || "") : (a.description || "");
-    descInp.value = descVal;
-    if (isBuiltin) {
-      descInp.disabled = true;
-      descInp.classList.add("agent-builtin-readonly");
-    } else {
-      descInp.addEventListener("input", () => { a.description = descInp.value; onChange(); });
-    }
-    descF.appendChild(descLbl);
-    descF.appendChild(descInp);
-    instrBody.appendChild(descF);
-
-    // System Instructions
-    const sysF = document.createElement("div");
-    sysF.className = "agent-instr-field";
-    const sysTop = document.createElement("div");
-    sysTop.className = "agent-instr-top-row";
-    const sysLbl = document.createElement("label");
-    sysLbl.className = "agent-instr-label";
-    sysLbl.textContent = tr("set.agent.systemInstructions");
-    if (isBuiltin) {
-      const tag = document.createElement("span");
-      tag.className = "agent-builtin-tag";
-      tag.textContent = tr("set.agent.builtin");
-      sysLbl.appendChild(tag);
-    }
-    const sysCount = document.createElement("span");
-    sysCount.className = "agent-instr-count";
-    const instrVal = isBuiltin && builtinDefaults ? (builtinDefaults.instruction || "") : (a.instruction || "");
-    sysCount.textContent = tr("set.agent.tokensUsed", { count: Math.round(instrVal.length / 4) });
-    sysTop.appendChild(sysLbl);
-    sysTop.appendChild(sysCount);
-    sysF.appendChild(sysTop);
-    const ta = document.createElement("textarea");
-    ta.className = "agent-instr-textarea"; ta.rows = 8; ta.value = instrVal;
-    if (isBuiltin) {
-      ta.disabled = true;
-      ta.classList.add("agent-builtin-readonly");
-    } else {
-      ta.addEventListener("input", () => {
-        a.instruction = ta.value;
-        sysCount.textContent = tr("set.agent.tokensUsed", { count: Math.round(ta.value.length / 4) });
-        onChange();
-      });
-    }
-    sysF.appendChild(ta);
-    instrBody.appendChild(sysF);
-
-    instrSection.appendChild(instrBody);
-    body.appendChild(instrSection);
-
-    // ── Advanced paths (collapsible) ──
-    const adv = document.createElement("details");
-    adv.className = "agent-advanced";
-    adv.innerHTML = `<summary class="agent-advanced-summary">${escHtml(tr("set.agent.advancedPaths"))}</summary>`;
-    const advGrid = document.createElement("div");
-    advGrid.className = "agent-gen-grid";
-    for (const [key, label] of [
-      ["softskills_dir", "softskills_dir"],
-      ["mcp_config_path", "mcp_config_path"], ["permissions_config_path", "permissions_config_path"],
-    ]) {
-      const f = document.createElement("div");
-      f.className = "agent-gen-field";
-      const lbl = document.createElement("label");
-      lbl.className = "agent-gen-label"; lbl.textContent = label;
-      const inp = document.createElement("input");
-      inp.type = "text"; inp.className = "agent-gen-input"; inp.value = a[key] || "";
-      if (isLeader && !a[key]) inp.placeholder = tr("set.default");
-      inp.addEventListener("input", () => { a[key] = inp.value; onChange(); });
-      f.appendChild(lbl); f.appendChild(inp); advGrid.appendChild(f);
-    }
-    adv.appendChild(advGrid);
-    body.appendChild(adv);
-
-    // ── Move / Delete ──
-    if (!isLeader) {
-      const leaderFirst = d.agents[0]?.name === "leader";
-      const upOk   = idx > 0 && !(leaderFirst && idx === 1);
-      const downOk = idx < d.agents.length - 1;
-      const acts = document.createElement("div");
-      acts.className = "agent-detail-actions";
-      const upBtn = document.createElement("button");
-      upBtn.type = "button"; upBtn.className = "up-btn"; upBtn.textContent = tr("set.agent.moveUp");
-      if (!upOk) upBtn.disabled = true;
-      const dnBtn = document.createElement("button");
-      dnBtn.type = "button"; dnBtn.className = "down-btn"; dnBtn.textContent = tr("set.agent.moveDown");
-      if (!downOk) dnBtn.disabled = true;
-      upBtn.addEventListener("click", () => {
-        [d.agents[idx - 1], d.agents[idx]] = [d.agents[idx], d.agents[idx - 1]];
-        state.activeAgentIdx = idx - 1; markFormDirty("agent"); renderAgentAgents(d);
-      });
-      dnBtn.addEventListener("click", () => {
-        [d.agents[idx + 1], d.agents[idx]] = [d.agents[idx], d.agents[idx + 1]];
-        state.activeAgentIdx = idx + 1; markFormDirty("agent"); renderAgentAgents(d);
-      });
-      acts.appendChild(upBtn); acts.appendChild(dnBtn);
-      body.appendChild(acts);
-    }
-
-    detailPanel.appendChild(body);
-  }
 
   // ── permissions.json form (Claude Code nomenclature) ──
   // Tiers are deny → ask → allow (precedence order). Each rule is a
@@ -6873,65 +6405,11 @@ const BASE_PATH = window.BASE_PATH || "";
 
   const remoteAgentsCache = {}; // keyed by registry ID → { agents, timestamp }
 
-  // Top-level entry: renders the "Remotes" sub-tab inside the Agents pane.
   // Shared callback used by browse/detail views to re-render only the right
-  // panel without rebuilding the full split layout. Set by renderAgentRemotesTab.
+  // panel without rebuilding the full split layout. Set by
+  // renderRegistriesHub's refreshRegistriesRight (the classic Agents-section
+  // Remotes tab that used to also set this was removed in Phase 6).
   let refreshRemotesRightFn = null;
-
-  // host is the container provided by renderAgentForm.
-  async function renderAgentRemotesTab(d, host) {
-    if (!state.agentRemotes) state.agentRemotes = { browsing: null, viewing: null };
-    if (!state.squadRemotes) state.squadRemotes = { browsing: null };
-    if (!state.activeRemoteKind) state.activeRemoteKind = "agents";
-
-    host.innerHTML = `
-      <div class="agent-split-layout">
-        <div class="agent-fleet-panel">
-          <div class="agent-fleet-header">
-            <span class="agent-fleet-title">REGISTRIES</span>
-          </div>
-          <div class="agent-fleet-list" id="remotes-kind-list"></div>
-        </div>
-        <div class="agent-detail-panel" id="remotes-right-panel"></div>
-      </div>
-    `;
-
-    const kindList = host.querySelector("#remotes-kind-list");
-    const rightEl  = host.querySelector("#remotes-right-panel");
-
-    function renderKindNav() {
-      kindList.innerHTML = "";
-      for (const k of [{ id: "agents", label: tr("settings.menu.agent") }, { id: "squads", label: tr("subtab.squads") }]) {
-        const item = document.createElement("div");
-        item.className = "agent-fleet-item" + (state.activeRemoteKind === k.id ? " active" : "");
-        item.innerHTML = `<div class="agent-fleet-item-name">${escHtml(k.label)}</div>`;
-        item.addEventListener("click", () => {
-          if (state.activeRemoteKind === k.id && !state.agentRemotes.browsing && !state.agentRemotes.viewing && !state.squadRemotes.browsing) return;
-          state.activeRemoteKind = k.id;
-          state.agentRemotes = { browsing: null, viewing: null };
-          state.squadRemotes = { browsing: null };
-          renderKindNav();
-          refreshRight();
-        });
-        kindList.appendChild(item);
-      }
-    }
-
-    async function refreshRight() {
-      if (state.activeRemoteKind === "agents") {
-        if (state.agentRemotes.viewing)  { await renderAgentRemoteDetailView(rightEl); return; }
-        if (state.agentRemotes.browsing) { await renderAgentRemoteBrowseView(rightEl); return; }
-        await renderAgentRegistryList(rightEl, refreshRight);
-      } else {
-        if (state.squadRemotes.browsing) { await renderSquadRemoteBrowseView(rightEl); return; }
-        await renderSquadRegistryList(rightEl, refreshRight);
-      }
-    }
-
-    refreshRemotesRightFn = refreshRight;
-    renderKindNav();
-    await refreshRight();
-  }
 
   async function renderAgentRegistryList(rightEl, onRefresh) {
     rightEl.innerHTML = `
@@ -7335,10 +6813,6 @@ const BASE_PATH = window.BASE_PATH || "";
       } else if (res.enabled) {
         await doReload();
         await loadParsed("agent");
-        state.activeAgentSubtab = "agents";
-        const newAgents = (state.parsed["agent"].value || {}).agents || [];
-        const newIdx = newAgents.findIndex(a => a.name === res.name);
-        state.activeAgentIdx = newIdx >= 0 ? newIdx : newAgents.length - 1;
         renderAgentForm();
         showInstallResult(`Agent "${res.name}" installed and enabled.`, res.warnings);
       } else {
@@ -9312,6 +8786,28 @@ const BASE_PATH = window.BASE_PATH || "";
     return embedderFingerprint(parse(oldVal)) !== embedderFingerprint(parse(newVal));
   }
 
+  // saveParsedFile persists one parsed config file (the "form" view path) and
+  // reports whether the save changed the embedder identity (models.json only).
+  // Extracted from saveActive so the Fleet Models slide-over can save
+  // models.json without going through state.activeFile / the classic footer.
+  async function saveParsedFile(id) {
+    const p = state.parsed[id];
+    const prevData = p.data;
+    const r = await fetch(BASE_PATH + `/api/config/parsed/${id}`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ data: prepareForSave(id, p.value), mtime: p.mtime }),
+    });
+    if (!r.ok) throw new Error(await errText(r));
+    const j = await r.json();
+    const restartRequired = embedderChangedOnSave(id, prevData, p.value);
+    p.data = deepClone(p.value);
+    p.mtime = j.mtime;
+    p.dirty = false;
+    delete state.raw[id]; // Invalidate raw cache so the raw view re-fetches the canonical JSON.
+    return { restartRequired };
+  }
+
   async function saveActive() {
     const id = state.activeFile;
     setStatus(tr("set.status.saving"));
@@ -9332,21 +8828,7 @@ const BASE_PATH = window.BASE_PATH || "";
         // Invalidate parsed cache so the form view re-fetches.
         delete state.parsed[id];
       } else {
-        const p = state.parsed[id];
-        const prevData = p.data;
-        const r = await fetch(BASE_PATH + `/api/config/parsed/${id}`, {
-          method: "PUT",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ data: prepareForSave(id, p.value), mtime: p.mtime }),
-        });
-        if (!r.ok) throw new Error(await errText(r));
-        const j = await r.json();
-        restartRequired = embedderChangedOnSave(id, prevData, p.value);
-        p.data = deepClone(p.value);
-        p.mtime = j.mtime;
-        p.dirty = false;
-        // Invalidate raw cache so the raw view re-fetches the canonical JSON.
-        delete state.raw[id];
+        restartRequired = (await saveParsedFile(id)).restartRequired;
       }
       setStatus(restartRequired
         ? "Saved. Restart the server to apply the embedder change."
@@ -9730,6 +9212,15 @@ const BASE_PATH = window.BASE_PATH || "";
   window.addEventListener("beforeunload", e => {
     for (const id of Object.keys(state.raw)) if (state.raw[id].dirty) { e.preventDefault(); e.returnValue = ""; return; }
     for (const id of Object.keys(state.parsed)) if (state.parsed[id].dirty) { e.preventDefault(); e.returnValue = ""; return; }
+  });
+
+  // Wire the Fleet squad/agent editors (web/fleet/editor.js) with the
+  // settings.js-scope helpers they call. Called once, after every referenced
+  // identifier above is defined.
+  window.FleetEditor.init({
+    tr, escHtml, appConfirm, state, isBuiltinAgent,
+    renderAgentTeamBlock, populateAgentSkillBlock, populateAgentMCPBlock, populateAgentA2ABlock,
+    TOOL_GROUPS, TOOL_MUTEX, TOOL_ICONS, TOOL_DISPLAY,
   });
 
   // Expose & wire button.

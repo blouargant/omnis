@@ -573,8 +573,14 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		}
 		out := struct {
 			Default string     `json:"default"`
-			Squads  []squadDTO `json:"squads"`
-		}{Default: agent.DefaultSquadName}
+			// DefaultSquad is the always-present fallback squad (DefaultSquadName)
+			// — the one whose name the editor must treat as read-only. Distinct
+			// from Default above, which is the squad NEW CHATS start on (the router
+			// when routing is enabled). Exposed so the web client never hardcodes
+			// the name and drifts from the server (see the "system" rename).
+			DefaultSquad string     `json:"default_squad"`
+			Squads       []squadDTO `json:"squads"`
+		}{Default: agent.DefaultSquadName, DefaultSquad: agent.DefaultSquadName}
 		if manager == nil {
 			c.JSON(http.StatusOK, out)
 			return
@@ -589,6 +595,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		// This preselects Omnis in the new-chat picker and suppresses a
 		// redundant squad badge on router-default sessions.
 		out.Default = inst.DefaultName
+		out.DefaultSquad = inst.DefaultName
 		if inst.RouterName != "" {
 			out.Default = inst.RouterName
 		}

@@ -165,8 +165,8 @@ the full field reference.
 ## Adding a squad
 
 Squads compose existing agents — they don't redefine them. Edit
-`agents.json` (or use the **Squads** sub-tab under Settings →
-Agent) to declare a new squad:
+`agents.json` (or select a squad node in the **Fleet** under Settings →
+Agents) to declare a new squad:
 
 ```json
 {

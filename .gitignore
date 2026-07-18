@@ -51,3 +51,6 @@ dist/wheels/
 
 # stray build artifact (was committed by mistake)
 yoke
+
+# Brainstorming visual-companion scratch (superpowers)
+.superpowers/

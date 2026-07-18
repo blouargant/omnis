@@ -36,69 +36,50 @@ fail with a stale-mtime error — reload the panel and retry.
 
 ## Editing Agents
 
-The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
-**Models**, and **Global configuration**. See the dedicated
-[Agents Settings](19-agents.md) page for full field-by-field reference.
+The Agents section **is the Fleet**: a topology tree on the left — router →
+squads → leaders → members → nested sub-agent teams, plus an **Unused
+agents** pool for agents no squad references — and a right-hand editor for
+whichever node you select. A header row above the tree carries four peers,
+**Fleet · Models · Registry · Global**, plus a reload button (Models and
+Registry are also their own top-level Settings sections — Registry being
+the **Registries** section — while Global is reached only through this
+header peer). See the dedicated [Agents Settings](19-agents.md) page for
+the full field-by-field reference.
 
 Key points:
 
-- **Agents** — fleet list split into **Built-in Agents** (`leader`,
-  `skill_editor`, `helper`, `summariser`, `curator`,
-  `reflector`) and **Custom Agents**. Each agent's detail panel exposes
-  its tool set, skill/MCP/A2A wiring, system instruction, and model
+- **`＋` create** — opens a menu: **New squad…**, **New agent…**, and
+  **Import agent from file…** (paste or load a Claude Code-style `.md` or
+  `.json` agent definition).
+- **Node context menus** — right-click a node, or use its **`⋯`** button:
+  squads offer add/set member, set/make leader, duplicate, and delete;
+  agents offer add to team, add to squad, make leader, enable/disable,
+  duplicate, remove from squad, and delete.
+- **Drag-and-drop** — reorder a squad's members, or drop a member or an
+  unused agent onto a different squad to add it there as a shared
   reference.
-- **Squads** — named groups `{ leader, members[] }` (see below).
-- **Remotes** — browse and install agent definitions from remote Git
-  repositories. Switch between Agents and Squads registry views.
-- **Models** — model profiles (provider, model ID, base URL, API key,
-  context length, pricing) referenced by each agent's `model_ref`.
-- **Global configuration** — fleet-wide settings, in order: token optimization
-  (`token_optimization`), the web-search API keys (`serper_key`, `serpapi_key`,
-  each with a **Test** button), then `softskills_dir`, `bash_timeout_seconds`,
-  and path overrides.
+- Selecting an **agent** node opens its editor: tool set, skill/MCP/A2A
+  wiring, system instruction, and model reference.
+- Selecting a **squad** node opens its editor: leader, members,
+  description, and the leaderless option (see "Squads" below).
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.
 
-### Squads sub-tab
+### Squads
 
 A **squad** is a named group `{ leader, members[] }` that a chat session
-picks at creation time. Each squad is wired as its own leader +
-sub-agent tree; selecting a different squad in the New Chat picker
-gives the user a different set of delegable sub-agents while reusing
-the same shared agent definitions.
+picks at creation time — selecting a different squad gives the user a
+different set of delegable sub-agents while reusing the same shared agent
+definitions. New chats actually start on the **Omnis router** squad rather
+than `default` — it routes each request to the best squad and hands over
+(see [Architecture](10-architecture.md#omnis-router-default-chat-routing));
+choose the router squad, or disable routing entirely, with the top-level
+`router_squad` key in `agents.json` (`"none"` disables; absent ⇒ `omnis`).
 
-The sub-tab shows a list of squads on the left and a structured detail
-panel on the right:
-
-- **Name** — case-insensitive, unique within the file. The `default`
-  squad is always present and its name is read-only.
-- **Description** — surfaced as the picker tooltip.
-- **Leader** — dropdown over the enabled agents (excluding `curator` and
-  `reflector`), plus a **`(none — run single agent directly)`** option that
-  makes the squad **leaderless**: it then needs exactly one member, which
-  runs directly with no coordinator (the shape used by `helper` and the
-  Omnis router).
-- **Members** — checkbox grid over the enabled agents. The squad's
-  current leader is disabled in the grid (a squad can never list its
-  own leader as a member). Curator and reflector are excluded — they stay
-  process-wide. A leaderless squad switches this to single-select.
-- **Delete squad** — bottom-right; the `default` squad cannot be
-  deleted.
-
-The editor always shows a `default` squad. If your `agent.json` doesn't
-declare one, the editor synthesises one from the enabled agents the
-first time you open the sub-tab — saving writes it to disk so the
-agent.json round-trips cleanly. Saving any change triggers the standard
-**Reload** banner.
-
-**Omnis router.** New chats start on the **Omnis router** squad rather than
-`default` — it routes each request to the best squad and hands over (see
-[Architecture](10-architecture.md#omnis-router-default-chat-routing)). The
-router squad (`omnis` by default) is auto-injected when absent and is **not**
-listed in the New Chat picker. Choose the router squad — or disable routing —
-with the top-level `router_squad` key in `agents.json` (`"none"` disables;
-absent ⇒ `omnis`), also overridable via `OMNIS_ROUTER_SQUAD`.
+See [Agents Settings](19-agents.md) for the squad editor's full field
+reference (name, description, leader, members, the leaderless option, and
+deleting a squad).
 
 ## Editing Permissions
 

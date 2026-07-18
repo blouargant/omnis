@@ -173,8 +173,8 @@ next turn (and logs a warning).
 
 To **disable routing** entirely, set `router_squad` to `"none"` in
 `agents.json` (or `OMNIS_ROUTER_SQUAD=none`); new chats then start directly
-on the squad you pick (or `default`). To define new squads, see the
-**Squads** sub-tab under Settings → Agents.
+on the squad you pick (or `default`). To define new squads, use the
+**Fleet** under Settings → Agents.
 
 ## Session lifecycle and the curator
 

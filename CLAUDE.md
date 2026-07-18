@@ -342,6 +342,66 @@ same generation can use different squads. Squads only *reference* agents
 squads that share a member also share that member's wiring (and the MCP
 pool dedups any subprocess backing it).
 
+- **Fleet (Web UI).** Settings → Agents opens directly onto the **Fleet** —
+  the sole Agents/Squads editor since Phase 6's cutover (no sub-tab strip, no
+  flag) — rendering this topology (router → squads → leader → members →
+  nested sub-agents, an "Unused agents" pool, `⌂N` badges on shared agents) as
+  a selectable tree — [web/fleet/store.js](web/fleet/store.js) (pure,
+  unit-tested topology model: `create(cfg)` returns a store with a mutable
+  `draft`, `dirty()`/`serialize()`/`commit()`/`discard()`, and mutation helpers
+  — `setLeader`/`toggleMember`/`setHidden`/`setSubagents`/`removeSquad`/
+  `removeAgent`/`teamCandidates` — that own the leaderless/member-trim/cycle
+  rules) + [web/fleet/tree.js](web/fleet/tree.js) (the renderer). It is now
+  **read + edit**: selecting a squad or agent node opens a store-driven editor
+  in [web/settings.js](web/settings.js) (`renderFleetSquadEditor`/
+  `renderFleetAgentEditor`, composing the same leaf widgets the classic
+  editors used — `renderAgentTeamBlock`, `populateAgentSkillBlock`/`MCPBlock`/
+  `A2ABlock` — so cycle-exclusion/MCP/A2A behavior can't regress); a
+  Save/Discard bar tracks `store.dirty()`. **Save** (`saveFleet`) PUTs
+  `store.serialize()` through the same `/api/config/parsed/agent` route +
+  `prepareForSave` the classic editor used (the server does the per-agent
+  fan-out + layered delta-write), keeps `state.parsed.agent` in sync, calls
+  `store.commit()` (adopts the draft as the new base), and hot-reloads
+  (`doReload()`) so the edit takes effect immediately — agent.json never
+  carries the embedder identity, so it's always hot-reloadable, never a
+  restart. **Rename reconciliation:** because `store.commit()` re-clones the
+  draft into a new object, an editor open on a just-renamed squad/agent must
+  keep tracking it by its current name — the squad/agent editors take an
+  `onRename` callback (wired from `renderFleetPane`) that updates the pane's
+  `selected` ref the moment a name input changes, so a rename-then-save
+  leaves the (renamed) entity selected instead of collapsing to the
+  "select a node" prompt. New `make test-web` target runs the project's first
+  JS unit tests (`node --test web/fleet/*.test.js`). **Phase 4** added a
+  header shell above the tree — **Fleet / Models / Registry / Global** peers
+  plus a `⟳` reload — and slide-overs that wrap the existing Models/
+  Registries/Global renderers on top of the fleet instead of navigating away:
+  Global edits ride the Fleet store draft (saved by the Fleet Save bar),
+  Models saves `models.json` itself (via the extracted `saveParsedFile`,
+  embedder-restart banner preserved), Registries is dirty-guarded on open and
+  re-syncs the store from the server on close, and the agent editor's model-
+  ref **`↗`** opens the Models slide-over. **Phase 5** added the interaction
+  layer: a **`＋`** create control (new squad/agent, name-prompted, selects
+  the new node and opens the Save bar), node **right-click / `⋯` context
+  menus** (squad: Add/Set member…, Set/Make leader…, Duplicate, Delete squad
+  — hidden for the default squad; agent: Add to team…, Add to squad…, Make
+  leader, Enable/Disable (disabled when the agent is the squad's leader),
+  Duplicate, Remove from squad, Delete agent — Delete is hidden for built-ins), and light **drag-and-drop** (reorder members within
+  a squad; drop a member/unused agent onto another squad to add it there as a
+  shared reference, not a move — the router is never a drag source or drop
+  target). It also fixed a registry-install regression: opening the
+  Registries slide-over used to reload the config and eject the view back to
+  the (then still-present) classic Agents sub-tab; a `reloadRebuild` hook
+  (registered by the Fleet pane, cleared on teardown) now repaints the Fleet
+  tree in place on reload instead, so the slide-over stays open across an
+  install. **Phase 6 (the cutover)** deleted the preview flag and the
+  classic Agents/Squads/Remotes sub-tab editors outright — the
+  Fleet is now the **only** Agents/Squads editor in the Web UI, mounted
+  directly under Settings → Agents with no sub-tab strip above it. Agent
+  import (paste/load a Claude Code `.md`/`.json` agent definition, with an
+  "Enable in agents.json" checkbox) moved from its own classic-editor button
+  into the **`＋`** create menu as **Import agent from file…**, alongside
+  New squad…/New agent…. Zero Go.
+
 ### Nested sub-agents (`subagents`) — the gatherer doctrine
 
 Any agent may declare **`subagents: [...]`** in its `agent.json`: its OWN delegable

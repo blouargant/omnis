@@ -5,45 +5,89 @@ fleet. Changes are saved to `agents.json` (global list, models, squads,
 globals) and to individual files under `registry/agents/<name>/` (per-agent
 definitions and instructions).
 
-The panel has five sub-tabs: **Agents**, **Squads**, **Remotes**, **Models**,
-and **Global configuration**.
+Settings → Agents opens directly onto the **Fleet** — a single tree view of
+the whole agent topology. It is the only Agents/Squads editor in the Web UI;
+there is no separate Agents/Squads/Remotes sub-tab strip to switch between.
+**Models** and **Global configuration** remain reachable from the same screen
+as header peers (see below).
+
+### Fleet
+
+The Fleet renders the whole agent tree in one place — router → squads →
+leader → members → nested sub-agents — with an **Unused agents** section for
+agents no squad references, and a `⌂N` badge on any agent shared by more than
+one mount point.
+
+The Fleet is **editable**: select a squad or agent in the tree to open its
+editor on the right. Editing a squad covers its name, description, leader,
+members, and the hidden flag; editing an agent covers its identity, model,
+tools, team (sub-agents), skills, MCP servers, A2A peers, instruction, and the
+parallelism/session settings. A **Save / Discard** bar appears once you make a
+change; **Save** writes the change and hot-reloads the fleet so it takes
+effect immediately, **Discard** reverts to the last-saved state.
+
+Beneath the tree, a collapsible **Delegation map** strip shows the same
+topology as a small, read-only diagram (router/squad/leader/sub-agent nodes
+connected by delegation edges); it stays collapsed until you open it and
+repaints whenever the tree changes.
+
+A header above the tree carries four peers — **Fleet · Models · Registry ·
+Global** — plus a `⟳` reload button. Fleet is where you already are; clicking
+**Models**, **Registry**, or **Global** opens that panel as a slide-over on
+top of the fleet instead of navigating away, so you rarely have to leave the
+tree to make a related change. **Global** edits the same draft as the fleet
+tree, so they're picked up by the fleet's own Save/Discard bar; **Models**
+carries its own Save button (it edits `models.json`, a separate file, and
+still shows the embedder-restart notice when that applies); **Registry**
+mounts the same registries hub you'd get from Settings → Registries, and
+closing it re-syncs the fleet tree in case an install changed an agent. In
+the agent editor, the Model Reference field has a small **`↗`** button that
+jumps straight to the Models slide-over.
+
+Opening **Models** or **Registries** requires the Fleet draft to be saved or
+discarded first — both reload the underlying config when you save/install,
+which would otherwise silently drop any unsaved composition edits still
+sitting in the tree. **Global** shares the same draft as the Fleet tree, so
+it stays available while dirty. Installing an agent or squad from the
+**Registries** slide-over repaints the Fleet tree in place — the slide-over
+stays open and you are not ejected to a different view.
+
+### Editing the Fleet
+
+The tree supports creating, reorganising, and removing nodes directly:
+
+- **`＋` create** — the button above the tree opens a menu: **New squad…**
+  and **New agent…** each prompt for a name, select the new node, and open
+  the Save/Discard bar; **Import agent from file…** opens a dialog to
+  paste or load a Claude Code-style `.md` (YAML frontmatter) or `.json`
+  agent definition, with an "Enable in agents.json" checkbox to wire it in
+  on the next hot-reload.
+- **Node menus** — right-click a node, or use its **`⋯`** button, to open a
+  context menu. A squad offers **Add member…** / **Set member…** (leaderless
+  squads), **Set/Make leader…**, **Duplicate**, and **Delete squad** (hidden
+  for the default squad). An agent offers **Add to team…** (its `subagents`,
+  excluding anything that would create a cycle), **Add to squad…**, **Make
+  leader** (when it's a member of a real, non-leaderless squad), **Enable** /
+  **Disable** (disabled when the agent is the squad's leader), **Duplicate**,
+  **Remove from squad**, and **Delete agent** (Delete is hidden for built-in agents).
+- **Drag-and-drop** — drag a member within its squad to reorder it; drag a
+  member or an unused agent onto a different squad to add it there as a
+  **shared reference** (the agent stays in its original squad too — this is
+  not a move). The router is never a drag source or a drop target.
+
+Every change here goes through the same Save/Discard bar as the rest of the
+Fleet editor.
 
 ---
 
-## Agents sub-tab
+## Agent editor
 
-A split view: fleet list on the left, agent detail panel on the right.
-
-### Fleet list
-
-Agents are grouped into two sections:
-
-- **BUILT-IN AGENTS** — shipped with omnis: `omnis`, `leader`,
-  `skill_editor`, `helper`, `summariser`, `curator`, `reflector`. Fields
-  are read-only where the binary bakes in defaults. The **`omnis`** agent is
-  the **router** that runs at the start of every new chat and hands the
-  conversation to the best squad (see [Architecture →
-  Omnis router](10-architecture.md#omnis-router-default-chat-routing)); it
-  is auto-injected when your config doesn't declare it. The **`helper`**
-  answers questions about omnis from its bundled documentation (quoting the
-  source via `search_docs`) and browses/installs remote registry items.
-- **CUSTOM AGENTS** — user-added. All fields are editable; the agent can be
-  removed or reordered.
-
-Each row shows a status dot (active / disabled), the agent name, and its
-current model reference.
-
-**Adding an agent** — click **+** above the fleet list to create a blank
-custom agent.
-
-**Importing a Claude Code agent** — click the **↓** button to paste or
-load a `.md` (YAML frontmatter) or `.json` agent definition. The dialog
-offers an "Enable in agents.json" checkbox so the imported agent
-is wired in immediately on the next hot-reload.
+Selecting an agent node in the **Fleet** tree — a squad's leader or member,
+or an entry under **Unused agents** — opens its editor on the right.
 
 ### Agent detail panel
 
-Selecting an agent opens its detail panel. The top bar shows:
+The editor's top bar shows:
 
 - **Agent Display Name** — the name used to reference this agent everywhere.
   Locked to `leader` for the leader agent.
@@ -129,20 +173,23 @@ the global values:
 | `mcp_config_path` | Path to a custom `mcp_config.json` for this agent. |
 | `permissions_config_path` | Path to a custom `permissions.json` for this agent. |
 
-#### Move / Delete
+#### Reorder, enable, and remove
 
-Custom agents can be reordered with **▲ Move up** / **▼ Move down** (affects
-the order in which they appear in squad member lists) or removed with the
-**REMOVE** link in the title bar.
+There are no Move up/down buttons — reordering a member within a squad is
+drag-and-drop on the Fleet tree (see "Drag-and-drop" under [Editing the
+Fleet](#editing-the-fleet) above). **Enable** / **Disable**, **Duplicate**,
+**Remove from squad**, and **Delete agent** (hidden for built-in agents) are
+all on the agent node's context menu — right-click it, or use its **`⋯`**
+button (or the **REMOVE** link in the editor's title bar).
 
 ---
 
-## Squads sub-tab
+## Squad editor
 
 A **squad** is a named group `{ leader, members[] }` that a chat session
 runs on. Each squad is wired as its own leader + sub-agent tree.
 
-The sub-tab shows a list on the left and a detail panel on the right:
+Selecting a squad node in the **Fleet** tree opens its editor on the right:
 
 | Field | Description |
 |---|---|
@@ -152,10 +199,12 @@ The sub-tab shows a list on the left and a detail panel on the right:
 | **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` and `reflector` are always excluded (they are process-wide). Leaderless squads switch this to single-select. |
 
 The `default` squad is always present. If `agents.json` doesn't declare one,
-the editor synthesises it from all enabled agents the first time the sub-tab
+the editor synthesises it from all enabled agents the first time the Fleet
 is opened — saving writes it to disk.
 
-Click **Delete squad** (bottom-right) to remove a non-default squad.
+Remove a non-default squad from its node's context menu (**Delete squad**,
+hidden for the default squad — see [Editing the Fleet](#editing-the-fleet)
+above).
 
 ### The Omnis router squad
 
@@ -172,11 +221,15 @@ in `agents.json` (or `OMNIS_ROUTER_SQUAD=none`) — new chats then start on the
 
 ---
 
-## Remotes sub-tab
+## Installing remote agents and squads
 
-Browse and install agent definitions and squad templates from remote Git
-repositories (GitHub, GitLab, Gitea). The left sidebar switches between
-**Agents** and **Squads** registry views.
+Browsing and installing agent definitions and squad templates from remote
+Git repositories (GitHub, GitLab, Gitea) is no longer a sub-tab under
+Agents. It lives in the top-level **Settings → Registries** section (a
+consolidated hub covering every kind — Skills, Agents, Squads, MCP, A2A,
+Commands, Permissions), and is also reachable without leaving the tree via
+the Fleet's **Registry** header peer / slide-over (see [Fleet](#fleet)
+above).
 
 Remote agent repositories follow this layout:
 
@@ -191,11 +244,15 @@ repo/path/
 
 Installing an agent downloads all files in the matched directory to
 `$OMNIS_HOME/registry/agents/<name>/`. The install dialog offers
-**Enable in agents.json** to wire the agent in on the next
-hot-reload.
+**Enable in agents.json** to wire the agent in on the next hot-reload.
+Installing from the Fleet's Registry slide-over repaints the Fleet tree in
+place, so a newly-installed agent or squad shows up immediately without
+leaving the tree.
 
-Configure remote registries under **Settings → Skills → Remotes** — registries
-marked `kind: agents` or `kind: both` appear here.
+Configure remote registries in **Settings → Registries** (or any of the
+per-kind Remotes tabs elsewhere in Settings, e.g. Skills → Remotes) — tick
+**Agents** and/or **Squads** under a registry's **Content types** for it to
+appear in these browse views.
 
 ---
 
@@ -204,7 +261,9 @@ marked `kind: agents` or `kind: both` appear here.
 Models and the providers they connect through have their own settings
 section — **Settings → Models**, listed right after **Agents**. The data
 lives in `models.json` (separate from `agents.json`) and is picked up by
-the same `POST /api/config/reload` flow.
+the same `POST /api/config/reload` flow. It's also reachable without
+leaving the Fleet tree, via its **Models** header peer / slide-over (see
+[Fleet](#fleet) above).
 
 ### Providers sub-tab
 
@@ -238,10 +297,13 @@ Profile names are case-insensitive keys; agents reference them via
 
 ---
 
-## Global configuration sub-tab
+## Global configuration
 
-Shared settings that apply across the entire agent fleet. Stored at the
-top level of `agents.json`.
+Shared settings that apply across the entire agent fleet, stored at the top
+level of `agents.json`. Reached via the Fleet's **Global** header peer (see
+[Fleet](#fleet) above), which opens as a slide-over on top of the tree —
+edits there are folded into the same draft as the Fleet tree and saved by
+its own Save/Discard bar (there is no separate Save button for Global).
 
 ### OPTIMIZATION
 
