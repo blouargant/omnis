@@ -42,6 +42,11 @@ const BASE_PATH = window.BASE_PATH || "";
   const USER_COMMANDS_ID = "user-commands";
   const REGISTRIES_ID = "registries";
   const AUTOMATION_ID = "automation";
+  // Name of the always-present fallback squad. MUST match the server's
+  // agent.DefaultSquadName (currently "system"). Historically "default";
+  // the client kept the old literal after the server rename, which made the
+  // editor believe the fallback was missing and synthesise a phantom one.
+  const DEFAULT_SQUAD_NAME = "system";
   const MENU_ITEMS = [
     { id: "skills",        label: "Skills",      title: "Skills",                    kind: "client" },
     { id: "agent",         label: "Agents",      title: "Agent Configuration",       kind: "json" },
@@ -257,8 +262,8 @@ const BASE_PATH = window.BASE_PATH || "";
   };
 
   const AGENT_SUBTABS = [
-    { id: "agents",  label: tr("subtab.agents")  },
     { id: "squads",  label: tr("subtab.squads")  },
+    { id: "agents",  label: tr("subtab.agents")  },
     { id: "remotes", label: tr("subtab.remotes") },
     { id: "globals", label: tr("subtab.globalEnv") },
   ];
@@ -294,7 +299,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // opened from an autonomous Appearance/Documentation view.
     lastMenuFile: "skills",
     activeView: "form", // 'form' | 'raw'
-    activeAgentSubtab: "agents", // only used when activeFile === 'agent'
+    activeAgentSubtab: "squads", // only used when activeFile === 'agent'
     activeModelsSubtab: "models", // only used when activeFile === 'models'
     activeProviderName: null,     // selected provider in the Providers sub-tab
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
@@ -304,6 +309,7 @@ const BASE_PATH = window.BASE_PATH || "";
     activeAgentIdx: 0,            // selected agent in the fleet list
     activeAgentInitialized: false, // true once localStorage restore has been attempted
     activeSquadIdx: 0,            // selected squad in the squads list
+    activeSquadInitialized: false, // true once the default-squad selection has been applied
     raw: {}, // id → { content, mtime, dirty, value }
     parsed: {}, // id → { data, mtime, dirty, value }
     open: false,
@@ -1821,17 +1827,17 @@ const BASE_PATH = window.BASE_PATH || "";
       host.innerHTML = `<div id="agent-globals-host" class="env-sections"></div>`;
       renderAgentGlobals(d);
     } else if (sub === "squads") {
-      // Surface a synthesised `default` squad in the editor whenever it is
-      // missing, so users see what the server already provides as fallback
-      // and never end up saving a squads list without one. Marking the
-      // form dirty here writes the default into agent.json on Save —
+      // Surface the synthesised fallback squad (DEFAULT_SQUAD_NAME) in the
+      // editor whenever it is missing, so users see what the server already
+      // provides as fallback and never end up saving a squads list without
+      // one. Marking the form dirty here writes it into agent.json on Save —
       // intentional, so it round-trips cleanly through the JSON view.
-      if (!d.squads.some(sq => (sq.name || "").toLowerCase() === "default")) {
+      if (!d.squads.some(sq => (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME)) {
         d.squads.unshift(synthesizeDefaultSquad(d.agents));
         markFormDirty(id);
       }
       host.innerHTML = `
-        <div class="agent-split-layout">
+        <div class="agent-split-layout agent-master-detail">
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
               <span class="agent-fleet-title">${escHtml(tr("set.fleet.squadsTitle"))}</span>
@@ -1855,7 +1861,7 @@ const BASE_PATH = window.BASE_PATH || "";
       renderAgentRemotesTab(d, host);
     } else {
       host.innerHTML = `
-        <div class="agent-split-layout">
+        <div class="agent-split-layout agent-master-detail">
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
               <span class="agent-fleet-title">${escHtml(tr("set.fleet.activeFleet"))}</span>
@@ -1902,8 +1908,9 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   // synthesizeDefaultSquad mirrors the server-side logic for the editor:
-  // build a `default` squad from the enabled agents so the user always sees
-  // it in the Squads sub-tab — even when the JSON file has no squads block.
+  // build the fallback squad (DEFAULT_SQUAD_NAME) from the enabled agents so
+  // the user always sees it in the Squads sub-tab — even when the JSON file
+  // has no squads block.
   function synthesizeDefaultSquad(agents) {
     const enabled = (Array.isArray(agents) ? agents : [])
       .filter(a => a && a.name && (a.enabled === undefined || a.enabled));
@@ -1912,11 +1919,22 @@ const BASE_PATH = window.BASE_PATH || "";
       .map(a => a.name)
       .filter(n => n && n.toLowerCase() !== "leader" && n.toLowerCase() !== "curator");
     return {
-      name: "default",
+      name: DEFAULT_SQUAD_NAME,
       description: "General-purpose squad — automatically generated.",
       leader,
       members,
     };
+  }
+
+  // A built-in "system" squad — the router (Omnis), the Helper, and the hidden
+  // Session Search squad — is a leaderless squad: it runs a single agent
+  // directly with no coordinator. These are grouped at the bottom of the list
+  // and rendered READ-ONLY in the detail panel. Detected structurally
+  // (leaderless) rather than by a hardcoded name list, so it never drifts when
+  // a squad is renamed — the trap that produced the phantom "Default" squad.
+  function isSystemSquad(sq) {
+    const l = String((sq && sq.leader) || "").toLowerCase();
+    return l === "" || l === "none";
   }
 
   // ── Squads sub-tab: list + detail editor ──
@@ -1924,17 +1942,25 @@ const BASE_PATH = window.BASE_PATH || "";
   // editor mirrors the Agents sub-tab visually: a left-hand list of
   // squads with an inline detail panel for the selected entry.
   function renderAgentSquads(d) {
-    const id = "agent";
     const listEl = bodyEl.querySelector("#squad-list");
     if (!listEl) return;
     if (!Array.isArray(d.squads)) d.squads = [];
+    // First render: default the selection to the "DEFAULT" squad (the system
+    // squad), not whatever sits at index 0 (e.g. the leaderless Omnis router).
+    if (!state.activeSquadInitialized) {
+      state.activeSquadInitialized = true;
+      const di = d.squads.findIndex(sq => (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME);
+      if (di >= 0) state.activeSquadIdx = di;
+    }
     if (state.activeSquadIdx >= d.squads.length) state.activeSquadIdx = Math.max(0, d.squads.length - 1);
 
     listEl.innerHTML = "";
-    d.squads.forEach((sq, idx) => {
+
+    const renderSquadItem = (sq) => {
+      const idx = d.squads.indexOf(sq);
       const item = document.createElement("div");
       item.className = "agent-fleet-item" + (idx === state.activeSquadIdx ? " active" : "");
-      const isDefault = (sq.name || "").toLowerCase() === "default";
+      const isDefault = (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME;
       const memberCount = Array.isArray(sq.members) ? sq.members.length : 0;
       item.innerHTML = `
         <div class="agent-fleet-item-name">${escHtml(sq.name || tr("app.askuser.unnamed"))} ${isDefault ? '<span class="squad-default-tag">default</span>' : ""}</div>
@@ -1942,7 +1968,20 @@ const BASE_PATH = window.BASE_PATH || "";
       `;
       item.addEventListener("click", () => { state.activeSquadIdx = idx; renderAgentSquads(d); });
       listEl.appendChild(item);
-    });
+    };
+
+    // Task + custom squads first (no section header — the panel title already
+    // reads "SQUADS"); then a "Built-in" divider and the system squads.
+    d.squads.filter(sq => !isSystemSquad(sq)).forEach(renderSquadItem);
+
+    const systemSquads = d.squads.filter(isSystemSquad);
+    if (systemSquads.length) {
+      const header = document.createElement("div");
+      header.className = "agent-fleet-section-header";
+      header.innerHTML = `<div class="section-label">${tr("set.fleet.builtinSquadsLabel")}</div>`;
+      listEl.appendChild(header);
+      systemSquads.forEach(renderSquadItem);
+    }
 
     renderSquadDetail(d, state.activeSquadIdx);
   }
@@ -1969,7 +2008,11 @@ const BASE_PATH = window.BASE_PATH || "";
     const memberCandidates = d.agents
       .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator");
     const members = Array.isArray(sq.members) ? sq.members : [];
-    const isDefault = (sq.name || "").toLowerCase() === "default";
+    const isDefault = (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME;
+    // Built-in system squads (Omnis / Helper / Session Search — the leaderless
+    // ones) are shipped plumbing and are shown READ-ONLY: no field is editable
+    // and they cannot be deleted.
+    const isReadonly = isSystemSquad(sq);
     // A leaderless squad (leader "" or "none") runs a single member agent
     // directly, with no coordinator. The default squad always needs a leader.
     const leaderless = !isDefault && (!sq.leader || (sq.leader || "").toLowerCase() === "none");
@@ -1994,16 +2037,16 @@ const BASE_PATH = window.BASE_PATH || "";
       <div class="agent-detail-section">
         <div class="agent-detail-field">
           <label class="agent-detail-label">${escHtml(tr("common.name"))}</label>
-          <input type="text" class="agent-detail-input" id="squad-name" value="${escHtml(sq.name || "")}" ${isDefault ? "disabled" : ""} />
-          ${isDefault ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.defaultNameHint"))}</div>` : ""}
+          <input type="text" class="agent-detail-input" id="squad-name" value="${escHtml(sq.name || "")}" ${(isDefault || isReadonly) ? "disabled" : ""} />
+          ${isReadonly ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.builtinReadonlyHint"))}</div>` : isDefault ? `<div class="agent-detail-hint">${escHtml(tr("set.squad.defaultNameHint"))}</div>` : ""}
         </div>
         <div class="agent-detail-field">
           <label class="agent-detail-label">${escHtml(tr("common.description"))}</label>
-          <input type="text" class="agent-detail-input" id="squad-desc" value="${escHtml(sq.description || "")}" placeholder="${escHtml(tr("set.squad.descPlaceholder"))}" />
+          <input type="text" class="agent-detail-input" id="squad-desc" value="${escHtml(sq.description || "")}" placeholder="${escHtml(tr("set.squad.descPlaceholder"))}" ${isReadonly ? "disabled" : ""} />
         </div>
         <div class="agent-detail-field">
           <label class="agent-detail-label">${escHtml(tr("set.squad.leader"))}</label>
-          <select class="agent-detail-input" id="squad-leader">
+          <select class="agent-detail-input" id="squad-leader" ${isReadonly ? "disabled" : ""}>
             ${isDefault ? "" : `<option value="none" ${leaderless ? "selected" : ""}>${escHtml(tr("set.squad.leaderNone"))}</option>`}
             ${leaderCandidates.map(n => `<option value="${escHtml(n)}" ${!leaderless && n === sq.leader ? "selected" : ""}>${escHtml(n)}</option>`).join("")}
           </select>
@@ -2017,7 +2060,7 @@ const BASE_PATH = window.BASE_PATH || "";
               const isLeaderRow = a.name === sq.leader;
               const desc = a.description || "";
               return `
-              <div class="agent-tool-card${isOn ? " tool-on" : ""}${isLeaderRow ? " tool-disabled" : ""}" data-name="${escHtml(a.name)}" data-tip="${escHtml(desc)}">
+              <div class="agent-tool-card${isOn ? " tool-on" : ""}${(isLeaderRow || isReadonly) ? " tool-disabled" : ""}" data-name="${escHtml(a.name)}" data-tip="${escHtml(desc)}">
                 <div class="agent-tool-icon">${agentIcon}</div>
                 <div class="agent-tool-info">
                   <span class="agent-tool-name">${escHtml(a.name)}</span>
@@ -2030,14 +2073,14 @@ const BASE_PATH = window.BASE_PATH || "";
           </div>
           <div class="agent-detail-hint">${escHtml(leaderless ? tr("set.squad.membersHintLeaderless") : tr("set.squad.membersHint"))}</div>
         </div>
-        ${!isDefault ? `<div class="squad-detail-actions"><button type="button" class="agent-detail-remove" id="squad-remove">${escHtml(tr("set.squad.deleteBtn"))}</button></div>` : ""}
+        ${(!isDefault && !isReadonly) ? `<div class="squad-detail-actions"><button type="button" class="agent-detail-remove" id="squad-remove">${escHtml(tr("set.squad.deleteBtn"))}</button></div>` : ""}
       </div>
     `;
 
     const onChange = () => { markFormDirty("agent"); };
 
     const nameInput = panel.querySelector("#squad-name");
-    if (nameInput && !isDefault) {
+    if (nameInput && !isDefault && !isReadonly) {
       nameInput.addEventListener("input", () => {
         sq.name = nameInput.value;
         // Re-render the list so the label tracks the input. Keep selection.
@@ -2101,7 +2144,7 @@ const BASE_PATH = window.BASE_PATH || "";
         onChange();
       });
     });
-    if (!isDefault) {
+    if (!isDefault && !isReadonly) {
       panel.querySelector("#squad-remove").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.confirm.deleteSquad", { name: sq.name }))) return;
         d.squads.splice(idx, 1);
@@ -3396,27 +3439,51 @@ const BASE_PATH = window.BASE_PATH || "";
     code_search: tr("tool.display.code_search"), docs: tr("tool.display.docs"),
   };
 
-  // updateFleetModelLine syncs the model display under a fleet-list item with
-  // the agent's current model_ref / recommended_model. Handles three states:
-  // a resolved model_ref, a recommended (angle-bracketed) fallback, or empty.
+  // fleetMetaHtml builds the compact fleet-item meta line: the agent's model
+  // (a resolved model_ref, or a recommended angle-bracketed fallback) followed
+  // by how many squads/agents reference it — mirroring the squad list's
+  // "N members". Model absent ⇒ just the reference count.
+  function fleetMetaHtml(a, refCount) {
+    let modelHtml = "";
+    if (a.model_ref) {
+      modelHtml = `<span class="agent-fleet-model">${escHtml(a.model_ref)}</span>`;
+    } else if (a.recommended_model) {
+      modelHtml = `<span class="agent-fleet-model agent-fleet-model-recommended">&lt;${escHtml(a.recommended_model)}&gt;</span>`;
+    }
+    const refHtml = `<span class="agent-fleet-refs">${refCount}</span>`;
+    return modelHtml ? `${modelHtml} &middot; ${refHtml}` : refHtml;
+  }
+
+  // updateFleetModelLine rebuilds the compact meta line ("<model> · N refs")
+  // after the agent's model_ref changes. The reference count is stored on the
+  // item (data-refs) at render time, so we don't recompute it here.
   function updateFleetModelLine(fleetItem, a) {
-    const info = fleetItem.querySelector(".agent-fleet-info");
-    if (!info) return;
-    let modelEl = info.querySelector(".agent-fleet-model");
-    const desired = a.model_ref
-      ? { text: a.model_ref, recommended: false }
-      : (a.recommended_model ? { text: `<${a.recommended_model}>`, recommended: true } : null);
-    if (!desired) {
-      if (modelEl) modelEl.remove();
-      return;
-    }
-    if (!modelEl) {
-      modelEl = document.createElement("span");
-      modelEl.className = "agent-fleet-model";
-      info.appendChild(modelEl);
-    }
-    modelEl.textContent = desired.text;
-    modelEl.classList.toggle("agent-fleet-model-recommended", desired.recommended);
+    const meta = fleetItem.querySelector(".agent-fleet-item-meta");
+    if (!meta) return;
+    meta.innerHTML = fleetMetaHtml(a, Number(fleetItem.dataset.refs || "0"));
+  }
+
+  // agentReferencers returns who points at `name`: each squad that lists it as
+  // leader or member, and each other agent that lists it in its `subagents`
+  // (team). Descriptors {type:"squad"|"agent", name, role:"leader"|"member"|
+  // "team"} drive both the compact list's reference count and the detail
+  // panel's "Referenced by" list. An agent with an empty result is orphaned —
+  // enabled but wired into nothing.
+  function agentReferencers(name, d) {
+    const lc = (name || "").toLowerCase();
+    if (!lc) return [];
+    const refs = [];
+    (Array.isArray(d.squads) ? d.squads : []).forEach(sq => {
+      const leader = (sq.leader || "").toLowerCase();
+      const sqName = sq.name || tr("app.askuser.unnamed");
+      if (leader && leader !== "none" && leader === lc) refs.push({ type: "squad", name: sqName, role: "leader" });
+      if ((Array.isArray(sq.members) ? sq.members : []).some(m => (m || "").toLowerCase() === lc)) refs.push({ type: "squad", name: sqName, role: "member" });
+    });
+    (Array.isArray(d.agents) ? d.agents : []).forEach(ag => {
+      if ((ag.name || "").toLowerCase() === lc) return;
+      if ((Array.isArray(ag.subagents) ? ag.subagents : []).some(s => (s || "").toLowerCase() === lc)) refs.push({ type: "agent", name: ag.name || tr("app.askuser.unnamed"), role: "team" });
+    });
+    return refs;
   }
 
   function renderAgentAgents(d) {
@@ -3465,42 +3532,40 @@ const BASE_PATH = window.BASE_PATH || "";
     const renderAgentGroup = (agents, label) => {
       if (agents.length === 0) return;
 
-      // Add section header
-      const header = document.createElement("div");
-      header.className = "agent-fleet-section-header";
-      header.innerHTML = `<div class="section-label">${label}</div>`;
-      fleetList.appendChild(header);
+      // Section header — skipped for a blank label (the top group needs none,
+      // the panel title already reads "ACTIVE FLEET").
+      if (label) {
+        const header = document.createElement("div");
+        header.className = "agent-fleet-section-header";
+        header.innerHTML = `<div class="section-label">${label}</div>`;
+        fleetList.appendChild(header);
+      }
 
       // Add agents in this section
       agents.forEach((a) => {
         const item = document.createElement("div");
         const originalIdx = d.agents.indexOf(a);
         item.className = "agent-fleet-item" + (originalIdx === state.activeAgentIdx ? " active" : "");
+        // Stable lookup key for the incremental updaters (name/model change),
+        // since the list is grouped + alphabetised so DOM order != d.agents order.
+        item.dataset.idx = String(originalIdx);
         const agentSourceBadge = a.source === "local"
           ? `<span class="source-badge source-badge-local">local</span>`
           : "";
-        let modelHtml = "";
-        if (a.model_ref) {
-          modelHtml = `<span class="agent-fleet-model">${escHtml(a.model_ref)}</span>`;
-        } else if (a.recommended_model) {
-          // Frontmatter declared a model the local catalog doesn't ship —
-          // render it greyed in angle brackets to flag the recommendation.
-          modelHtml = `<span class="agent-fleet-model agent-fleet-model-recommended">&lt;${escHtml(a.recommended_model)}&gt;</span>`;
-        }
+        const refCount = agentReferencers(a.name, d).length;
+        item.dataset.refs = String(refCount);
         item.innerHTML = `
-          <span class="agent-fleet-dot ${a.enabled !== false ? "dot-live" : "dot-off"}"></span>
-          <div class="agent-fleet-info">
-            <span class="agent-fleet-name">${escHtml(a.name || tr("app.askuser.unnamed"))} ${agentSourceBadge}</span>
-            ${modelHtml}
-          </div>
+          <div class="agent-fleet-item-name"><span class="agent-fleet-nametext">${escHtml(a.name || tr("app.askuser.unnamed"))}</span> ${agentSourceBadge}</div>
+          <div class="agent-fleet-item-meta">${fleetMetaHtml(a, refCount)}</div>
         `;
         item.addEventListener("click", () => { state.activeAgentIdx = originalIdx; renderAgentAgents(d); });
         fleetList.appendChild(item);
       });
     };
 
-    // Render custom agents first (labelled simply "AGENTS"), then built-in
-    renderAgentGroup(customAgents, tr("set.fleet.agentsLabel"));
+    // Custom agents first with no header (the panel title "ACTIVE FLEET"
+    // already labels them), then the "BUILT-IN AGENTS" divider + built-ins.
+    renderAgentGroup(customAgents, "");
     renderAgentGroup(builtinAgents, tr("set.fleet.builtinAgentsLabel"));
 
     // Detail panel
@@ -3516,8 +3581,49 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const isLeader = a.name === "leader";
     const isBuiltin = isBuiltinAgent(a.name);
+    // Built-in (internal-working) agents — those carrying "builtin": true — are
+    // shown READ-ONLY, like the internal squads: the whole detail body is
+    // non-editable and cannot be deleted/reordered (only enable/disable stays
+    // available). Keyed on the on-disk flag, the same signal as the Built-in
+    // section grouping.
+    const readOnly = a.builtin === true;
     const builtinDefaults = (state.builtinAgents && state.builtinAgents[a.name]) || null;
-    const onChange = () => markFormDirty("agent");
+
+    // Foldable sections below "General settings" register a count-badge updater.
+    // Wrapping onChange means any selection change (tools, team, skills, MCP,
+    // A2A) refreshes every header count live, even while a section is open.
+    const foldCountUpdaters = [];
+    const onChange = () => {
+      markFormDirty("agent");
+      for (const u of foldCountUpdaters) u();
+    };
+
+    // makeFoldable turns an .agent-detail-section into a folder that is
+    // COLLAPSED by default: clicking its header toggles it. When countFn is
+    // given, a live badge of the selected-item count shows in the header.
+    const makeFoldable = (section, countFn) => {
+      const hdr = section.querySelector(".agent-section-hdr");
+      if (!hdr) return;
+      section.classList.add("agent-section-foldable", "collapsed");
+      if (typeof countFn === "function") {
+        const badge = document.createElement("span");
+        badge.className = "agent-section-count";
+        const h3 = hdr.querySelector("h3");
+        (h3 || hdr).insertAdjacentElement(h3 ? "afterend" : "beforeend", badge);
+        const update = () => {
+          const n = countFn() || 0;
+          badge.textContent = n > 0 ? String(n) : "";
+          badge.classList.toggle("agent-section-count-empty", n === 0);
+        };
+        update();
+        foldCountUpdaters.push(update);
+      }
+      const chevron = document.createElement("span");
+      chevron.className = "agent-section-chevron";
+      chevron.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`;
+      hdr.appendChild(chevron);
+      hdr.addEventListener("click", () => section.classList.toggle("collapsed"));
+    };
 
     detailPanel.innerHTML = "";
 
@@ -3542,17 +3648,14 @@ const BASE_PATH = window.BASE_PATH || "";
             <span class="agent-toggle-slider"></span>
           </span>
         </label>
-        ${isBuiltin ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
+        ${(isBuiltin || readOnly) ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
       </div>
     `;
     titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
       a.enabled = e.target.checked;
-      // update dot in fleet list
-      const dot = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-dot");
-      if (dot) { dot.className = "agent-fleet-dot " + (a.enabled ? "dot-live" : "dot-off"); }
       onChange();
     });
-    if (!isBuiltin) {
+    if (!isBuiltin && !readOnly) {
       titleBar.querySelector(".agent-remove-link").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.confirm.removeAgent", { name: a.name }))) return;
         d.agents.splice(idx, 1);
@@ -3595,7 +3698,7 @@ const BASE_PATH = window.BASE_PATH || "";
       inp.addEventListener("input", () => {
         a.name = inp.value;
         detailPanel.querySelector(".agent-detail-name").textContent = a.name || tr("app.askuser.unnamed");
-        const nameEl = bodyEl.querySelectorAll(".agent-fleet-item")[idx]?.querySelector(".agent-fleet-name");
+        const nameEl = bodyEl.querySelector(`.agent-fleet-item[data-idx="${idx}"] .agent-fleet-nametext`);
         if (nameEl) nameEl.textContent = a.name || tr("app.askuser.unnamed");
         onChange();
       });
@@ -3614,7 +3717,7 @@ const BASE_PATH = window.BASE_PATH || "";
       }
       sel.addEventListener("change", () => {
         a.model_ref = sel.value;
-        const fleetItem = bodyEl.querySelectorAll(".agent-fleet-item")[idx];
+        const fleetItem = bodyEl.querySelector(`.agent-fleet-item[data-idx="${idx}"]`);
         if (fleetItem) updateFleetModelLine(fleetItem, a);
         onChange();
       });
@@ -3629,6 +3732,26 @@ const BASE_PATH = window.BASE_PATH || "";
         hint.setAttribute("data-tip", tr("set.agent.recommendedTip"));
         f.appendChild(hint);
       }
+    }));
+
+    // Referenced by — read-only list of the squads/agents that point at this
+    // agent (leader/member of a squad, or a member of another agent's team).
+    genGrid.appendChild(genField(tr("set.agent.referencedBy"), f => {
+      const refs = agentReferencers(a.name, d);
+      const wrap = document.createElement("div");
+      wrap.className = "agent-ref-list";
+      if (!refs.length) {
+        wrap.innerHTML = `<span class="agent-ref-empty">${escHtml(tr("set.agent.referencedByNone"))}</span>`;
+      } else {
+        wrap.innerHTML = refs.map(r => {
+          // Show the referencer TYPE, not the agent's role: a squad (member of),
+          // a leader (leads that squad), or another agent (in its team).
+          const kind = r.role === "leader" ? "leader" : (r.type === "agent" ? "agent" : "squad");
+          const kindLabel = tr("set.agent.refType." + kind);
+          return `<span class="agent-ref-chip agent-ref-${r.type}"><span class="agent-ref-name">${escHtml(r.name)}</span><span class="agent-ref-role">${escHtml(kindLabel)}</span></span>`;
+        }).join("");
+      }
+      f.appendChild(wrap);
     }));
 
     genSection.appendChild(genGrid);
@@ -3754,36 +3877,30 @@ const BASE_PATH = window.BASE_PATH || "";
     for (const { btn } of toolEntries) toolGrid.appendChild(btn);
 
     toolSection.appendChild(toolGrid);
+    toolSection._foldCount = () => cur.size;
     body.appendChild(toolSection);
 
-    // ── Parallelism (max_instances) ──
-    // Only meaningful for sub-agents: it caps how many invocations the leader
-    // may fan out in a single tool call. The leader is never fanned out and the
-    // curator is a process-wide hook (both excluded by buildSubAgents), so the
-    // setting is inert for them — hide the control.
+    // ── Parallelism (max_instances) + Sessions (resumable_sessions) ──
+    // Both only matter for sub-agents: max_instances caps how many invocations
+    // the leader may fan out in one call, and resumable sessions keep a handle
+    // the leader can resume. The leader is never fanned out and the curator is a
+    // process-wide hook (both excluded by buildSubAgents), so the controls are
+    // hidden for them. Rendered as two fields in the General grid (their long
+    // descriptions live in the "?" popups, not as hint lines).
     if (!isLeader && (a.name || "").toLowerCase() !== "curator") {
-      const parSec = document.createElement("section");
-      parSec.className = "agent-detail-section";
-      const parHdr = document.createElement("div");
-      parHdr.className = "agent-section-hdr";
-      parHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="21"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="18" y1="3" x2="18" y2="21"/></svg><h3>${escHtml(tr("set.hdr.parallelism"))}</h3>`;
-      parSec.appendChild(parHdr);
-      const parBody = document.createElement("div");
-      parBody.className = "agent-gen-grid";
+      // Max parallel instances — custom stepper (matches the app look instead of
+      // the browser's native number spinner).
       const parField = document.createElement("div");
       parField.className = "agent-gen-field";
       const parLbl = document.createElement("label");
       parLbl.className = "agent-gen-label";
       parLbl.textContent = tr("set.agent.maxInstances");
-      // App tooltip (themed #tip-layer via data-tip), not the native browser
-      // title bubble, to match the rest of the settings UI.
+      // App tooltip (themed #tip-layer via data-tip), not the native title bubble.
       const parInfo = document.createElement("span");
       parInfo.className = "agent-gen-info";
       parInfo.textContent = "?";
       parInfo.setAttribute("data-tip", tr("set.agent.maxInstancesTip"));
       parLbl.appendChild(parInfo);
-      // Custom stepper so the +/- controls match the app look & feel instead of
-      // the browser's native number spinner.
       const parWrap = document.createElement("div");
       parWrap.className = "num-stepper";
       const parInp = document.createElement("input");
@@ -3821,37 +3938,24 @@ const BASE_PATH = window.BASE_PATH || "";
       parWrap.appendChild(parDec);
       parWrap.appendChild(parInp);
       parWrap.appendChild(parInc);
-      const parHint = document.createElement("p");
-      parHint.className = "agent-gen-hint";
-      parHint.textContent = tr("set.agent.maxInstancesHint");
       parField.appendChild(parLbl);
       parField.appendChild(parWrap);
-      parField.appendChild(parHint);
-      parBody.appendChild(parField);
-      parSec.appendChild(parBody);
-      body.appendChild(parSec);
+      genGrid.appendChild(parField);
 
-      // ── Sessions (resumable_sessions) ──
-      // Durable, re-attachable sub-agent sessions are ON by default (opt-out):
-      // each call returns a `session` handle the leader can pass back as
-      // resume_session to CONTINUE that exact conversation instead of starting
-      // fresh. Toggle OFF to make this sub-agent a stateless pure function (a
-      // throwaway session per call). Persist-clean: only the opt-out (false) is
-      // written; the default-on case leaves the key absent. Same leader/curator
-      // gate as Parallelism (both inert for non-fan-out roots).
-      const resSec = document.createElement("section");
-      resSec.className = "agent-detail-section";
-      const resHdr = document.createElement("div");
-      resHdr.className = "agent-section-hdr";
-      resHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><h3>${escHtml(tr("set.hdr.sessions"))}</h3>`;
-      resSec.appendChild(resHdr);
-      const resBody = document.createElement("div");
-      resBody.className = "agent-gen-grid";
+      // Resumable sessions — toggle. The long description lives in the "?" popup,
+      // so there is no hint line here.
       const resField = document.createElement("div");
       resField.className = "agent-gen-field";
+      const resLbl = document.createElement("label");
+      resLbl.className = "agent-gen-label";
+      resLbl.textContent = tr("set.hdr.sessions");
+      const resInfo = document.createElement("span");
+      resInfo.className = "agent-gen-info";
+      resInfo.textContent = "?";
+      resInfo.setAttribute("data-tip", tr("set.agent.resumableTip"));
+      resLbl.appendChild(resInfo);
       const resRow = document.createElement("div");
       resRow.className = "agent-toggle-row";
-      resRow.setAttribute("data-tip", tr("set.agent.resumableTip"));
       const resSwitch = document.createElement("label");
       resSwitch.className = "agent-toggle-switch";
       const resCb = document.createElement("input");
@@ -3872,14 +3976,9 @@ const BASE_PATH = window.BASE_PATH || "";
       resText.textContent = tr("set.agent.resumable");
       resRow.appendChild(resSwitch);
       resRow.appendChild(resText);
-      const resHint = document.createElement("p");
-      resHint.className = "agent-gen-hint";
-      resHint.textContent = tr("set.agent.resumableHint");
+      resField.appendChild(resLbl);
       resField.appendChild(resRow);
-      resField.appendChild(resHint);
-      resBody.appendChild(resField);
-      resSec.appendChild(resBody);
-      body.appendChild(resSec);
+      genGrid.appendChild(resField);
     }
 
     // ── Team (subagents) ──
@@ -3903,6 +4002,7 @@ const BASE_PATH = window.BASE_PATH || "";
       teamBody.className = "agent-block-body";
       renderAgentTeamBlock(teamBody, a, d.agents, onChange);
       teamSec.appendChild(teamBody);
+      teamSec._foldCount = () => (a.subagents || []).length;
       body.appendChild(teamSec);
     }
 
@@ -3917,6 +4017,7 @@ const BASE_PATH = window.BASE_PATH || "";
     skillsBody.className = "skills-agent-body";
     skillsSec.appendChild(skillsBody);
     populateAgentSkillBlock(skillsBody, a, cur.has("Skill"), onChange);
+    skillsSec._foldCount = () => (a.skills || []).length;
     body.appendChild(skillsSec);
 
     // ── MCP Servers ──
@@ -3930,6 +4031,7 @@ const BASE_PATH = window.BASE_PATH || "";
     mcpBody.className = "skills-agent-body";
     mcpSec.appendChild(mcpBody);
     populateAgentMCPBlock(mcpBody, a, cur.has("mcp"), onChange);
+    mcpSec._foldCount = () => (a.mcp_servers || []).length;
     body.appendChild(mcpSec);
 
     // ── A2A Agents ──
@@ -3943,6 +4045,7 @@ const BASE_PATH = window.BASE_PATH || "";
     a2aBody.className = "skills-agent-body";
     a2aSec.appendChild(a2aBody);
     populateAgentA2ABlock(a2aBody, a, onChange);
+    a2aSec._foldCount = () => (a.a2a_agents || []).length;
     body.appendChild(a2aSec);
 
     // ── Instruction Set ──
@@ -4046,7 +4149,7 @@ const BASE_PATH = window.BASE_PATH || "";
     body.appendChild(adv);
 
     // ── Move / Delete ──
-    if (!isLeader) {
+    if (!isLeader && !readOnly) {
       const leaderFirst = d.agents[0]?.name === "leader";
       const upOk   = idx > 0 && !(leaderFirst && idx === 1);
       const downOk = idx < d.agents.length - 1;
@@ -4068,6 +4171,34 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       acts.appendChild(upBtn); acts.appendChild(dnBtn);
       body.appendChild(acts);
+    }
+
+    // Instruction Set sits directly below General settings (before the Tools /
+    // Team / Skills / MCP / A2A sections), so move it up in the DOM. It stays a
+    // foldable section (collapsed by default) like the others.
+    if (instrSection && toolSection) body.insertBefore(instrSection, toolSection);
+
+    // Fold every section BELOW "General settings" (the first section), collapsed
+    // by default. The multi-select sections carry a `_foldCount` for their
+    // header badge; the rest fold with no badge. "Advanced paths" is a native
+    // <details>, already collapsible, so it is left untouched.
+    Array.from(body.querySelectorAll(":scope > .agent-detail-section"))
+      .slice(1)
+      .forEach(sec => makeFoldable(sec, sec._foldCount));
+
+    // Read-only for built-in (internal) agents: disable every native config
+    // input and (via CSS) neutralise the cards/buttons inside each section,
+    // while leaving the fold headers clickable so sections can still be
+    // expanded to view. The async Team/Skills/MCP/A2A blocks hold no native
+    // inputs, so the CSS pointer-events rule covers their later-added cards too.
+    // The title-bar enable/disable toggle stays live (it is outside `body`).
+    if (readOnly) {
+      body.classList.add("agent-detail-readonly");
+      body.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+      const roNote = document.createElement("div");
+      roNote.className = "agent-detail-ro-banner";
+      roNote.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>${escHtml(tr("set.agent.builtinReadonly"))}</span>`;
+      body.insertBefore(roNote, body.firstChild);
     }
 
     detailPanel.appendChild(body);

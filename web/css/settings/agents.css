@@ -102,16 +102,9 @@
 .agent-fleet-item:hover { background: var(--bg-raised); }
 .agent-fleet-item.active { background: var(--accent-bg-soft); border-left: 2px solid var(--accent); }
 
-.agent-fleet-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-}
-.dot-live { background: #4ec94e; box-shadow: 0 0 4px #4ec94e88; }
-.dot-off  { background: #555; }
-
-.agent-fleet-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.agent-fleet-name { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+/* Compact fleet item (mirrors the squad list): a name line over a muted meta
+   line ("<model> · N refs"). The .agent-fleet-item-name / -item-meta layout
+   classes are shared with the squad list (web/css/settings/squads.css). */
 .agent-fleet-model { font-size: 0.75rem; color: var(--text-muted); }
 .agent-fleet-model-recommended {
   color: var(--text-muted);
@@ -126,6 +119,39 @@
   font-style: italic;
   font-family: var(--font-mono, ui-monospace, monospace);
 }
+
+/* "Referenced by" list in the General settings section (read-only): one chip per
+   squad/agent that points at this agent. */
+.agent-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.agent-ref-empty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.agent-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-size: 0.75rem;
+}
+.agent-ref-name { color: var(--text); font-weight: 600; }
+.agent-ref-role {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* Subtle type accent: squad references vs. team (subagent) references. */
+.agent-ref-squad .agent-ref-role { color: var(--accent); }
 
 /* Detail panel (right) */
 .agent-detail-panel {
@@ -258,6 +284,12 @@
   flex-direction: column;
   gap: 1.25rem;
 }
+/* The body is a bounded flex column (so it scrolls independently of the fleet
+   list). Its children must NOT flex-shrink, or a tall stack compresses each
+   section instead of scrolling — and since sections are `overflow: hidden`,
+   their content would be clipped ("General settings not fully shown"). Keep
+   natural heights and let the body scroll. */
+.agent-detail-body > * { flex-shrink: 0; }
 
 .agent-detail-section {
   border: 1px solid var(--border);
@@ -286,6 +318,62 @@
   color: var(--text);
 }
 .agent-section-hdr svg { color: var(--text-muted); flex-shrink: 0; }
+
+/* Foldable sections (everything below "General settings"): collapsed by
+   default, click the header to toggle. */
+.agent-detail-section.agent-section-foldable > .agent-section-hdr {
+  cursor: pointer;
+  user-select: none;
+}
+.agent-detail-section.agent-section-foldable.collapsed > *:not(.agent-section-hdr) {
+  display: none;
+}
+/* keep the header clickable even when the section is greyed-out/inactive
+   (Skill / MCP tool not enabled) so it can still be expanded to inspect. */
+.agent-detail-section.section-inactive.agent-section-foldable > .agent-section-hdr {
+  pointer-events: auto;
+}
+/* selected-item count badge in a multi-select section header */
+.agent-section-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--text);
+}
+.agent-section-count.agent-section-count-empty { display: none; }
+/* fold chevron, pushed to the right edge; rotates down when expanded */
+.agent-section-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.agent-detail-section.agent-section-foldable:not(.collapsed) > .agent-section-hdr .agent-section-chevron {
+  transform: rotate(90deg);
+}
+
+/* Read-only built-in (internal) agents: section CONTENT is non-interactive
+   (covers async-added Team/Skills/MCP/A2A cards too), but the fold headers stay
+   clickable so sections can still be expanded to view. Native inputs are also
+   `disabled` in JS for keyboard-focus safety. */
+.agent-detail-body.agent-detail-readonly .agent-detail-section > *:not(.agent-section-hdr) {
+  pointer-events: none;
+}
+.agent-detail-ro-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--accent-border-soft);
+  border-radius: 8px;
+  background: var(--accent-bg-soft);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+.agent-detail-ro-banner svg { flex-shrink: 0; color: var(--text-muted); }
 
 /* General Settings grid */
 .agent-gen-grid {
@@ -528,5 +616,47 @@ details[open] > .agent-advanced-summary::before { transform: rotate(90deg); }
   flex: 1;
   min-height: 500px;
 }
+
+/* Independent scroll for the Agents/Squads master-detail.
+   The fleet list (left) and the detail panel (right) each scroll on their own;
+   the surrounding settings content area must NOT scroll as a whole, or a long
+   fleet list drags the detail panel off-screen. That requires the ancestor
+   chain (content-content → settings-form → subtab-body → split) to be a
+   height-bounded flex column so the split fills the viewport and its inner
+   overflow-y:auto panels engage (overflow != visible already gives them an
+   effective min-height:0). Scoped to `.agent-master-detail` so the registries
+   hub / Remotes browse splits — whose right panels have no inner scroller —
+   keep their normal whole-area scroll and are never clipped. Rules come AFTER
+   the `.agent-split-layout` ones above so they win on equal specificity. */
+.settings-body-content:has(.agent-master-detail) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.settings-body-content:has(.agent-master-detail) > .settings-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.settings-subtab-body:has(.agent-master-detail) {
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.agent-master-detail {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* The squad detail panel has no inner .agent-detail-body wrapper (unlike the
+   agent detail), so let the panel itself scroll when a squad has many members. */
+#squad-detail-panel {
+  overflow-y: auto;
+}
+/* Same flex-shrink trap as `.agent-detail-body > *`: the panel is a bounded flex
+   column, so its section child must NOT flex-shrink — otherwise a tall member
+   grid compresses (and clips, sections being `overflow: hidden`) to fit instead
+   of overflowing, and the panel never needs to scroll. Keep natural height and
+   let `overflow-y: auto` above engage. */
+#squad-detail-panel > * { flex-shrink: 0; }
 
 
