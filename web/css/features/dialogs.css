@@ -547,8 +547,9 @@
 }
 .aia-field-btn:hover,
 .agent-instr-asst-btn:hover { color: var(--accent, #0e639c); border-color: var(--accent, #0e639c); }
-/* The header button sits right of the section title, before the fold chevron. */
-.agent-instr-asst-btn { margin-left: auto; }
+/* The header button hugs the section title (the fold chevron's own margin-left:
+   auto keeps it at the far right, so the button never drifts to the middle). */
+.agent-instr-asst-btn { margin-right: auto; }
 @media (max-width: 720px) {
   .agent-instr-modal.cc-asst-open .cc-split .user-cmd-modal-body { display: none; }
 }
