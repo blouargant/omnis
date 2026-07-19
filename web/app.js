@@ -7278,11 +7278,11 @@ async function subscribeGlobalEvents() {
       for await (const { event, data } of parseSSE(res)) {
         const sid = data && typeof data === "object" ? data.session_id : null;
         // The in-Settings "Settings assistant", the picker's session-search
-        // agent, and the collection context assistant each run on a hidden
-        // session that owns its own stream + UI. Skip all of their session-scoped
-        // global events here so they never spawn a pane ask-widget, an OS
-        // notification, or a sidebar entry.
-        if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId || sid === window.__omnisCollectionAsstSessionId)) continue;
+        // agent, the collection context assistant, and the agent-instruction
+        // assistant each run on a hidden session that owns its own stream + UI.
+        // Skip all of their session-scoped global events here so they never spawn
+        // a pane ask-widget, an OS notification, or a sidebar entry.
+        if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId || sid === window.__omnisCollectionAsstSessionId || sid === window.__omnisAgentInstrAsstSessionId)) continue;
         if (event === "mailbox_push" && sid) {
           endRemoteBusy(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);

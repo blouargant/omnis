@@ -4156,6 +4156,59 @@ IIFE) + a CSS partial; the only backend addition is the `hidden` session flag
   [web/css/settings/assistant.css](web/css/settings/assistant.css); i18n keys
   under `set.assistant.*`.
 
+### Agent-instruction drafting assistant (Settings → Agents)
+
+A Helper-backed **drafting** chat for a **custom** agent's **System Instruction**
++ public **Description**, reached from the agent detail's **Instruction Set**
+section. It is the agent-side analogue of the **collection-context drafting
+assistant** (see "Drafting assistant (web UI)" under Collection context) — same
+propose-then-commit contract — but tuned for agent authoring. Entirely in
+[web/settings.js](web/settings.js) `openAgentInstructionAssistant`; **no server
+changes** (reuses the Helper squad + `POST /api/sessions[/:id/messages]` + the
+`hidden` session flag).
+
+- **Trigger + gating**: a `✦ Assistant` button in the Instruction Set section
+  header (`renderAgentDetail`), rendered **only for editable agents**
+  (`!isBuiltin && !readOnly` — the same condition that makes the instruction
+  textarea editable, so a built-in/read-only agent shows no button and nothing to
+  apply). The click `stopPropagation`s so it doesn't toggle the section fold.
+- **Modal**: `uiModalShell` + an `agent-instr-modal` class, laid out `[fields |
+  chat]` via the collection assistant's **unscoped** `.cc-asst*` / `.cc-field*`
+  chat classes (shared, see the CSS note below) plus an agent-specific
+  scaffolding block in [web/css/features/dialogs.css](web/css/features/dialogs.css).
+  Left = Description input + System instruction textarea (seeded from the inline
+  fields, each with a `✦` field button that points the composer placeholder at
+  that field); right = the chat (visible by default — the modal *is* the
+  assistant), with a single **Close** in the footer.
+- **Drafting protocol**: the assistant proposes fenced ` ```instruction ` /
+  ` ```description ` blocks; `extractAgentInstrDrafts` pulls them into **Apply**
+  buttons (`Apply to instruction` / `Apply to description`), mirroring
+  `extractCollectionDrafts`.
+- **Apply / persistence (propose-then-commit)**: the modal's editors are the
+  drafting surface; editing them — manually or via **Apply** — dispatches an
+  `input` event on the **inline** settings field, reusing its existing handler
+  (sets `a.instruction` / `a.description`, updates the token count, marks the form
+  dirty). The modal **never writes to disk** — the Settings top-bar **Save**
+  persists and **Discard** reverts, exactly like any inline edit.
+- **Capability-aware preamble**: each turn prepends the agent's tools / skills /
+  model / team (`agentCapabilitySummary`) plus the current field values, so drafts
+  are grounded in what the agent can actually do (an improvement over the
+  collection assistant's name-only context).
+- **Session**: one hidden, reusable Helper session cached in
+  `localStorage["agent_toolkit_agent_instr_assistant"]`, published as
+  `window.__omnisAgentInstrAsstSessionId` and **added to the events-skip guard**
+  in [web/app.js](web/app.js) `subscribeGlobalEvents` (so it spawns no pane
+  ask-widget / OS notification / sidebar entry); `reset_context: true` on the
+  first send per modal-open (no bleed between agents); 404 self-heal recreates the
+  session and retries once.
+- **CSS note**: the `.cc-asst*` / `.cc-field*` chat classes in `dialogs.css` are
+  now **shared** by the collection-context and agent-instruction assistants; only
+  the `.agent-instr-modal` split scaffolding + `.aia-*` field editors +
+  `.agent-instr-asst-btn` header button are agent-specific. i18n keys under
+  `set.agent.asst*` (en/fr/es/de).
+- **No-op contract**: built-in agents and every non-Settings surface are
+  byte-identical; the feature is purely additive in the web UI.
+
 ### Remote registries (skills, agents, mcp, a2a, squads, commands, permissions)
 
 The web UI can browse and install skills, agents, MCP servers, A2A peers,

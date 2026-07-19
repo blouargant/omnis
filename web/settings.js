@@ -4122,6 +4122,22 @@ const BASE_PATH = window.BASE_PATH || "";
     sysF.appendChild(ta);
     instrBody.appendChild(sysF);
 
+    // Drafting-assistant entry point (editable agents only — built-in agents'
+    // fields are read-only, so there's nothing to apply). A ✦ button in the
+    // section header opens a Helper-backed chat that drafts the instruction +
+    // description; stopPropagation so the click doesn't toggle the fold.
+    if (!isBuiltin && !readOnly) {
+      const asstBtn = document.createElement("button");
+      asstBtn.type = "button";
+      asstBtn.className = "agent-instr-asst-btn";
+      asstBtn.setAttribute("data-tip", tr("set.agent.asstTip"));
+      asstBtn.innerHTML =
+        `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg>` +
+        `<span>${escHtml(tr("set.agent.asstBtn"))}</span>`;
+      asstBtn.addEventListener("click", (e) => { e.stopPropagation(); openAgentInstructionAssistant(a, ta, descInp); });
+      instrHdr.appendChild(asstBtn);
+    }
+
     instrSection.appendChild(instrBody);
     body.appendChild(instrSection);
 
@@ -9855,6 +9871,247 @@ const BASE_PATH = window.BASE_PATH || "";
       });
       return res.ok;
     } catch { return false; }
+  }
+
+  // ─── Agent-instruction drafting assistant (modal) ───────────────────────
+  // A Helper-backed drafting chat for an agent's System Instruction + public
+  // Description, opened from the Instruction Set section (editable agents only).
+  // Mirrors the collection-context assistant (web/app.js wireCollectionAssistant):
+  // the assistant proposes fenced ```instruction / ```description blocks that the
+  // client turns into Apply buttons; Apply fills the modal's editors, which sync
+  // straight through to the inline settings fields (propose-then-commit). The
+  // modal never writes to disk — the Settings Save/Discard governs persistence.
+  // Reuses app.js globals (uiModalShell, apiFetch, parseSSE, renderMarkdown,
+  // isRoutingTool, showToast, escHtml, tr) and the unscoped .cc-asst* chat CSS
+  // from the collection assistant.
+  const AIA_SESSION_KEY = "agent_toolkit_agent_instr_assistant";
+  // Publish the (cached) id early so app.js's /api/events handler skips it (no
+  // pane ask-widget / OS notification / sidebar entry for the hidden session).
+  if (localStorage.getItem(AIA_SESSION_KEY)) {
+    window.__omnisAgentInstrAsstSessionId = localStorage.getItem(AIA_SESSION_KEY);
+  }
+  let aiaSession = null;
+
+  async function ensureAgentInstrSession() {
+    if (aiaSession) return aiaSession;
+    const cached = localStorage.getItem(AIA_SESSION_KEY);
+    if (cached) { aiaSession = cached; window.__omnisAgentInstrAsstSessionId = cached; return cached; }
+    return await createAgentInstrSession();
+  }
+  async function createAgentInstrSession() {
+    const res = await apiFetch("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ squad: "helper", hidden: true, title: "Agent instruction assistant" }),
+    });
+    if (!res.ok) throw new Error("could not create agent instruction assistant session");
+    const j = await res.json();
+    aiaSession = j.session_id;
+    localStorage.setItem(AIA_SESSION_KEY, aiaSession);
+    window.__omnisAgentInstrAsstSessionId = aiaSession;
+    return aiaSession;
+  }
+
+  // extractAgentInstrDrafts pulls ```instruction / ```description fenced blocks
+  // out of the assistant's markdown so they can be offered as Apply buttons.
+  function extractAgentInstrDrafts(md) {
+    const out = {};
+    const re = /```(instruction|description)[ \t]*\r?\n([\s\S]*?)```/g;
+    let m;
+    while ((m = re.exec(md || "")) !== null) out[m[1]] = m[2].replace(/\s+$/, "");
+    return out;
+  }
+
+  // agentCapabilitySummary renders the agent's tools/skills/model/team into a
+  // short model-facing block so drafts are grounded in what the agent can do.
+  function agentCapabilitySummary(a) {
+    const list = (v) => (Array.isArray(v) && v.length ? v.join(", ") : "(none)");
+    const team = [].concat(a.subagents || [], a.a2a_agents || []);
+    return [
+      "  tools:  " + list(a.tools),
+      "  skills: " + list(a.skills),
+      "  model:  " + (a.model_ref || a.model || "(default)"),
+      "  team:   " + (team.length ? team.join(", ") : "(none)"),
+    ].join("\n");
+  }
+
+  // openAgentInstructionAssistant builds the [fields | chat] modal. instrEl and
+  // descEl are the INLINE settings fields; the modal's editors sync through to
+  // them (dispatching `input`, which reuses their existing handlers to update
+  // the agent object, token count, and mark the form dirty).
+  function openAgentInstructionAssistant(a, instrEl, descEl) {
+    const overlay = uiModalShell(tr("set.agent.asstTitle", { name: a.name || "" }));
+    const modalEl = overlay.querySelector(".ui-modal");
+    modalEl.classList.add("agent-instr-modal", "cc-asst-open");
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    const sparkSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10z"/></svg>`;
+    body.innerHTML = `
+      <div class="user-cmd-field aia-desc-field">
+        <div class="aia-field-head">
+          <span class="user-cmd-field-label">${escHtml(tr("set.agent.publicDesc"))}</span>
+          <button type="button" class="aia-field-btn" data-field="description" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
+        </div>
+        <input type="text" class="aia-desc" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}" />
+      </div>
+      <div class="user-cmd-field aia-instr-field">
+        <div class="aia-field-head">
+          <span class="user-cmd-field-label">${escHtml(tr("set.agent.systemInstructions"))}</span>
+          <button type="button" class="aia-field-btn" data-field="instruction" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
+        </div>
+        <textarea class="aia-instr" spellcheck="false" placeholder="${escHtml(tr("set.agent.instrPlaceholder"))}"></textarea>
+      </div>`;
+    const mDesc = body.querySelector(".aia-desc");
+    const mInstr = body.querySelector(".aia-instr");
+    mDesc.value = descEl ? descEl.value : (a.description || "");
+    mInstr.value = instrEl ? instrEl.value : (a.instruction || "");
+    // Sync-through to the inline settings fields on every edit (their own input
+    // handlers set a.description / a.instruction, update the count, mark dirty).
+    const syncTo = (src, dst) => { if (!dst) return; dst.value = src.value; dst.dispatchEvent(new Event("input", { bubbles: true })); };
+    mDesc.addEventListener("input", () => syncTo(mDesc, descEl));
+    mInstr.addEventListener("input", () => syncTo(mInstr, instrEl));
+
+    // Lay the fields and the chat side by side: [header, split[body, aside], footer].
+    const split = document.createElement("div");
+    split.className = "cc-split";
+    modalEl.insertBefore(split, body);
+    split.appendChild(body);
+    const aside = document.createElement("aside");
+    aside.className = "cc-asst";
+    aside.innerHTML =
+      `<div class="cc-asst-head"><span class="cc-asst-title">` +
+      `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>` +
+      `<span>${escHtml(tr("set.agent.asstBtn"))}</span></span></div>` +
+      `<div class="cc-asst-transcript"></div>` +
+      `<div class="cc-asst-status"></div>` +
+      `<form class="cc-asst-composer">` +
+      `<textarea class="cc-asst-input" rows="2" spellcheck="false" placeholder="${escHtml(tr("set.agent.asstPlaceholder"))}"></textarea>` +
+      `<button type="submit" class="cc-asst-send" data-tip="${escHtml(tr("collections.asstSend"))}" aria-label="${escHtml(tr("collections.asstSend"))}">` +
+      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>` +
+      `</button></form>`;
+    split.appendChild(aside);
+
+    const transcript = aside.querySelector(".cc-asst-transcript");
+    const statusLine = aside.querySelector(".cc-asst-status");
+    const input = aside.querySelector(".cc-asst-input");
+    const sendBtn = aside.querySelector(".cc-asst-send");
+    const form = aside.querySelector(".cc-asst-composer");
+    let sending = false;
+    let fresh = true; // reset the hidden session's context on the first send
+
+    const scrollBottom = () => { transcript.scrollTop = transcript.scrollHeight; };
+    const addUser = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-user"; el.textContent = t; transcript.appendChild(el); scrollBottom(); };
+    const addErr = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-error"; el.textContent = t; transcript.appendChild(el); scrollBottom(); };
+    const addBot = (t) => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-bot"; renderMarkdown(el, t); transcript.appendChild(el); scrollBottom(); return el; };
+    const newBubble = () => { const el = document.createElement("div"); el.className = "cc-asst-msg cc-asst-bot"; transcript.appendChild(el); scrollBottom(); return el; };
+
+    const applyBar = (drafts, bubble) => {
+      const bar = document.createElement("div");
+      bar.className = "cc-asst-apply";
+      const mk = (labelKey, target, value) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "cc-asst-apply-btn";
+        b.textContent = tr(labelKey);
+        b.addEventListener("click", () => {
+          target.value = value;
+          target.dispatchEvent(new Event("input", { bubbles: true })); // fills the inline field too
+          target.focus();
+          showToast(tr("set.agent.asstApplied"), "ok");
+        });
+        return b;
+      };
+      if (drafts.instruction != null) bar.appendChild(mk("set.agent.asstApplyInstr", mInstr, drafts.instruction));
+      if (drafts.description != null) bar.appendChild(mk("set.agent.asstApplyDesc", mDesc, drafts.description));
+      if (bar.children.length) { bubble.appendChild(bar); scrollBottom(); }
+    };
+
+    const autoGrow = () => { input.style.height = "auto"; input.style.height = Math.min(120, input.scrollHeight) + "px"; };
+
+    // Each field's ✦ button points the composer placeholder at that field (a
+    // hint, not pre-filled text) and focuses it.
+    body.querySelectorAll(".aia-field-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        input.placeholder = btn.getAttribute("data-field") === "instruction"
+          ? tr("set.agent.asstStarterInstr")
+          : tr("set.agent.asstStarterDesc");
+        input.focus();
+      });
+    });
+
+    async function send() {
+      if (sending) return;
+      const text = (input.value || "").trim();
+      if (!text) return;
+      input.value = ""; autoGrow();
+      addUser(text);
+      sending = true; sendBtn.disabled = true;
+      statusLine.textContent = tr("set.agent.asstThinking");
+      const prompt =
+        tr("set.agent.asstPreamble", { name: a.name || "" }) + "\n\n" +
+        "AGENT CAPABILITIES:\n" + agentCapabilitySummary(a) + "\n\n" +
+        "CURRENT DESCRIPTION:\n" + (mDesc.value.trim() || "(empty)") + "\n\n" +
+        "CURRENT INSTRUCTION:\n" + (mInstr.value.trim() || "(empty)") + "\n\n" +
+        "USER REQUEST:\n" + text;
+      try {
+        let sid = await ensureAgentInstrSession();
+        const post = (s) => apiFetch(`/api/sessions/${s}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ prompt, reset_context: fresh }),
+        }).catch(() => null);
+        let res = await post(sid);
+        if (res && res.status === 404) {
+          localStorage.removeItem(AIA_SESSION_KEY); aiaSession = null;
+          sid = await createAgentInstrSession(); res = await post(sid);
+        }
+        fresh = false;
+        if (!res || !res.ok) { addErr(tr("set.agent.asstError")); return; }
+        let bubble = null, acc = "";
+        const ensure = () => { if (!bubble) bubble = newBubble(); return bubble; };
+        const finalize = () => {
+          if (bubble && acc) { renderMarkdown(bubble, acc); applyBar(extractAgentInstrDrafts(acc), bubble); }
+          else if (bubble && !acc) bubble.remove();
+          bubble = null; acc = "";
+        };
+        for await (const { event, data } of parseSSE(res)) {
+          switch (event) {
+            case "token": ensure(); acc += (data.text || ""); renderMarkdown(bubble, acc); scrollBottom(); statusLine.textContent = tr("set.agent.asstStreaming"); break;
+            case "message": if (!acc) { ensure(); acc = data.text || ""; renderMarkdown(bubble, acc); scrollBottom(); } break;
+            case "tool_call": if (!(typeof isRoutingTool === "function" && isRoutingTool(data.name))) statusLine.textContent = tr("set.agent.asstWorking"); break;
+            case "heartbeat": statusLine.textContent = tr("set.agent.asstThinking"); break;
+            case "error": finalize(); addErr(data.message || tr("set.agent.asstError")); break;
+            case "done": finalize(); return;
+          }
+        }
+        finalize();
+      } catch (_) {
+        addErr(tr("set.agent.asstError"));
+      } finally {
+        sending = false; sendBtn.disabled = false; statusLine.textContent = "";
+      }
+    }
+
+    input.addEventListener("input", autoGrow);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+      else if (e.key === "Escape") { e.stopPropagation(); } // don't close the modal while typing
+    });
+    form.addEventListener("submit", (e) => { e.preventDefault(); send(); });
+
+    // Footer: a single Close (no discard concept — edits already synced to the
+    // inline fields; the Settings Save/Discard governs persistence).
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = tr("common.close");
+    const cancelBtn = overlay.querySelector(".ui-modal-cancel");
+    if (cancelBtn) cancelBtn.style.display = "none";
+    let done = false;
+    const close = () => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); };
+    ok.addEventListener("click", close);
+    overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+    const onKey = (e) => { if (e.key === "Escape" && document.activeElement !== input) { e.preventDefault(); close(); } };
+    document.addEventListener("keydown", onKey, true);
+
+    addBot(tr("set.agent.asstGreeting"));
+    setTimeout(() => input.focus(), 0);
   }
 
   // Window-level dirty guard.

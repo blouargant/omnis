@@ -21,6 +21,7 @@
 
 - **Per-collection context** — a collection can carry persistent instructions + memory that follow a workstream across repos, plus a seeded starting squad and working directory.
 - **Assisted collection memory** — generate a collection's memory from its recent chats, and a drafting assistant that helps you write the instructions.
+- **Agent instruction assistant** — a drafting assistant on the agent Settings panel that helps you write an agent's system instruction and public description, grounded in the agent's own tools, skills, and model.
 - **Find a past chat** — search every past conversation (including archived) from the new-tab landing page or a chat.
 - **More web-search providers** — added Serper.dev as the recommended provider, with a "Test" button for web-search API keys in Settings.
 
