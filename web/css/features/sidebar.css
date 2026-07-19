@@ -393,6 +393,16 @@ body.resizing #sidebar { transition: none; }
   transition: background 0.1s, color 0.1s;
 }
 #session-list li:hover { background: var(--bg-raised); color: var(--text); }
+/* Pagination sentinel — an invisible end-of-list marker the IntersectionObserver
+   watches to load the next page ~5 rows early (see PAGE_MORE in web/app.js). It
+   is a zero-height, non-interactive <li>, never styled as a session row. */
+#session-list li.session-sentinel,
+#archived-list li.session-sentinel {
+  padding: 0; margin: 0; height: 1px; min-height: 0;
+  list-style: none; pointer-events: none; background: none; cursor: default;
+}
+#session-list li.session-sentinel:hover,
+#archived-list li.session-sentinel:hover { background: none; }
 /* Indent the session rows so their left edge — the hover/active highlight box
    and the focused accent rail — lines up with the timeframe group-label text
    (list padding 6px + label padding-left 8px = 14px), rather than sticking out

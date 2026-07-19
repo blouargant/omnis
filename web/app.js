@@ -595,7 +595,7 @@ function highlightTerms(text, query) {
 // (which carries only a session id and a reason) still renders with its title and
 // date without another round-trip.
 function sessionMetaById(id) {
-  return (lastSessions || []).find(s => s.id === id) || null;
+  return sessionMeta.get(id) || null;
 }
 
 function renderSearchResults(panel, results, opts = {}) {
@@ -901,12 +901,15 @@ function renderPanePicker(panel) {
   if (!list) return;
   list.innerHTML = "";
   const shown = new Set(panels.flatMap(p => p.tabs));
-  // List every ACTIVE session from the full payload (not the rendered list,
-  // which is filtered to the selected collection) so the picker can jump to a
-  // session in any collection.
-  for (const s of lastSessions) {
+  // List the ACTIVE sessions we have seen (the sessionMeta cache accumulates every
+  // fetched/opened session across collections), most-recent first. The list is no
+  // longer the full universe (GET /api/sessions is paginated), but the picker's
+  // own search box finds anything not yet cached.
+  const seen = [...sessionMeta.values()]
+    .filter((s) => s.id && !s.archived)
+    .sort((a, b) => new Date(b.last_used_at) - new Date(a.last_used_at));
+  for (const s of seen) {
     const id = s.id;
-    if (!id || s.archived) continue;
     const name = s.title || s.id;
     const item = document.createElement("li");
     item.className = "pane-picker-item";
@@ -1424,17 +1427,39 @@ const sessionTitles     = new Map(); // sessionId → display title (for pane ta
 const GENERAL_COLLECTION = "General";
 let activeCollection = GENERAL_COLLECTION; // which collection the middle list is filtered to
 let collectionsData  = [];                 // [{name,count,general}] from GET /api/collections
-let lastSessions     = [];                 // last GET /api/sessions payload, so a collection
-                                           // click re-filters the list without a refetch
+// sessionMeta is a lazily-grown id → session-meta cache. GET /api/sessions is now
+// paginated, so we no longer hold the whole list; every row we fetch (a page, a
+// prefix reload, a single open) is remembered here so colour lookups, the pane
+// picker, and sessionMetaById still resolve a session we've already seen without
+// holding the entire list in memory.
+const sessionMeta = new Map();
 let sessionDrag      = null;               // sessionId currently being dragged onto the rail
+
+// ─── Session-pane pagination (server-side windowing) ─────────────────────────
+// The middle list and the archived panel each page GET /api/sessions: an initial
+// PAGE_INITIAL, then PAGE_MORE each time an IntersectionObserver sentinel nears
+// the list end (~5 rows early). resetActiveView loads page 1 (collection/search/
+// sort change); loadMoreActive appends the next page; reloadActivePrefix re-fetches
+// the loaded prefix in place, preserving scroll (the live-push refresh). See
+// docs/superpowers/specs/2026-07-19-session-list-pagination-design.md.
+const PAGE_INITIAL = 50;
+const PAGE_MORE = 5;
+function newSessionView() {
+  // seq is a per-view monotonic token: every reset / prefix-reload bumps it so a
+  // slower in-flight page response for a superseded view is dropped instead of
+  // appending stale rows (active and archived carry independent seqs).
+  return { loaded: 0, total: 0, loading: false, exhausted: false, lastGroupKey: null, seq: 0 };
+}
+const activeView = newSessionView();
+const archivedView = newSessionView();
 
 // ─── Session-pane toolbar state (search / sort / bulk-select) ─────────────────
 const SESSION_SORT_KEY = "agent_session_sort";
-let sessionSearch = "";                    // live title filter for the middle list
+let sessionSearch = "";                    // server-side title filter (q=) for the list
 let sessionSort   = localStorage.getItem(SESSION_SORT_KEY) || "recent"; // recent | created | az
 let selectMode    = false;                 // bulk multi-select mode toggle
 const selectedSessions = new Set();        // ids ticked in select mode
-let currentViewIds = [];                   // ids currently shown (post filter+sort) — for Select all
+let currentViewIds = [];                   // LOADED active ids (post filter) — for Select all
 
 // ─── Per-session push event subscriptions ────────────────────────────────────
 // Each open session has a persistent SSE connection to /api/sessions/:id/events
@@ -5526,21 +5551,16 @@ function promptForToken() {
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
-// Monotonic sequence guard: bursts of session creation/deletion fire several
-// overlapping loadSessions() calls, and their GET /api/sessions responses can
-// resolve out of order. Without this, an older response (issued when fewer
-// sessions existed) could resolve last and clobber a newer one — dropping the
-// just-created session from the sidebar until the next refresh. We tag each
-// request and only render the latest one to resolve.
-let _loadSessionsSeq = 0;
+// loadSessions is the "refresh the sidebar" entry point every mutation +
+// cross-browser push calls. With the list now paginated it re-fetches the
+// *loaded prefix* of both the active and archived views (offset 0 ..
+// max(PAGE_INITIAL, loaded)) and re-renders in place, preserving scroll — so a
+// create/delete/rename/move never yanks the user back to the top. Each view's own
+// monotonic seq drops any stale in-flight page response, so overlapping refreshes
+// can't clobber each other (this replaces the old whole-list _loadSessionsSeq).
 async function loadSessions() {
-  const seq = ++_loadSessionsSeq;
-  try {
-    const res = await apiFetch("/api/sessions", { cache: "no-store" });
-    const data = await res.json();
-    if (seq !== _loadSessionsSeq) return; // a newer load superseded this one
-    renderSessions(data.sessions || []);
-  } catch (e) { console.error(e); }
+  await reloadActivePrefix();
+  await reloadArchivedPrefix();
 }
 
 // Three-dots "kebab" trigger that opens each session row's actions menu.
@@ -5786,69 +5806,36 @@ function effectiveCollection(sess, known) {
   return known.has(raw.toLowerCase()) ? raw : GENERAL_COLLECTION;
 }
 
-function renderSessions(sessions) {
-  lastSessions = sessions; // remember so a collection click can re-filter without a refetch
-  // Keep the archived-state index in sync so the composer read-only guard and
-  // applySessionUI can consult it without re-fetching. This set holds ALL
-  // archived ids (unfiltered) since the read-only guard is collection-agnostic.
-  archivedSessions.clear();
-  const known = knownUserCollections();
-  const q = sessionSearch.trim().toLowerCase();
-  const matchQ = (s) => !q || (s.title || s.id).toLowerCase().includes(q);
-  const active = [];
-  const archived = [];
-  for (const s of sessions) {
-    sessionTitles.set(s.id, s.title || s.id);
-    if (s.archived) archivedSessions.add(s.id);
-    // Filter both lists to the selected collection so each collection is a
-    // self-contained view (General shows un-filed sessions), plus the search box.
-    if (effectiveCollection(s, known).toLowerCase() !== activeCollection.toLowerCase()) continue;
-    if (!matchQ(s)) continue;
-    if (s.archived) archived.push(s);
-    else active.push(s);
-  }
-  // Drop any ticked selections for sessions that no longer exist (deleted
-  // elsewhere) so a batch action never targets a gone session.
-  if (selectMode) {
-    const allIds = new Set(sessions.map((s) => s.id));
-    for (const id of [...selectedSessions]) if (!allIds.has(id)) selectedSessions.delete(id);
-  }
+// rememberSessionMeta caches a fetched session by id so colour lookups, the pane
+// picker, sessionMetaById, and the archived read-only guard resolve a seen
+// session without holding the whole (now paginated) list. It also keeps the
+// archived-id index + the title map current for any session we have loaded.
+function rememberSessionMeta(s) {
+  if (!s || !s.id) return;
+  sessionMeta.set(s.id, s);
+  sessionTitles.set(s.id, s.title || s.id);
+  if (s.archived) archivedSessions.add(s.id);
+  else archivedSessions.delete(s.id);
+}
 
-  // Sort the active list per the toolbar's sort choice. "recent" keeps the
-  // server order (last_used desc) and shows Today/Yesterday/… timeframe headers;
-  // the other orders are a flat list (timeframe headers wouldn't make sense).
-  if (sessionSort === "created") {
-    active.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  } else if (sessionSort === "az") {
-    active.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id));
-  }
-  currentViewIds = active.map((s) => s.id);
+// sessionsQuery builds a paginated GET /api/sessions URL for the current
+// collection / search / sort. `archived` picks which list; the chosen sort only
+// applies to the active list (the archived panel is always recent order).
+function sessionsQuery(archived, offset, limit) {
+  const p = new URLSearchParams();
+  p.set("collection", activeCollection);
+  p.set("archived", archived ? "true" : "false");
+  const q = sessionSearch.trim();
+  if (q) p.set("q", q);
+  p.set("sort", archived ? "recent" : sessionSort);
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  return "/api/sessions?" + p.toString();
+}
 
-  els.list.innerHTML = "";
-  if (sessionSort === "recent") {
-    const now = new Date();
-    let curGroup = null;
-    for (const s of active) {
-      const tf = sessionTimeframe(new Date(s.last_used_at), now);
-      if (tf.key !== curGroup) {
-        curGroup = tf.key;
-        els.list.appendChild(buildTimeframeHeader(tf.label));
-      }
-      els.list.appendChild(buildSessionRow(s, { archived: false }));
-    }
-  } else {
-    for (const s of active) els.list.appendChild(buildSessionRow(s, { archived: false }));
-  }
-
-  els.archivedList.innerHTML = "";
-  for (const s of archived) els.archivedList.appendChild(buildSessionRow(s, { archived: true }));
-  els.archivedPanel.hidden = archived.length === 0;
-  els.archivedCount.textContent = archived.length ? `(${archived.length})` : "";
-
-  updateSessionBar();
-
-  // Reflect each shown session's (possibly changed) archived state, refresh the
-  // sidebar highlight, and re-render any open empty-pane pickers.
+// syncPanesAfterRender re-applies the sidebar highlight + pane chrome after the
+// list changes (the tail of the old renderSessions).
+function syncPanesAfterRender() {
   refreshSidebarActive();
   for (const p of panels) {
     renderPaneTabs(p);
@@ -5856,6 +5843,212 @@ function renderSessions(sessions) {
     else if (p.els.picker && !p.els.picker.hidden) renderPanePicker(p);
   }
 }
+
+// refreshLoadedActiveIds recomputes currentViewIds from the rows currently in the
+// DOM — Select-all covers the loaded rows.
+function refreshLoadedActiveIds() {
+  currentViewIds = [];
+  for (const li of els.list.children) {
+    if (li.dataset && li.dataset.id) currentViewIds.push(li.dataset.id);
+  }
+}
+
+// appendActiveRows renders session rows into the middle list, emitting Today/
+// Yesterday/… headers (recent sort only) as the timeframe group changes across
+// pages. `reset` clears the list + group tracker first.
+function appendActiveRows(rows, { reset } = {}) {
+  const list = els.list;
+  if (reset) { list.innerHTML = ""; activeView.lastGroupKey = null; }
+  const headers = sessionSort === "recent";
+  const now = new Date();
+  for (const s of rows) {
+    rememberSessionMeta(s);
+    if (headers) {
+      const tf = sessionTimeframe(new Date(s.last_used_at), now);
+      if (tf.key !== activeView.lastGroupKey) {
+        activeView.lastGroupKey = tf.key;
+        list.appendChild(buildTimeframeHeader(tf.label));
+      }
+    }
+    list.appendChild(buildSessionRow(s, { archived: false }));
+  }
+  // Prune ticks for rows no longer present (deleted elsewhere) so a batch action
+  // never targets a gone session.
+  if (selectMode) {
+    const present = new Set(currentViewIds);
+    for (const id of [...selectedSessions]) if (!present.has(id)) selectedSessions.delete(id);
+  }
+  refreshLoadedActiveIds();
+}
+
+// ── active view: sentinel + IntersectionObserver ──
+let activeSentinel = null, activeObserver = null;
+function ensureActiveSentinel() {
+  const list = els.list;
+  if (!activeSentinel) {
+    activeSentinel = document.createElement("li");
+    activeSentinel.className = "session-sentinel";
+    activeSentinel.setAttribute("aria-hidden", "true");
+  }
+  list.appendChild(activeSentinel); // keep it last
+  activeSentinel.style.display = activeView.exhausted ? "none" : "";
+  if (!activeObserver) {
+    activeObserver = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) loadMoreActive();
+    }, { root: list, rootMargin: "0px 0px 300px 0px" }); // ~5 rows early
+  }
+  // Re-observe so a still-visible sentinel (a short list not filling the viewport)
+  // keeps loading until the viewport is full or the view is exhausted.
+  activeObserver.unobserve(activeSentinel);
+  if (!activeView.exhausted) activeObserver.observe(activeSentinel);
+}
+
+// loadMoreActive fetches + appends the next active page (PAGE_INITIAL first, then
+// PAGE_MORE). Guarded against re-entry and stale (superseded) responses.
+async function loadMoreActive() {
+  const v = activeView;
+  if (v.loading || v.exhausted) return;
+  v.loading = true;
+  const mySeq = v.seq;
+  const first = v.loaded === 0;
+  try {
+    const res = await apiFetch(sessionsQuery(false, v.loaded, first ? PAGE_INITIAL : PAGE_MORE), { cache: "no-store" });
+    const data = await res.json();
+    if (mySeq !== v.seq) return; // superseded by a reset / prefix reload
+    const rows = data.sessions || [];
+    appendActiveRows(rows, { reset: false });
+    v.loaded += rows.length;
+    v.total = Number.isFinite(data.total) ? data.total : v.loaded;
+    v.exhausted = v.loaded >= v.total || rows.length === 0;
+    updateSessionBar();
+    syncPanesAfterRender();
+  } catch (e) { console.error("loadMoreActive:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; ensureActiveSentinel(); } }
+}
+
+// resetActiveView clears the middle list and loads page 1 for the current filters
+// (collection / search / sort change).
+function resetActiveView() {
+  const v = activeView;
+  v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false; v.lastGroupKey = null;
+  els.list.innerHTML = "";
+  loadMoreActive();
+}
+
+// reloadActivePrefix re-fetches offset 0 .. max(PAGE_INITIAL, loaded) and
+// re-renders in place, preserving scroll — the live-push refresh path.
+async function reloadActivePrefix() {
+  const v = activeView;
+  v.seq++;
+  const mySeq = v.seq;
+  v.loading = true;
+  const want = Math.max(PAGE_INITIAL, v.loaded);
+  const scrollTop = els.list.scrollTop;
+  try {
+    const res = await apiFetch(sessionsQuery(false, 0, want), { cache: "no-store" });
+    const data = await res.json();
+    if (mySeq !== v.seq) return;
+    const rows = data.sessions || [];
+    appendActiveRows(rows, { reset: true });
+    v.loaded = rows.length;
+    v.total = Number.isFinite(data.total) ? data.total : rows.length;
+    v.exhausted = v.loaded >= v.total;
+    els.list.scrollTop = scrollTop;
+    updateSessionBar();
+    syncPanesAfterRender();
+  } catch (e) { console.error("reloadActivePrefix:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; ensureActiveSentinel(); } }
+}
+
+// ── archived view (left sidebar panel): same machinery, flat + recent order ──
+function appendArchivedRows(rows, { reset } = {}) {
+  const list = els.archivedList;
+  if (reset) list.innerHTML = "";
+  for (const s of rows) {
+    rememberSessionMeta(s);
+    list.appendChild(buildSessionRow(s, { archived: true }));
+  }
+}
+
+// updateArchivedChrome shows/hides the archived panel + header count from the
+// archived view's total (not just the loaded rows).
+function updateArchivedChrome() {
+  els.archivedPanel.hidden = archivedView.total === 0;
+  els.archivedCount.textContent = archivedView.total ? `(${archivedView.total})` : "";
+}
+
+let archivedSentinel = null, archivedObserver = null;
+function ensureArchivedSentinel() {
+  const list = els.archivedList;
+  if (!archivedSentinel) {
+    archivedSentinel = document.createElement("li");
+    archivedSentinel.className = "session-sentinel";
+    archivedSentinel.setAttribute("aria-hidden", "true");
+  }
+  list.appendChild(archivedSentinel);
+  archivedSentinel.style.display = archivedView.exhausted ? "none" : "";
+  if (!archivedObserver) {
+    archivedObserver = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) loadMoreArchived();
+    }, { root: list, rootMargin: "0px 0px 200px 0px" });
+  }
+  archivedObserver.unobserve(archivedSentinel);
+  if (!archivedView.exhausted) archivedObserver.observe(archivedSentinel);
+}
+
+async function loadMoreArchived() {
+  const v = archivedView;
+  if (v.loading || v.exhausted) return;
+  v.loading = true;
+  const mySeq = v.seq;
+  const first = v.loaded === 0;
+  try {
+    const res = await apiFetch(sessionsQuery(true, v.loaded, first ? PAGE_INITIAL : PAGE_MORE), { cache: "no-store" });
+    const data = await res.json();
+    if (mySeq !== v.seq) return;
+    const rows = data.sessions || [];
+    appendArchivedRows(rows, { reset: false });
+    v.loaded += rows.length;
+    v.total = Number.isFinite(data.total) ? data.total : v.loaded;
+    v.exhausted = v.loaded >= v.total || rows.length === 0;
+    updateArchivedChrome();
+    syncPanesAfterRender();
+  } catch (e) { console.error("loadMoreArchived:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; ensureArchivedSentinel(); } }
+}
+
+function resetArchivedView() {
+  const v = archivedView;
+  v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false;
+  els.archivedList.innerHTML = "";
+  loadMoreArchived();
+}
+
+async function reloadArchivedPrefix() {
+  const v = archivedView;
+  v.seq++;
+  const mySeq = v.seq;
+  v.loading = true;
+  const want = Math.max(PAGE_INITIAL, v.loaded);
+  const scrollTop = els.archivedList.scrollTop;
+  try {
+    const res = await apiFetch(sessionsQuery(true, 0, want), { cache: "no-store" });
+    const data = await res.json();
+    if (mySeq !== v.seq) return;
+    const rows = data.sessions || [];
+    appendArchivedRows(rows, { reset: true });
+    v.loaded = rows.length;
+    v.total = Number.isFinite(data.total) ? data.total : rows.length;
+    v.exhausted = v.loaded >= v.total;
+    els.archivedList.scrollTop = scrollTop;
+    updateArchivedChrome();
+    syncPanesAfterRender();
+  } catch (e) { console.error("reloadArchivedPrefix:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; ensureArchivedSentinel(); } }
+}
+
+// resetSessionViews reloads page 1 of both lists (collection / search change).
+function resetSessionViews() { resetActiveView(); resetArchivedView(); }
 
 function setSessionBusy(sessionId, busy) {
   const li = els.list.querySelector(`li[data-id="${CSS.escape(sessionId)}"]`);
@@ -5894,7 +6087,7 @@ function collectionColorByName(name) {
 // sessionCollectionColor resolves the palette key for a session's collection, so
 // its row / tab can wear the collection colour. Empty for General/uncoloured.
 function sessionCollectionColor(id) {
-  const s = (lastSessions || []).find((x) => x.id === id);
+  const s = sessionMeta.get(id);
   if (!s) return "";
   return collectionColorByName(effectiveCollection(s));
 }
@@ -5933,8 +6126,10 @@ function renderCollections(list) {
   }
   els.collectionsList.innerHTML = "";
   for (const c of collectionsData) els.collectionsList.appendChild(buildCollectionRow(c));
-  // Re-filter the (already loaded) session list against the current selection.
-  renderSessions(lastSessions);
+  // The rail only paints itself now — the (paginated) session list is refetched
+  // by its own callers (selectCollection on a rail click, loadSessions on a
+  // collections_changed push). Effective-collection folding is server-side, so
+  // there is no boot race requiring a re-filter here.
 }
 
 function buildCollectionRow(c) {
@@ -5974,15 +6169,16 @@ function buildCollectionRow(c) {
   return li;
 }
 
-// selectCollection switches the middle list's filter. No refetch — we already
-// hold every session in lastSessions.
+// selectCollection switches the middle list's filter. The list is paginated, so
+// this refetches page 1 for the newly selected collection (both active + archived
+// views).
 function selectCollection(name) {
   if (activeCollection.toLowerCase() === name.toLowerCase()) return;
   activeCollection = name;
   for (const row of els.collectionsList.children) {
     row.classList.toggle("active", row.dataset.name.toLowerCase() === name.toLowerCase());
   }
-  renderSessions(lastSessions);
+  resetSessionViews();
 }
 
 // openCollectionCtxMenu offers Rename / Change colour / Delete for a user
@@ -6502,11 +6698,13 @@ async function moveSessionToCollection(sessionId, target) {
 // ─── Session-pane toolbar (search / sort / bulk-select / new) ─────────────────
 
 // updateSessionBar refreshes the title+count (normal state) and the "n selected"
-// label + Select-all lit state (select state). Called at the end of every
-// renderSessions and whenever a selection toggles.
+// label + Select-all lit state (select state). Called after each page load /
+// prefix reload and whenever a selection toggles.
 function updateSessionBar() {
   if (els.sessionBarTitle) {
-    els.sessionBarTitle.textContent = `${activeCollection} · ${currentViewIds.length}`;
+    // The count is the collection's true filtered total from the server, not the
+    // number of rows currently loaded into the window.
+    els.sessionBarTitle.textContent = `${activeCollection} · ${activeView.total}`;
   }
   if (selectMode && els.sessionSelectCount) {
     els.sessionSelectCount.textContent = trN("sessionbar.selected", selectedSessions.size, { count: selectedSessions.size });
@@ -6533,12 +6731,14 @@ function setSearchMode(on) {
   } else if (sessionSearch) {
     els.sessionSearchInput.value = "";
     sessionSearch = "";
-    renderSessions(lastSessions);
+    resetSessionViews();
   }
 }
 
 // setSelectMode toggles bulk-select. Entering clears any prior ticks; leaving
-// drops the selection and re-renders (removing the checkboxes).
+// drops the selection. The checkboxes are pure CSS (#session-pane.selecting), so
+// no refetch is needed — just clear the row highlights and refresh the bar. This
+// preserves the loaded window + scroll position across entering/leaving select.
 function setSelectMode(on) {
   if (selectMode === on) return;
   selectMode = on;
@@ -6547,7 +6747,8 @@ function setSelectMode(on) {
   els.sessionSelectRow.hidden = !on;
   els.sessionBarMain.hidden = on;
   if (on) { els.sessionSearchRow.hidden = true; }
-  renderSessions(lastSessions);
+  for (const li of els.list.children) li.classList.remove("row-selected");
+  updateSessionBar();
 }
 
 // toggleSelectAll ticks every visible row, or clears them if all are already on.
@@ -6578,7 +6779,9 @@ function setSessionSort(key) {
   if (sessionSort === key) return;
   sessionSort = key;
   localStorage.setItem(SESSION_SORT_KEY, key);
-  renderSessions(lastSessions);
+  // Sort is applied server-side, so refetch page 1 in the new order. Only the
+  // active list is affected (the archived panel is always recent order).
+  resetActiveView();
 }
 
 // openBatchMenu offers the batch actions for the ticked sessions: move to a
@@ -6633,7 +6836,18 @@ function wireSessionBar() {
   on("session-search-btn", "click", () => setSearchMode(true));
   on("session-search-close", "click", () => setSearchMode(false));
   if (els.sessionSearchInput) {
-    els.sessionSearchInput.addEventListener("input", () => { sessionSearch = els.sessionSearchInput.value; renderSessions(lastSessions); });
+    // Search is server-side now (q=), so debounce so we don't fire a request per
+    // keystroke; each committed query refetches page 1 of both lists.
+    let searchDebounce = null;
+    els.sessionSearchInput.addEventListener("input", () => {
+      const val = els.sessionSearchInput.value;
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        if (val === sessionSearch) return;
+        sessionSearch = val;
+        resetSessionViews();
+      }, 150);
+    });
     els.sessionSearchInput.addEventListener("keydown", (e) => { if (e.key === "Escape") setSearchMode(false); });
   }
   on("session-sort-btn", "click", (e) => openSortMenu(e));
@@ -10563,6 +10777,12 @@ function toggleArchivedPanel() {
   const collapsed = !els.archivedPanel.classList.contains("collapsed");
   applyArchivedCollapse(collapsed);
   localStorage.setItem(ARCHIVED_COL_KEY, collapsed ? "1" : "0");
+  // The archived list is display:none while collapsed, so its pagination sentinel
+  // can't intersect. On expand, re-arm the observer so a further page loads if the
+  // (now visible) sentinel is in view and the view isn't exhausted.
+  if (!collapsed && typeof ensureArchivedSentinel === "function" && archivedView.loaded > 0) {
+    ensureArchivedSentinel();
+  }
 }
 els.archivedHeader.addEventListener("click", toggleArchivedPanel);
 els.archivedHeader.addEventListener("keydown", (e) => {
@@ -11882,8 +12102,10 @@ async function restoreLayout(rec, liveIds) {
     const rawTabs = Array.isArray(pane.tabs)
       ? pane.tabs
       : (pane.sessionId ? [pane.sessionId] : []);
-    // Keep editor tabs (file#<abs>) through the live-session filter.
-    const tabs = rawTabs.filter(k => isEditorTab(k) || liveIds.has(k));
+    // Keep editor tabs (file#<abs>) through the live-session filter. A null
+    // liveIds means the id set couldn't be fetched — keep every tab and let
+    // mounting drop a genuinely dead session on a 404.
+    const tabs = rawTabs.filter(k => isEditorTab(k) || !liveIds || liveIds.has(k));
     const preferred = (pane.activeKey && tabs.includes(pane.activeKey))
       ? pane.activeKey
       : (pane.activeId && tabs.includes(pane.activeId) ? pane.activeId : null);
@@ -11952,12 +12174,17 @@ async function restoreLayout(rec, liveIds) {
   await loadCollections();
   await loadSessions();
 
-  // Collect live session ids for layout validation. Use the full session
-  // payload (lastSessions), NOT the rendered list — the list is filtered to the
-  // active collection, so reading the DOM would drop tabs for sessions filed
-  // under other collections when the saved layout is validated.
-  const liveIds = new Set();
-  for (const s of lastSessions) if (s.id) liveIds.add(s.id);
+  // Collect live session ids for layout validation. The session list is now
+  // paginated, so the loaded window is NOT the full universe — a persisted tab for
+  // a session past page 1 (or in another collection) would be wrongly dropped.
+  // Fetch the slim id set once (/api/session-ids) instead; on failure keep every
+  // persisted tab (mount will drop a genuinely dead one on a 404).
+  let liveIds = null; // null ⇒ "unknown", restoreLayout keeps all tabs
+  try {
+    const res = await apiFetch("/api/session-ids", { cache: "no-store" });
+    const data = await res.json();
+    liveIds = new Set(data.ids || []);
+  } catch (e) { console.error("session-ids:", e); }
 
   const saved = loadSavedLayout();
   let restored = false;

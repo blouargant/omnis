@@ -1941,6 +1941,65 @@ exactly one** ("move" semantics, flat — no nesting).
 - **No-op contract**: no `collections.json` ⇒ only General exists and every
   session shows under it — byte-identical to the pre-collections sidebar.
 
+### Session list pagination (server-side windowing)
+
+The middle session list and the left Archived panel are **paginated server-side**
+— the client no longer holds every session. Both the active list (`#session-list`)
+and the archived panel (`#archived-list`) load an initial **50** rows, then **5
+more** each time the user scrolls to within ~5 rows of the end.
+
+- **Endpoint** = the extended `GET /api/sessions`
+  ([server/session_list.go](server/session_list.go) `handleListSessions`). It is
+  **backward-compatible**: with **no `limit`** it returns the full non-hidden list
+  exactly as before (`{sessions:[…]}`, no total) — protecting any other consumer +
+  the existing tests. With `limit` present it filters by `collection` (effective —
+  blank/unknown folds to General via the server-side `effectiveCollection`, using
+  `sessions.ListCollections()`), `archived` (`true`/`false`), and a `q` substring
+  over title/id, applies `sort` (`recent` keeps `Registry.List()`'s `last_used`
+  desc; `created`/`az` re-sort server-side so ordering is stable across pages),
+  then slices `[offset:offset+limit]` and returns `{sessions, total, offset,
+  limit}`. `total` is the filtered count **before** slicing — it drives the toolbar
+  count and the client's exhaustion check. Hidden sessions are always excluded.
+- **`GET /api/session-ids`** ([server/session_list.go](server/session_list.go)
+  `handleSessionIDs`) is a slim id-only list of every non-hidden session, fetched
+  **once at boot** to validate the persisted pane layout (drop tabs for sessions
+  deleted while the app was closed). It lives at `/api/session-ids`, **NOT**
+  `/api/sessions/ids` — a static `ids` segment under `/sessions/` would collide
+  with the `/api/sessions/:id/…` wildcard in gin's route tree and panic at startup
+  (same reason import lives at `/api/import/session`).
+- **Client windowing** ([web/app.js](web/app.js)): two independent view-states
+  (`activeView`, `archivedView` — each `{loaded, total, loading, exhausted,
+  lastGroupKey, seq}`). `resetActiveView()` clears + loads page 1 (collection /
+  search / sort change); `loadMoreActive()` appends the next page; a **sentinel
+  `<li class="session-sentinel">`** at the list end, watched by an
+  **`IntersectionObserver`** with `rootMargin` ≈ `0 0 300px 0` (~5 rows early),
+  fires the next `PAGE_MORE` load. `reloadActivePrefix()` re-fetches `offset 0 ..
+  max(PAGE_INITIAL, loaded)` in place, **preserving scroll** — this is what
+  **`loadSessions()`** now does (its name is kept, so every create/delete/rename/
+  move + cross-browser push refreshes without yanking the user to the top). A
+  **per-view monotonic `seq`** drops stale in-flight responses (replaces the old
+  whole-list `_loadSessionsSeq`). The archived panel mirrors this (flat, recent
+  order); its observer only fires while the panel is expanded (its list is
+  `display:none` collapsed), and it is re-armed on expand.
+- **Search + sort are server-driven.** The `#session-search-input` handler
+  (debounced ~150ms) sets `q`; the sort menu sets `sort`; both call
+  `resetSessionViews()`. Timeframe headers (recent sort) are emitted incrementally
+  across pages via `activeView.lastGroupKey`.
+- **`lastSessions` (the old full-list cache) is retired**, replaced by
+  `sessionMeta` — a lazily-grown `id → session` map populated on every fetch. It
+  backs `sessionMetaById`, `sessionCollectionColor`, the archived read-only-guard
+  set, and the **pane picker** (which lists the sessions seen so far, its own
+  search box finding the rest). Boot layout-restore uses `/api/session-ids`
+  instead of the full list (a `null` id set ⇒ keep every tab, mount drops a dead
+  one on 404).
+- **Select-all covers loaded rows** (`currentViewIds` = the ids in the DOM), not
+  "all N in the collection"; the toolbar count still shows the true `total`.
+- **No-op contract:** a caller omitting `limit` gets the byte-identical legacy
+  full list; CLI/TUI are untouched (server-only UI). Tests:
+  [server/session_list_test.go](server/session_list_test.go)
+  (`TestListSessionsPaginated`, drives the real router — also guards the
+  `/session-ids` route registration).
+
 ### Collection context (per-collection instructions + memory)
 
 A collection is no longer a pure UI folder — it can carry **persistent context

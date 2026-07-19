@@ -427,19 +427,13 @@ func newEngine(d serverDeps) *gin.Engine {
 			"hidden":     body.Hidden,
 		})
 	})
-	auth.GET("/sessions", func(c *gin.Context) {
-		// Hidden utility sessions (e.g. the in-Settings assistant) stay in the
-		// registry (pinned/watched/retained) but are omitted from the sidebar.
-		all := d.Registry.List()
-		out := make([]*sessions.SessionMeta, 0, len(all))
-		for _, m := range all {
-			if m.Hidden {
-				continue
-			}
-			out = append(out, m)
-		}
-		c.JSON(http.StatusOK, gin.H{"sessions": out})
-	})
+	// GET /api/sessions — legacy full list (no `limit`) or a paginated,
+	// collection/archived/q/sort-filtered page (`limit` present). Hidden utility
+	// sessions are always excluded. See server/session_list.go.
+	auth.GET("/sessions", handleListSessions(d))
+	// GET /api/session-ids — slim id-only list for boot layout validation (NOT
+	// under /sessions/ to avoid the :id wildcard collision). See session_list.go.
+	auth.GET("/session-ids", handleSessionIDs(d))
 	auth.DELETE("/sessions/:id", func(c *gin.Context) {
 		if !deleteSession(d, c.Param("id")) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
