@@ -99,3 +99,18 @@
   color: var(--text-muted, #9aa0a6);
   text-align: center;
 }
+
+.squad-graph-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.squad-graph-edge {
+  fill: none;
+  stroke: var(--border, #4a505a);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}

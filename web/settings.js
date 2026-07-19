@@ -2257,6 +2257,43 @@ const BASE_PATH = window.BASE_PATH || "";
     </div>`;
   }
 
+  // Draw parent→child connectors on the SVG overlay. Coordinates are measured
+  // from each node's bounding box relative to the canvas, so this must run
+  // AFTER layout (rAF) and on every resize.
+  function drawSquadGraphEdges(canvas, edges) {
+    const svg = canvas.querySelector(".squad-graph-edges");
+    if (!svg) return;
+    const box = canvas.getBoundingClientRect();
+    // Size the overlay to the full scroll area so lines align even when scrolled.
+    const w = canvas.scrollWidth, h = canvas.scrollHeight;
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    const originX = box.left - canvas.scrollLeft;
+    const originY = box.top - canvas.scrollTop;
+    const paths = edges.map(([fromId, toId]) => {
+      const a = canvas.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(fromId) : fromId));
+      const b = canvas.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(toId) : toId));
+      if (!a || !b) return "";
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.left - originX + ra.width / 2, y1 = ra.bottom - originY;
+      const x2 = rb.left - originX + rb.width / 2, y2 = rb.top - originY;
+      const my = (y1 + y2) / 2;
+      return `<path class="squad-graph-edge" d="M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}" />`;
+    });
+    svg.innerHTML = paths.join("");
+  }
+
+  function scheduleEdgeDraw(canvas, edges) {
+    if (canvas._edgeRO) { canvas._edgeRO.disconnect(); canvas._edgeRO = null; }
+    requestAnimationFrame(() => drawSquadGraphEdges(canvas, edges));
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(() => drawSquadGraphEdges(canvas, edges));
+      ro.observe(canvas);
+      canvas._edgeRO = ro;
+    }
+  }
+
   function renderSquadGraph(d, idx, body) {
     const model = buildSquadGraphModel(d, idx);
     body.innerHTML = `<div class="squad-graph"><svg class="squad-graph-edges" aria-hidden="true"></svg><div class="squad-graph-levels"></div></div>`;
@@ -2270,11 +2307,13 @@ const BASE_PATH = window.BASE_PATH || "";
     // Walk the tree into depth levels, assigning a DOM id to each node.
     let uid = 0;
     const levels = [];
-    (function assign(node, depth) {
+    const edges = [];
+    (function assign(node, depth, parentId) {
       node._id = "sgn-" + (uid++);
+      if (parentId != null) edges.push([parentId, node._id]);
       (levels[depth] || (levels[depth] = [])).push(node);
-      (node.children || []).forEach(c => assign(c, depth + 1));
-    })(model, 0);
+      (node.children || []).forEach(c => assign(c, depth + 1, node._id));
+    })(model, 0, null);
 
     levelsEl.innerHTML = levels
       .map(row => `<div class="squad-graph-row">${row.map(nodeCardHTML).join("")}</div>`)
@@ -2283,6 +2322,9 @@ const BASE_PATH = window.BASE_PATH || "";
     if (model.kind === "router" && (model.children || []).length === 0) {
       levelsEl.insertAdjacentHTML("beforeend", `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noRoutableSquads"))}</div>`);
     }
+
+    const canvas = body.querySelector(".squad-graph");
+    scheduleEdgeDraw(canvas, edges);
   }
 
   function renderAgentGlobals(d) {
