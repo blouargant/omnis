@@ -490,7 +490,6 @@
   "set.agent.info.off": "Désactivé",
   "set.agent.info.tools": "Outils",
   "set.agent.info.skills": "Skills",
-  "set.agent.info.team": "Équipe",
   "set.agent.info.instruction": "Instruction système",
   "set.agent.info.none": "(aucun)",
   "set.agent.info.noDescription": "Aucune description.",

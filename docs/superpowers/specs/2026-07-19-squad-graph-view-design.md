@@ -209,10 +209,13 @@ info modal** and does **not** leave the graph.
   `navigateToAgentSettings(ref, d)` and reached only via the modal's footer
   button — an explicit, opt-in jump.
 - **`openAgentInfoModal(a, ref, d)`** — built on the shared `uiModalShell`
-  (title = agent name, `.ui-modal` gains `agent-info-modal`). Read-only content:
+  (title = agent name, `.ui-modal` gains `agent-info-modal`, width
+  `min(760px, 94vw)`). Read-only content:
   identity badges (active/disabled · built-in/custom · leader), the public
   **description**, a meta block (**model**, **parallel instances**, **resumable
-  sessions**), chip rows for **tools / skills / team** (`subagents` + `a2a_agents`),
+  sessions**), chip rows for **tools / skills / Sub-agents** (the last =
+  `subagents` + `a2a_agents`, labelled with the config panel's existing
+  `set.hdr.team` "Sub-agents" key so the two stay in sync),
   and the full **system instruction** in a scrollable `<pre>`. Built-in agents'
   description/instruction come from the on-demand built-in defaults
   (`state.builtinAgents`, `await loadBuiltinAgents()` first — idempotent); every
@@ -222,6 +225,7 @@ info modal** and does **not** leave the graph.
 - **CSS** — `.agent-info-*` rules appended to `web/css/settings/squad-graph.css`
   (theme-aware, reusing the design tokens).
 - **i18n** — new `set.agent.info.*` keys (en/fr/es/de); `Skills` and `Leader`
-  stay untranslated per the glossary; regenerated via `make i18n`.
+  stay untranslated per the glossary; the Sub-agents section reuses the existing
+  `set.hdr.team` key; regenerated via `make i18n`.
 - **No server/Go changes**; all data already client-side. No-op contract holds
   (nothing renders until a node is clicked).

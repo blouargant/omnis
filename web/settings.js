@@ -2406,7 +2406,7 @@ const BASE_PATH = window.BASE_PATH || "";
       metaHtml +
       section(tr("set.agent.info.tools"), chips(tools)) +
       section(tr("set.agent.info.skills"), chips(skills)) +
-      section(tr("set.agent.info.team"), chips(team)) +
+      section(tr("set.hdr.team"), chips(team)) + // "Sub-agents" — same label as the config panel
       section(tr("set.agent.info.instruction"), instrInner);
 
     const editBtn = overlay.querySelector(".ui-modal-cancel");

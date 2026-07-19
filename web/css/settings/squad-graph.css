@@ -124,7 +124,7 @@
 /* Read-only agent info modal — opened by clicking an agent node in the graph.
    Built on the shared uiModalShell; the body's flex-column gap (dialogs.css)
    spaces the top-level sections. */
-.agent-info-modal.ui-modal { width: min(560px, 94vw); }
+.agent-info-modal.ui-modal { width: min(760px, 94vw); }
 
 .agent-info-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .agent-info-badge {
@@ -196,7 +196,7 @@
 
 .agent-info-instr {
   margin: 0;
-  max-height: 240px;
+  max-height: 360px;
   overflow: auto;
   padding: 10px 12px;
   border: 1px solid var(--border, #33373e);
