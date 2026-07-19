@@ -1,0 +1,31 @@
+/* Squad graph view — Settings → Agents → Squads right panel.
+   Nodes are HTML cards; edges are an absolutely-positioned SVG overlay. */
+
+/* Configuration | Graph segmented toggle */
+.squad-detail-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin: 0 0 14px;
+  border: 1px solid var(--border, #33373e);
+  border-radius: 8px;
+  background: var(--bg-raised, rgba(255, 255, 255, 0.03));
+}
+.squad-view-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, #9aa0a6);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.squad-view-btn:hover { color: var(--text, #e6e6e6); }
+.squad-view-btn.active {
+  background: var(--accent, #3d7eff);
+  color: #fff;
+}
+.squad-detail-body { position: relative; }

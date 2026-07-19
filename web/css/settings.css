@@ -30,6 +30,7 @@
 @import "settings/agents.css";
 @import "settings/docs.css";
 @import "settings/squads.css";
+@import "settings/squad-graph.css";
 @import "settings/commands.css";
 @import "settings/automation.css";
 @import "settings/assistant.css";

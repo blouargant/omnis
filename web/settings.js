@@ -300,6 +300,8 @@ const BASE_PATH = window.BASE_PATH || "";
     lastMenuFile: "skills",
     activeView: "form", // 'form' | 'raw'
     activeAgentSubtab: "squads", // only used when activeFile === 'agent'
+    // Right-panel view for the Squads sub-tab: "config" (form) or "graph".
+    squadView: (() => { try { return localStorage.getItem("agent_toolkit_squad_view") === "graph" ? "graph" : "config"; } catch { return "config"; } })(),
     activeModelsSubtab: "models", // only used when activeFile === 'models'
     activeProviderName: null,     // selected provider in the Providers sub-tab
     activeSkillsSubtab: "installed", // only used when activeFile === 'skills'
@@ -1998,9 +2000,34 @@ const BASE_PATH = window.BASE_PATH || "";
       panel.innerHTML = `<div class="agent-detail-empty">${escHtml(tr("set.squad.selectPrompt"))}</div>`;
       return;
     }
-    // Leader candidates: only agents marked `leader: true` (the agent named
-    // "leader" is the canonical default — auto-flagged when the field is
-    // absent, matching the server-side resolver).
+    const view = state.squadView === "graph" ? "graph" : "config";
+    panel.innerHTML = `
+      <div class="squad-detail-toggle" role="tablist">
+        <button type="button" class="squad-view-btn ${view === "config" ? "active" : ""}" data-view="config">${escHtml(tr("set.squad.graph.configTab"))}</button>
+        <button type="button" class="squad-view-btn ${view === "graph" ? "active" : ""}" data-view="graph">${escHtml(tr("set.squad.graph.graphTab"))}</button>
+      </div>
+      <div class="squad-detail-body"></div>
+    `;
+    const body = panel.querySelector(".squad-detail-body");
+    panel.querySelectorAll(".squad-view-btn").forEach(b => {
+      b.addEventListener("click", () => {
+        const v = b.dataset.view;
+        if (state.squadView === v) return;
+        state.squadView = v;
+        try { localStorage.setItem("agent_toolkit_squad_view", v); } catch {}
+        renderSquadDetail(d, idx);
+      });
+    });
+    if (view === "graph") renderSquadGraph(d, idx, body);
+    else renderSquadConfig(d, idx, body);
+  }
+
+  // The Configuration form for a squad (name / description / leader / members).
+  // Rendered into the swappable `body` under the toggle. Behaviour unchanged
+  // from the pre-graph inline version — only the render target moved from the
+  // panel to the toggle's body container.
+  function renderSquadConfig(d, idx, body) {
+    const sq = d.squads[idx];
     const isLeaderAgent = a => !!a.leader || (a.name || "").toLowerCase() === "leader";
     const leaderCandidates = d.agents
       .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator" && isLeaderAgent(a))
@@ -2009,17 +2036,9 @@ const BASE_PATH = window.BASE_PATH || "";
       .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator");
     const members = Array.isArray(sq.members) ? sq.members : [];
     const isDefault = (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME;
-    // Built-in system squads (Omnis / Helper / Session Search — the leaderless
-    // ones) are shipped plumbing and are shown READ-ONLY: no field is editable
-    // and they cannot be deleted.
     const isReadonly = isSystemSquad(sq);
-    // A leaderless squad (leader "" or "none") runs a single member agent
-    // directly, with no coordinator. The default squad always needs a leader.
     const leaderless = !isDefault && (!sq.leader || (sq.leader || "").toLowerCase() === "none");
 
-    // Sort: selected members first (in the order they appear in `members`),
-    // then the rest. The leader of the squad is forced last and rendered
-    // as disabled — a squad cannot list its own leader as a member.
     const memberOrder = (a) => {
       if (a.name === sq.leader) return 2;
       return members.includes(a.name) ? 0 : 1;
@@ -2033,7 +2052,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const agentIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
 
-    panel.innerHTML = `
+    body.innerHTML = `
       <div class="agent-detail-section">
         <div class="agent-detail-field">
           <label class="agent-detail-label">${escHtml(tr("common.name"))}</label>
@@ -2079,55 +2098,43 @@ const BASE_PATH = window.BASE_PATH || "";
 
     const onChange = () => { markFormDirty("agent"); };
 
-    const nameInput = panel.querySelector("#squad-name");
+    const nameInput = body.querySelector("#squad-name");
     if (nameInput && !isDefault && !isReadonly) {
       nameInput.addEventListener("input", () => {
         sq.name = nameInput.value;
-        // Re-render the list so the label tracks the input. Keep selection.
         renderAgentSquads(d);
-        // Restore focus / caret to the still-mounted input.
         const ref = bodyEl.querySelector("#squad-name");
         if (ref) { ref.focus(); ref.setSelectionRange(ref.value.length, ref.value.length); }
         onChange();
       });
     }
-    panel.querySelector("#squad-desc").addEventListener("input", (e) => {
+    body.querySelector("#squad-desc").addEventListener("input", (e) => {
       sq.description = e.target.value; onChange();
     });
-    panel.querySelector("#squad-leader").addEventListener("change", (e) => {
+    body.querySelector("#squad-leader").addEventListener("change", (e) => {
       sq.leader = e.target.value;
       if ((sq.leader || "").toLowerCase() === "none") {
-        // Leaderless: keep at most one member so the single agent runs directly.
         if (Array.isArray(sq.members) && sq.members.length > 1) {
           sq.members = [sq.members[0]];
         }
       } else if (Array.isArray(sq.members)) {
-        // Drop the new leader from the members list (a squad cannot list its
-        // own leader as a member).
         sq.members = sq.members.filter(m => m !== sq.leader);
       }
       onChange();
       renderSquadDetail(d, idx);
     });
-    panel.querySelectorAll("#squad-members .agent-tool-card").forEach(card => {
+    body.querySelectorAll("#squad-members .agent-tool-card").forEach(card => {
       if (card.classList.contains("tool-disabled")) return;
       card.addEventListener("click", () => {
         const name = card.dataset.name;
         if (!Array.isArray(sq.members)) sq.members = [];
         if (leaderless) {
-          // Single-agent selection: clicking an agent makes it the sole member;
-          // clicking the selected one clears it.
           sq.members = sq.members.includes(name) ? [] : [name];
         } else if (sq.members.includes(name)) {
           sq.members = sq.members.filter(m => m !== name);
         } else {
           sq.members.push(name);
         }
-        // Reflect the new selection in place instead of re-rendering the whole
-        // grid. A full renderAgentSquads(d) re-sorts members (selected first),
-        // so the just-clicked chip would jump to the front of the list. Keeping
-        // each card where it is until the next real render (page/server reload)
-        // is far less jarring while toggling several members.
         const paint = (el, on) => {
           el.classList.toggle("tool-on", on);
           const pill = el.querySelector(".agent-tool-toggle-pill");
@@ -2135,8 +2142,7 @@ const BASE_PATH = window.BASE_PATH || "";
         };
         paint(card, sq.members.includes(name));
         if (leaderless) {
-          // Single-select: clear the visual state of every other member card.
-          panel.querySelectorAll("#squad-members .agent-tool-card").forEach(other => {
+          body.querySelectorAll("#squad-members .agent-tool-card").forEach(other => {
             if (other === card || other.classList.contains("tool-disabled")) return;
             paint(other, false);
           });
@@ -2145,7 +2151,7 @@ const BASE_PATH = window.BASE_PATH || "";
       });
     });
     if (!isDefault && !isReadonly) {
-      panel.querySelector("#squad-remove").addEventListener("click", async () => {
+      body.querySelector("#squad-remove").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.confirm.deleteSquad", { name: sq.name }))) return;
         d.squads.splice(idx, 1);
         state.activeSquadIdx = Math.max(0, idx - 1);
@@ -2153,6 +2159,10 @@ const BASE_PATH = window.BASE_PATH || "";
         renderAgentSquads(d);
       });
     }
+  }
+
+  function renderSquadGraph(d, idx, body) {
+    body.innerHTML = `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.graphTab"))} — coming up.</div>`;
   }
 
   function renderAgentGlobals(d) {
