@@ -114,3 +114,9 @@
   stroke-width: 1.5;
   opacity: 0.8;
 }
+
+.squad-graph-node.is-clickable { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.squad-graph-node.is-clickable:hover {
+  border-color: var(--accent, #3d7eff);
+  background: var(--accent-bg-soft, rgba(61, 126, 255, 0.08));
+}

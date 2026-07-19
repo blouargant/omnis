@@ -2299,6 +2299,28 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
+  // Click-to-navigate: agent node → Agents sub-tab with that agent selected;
+  // squad node (Omnis graph) → select that squad, staying in Graph view.
+  // router root and missing/empty nodes are inert.
+  function wireGraphNodeClicks(container, d) {
+    container.querySelectorAll(".squad-graph-node").forEach(el => {
+      const kind = el.dataset.kind;
+      const ref = el.dataset.ref;
+      if ((kind !== "agent" && kind !== "squad") || ref == null) return;
+      el.classList.add("is-clickable");
+      el.addEventListener("click", () => {
+        if (kind === "agent") {
+          state.activeAgentSubtab = "agents";
+          state.activeAgentIdx = Number(ref);
+          renderAgentForm();
+        } else {
+          state.activeSquadIdx = Number(ref);
+          renderAgentSquads(d); // squadView stays "graph" → drill into the chosen squad
+        }
+      });
+    });
+  }
+
   function renderSquadGraph(d, idx, body) {
     const model = buildSquadGraphModel(d, idx);
     body.innerHTML = `<div class="squad-graph"><svg class="squad-graph-edges" aria-hidden="true"></svg><div class="squad-graph-levels"></div></div>`;
@@ -2323,6 +2345,7 @@ const BASE_PATH = window.BASE_PATH || "";
     levelsEl.innerHTML = levels
       .map(row => `<div class="squad-graph-row">${row.map(nodeCardHTML).join("")}</div>`)
       .join("");
+    wireGraphNodeClicks(levelsEl, d);
 
     if (model.kind === "router" && (model.children || []).length === 0) {
       levelsEl.insertAdjacentHTML("beforeend", `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noRoutableSquads"))}</div>`);
