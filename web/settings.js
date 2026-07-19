@@ -2285,12 +2285,17 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   function scheduleEdgeDraw(canvas, edges) {
-    if (canvas._edgeRO) { canvas._edgeRO.disconnect(); canvas._edgeRO = null; }
+    // Store the observer on the stable module-level `state` — NOT on `canvas`,
+    // which renderSquadGraph recreates (via body.innerHTML) on every squad
+    // switch / view toggle. A canvas-keyed guard can never find the prior
+    // observer, so it would leak one ResizeObserver + its detached subtree per
+    // re-render. Disconnecting the single stored observer keeps it bounded to one.
+    if (state._squadEdgeRO) { state._squadEdgeRO.disconnect(); state._squadEdgeRO = null; }
     requestAnimationFrame(() => drawSquadGraphEdges(canvas, edges));
     if (typeof ResizeObserver === "function") {
       const ro = new ResizeObserver(() => drawSquadGraphEdges(canvas, edges));
       ro.observe(canvas);
-      canvas._edgeRO = ro;
+      state._squadEdgeRO = ro;
     }
   }
 

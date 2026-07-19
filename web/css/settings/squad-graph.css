@@ -110,7 +110,7 @@
 }
 .squad-graph-edge {
   fill: none;
-  stroke: var(--border, #4a505a);
+  stroke: var(--border, #33373e);
   stroke-width: 1.5;
   opacity: 0.8;
 }
