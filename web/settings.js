@@ -4071,8 +4071,8 @@ const BASE_PATH = window.BASE_PATH || "";
       tag.textContent = tr("set.agent.builtin");
       descLbl.appendChild(tag);
     }
-    const descInp = document.createElement("input");
-    descInp.type = "text"; descInp.className = "agent-gen-input";
+    const descInp = document.createElement("textarea");
+    descInp.className = "agent-gen-input agent-desc-input"; descInp.rows = 2;
     descInp.placeholder = tr("set.agent.descPlaceholder");
     const descVal = isBuiltin && builtinDefaults ? (builtinDefaults.description || "") : (a.description || "");
     descInp.value = descVal;
@@ -4108,7 +4108,7 @@ const BASE_PATH = window.BASE_PATH || "";
     sysTop.appendChild(sysCount);
     sysF.appendChild(sysTop);
     const ta = document.createElement("textarea");
-    ta.className = "agent-instr-textarea"; ta.rows = 8; ta.value = instrVal;
+    ta.className = "agent-instr-textarea"; ta.rows = 16; ta.value = instrVal;
     if (isBuiltin) {
       ta.disabled = true;
       ta.classList.add("agent-builtin-readonly");
@@ -9950,7 +9950,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="user-cmd-field-label">${escHtml(tr("set.agent.publicDesc"))}</span>
           <button type="button" class="aia-field-btn" data-field="description" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
         </div>
-        <input type="text" class="aia-desc" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}" />
+        <textarea class="aia-desc" rows="2" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}"></textarea>
       </div>
       <div class="user-cmd-field aia-instr-field">
         <div class="aia-field-head">

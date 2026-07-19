@@ -505,6 +505,9 @@
   gap: 4px;
 }
 .agent-instr-modal .aia-instr { flex: 1 1 0; min-height: 120px; }
+/* Description stays a compact 2-line box — override the generic
+   `.user-cmd-field textarea { min-height: 96px }` so rows="2" governs height. */
+.agent-instr-modal .aia-desc { flex: 0 0 auto; min-height: 0; }
 .agent-instr-modal .aia-desc,
 .agent-instr-modal .aia-instr {
   width: 100%;
