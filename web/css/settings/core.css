@@ -35,10 +35,19 @@
 
 .settings-header {
   flex: 0 0 auto;
+  /* Pinned to the shared top-bar height so every right-panel header is identical
+     regardless of whether the Save/Discard actions are shown (client-only panels
+     like Appearance hide them, which previously made their header shorter), and so
+     it aligns exactly with the middle column's "Settings" header and the left
+     sidebar header — all --topbar-h. box-sizing:border-box (global) folds the 1px
+     border into the height, matching the center header's min-height box. Vertical
+     padding is dropped: flex align-items:center handles centering within the fixed
+     height, and any vertical padding would push the total past --topbar-h. */
+  height: var(--topbar-h);
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.85rem 1.5rem;
+  padding: 0 1.5rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
 }
