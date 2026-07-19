@@ -120,3 +120,91 @@
   border-color: var(--accent, #3d7eff);
   background: var(--accent-bg-soft, rgba(61, 126, 255, 0.08));
 }
+
+/* Read-only agent info modal — opened by clicking an agent node in the graph.
+   Built on the shared uiModalShell; the body's flex-column gap (dialogs.css)
+   spaces the top-level sections. */
+.agent-info-modal.ui-modal { width: min(560px, 94vw); }
+
+.agent-info-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-info-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #33373e);
+  color: var(--text-muted, #9aa0a6);
+  background: var(--bg-raised, rgba(255, 255, 255, 0.04));
+}
+.agent-info-badge.is-on {
+  color: #fff;
+  border-color: var(--accent, #3d7eff);
+  background: var(--accent, #3d7eff);
+}
+.agent-info-badge.is-off { opacity: 0.7; }
+.agent-info-badge.is-leader {
+  color: var(--accent, #3d7eff);
+  border-color: var(--accent, #3d7eff);
+  background: var(--accent-bg-soft, rgba(61, 126, 255, 0.1));
+}
+
+.agent-info-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #e6e6e6);
+  white-space: pre-line;
+}
+.agent-info-desc.is-empty { color: var(--text-muted, #9aa0a6); font-style: italic; }
+
+.agent-info-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border, #33373e);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-raised, rgba(255, 255, 255, 0.03));
+}
+.agent-info-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12.5px;
+}
+.agent-info-meta-key { color: var(--text-muted, #9aa0a6); }
+.agent-info-meta-val { color: var(--text, #e6e6e6); font-weight: 500; text-align: right; }
+
+.agent-info-section { display: flex; flex-direction: column; gap: 6px; }
+.agent-info-section-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9aa0a6);
+}
+.agent-info-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.agent-info-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #33373e);
+  background: var(--bg, rgba(0, 0, 0, 0.25));
+  color: var(--text, #e6e6e6);
+}
+.agent-info-empty { font-size: 12px; color: var(--text-muted, #9aa0a6); font-style: italic; }
+
+.agent-info-instr {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #33373e);
+  border-radius: 8px;
+  background: var(--bg, rgba(0, 0, 0, 0.25));
+  color: var(--text, #e6e6e6);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

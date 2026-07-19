@@ -2307,7 +2307,8 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
-  // Click-to-navigate: agent node → Agents sub-tab with that agent selected;
+  // Node clicks: agent node → read-only info modal (does NOT leave the graph;
+  // the modal's own footer button is the sole opt-in path to the Agents tab);
   // squad node (Omnis graph) → select that squad, staying in Graph view.
   // router root and missing/empty nodes are inert.
   function wireGraphNodeClicks(container, d) {
@@ -2318,21 +2319,109 @@ const BASE_PATH = window.BASE_PATH || "";
       el.classList.add("is-clickable");
       el.addEventListener("click", () => {
         if (kind === "agent") {
-          state.activeAgentSubtab = "agents";
-          // Mark the agents list as already initialised and record the chosen
-          // agent BEFORE rendering, so renderAgentAgents' first-render restore
-          // (which would otherwise reset activeAgentIdx to the saved/leader
-          // default) does not clobber the node we just clicked.
-          state.activeAgentInitialized = true;
-          state.activeAgentIdx = Number(ref);
-          try { localStorage.setItem(ACTIVE_AGENT_KEY, d.agents[Number(ref)]?.name || ""); } catch {}
-          renderAgentForm();
+          openAgentInfoModal(d.agents[Number(ref)], Number(ref), d);
         } else {
           state.activeSquadIdx = Number(ref);
           renderAgentSquads(d); // squadView stays "graph" → drill into the chosen squad
         }
       });
     });
+  }
+
+  // navigateToAgentSettings switches to the Agents sub-tab with `ref` selected.
+  // Marks the list as already initialised and records the chosen agent BEFORE
+  // rendering, so renderAgentAgents' first-render restore (which would otherwise
+  // reset activeAgentIdx to the saved/leader default) does not clobber it. This
+  // is the click-to-navigate behaviour the graph used to run on every agent-node
+  // click; it is now reached only via the info modal's "Open in Agents settings"
+  // button — an explicit, opt-in jump.
+  function navigateToAgentSettings(ref, d) {
+    state.activeAgentSubtab = "agents";
+    state.activeAgentInitialized = true;
+    state.activeAgentIdx = Number(ref);
+    try { localStorage.setItem(ACTIVE_AGENT_KEY, (d.agents[Number(ref)] || {}).name || ""); } catch {}
+    renderAgentForm();
+  }
+
+  // openAgentInfoModal shows a read-only card of everything known about an agent
+  // — identity (active/disabled, built-in/custom, leader), model, parallelism,
+  // resumable sessions, tools, skills, team (subagents + A2A peers), the public
+  // description, and the full system instruction — without leaving the graph.
+  // A built-in agent's description/instruction live in the binary, not the
+  // parsed config, so they come from the on-demand built-in defaults
+  // (state.builtinAgents); everything else reads off the parsed agent object,
+  // which carries model/tools/team for built-ins too (the graph nodes already
+  // render those). The footer "Open in Agents settings" button is the ONLY path
+  // back to the editable Agents sub-tab.
+  async function openAgentInfoModal(a, ref, d) {
+    if (!a) return;
+    await loadBuiltinAgents(); // idempotent; populates built-in defaults + names
+    const bd = (state.builtinAgents && state.builtinAgents[a.name]) || null;
+    const builtin = isBuiltinAgent(a.name) || a.builtin === true;
+    const enabled = a.enabled !== false;
+    const model = a.model_ref || a.model || "";
+    const fanout = Number(a.max_instances) > 1 ? Number(a.max_instances) : 0;
+    const resumable = a.resumable_sessions !== false; // tri-state: default ON
+    const description = a.description || (bd && bd.description) || "";
+    const instruction = a.instruction || (bd && bd.instruction) || "";
+    const tools = Array.isArray(a.tools) ? a.tools : [];
+    const skills = Array.isArray(a.skills) ? a.skills : [];
+    const team = [].concat(
+      Array.isArray(a.subagents) ? a.subagents : [],
+      Array.isArray(a.a2a_agents) ? a.a2a_agents : []
+    );
+
+    const chips = (arr) => arr.length
+      ? `<div class="agent-info-chips">${arr.map(x => `<span class="agent-info-chip">${escHtml(x)}</span>`).join("")}</div>`
+      : `<div class="agent-info-empty">${escHtml(tr("set.agent.info.none"))}</div>`;
+    const section = (label, inner) =>
+      `<div class="agent-info-section"><div class="agent-info-section-label">${escHtml(label)}</div>${inner}</div>`;
+
+    const badges = [
+      `<span class="agent-info-badge ${enabled ? "is-on" : "is-off"}">${escHtml(enabled ? tr("set.agent.info.active") : tr("set.agent.info.disabled"))}</span>`,
+      `<span class="agent-info-badge is-kind">${escHtml(builtin ? tr("set.agent.info.builtin") : tr("set.agent.info.custom"))}</span>`,
+    ];
+    if (a.leader === true) badges.push(`<span class="agent-info-badge is-leader">${escHtml(tr("set.agent.info.leaderBadge"))}</span>`);
+
+    const metaRows = [
+      [tr("set.agent.info.model"), model || tr("set.agent.info.defaultModel")],
+      [tr("set.agent.info.parallelism"), fanout ? "×" + fanout : "1"],
+      [tr("set.agent.info.resumable"), resumable ? tr("set.agent.info.on") : tr("set.agent.info.off")],
+    ];
+    const metaHtml = `<div class="agent-info-meta">${metaRows
+      .map(([k, v]) => `<div class="agent-info-meta-row"><span class="agent-info-meta-key">${escHtml(k)}</span><span class="agent-info-meta-val">${escHtml(v)}</span></div>`)
+      .join("")}</div>`;
+
+    let instrInner;
+    if (instruction) instrInner = `<pre class="agent-info-instr">${escHtml(instruction)}</pre>`;
+    else if (builtin) instrInner = `<div class="agent-info-empty">${escHtml(tr("set.agent.info.builtinInstrUnavailable"))}</div>`;
+    else instrInner = `<div class="agent-info-empty">${escHtml(tr("set.agent.info.noInstruction"))}</div>`;
+
+    const overlay = uiModalShell(a.name || "");
+    overlay.querySelector(".ui-modal").classList.add("agent-info-modal");
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    body.innerHTML =
+      `<div class="agent-info-badges">${badges.join("")}</div>` +
+      `<div class="agent-info-desc${description ? "" : " is-empty"}">${description ? escHtml(description) : escHtml(tr("set.agent.info.noDescription"))}</div>` +
+      metaHtml +
+      section(tr("set.agent.info.tools"), chips(tools)) +
+      section(tr("set.agent.info.skills"), chips(skills)) +
+      section(tr("set.agent.info.team"), chips(team)) +
+      section(tr("set.agent.info.instruction"), instrInner);
+
+    const editBtn = overlay.querySelector(".ui-modal-cancel");
+    editBtn.textContent = tr("set.agent.info.openInSettings");
+    const closeBtn = overlay.querySelector(".ui-modal-ok");
+    closeBtn.textContent = tr("set.agent.info.close");
+
+    let done = false;
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    const close = () => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); };
+    document.addEventListener("keydown", onKey, true);
+    closeBtn.addEventListener("click", close);
+    overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+    editBtn.addEventListener("click", () => { close(); navigateToAgentSettings(ref, d); });
   }
 
   function renderSquadGraph(d, idx, body) {

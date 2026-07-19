@@ -194,3 +194,34 @@ layout/draw pass. Node kinds: **agent node** and **squad node**.
   - Resize the panel / split pane → connector lines redraw correctly.
   - Toggle to Graph, reload → view persists (localStorage).
 - Verify light + dark themes.
+
+---
+
+## Update (2026-07-19): agent node click → info modal (not navigation)
+
+The original design had an agent-node click **navigate** to the Agents sub-tab.
+Per user request this is changed: clicking an agent node now opens a **read-only
+info modal** and does **not** leave the graph.
+
+- **`wireGraphNodeClicks`** — the agent branch now calls
+  `openAgentInfoModal(agent, ref, d)`. The squad branch (drill into a routable
+  squad) is unchanged. The old navigation is factored into
+  `navigateToAgentSettings(ref, d)` and reached only via the modal's footer
+  button — an explicit, opt-in jump.
+- **`openAgentInfoModal(a, ref, d)`** — built on the shared `uiModalShell`
+  (title = agent name, `.ui-modal` gains `agent-info-modal`). Read-only content:
+  identity badges (active/disabled · built-in/custom · leader), the public
+  **description**, a meta block (**model**, **parallel instances**, **resumable
+  sessions**), chip rows for **tools / skills / team** (`subagents` + `a2a_agents`),
+  and the full **system instruction** in a scrollable `<pre>`. Built-in agents'
+  description/instruction come from the on-demand built-in defaults
+  (`state.builtinAgents`, `await loadBuiltinAgents()` first — idempotent); every
+  other field reads off the parsed agent object (which carries model/tools/team
+  for built-ins too). Footer: **Open in Agents settings** (secondary — runs
+  `navigateToAgentSettings`) + **Close** (primary). Escape / backdrop / × close it.
+- **CSS** — `.agent-info-*` rules appended to `web/css/settings/squad-graph.css`
+  (theme-aware, reusing the design tokens).
+- **i18n** — new `set.agent.info.*` keys (en/fr/es/de); `Skills` and `Leader`
+  stay untranslated per the glossary; regenerated via `make i18n`.
+- **No server/Go changes**; all data already client-side. No-op contract holds
+  (nothing renders until a node is clicked).

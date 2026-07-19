@@ -94,6 +94,7 @@ same colour/size in multiple partials.
 | `agents.css` | Agents panel (master-detail split: fleet list + detail) |
 | `docs.css` | Documentation viewer |
 | `squads.css` | Squads sub-tab (Agent → Squads) |
+| `squad-graph.css` | Squad **graph view** (Agent → Squads right panel): Config/Graph toggle, node cards, SVG connector edges, **and** the read-only agent-info modal (`.agent-info-*`) opened by clicking an agent node |
 | `commands.css` | User Commands settings |
 | `automation.css` | Automation panel (Settings → Automation): loops & schedules list + add-routine form |
 | `assistant.css` | Settings assistant: the bottom-right floating action button + the floating right-side chat drawer (`.settings-assistant-fab`, `.settings-assistant-panel`, `.sa-composer`, `.sa-msg`, `.sa-ask`) |
