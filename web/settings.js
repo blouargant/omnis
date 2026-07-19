@@ -2003,8 +2003,8 @@ const BASE_PATH = window.BASE_PATH || "";
     const view = state.squadView === "graph" ? "graph" : "config";
     panel.innerHTML = `
       <div class="squad-detail-toggle" role="tablist">
-        <button type="button" class="squad-view-btn ${view === "config" ? "active" : ""}" data-view="config">${escHtml(tr("set.squad.graph.configTab"))}</button>
-        <button type="button" class="squad-view-btn ${view === "graph" ? "active" : ""}" data-view="graph">${escHtml(tr("set.squad.graph.graphTab"))}</button>
+        <button type="button" role="tab" aria-selected="${view === "config"}" class="squad-view-btn ${view === "config" ? "active" : ""}" data-view="config">${escHtml(tr("set.squad.graph.configTab"))}</button>
+        <button type="button" role="tab" aria-selected="${view === "graph"}" class="squad-view-btn ${view === "graph" ? "active" : ""}" data-view="graph">${escHtml(tr("set.squad.graph.graphTab"))}</button>
       </div>
       <div class="squad-detail-body"></div>
     `;
@@ -2311,7 +2311,13 @@ const BASE_PATH = window.BASE_PATH || "";
       el.addEventListener("click", () => {
         if (kind === "agent") {
           state.activeAgentSubtab = "agents";
+          // Mark the agents list as already initialised and record the chosen
+          // agent BEFORE rendering, so renderAgentAgents' first-render restore
+          // (which would otherwise reset activeAgentIdx to the saved/leader
+          // default) does not clobber the node we just clicked.
+          state.activeAgentInitialized = true;
           state.activeAgentIdx = Number(ref);
+          try { localStorage.setItem(ACTIVE_AGENT_KEY, d.agents[Number(ref)]?.name || ""); } catch {}
           renderAgentForm();
         } else {
           state.activeSquadIdx = Number(ref);
@@ -2349,6 +2355,15 @@ const BASE_PATH = window.BASE_PATH || "";
 
     if (model.kind === "router" && (model.children || []).length === 0) {
       levelsEl.insertAdjacentHTML("beforeend", `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noRoutableSquads"))}</div>`);
+    }
+
+    // A squad WITH a leader but no members: render the leader alone + a hint.
+    // (A leaderless single agent with no subagents is a valid one-node graph,
+    // so this only applies to leader-ful squads.)
+    const sqSel = (d.squads || [])[idx] || {};
+    const leaderful = sqSel.leader && String(sqSel.leader).toLowerCase() !== "none";
+    if (model.kind === "agent" && leaderful && (model.children || []).length === 0) {
+      levelsEl.insertAdjacentHTML("beforeend", `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noMembers"))}</div>`);
     }
 
     const canvas = body.querySelector(".squad-graph");
