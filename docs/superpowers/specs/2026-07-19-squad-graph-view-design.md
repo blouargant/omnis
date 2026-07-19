@@ -103,11 +103,18 @@ layout/draw pass. Node kinds: **agent node** and **squad node**.
     description → the app's themed `#tip-layer` tooltip.
   - **Squad node** (Omnis children): name; **member-count** meta; **leader** name
     sub-label. `data-tip` = the squad description.
-- **Layout**: CSS flex — one **centred row per depth level**, siblings laid out
-  horizontally, the row scrolls horizontally (`overflow-x:auto`) if it overflows.
+- **Layout**: CSS flex, **left→right** — squad graphs are shallow in depth but
+  wide in siblings, so depth runs **horizontally** (one **column per depth
+  level**) and the siblings within a level **stack vertically**. The whole tree
+  is centred in the panel; a deep graph scrolls horizontally (`overflow-x:auto`),
+  and a tall (many-sibling) graph grows and `#squad-detail-panel` scrolls
+  vertically (`.squad-graph` is `overflow-y:hidden`, see the CSS note).
+  *(Superseded the original top→bottom "row per level" layout on 2026-07-19.)*
 - **Edges**: a single absolutely-positioned **SVG overlay** sized to the canvas
-  draws parent→child connector lines. Line endpoints are computed from each
-  node's `getBoundingClientRect` **after** layout (relative to the canvas box).
+  draws parent→child connector lines — a horizontal S-curve from the parent's
+  **right-middle** to the child's **left-middle**. Line endpoints are computed
+  from each node's `getBoundingClientRect` **after** layout (relative to the
+  canvas box).
   - Redraw on:
     - a **`ResizeObserver`** on the graph canvas (panel width changes, sidebar
       resize, split-pane drag),

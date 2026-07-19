@@ -2284,10 +2284,12 @@ const BASE_PATH = window.BASE_PATH || "";
       const b = canvas.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(toId) : toId));
       if (!a || !b) return "";
       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-      const x1 = ra.left - originX + ra.width / 2, y1 = ra.bottom - originY;
-      const x2 = rb.left - originX + rb.width / 2, y2 = rb.top - originY;
-      const my = (y1 + y2) / 2;
-      return `<path class="squad-graph-edge" d="M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}" />`;
+      // Left→right layout: connect the parent's RIGHT-middle to the child's
+      // LEFT-middle with a horizontal S-curve (control points offset on X).
+      const x1 = ra.right - originX, y1 = ra.top - originY + ra.height / 2;
+      const x2 = rb.left - originX, y2 = rb.top - originY + rb.height / 2;
+      const mx = (x1 + x2) / 2;
+      return `<path class="squad-graph-edge" d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" />`;
     });
     svg.innerHTML = paths.join("");
   }

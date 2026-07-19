@@ -32,33 +32,41 @@
 
 .squad-graph {
   position: relative;
-  /* Horizontal-only scroll. A deep/wide graph scrolls HORIZONTALLY here; its
-     HEIGHT is always content-driven (no height cap), so this box never needs to
-     scroll vertically on its own — a tall graph grows and #squad-detail-panel
-     (overflow-y:auto) scrolls instead. overflow-y MUST stay hidden, not auto:
-     drawSquadGraphEdges sizes the absolute SVG overlay to canvas.clientHeight (a
-     rounded integer, e.g. 192) while the content box is fractional (191.59px),
-     so the integer overlay overshoots by ~0.4px and, with overflow-y:auto, that
-     sub-pixel overflow surfaces a spurious overlay scrollbar on shallow graphs
-     (integer scrollHeight==clientHeight, so it's invisible to JS metrics).
-     hidden clips that harmless sub-pixel tail and shows no phantom bar. */
+  /* Horizontal-only scroll. In the left→right layout a DEEP graph (many levels)
+     scrolls HORIZONTALLY here; a WIDE graph (many siblings) is tall, but this
+     box's HEIGHT is content-driven (no height cap) so it never needs to scroll
+     vertically on its own — it grows and #squad-detail-panel (overflow-y:auto)
+     scrolls instead. overflow-y MUST stay hidden, not auto: drawSquadGraphEdges
+     sizes the absolute SVG overlay to the canvas's rounded-INTEGER clientHeight
+     while the content box is FRACTIONAL, so the overlay overshoots by ~0.4px and,
+     with overflow-y:auto, that sub-pixel overflow surfaces a spurious overlay
+     scrollbar (integer scrollHeight==clientHeight, so it's invisible to JS
+     metrics). hidden clips that harmless sub-pixel tail and shows no phantom bar. */
   overflow-x: auto;
   overflow-y: hidden;
   padding: 8px 4px 16px;
 }
+/* Left→right tree: depth runs horizontally (one COLUMN per level), and the
+   siblings within a level stack VERTICALLY. Squad graphs are shallow in depth
+   but wide in siblings, so this uses the panel's horizontal space for the few
+   levels and its vertical space for the many members. */
 .squad-graph-levels {
   position: relative;
   z-index: 1;
   display: flex;
-  flex-direction: column;
-  gap: 42px;
-  align-items: center;
+  flex-direction: row;      /* levels laid left→right (the depth axis) */
+  gap: 56px;                /* horizontal room between levels for the connectors */
+  align-items: center;      /* vertically centre each level's column against its neighbours */
+  justify-content: center;  /* centre the whole tree in the wide panel */
   min-width: min-content;
+  min-height: min-content;
 }
 .squad-graph-row {
   display: flex;
-  gap: 20px;
+  flex-direction: column;   /* siblings within a level stack vertically */
+  gap: 16px;                /* vertical gap between siblings */
   justify-content: center;
+  align-items: center;
   flex-wrap: nowrap;
 }
 .squad-graph-node {

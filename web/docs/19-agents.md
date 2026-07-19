@@ -160,13 +160,14 @@ Click **Delete squad** (bottom-right) to remove a non-default squad.
 ### Graph view
 
 The right panel has a **Configuration | Graph** toggle. **Graph** visualises the
-selected squad's structure as a delegation tree — the leader (or, for a
-leaderless squad, its single agent) at the top, its members below, and each
-member's own nested sub-agents beneath them. For the **Omnis router** squad the
-graph instead shows Omnis and every squad it can route to (each with its member
-count and leader). Hover a node for its model tier and description; click an
-agent node to open that agent's configuration, or a routable-squad node (in the
-Omnis graph) to drill into that squad's graph.
+selected squad's structure as a left-to-right delegation tree — the leader (or,
+for a leaderless squad, its single agent) on the left, its members in a column to
+the right, and each member's own nested sub-agents further right. For the **Omnis
+router** squad the graph instead shows Omnis and every squad it can route to (each
+with its member count and leader). Hover a node for its model tier and
+description; click an agent node to open a read-only info panel for that agent (or
+jump from there to its full configuration), or a routable-squad node (in the Omnis
+graph) to drill into that squad's graph.
 
 ### The Omnis router squad
 
