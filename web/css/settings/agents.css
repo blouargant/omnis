@@ -406,7 +406,7 @@
 .agent-gen-input:focus { outline: none; border-color: var(--accent); }
 .agent-gen-input:disabled { opacity: 0.5; cursor: not-allowed; }
 .agent-gen-input[type="checkbox"] { width: auto; accent-color: var(--accent); }
-/* Public-description field is a short 2-line textarea (roomier than a 1-line
+/* Public-description field is a short 3-line textarea (roomier than a 1-line
    input) — vertical resize only, so it never stretches the layout sideways. */
 textarea.agent-desc-input { line-height: 1.4; resize: vertical; }
 .agent-gen-hint {

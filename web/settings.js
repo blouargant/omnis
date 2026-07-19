@@ -4072,7 +4072,7 @@ const BASE_PATH = window.BASE_PATH || "";
       descLbl.appendChild(tag);
     }
     const descInp = document.createElement("textarea");
-    descInp.className = "agent-gen-input agent-desc-input"; descInp.rows = 2;
+    descInp.className = "agent-gen-input agent-desc-input"; descInp.rows = 3;
     descInp.placeholder = tr("set.agent.descPlaceholder");
     const descVal = isBuiltin && builtinDefaults ? (builtinDefaults.description || "") : (a.description || "");
     descInp.value = descVal;
@@ -9950,7 +9950,7 @@ const BASE_PATH = window.BASE_PATH || "";
           <span class="user-cmd-field-label">${escHtml(tr("set.agent.publicDesc"))}</span>
           <button type="button" class="aia-field-btn" data-field="description" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
         </div>
-        <textarea class="aia-desc" rows="2" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}"></textarea>
+        <textarea class="aia-desc" rows="3" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}"></textarea>
       </div>
       <div class="user-cmd-field aia-instr-field">
         <div class="aia-field-head">
