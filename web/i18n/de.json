@@ -442,8 +442,6 @@
   "set.agent.asstError": "Der Assistent konnte nicht antworten.",
   "set.agent.asstGreeting": "Sagen Sie mir, wofür dieser Agent gedacht ist, und ich helfe Ihnen, seine **Systemanweisung** (wie er sich verhalten soll) und seine **öffentliche Beschreibung** (ein Satz, der beschreibt, was er tut) zu verfassen. Ich schlage Text vor, den Sie auf eines der Felder anwenden und dann speichern können.",
   "set.agent.asstPreamble": "Sie helfen dem Benutzer, die SYSTEMANWEISUNG und die ÖFFENTLICHE BESCHREIBUNG für einen Agenten namens „{name}“ in einer Multi-Agenten-Flotte zu verfassen. Stützen Sie Ihre Vorschläge auf das, was dieser Agent tatsächlich kann (siehe seine Fähigkeiten unten). Die Beschreibung ist ein prägnanter Satz, der angibt, was der Agent tut; die Anweisung ist ein klarer, gut strukturierter System-Prompt. Rufen Sie KEINE Tools auf und ändern Sie keine Einstellungen — führen Sie nur ein Gespräch und verfassen Sie Text. Wenn Sie Text für ein Feld vorschlagen, geben Sie den VOLLSTÄNDIGEN Text in einem umschlossenen Block aus: ```instruction für die Systemanweisung, ```description für die öffentliche Beschreibung. Platzieren Sie Erklärungen oder Fragen AUSSERHALB der Blöcke.",
-  "set.agent.asstStarterInstr": "Hilf mir, die Systemanweisung dieses Agenten zu verfassen.",
-  "set.agent.asstStarterDesc": "Hilf mir, die öffentliche Beschreibung dieses Agenten zu verfassen.",
   "set.agent.asstApplyInstr": "Auf Anweisung anwenden",
   "set.agent.asstApplyDesc": "Auf Beschreibung anwenden",
   "set.agent.asstApplied": "Angewendet — prüfen und speichern.",

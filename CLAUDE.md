@@ -4176,9 +4176,8 @@ changes** (reuses the Helper squad + `POST /api/sessions[/:id/messages]` + the
   chat]` via the collection assistant's **unscoped** `.cc-asst*` / `.cc-field*`
   chat classes (shared, see the CSS note below) plus an agent-specific
   scaffolding block in [web/css/features/dialogs.css](web/css/features/dialogs.css).
-  Left = Description input + System instruction textarea (seeded from the inline
-  fields, each with a `✦` field button that points the composer placeholder at
-  that field); right = the chat (visible by default — the modal *is* the
+  Left = Description textarea + System instruction textarea (seeded from the
+  inline fields); right = the chat (visible by default — the modal *is* the
   assistant), with a single **Close** in the footer.
 - **Drafting protocol**: the assistant proposes fenced ` ```instruction ` /
   ` ```description ` blocks; `extractAgentInstrDrafts` pulls them into **Apply**

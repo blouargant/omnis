@@ -442,8 +442,6 @@
   "set.agent.asstError": "L'assistant n'a pas pu répondre.",
   "set.agent.asstGreeting": "Dites-moi à quoi sert cet agent et je vous aiderai à rédiger son **instruction système** (comment il doit se comporter) et sa **description publique** (une phrase décrivant ce qu'il fait). Je proposerai du texte que vous pourrez appliquer à l'un ou l'autre champ, puis enregistrer.",
   "set.agent.asstPreamble": "Vous aidez l'utilisateur à rédiger l'INSTRUCTION SYSTÈME et la DESCRIPTION PUBLIQUE d'un agent nommé « {name} » au sein d'une flotte multi-agents. Ancrez vos propositions dans ce que cet agent peut réellement faire (voir ses capacités ci-dessous). La description est une phrase concise décrivant ce que fait l'agent ; l'instruction est un prompt système clair et bien structuré. N'appelez AUCUN outil et ne modifiez aucun paramètre — contentez-vous de converser et de rédiger du texte. Lorsque vous proposez du texte pour un champ, produisez le texte COMPLET dans un bloc délimité : ```instruction pour l'instruction système, ```description pour la description publique. Placez toute explication ou question EN DEHORS des blocs.",
-  "set.agent.asstStarterInstr": "Aidez-moi à rédiger l'instruction système de cet agent.",
-  "set.agent.asstStarterDesc": "Aidez-moi à rédiger la description publique de cet agent.",
   "set.agent.asstApplyInstr": "Appliquer à l'instruction",
   "set.agent.asstApplyDesc": "Appliquer à la description",
   "set.agent.asstApplied": "Appliqué — vérifiez puis enregistrez.",

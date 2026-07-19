@@ -9943,20 +9943,13 @@ const BASE_PATH = window.BASE_PATH || "";
     const modalEl = overlay.querySelector(".ui-modal");
     modalEl.classList.add("agent-instr-modal", "cc-asst-open");
     const body = overlay.querySelector(".user-cmd-modal-body");
-    const sparkSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10z"/></svg>`;
     body.innerHTML = `
       <div class="user-cmd-field aia-desc-field">
-        <div class="aia-field-head">
-          <span class="user-cmd-field-label">${escHtml(tr("set.agent.publicDesc"))}</span>
-          <button type="button" class="aia-field-btn" data-field="description" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
-        </div>
+        <span class="user-cmd-field-label">${escHtml(tr("set.agent.publicDesc"))}</span>
         <textarea class="aia-desc" rows="3" spellcheck="false" placeholder="${escHtml(tr("set.agent.descPlaceholder"))}"></textarea>
       </div>
       <div class="user-cmd-field aia-instr-field">
-        <div class="aia-field-head">
-          <span class="user-cmd-field-label">${escHtml(tr("set.agent.systemInstructions"))}</span>
-          <button type="button" class="aia-field-btn" data-field="instruction" data-tip="${escHtml(tr("set.agent.asstTip"))}">${sparkSvg}<span>${escHtml(tr("set.agent.asstBtn"))}</span></button>
-        </div>
+        <span class="user-cmd-field-label">${escHtml(tr("set.agent.systemInstructions"))}</span>
         <textarea class="aia-instr" spellcheck="false" placeholder="${escHtml(tr("set.agent.instrPlaceholder"))}"></textarea>
       </div>`;
     const mDesc = body.querySelector(".aia-desc");
@@ -10025,17 +10018,6 @@ const BASE_PATH = window.BASE_PATH || "";
     };
 
     const autoGrow = () => { input.style.height = "auto"; input.style.height = Math.min(120, input.scrollHeight) + "px"; };
-
-    // Each field's ✦ button points the composer placeholder at that field (a
-    // hint, not pre-filled text) and focuses it.
-    body.querySelectorAll(".aia-field-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        input.placeholder = btn.getAttribute("data-field") === "instruction"
-          ? tr("set.agent.asstStarterInstr")
-          : tr("set.agent.asstStarterDesc");
-        input.focus();
-      });
-    });
 
     async function send() {
       if (sending) return;

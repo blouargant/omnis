@@ -526,14 +526,7 @@
 }
 .agent-instr-modal .aia-desc:focus,
 .agent-instr-modal .aia-instr:focus { border-color: var(--accent, #0e639c); }
-/* Per-field ✦ button in the modal (points the composer at that field). */
-.aia-field-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.aia-field-btn,
+/* ✦ button in the Instruction Set section header (opens the drafting modal). */
 .agent-instr-asst-btn {
   display: inline-flex;
   align-items: center;
@@ -548,7 +541,6 @@
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s;
 }
-.aia-field-btn:hover,
 .agent-instr-asst-btn:hover { color: var(--accent, #0e639c); border-color: var(--accent, #0e639c); }
 /* The header button hugs the section title (the fold chevron's own margin-left:
    auto keeps it at the far right, so the button never drifts to the middle). */

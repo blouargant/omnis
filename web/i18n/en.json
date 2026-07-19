@@ -442,8 +442,6 @@
   "set.agent.asstError": "The assistant could not respond.",
   "set.agent.asstGreeting": "Tell me what this agent is for and I'll help you draft its **system instruction** (how it should behave) and its **public description** (one sentence naming what it does). I'll propose text you can apply to either field and then save.",
   "set.agent.asstPreamble": "You are helping the user write the SYSTEM INSTRUCTION and the PUBLIC DESCRIPTION for an agent named \"{name}\" in a multi-agent fleet. Ground your drafts in what this agent can actually do (see its capabilities below). The description is one concise sentence naming what the agent does; the instruction is a clear, well-structured system prompt. Do NOT call any tools or change any settings — only converse and draft text. When you propose text for a field, output the FULL proposed text inside a fenced block: ```instruction for the system instruction, ```description for the public description. Put any explanation or questions OUTSIDE the fences.",
-  "set.agent.asstStarterInstr": "Help me write this agent's system instruction.",
-  "set.agent.asstStarterDesc": "Help me write this agent's public description.",
   "set.agent.asstApplyInstr": "Apply to instruction",
   "set.agent.asstApplyDesc": "Apply to description",
   "set.agent.asstApplied": "Applied — review and Save.",
