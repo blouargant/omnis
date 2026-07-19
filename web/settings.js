@@ -2161,8 +2161,128 @@ const BASE_PATH = window.BASE_PATH || "";
     }
   }
 
+  // Build the graph node tree for the squad at `idx`. Pure over (d, idx):
+  //   - router squad  → Omnis root + one squad node per routable (non-hidden,
+  //                     non-router) squad.
+  //   - normal squad  → leader root → members → each member's subagents.
+  //   - leaderless    → the single member root → its subagents.
+  // Subagent recursion is guarded by a visited-set + depth cap; an unresolved
+  // name renders as a greyed "missing" node.
+  function buildSquadGraphModel(d, idx) {
+    const sq = (d.squads || [])[idx] || {};
+    const agents = Array.isArray(d.agents) ? d.agents : [];
+    const squads = Array.isArray(d.squads) ? d.squads : [];
+    const routerName = String(d.router_squad || "omnis").toLowerCase();
+    const findAgent = (name) => agents.findIndex(a => (a.name || "").toLowerCase() === String(name || "").toLowerCase());
+    const leaderless = !sq.leader || String(sq.leader).toLowerCase() === "none";
+    const isRouter = leaderless && String(sq.name || "").toLowerCase() === routerName;
+    const MAX_DEPTH = 6;
+
+    const agentNode = (name, depth, seen) => {
+      const ai = findAgent(name);
+      if (ai < 0) {
+        return { kind: "missing", label: String(name || ""), tip: tr("set.squad.graph.unavailableAgent"), children: [] };
+      }
+      const a = agents[ai];
+      const key = (a.name || "").toLowerCase();
+      const node = {
+        kind: "agent",
+        label: a.name || "",
+        ref: ai,
+        model: a.model_ref || "",
+        fanout: Number(a.max_instances) > 1 ? Number(a.max_instances) : 0,
+        tip: a.description || "",
+        children: [],
+      };
+      if (depth < MAX_DEPTH && Array.isArray(a.subagents) && a.subagents.length && !seen.has(key)) {
+        const nextSeen = new Set(seen); nextSeen.add(key);
+        node.children = a.subagents.map(sn => agentNode(sn, depth + 1, nextSeen));
+      }
+      return node;
+    };
+
+    if (isRouter) {
+      const root = { kind: "router", label: sq.name || "", tip: sq.description || "", isRoot: true, children: [] };
+      root.children = squads
+        .filter(s => s !== sq && !s.hidden && String(s.name || "").toLowerCase() !== routerName)
+        .map(s => ({
+          kind: "squad",
+          label: s.name || "",
+          ref: squads.indexOf(s),
+          count: trN("set.squad.memberCount", Array.isArray(s.members) ? s.members.length : 0),
+          sub: (s.leader && String(s.leader).toLowerCase() !== "none") ? s.leader : "",
+          tip: s.description || "",
+          children: [],
+        }));
+      return root;
+    }
+
+    if (leaderless) {
+      const only = (Array.isArray(sq.members) && sq.members.length) ? sq.members[0] : "";
+      if (!only) return { kind: "empty", label: sq.name || "", isRoot: true, children: [] };
+      const root = agentNode(only, 0, new Set());
+      root.isRoot = true;
+      return root;
+    }
+
+    // Normal squad: the leader's delegable set is the squad's MEMBERS (not the
+    // leader agent's own subagents), so build the leader node then override its
+    // children with the members (each expanded via its own subagents).
+    const root = agentNode(sq.leader, 0, new Set());
+    root.isRoot = true;
+    root.children = (Array.isArray(sq.members) ? sq.members : [])
+      .map(mn => agentNode(mn, 1, new Set([String(sq.leader || "").toLowerCase()])));
+    return root;
+  }
+
+  function nodeCardHTML(n) {
+    const cls = ["squad-graph-node", "sgn-" + n.kind];
+    if (n.isRoot) cls.push("is-root");
+    if (n.kind === "missing") cls.push("is-missing");
+    const tip = n.tip ? ` data-tip="${escHtml(n.tip)}"` : "";
+    const ref = (n.ref != null) ? ` data-ref="${n.ref}"` : "";
+    let meta = "";
+    if (n.kind === "agent") {
+      const chips = [];
+      if (n.model) chips.push(`<span class="sgn-chip sgn-model">${escHtml(n.model)}</span>`);
+      if (n.fanout) chips.push(`<span class="sgn-chip sgn-fanout">×${n.fanout}</span>`);
+      if (chips.length) meta = `<div class="sgn-meta">${chips.join("")}</div>`;
+    } else if (n.kind === "squad") {
+      const lead = n.sub ? `<span class="sgn-sub">${escHtml(tr("set.squad.graph.leaderPrefix", { name: n.sub }))}</span>` : "";
+      meta = `<div class="sgn-meta"><span class="sgn-count">${escHtml(n.count || "")}</span>${lead}</div>`;
+    }
+    return `<div class="${cls.join(" ")}" id="${n._id}" data-kind="${escHtml(n.kind)}"${ref}${tip}>
+      <div class="sgn-name">${escHtml(n.label)}</div>
+      ${meta}
+    </div>`;
+  }
+
   function renderSquadGraph(d, idx, body) {
-    body.innerHTML = `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.graphTab"))} — coming up.</div>`;
+    const model = buildSquadGraphModel(d, idx);
+    body.innerHTML = `<div class="squad-graph"><svg class="squad-graph-edges" aria-hidden="true"></svg><div class="squad-graph-levels"></div></div>`;
+    const levelsEl = body.querySelector(".squad-graph-levels");
+
+    if (model.kind === "empty") {
+      levelsEl.innerHTML = `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noMembers"))}</div>`;
+      return;
+    }
+
+    // Walk the tree into depth levels, assigning a DOM id to each node.
+    let uid = 0;
+    const levels = [];
+    (function assign(node, depth) {
+      node._id = "sgn-" + (uid++);
+      (levels[depth] || (levels[depth] = [])).push(node);
+      (node.children || []).forEach(c => assign(c, depth + 1));
+    })(model, 0);
+
+    levelsEl.innerHTML = levels
+      .map(row => `<div class="squad-graph-row">${row.map(nodeCardHTML).join("")}</div>`)
+      .join("");
+
+    if (model.kind === "router" && (model.children || []).length === 0) {
+      levelsEl.insertAdjacentHTML("beforeend", `<div class="squad-graph-hint">${escHtml(tr("set.squad.graph.noRoutableSquads"))}</div>`);
+    }
   }
 
   function renderAgentGlobals(d) {
