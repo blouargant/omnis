@@ -163,5 +163,11 @@ body:has(#chat.chat--settings) #session-pane:has(> #settings-menu[hidden]) {
   border: none;
   overflow: hidden;
 }
+/* The Settings nav is icon + short-label rows — it needs far less room than the
+ * session list, so narrow the middle column while the category menu is shown
+ * (chat's #session-pane width is left untouched). */
+body:has(#chat.chat--settings) #session-pane:has(> #settings-menu:not([hidden])) {
+  width: 210px;
+}
 
 
