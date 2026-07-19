@@ -13,6 +13,12 @@
      right corners. */
   border-radius: 0 8px 8px 0;
   background: var(--bg-raised, rgba(255, 255, 255, 0.03));
+  /* Match the left fleet-list header's height so the two panels' top bars line
+     up (var defined on .agent-master-detail). The buttons keep their natural
+     size and centre within the taller bar. */
+  box-sizing: border-box;
+  min-height: var(--md-topbar-h, calc(1.3rem + 23px));
+  align-items: center;
 }
 .squad-view-btn {
   appearance: none;

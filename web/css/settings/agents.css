@@ -649,6 +649,11 @@ details[open] > .agent-advanced-summary::before { transform: rotate(90deg); }
 .agent-master-detail {
   flex: 1 1 auto;
   min-height: 0;
+  /* Shared height of the two panels' top bars. Equals the natural height of
+     .agent-fleet-header (0.65rem padding top+bottom + a 22px add/import button +
+     a 1px bottom border). The squad Config/Graph toggle consumes it so the left
+     and right top bars line up at the same height. */
+  --md-topbar-h: calc(1.3rem + 23px);
 }
 /* The squad detail panel has no inner .agent-detail-body wrapper (unlike the
    agent detail), so let the panel itself scroll when a squad has many members. */
