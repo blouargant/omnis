@@ -32,7 +32,18 @@
 
 .squad-graph {
   position: relative;
-  overflow: auto;
+  /* Horizontal-only scroll. A deep/wide graph scrolls HORIZONTALLY here; its
+     HEIGHT is always content-driven (no height cap), so this box never needs to
+     scroll vertically on its own — a tall graph grows and #squad-detail-panel
+     (overflow-y:auto) scrolls instead. overflow-y MUST stay hidden, not auto:
+     drawSquadGraphEdges sizes the absolute SVG overlay to canvas.clientHeight (a
+     rounded integer, e.g. 192) while the content box is fractional (191.59px),
+     so the integer overlay overshoots by ~0.4px and, with overflow-y:auto, that
+     sub-pixel overflow surfaces a spurious overlay scrollbar on shallow graphs
+     (integer scrollHeight==clientHeight, so it's invisible to JS metrics).
+     hidden clips that harmless sub-pixel tail and shows no phantom bar. */
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 8px 4px 16px;
 }
 .squad-graph-levels {
