@@ -2173,7 +2173,7 @@ const BASE_PATH = window.BASE_PATH || "";
     const agents = Array.isArray(d.agents) ? d.agents : [];
     const squads = Array.isArray(d.squads) ? d.squads : [];
     const routerName = String(d.router_squad || "omnis").toLowerCase();
-    const findAgent = (name) => agents.findIndex(a => (a.name || "").toLowerCase() === String(name || "").toLowerCase());
+    const findAgent = (name) => agents.findIndex(a => a && a.enabled !== false && (a.name || "").toLowerCase() === String(name || "").toLowerCase());
     const leaderless = !sq.leader || String(sq.leader).toLowerCase() === "none";
     const isRouter = leaderless && String(sq.name || "").toLowerCase() === routerName;
     const MAX_DEPTH = 6;
