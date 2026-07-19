@@ -8,7 +8,10 @@
   padding: 3px;
   margin: 0 0 14px;
   border: 1px solid var(--border, #33373e);
-  border-radius: 8px;
+  /* This bar stretches to the full panel width (flex-column item), so its LEFT
+     edge sits flush against the fleet-list divider — square that side; keep the
+     right corners. */
+  border-radius: 0 8px 8px 0;
   background: var(--bg-raised, rgba(255, 255, 255, 0.03));
 }
 .squad-view-btn {
