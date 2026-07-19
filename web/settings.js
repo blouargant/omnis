@@ -2264,8 +2264,16 @@ const BASE_PATH = window.BASE_PATH || "";
     const svg = canvas.querySelector(".squad-graph-edges");
     if (!svg) return;
     const box = canvas.getBoundingClientRect();
-    // Size the overlay to the full scroll area so lines align even when scrolled.
-    const w = canvas.scrollWidth, h = canvas.scrollHeight;
+    // Size the overlay to the canvas CLIENT box, never to scrollWidth/scrollHeight.
+    // The SVG is position:absolute INSIDE this scroll container, so sizing it to
+    // the scroll size feeds its own box back into scrollWidth/scrollHeight — a
+    // self-reinforcing loop that leaves a spurious scrollbar on graphs whose real
+    // content fits (observed: a 6px phantom H-scrollbar on shallow squads). The
+    // client box can never exceed the container, so it adds no overflow; edges
+    // that fall outside it on a genuinely wide/tall graph still render and track
+    // the nodes because `.squad-graph-edges` is `overflow: visible` and scrolls
+    // with the content (it is absolutely positioned in the scrolled padding box).
+    const w = canvas.clientWidth, h = canvas.clientHeight;
     svg.setAttribute("width", w);
     svg.setAttribute("height", h);
     svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
