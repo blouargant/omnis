@@ -1,6 +1,6 @@
 ---
 name: liteparse
-description: Preferred local parser for extracting text from PDFs and other documents (DOCX, PPTX, XLSX, images, etc.). Use this FIRST for any PDF or document text-extraction, OCR, or conversion task — it handles scanned and complex PDFs far better than pdftotext. The `pdf` skill (pdftotext) is only a fallback for when LiteParse cannot be installed.
+description: Preferred local parser for extracting text from PDFs, images, and scanned/layout-heavy documents (OCR, screenshots, complex PDFs) — far better than pdftotext. Use this FIRST for any PDF, image, or OCR text-extraction or conversion task. NOTE for Office documents (DOCX, PPTX, XLSX, ODT) — for plain text extraction prefer the `pandoc` skill, which needs no LibreOffice; only use LiteParse for Office docs when you need its layout/OCR/screenshot output. The `pdf` skill (pdftotext) is only a fallback for when LiteParse cannot be installed.
 compatibility: Requires Python 3.10+ and the `lit` CLI from `liteparse`, installed with pipx (`pipx install liteparse`) — pipx isolates the app and puts `lit` on PATH, and works on PEP 668 / externally-managed Python where `pip install` is blocked
 license: MIT
 metadata:
@@ -18,6 +18,28 @@ results than `pdftotext`, especially on scanned, multi-column, or
 layout-heavy PDFs, and it also handles formats `pdftotext` cannot. Reach for
 the `pdf` skill (pdftotext) **only as a fallback** when `lit` is unavailable and
 cannot be installed (see Step 1).
+
+## Step 0 — Install discipline (READ FIRST)
+
+Apply these rules before installing anything — and *especially* before **re-**trying
+an install. They prevent the common failure of re-installing tools that are
+already present and thrashing on installs when the real problem is elsewhere:
+
+- **Check before you install.** Run `command -v <tool>` (e.g. `command -v lit`,
+  `command -v libreoffice`, `command -v pandoc`, `command -v convert`). **If it
+  prints a path, the tool is ALREADY INSTALLED — do NOT install or re-install
+  it.**
+- **Install each tool at most once.** Never run the same install command twice in
+  a task. If you already ran it, treat that dependency as handled.
+- **A conversion failure is NOT proof of a missing package.** If the required
+  binary is already on PATH and a parse still fails, the cause is *not* a missing
+  dependency, and installing more packages will not fix it. **Stop, read the
+  actual error, and diagnose or fall back** (see the fallbacks in Step 1). In
+  particular, a **snap-packaged LibreOffice** is sandboxed: it cannot read files
+  in hidden directories (e.g. uploads under `~/.omnis/…`) nor write its temp PDF,
+  so `lit` will report `source file could not be loaded` or `output PDF not
+  found` no matter how many times you reinstall it — use **pandoc** for Office
+  documents instead (see the "Optional system dependencies" note under Step 1).
 
 ## Step 1 — Check that `lit` is installed
 
@@ -59,20 +81,34 @@ command -v lit
     - For a **plain PDF**, hand off to the **`pdf` skill** (`pdftotext`) — it
       needs no install and covers the common case. Note the result may be lower
       quality on scanned or layout-heavy PDFs.
-    - For **any other format** (DOCX, PPTX, XLSX, images) `pdftotext` cannot
-      help, so stop and explain that LiteParse is required for that format.
+    - For **Office documents** (DOCX, PPTX, XLSX, ODT), hand off to the
+      **`pandoc` skill** for text extraction — it needs no LibreOffice, is
+      usually already installed, and is the **preferred path** for these formats
+      (see the optional-dependencies note below).
+    - For **images**, LiteParse (or ImageMagick + OCR) is required, so stop and
+      explain that.
 
-### Optional system dependencies
+### Optional system dependencies (and when to skip LiteParse)
 
 LiteParse needs extra tools only for certain inputs — check/install these **only
-for the formats actually being parsed** (plain PDF parsing needs neither):
+for the formats actually being parsed** (plain PDF parsing needs neither). Always
+`command -v` first (Step 0):
 
-- **Office documents** (DOCX, PPTX, XLSX, ODT, …) require **LibreOffice**:
+- **Office documents** (DOCX, PPTX, XLSX, ODT, …): LiteParse converts these to
+  PDF via **LibreOffice** first. For plain **text extraction, prefer the
+  `pandoc` skill instead of LiteParse** — it is lightweight, usually already
+  installed, needs no conversion step, and is immune to the LibreOffice-as-snap
+  problem (Step 0). Example: `pandoc "file.docx" -t plain`. Only use
+  LiteParse+LibreOffice for an Office doc when you specifically need LiteParse's
+  layout/OCR/screenshot output, **and** LibreOffice is a real (non-snap) install:
   ```bash
   brew install --cask libreoffice   # macOS
-  apt-get install libreoffice       # Ubuntu/Debian
+  apt-get install libreoffice       # Ubuntu/Debian — avoid the snap: it is
+                                    # sandboxed and cannot read ~/.omnis uploads
+                                    # or write its temp PDF, so conversion fails
   ```
-- **Images** (PNG, JPG, TIFF, …) require **ImageMagick**:
+- **Images** (PNG, JPG, TIFF, …) require **ImageMagick** (`command -v convert`
+  first):
   ```bash
   brew install imagemagick          # macOS
   apt-get install imagemagick       # Ubuntu/Debian
