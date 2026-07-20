@@ -343,6 +343,49 @@
 .cc-mem-gen:hover:not(:disabled) { border-color: var(--accent, #0e639c); }
 .cc-mem-gen:disabled { opacity: 0.6; cursor: default; }
 
+/* A field title with its leading "?" help button on one row (Instructions /
+   Memory). Keeps the badge and the label together so the Memory row's "Generate"
+   button still sits at the far right of its space-between head. */
+.cc-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cc-help-btn {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-help-btn:hover { color: var(--accent, #0e639c); border-color: var(--accent, #0e639c); }
+.cc-help-btn:focus-visible { outline: 2px solid var(--accent, #0e639c); outline-offset: 1px; }
+/* Themed popup opened by a .cc-help-btn (position set inline). */
+.cc-help-popup {
+  position: fixed;
+  z-index: 10000;
+  max-width: 22rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: normal;
+  box-shadow: var(--shadow-bubble, 0 6px 20px rgba(0, 0, 0, 0.28));
+}
+
 /* Context editor ⇄ drafting assistant. When the assistant is open the modal
    widens and its body sits beside a chat column (.cc-split lays them out in a
    row that fills the modal between header and footer). */

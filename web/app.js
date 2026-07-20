@@ -6229,6 +6229,74 @@ async function editCollectionContext(c) {
   } catch (e) { console.error(e); }
 }
 
+// ── Collection field help popup ─────────────────────────────────────────────
+// A small "?" button before the Instructions / Memory titles opens a themed
+// popup explaining what the field is for and how it differs from the other.
+// Click-to-open (works on touch, unlike the hover `data-tip`), roomy enough for
+// a couple of sentences. Mirrors the Settings models-panel help popup, kept
+// self-contained here since that one lives in the Settings IIFE. One popup at a
+// time; dismissed on outside-click, Escape, scroll or resize.
+let _ccHelpPopup = null;
+function closeCcHelpPopup() {
+  if (!_ccHelpPopup) return;
+  const p = _ccHelpPopup;
+  _ccHelpPopup = null;
+  document.removeEventListener("click", p._onDoc, true);
+  window.removeEventListener("resize", p._onGone, true);
+  window.removeEventListener("scroll", p._onGone, true);
+  p.remove();
+}
+function openCcHelpPopup(anchor, text) {
+  // A re-click on the same anchor toggles the popup closed.
+  const sameAnchor = _ccHelpPopup && _ccHelpPopup._anchor === anchor;
+  closeCcHelpPopup();
+  if (sameAnchor) return;
+
+  const pop = document.createElement("div");
+  pop.className = "cc-help-popup";
+  pop.textContent = text;
+  pop._anchor = anchor;
+  document.body.appendChild(pop);
+
+  // Position below the anchor, clamped to the viewport (flip above if needed).
+  const r = anchor.getBoundingClientRect();
+  const margin = 8;
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = r.left;
+  if (left + pw > window.innerWidth - margin) left = window.innerWidth - margin - pw;
+  if (left < margin) left = margin;
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - margin) top = Math.max(margin, r.top - ph - 6);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  // The capture-phase document click was added after this opening click already
+  // passed capture, so it won't self-close; the next outside click closes it.
+  // (Escape is handled by the dialog's own key handler so it closes the popup
+  // before the editor.)
+  pop._onDoc = (e) => { if (!pop.contains(e.target) && e.target !== anchor) closeCcHelpPopup(); };
+  pop._onGone = () => closeCcHelpPopup();
+  document.addEventListener("click", pop._onDoc, true);
+  window.addEventListener("resize", pop._onGone, true);
+  window.addEventListener("scroll", pop._onGone, true);
+  _ccHelpPopup = pop;
+}
+// ccHelpButton returns a small "?" button that pops up `text` on click. `text`
+// is also the aria-label so screen-reader users get the same explanation.
+function ccHelpButton(text) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cc-help-btn";
+  btn.textContent = "?";
+  btn.setAttribute("aria-label", text);
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openCcHelpPopup(btn, text);
+  });
+  return btn;
+}
+
 // collectionContextDialog is the per-collection context editor: a starting-squad
 // picker + default-folder field (the seeded per-session defaults) and two prose
 // textareas (stable instructions, evolving memory). Resolves
@@ -6254,12 +6322,12 @@ function collectionContextDialog(name, snap) {
         <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
       </label>
       <label class="user-cmd-field cc-grow-instr">
-        <span class="user-cmd-field-label">${escHtml(tr("collections.instructions"))}</span>
+        <span class="user-cmd-field-label cc-label-row cc-instr-label">${escHtml(tr("collections.instructions"))}</span>
         <textarea class="cc-instr" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
       </label>
       <div class="user-cmd-field cc-grow-mem">
         <div class="cc-mem-head">
-          <span class="user-cmd-field-label">${escHtml(tr("collections.memory"))}</span>
+          <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
           <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
         </div>
         <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
@@ -6268,6 +6336,11 @@ function collectionContextDialog(name, snap) {
     body.querySelector(".cc-cwd").value = snap.cwd || "";
     body.querySelector(".cc-instr").value = snap.instructions || "";
     body.querySelector(".cc-mem").value = snap.memory || "";
+    // A "?" help button before each title explains what the field is for, how to
+    // fill it, and how it differs from the other — so a user knows when to reach
+    // for Instructions (how the agent should behave) vs Memory (durable facts).
+    body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
+    body.querySelector(".cc-mem-label").prepend(ccHelpButton(tr("collections.memoryHelp")));
     // "Generate from recent chats": distil the collection's recent sessions into a
     // proposed memory. Propose-then-commit — the draft only fills the (editable)
     // field; it is saved to disk with the rest on the dialog's Save.
@@ -6299,7 +6372,7 @@ function collectionContextDialog(name, snap) {
     const ok = overlay.querySelector(".ui-modal-ok");
     ok.textContent = tr("common.save");
     let done = false;
-    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const close = (val) => { if (done) return; done = true; closeCcHelpPopup(); overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
     const submit = () => close({
       squad: body.querySelector(".cc-squad").value,
       cwd: body.querySelector(".cc-cwd").value.trim(),
@@ -6311,8 +6384,15 @@ function collectionContextDialog(name, snap) {
     overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
     const onKey = (e) => {
-      // Enter inside a textarea inserts a newline; only Escape closes.
-      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      // Enter inside a textarea inserts a newline; only Escape closes. This
+      // capture-phase handler is registered before the help popup's own Escape
+      // handler, so when a help popup is open Escape dismisses just the popup
+      // and leaves the editor open.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (_ccHelpPopup) { closeCcHelpPopup(); return; }
+        close(null);
+      }
     };
     document.addEventListener("keydown", onKey, true);
     setTimeout(() => body.querySelector(".cc-instr").focus(), 0);
