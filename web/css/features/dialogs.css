@@ -721,10 +721,15 @@
   color: #fff;
 }
 .user-cmd-modal-footer button.primary:hover { filter: brightness(1.1); }
-/* Collection-context modal: Cancel + Save use the modal's own background
-   (var(--bg)) instead of a raised chip / loud accent fill, so both read as part
-   of the modal. Cancel already uses var(--bg); Save keeps an accent outline to
-   stay identifiable as the primary action. Scoped so other dialogs are unchanged. */
+/* Collection-context modal: the footer bar drops the default raised fill and
+   uses the modal's own background (var(--bg)) — the same the title bar shows —
+   so the top and bottom bars match. Scoped so other dialogs are unchanged. */
+.collection-ctx-modal .user-cmd-modal-footer {
+  background: var(--bg);
+}
+/* Cancel + Save likewise use the modal's own background instead of a raised chip
+   / loud accent fill, so both read as part of the modal. Cancel already uses
+   var(--bg); Save keeps an accent outline to stay identifiable as the primary. */
 .collection-ctx-modal .user-cmd-modal-footer button.primary {
   background: var(--bg);
   border-color: var(--accent, #0e639c);
