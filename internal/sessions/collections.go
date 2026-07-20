@@ -51,35 +51,52 @@ type collectionsFile struct {
 type collectionProfile struct {
 	Squad string `json:"squad,omitempty"`
 	Cwd   string `json:"cwd,omitempty"`
+	// MemorySize bounds the distilled/injected memory ("" | "small" | "medium" |
+	// "large"; "" ⇒ medium). It is a soft target: it caps the distiller and drives
+	// the editor word-counter, but never truncates manually typed memory.
+	MemorySize string `json:"memory_size,omitempty"`
+	// AutoUpdate turns on the server-side idle memory distiller for this
+	// collection (opt-in, default off).
+	AutoUpdate bool `json:"auto_update,omitempty"`
+	// LastMemoryUpdate is the unix-seconds time of the last AUTOMATIC memory
+	// commit; 0 ⇒ none. Drives the min-interval gate and the "auto-updated N ago"
+	// marker; cleared on revert or a manual memory save.
+	LastMemoryUpdate int64 `json:"last_memory_update,omitempty"`
 }
 
-// CollectionProfile returns the stored per-collection defaults (squad, cwd). A
-// missing collection or no recorded profile yields a zero-value profile (both
-// fields empty), which callers read as "no defaults".
-func CollectionProfile(name string) (squad, cwd string) {
+// CollectionProfileData is a collection's full per-collection scalar bag.
+type CollectionProfileData struct {
+	Squad            string
+	Cwd              string
+	MemorySize       string
+	AutoUpdate       bool
+	LastMemoryUpdate int64
+}
+
+// CollectionProfileFull returns the full stored per-collection scalars. A missing
+// collection or no recorded profile yields the zero value.
+func CollectionProfileFull(name string) CollectionProfileData {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
 	f, err := loadFileLocked()
 	if err != nil {
-		return "", ""
+		return CollectionProfileData{}
 	}
 	i := indexOfFold(f.Collections, name)
 	if i < 0 {
-		return "", ""
+		return CollectionProfileData{}
 	}
 	p := f.Profiles[f.Collections[i]]
-	return p.Squad, p.Cwd
+	return CollectionProfileData{
+		Squad: p.Squad, Cwd: p.Cwd, MemorySize: p.MemorySize,
+		AutoUpdate: p.AutoUpdate, LastMemoryUpdate: p.LastMemoryUpdate,
+	}
 }
 
-// SetCollectionProfile sets (or, with both empty, clears) a collection's
-// per-session defaults, keyed by its canonical stored name. An unknown
-// collection is an error. The server validates the squad against the live squad
-// catalogue and the cwd against the filesystem before calling this; the storage
-// layer only persists the tokens.
-func SetCollectionProfile(name, squad, cwd string) error {
+// SetCollectionProfileData writes a collection's full scalar bag (all zero ⇒ the
+// profile entry is dropped). An unknown collection is an error.
+func SetCollectionProfileData(name string, d CollectionProfileData) error {
 	name = strings.TrimSpace(name)
-	squad = strings.TrimSpace(squad)
-	cwd = strings.TrimSpace(cwd)
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
 	f, err := loadFileLocked()
@@ -91,7 +108,14 @@ func SetCollectionProfile(name, squad, cwd string) error {
 		return fmt.Errorf("collection %q not found", name)
 	}
 	canon := f.Collections[i]
-	if squad == "" && cwd == "" {
+	p := collectionProfile{
+		Squad:            strings.TrimSpace(d.Squad),
+		Cwd:              strings.TrimSpace(d.Cwd),
+		MemorySize:       strings.TrimSpace(d.MemorySize),
+		AutoUpdate:       d.AutoUpdate,
+		LastMemoryUpdate: d.LastMemoryUpdate,
+	}
+	if p == (collectionProfile{}) {
 		if f.Profiles != nil {
 			delete(f.Profiles, canon)
 		}
@@ -99,9 +123,42 @@ func SetCollectionProfile(name, squad, cwd string) error {
 		if f.Profiles == nil {
 			f.Profiles = map[string]collectionProfile{}
 		}
-		f.Profiles[canon] = collectionProfile{Squad: squad, Cwd: cwd}
+		f.Profiles[canon] = p
 	}
 	return saveFileLocked(f)
+}
+
+// CollectionProfile returns the stored (squad, cwd) defaults. Kept for callers
+// that only need the seed scalars.
+func CollectionProfile(name string) (squad, cwd string) {
+	p := CollectionProfileFull(name)
+	return p.Squad, p.Cwd
+}
+
+// SetCollectionProfile sets squad/cwd while PRESERVING memory_size/auto_update/
+// last_memory_update (a squad/cwd-only PATCH must not clobber the memory fields).
+func SetCollectionProfile(name, squad, cwd string) error {
+	cur := CollectionProfileFull(name)
+	cur.Squad = squad
+	cur.Cwd = cwd
+	return SetCollectionProfileData(name, cur)
+}
+
+// SetCollectionMemoryUpdate updates only the last-automatic-memory-commit
+// timestamp (0 clears it), preserving the other scalars.
+func SetCollectionMemoryUpdate(name string, ts int64) error {
+	cur := CollectionProfileFull(name)
+	cur.LastMemoryUpdate = ts
+	return SetCollectionProfileData(name, cur)
+}
+
+// ValidMemorySize reports whether s is an accepted memory-size token.
+func ValidMemorySize(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "", "small", "medium", "large":
+		return true
+	}
+	return false
 }
 
 // MaxCollectionColorLen bounds a colour token so it stays a small palette key.

@@ -84,3 +84,40 @@ func TestRemoveCascadesProfileAndProse(t *testing.T) {
 		t.Fatal("prose lingers after remove")
 	}
 }
+
+func TestCollectionProfilePreservesFields(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddCollection("Acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetCollectionProfileData("Acme", CollectionProfileData{
+		Squad: "Coding", MemorySize: "large", AutoUpdate: true, LastMemoryUpdate: 123,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A squad/cwd-only edit (the PATCH path) must NOT wipe memory_size/auto_update.
+	if err := SetCollectionProfile("Acme", "Kubernetes", "/tmp"); err != nil {
+		t.Fatal(err)
+	}
+	p := CollectionProfileFull("Acme")
+	if p.Squad != "Kubernetes" || p.Cwd != "/tmp" {
+		t.Fatalf("squad/cwd not updated: %+v", p)
+	}
+	if p.MemorySize != "large" || !p.AutoUpdate || p.LastMemoryUpdate != 123 {
+		t.Fatalf("size/auto_update/last clobbered: %+v", p)
+	}
+	// The legacy two-value accessor still works.
+	if s, c := CollectionProfile("Acme"); s != "Kubernetes" || c != "/tmp" {
+		t.Fatalf("CollectionProfile = %q,%q", s, c)
+	}
+	// SetCollectionMemoryUpdate updates only the timestamp.
+	if err := SetCollectionMemoryUpdate("Acme", 0); err != nil {
+		t.Fatal(err)
+	}
+	if CollectionProfileFull("Acme").LastMemoryUpdate != 0 {
+		t.Fatal("last_memory_update not cleared")
+	}
+	if !ValidMemorySize("") || !ValidMemorySize("small") || ValidMemorySize("huge") {
+		t.Fatal("ValidMemorySize wrong")
+	}
+}
