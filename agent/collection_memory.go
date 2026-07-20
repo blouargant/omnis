@@ -21,9 +21,23 @@ import (
 	"google.golang.org/genai"
 )
 
-// collectionMemoryOutputCap bounds the distilled memory — it is injected into the
-// system instruction of EVERY chat in the collection, so it must stay small.
-const collectionMemoryOutputCap = 6000
+// SizeWordLimit maps a collection memory-size token to its word budget. "" or an
+// unknown token ⇒ medium. Exported so the server can size the distiller from the
+// collection's stored MemorySize.
+func SizeWordLimit(size string) int {
+	switch strings.ToLower(strings.TrimSpace(size)) {
+	case "small":
+		return 200
+	case "large":
+		return 700
+	default: // "medium", "", unknown
+		return 350
+	}
+}
+
+// memoryCharCap is the backstop output cap in characters for a given word limit
+// (the prompt is the primary control; this trims a model that overshoots badly).
+func memoryCharCap(wordLimit int) int { return wordLimit * 8 }
 
 // collectionMaterialCap bounds the recent-sessions material fed to the distiller
 // (the caller also caps what it gathers; this is defence in depth). The material
@@ -47,7 +61,7 @@ const collectionMemorySystemPrompt = "You maintain a concise, durable MEMORY for
 // DistillCollectionMemory reconciles a collection's current memory with material
 // gathered from its recent sessions and returns an updated, bounded memory block
 // as a PROPOSAL (the caller decides whether to apply it). It never writes to disk.
-func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, material string) (string, error) {
+func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, material string, wordLimit int) (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("no manager")
 	}
@@ -63,7 +77,7 @@ func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, ma
 	if strings.TrimSpace(material) == "" {
 		return "", fmt.Errorf("no session material to distill")
 	}
-	req := buildDistillRequest(currentMemory, material)
+	req := buildDistillRequest(currentMemory, material, wordLimit)
 
 	var out strings.Builder
 	for resp, gerr := range mdl.GenerateContent(ctx, req, false) {
@@ -79,8 +93,9 @@ func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, ma
 	}
 
 	res := strings.TrimSpace(out.String())
-	if r := []rune(res); len(r) > collectionMemoryOutputCap {
-		res = strings.TrimSpace(string(r[:collectionMemoryOutputCap]))
+	cap := memoryCharCap(wordLimit)
+	if r := []rune(res); len(r) > cap {
+		res = strings.TrimSpace(string(r[:cap]))
 	}
 	return res, nil
 }
@@ -89,7 +104,7 @@ func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, ma
 // and the gathered material, applying the material input cap (the material is
 // most-recent-first, so it keeps the HEAD). Extracted so the capping + prompt
 // shape are unit-testable without a live model.
-func buildDistillRequest(currentMemory, material string) *model.LLMRequest {
+func buildDistillRequest(currentMemory, material string, wordLimit int) *model.LLMRequest {
 	material = strings.TrimSpace(material)
 	if r := []rune(material); len(r) > collectionMaterialCap {
 		material = string(r[:collectionMaterialCap]) + "\n…(older sessions omitted)…"
@@ -106,6 +121,7 @@ func buildDistillRequest(currentMemory, material string) *model.LLMRequest {
 	}
 	user.WriteString("\nRECENT SESSIONS (most recent first):\n")
 	user.WriteString(material)
+	fmt.Fprintf(&user, "\n\nIMPORTANT: keep the updated memory concise — under about %d words.", wordLimit)
 
 	return &model.LLMRequest{
 		Config: &genai.GenerateContentConfig{

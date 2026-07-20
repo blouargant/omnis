@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
@@ -94,7 +95,7 @@ func handleDistillCollectionMemory(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		current := collectionctx.ReadMemory(name)
-		proposed, err := d.Manager.DistillCollectionMemory(c.Request.Context(), current, material)
+		proposed, err := d.Manager.DistillCollectionMemory(c.Request.Context(), current, material, toolkitagent.SizeWordLimit(""))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
