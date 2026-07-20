@@ -516,6 +516,58 @@ func TestShippedConfigParity(t *testing.T) {
 	}
 }
 
+// TestShippedConfigDeniesHomeDeletion is defense-in-depth for the safety floor:
+// the shipped deny rules must give a clean DENY (not merely ask) for a
+// recursive-force rm of the home directory across flag spellings and tilde /
+// $HOME / ${HOME} / quoted forms — while a recursive rm of a *named* sub-path of
+// home stays a normal ask (not over-denied).
+func TestShippedConfigDeniesHomeDeletion(t *testing.T) {
+	t.Parallel()
+	cfg, err := Load("../../config/permissions.json")
+	if err != nil {
+		t.Fatalf("load shipped config: %v", err)
+	}
+	denied := []string{
+		"rm -rf ~",
+		"rm -rf ~/",
+		"rm -rf ~/*",
+		"rm -fr ~",
+		"rm -r -f ~",               // separated flags
+		"rm --recursive --force ~", // long flags
+		"rm -rf $HOME",
+		"rm -rf $HOME/",
+		"rm -rf $HOME/*",
+		"rm -rf ${HOME}",
+		"rm -rf ${HOME}/*",
+		"rm -r -f /home/u", // absolute system dir, separated flags
+		// NOTE: the *double-quoted* `rm -rf "$HOME"` form is intentionally not
+		// listed here. In the matched probe the shell quotes are JSON-escaped
+		// (\"$HOME\"), which a readable shipped-config regex can't cleanly match;
+		// it is instead hard-blocked by the safety floor regardless of mode — see
+		// TestSafetyFloorBlocksHomeDeletion in core/tools. The floor is the
+		// guarantee here; this config tier is defense-in-depth for the common
+		// unquoted spellings.
+	}
+	for _, cmd := range denied {
+		if d, r := cfg.CheckArgs("Bash", bash(cmd), "/proj"); d != DecisionDeny {
+			t.Errorf("CheckArgs(%q): want DENY, got %v (%s)", cmd, d, r)
+		}
+	}
+	// Removing a named sub-directory of home is ordinary work — it must not be
+	// hard-denied by the escape-hatch rules (it still asks via `Bash(rm *)`).
+	notDenied := []string{
+		"rm -rf ~/project",
+		"rm -rf $HOME/project/build",
+		"rm -rf ${HOME}/go/pkg",
+		"rm -rf ./build",
+	}
+	for _, cmd := range notDenied {
+		if d, _ := cfg.CheckArgs("Bash", bash(cmd), "/proj"); d == DecisionDeny {
+			t.Errorf("CheckArgs(%q): want not-denied (ask), got DENY", cmd)
+		}
+	}
+}
+
 // TestSplitCompoundRedirect guards against treating the '&' in a
 // file-descriptor redirection as a command separator (e.g. `2>&1` must not
 // split into `2>` + `1`). A spurious `1` subcommand would not be covered by

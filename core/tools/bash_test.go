@@ -104,6 +104,69 @@ func TestSafetyFloorStructural(t *testing.T) {
 	}
 }
 
+// TestSafetyFloorBlocksHomeDeletion pins that a recursive-force rm of the user's
+// HOME — whether written as a tilde, a $HOME/${HOME} variable, a quoted form, or
+// a `cd`-to-home followed by a bare wipe — trips the hard floor. The floor is the
+// only guard that survives bypassPermissions and the `!` shell-escape, so the
+// static token forms (which the shell would expand to the home path) must be
+// caught here, not only by the permission layer.
+func TestSafetyFloorBlocksHomeDeletion(t *testing.T) {
+	t.Parallel()
+
+	blocked := []string{
+		// tilde targeting the home root or all of its contents.
+		"rm -rf ~",
+		"rm -rf ~/",
+		"rm -rf ~/*",
+		"rm -rf ~/.",
+		"rm -rf ~/..",
+		"rm -fr ~",              // flag reorder
+		"rm -r -f ~",            // split flags
+		"rm --recursive --force ~", // long flags
+		// $HOME / ${HOME} / quoted variable forms.
+		"rm -rf $HOME",
+		"rm -rf $HOME/",
+		"rm -rf $HOME/*",
+		"rm -rf ${HOME}",
+		"rm -rf ${HOME}/*",
+		`rm -rf "$HOME"`,
+		`rm -rf "$HOME/"`,
+		"rm -r -f $HOME",
+		// cd into the home root, then wipe the (now home) working directory.
+		"cd ~ && rm -rf *",
+		"cd ~ && rm -rf .",
+		"cd $HOME && rm -rf *",
+		"cd ${HOME} && rm -rf ..",
+		"cd ~/ && rm -rf ./*",
+		"cd ~ ; rm -rf *",
+	}
+	for _, cmd := range blocked {
+		if _, bad := SafetyFloorBlock(cmd); !bad {
+			t.Errorf("SafetyFloorBlock(%q) = not blocked, want blocked", cmd)
+		}
+	}
+
+	// The floor must stay conservative: deleting a *named* sub-directory of home,
+	// or wiping a project directory after cd-ing into it, is ordinary work and
+	// must NOT trip the floor.
+	allowed := []string{
+		"rm -rf ~/project",
+		"rm -rf ~/project/build",
+		"rm -rf $HOME/project",
+		"rm -rf ${HOME}/go/pkg",
+		"rm -rf ~/.cache/thumbnails",
+		"cd ~/project && rm -rf *",   // cd to a sub-dir, wipe that sub-dir
+		"cd ~ && rm -rf build",       // delete a named dir under home
+		"cd ~ && cd project && rm -rf *", // last cd leaves the home root
+		"cd ~ && ls -la",             // no wipe at all
+	}
+	for _, cmd := range allowed {
+		if reason, bad := SafetyFloorBlock(cmd); bad {
+			t.Errorf("SafetyFloorBlock(%q) = blocked (%s), want allowed", cmd, reason)
+		}
+	}
+}
+
 func TestRunBashTimeout(t *testing.T) {
 	t.Parallel()
 

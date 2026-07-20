@@ -49,10 +49,14 @@ var blockDeviceRe = regexp.MustCompile(`/dev/(sd[a-z]|nvme\d|vd[a-z]|hd[a-z]|mmc
 // commands), so it targets a small set of unambiguously catastrophic patterns
 // and is robust to the evasions the old substring-only check missed: flag
 // reordering (`rm -fr /`), split/long flags (`rm -r -f /`, `rm --recursive
-// --force /`), extra whitespace, and whitespace in the fork bomb. It is NOT a
-// general destructive-command detector — decode-then-exec chains
-// (`… | base64 -d | bash`) and shell-variable-expanded targets (`$HOME`) are
-// out of reach of static inspection and are governed by the permission layer.
+// --force /`), extra whitespace, and whitespace in the fork bomb. It also blocks
+// a recursive-force rm of the home directory written as a tilde or HOME variable
+// (`rm -rf ~`, `rm -rf $HOME/*`, `rm -rf ${HOME}`) and the two-step `cd ~ && rm
+// -rf *` form — the tokens are statically visible even though their expanded
+// value is not. It is NOT a general destructive-command detector — decode-then-
+// exec chains (`… | base64 -d | bash`) and targets computed at runtime (a var
+// holding a path the floor never sees literally) remain out of reach of static
+// inspection and are governed by the permission layer.
 func SafetyFloorBlock(command string) (string, bool) {
 	// Fast path: exact catastrophic literals (also exercised by tests).
 	for _, b := range alwaysBlock {
@@ -69,6 +73,11 @@ func SafetyFloorBlock(command string) (string, bool) {
 		if reason, bad := blockedSubcommand(sub); bad {
 			return reason, true
 		}
+	}
+	// Cross-segment: `cd <home-root> && rm -rf <wipe>` wipes HOME, which no
+	// single-segment check can see (the target of the rm is the cwd the cd set).
+	if cdThenHomeWipe(command) {
+		return "recursive force rm of the home directory (after cd)", true
 	}
 	return "", false
 }
@@ -98,37 +107,20 @@ func blockedSubcommand(sub string) (string, bool) {
 		return "redirect to block device", true
 	}
 
-	toks := strings.Fields(sub)
-	// Skip leading benign wrappers and VAR=val assignments / sudo flags.
-	i := 0
-	for i < len(toks) {
-		t := strings.TrimPrefix(toks[i], `\`)
-		if benignWrappers[filepath.Base(t)] {
-			i++
-			continue
-		}
-		if strings.HasPrefix(t, "-") { // e.g. `sudo -S`
-			i++
-			continue
-		}
-		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") &&
-			isEnvAssignment(t) {
-			i++
-			continue
-		}
-		break
-	}
-	if i >= len(toks) {
+	cmd, args := segmentCmdArgs(sub)
+	if cmd == "" {
 		return "", false
 	}
-	cmd := filepath.Base(strings.TrimPrefix(toks[i], `\`))
-	args := toks[i+1:]
 
 	switch {
 	case cmd == "rm":
-		if rmHasFlag(args, 'r', "recursive") && rmHasFlag(args, 'f', "force") &&
-			hasAbsolutePathArg(args) {
-			return "recursive force rm of an absolute path", true
+		if rmHasFlag(args, 'r', "recursive") && rmHasFlag(args, 'f', "force") {
+			if hasAbsolutePathArg(args) {
+				return "recursive force rm of an absolute path", true
+			}
+			if hasHomeTargetArg(args) {
+				return "recursive force rm of the home directory", true
+			}
 		}
 	case cmd == "mkfs" || strings.HasPrefix(cmd, "mkfs."):
 		return "mkfs", true
@@ -189,6 +181,105 @@ func hasAbsolutePathArg(args []string) bool {
 		}
 		if strings.HasPrefix(a, "/") {
 			return true
+		}
+	}
+	return false
+}
+
+// homeWipeRemainders are the sub-tokens that, appended to a home-root prefix,
+// still target the home directory itself (its whole contents) rather than a
+// named sub-path — so `~/*` wipes home but `~/project` does not.
+var homeWipeRemainders = map[string]bool{
+	"": true, "*": true, ".": true, "..": true, "./": true, "./*": true, ".*": true,
+}
+
+// isHomeRootTarget reports whether arg is a shell token that expands to the
+// user's HOME directory itself (or all of its contents) — `~`, `~/`, `$HOME`,
+// `${HOME}` (optionally quoted), and their whole-directory wildcards (`~/*`,
+// `$HOME/.`, …). A named sub-path such as `~/project` is NOT a home-root target,
+// so removing it stays ordinary work. The token forms are statically visible
+// even though their expanded value is not, which is what lets the floor — the
+// only guard under bypassPermissions / the `!` escape — catch them.
+func isHomeRootTarget(arg string) bool {
+	a := strings.Trim(arg, `"'`)
+	for _, p := range []string{"~", "$HOME", "${HOME}"} {
+		if a == p {
+			return true
+		}
+		if strings.HasPrefix(a, p+"/") {
+			return homeWipeRemainders[a[len(p)+1:]]
+		}
+	}
+	return false
+}
+
+func hasHomeTargetArg(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if isHomeRootTarget(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// segmentCmdArgs resolves an operator-free command segment to its command base
+// name and argument list, skipping leading benign wrappers (`sudo`, `env`, …),
+// their flags, and VAR=val assignments — the same normalisation blockedSubcommand
+// performs before inspecting a command.
+func segmentCmdArgs(sub string) (string, []string) {
+	toks := strings.Fields(sub)
+	i := 0
+	for i < len(toks) {
+		t := strings.TrimPrefix(toks[i], `\`)
+		switch {
+		case benignWrappers[filepath.Base(t)]:
+			i++
+		case strings.HasPrefix(t, "-"):
+			i++
+		case strings.Contains(t, "=") && isEnvAssignment(t):
+			i++
+		default:
+			return filepath.Base(t), toks[i+1:]
+		}
+	}
+	return "", nil
+}
+
+// rmWipesCwd reports whether an rm's targets include the current working
+// directory itself (`*`, `.`, `..`, `./*`) rather than a named entry — the shape
+// that, run from the home directory, deletes it.
+func rmWipesCwd(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		switch strings.Trim(a, `"'`) {
+		case "*", ".", "..", "./", "./*", ".*":
+			return true
+		}
+	}
+	return false
+}
+
+// cdThenHomeWipe detects `cd <home-root> … rm -r -f <cwd-wipe>` across command
+// segments: after cd-ing to the home root, a recursive rm of the working
+// directory wipes HOME. A cd into (or back out to) a named directory clears the
+// flag, so wiping a project directory after cd-ing into it stays allowed.
+func cdThenHomeWipe(command string) bool {
+	atHomeRoot := false
+	for _, sub := range shellSplitRe.Split(command, -1) {
+		cmd, args := segmentCmdArgs(sub)
+		switch {
+		case cmd == "cd":
+			atHomeRoot = len(args) == 1 && isHomeRootTarget(args[0])
+		case cmd == "rm" && atHomeRoot:
+			if rmHasFlag(args, 'r', "recursive") && rmHasFlag(args, 'f', "force") &&
+				rmWipesCwd(args) {
+				return true
+			}
 		}
 	}
 	return false

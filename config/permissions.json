@@ -3,12 +3,12 @@
     "defaultMode": "default",
     "deny": [
       {
-        "regex": "\\brm\\s+-[rRfF]+\\s+(/|~|\\$HOME)(\\s|\"|$|;|&|\\|)",
-        "reason": "rm -r/-f on /, $HOME, or ~ is catastrophic",
+        "regex": "\\brm\\b(\\s+-{1,2}[A-Za-z]+)+\\s+\"?(/|~|\\$\\{?HOME\\}?)(/\\*?|/\\.\\.?)?\"?(\\s|\"|'|$|;|&|\\|)",
+        "reason": "rm -r/-f on /, ~, $HOME or ${HOME} (or their whole contents) is catastrophic — matches split/long flags and quoted forms",
         "tools": ["Bash"]
       },
       {
-        "regex": "\\brm\\s+-[rRfF]+\\s+/(etc|usr|bin|sbin|lib|lib64|boot|home|var|opt|sys|proc|dev|root|srv|run)(\\b|/)",
+        "regex": "\\brm\\b(\\s+-{1,2}[A-Za-z]+)+\\s+/(etc|usr|bin|sbin|lib|lib64|boot|home|var|opt|sys|proc|dev|root|srv|run)(\\b|/)",
         "reason": "rm -r/-f on a system directory is catastrophic",
         "tools": ["Bash"]
       },
