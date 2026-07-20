@@ -95,7 +95,8 @@ func handleDistillCollectionMemory(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		current := collectionctx.ReadMemory(name)
-		proposed, err := d.Manager.DistillCollectionMemory(c.Request.Context(), current, material, toolkitagent.SizeWordLimit(""))
+		size := sessions.CollectionProfileFull(name).MemorySize
+		proposed, err := d.Manager.DistillCollectionMemory(c.Request.Context(), current, material, toolkitagent.SizeWordLimit(size))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

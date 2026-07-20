@@ -141,10 +141,12 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			return
 		}
 		var body struct {
-			Name  string  `json:"name"`
-			Color *string `json:"color"`
-			Squad *string `json:"squad"`
-			Cwd   *string `json:"cwd"`
+			Name       string  `json:"name"`
+			Color      *string `json:"color"`
+			Squad      *string `json:"squad"`
+			Cwd        *string `json:"cwd"`
+			MemorySize *string `json:"memory_size"`
+			AutoUpdate *bool   `json:"auto_update"`
 		}
 		_ = c.ShouldBindJSON(&body)
 
@@ -180,29 +182,48 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			}
 		}
 
-		// Per-session defaults (squad / cwd). Merge with the stored profile so a
-		// PATCH that touches only one field doesn't clear the other; an empty
-		// string clears that field. Validate the squad against the live catalogue
-		// and the cwd against the filesystem before persisting.
-		if body.Squad != nil || body.Cwd != nil {
-			curSquad, curCwd := sessions.CollectionProfile(current)
+		// Per-collection scalars (squad / cwd / memory_size / auto_update). Validate
+		// the incoming values, then apply them ATOMICALLY via UpdateCollectionProfile
+		// (single locked read-modify-write) so a field edit here never clobbers the
+		// background auto-updater's concurrent last_memory_update write. Only fields
+		// present in the body change; an empty string clears that field.
+		if body.Squad != nil || body.Cwd != nil || body.MemorySize != nil || body.AutoUpdate != nil {
+			cur := sessions.CollectionProfileFull(current)
+			sq, cw := cur.Squad, cur.Cwd
 			if body.Squad != nil {
-				curSquad = strings.TrimSpace(*body.Squad)
+				sq = strings.TrimSpace(*body.Squad)
 			}
 			if body.Cwd != nil {
-				curCwd = strings.TrimSpace(*body.Cwd)
+				cw = strings.TrimSpace(*body.Cwd)
 			}
-			if curSquad != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(curSquad)) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + curSquad})
+			if body.MemorySize != nil && !sessions.ValidMemorySize(strings.TrimSpace(*body.MemorySize)) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory size"})
 				return
 			}
-			if curCwd != "" {
-				if info, err := os.Stat(curCwd); err != nil || !info.IsDir() {
+			if sq != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(sq)) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + sq})
+				return
+			}
+			if cw != "" {
+				if info, err := os.Stat(cw); err != nil || !info.IsDir() {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "default folder is not a directory"})
 					return
 				}
 			}
-			if err := sessions.SetCollectionProfile(current, curSquad, curCwd); err != nil {
+			if err := sessions.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
+				if body.Squad != nil {
+					p.Squad = sq
+				}
+				if body.Cwd != nil {
+					p.Cwd = cw
+				}
+				if body.MemorySize != nil {
+					p.MemorySize = strings.TrimSpace(*body.MemorySize)
+				}
+				if body.AutoUpdate != nil {
+					p.AutoUpdate = *body.AutoUpdate
+				}
+			}); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -282,15 +303,19 @@ func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		squad, cwd := sessions.CollectionProfile(name)
+		prof := sessions.CollectionProfileFull(name)
 		colors, _ := sessions.CollectionColors()
 		c.JSON(http.StatusOK, gin.H{
-			"name":         name,
-			"instructions": collectionctx.ReadInstructions(name),
-			"memory":       collectionctx.ReadMemory(name),
-			"squad":        squad,
-			"cwd":          cwd,
-			"color":        colors[name],
+			"name":               name,
+			"instructions":       collectionctx.ReadInstructions(name),
+			"memory":             collectionctx.ReadMemory(name),
+			"squad":              prof.Squad,
+			"cwd":                prof.Cwd,
+			"color":              colors[name],
+			"memory_size":        prof.MemorySize,
+			"auto_update":        prof.AutoUpdate,
+			"last_memory_update": prof.LastMemoryUpdate,
+			"has_prev_memory":    collectionctx.HasPrevMemory(name),
 		})
 	}
 }
@@ -323,6 +348,10 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+			// A manual memory edit supersedes any unreviewed auto-commit: consume
+			// the revert snapshot + clear the auto-update marker.
+			_ = collectionctx.RemovePrevMemory(name)
+			_ = sessions.SetCollectionMemoryUpdate(name, 0)
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("collections_changed", "")
@@ -333,6 +362,33 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 			"instructions": collectionctx.ReadInstructions(name),
 			"memory":       collectionctx.ReadMemory(name),
 		})
+	}
+}
+
+// handleRevertCollectionMemory restores a collection's previous-memory snapshot
+// (written by an auto-commit) and consumes it — undoing the last automatic
+// memory update. 404 when there is no snapshot to restore.
+func handleRevertCollectionMemory(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name, ok := resolveKnownCollection(c)
+		if !ok {
+			return
+		}
+		prev := collectionctx.ReadPrevMemory(name)
+		if strings.TrimSpace(prev) == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no previous memory to revert to"})
+			return
+		}
+		if err := collectionctx.WriteMemory(name, prev); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		_ = collectionctx.RemovePrevMemory(name)
+		_ = sessions.SetCollectionMemoryUpdate(name, 0)
+		if d.PushEvents != nil {
+			d.PushEvents.broadcast("collections_changed", "")
+		}
+		c.JSON(http.StatusOK, gin.H{"name": name, "memory": collectionctx.ReadMemory(name)})
 	}
 }
 
