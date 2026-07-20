@@ -6208,7 +6208,7 @@ async function editCollectionContext(c) {
   try {
     const p = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}`, {
       method: "PATCH",
-      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd }),
+      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd, memory_size: chosen.memory_size, auto_update: chosen.auto_update }),
     });
     if (!p.ok) {
       const b = await p.json().catch(() => ({}));
@@ -6237,6 +6237,7 @@ async function editCollectionContext(c) {
 // self-contained here since that one lives in the Settings IIFE. One popup at a
 // time; dismissed on outside-click, Escape, scroll or resize.
 let _ccHelpPopup = null;
+let _ccModalBusy = false; // true while a child modal (e.g. the auto-update warning) is open
 function closeCcHelpPopup() {
   if (!_ccHelpPopup) return;
   const p = _ccHelpPopup;
@@ -6299,8 +6300,9 @@ function ccHelpButton(text) {
 
 // collectionContextDialog is the per-collection context editor: a starting-squad
 // picker + default-folder field (the seeded per-session defaults) and two prose
-// textareas (stable instructions, evolving memory). Resolves
-// { squad, cwd, instructions, memory } or null.
+// textareas (stable instructions, evolving memory), plus the memory size/
+// auto-update controls. Resolves
+// { squad, cwd, instructions, memory, memory_size, auto_update } or null.
 function collectionContextDialog(name, snap) {
   return new Promise((resolve) => {
     const overlay = uiModalShell(tr("collections.contextTitle", { name }));
@@ -6330,7 +6332,20 @@ function collectionContextDialog(name, snap) {
           <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
           <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
         </div>
+        <div class="cc-mem-controls">
+          <div class="cc-size-row" role="radiogroup" aria-label="${escHtml(tr("collections.memorySizeLabel"))}">
+            <span class="cc-size-caption">${escHtml(tr("collections.memorySizeLabel"))}</span>
+            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeSmallTip"))}"><input type="radio" name="cc-size" value="small"> ${escHtml(tr("collections.memorySizeSmall"))}</label>
+            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeMediumTip"))}"><input type="radio" name="cc-size" value="medium"> ${escHtml(tr("collections.memorySizeMedium"))}</label>
+            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeLargeTip"))}"><input type="radio" name="cc-size" value="large"> ${escHtml(tr("collections.memorySizeLarge"))}</label>
+          </div>
+          <label class="cc-autoupdate"><input type="checkbox" class="cc-autoupdate-cb"> <span data-tip="${escHtml(tr("collections.autoUpdateTip"))}">${escHtml(tr("collections.autoUpdate"))}</span></label>
+        </div>
         <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
+        <div class="cc-mem-foot">
+          <span class="cc-word-count"></span>
+          <span class="cc-revert-marker" hidden><span class="cc-revert-text"></span> <button type="button" class="cc-revert-btn">${escHtml(tr("collections.memoryRevert"))}</button></span>
+        </div>
         <span class="user-cmd-field-hint">${escHtml(tr("collections.memoryHint"))}</span>
       </div>`;
     body.querySelector(".cc-cwd").value = snap.cwd || "";
@@ -6341,6 +6356,71 @@ function collectionContextDialog(name, snap) {
     // for Instructions (how the agent should behave) vs Memory (durable facts).
     body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
     body.querySelector(".cc-mem-label").prepend(ccHelpButton(tr("collections.memoryHelp")));
+
+    // ── Memory size (soft target) + live word counter ──
+    const CC_SIZE_LIMITS = { small: 200, medium: 350, large: 700 };
+    const memEl = body.querySelector(".cc-mem");
+    const sizeInputs = Array.from(body.querySelectorAll('input[name="cc-size"]'));
+    const initialSize = CC_SIZE_LIMITS[snap.memory_size] ? snap.memory_size : "medium";
+    for (const r of sizeInputs) r.checked = r.value === initialSize;
+    const wordCountEl = body.querySelector(".cc-word-count");
+    const currentSize = () => (sizeInputs.find((r) => r.checked) || {}).value || "medium";
+    const updateWordCount = () => {
+      const n = (memEl.value.trim().match(/\S+/g) || []).length;
+      const limit = CC_SIZE_LIMITS[currentSize()];
+      wordCountEl.textContent = tr("collections.memoryWords", { n, limit });
+      wordCountEl.classList.toggle("over", n > limit);
+    };
+    memEl.addEventListener("input", updateWordCount);
+    for (const r of sizeInputs) r.addEventListener("change", updateWordCount);
+    updateWordCount();
+
+    // ── Auto-update toggle (+ enable warning) ──
+    const autoCb = body.querySelector(".cc-autoupdate-cb");
+    autoCb.checked = !!snap.auto_update;
+    autoCb.addEventListener("change", async () => {
+      if (!autoCb.checked) return; // turning OFF never warns
+      _ccModalBusy = true;
+      const ok = await uiConfirm({
+        title: tr("collections.autoUpdateWarnTitle"),
+        message: tr("collections.autoUpdateWarnMsg"),
+        confirmText: tr("collections.autoUpdateConfirm"),
+        cancelText: tr("common.cancel"),
+      });
+      _ccModalBusy = false;
+      if (!ok) autoCb.checked = false; // declined ⇒ leave it off
+    });
+
+    // ── Revert marker (only when an unreviewed auto-commit snapshot exists) ──
+    const revertMarker = body.querySelector(".cc-revert-marker");
+    const revertText = body.querySelector(".cc-revert-text");
+    const relAgo = (sec) => {
+      const s = Math.max(0, Math.floor(Date.now() / 1000) - (sec || 0));
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h`;
+      return `${Math.floor(h / 24)}d`;
+    };
+    if (snap.has_prev_memory) {
+      revertText.textContent = tr("collections.memoryAutoUpdated", { ago: relAgo(snap.last_memory_update) });
+      revertMarker.hidden = false;
+    }
+    body.querySelector(".cc-revert-btn").addEventListener("click", async () => {
+      try {
+        const res = await apiFetch(`/api/collections/${encodeURIComponent(name)}/memory/revert`, { method: "POST" });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) { showToast(b.error || tr("collections.memoryRevertFailed"), "err"); return; }
+        memEl.value = b.memory || "";
+        updateWordCount();
+        revertMarker.hidden = true;
+        showToast(tr("collections.memoryReverted"), "ok");
+      } catch (e) {
+        console.error(e);
+        showToast(tr("collections.memoryRevertFailed"), "err");
+      }
+    });
     // "Generate from recent chats": distil the collection's recent sessions into a
     // proposed memory. Propose-then-commit — the draft only fills the (editable)
     // field; it is saved to disk with the rest on the dialog's Save.
@@ -6356,6 +6436,7 @@ function collectionContextDialog(name, snap) {
         if (!res.ok) { showToast(b.error || tr("collections.memoryGenFailed"), "err"); return; }
         const mem = body.querySelector(".cc-mem");
         mem.value = b.proposed || "";
+        mem.dispatchEvent(new Event("input"));
         mem.focus();
         showToast(tr("collections.memoryGenDone"), "ok");
       } catch (e) {
@@ -6378,17 +6459,18 @@ function collectionContextDialog(name, snap) {
       cwd: body.querySelector(".cc-cwd").value.trim(),
       instructions: body.querySelector(".cc-instr").value,
       memory: body.querySelector(".cc-mem").value,
+      memory_size: currentSize(),
+      auto_update: autoCb.checked,
     });
     ok.addEventListener("click", submit);
     overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
     overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
     const onKey = (e) => {
-      // Enter inside a textarea inserts a newline; only Escape closes. This
-      // capture-phase handler is registered before the help popup's own Escape
-      // handler, so when a help popup is open Escape dismisses just the popup
-      // and leaves the editor open.
+      // Enter inside a textarea inserts a newline; only Escape closes. Yield to a
+      // child modal (auto-update warning) and to an open help popup first.
       if (e.key === "Escape") {
+        if (_ccModalBusy) return; // the child uiConfirm handles this Escape
         e.preventDefault();
         if (_ccHelpPopup) { closeCcHelpPopup(); return; }
         close(null);

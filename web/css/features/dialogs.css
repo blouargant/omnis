@@ -343,6 +343,42 @@
 .cc-mem-gen:hover:not(:disabled) { border-color: var(--accent, #0e639c); }
 .cc-mem-gen:disabled { opacity: 0.6; cursor: default; }
 
+/* Memory-size radios + auto-update toggle row, and the word-count / revert foot. */
+.cc-mem-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 12px;
+}
+.cc-size-row { display: inline-flex; align-items: center; gap: 10px; }
+.cc-size-caption { color: var(--text-muted); }
+.cc-size-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cc-autoupdate { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.cc-autoupdate span { cursor: help; }
+.cc-mem-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  min-height: 16px;
+}
+.cc-word-count { color: var(--text-muted); }
+.cc-word-count.over { color: var(--warn-fg, #c9821f); font-weight: 600; }
+.cc-revert-marker { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.cc-revert-btn {
+  font-size: 11px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+.cc-revert-btn:hover { border-color: var(--accent, #0e639c); }
+
 /* A field title with its leading "?" help button on one row (Instructions /
    Memory). Keeps the badge and the label together so the Memory row's "Generate"
    button still sits at the far right of its space-between head. */
