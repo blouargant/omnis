@@ -31,6 +31,7 @@ import (
 const (
 	instructionsFile = "instructions.md"
 	memoryFile       = "memory.md"
+	prevMemoryFile   = "memory.prev.md"
 )
 
 // baseDir is the parent of every per-collection directory. It sits beside
@@ -100,6 +101,32 @@ func readFile(path string) string {
 // unusable name is an error.
 func WriteInstructions(name, text string) error { return writeFile(InstructionsPath(name), text) }
 func WriteMemory(name, text string) error       { return writeFile(MemoryPath(name), text) }
+
+// PrevMemoryPath returns the on-disk path of a collection's previous-memory
+// snapshot (used by auto-update's revert net), or "" for an unusable name.
+func PrevMemoryPath(name string) string { return filePath(name, prevMemoryFile) }
+
+// ReadPrevMemory returns the previous-memory snapshot text, or "" when absent.
+func ReadPrevMemory(name string) string { return readFile(PrevMemoryPath(name)) }
+
+// WritePrevMemory replaces the snapshot (an empty body removes it).
+func WritePrevMemory(name, text string) error { return writeFile(PrevMemoryPath(name), text) }
+
+// HasPrevMemory reports whether a non-empty snapshot exists (so the UI only
+// offers Revert when there is prior memory to restore).
+func HasPrevMemory(name string) bool { return strings.TrimSpace(ReadPrevMemory(name)) != "" }
+
+// RemovePrevMemory drops the snapshot; a missing file is a no-op.
+func RemovePrevMemory(name string) error {
+	p := PrevMemoryPath(name)
+	if p == "" {
+		return nil
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
 
 func writeFile(path, text string) error {
 	if path == "" {
