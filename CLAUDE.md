@@ -2012,8 +2012,11 @@ plus **per-session defaults** (a seeded starting **squad** and **cwd**) applied 
 new chats. Everything is **per-session** — nothing crosses the generation
 boundary — so it composes with the existing squad/cwd machinery and needs no
 per-collection generations. Phase 1 is the deterministic hand-authored layer;
-Phase 2 adds an **assisted, user-initiated memory distiller** (below). A
-fully-automatic idle-triggered distiller (Phase 3) remains unwired by design.
+Phase 2 adds an **assisted, user-initiated memory distiller** (below). Phase 3
+(a fully-automatic idle-triggered distiller) is now available as an **opt-in,
+per-collection auto-update worker** — off by default, gated behind a UI enable
+warning, and always keeping a revertable snapshot (see "Memory size + automatic
+updates" below).
 
 - **Storage split**: scalars in `collections.json` (a `profiles` map keyed by
   canonical name, `{squad, cwd}`, beside `colors`), prose in files under
