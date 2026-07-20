@@ -645,42 +645,51 @@ In `server/collections.go` `handleUpdateCollection`, extend the body struct (lin
 		}
 ```
 
-Replace the whole `if body.Squad != nil || body.Cwd != nil { … }` block (lines ~187-209) with a unified profile-merge block:
+Replace the whole `if body.Squad != nil || body.Cwd != nil { … }` block (lines ~187-209) with a unified profile-merge block. It validates the incoming values, then applies them **atomically** via `sessions.UpdateCollectionProfile` (a single locked read-modify-write, added in Task 1's fix pass) so a field edit here never clobbers the Task 5 background worker's concurrent `last_memory_update` write:
 
 ```go
-		// Per-collection scalars (squad / cwd / memory_size / auto_update). Merge
-		// with the stored profile so a PATCH touching one field never clears the
-		// others (and preserves last_memory_update). Empty string clears a field.
+		// Per-collection scalars (squad / cwd / memory_size / auto_update). Validate
+		// the incoming values, then apply them ATOMICALLY via UpdateCollectionProfile
+		// (single locked read-modify-write) so a field edit here never clobbers the
+		// background auto-updater's concurrent last_memory_update write. Only fields
+		// present in the body change; an empty string clears that field.
 		if body.Squad != nil || body.Cwd != nil || body.MemorySize != nil || body.AutoUpdate != nil {
-			prof := sessions.CollectionProfileFull(current)
+			cur := sessions.CollectionProfileFull(current)
+			sq, cw := cur.Squad, cur.Cwd
 			if body.Squad != nil {
-				prof.Squad = strings.TrimSpace(*body.Squad)
+				sq = strings.TrimSpace(*body.Squad)
 			}
 			if body.Cwd != nil {
-				prof.Cwd = strings.TrimSpace(*body.Cwd)
+				cw = strings.TrimSpace(*body.Cwd)
 			}
-			if body.MemorySize != nil {
-				ms := strings.TrimSpace(*body.MemorySize)
-				if !sessions.ValidMemorySize(ms) {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory size"})
-					return
-				}
-				prof.MemorySize = ms
-			}
-			if body.AutoUpdate != nil {
-				prof.AutoUpdate = *body.AutoUpdate
-			}
-			if prof.Squad != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(prof.Squad)) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + prof.Squad})
+			if body.MemorySize != nil && !sessions.ValidMemorySize(strings.TrimSpace(*body.MemorySize)) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory size"})
 				return
 			}
-			if prof.Cwd != "" {
-				if info, err := os.Stat(prof.Cwd); err != nil || !info.IsDir() {
+			if sq != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(sq)) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + sq})
+				return
+			}
+			if cw != "" {
+				if info, err := os.Stat(cw); err != nil || !info.IsDir() {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "default folder is not a directory"})
 					return
 				}
 			}
-			if err := sessions.SetCollectionProfileData(current, prof); err != nil {
+			if err := sessions.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
+				if body.Squad != nil {
+					p.Squad = sq
+				}
+				if body.Cwd != nil {
+					p.Cwd = cw
+				}
+				if body.MemorySize != nil {
+					p.MemorySize = strings.TrimSpace(*body.MemorySize)
+				}
+				if body.AutoUpdate != nil {
+					p.AutoUpdate = *body.AutoUpdate
+				}
+			}); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
