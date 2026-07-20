@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/blouargant/omnis/internal/collectionctx"
@@ -119,5 +120,31 @@ func TestCollectionProfilePreservesFields(t *testing.T) {
 	}
 	if !ValidMemorySize("") || !ValidMemorySize("small") || ValidMemorySize("huge") {
 		t.Fatal("ValidMemorySize wrong")
+	}
+}
+
+func TestCollectionProfileConcurrentFieldUpdates(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddCollection("Acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetCollectionProfileData("Acme", CollectionProfileData{Squad: "seed"}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = SetCollectionProfile("Acme", "Coding", "") }()
+		go func() { defer wg.Done(); _ = SetCollectionMemoryUpdate("Acme", 777) }()
+	}
+	wg.Wait()
+	// Atomic per-field merges ⇒ the final state keeps BOTH fields; neither the
+	// squad write nor the timestamp write can clobber the other.
+	p := CollectionProfileFull("Acme")
+	if p.Squad != "Coding" {
+		t.Fatalf("squad lost under concurrency: %+v", p)
+	}
+	if p.LastMemoryUpdate != 777 {
+		t.Fatalf("last_memory_update lost under concurrency: %+v", p)
 	}
 }

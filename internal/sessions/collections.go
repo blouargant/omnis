@@ -93,6 +93,51 @@ func CollectionProfileFull(name string) CollectionProfileData {
 	}
 }
 
+// UpdateCollectionProfile applies mutate to a collection's scalar profile under a
+// SINGLE held lock (atomic read-modify-write) and persists the result. All-zero
+// after mutation drops the entry. An unknown collection is an error. This is the
+// race-safe way to change one field without clobbering a concurrent writer's
+// change to another (e.g. the PATCH route changing memory_size while the
+// background auto-updater sets last_memory_update).
+func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData)) error {
+	name = strings.TrimSpace(name)
+	collectionsMu.Lock()
+	defer collectionsMu.Unlock()
+	f, err := loadFileLocked()
+	if err != nil {
+		return err
+	}
+	i := indexOfFold(f.Collections, name)
+	if i < 0 {
+		return fmt.Errorf("collection %q not found", name)
+	}
+	canon := f.Collections[i]
+	cur := f.Profiles[canon]
+	d := CollectionProfileData{
+		Squad: cur.Squad, Cwd: cur.Cwd, MemorySize: cur.MemorySize,
+		AutoUpdate: cur.AutoUpdate, LastMemoryUpdate: cur.LastMemoryUpdate,
+	}
+	mutate(&d)
+	p := collectionProfile{
+		Squad:            strings.TrimSpace(d.Squad),
+		Cwd:              strings.TrimSpace(d.Cwd),
+		MemorySize:       strings.TrimSpace(d.MemorySize),
+		AutoUpdate:       d.AutoUpdate,
+		LastMemoryUpdate: d.LastMemoryUpdate,
+	}
+	if p == (collectionProfile{}) {
+		if f.Profiles != nil {
+			delete(f.Profiles, canon)
+		}
+	} else {
+		if f.Profiles == nil {
+			f.Profiles = map[string]collectionProfile{}
+		}
+		f.Profiles[canon] = p
+	}
+	return saveFileLocked(f)
+}
+
 // SetCollectionProfileData writes a collection's full scalar bag (all zero ⇒ the
 // profile entry is dropped). An unknown collection is an error.
 func SetCollectionProfileData(name string, d CollectionProfileData) error {
@@ -138,18 +183,18 @@ func CollectionProfile(name string) (squad, cwd string) {
 // SetCollectionProfile sets squad/cwd while PRESERVING memory_size/auto_update/
 // last_memory_update (a squad/cwd-only PATCH must not clobber the memory fields).
 func SetCollectionProfile(name, squad, cwd string) error {
-	cur := CollectionProfileFull(name)
-	cur.Squad = squad
-	cur.Cwd = cwd
-	return SetCollectionProfileData(name, cur)
+	return UpdateCollectionProfile(name, func(p *CollectionProfileData) {
+		p.Squad = squad
+		p.Cwd = cwd
+	})
 }
 
 // SetCollectionMemoryUpdate updates only the last-automatic-memory-commit
 // timestamp (0 clears it), preserving the other scalars.
 func SetCollectionMemoryUpdate(name string, ts int64) error {
-	cur := CollectionProfileFull(name)
-	cur.LastMemoryUpdate = ts
-	return SetCollectionProfileData(name, cur)
+	return UpdateCollectionProfile(name, func(p *CollectionProfileData) {
+		p.LastMemoryUpdate = ts
+	})
 }
 
 // ValidMemorySize reports whether s is an accepted memory-size token.
