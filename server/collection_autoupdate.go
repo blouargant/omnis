@@ -51,9 +51,10 @@ type autoUpdater struct {
 	gather      func(collection string) string
 	distill     func(ctx context.Context, current, material string, wordLimit int) (string, error)
 
-	mu       sync.Mutex
-	inflight map[string]bool
-	lastHash map[string]string
+	mu          sync.Mutex
+	inflight    map[string]bool
+	lastHash    map[string]string
+	lastAttempt map[string]time.Time
 }
 
 // runCollection applies the gates and, if they pass, distils + commits the
@@ -72,15 +73,20 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection string) {
 		return
 	}
 	h := materialHash(material)
-	sinceLast := time.Since(time.Unix(prof.LastMemoryUpdate, 0))
 
+	now := time.Now()
 	au.mu.Lock()
+	gateFrom := time.Unix(prof.LastMemoryUpdate, 0)
+	if la := au.lastAttempt[collection]; la.After(gateFrom) {
+		gateFrom = la
+	}
 	changed := au.lastHash[collection] != h
-	if !shouldAutoUpdate(prof.AutoUpdate, changed, sinceLast, au.minInterval) || au.inflight[collection] {
+	if !shouldAutoUpdate(prof.AutoUpdate, changed, now.Sub(gateFrom), au.minInterval) || au.inflight[collection] {
 		au.mu.Unlock()
 		return
 	}
 	au.inflight[collection] = true
+	au.lastAttempt[collection] = now // advance the throttle even if the distill below fails
 	au.mu.Unlock()
 	defer func() {
 		au.mu.Lock()
@@ -102,6 +108,13 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection string) {
 	if proposed == "" || proposed == strings.TrimSpace(cur) {
 		return // nothing changed — no write, no snapshot
 	}
+	// A manual edit (or anything) may have changed memory.md during the slow
+	// distill above. Re-read and skip the auto-commit if so, rather than
+	// clobbering the user's edit (its snapshot would also be wrong).
+	if collectionctx.ReadMemory(collection) != cur {
+		log.Printf("collection auto-update: %q memory changed during distill; skipping commit", collection)
+		return
+	}
 	if strings.TrimSpace(cur) != "" {
 		_ = collectionctx.WritePrevMemory(collection, cur)
 	}
@@ -109,7 +122,7 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection string) {
 		log.Printf("collection auto-update: write %q: %v", collection, err)
 		return
 	}
-	_ = sessions.SetCollectionMemoryUpdate(collection, time.Now().Unix())
+	_ = sessions.SetCollectionMemoryUpdate(collection, now.Unix())
 	if au.deps.PushEvents != nil {
 		au.deps.PushEvents.broadcast("collections_changed", "")
 	}
@@ -129,8 +142,9 @@ func startCollectionAutoUpdate(ctx context.Context, d serverDeps, minInterval ti
 		distill: func(ctx context.Context, cur, material string, wl int) (string, error) {
 			return d.Manager.DistillCollectionMemory(ctx, cur, material, wl)
 		},
-		inflight: map[string]bool{},
-		lastHash: map[string]string{},
+		inflight:    map[string]bool{},
+		lastHash:    map[string]string{},
+		lastAttempt: map[string]time.Time{},
 	}
 	log.Printf("collection auto-update: enabled (min_interval=%s)", minInterval)
 	d.EventBus.Subscribe(events.EventSessionIndexNow, func(_ string, payload map[string]any) {

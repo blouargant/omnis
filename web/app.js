@@ -6196,7 +6196,7 @@ function openCollectionCtxMenu(ev, c) {
 
 // editCollectionContext loads a collection's full snapshot (per-session defaults
 // + instructions/memory prose) and opens the context editor. Saving splits the
-// write: scalars (squad/cwd) via PATCH, prose via PUT …/context.
+// write: scalars (squad/cwd/memory_size/auto_update) via PATCH, prose via PUT …/context.
 async function editCollectionContext(c) {
   let snap = {};
   try {

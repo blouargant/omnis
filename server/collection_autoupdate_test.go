@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 )
+
+var errFakeDistill = errors.New("distill failed")
 
 func TestShouldAutoUpdate(t *testing.T) {
 	if !shouldAutoUpdate(true, true, 40*time.Minute, 30*time.Minute) {
@@ -41,8 +44,9 @@ func TestAutoUpdaterCommitsThenSkipsUnchanged(t *testing.T) {
 			}
 			return "new facts", nil
 		},
-		inflight: map[string]bool{},
-		lastHash: map[string]string{},
+		inflight:    map[string]bool{},
+		lastHash:    map[string]string{},
+		lastAttempt: map[string]time.Time{},
 	}
 	au.runCollection(context.Background(), "Acme")
 	if got := collectionctx.ReadMemory("Acme"); got != "new facts" {
@@ -71,11 +75,36 @@ func TestAutoUpdaterOffIsNoop(t *testing.T) {
 			t.Fatal("distill must not run")
 			return "", nil
 		},
-		inflight: map[string]bool{},
-		lastHash: map[string]string{},
+		inflight:    map[string]bool{},
+		lastHash:    map[string]string{},
+		lastAttempt: map[string]time.Time{},
 	}
 	au.runCollection(context.Background(), "Acme")
 	if collectionctx.ReadMemory("Acme") != "old" {
 		t.Fatal("memory changed while auto_update off")
+	}
+}
+
+func TestAutoUpdaterThrottlesFailedDistill(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	sessions.AddCollection("Acme")
+	sessions.SetCollectionProfileData("Acme", sessions.CollectionProfileData{AutoUpdate: true, MemorySize: "small"})
+	collectionctx.WriteMemory("Acme", "old")
+	calls := 0
+	au := &autoUpdater{
+		minInterval: time.Hour, // a failure must not re-fire within the interval
+		gather:      func(string) string { return "## Session: s\nUser: hi\nAssistant: yo\n" },
+		distill:     func(_ context.Context, _, _ string, _ int) (string, error) { calls++; return "", errFakeDistill },
+		inflight:    map[string]bool{},
+		lastHash:    map[string]string{},
+		lastAttempt: map[string]time.Time{},
+	}
+	au.runCollection(context.Background(), "Acme")
+	au.runCollection(context.Background(), "Acme") // within the interval → must be gated out
+	if calls != 1 {
+		t.Fatalf("expected the failed distill to be throttled to 1 call, got %d", calls)
+	}
+	if collectionctx.ReadMemory("Acme") != "old" {
+		t.Fatal("memory must be unchanged after a failed distill")
 	}
 }

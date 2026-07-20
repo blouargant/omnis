@@ -93,9 +93,9 @@ func (m *Manager) DistillCollectionMemory(ctx context.Context, currentMemory, ma
 	}
 
 	res := strings.TrimSpace(out.String())
-	cap := memoryCharCap(wordLimit)
-	if r := []rune(res); len(r) > cap {
-		res = strings.TrimSpace(string(r[:cap]))
+	charCap := memoryCharCap(wordLimit)
+	if r := []rune(res); len(r) > charCap {
+		res = strings.TrimSpace(string(r[:charCap]))
 	}
 	return res, nil
 }
