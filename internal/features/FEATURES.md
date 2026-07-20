@@ -17,7 +17,12 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
-## 1.8 (in development) — Collection context & session search
+## 1.9 (in development) — Collection memory management
+
+- **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.
+- **Automatic memory updates** — opt a collection into keeping its memory current from recent chats, with one-click revert.
+
+## 1.8 — Collection context & session search
 
 - **Per-collection context** — a collection can carry persistent instructions + memory that follow a workstream across repos, plus a seeded starting squad and working directory.
 - **Assisted collection memory** — generate a collection's memory from its recent chats, and a drafting assistant that helps you write the instructions.

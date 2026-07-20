@@ -1605,6 +1605,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_LLM_HTTP_TIMEOUT` | Total duration cap for a single LLM HTTP request — connection + reading the whole (possibly streamed) body (Go duration, default `15m`; `0` disables entirely, leaving only the stall guard + request context). Sits **above** `OMNIS_LLM_STREAM_STALL_TIMEOUT` (10m) so a genuinely frozen stream trips the stall guard first (clear message) rather than this raw client timeout. Raise it for slow backends whose generation intermittently blocks for minutes under load (e.g. a Scaleway-hosted model) — the previous hard 5-minute cap killed such legitimate long generations with `Client.Timeout … while reading body`. Both adapters ([core/llm/stall.go](core/llm/stall.go) `httpClientTimeout`, applied in [core/llm/openai.go](core/llm/openai.go) + [core/llm/anthropic.go](core/llm/anthropic.go)). |
 | `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). Overrides the `server.yaml` `update_check` setting; when the env var is unset, `update_check: false` in `server.yaml` disables the poller. See "Self-update". |
 | `OMNIS_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
+| `OMNIS_COLLECTION_AUTOUPDATE_MIN_INTERVAL` | Minimum time between automatic memory distillations for one collection (Go duration, default `30m`). Gates the per-collection auto-update worker (see "Collection context") so a busy collection can't churn the model |
 
 ### Permission nomenclature (Claude Code-style) + grant scopes
 
@@ -2112,6 +2113,19 @@ fully-automatic idle-triggered distiller (Phase 3) remains unwired by design.
   [web/css/features/dialogs.css](web/css/features/dialogs.css)); context resets per
   editor open (`reset_context` on the first send). No Go changes — it reuses the
   Helper squad and the existing message/SSE endpoints.
+- **Memory size + automatic updates** — a per-collection `memory_size` scalar
+  (small 200 / medium 350 / large 700 words, default medium) is a **soft target**
+  that bounds the distiller (`agent.SizeWordLimit`) and drives the editor
+  word-counter, but never truncates typed memory (injection stays size-unaware).
+  An opt-in **auto-update worker** ([server/collection_autoupdate.go](server/collection_autoupdate.go))
+  keeps a collection's memory current: enabled per collection via the `auto_update`
+  profile scalar (default off, enable-warning in the UI), rides `EventSessionIndexNow`,
+  gated by content-hash + `OMNIS_COLLECTION_AUTOUPDATE_MIN_INTERVAL` (default 30m),
+  auto-commits changes with a `memory.prev.md` snapshot, and the `POST
+  /api/collections/:name/memory/revert` route consumes the snapshot on revert or
+  manual memory save. This **wires the previously-"unwired by design" Phase 3**
+  with the safety net, so a collection can evolve its memory automatically without
+  losing the ability to roll back.
 - **No-op contract**: a collection with no profile + no prose is byte-identical to
   before (resolver returns `""`, seed falls through to the router/default, plugin
   is a no-op). CLI/TUI leave the resolver nil ⇒ no injection.
