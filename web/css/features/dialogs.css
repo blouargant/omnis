@@ -274,6 +274,19 @@
   max-height: 90vh;
 }
 .collection-ctx-modal .user-cmd-modal-body { flex: 1 1 auto; min-height: 0; }
+/* Default squad + default folder share one row (frees vertical space for the
+   memory textarea). Each field flexes to half the row; min-width:0 lets the
+   select/input shrink instead of overflowing. Both fields align at the top so
+   the squad's extra hint line doesn't stretch the folder input. */
+.collection-ctx-modal .cc-defaults-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.collection-ctx-modal .cc-defaults-row .user-cmd-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
 .collection-ctx-modal .cc-grow-instr,
 .collection-ctx-modal .cc-grow-mem { min-height: 0; }
 .collection-ctx-modal .cc-grow-instr { flex: 3 1 0; }
@@ -295,6 +308,25 @@
   width: 100%;
   overflow-y: auto;
   resize: none;
+}
+/* The memory textarea + its controls bar are stacked flush (no gap) inside one
+   wrapper that takes the field's slack; the textarea grows, the bar is fixed. */
+.collection-ctx-modal .cc-mem-editor {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The textarea drops its bottom border + bottom corners so the controls bar
+   below (.cc-mem-controls) reads as its continuation. */
+.collection-ctx-modal .cc-mem {
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+/* …but when it's focused we restore an accent bottom line so the selected
+   textarea shows a complete outline (border-box ⇒ no layout shift of the bar). */
+.collection-ctx-modal .cc-mem:focus {
+  border-bottom: 1px solid var(--accent, #0e639c);
 }
 /* Floating per-field entry point to the drafting assistant, anchored inside the
    textarea (bottom-right). Subtle until hovered/active so it never fights the
@@ -343,14 +375,23 @@
 .cc-mem-gen:hover:not(:disabled) { border-color: var(--accent, #0e639c); }
 .cc-mem-gen:disabled { opacity: 0.6; cursor: default; }
 
-/* Memory-size radios + auto-update toggle row, and the word-count / revert foot. */
+/* Memory-size radios + auto-update toggle, as a bar that sits flush UNDER the
+   memory textarea (inside .cc-mem-editor). It shares the textarea's background +
+   border with no top border and flat top corners, so it reads as a continuation
+   of the textarea (which drops its own bottom border + corners to match). */
 .cc-mem-controls {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
   font-size: 12px;
+  padding: 6px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
 }
 .cc-size-row { display: inline-flex; align-items: center; gap: 10px; }
 .cc-size-caption { color: var(--text-muted); }
@@ -680,6 +721,19 @@
   color: #fff;
 }
 .user-cmd-modal-footer button.primary:hover { filter: brightness(1.1); }
+/* Collection-context modal: Cancel + Save use the modal's own background
+   (var(--bg)) instead of a raised chip / loud accent fill, so both read as part
+   of the modal. Cancel already uses var(--bg); Save keeps an accent outline to
+   stay identifiable as the primary action. Scoped so other dialogs are unchanged. */
+.collection-ctx-modal .user-cmd-modal-footer button.primary {
+  background: var(--bg);
+  border-color: var(--accent, #0e639c);
+  color: var(--accent, #0e639c);
+}
+.collection-ctx-modal .user-cmd-modal-footer button.primary:hover {
+  background: var(--bg-active);
+  filter: none;
+}
 
 
 /* ─── Push notification banner ──────────────────────────────── */

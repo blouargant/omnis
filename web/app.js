@@ -6314,15 +6314,16 @@ function collectionContextDialog(name, snap) {
         return `<option value="${escHtml(s.name)}"${sel}>${escHtml(s.name)}</option>`;
       })).join("");
     body.innerHTML = `
-      <label class="user-cmd-field">
-        <span class="user-cmd-field-label">${escHtml(tr("collections.defaultSquad"))}</span>
-        <select class="cc-squad">${opts}</select>
-        <span class="user-cmd-field-hint">${escHtml(tr("collections.defaultSquadHint"))}</span>
-      </label>
-      <label class="user-cmd-field">
-        <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
-        <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
-      </label>
+      <div class="cc-defaults-row">
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label cc-label-row cc-squad-label">${escHtml(tr("collections.defaultSquad"))}</span>
+          <select class="cc-squad">${opts}</select>
+        </label>
+        <label class="user-cmd-field">
+          <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
+          <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
+        </label>
+      </div>
       <label class="user-cmd-field cc-grow-instr">
         <span class="user-cmd-field-label cc-label-row cc-instr-label">${escHtml(tr("collections.instructions"))}</span>
         <textarea class="cc-instr" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
@@ -6332,21 +6333,22 @@ function collectionContextDialog(name, snap) {
           <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
           <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
         </div>
-        <div class="cc-mem-controls">
-          <div class="cc-size-row" role="radiogroup" aria-label="${escHtml(tr("collections.memorySizeLabel"))}">
-            <span class="cc-size-caption">${escHtml(tr("collections.memorySizeLabel"))}</span>
-            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeSmallTip"))}"><input type="radio" name="cc-size" value="small"> ${escHtml(tr("collections.memorySizeSmall"))}</label>
-            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeMediumTip"))}"><input type="radio" name="cc-size" value="medium"> ${escHtml(tr("collections.memorySizeMedium"))}</label>
-            <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeLargeTip"))}"><input type="radio" name="cc-size" value="large"> ${escHtml(tr("collections.memorySizeLarge"))}</label>
+        <div class="cc-mem-editor">
+          <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
+          <div class="cc-mem-controls">
+            <div class="cc-size-row" role="radiogroup" aria-label="${escHtml(tr("collections.memorySizeLabel"))}">
+              <span class="cc-size-caption">${escHtml(tr("collections.memorySizeLabel"))}</span>
+              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeSmallTip"))}"><input type="radio" name="cc-size" value="small"> ${escHtml(tr("collections.memorySizeSmall"))}</label>
+              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeMediumTip"))}"><input type="radio" name="cc-size" value="medium"> ${escHtml(tr("collections.memorySizeMedium"))}</label>
+              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeLargeTip"))}"><input type="radio" name="cc-size" value="large"> ${escHtml(tr("collections.memorySizeLarge"))}</label>
+            </div>
+            <label class="cc-autoupdate"><input type="checkbox" class="cc-autoupdate-cb"> <span data-tip="${escHtml(tr("collections.autoUpdateTip"))}">${escHtml(tr("collections.autoUpdate"))}</span></label>
           </div>
-          <label class="cc-autoupdate"><input type="checkbox" class="cc-autoupdate-cb"> <span data-tip="${escHtml(tr("collections.autoUpdateTip"))}">${escHtml(tr("collections.autoUpdate"))}</span></label>
         </div>
-        <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
         <div class="cc-mem-foot">
           <span class="cc-word-count"></span>
           <span class="cc-revert-marker" hidden><span class="cc-revert-text"></span> <button type="button" class="cc-revert-btn">${escHtml(tr("collections.memoryRevert"))}</button></span>
         </div>
-        <span class="user-cmd-field-hint">${escHtml(tr("collections.memoryHint"))}</span>
       </div>`;
     body.querySelector(".cc-cwd").value = snap.cwd || "";
     body.querySelector(".cc-instr").value = snap.instructions || "";
@@ -6354,6 +6356,7 @@ function collectionContextDialog(name, snap) {
     // A "?" help button before each title explains what the field is for, how to
     // fill it, and how it differs from the other — so a user knows when to reach
     // for Instructions (how the agent should behave) vs Memory (durable facts).
+    body.querySelector(".cc-squad-label").prepend(ccHelpButton(tr("collections.defaultSquadHelp")));
     body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
     body.querySelector(".cc-mem-label").prepend(ccHelpButton(tr("collections.memoryHelp")));
 
