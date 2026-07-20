@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sort"
@@ -103,4 +105,11 @@ func handleDistillCollectionMemory(d serverDeps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"proposed": proposed, "current": current})
 	}
+}
+
+// materialHash is a stable content key for gathered material, so the auto-update
+// worker can skip re-distilling a collection whose recent chats have not changed.
+func materialHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
