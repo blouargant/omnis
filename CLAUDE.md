@@ -13,6 +13,40 @@ After every major change (new agent, new squad, new tool, new skill, new config 
 - Keep this file as the single source of truth for AI sessions working on this project.
 - **When you ship a user-facing feature, add a bullet to `internal/features/FEATURES.md`** under the current minor version (see "What's-new feature tracking (FEATURES.md)" below).
 
+## ⚠️ ADK v2 transition (TEMPORARY — delete this whole section once migrated)
+
+> This section is scaffolding for the pending **ADK v1→v2 migration**. **Delete
+> it (heading included) once `go.mod` is on `google.golang.org/adk/v2` and
+> [docs/adk-v2-readiness.md](docs/adk-v2-readiness.md) reports "migrated".** It
+> exists so the migration stays a one-file change instead of a ~55-file sweep.
+
+While omnis is on ADK v1 but preparing for v2, **never name a churny ADK symbol
+directly** — reach it through the `core/adk` façade so the v2 change lands in one
+place:
+
+- Context types → `adk.ToolContext` / `adk.CallbackContext` / `adk.ReadonlyContext`
+  / `adk.InvocationContext` — **not** `tool.Context` / `agent.*Context`.
+- Turn termination → `adk.EndTurnAfterToolCall(ctx)` — **not**
+  `ctx.Actions().SkipSummarization = true`.
+- Event construction → `adk.NewEvent(ctx, id)` — **not** `session.NewEvent(...)`.
+
+The guard test `internal/adkguard` fails `make test` if a raw form reappears —
+**fix the call site, never weaken the guard.** The **stable** ADK types
+(`model.LLM`, `agent.Agent`, `tool.Tool`, `session.Event`, `functiontool.New`)
+are **not** fenced — import them directly as before.
+
+**Do not add new bespoke orchestration that ADK v2 already provides natively**
+(graph workflow routing/fan-out/fan-in/loops, agent Chat/Task/SingleTurn modes,
+durable HITL pause/resume) without recording the decision in
+[docs/adk-v2-readiness.md](docs/adk-v2-readiness.md). The v1-only mechanisms —
+the `RunWithRouting` dispatch loop, the concurrent/resumable agenttool wrappers,
+and `ask_user`'s in-memory HITL — are **frozen (bug-fix only)** to keep the v2
+gap from widening.
+
+Run `make adk-v2-status` to see the migration surface; keep
+`docs/adk-v2-readiness.md` current (same self-maintenance discipline as
+FEATURES.md).
+
 ## What's-new feature tracking (FEATURES.md)
 
 The web UI shows a **"What's new"** modal once per upgrade, driven by
