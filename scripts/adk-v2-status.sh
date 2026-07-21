@@ -24,11 +24,14 @@ printf '  direct ADK imports:  %s file(s)\n' "$(grep -rlE '\"google\.golang\.org
 # (e.g. `adksession.NewEvent(...)`, or a `CallbackContext` reached via an
 # aliased `adk/agent` import), not just the default names. A closed-qualifier
 # grep here would silently miss those and could report a false "0" while the
-# guard correctly fails the build — so this line reruns that exact test
-# instead of re-implementing its regex, and can never drift from it.
+# guard correctly fails the build — so this line runs the WHOLE
+# internal/adkguard package (it contains only the guard test) instead of
+# re-implementing its regex or naming the test via `-run`, so it can never
+# drift from it and a guard-test rename can't silently make this read a false
+# "0 (guard passes)" forever.
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-if go test ./internal/adkguard/ -run TestNoRawADKSeamsOutsideFacade >"$tmp" 2>&1; then
+if go test ./internal/adkguard/ >"$tmp" 2>&1; then
   echo "  seams outside core/adk:  0  (internal/adkguard guard passes — authoritative)"
 else
   # Offender lines are the Fatalf message's continuation lines

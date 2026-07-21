@@ -23,15 +23,20 @@ announcement and the README-v2.md migration guide.
 ## Surface tracker
 
 Run `make adk-v2-status`. Its "seams outside core/adk" line is not a separate
-hand-grepped count — it **runs `go test ./internal/adkguard/
--run TestNoRawADKSeamsOutsideFacade`** and reports that test's own PASS/FAIL, so
+hand-grepped count — it **runs `go test ./internal/adkguard/`** (the package
+holds only the guard test, so no `-run` filter is needed — and none is used,
+precisely so a future rename of the guard test can't silently make this line
+read a false "0") and reports that test's own PASS/FAIL, so
 the dashboard can never drift from the guard. This matters because the guard's
 `rawADK` matcher is **alias-agnostic** (`\b(\w+)\.(ToolContext|CallbackContext|
 ReadonlyContext|InvocationContext)\b`, `\b(\w+)\.NewEvent(WithContext)?\(`,
 skipping only `adk.`-prefixed matches — our own façade): it catches a seam
 introduced under *any* import alias (e.g. `adksession.NewEvent(...)`, or a
 `CallbackContext` reached via an aliased `adk/agent` import), not just the
-default package names. Definition of ready = `make adk-v2-status` shows
+default package names. (Exception: a `tool.Context` reached via a *non-default*
+`google.golang.org/adk/tool` import alias is not caught by the `\btool\.Context\b`
+branch; the `*Context`/`NewEvent` branches are alias-agnostic.) Definition of
+ready = `make adk-v2-status` shows
 "seams outside core/adk: 0" (equivalently, `go test ./internal/adkguard/`
 passes) AND `core/adk` compiles/tests green against the target ADK version.
 
@@ -57,6 +62,7 @@ the count + a one-line summary here each time you spike.
 ## When we migrate (checklist)
 
 - [ ] Bump `go.mod` to `google.golang.org/adk/v2` (+ `go mod tidy`).
+- [ ] Rewrite every `google.golang.org/adk/` import path to `google.golang.org/adk/v2/` across the tree (~100 files, mechanical), e.g. `grep -rl 'google.golang.org/adk/' --include='*.go' . | xargs sed -i 's#google.golang.org/adk/#google.golang.org/adk/v2/#g'` — then re-run `go build ./...` and fix stable-type API drift.
 - [ ] In `core/adk/adk.go`: alias RHS -> `agent.Context`; `NewEvent` body -> `session.NewEvent(ctx, id)`.
 - [ ] `go build ./...`; fix any stable-type API drift the spike surfaced.
 - [ ] `go test ./core/adk/` — the termination canary MUST pass (if not, redesign termination before proceeding).
