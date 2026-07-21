@@ -468,7 +468,7 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   `ctx.Actions().SkipSummarization = true`, which makes their function-response
   event `IsFinalResponse()` (ADK `session.Event`) — terminating the agent flow
   loop immediately. This is a **host-side guarantee**, not an instruction the
-  router may ignore: the ADK LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/go/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go)
+  router may ignore: the ADK LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/go/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go)
   `Flow.Run`) has **no iteration cap** and only stops when the model returns a
   tool-call-free response, and the directive is consumed by the dispatch loop
   only *after* `Runner.Run` returns — so without this, an unlucky router sample
@@ -610,7 +610,7 @@ width of its semaphore. The wrapper **always advertises the sub-agent's own
 single-task schema, unchanged** — one call = one job.
 
 **The fan-out is ADK's, not ours.** `Flow.handleFunctionCalls`
-([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go))
+([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go))
 dispatches **every function call in one model response concurrently** (a
 `sync.WaitGroup` + a goroutine each) against the single shared tool object from
 `toolsDict`. So a caller that wants three lookups just emits three calls and they
@@ -1679,7 +1679,7 @@ a sub-agent runs in `agenttool`'s **private, plugin-less runner**, so the
 runner-level Plugin never sees its tool calls — without the attached callback a
 sub-agent's `Edit`/`Write`/`Bash`/MCP calls would run **ungated** even though
 most sub-agents (`investigator`, `k8s_investigator`, `refactorer`, …) carry those
-tools. ADK's `Flow.callTool` ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go))
+tools. ADK's `Flow.callTool` ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go))
 runs the agent-level `BeforeToolCallback`s when there is no plugin manager and
 **skips `tool.Run` the instant one returns non-nil**, so the gate's deny/ask
 short-circuit works identically for a sub-agent. Because the Plugin and the
@@ -2930,7 +2930,7 @@ silently uses the leader model.
 A turn cannot run away. Every turn spends against a **ceiling** (tool calls and
 tokens); when it runs out, the **user** — not the model — decides whether to keep
 going. This exists because **nothing else in the stack can stop a turn**: the ADK
-LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.2.0/internal/llminternal/base_flow.go)
+LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go)
 `Flow.Run`) has **no iteration cap** — it ends only when the model returns a
 tool-call-free response — and a sub-agent runs inside agenttool's **private,
 plugin-less runner**, invisible to the surface that started the turn. So a squad
