@@ -24,18 +24,16 @@ import (
 var rawADK = regexp.MustCompile(
 	`\btool\.Context\b` +
 		`|\b(\w+)\.(ToolContext|CallbackContext|ReadonlyContext|InvocationContext)\b` +
-		// Split across two literals (same compiled pattern) so this line of
-		// guard source doesn't itself contain the literal substring the
-		// guard scans for — otherwise the guard would flag its own file.
-		`|\.Skip` + `Summarization\b` +
+		`|\.SkipSummarization\b` +
 		`|\b(\w+)\.NewEvent(WithContext)?\(`,
 )
 
 func TestNoRawADKSeamsOutsideFacade(t *testing.T) {
 	root := repoRoot(t)
 	allow := map[string]bool{
-		filepath.FromSlash("core/adk/adk.go"):      true,
-		filepath.FromSlash("core/adk/adk_test.go"): true,
+		filepath.FromSlash("core/adk/adk.go"):                 true,
+		filepath.FromSlash("core/adk/adk_test.go"):            true,
+		filepath.FromSlash("internal/adkguard/guard_test.go"): true,
 	}
 	var offenders []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
