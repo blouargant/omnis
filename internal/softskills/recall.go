@@ -17,6 +17,7 @@ import (
 	"google.golang.org/adk/tool/functiontool"
 	"gopkg.in/yaml.v3"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/semindex"
@@ -166,7 +167,7 @@ func RecallTool(ctx context.Context, dir string, emb embed.Embedder) (tool.Tool,
 		"default 5) — how many matches to return."
 
 	t, err := functiontool.New(functiontool.Config{Name: RecallToolName, Description: desc},
-		func(fnCtx tool.Context, in recallIn) (recallOut, error) {
+		func(fnCtx adk.ToolContext, in recallIn) (recallOut, error) {
 			query := strings.TrimSpace(in.Query)
 			if query == "" {
 				return recallOut{}, fmt.Errorf("query is required")

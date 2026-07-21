@@ -1,12 +1,12 @@
 package agent
 
 import (
-	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/agentmd"
 )
@@ -24,7 +24,7 @@ func agentMDPlugin(name string) (*plugin.Plugin, error) {
 	})
 }
 
-func injectAgentMD(ctx adkagent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+func injectAgentMD(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 	if req == nil {
 		return nil, nil
 	}

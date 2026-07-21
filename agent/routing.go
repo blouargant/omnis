@@ -31,6 +31,8 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 	"google.golang.org/genai"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Directive kinds recorded by the routing tools.
@@ -171,7 +173,7 @@ func routeToSquadTool(reg *RouteRegistry, validTargets []string) tool.Tool {
 			"rephrase the request (never invent or change details such as product names or numbers). " +
 			"After you call this, that squad's leader takes over and answers the user directly — you " +
 			"do not reply yourself. Available squads: " + list + ".",
-	}, func(ctx tool.Context, in routeIn) (routeOut, error) {
+	}, func(ctx adk.ToolContext, in routeIn) (routeOut, error) {
 		target := lowerTrim(in.Squad)
 		if target == "" || !valid[target] {
 			return routeOut{}, fmt.Errorf("unknown squad %q; choose exactly one of: %s", in.Squad, list)
@@ -218,7 +220,7 @@ func handoffToRouterTool(reg *RouteRegistry) tool.Tool {
 			"choose a better-suited squad. The user's original message and any attached files are " +
 			"forwarded automatically — you do not restate the request. Do not use this for requests " +
 			"you can handle — answer those yourself.",
-	}, func(ctx tool.Context, in handoffIn) (handoffOut, error) {
+	}, func(ctx adk.ToolContext, in handoffIn) (handoffOut, error) {
 		reg.Set(ctx.SessionID(), &RouteDirective{
 			Kind:   routeKindHandoff,
 			Reason: strings.TrimSpace(in.Reason),
@@ -270,7 +272,7 @@ func askSquadTool(reg *RouteRegistry, runtime RuntimeSettings, validTargets []st
 			"confident, call route_to_squad directly. Returns the squad's own verdict (CAN_HANDLE or " +
 			"CANNOT_HANDLE) with a one-line reason. This check is private: the user does not see it, " +
 			"and it does not hand over the conversation. Available squads: " + list + ".",
-	}, func(ctx tool.Context, in askSquadIn) (askSquadOut, error) {
+	}, func(ctx adk.ToolContext, in askSquadIn) (askSquadOut, error) {
 		target := lowerTrim(in.Squad)
 		if target == "" || !valid[target] {
 			return askSquadOut{}, fmt.Errorf("unknown squad %q; choose exactly one of: %s", in.Squad, list)

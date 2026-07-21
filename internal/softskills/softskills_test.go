@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"google.golang.org/adk/agent"
+	"github.com/blouargant/omnis/core/adk"
 )
 
 func TestToolsetRenamesAndDiscovers(t *testing.T) {
@@ -36,7 +36,7 @@ Just a fixture.
 	if got := ts.Name(); got != "softskills" {
 		t.Errorf("toolset name = %q, want %q", got, "softskills")
 	}
-	tools, err := ts.Tools(agent.ReadonlyContext(nil))
+	tools, err := ts.Tools(adk.ReadonlyContext(nil))
 	if err != nil {
 		t.Fatalf("Tools: %v", err)
 	}

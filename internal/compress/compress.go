@@ -30,12 +30,12 @@ import (
 
 	"google.golang.org/genai"
 
-	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 )
 
@@ -230,7 +230,7 @@ func (m *manager) hardLimit() int { return int(float64(m.cfg.WindowTokens) * m.c
 
 // beforeModel inspects req.Contents, decides whether to compress, and
 // rewrites the slice in place if so.
-func (m *manager) beforeModel(ctx agent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (m *manager) beforeModel(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 	return m.compressOnce(ctx, ctx.UserID(), ctx.SessionID(), req)
 }
 
@@ -294,7 +294,7 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 // model turn so the State Log extractor sees decisions/file paths/tool
 // calls (not only user prompts), and refreshes the per-session State Log
 // every StateLogEvery turns.
-func (m *manager) afterModel(ctx agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+func (m *manager) afterModel(ctx adk.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 	// ADK fires this callback for every streamed chunk, not just the
 	// finished turn. Acting on partials is wrong on three counts: it
 	// over-counts turns (once per token), it buffers single-token fragments

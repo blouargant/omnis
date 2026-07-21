@@ -10,6 +10,8 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
+
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 )
@@ -38,7 +40,7 @@ func (c *countingRunnableTool) Declaration() *genai.FunctionDeclaration {
 	}
 }
 
-func (c *countingRunnableTool) Run(_ tool.Context, args any) (map[string]any, error) {
+func (c *countingRunnableTool) Run(_ adk.ToolContext, args any) (map[string]any, error) {
 	c.calls.Add(1)
 	n := c.inFlight.Add(1)
 	for {
@@ -169,7 +171,7 @@ func TestConcurrentAgentToolProcessRequestPacksItself(t *testing.T) {
 
 	req := &model.LLMRequest{}
 	if err := wrapped.(interface {
-		ProcessRequest(tool.Context, *model.LLMRequest) error
+		ProcessRequest(adk.ToolContext, *model.LLMRequest) error
 	}).ProcessRequest(nil, req); err != nil {
 		t.Fatalf("ProcessRequest() error = %v", err)
 	}
@@ -182,11 +184,11 @@ func TestConcurrentAgentToolProcessRequestPacksItself(t *testing.T) {
 	}
 }
 
-// cancelCtx is a tool.Context that is only ever asked whether it is done. The
+// cancelCtx is an adk.ToolContext that is only ever asked whether it is done. The
 // embedded interface is nil: any other method would panic, which is the point —
 // the wrapper must not touch the context for anything but cancellation.
 type cancelCtx struct {
-	tool.Context
+	adk.ToolContext
 	ctx context.Context
 }
 

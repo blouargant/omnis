@@ -15,13 +15,13 @@ import (
 	"fmt"
 	"os"
 
-	"google.golang.org/adk/agent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/internal/fsutil"
 	"github.com/blouargant/omnis/internal/paths"
@@ -117,7 +117,7 @@ type recallToolset struct {
 	recall tool.Tool
 }
 
-func (r *recallToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
+func (r *recallToolset) Tools(ctx adk.ReadonlyContext) ([]tool.Tool, error) {
 	base, err := r.renamedToolset.Tools(ctx)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ type renamedToolset struct {
 }
 
 // Tools overrides the embedded method to rename each underlying tool.
-func (r *renamedToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
+func (r *renamedToolset) Tools(ctx adk.ReadonlyContext) ([]tool.Tool, error) {
 	inner, err := r.SkillToolset.Tools(ctx)
 	if err != nil {
 		return nil, err
@@ -170,8 +170,8 @@ var renameMap = map[string]string{
 type runnableTool interface {
 	tool.Tool
 	Declaration() *genai.FunctionDeclaration
-	Run(ctx tool.Context, args any) (map[string]any, error)
-	ProcessRequest(ctx tool.Context, req *model.LLMRequest) error
+	Run(ctx adk.ToolContext, args any) (map[string]any, error)
+	ProcessRequest(ctx adk.ToolContext, req *model.LLMRequest) error
 }
 
 type renamedTool struct {
@@ -191,7 +191,7 @@ func (rt *renamedTool) Declaration() *genai.FunctionDeclaration { return rt.decl
 // req.Tools[name], so storing the wrapper under the new name routes
 // invocations back through us — and we forward Run() to the embedded
 // tool transparently.
-func (rt *renamedTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
+func (rt *renamedTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
 	}

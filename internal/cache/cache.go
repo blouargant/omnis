@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Stats are the running totals.
@@ -47,7 +48,7 @@ func (s *Stats) Summary() string {
 // Plugin returns a stats collector plus the ADK plugin that feeds it.
 func Plugin(name string) (*Stats, *plugin.Plugin, error) {
 	s := &Stats{}
-	cb := func(_ agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+	cb := func(_ adk.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 		if resp == nil || resp.UsageMetadata == nil {
 			return nil, nil
 		}

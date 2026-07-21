@@ -9,8 +9,8 @@ import (
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
-	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/permissions"
 	fstools "github.com/blouargant/omnis/core/tools"
@@ -256,7 +256,7 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		// panel / "!cd" — so a grant applies to that directory and its children
 		// but not its parents. Resolved identically to where the tools actually
 		// run; falls back to the process cwd when no per-session cwd resolves.
-		CWDFunc: func(tc tool.Context) string {
+		CWDFunc: func(tc adk.ToolContext) string {
 			if d := fstools.CwdForContext(tc); d != "" {
 				return d
 			}
@@ -267,7 +267,7 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		// runs under an ephemeral agenttool session) so its approval cache keys —
 		// and grants like "Allow all Edit this session" — line up with the
 		// leader's. Falls back to tc.SessionID() for the root's own calls.
-		SessionFunc: func(tc tool.Context) string {
+		SessionFunc: func(tc adk.ToolContext) string {
 			if id := steerSessionID(tc); id != "" {
 				return id
 			}

@@ -6,8 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"google.golang.org/adk/tool"
-
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/configedit"
 )
 
@@ -114,14 +113,14 @@ func tempEnv(t *testing.T) string {
 	return tmp
 }
 
-// fakeCtx embeds tool.Context (nil) and overrides only SessionID() — the single
+// fakeCtx embeds adk.ToolContext (nil) and overrides only SessionID() — the single
 // method the settings handlers reach (via confirmSensitive). Any other method
 // would panic, but the tested paths never call them.
-type fakeCtx struct{ tool.Context }
+type fakeCtx struct{ adk.ToolContext }
 
 func (fakeCtx) SessionID() string { return "test-session" }
 
-func testCtx() tool.Context { return fakeCtx{} }
+func testCtx() adk.ToolContext { return fakeCtx{} }
 
 func TestSetPreference(t *testing.T) {
 	tempEnv(t)

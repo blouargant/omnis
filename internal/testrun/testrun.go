@@ -26,6 +26,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	fstools "github.com/blouargant/omnis/core/tools"
 )
 
@@ -138,7 +139,7 @@ func Tools() []tool.Tool {
 			"`scope` (string, optional) — narrow the run to one package/path/test (e.g. `./internal/lsp/...` for go, " +
 			"`tests/test_x.py::TestY` for pytest, a test-name filter for cargo); " +
 			"`timeout_seconds` (int, optional, default 300, max 600). For very long suites use bash_background instead.",
-	}, func(ctx tool.Context, in runTestsIn) (runTestsOut, error) {
+	}, func(ctx adk.ToolContext, in runTestsIn) (runTestsOut, error) {
 		cwd := fstools.CwdForContext(ctx)
 		out, err := run(ctx, cwd, in)
 		if err != nil {

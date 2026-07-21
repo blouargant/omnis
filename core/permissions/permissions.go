@@ -35,6 +35,8 @@ import (
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Decision is the outcome of evaluating a tool call against the rule set.
@@ -609,13 +611,13 @@ const (
 
 // Asker prompts the user when an ask rule fires.
 type Asker interface {
-	Ask(tc tool.Context, toolName, input, reason string) AskOutcome
+	Ask(tc adk.ToolContext, toolName, input, reason string) AskOutcome
 }
 
 // StdinAsker prompts on stderr and reads from stdin (CLI fallback).
 type StdinAsker struct{}
 
-func (StdinAsker) Ask(_ tool.Context, toolName, input, reason string) AskOutcome {
+func (StdinAsker) Ask(_ adk.ToolContext, toolName, input, reason string) AskOutcome {
 	fmt.Fprintf(os.Stderr,
 		"\n[PERMISSION] %s: %s\n  Reason: %s\n"+
 			"  [o] allow once (default, press Enter), [s] allow all %s this session, [p] allow in project, [a] allow always, [d] deny: ",
@@ -657,13 +659,13 @@ type PluginConfig struct {
 	Source         Source
 	Asker          Asker
 	UserConfigPath string
-	CWDFunc        func(tc tool.Context) string
+	CWDFunc        func(tc adk.ToolContext) string
 	// SessionFunc resolves the session id used to key the approval cache. It
 	// exists because a sub-agent runs in agenttool's private runner under an
 	// ephemeral session id, so tc.SessionID() there is not the user-facing
 	// session — the caller supplies a resolver that recovers the real id from
 	// the run context (falling back to tc.SessionID()). Nil ⇒ tc.SessionID().
-	SessionFunc func(tc tool.Context) string
+	SessionFunc func(tc adk.ToolContext) string
 	OnPersist   func()
 	Debug       bool
 }
@@ -729,13 +731,13 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		cfg.Asker = StdinAsker{}
 	}
 	if cfg.CWDFunc == nil {
-		cfg.CWDFunc = func(tool.Context) string {
+		cfg.CWDFunc = func(adk.ToolContext) string {
 			d, _ := os.Getwd()
 			return d
 		}
 	}
 	if cfg.SessionFunc == nil {
-		cfg.SessionFunc = func(tc tool.Context) string { return tc.SessionID() }
+		cfg.SessionFunc = func(tc adk.ToolContext) string { return tc.SessionID() }
 	}
 	cache := newSessionApprovalCache()
 	logf := func(format string, a ...any) {
@@ -744,7 +746,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		}
 	}
 
-	cb := func(tc tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+	cb := func(tc adk.ToolContext, t tool.Tool, args map[string]any) (map[string]any, error) {
 		input := flattenArgs(args)
 		cwd := cfg.CWDFunc(tc)
 		probeKey := t.Name() + "\x00" + input

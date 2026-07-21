@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/budget"
@@ -103,7 +103,7 @@ func budgetCallbacks(store *budget.Store, reg *askuser.Registry, limits budget.L
 		return nil, nil
 	}
 
-	beforeTool := func(tc tool.Context, t tool.Tool, _ map[string]any) (map[string]any, error) {
+	beforeTool := func(tc adk.ToolContext, t tool.Tool, _ map[string]any) (map[string]any, error) {
 		if budgetExemptTools[t.Name()] {
 			return nil, nil
 		}
@@ -146,7 +146,7 @@ func budgetCallbacks(store *budget.Store, reg *askuser.Registry, limits budget.L
 		return nil, nil
 	}
 
-	afterModel := func(cb adkagent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+	afterModel := func(cb adk.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 		// Streaming deltas carry no usage; only the final aggregated response
 		// does (same reason core/events skips partials).
 		if resp == nil || resp.Partial || resp.UsageMetadata == nil {

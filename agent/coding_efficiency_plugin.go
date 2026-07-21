@@ -13,6 +13,7 @@ import (
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lsp"
@@ -154,7 +155,7 @@ func (ce *codingEfficiency) clearSession(sid string) {
 
 // afterTool applies fusion → dedup → shaper. Returns nil when nothing changed
 // (ADK keeps the original result), or the rewritten result map otherwise.
-func (ce *codingEfficiency) afterTool(tc tool.Context, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
+func (ce *codingEfficiency) afterTool(tc adk.ToolContext, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
 	if result == nil || t == nil {
 		return nil, nil
 	}
@@ -212,7 +213,7 @@ func (ce *codingEfficiency) afterTool(tc tool.Context, t tool.Tool, args, result
 //
 // Stateless, so there is no cache to key, invalidate, or leak.
 func subAgentShaperCallback() llmagent.AfterToolCallback {
-	return func(_ tool.Context, t tool.Tool, _ map[string]any, result map[string]any, _ error) (map[string]any, error) {
+	return func(_ adk.ToolContext, t tool.Tool, _ map[string]any, result map[string]any, _ error) (map[string]any, error) {
 		if result == nil || t == nil {
 			return nil, nil
 		}
@@ -230,7 +231,7 @@ func subAgentShaperCallback() llmagent.AfterToolCallback {
 // fuse appends the diagnostics delta for the edited file(s) to an edit result.
 // Returns nil (no change) on a failed/no-op edit, when no server is running for
 // any touched file, or when there's nothing to report.
-func (ce *codingEfficiency) fuse(tc tool.Context, sid, cwd, name string, args, result map[string]any) map[string]any {
+func (ce *codingEfficiency) fuse(tc adk.ToolContext, sid, cwd, name string, args, result map[string]any) map[string]any {
 	if ce.lspMgr == nil {
 		return nil
 	}

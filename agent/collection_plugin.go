@@ -3,11 +3,11 @@ package agent
 import (
 	"sync"
 
-	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/collectionctx"
 )
 
@@ -54,7 +54,7 @@ func collectionCtxPlugin(name string) (*plugin.Plugin, error) {
 	})
 }
 
-func injectCollectionCtx(ctx adkagent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 	if req == nil {
 		return nil, nil
 	}

@@ -5,6 +5,8 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
+
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 )
@@ -14,7 +16,7 @@ import (
 type runnableTool interface {
 	tool.Tool
 	Declaration() *genai.FunctionDeclaration
-	Run(ctx tool.Context, args any) (map[string]any, error)
+	Run(ctx adk.ToolContext, args any) (map[string]any, error)
 }
 
 // concurrentAgentTool bounds how many invocations of ONE sub-agent may be in
@@ -93,11 +95,11 @@ func (t *concurrentAgentTool) Description() string {
 // inner here would make the runner call the inner's Run directly and bypass the
 // semaphore — the concurrency limit would silently not exist. The declaration is
 // the inner's either way (Declaration delegates), so the model sees no difference.
-func (t *concurrentAgentTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
+func (t *concurrentAgentTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
 	return packToolDecl(req, t)
 }
 
-func (t *concurrentAgentTool) Run(ctx tool.Context, args any) (map[string]any, error) {
+func (t *concurrentAgentTool) Run(ctx adk.ToolContext, args any) (map[string]any, error) {
 	if err := t.acquire(ctx); err != nil {
 		return nil, err
 	}
@@ -106,7 +108,7 @@ func (t *concurrentAgentTool) Run(ctx tool.Context, args any) (map[string]any, e
 }
 
 // acquire takes a slot, waiting while the sub-agent is at its concurrency limit.
-// tool.Context embeds context.Context, so a cancelled turn (Stop button, session
+// adk.ToolContext embeds context.Context, so a cancelled turn (Stop button, session
 // end, shutdown) releases a queued sibling rather than leaking its goroutine for
 // the lifetime of the process.
 //
@@ -115,7 +117,7 @@ func (t *concurrentAgentTool) Run(ctx tool.Context, args any) (map[string]any, e
 // blocking send. That keeps ONE code path — a separate nil branch would be a path
 // production never takes and tests always would, which is how a regression test
 // ends up passing against the very bug it exists to catch.
-func (t *concurrentAgentTool) acquire(ctx tool.Context) error {
+func (t *concurrentAgentTool) acquire(ctx adk.ToolContext) error {
 	var done <-chan struct{}
 	if ctx != nil {
 		done = ctx.Done()

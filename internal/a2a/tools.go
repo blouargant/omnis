@@ -13,6 +13,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // SendIn is the JSON input schema the model fills in when calling an A2A tool.
@@ -57,7 +59,7 @@ func NewTools(agents []Agent) []tool.Tool {
 		desc := buildToolDescription(agent)
 		t, err := functiontool.New(
 			functiontool.Config{Name: name, Description: desc},
-			func(_ tool.Context, in SendIn) (SendOut, error) {
+			func(_ adk.ToolContext, in SendIn) (SendOut, error) {
 				squad := strings.TrimSpace(in.Squad)
 				if squad == "" {
 					squad = strings.TrimSpace(agent.Squad)

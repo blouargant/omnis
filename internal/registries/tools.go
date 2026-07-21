@@ -5,6 +5,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Deps wires the tools to filesystem locations and agent-resolver callbacks.
@@ -233,7 +235,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"of agents that explicitly reference it (`linked_in`). Use this first when "+
 				"asked to find or recommend a skill — locally installed skills are preferred "+
 				"over remote ones. No arguments.",
-			func(_ tool.Context, _ listInstalledIn) (listInstalledOut, error) {
+			func(_ adk.ToolContext, _ listInstalledIn) (listInstalledOut, error) {
 				var agentsMap map[string][]string
 				if deps.ListAgentSkills != nil {
 					agentsMap = deps.ListAgentSkills()
@@ -250,7 +252,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"registry, plus the list of agents that reference it. Use this to inspect a "+
 				"skill on disk before recommending it or adding it to an agent. "+
 				"Arguments: `skill_name` (string, required) — from list_installed_skills.",
-			func(_ tool.Context, in getInstalledIn) (getInstalledOut, error) {
+			func(_ adk.ToolContext, in getInstalledIn) (getInstalledOut, error) {
 				if in.SkillName == "" {
 					return getInstalledOut{}, fmt.Errorf("skill_name is required")
 				}
@@ -277,7 +279,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"includes an `id` you can pass to browse_registry and a `kind` field "+
 				"(skills, agents, mcp, squads, a2a, or both) that tells you what the "+
 				"registry contains. No arguments.",
-			func(_ tool.Context, _ listRegistriesIn) (listRegistriesOut, error) {
+			func(_ adk.ToolContext, _ listRegistriesIn) (listRegistriesOut, error) {
 				list, err := LoadRegistries(deps.ConfigPath())
 				if err != nil {
 					return listRegistriesOut{}, err
@@ -306,7 +308,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"and installable, not an error. Agents without a format field use native "+
 				"omnis format (agent.json + optional instruction.md). "+
 				"Arguments: `registry_id` (string, required) — from list_registries.",
-			func(_ tool.Context, in browseRegistryIn) (browseRegistryOut, error) {
+			func(_ adk.ToolContext, in browseRegistryIn) (browseRegistryOut, error) {
 				ref, reg, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return browseRegistryOut{}, err
@@ -406,7 +408,7 @@ func NewTools(deps Deps) []tool.Tool {
 			"Fetch the raw SKILL.md content of a skill in a remote registry without installing it. "+
 				"Use this to inspect what a skill does before recommending it. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) — from browse_registry.",
-			func(_ tool.Context, in getRemoteSkillIn) (getRemoteSkillOut, error) {
+			func(_ adk.ToolContext, in getRemoteSkillIn) (getRemoteSkillOut, error) {
 				ref, _, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return getRemoteSkillOut{}, err
@@ -429,7 +431,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"mcp.json/mcp.md, squad.json, a2a.json, or the command .md). For agents with `format: \"claude\"` "+
 				"the content is the raw Claude Code markdown definition. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) — from browse_registry.",
-			func(_ tool.Context, in getRemoteItemIn) (getRemoteItemOut, error) {
+			func(_ adk.ToolContext, in getRemoteItemIn) (getRemoteItemOut, error) {
 				ref, reg, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return getRemoteItemOut{}, err
@@ -467,7 +469,7 @@ func NewTools(deps Deps) []tool.Tool {
 			"Download a skill from a remote registry and install it into the local skills registry. "+
 				"The skill becomes available system-wide; use link_skill_to_agent afterwards to grant a specific agent access. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) — from browse_registry.",
-			func(_ tool.Context, in installRemoteSkillIn) (installRemoteSkillOut, error) {
+			func(_ adk.ToolContext, in installRemoteSkillIn) (installRemoteSkillOut, error) {
 				ref, _, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return installRemoteSkillOut{}, err
@@ -497,7 +499,7 @@ func NewTools(deps Deps) []tool.Tool {
 				"append the agent to agents.json so the next hot-reload wires it in. "+
 				"Arguments: `registry_id` (string, required), `dir_path` (string, required) "+
 				"— from browse_registry; `enable` (bool, optional, agents only).",
-			func(_ tool.Context, in installRemoteItemIn) (installRemoteItemOut, error) {
+			func(_ adk.ToolContext, in installRemoteItemIn) (installRemoteItemOut, error) {
 				ref, reg, token, err := resolveRef(deps, in.RegistryID)
 				if err != nil {
 					return installRemoteItemOut{}, err
@@ -614,7 +616,7 @@ func NewTools(deps Deps) []tool.Tool {
 			"Add an installed skill to an agent's skills list so the agent can load it. "+
 				"The skill must already be installed locally (see install_remote_skill or install_remote_item). "+
 				"Arguments: `agent_name` (string, required), `skill_name` (string, required).",
-			func(_ tool.Context, in linkSkillToAgentIn) (linkSkillToAgentOut, error) {
+			func(_ adk.ToolContext, in linkSkillToAgentIn) (linkSkillToAgentOut, error) {
 				if in.AgentName == "" {
 					return linkSkillToAgentOut{}, fmt.Errorf("agent_name is required")
 				}

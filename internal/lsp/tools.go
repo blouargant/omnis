@@ -23,6 +23,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	fstools "github.com/blouargant/omnis/core/tools"
 )
 
@@ -76,7 +77,7 @@ func (lt *lspTools) documentSymbols() tool.Tool {
 		"Outline a source file's symbols (functions, types, methods, constants) via the language server — "+
 			"precise and far cheaper than reading the whole file. "+
 			"Arguments: `file` (string, required) — path to a source file, relative to the session directory or absolute.",
-		func(ctx tool.Context, in fileIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in fileIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			path := resolveFile(ctx, in.File)
@@ -109,7 +110,7 @@ func (lt *lspTools) readSymbol() tool.Tool {
 			"context. Arguments: `symbol` (string, required) — the symbol's name (a bare name like `Foo` or a qualified "+
 			"one like `(*Client).Call`); `file` (string, optional) — the file it's declared in; omit `file` to let the "+
 			"language server locate it project-wide.",
-		func(ctx tool.Context, in readSymbolIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in readSymbolIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			symbol := strings.TrimSpace(in.Symbol)
@@ -169,7 +170,7 @@ func (lt *lspTools) workspaceSymbol() tool.Tool {
 			"(answers 'where is X?'). Arguments: `query` (string, required) — a symbol name or fragment; "+
 			"`file` (string, optional) — any source file in the target project, used to pick the language; "+
 			"inferred from the session directory when omitted.",
-		func(ctx tool.Context, in queryIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in queryIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			cwd := fstools.CwdForContext(ctx)
@@ -194,7 +195,7 @@ func (lt *lspTools) definition() tool.Tool {
 		"Go to the definition of a symbol that appears in a file. Give the symbol by name; the language server "+
 			"resolves it across files. Arguments: `file` (string, required) — a file where the symbol appears; "+
 			"`symbol` (string, required) — the symbol's name as written in the file.",
-		func(ctx tool.Context, in symbolIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in symbolIn) (lspOut, error) {
 			return lt.runLocate(ctx, in, func(qctx context.Context, ls *langServer, path, cwd string) (string, error) {
 				locs, err := ls.Definition(qctx, path, in.Symbol)
 				if err != nil {
@@ -210,7 +211,7 @@ func (lt *lspTools) references() tool.Tool {
 		"List every place a symbol is used across the project (call sites, usages) — essential before changing or "+
 			"removing it. Includes the declaration. Arguments: `file` (string, required) — a file where the symbol "+
 			"appears; `symbol` (string, required).",
-		func(ctx tool.Context, in symbolIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in symbolIn) (lspOut, error) {
 			return lt.runLocate(ctx, in, func(qctx context.Context, ls *langServer, path, cwd string) (string, error) {
 				locs, err := ls.References(qctx, path, in.Symbol, true)
 				if err != nil {
@@ -225,7 +226,7 @@ func (lt *lspTools) hover() tool.Tool {
 	return newLSPTool("lsp_hover",
 		"Show a symbol's type signature and documentation (hover info) from the language server. "+
 			"Arguments: `file` (string, required) — a file where the symbol appears; `symbol` (string, required).",
-		func(ctx tool.Context, in symbolIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in symbolIn) (lspOut, error) {
 			return lt.runLocate(ctx, in, func(qctx context.Context, ls *langServer, path, cwd string) (string, error) {
 				txt, err := ls.Hover(qctx, path, in.Symbol)
 				if err != nil {
@@ -245,7 +246,7 @@ func (lt *lspTools) diagnostics() tool.Tool {
 			"after an edit. It re-reads the file from disk and re-analyses, so call it right after editing to see "+
 			"exactly what broke (and call it again after fixing to confirm it's clean). "+
 			"Arguments: `file` (string, required).",
-		func(ctx tool.Context, in fileIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in fileIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			path := resolveFile(ctx, in.File)
@@ -274,7 +275,7 @@ func (lt *lspTools) rename() tool.Tool {
 			"in every file, far more reliably than find-and-replace. Changes are written to disk and are revertible. "+
 			"Arguments: `file` (string, required) — a file where the symbol appears; `symbol` (string, required) — "+
 			"its current name; `new_name` (string, required) — the new name.",
-		func(ctx tool.Context, in renameIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in renameIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			path := resolveFile(ctx, in.File)
@@ -356,7 +357,7 @@ func (lt *lspTools) codeAction() tool.Tool {
 			"Changes are written to disk and are revertible. "+
 			"Arguments: `file` (string, required) — path to a source file; `kind` (string, optional) — restrict to one "+
 			"LSP code-action kind (e.g. `source.organizeImports`, `source.fixAll`, `quickfix`); omitted applies all three.",
-		func(ctx tool.Context, in codeActionIn) (lspOut, error) {
+		func(ctx adk.ToolContext, in codeActionIn) (lspOut, error) {
 			qctx, cancel := toolCtx(ctx)
 			defer cancel()
 			path := resolveFile(ctx, in.File)
@@ -483,7 +484,7 @@ func plural(n int) string {
 
 // runLocate is the shared flow for the file+symbol tools: resolve the server,
 // run the query, and map errors to clean fallback text.
-func (lt *lspTools) runLocate(ctx tool.Context, in symbolIn,
+func (lt *lspTools) runLocate(ctx adk.ToolContext, in symbolIn,
 	q func(qctx context.Context, ls *langServer, path, cwd string) (string, error)) (lspOut, error) {
 	qctx, cancel := toolCtx(ctx)
 	defer cancel()
@@ -505,7 +506,7 @@ func (lt *lspTools) runLocate(ctx tool.Context, in symbolIn,
 // otherwise it scans the session directory for the first file whose extension a
 // configured server handles, skipping noise dirs and bounding the walk depth.
 // Returns "" when nothing matches (caller reports ErrNoServer).
-func (lt *lspTools) anchorFile(ctx tool.Context, hint string) string {
+func (lt *lspTools) anchorFile(ctx adk.ToolContext, hint string) string {
 	if hint != "" {
 		return resolveFile(ctx, hint)
 	}
@@ -558,13 +559,13 @@ func walkDepth(root, p string) int {
 
 // toolCtx builds a per-call context: a timeout bound plus the active session id,
 // which the dependency gate uses to prompt the user on a first server start.
-func toolCtx(ctx tool.Context) (context.Context, context.CancelFunc) {
+func toolCtx(ctx adk.ToolContext) (context.Context, context.CancelFunc) {
 	c, cancel := context.WithTimeout(ctx, toolTimeout)
 	return withSession(c, ctx.SessionID()), cancel
 }
 
 // resolveFile resolves a tool-supplied path against the session working dir.
-func resolveFile(ctx tool.Context, p string) string {
+func resolveFile(ctx adk.ToolContext, p string) string {
 	cwd := fstools.CwdForContext(ctx)
 	if cwd == "" || p == "" || filepath.IsAbs(p) {
 		return p

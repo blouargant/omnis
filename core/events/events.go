@@ -16,7 +16,8 @@ import (
 
 	"google.golang.org/genai"
 
-	"google.golang.org/adk/agent"
+	"github.com/blouargant/omnis/core/adk"
+
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
@@ -247,7 +248,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 	toolTimers := sync.Map{}  // key = (agent, function-call id), value = time.Time
 	modelTimers := sync.Map{} // key = (agent, callback-context ptr), value = time.Time
 
-	beforeTool := func(tctx tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+	beforeTool := func(tctx adk.ToolContext, t tool.Tool, args map[string]any) (map[string]any, error) {
 		agentName := tctx.AgentName()
 		toolTimers.Store(scopedToolKey(agentName, t, args), time.Now())
 		b.Emit(EventBeforeTool, map[string]any{
@@ -262,7 +263,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		})
 		return nil, nil
 	}
-	afterTool := func(tctx tool.Context, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
+	afterTool := func(tctx adk.ToolContext, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
 		agentName := tctx.AgentName()
 		var elapsed time.Duration
 		if v, ok := toolTimers.LoadAndDelete(scopedToolKey(agentName, t, args)); ok {
@@ -282,7 +283,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		})
 		return nil, nil
 	}
-	onToolErr := func(tctx tool.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
+	onToolErr := func(tctx adk.ToolContext, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 		agentName := tctx.AgentName()
 		toolTimers.Delete(scopedToolKey(agentName, t, args))
 		b.Emit(EventToolError, map[string]any{
@@ -298,7 +299,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		})
 		return nil, nil
 	}
-	beforeModel := func(cb agent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+	beforeModel := func(cb adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 		agentName := cb.AgentName()
 		modelTimers.Store(modelKey(agentName, cb), time.Now())
 		payload := map[string]any{
@@ -317,7 +318,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 		b.Emit(EventBeforeModel, payload)
 		return nil, nil
 	}
-	afterModel := func(cb agent.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
+	afterModel := func(cb adk.CallbackContext, resp *model.LLMResponse, _ error) (*model.LLMResponse, error) {
 		// Skip partial streaming chunks: ADK invokes the AfterModel
 		// callback for every delta yielded by the LLM adapter. Emitting
 		// one event per chunk floods subscribers (TUI, event logs) with
@@ -375,7 +376,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 // AgentCallbacks directly to those sub-agents to capture their activity.
 func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin, error) {
 	cb := b.AgentCallbacks(opts)
-	beforeRun := func(ctx agent.InvocationContext) (*genai.Content, error) {
+	beforeRun := func(ctx adk.InvocationContext) (*genai.Content, error) {
 		s := ctx.Session()
 		b.Emit(EventRunStart, map[string]any{
 			"agent":      agentNameOf(ctx),
@@ -388,7 +389,7 @@ func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin
 		})
 		return nil, nil
 	}
-	afterRun := func(ctx agent.InvocationContext) {
+	afterRun := func(ctx adk.InvocationContext) {
 		s := ctx.Session()
 		b.Emit(EventRunEnd, map[string]any{
 			"agent":      agentNameOf(ctx),
@@ -424,13 +425,13 @@ func scopedToolKey(agentName string, t tool.Tool, args map[string]any) string {
 // scope by agent + identity of the callback context (its address). This is
 // safe because before/after callbacks for a given call run on the same
 // goroutine with the same context value.
-func modelKey(agentName string, cb agent.CallbackContext) string {
+func modelKey(agentName string, cb adk.CallbackContext) string {
 	return fmt.Sprintf("%s||%p", agentName, cb)
 }
 
 // agentNameOf returns the running agent's name from an InvocationContext,
 // or an empty string if unavailable.
-func agentNameOf(ctx agent.InvocationContext) string {
+func agentNameOf(ctx adk.InvocationContext) string {
 	if a := ctx.Agent(); a != nil {
 		return a.Name()
 	}

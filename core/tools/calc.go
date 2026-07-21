@@ -5,6 +5,8 @@ import (
 
 	"github.com/Knetic/govaluate"
 	"google.golang.org/adk/tool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 type CalcIn struct {
@@ -21,7 +23,7 @@ func NewCalcTools() []tool.Tool {
 				"Supports arithmetic (+, -, *, /), exponentiation (**), modulo (%), "+
 				"bitwise ops, comparisons, and standard functions (abs, ceil, floor, round, sqrt, log, pow, sin, cos, tan). "+
 				"Arguments: `expression` (string, required) — the expression to evaluate, e.g. \"sqrt(2) + 3 * 4\".",
-			func(_ tool.Context, in CalcIn) (CalcOut, error) {
+			func(_ adk.ToolContext, in CalcIn) (CalcOut, error) {
 				expr, err := govaluate.NewEvaluableExpression(in.Expression)
 				if err != nil {
 					return CalcOut{Result: fmt.Sprintf("parse error: %v", err)}, nil

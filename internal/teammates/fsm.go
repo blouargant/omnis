@@ -18,6 +18,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // AgentState is the FSM state.
@@ -81,7 +83,7 @@ func NewAgent(name string, b Backend) *Agent {
 }
 
 // resolveName returns the effective mailbox name for `logical` given the
-// caller's tool.Context.
+// caller's adk.ToolContext.
 //
 // Resolution order:
 //  1. Cross-session registry: if Registry is set and logical matches a known
@@ -89,7 +91,7 @@ func NewAgent(name string, b Backend) *Agent {
 //     NameFunc so the address is not re-scoped to the current session).
 //  2. NameFunc: apply the per-session namespace transformation.
 //  3. Fall back to logical unchanged.
-func (a *Agent) resolveName(ctx tool.Context, logical string) string {
+func (a *Agent) resolveName(ctx adk.ToolContext, logical string) string {
 	if a.Registry != nil {
 		if addr, ok := a.Registry.Lookup(logical); ok {
 			return addr
@@ -242,7 +244,7 @@ func (a *Agent) Tools() []tool.Tool {
 			"(petname such as 'happy-panda', or user-assigned title such as 'my-project'). " +
 			"Use teammate_list to discover available cross-session peers. " +
 			"Arguments: `to` (string, required), `question` (string, required).",
-	}, func(ctx tool.Context, in askIn) (askOut, error) {
+	}, func(ctx adk.ToolContext, in askIn) (askOut, error) {
 		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Question) == "" {
 			return askOut{Reply: "Error: required arguments: to and question"}, nil
 		}
@@ -260,7 +262,7 @@ func (a *Agent) Tools() []tool.Tool {
 			"`to` accepts an intra-session agent name or a cross-session name (petname or title). " +
 			"The recipient's next teammate_check will surface this message along with your session name in the [From] field. " +
 			"Arguments: `to` (string, required), `body` (string, required).",
-	}, func(ctx tool.Context, in tellIn) (tellOut, error) {
+	}, func(ctx adk.ToolContext, in tellIn) (tellOut, error) {
 		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Body) == "" {
 			return tellOut{Result: "Error: required arguments: to and body"}, nil
 		}
@@ -277,7 +279,7 @@ func (a *Agent) Tools() []tool.Tool {
 			"Returns the message with a [From] field showing the sender's session name, or '(none)' if empty. " +
 			"Call this on demand — e.g. when the user asks whether a peer has replied, or after a 'teammate_tell' you expect a follow-up to. " +
 			"You do NOT need to poll every turn: incoming messages are normally delivered to you automatically.",
-	}, func(ctx tool.Context, _ checkIn) (checkOut, error) {
+	}, func(ctx adk.ToolContext, _ checkIn) (checkOut, error) {
 		name := a.resolveName(ctx, a.Name)
 		m, err := a.checkWith(context.Background(), name, time.Second)
 		if err != nil {
@@ -299,7 +301,7 @@ func (a *Agent) Tools() []tool.Tool {
 			"Returns `sessions` (map of session name to mailbox address) and `your_session_name` " +
 			"(the name other sessions use to address THIS session). " +
 			"When a received message refers to `your_session_name`, it is referring to you.",
-	}, func(ctx tool.Context, _ struct{}) (listOut, error) {
+	}, func(ctx adk.ToolContext, _ struct{}) (listOut, error) {
 		if a.Registry == nil {
 			return listOut{Sessions: map[string]string{}}, nil
 		}

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"sync"
 
-	"google.golang.org/adk/agent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/deps"
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -25,7 +25,7 @@ import (
 // where the host enforces dependency installation (check → ask → install →
 // recheck); the implementation lives in the agent package, which owns the
 // ask-user registry and the Bash installer.
-type DepGate func(ctx tool.Context, skillName string) string
+type DepGate func(ctx adk.ToolContext, skillName string) string
 
 // The gate is process-wide: the ask-user registry and Bash installer live on
 // the (singleton, hot-reload-surviving) Infrastructure, so a single setter keeps
@@ -110,7 +110,7 @@ type gatedSkillToolset struct {
 	gate DepGate
 }
 
-func (g *gatedSkillToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
+func (g *gatedSkillToolset) Tools(ctx adk.ReadonlyContext) ([]tool.Tool, error) {
 	inner, err := g.SkillToolset.Tools(ctx)
 	if err != nil {
 		return nil, err
@@ -131,8 +131,8 @@ func (g *gatedSkillToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error
 type runnableSkillTool interface {
 	tool.Tool
 	Declaration() *genai.FunctionDeclaration
-	Run(ctx tool.Context, args any) (map[string]any, error)
-	ProcessRequest(ctx tool.Context, req *model.LLMRequest) error
+	Run(ctx adk.ToolContext, args any) (map[string]any, error)
+	ProcessRequest(ctx adk.ToolContext, req *model.LLMRequest) error
 }
 
 // gatedLoadTool keeps load_skill's name and declaration but runs the dependency
@@ -156,7 +156,7 @@ func newGatedLoadTool(t tool.Tool, gate DepGate) (tool.Tool, error) {
 	return &gatedLoadTool{runnableSkillTool: rt, gate: gate, decl: decl}, nil
 }
 
-func (g *gatedLoadTool) Run(ctx tool.Context, args any) (map[string]any, error) {
+func (g *gatedLoadTool) Run(ctx adk.ToolContext, args any) (map[string]any, error) {
 	out, err := g.runnableSkillTool.Run(ctx, args)
 	if err != nil || g.gate == nil {
 		return out, err
@@ -178,7 +178,7 @@ func (g *gatedLoadTool) Run(ctx tool.Context, args any) (map[string]any, error) 
 // dispatches calls through Run (which runs the gate). Packing the embedded tool
 // instead — what the inherited ProcessRequest would do — keys req.Tools to the
 // inner tool and bypasses the gate. Mirrors softskills' renamedTool.
-func (g *gatedLoadTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
+func (g *gatedLoadTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
 	}

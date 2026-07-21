@@ -3,6 +3,8 @@ package compress
 import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // compactNowIn is the argument schema for compact_now.
@@ -24,7 +26,7 @@ func (m *manager) tools() []tool.Tool {
 			"Use this after completing a major sub-task (e.g. finishing one feature, closing a long " +
 			"investigation) to free context for what comes next. " +
 			"Arguments: `reason` (string, required) — a one-sentence justification.",
-	}, func(ctx tool.Context, in compactNowIn) (compactNowOut, error) {
+	}, func(ctx adk.ToolContext, in compactNowIn) (compactNowOut, error) {
 		st := m.state(ctx.UserID(), ctx.SessionID())
 		st.forceCompact.Store(true)
 		return compactNowOut{Status: "compaction scheduled: " + in.Reason}, nil

@@ -22,6 +22,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // maxSpawnsPerSession bounds how many sessions one parent turn may spawn, so a
@@ -122,7 +124,7 @@ func spawnSessionTool(reg *SpawnRegistry, validSquads []string) tool.Tool {
 			"leave `prompt` empty to create an idle session for the user. " +
 			"Leave `squad` empty to let the Omnis router pick the best-suited squad for the task (recommended " +
 			"unless you have a specific reason to force one). Available squads: " + list + ".",
-	}, func(ctx tool.Context, in spawnIn) (spawnOut, error) {
+	}, func(ctx adk.ToolContext, in spawnIn) (spawnOut, error) {
 		squad := lowerTrim(in.Squad)
 		if squad != "" && len(valid) > 0 && !valid[squad] {
 			return spawnOut{}, fmt.Errorf("unknown squad %q; choose one of: %s (or leave empty for the default)", in.Squad, list)

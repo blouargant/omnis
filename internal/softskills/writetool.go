@@ -25,6 +25,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // indexFileName is the human-navigable category index living at the root
@@ -135,7 +137,7 @@ type createOut struct {
 	Result string `json:"result"`
 }
 
-func (w *writer) create(_ tool.Context, in createIn) (createOut, error) {
+func (w *writer) create(_ adk.ToolContext, in createIn) (createOut, error) {
 	// Allow "agent/name" shorthand in the Name field so the model can use
 	// the path notation it sees in prompts without a separate Agent param.
 	if in.Agent == "" {
@@ -180,7 +182,7 @@ type updateOut struct {
 	Result string `json:"result"`
 }
 
-func (w *writer) update(_ tool.Context, in updateIn) (updateOut, error) {
+func (w *writer) update(_ adk.ToolContext, in updateIn) (updateOut, error) {
 	if in.Agent == "" {
 		if parts := strings.SplitN(in.Name, "/", 2); len(parts) == 2 {
 			in.Agent, in.Name = parts[0], parts[1]
@@ -227,7 +229,7 @@ type deleteOut struct {
 	Result string `json:"result"`
 }
 
-func (w *writer) delete(_ tool.Context, in deleteIn) (deleteOut, error) {
+func (w *writer) delete(_ adk.ToolContext, in deleteIn) (deleteOut, error) {
 	if len(strings.TrimSpace(in.Reason)) < minReasonLen {
 		return deleteOut{Result: fmt.Sprintf("Error: `reason` must be at least %d non-whitespace chars explaining why the skill is obsolete", minReasonLen)}, nil
 	}
@@ -257,7 +259,7 @@ type removeIndexOut struct {
 	Result string `json:"result"`
 }
 
-func (w *writer) removeIndex(_ tool.Context, in removeIndexIn) (removeIndexOut, error) {
+func (w *writer) removeIndex(_ adk.ToolContext, in removeIndexIn) (removeIndexOut, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return removeIndexOut{Result: "Error: name is required"}, nil
@@ -322,7 +324,7 @@ type indexOut struct {
 	Result string `json:"result"`
 }
 
-func (w *writer) appendIndex(_ tool.Context, in indexIn) (indexOut, error) {
+func (w *writer) appendIndex(_ adk.ToolContext, in indexIn) (indexOut, error) {
 	// Allow "agent/name" shorthand in the Name field.
 	if in.Agent == "" {
 		if parts := strings.SplitN(in.Name, "/", 2); len(parts) == 2 {

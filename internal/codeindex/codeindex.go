@@ -26,6 +26,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/semindex"
@@ -391,7 +392,7 @@ func (i *Index) Tools() []tool.Tool {
 			"for a natural-language query — use it BEFORE broad grep/file scans when you don't know where " +
 			"something lives, then run_read the returned ranges. Arguments: `query` (string, required); " +
 			"`k` (int, optional, default 8).",
-	}, func(_ tool.Context, in searchIn) (searchOut, error) {
+	}, func(_ adk.ToolContext, in searchIn) (searchOut, error) {
 		q := strings.TrimSpace(in.Query)
 		if q == "" {
 			return searchOut{}, fmt.Errorf("query is required")
@@ -409,7 +410,7 @@ func (i *Index) Tools() []tool.Tool {
 		Name: ReindexToolName,
 		Description: "Rebuild the semantic code index for the current repository (incremental: only changed " +
 			"files are re-embedded). Call this after large edits if search_code seems stale. No arguments.",
-	}, func(_ tool.Context, _ reindexIn) (reindexOut, error) {
+	}, func(_ adk.ToolContext, _ reindexIn) (reindexOut, error) {
 		indexed, removed, err := i.Reindex(context.Background())
 		if err != nil {
 			return reindexOut{}, err

@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/adk/tool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/askuser"
 )
 
@@ -52,7 +53,7 @@ func NewAskUserTool(reg *askuser.Registry) tool.Tool {
 			"`allow_text` (bool) — also accept free text alongside choices (single/multi only). "+
 			"`default` (string) — pre-suggested value. "+
 			"`timeout_seconds` (int) — override default timeout (0 = use default).",
-		func(tc tool.Context, in askUserIn) (askUserOut, error) {
+		func(tc adk.ToolContext, in askUserIn) (askUserOut, error) {
 			if err := validateAskUserIn(in); err != nil {
 				return askUserOut{}, err
 			}

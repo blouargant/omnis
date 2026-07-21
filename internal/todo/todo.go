@@ -17,6 +17,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // DefaultPath is where the plan is persisted when no PathFunc is set.
@@ -68,7 +70,7 @@ func NewSessionScoped(defaultPath string, pathFor func(userID, sessionID string)
 	return &Store{defaultPath: defaultPath, pathFor: pathFor, muxes: map[string]*sync.Mutex{}}
 }
 
-func (s *Store) resolvePath(ctx tool.Context) string {
+func (s *Store) resolvePath(ctx adk.ToolContext) string {
 	if s.pathFor == nil {
 		return s.defaultPath
 	}
@@ -209,13 +211,13 @@ type updateOut struct {
 }
 
 // Tools returns the three todo tools wired to s. Each call resolves its
-// file path from the calling tool.Context (via PathFunc when configured).
+// file path from the calling adk.ToolContext (via PathFunc when configured).
 func (s *Store) Tools() []tool.Tool {
 	w, _ := functiontool.New(functiontool.Config{
 		Name: "todo_write",
 		Description: "Commit a complete plan as an ordered list of task descriptions. " +
 			"ALWAYS call this first on any multi-step task before executing.",
-	}, func(ctx tool.Context, in writeIn) (writeOut, error) {
+	}, func(ctx adk.ToolContext, in writeIn) (writeOut, error) {
 		out, err := s.WriteAt(s.resolvePath(ctx), in.Tasks)
 		if err != nil {
 			return writeOut{Result: "Error: " + err.Error()}, nil
@@ -225,7 +227,7 @@ func (s *Store) Tools() []tool.Tool {
 	r, _ := functiontool.New(functiontool.Config{
 		Name:        "todo_read",
 		Description: "Read the current plan and the status of each task.",
-	}, func(ctx tool.Context, _ readIn) (readOut, error) {
+	}, func(ctx adk.ToolContext, _ readIn) (readOut, error) {
 		out, err := s.ReadAt(s.resolvePath(ctx))
 		if err != nil {
 			return readOut{Plan: "Error: " + err.Error()}, nil
@@ -236,7 +238,7 @@ func (s *Store) Tools() []tool.Tool {
 		Name: "todo_update",
 		Description: "Mark a task by index with a new status (pending, in_progress, done, failed). " +
 			"Call after completing each step.",
-	}, func(ctx tool.Context, in updateIn) (updateOut, error) {
+	}, func(ctx adk.ToolContext, in updateIn) (updateOut, error) {
 		out, err := s.UpdateAt(s.resolvePath(ctx), in.Index, in.Status)
 		if err != nil {
 			return updateOut{Result: "Error: " + err.Error()}, nil

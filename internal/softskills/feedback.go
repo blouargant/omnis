@@ -22,6 +22,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Feedback is the on-disk record produced by `record_session_feedback`.
@@ -127,7 +129,7 @@ type feedbackToolOut struct {
 }
 
 // NewFeedbackTool returns the `record_session_feedback` tool. suffixFor
-// resolves the per-session filename suffix from the tool.Context
+// resolves the per-session filename suffix from the adk.ToolContext
 // (UserID + SessionID); logsDir is the directory where the sidecar
 // lives ($OMNIS_HOME/logs by default).
 //
@@ -151,7 +153,7 @@ func NewFeedbackTool(logsDir string, suffixFor func(userID, sessionID string) st
 			return u + "_" + s
 		}
 	}
-	h := func(tctx tool.Context, in feedbackToolIn) (feedbackToolOut, error) {
+	h := func(tctx adk.ToolContext, in feedbackToolIn) (feedbackToolOut, error) {
 		suffix := suffixFor(tctx.UserID(), tctx.SessionID())
 		if err := RecordFeedback(logsDir, suffix, in.Question, in.Answer); err != nil {
 			return feedbackToolOut{Result: "Error: " + err.Error()}, nil

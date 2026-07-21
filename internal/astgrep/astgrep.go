@@ -34,6 +34,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/deps"
 )
@@ -67,7 +68,7 @@ func Requirement() deps.Requirement {
 // DepGate mirrors the skills gate: it returns "" when ast-grep is available (or
 // was just installed) and a model-facing notice otherwise. Installed once,
 // process-wide, from the agent layer.
-type DepGate func(tc tool.Context) string
+type DepGate func(tc adk.ToolContext) string
 
 var gate DepGate
 
@@ -77,7 +78,7 @@ func SetDepGate(g DepGate) { gate = g }
 
 // ensureDep runs the gate (or a plain PATH check when no gate is wired) and
 // returns a non-empty notice when ast-grep is unavailable.
-func ensureDep(tc tool.Context) string {
+func ensureDep(tc adk.ToolContext) string {
 	if gate != nil {
 		return gate(tc)
 	}
@@ -119,7 +120,7 @@ func searchTool() tool.Tool {
 			"(`go`, `rust`, `typescript`, `tsx`, `javascript`, `python`, `java`, `c`, `cpp`, …); `path` (string, optional) "+
 			"— file or directory to search, default the session directory; `max` (int, optional) — cap the number of "+
 			"matches shown (default 100).",
-		func(ctx tool.Context, in searchIn) (out, error) {
+		func(ctx adk.ToolContext, in searchIn) (out, error) {
 			if notice := ensureDep(ctx); notice != "" {
 				return out{Result: notice}, nil
 			}
@@ -147,7 +148,7 @@ func rewriteTool() tool.Tool {
 			"Arguments: `pattern` (string, required); `rewrite` (string, required) — the replacement template; "+
 			"`lang` (string, required); `path` (string, optional) — file or directory, default the session directory; "+
 			"`dry_run` (bool, optional) — when true, report what would change without writing.",
-		func(ctx tool.Context, in rewriteIn) (out, error) {
+		func(ctx adk.ToolContext, in rewriteIn) (out, error) {
 			if notice := ensureDep(ctx); notice != "" {
 				return out{Result: notice}, nil
 			}

@@ -21,6 +21,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/paths"
@@ -169,7 +170,7 @@ func (p *Store) Tool() (tool.Tool, error) {
 		"Use it to check how comparable problems were resolved before before deciding. " +
 		"Arguments: `query` (string, required); `k` (int, optional, default 5)."
 	return functiontool.New(functiontool.Config{Name: RecallToolName, Description: desc},
-		func(_ tool.Context, in recallIn) (recallOut, error) {
+		func(_ adk.ToolContext, in recallIn) (recallOut, error) {
 			query := strings.TrimSpace(in.Query)
 			if query == "" {
 				return recallOut{}, fmt.Errorf("query is required")

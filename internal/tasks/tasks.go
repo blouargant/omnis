@@ -17,6 +17,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // DefaultPath is the on-disk location used when no PathFunc is configured
@@ -70,7 +72,7 @@ func New(path string) *Graph {
 }
 
 // NewSessionScoped returns a Graph whose on-disk file is computed per call
-// from the userID/sessionID exposed by tool.Context. This guarantees
+// from the userID/sessionID exposed by adk.ToolContext. This guarantees
 // concurrent sessions each get their own isolated task graph. The default
 // path (used by direct Go callers and as a fallback when callbacks fire
 // before a session is bound) is kept for back-compat.
@@ -88,9 +90,9 @@ func NewSessionScoped(defaultPath string, pathFor func(userID, sessionID string)
 	}
 }
 
-// resolvePath turns a tool.Context into the file path the call should use.
+// resolvePath turns an adk.ToolContext into the file path the call should use.
 // Empty IDs (e.g. early callbacks) fall back to the default path.
-func (g *Graph) resolvePath(ctx tool.Context) string {
+func (g *Graph) resolvePath(ctx adk.ToolContext) string {
 	if g.pathFor == nil {
 		return g.defaultPath
 	}
@@ -379,7 +381,7 @@ type updateOut struct {
 }
 
 // Tools returns the four task-graph tools. Each tool resolves its file
-// path from the calling tool.Context (via PathFunc when configured), so
+// path from the calling adk.ToolContext (via PathFunc when configured), so
 // concurrent sessions get isolated task graphs automatically.
 func (g *Graph) Tools() []tool.Tool {
 	c, _ := functiontool.New(functiontool.Config{
@@ -390,7 +392,7 @@ func (g *Graph) Tools() []tool.Tool {
 			"`depends_on` (array of task-id strings, optional — MUST be a JSON array, e.g. [\"1ed6204a\"]; use [] when there are no dependencies); " +
 			"`priority` (one of \"high\"|\"medium\"|\"low\", default \"medium\"). " +
 			"Returns the new task id.",
-	}, func(ctx tool.Context, in createIn) (createOut, error) {
+	}, func(ctx adk.ToolContext, in createIn) (createOut, error) {
 		id, err := g.CreateAt(g.resolvePath(ctx), in.Description, coerceDependsOn(in.DependsOn), in.Priority)
 		if err != nil {
 			return createOut{ID: "Error: " + err.Error()}, nil
@@ -400,7 +402,7 @@ func (g *Graph) Tools() []tool.Tool {
 	l, _ := functiontool.New(functiontool.Config{
 		Name:        "task_list",
 		Description: "List every task in the graph with id, priority, status, description.",
-	}, func(ctx tool.Context, _ listIn) (listOut, error) {
+	}, func(ctx adk.ToolContext, _ listIn) (listOut, error) {
 		s, err := g.ListAt(g.resolvePath(ctx))
 		if err != nil {
 			return listOut{Tasks: "Error: " + err.Error()}, nil
@@ -410,7 +412,7 @@ func (g *Graph) Tools() []tool.Tool {
 	n, _ := functiontool.New(functiontool.Config{
 		Name:        "task_next",
 		Description: "Atomically claim the next unblocked pending task. Returns the claimed task or '(none)'.",
-	}, func(ctx tool.Context, in nextIn) (nextOut, error) {
+	}, func(ctx adk.ToolContext, in nextIn) (nextOut, error) {
 		t, err := g.ClaimNextAt(g.resolvePath(ctx), in.AgentID)
 		if err != nil {
 			return nextOut{Task: "Error: " + err.Error()}, nil
@@ -424,7 +426,7 @@ func (g *Graph) Tools() []tool.Tool {
 	u, _ := functiontool.New(functiontool.Config{
 		Name:        "TaskUpdate",
 		Description: "Update a task's status (pending|in_progress|done|failed) and optional result string.",
-	}, func(ctx tool.Context, in updateIn) (updateOut, error) {
+	}, func(ctx adk.ToolContext, in updateIn) (updateOut, error) {
 		s, err := g.UpdateAt(g.resolvePath(ctx), in.ID, in.Status, in.Result)
 		if err != nil {
 			return updateOut{Result: "Error: " + err.Error()}, nil

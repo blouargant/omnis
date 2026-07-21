@@ -7,6 +7,8 @@ import (
 
 	serpapi "github.com/serpapi/serpapi-golang"
 	"google.golang.org/adk/tool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // NewSerpAPITools returns a web_search tool backed by SerpAPI (Google engine).
@@ -20,7 +22,7 @@ func NewSerpAPITools(apiKey string) []tool.Tool {
 			"Search the web using SerpAPI (Google) and return a list of results. "+
 				"Arguments: `query` (string, required) — the search query; "+
 				"`max_results` (int, optional, default 5, max 10) — number of results to return.",
-			func(_ tool.Context, in DDGIn) (DDGOut, error) {
+			func(_ adk.ToolContext, in DDGIn) (DDGOut, error) {
 				out, _ := runSerpAPISearch(apiKey, in)
 				return DDGOut{Results: out}, nil
 			}),

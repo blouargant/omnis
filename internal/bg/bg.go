@@ -26,6 +26,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/tools"
 )
 
@@ -161,8 +162,8 @@ func (s *SessionQueues) For(userID, sessionID string) *Queue {
 	return v.(*Queue)
 }
 
-// resolveQueue picks the Queue matching the calling tool.Context.
-func (s *SessionQueues) resolveQueue(ctx tool.Context) *Queue {
+// resolveQueue picks the Queue matching the calling adk.ToolContext.
+func (s *SessionQueues) resolveQueue(ctx adk.ToolContext) *Queue {
 	var u, sid string
 	if ctx != nil {
 		u = ctx.UserID()
@@ -198,7 +199,7 @@ func newStartTool(start func(label, command string, timeout time.Duration) strin
 		Name: "bash_background",
 		Description: "Start a shell command in the background. Returns immediately with a task id. " +
 			"You will be notified of the result in a later turn. Use for long-running operations like test suites or builds.",
-	}, func(_ tool.Context, in startIn) (startOut, error) {
+	}, func(_ adk.ToolContext, in startIn) (startOut, error) {
 		id := start(in.Label, in.Command, 0)
 		return startOut{Result: startResult(id, in.Label, in.Command)}, nil
 	})
@@ -218,7 +219,7 @@ func (s *SessionQueues) Tool() tool.Tool {
 		Name: "bash_background",
 		Description: "Start a shell command in the background. Returns immediately with a task id. " +
 			"You will be notified of the result in a later turn. Use for long-running operations like test suites or builds.",
-	}, func(ctx tool.Context, in startIn) (startOut, error) {
+	}, func(ctx adk.ToolContext, in startIn) (startOut, error) {
 		id := s.resolveQueue(ctx).Start(in.Label, in.Command, 0)
 		return startOut{Result: startResult(id, in.Label, in.Command)}, nil
 	})
@@ -229,7 +230,7 @@ func (s *SessionQueues) Tool() tool.Tool {
 // per-session queue: bash_background, monitor, bg_list, bg_cancel,
 // bg_output. This is what the "bg" tool group mounts.
 func (s *SessionQueues) Tools() []tool.Tool {
-	resolve := func(ctx tool.Context) *Queue { return s.resolveQueue(ctx) }
+	resolve := func(ctx adk.ToolContext) *Queue { return s.resolveQueue(ctx) }
 	return []tool.Tool{
 		s.Tool(),
 		monitorTool(resolve),

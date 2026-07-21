@@ -12,6 +12,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/tools"
 )
 
@@ -161,7 +162,7 @@ func monitorTool(resolve queueResolver) tool.Tool {
 			"(e.g. `tail -f app.log | grep --line-buffered ERROR`) or output is buffered and notifications lag. " +
 			"Set `timeout_sec` to auto-stop, or `persistent` for a session-long tail. Returns a task id; " +
 			"use bg_cancel(id) to stop it and bg_output(id) to read buffered matches.",
-	}, func(ctx tool.Context, in monitorIn) (monitorOut, error) {
+	}, func(ctx adk.ToolContext, in monitorIn) (monitorOut, error) {
 		id, err := resolve(ctx).StartMonitor(in.Label, in.Command, in.Filter,
 			time.Duration(in.TimeoutSec)*time.Second, in.Persistent)
 		if err != nil {

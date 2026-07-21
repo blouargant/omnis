@@ -16,6 +16,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Tool names.
@@ -195,7 +197,7 @@ func NewTools(d Deps) []tool.Tool {
 			"(`mode: scan`). Arguments: `query` (string, required); `k` (int, optional, default 10); " +
 			"`exclude_archived` (bool, optional). Run several differently-worded queries when the first " +
 			"is inconclusive — the user's words are rarely the words used in the session.",
-	}, func(tc tool.Context, in searchIn) (searchOut, error) {
+	}, func(tc adk.ToolContext, in searchIn) (searchOut, error) {
 		res, mode, _, err := SearchOrScan(tc, d.index(), in.Query, in.K, in.ExcludeArchived)
 		if err != nil {
 			return searchOut{}, err
@@ -211,7 +213,7 @@ func NewTools(d Deps) []tool.Tool {
 			"it verbatim. Returns the user/assistant text of a slice of its turns. Arguments: `session_id` " +
 			"(string, required); `from_turn` (int, optional, default 0); `turns` (int, optional, default 6, " +
 			"max 30).",
-	}, func(_ tool.Context, in readIn) (readOut, error) {
+	}, func(_ adk.ToolContext, in readIn) (readOut, error) {
 		id := strings.TrimSpace(in.SessionID)
 		if id == "" {
 			return readOut{}, fmt.Errorf("session_id is required")
@@ -260,7 +262,7 @@ func NewTools(d Deps) []tool.Tool {
 		Description: "List the most recently used past sessions (id, title, collection, turn count, date). " +
 			"Use it to answer questions about recent activity, or to orient yourself before searching. " +
 			"Arguments: `limit` (int, optional, default 20, max 100).",
-	}, func(_ tool.Context, in listIn) (listOut, error) {
+	}, func(_ adk.ToolContext, in listIn) (listOut, error) {
 		limit := in.Limit
 		if limit <= 0 {
 			limit = 20
@@ -299,7 +301,7 @@ func NewTools(d Deps) []tool.Tool {
 			"the user interface renders the reported sessions as the clickable result list, so a session you " +
 			"do not report here is not shown. Report only sessions you verified; report none if none match. " +
 			"Arguments: `sessions` (array of {`session_id`, `reason`}, required).",
-	}, func(ctx tool.Context, in reportIn) (reportOut, error) {
+	}, func(ctx adk.ToolContext, in reportIn) (reportOut, error) {
 		n := 0
 		for _, s := range in.Sessions {
 			if strings.TrimSpace(s.SessionID) != "" {

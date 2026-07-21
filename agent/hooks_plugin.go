@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/hooks"
@@ -91,7 +91,7 @@ func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, er
 
 	beforeTool, afterTool := hookToolCallbacks(engine, isRouter)
 
-	onUserMsg := func(ctx adkagent.InvocationContext, msg *genai.Content) (*genai.Content, error) {
+	onUserMsg := func(ctx adk.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
 		if len(cfg.Match(hooks.UserPromptSubmit, "")) == 0 {
 			return nil, nil
@@ -117,7 +117,7 @@ func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, er
 		return nil, nil
 	}
 
-	afterRun := func(ctx adkagent.InvocationContext) {
+	afterRun := func(ctx adk.InvocationContext) {
 		cfg := engine.Snapshot()
 		if len(cfg.Match(hooks.Stop, "")) == 0 {
 			return
@@ -158,7 +158,7 @@ func hookToolCallbacks(engine *hooks.Reloader, isRouter bool) (llmagent.BeforeTo
 		return nil, nil
 	}
 
-	beforeTool := func(tc tool.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+	beforeTool := func(tc adk.ToolContext, t tool.Tool, args map[string]any) (map[string]any, error) {
 		cfg := engine.Snapshot()
 		if len(cfg.Match(hooks.PreToolUse, t.Name())) == 0 {
 			return nil, nil
@@ -183,7 +183,7 @@ func hookToolCallbacks(engine *hooks.Reloader, isRouter bool) (llmagent.BeforeTo
 		return nil, nil
 	}
 
-	afterTool := func(tc tool.Context, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
+	afterTool := func(tc adk.ToolContext, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
 		cfg := engine.Snapshot()
 		if len(cfg.Match(hooks.PostToolUse, t.Name())) == 0 {
 			return nil, nil
@@ -314,7 +314,7 @@ func wireHookListeners(ctx context.Context, bus *events.Bus, engine *hooks.Reloa
 }
 
 // sessionIDOf returns the session id from an InvocationContext, or "".
-func sessionIDOf(ctx adkagent.InvocationContext) string {
+func sessionIDOf(ctx adk.InvocationContext) string {
 	if ctx == nil {
 		return ""
 	}

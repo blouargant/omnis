@@ -11,6 +11,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // NewNavTools returns the always-available documentation navigation tools —
@@ -28,7 +30,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 		Description: "List omnis's documentation files (markdown) across all doc roots, each with its " +
 			"title and root-relative path. Use it to discover what documentation exists before reading. " +
 			"No arguments.",
-	}, func(_ tool.Context, _ listIn) (listOut, error) {
+	}, func(_ adk.ToolContext, _ listIn) (listOut, error) {
 		return listDocs(rootsFn), nil
 	}); err == nil {
 		out = append(out, t)
@@ -38,7 +40,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 		Description: "Read a omnis documentation file by its root-relative `path` (as returned by " +
 			"list_docs or search_docs). Optional `start`/`end` 1-based line numbers read just a range. " +
 			"Only files inside the documentation roots can be read.",
-	}, func(_ tool.Context, in readIn) (readOut, error) {
+	}, func(_ adk.ToolContext, in readIn) (readOut, error) {
 		return readDoc(rootsFn, in)
 	}); err == nil {
 		out = append(out, t)
@@ -48,7 +50,7 @@ func NewNavTools(rootsFn func() []string) []tool.Tool {
 		Description: "Search omnis's documentation for a regular expression `pattern` and return matching " +
 			"lines with their file path and line number. A literal-text fallback to search_docs when no " +
 			"embedder is configured. Optional `max` caps results (default 50).",
-	}, func(_ tool.Context, in grepIn) (grepOut, error) {
+	}, func(_ adk.ToolContext, in grepIn) (grepOut, error) {
 		return grepDocs(rootsFn, in)
 	}); err == nil {
 		out = append(out, t)

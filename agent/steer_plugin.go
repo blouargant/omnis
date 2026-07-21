@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/plugin"
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/steer"
 )
 
@@ -61,7 +61,7 @@ func steerPlugin(name string, store *steer.Store) (*plugin.Plugin, error) {
 }
 
 func injectSteeringCallback(store *steer.Store) llmagent.BeforeModelCallback {
-	return func(ctx adkagent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+	return func(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 		if req == nil || store == nil {
 			return nil, nil
 		}
@@ -94,7 +94,7 @@ const steerYieldNotice = "[Interrupted: the user sent new information while I wa
 // With nothing pending — or no surface session planted (e.g. an example) — it is
 // a no-op and the sub-agent runs normally.
 func subAgentSteerYield(store *steer.Store) llmagent.BeforeModelCallback {
-	return func(ctx adkagent.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+	return func(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
 		if store == nil || req == nil {
 			return nil, nil
 		}

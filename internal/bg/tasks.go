@@ -12,6 +12,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 const maxTaskLines = 500
@@ -160,7 +162,7 @@ func (q *Queue) Output(id string) (string, TaskInfo, bool) {
 // Lifecycle tools (shared by Queue and SessionQueues via a resolver)
 // ----------------------------------------------------------------------
 
-type queueResolver func(tool.Context) *Queue
+type queueResolver func(adk.ToolContext) *Queue
 
 type taskListOut struct {
 	Tasks []TaskInfo `json:"tasks"`
@@ -170,7 +172,7 @@ func taskListTool(resolve queueResolver) tool.Tool {
 	t, _ := functiontool.New(functiontool.Config{
 		Name:        "bg_list",
 		Description: "List background tasks and monitors for this session (id, label, kind, status).",
-	}, func(ctx tool.Context, _ struct{}) (taskListOut, error) {
+	}, func(ctx adk.ToolContext, _ struct{}) (taskListOut, error) {
 		return taskListOut{Tasks: resolve(ctx).ListTasks()}, nil
 	})
 	return t
@@ -187,7 +189,7 @@ func taskCancelTool(resolve queueResolver) tool.Tool {
 	t, _ := functiontool.New(functiontool.Config{
 		Name:        "bg_cancel",
 		Description: "Cancel a running background task or monitor by its id.",
-	}, func(ctx tool.Context, in taskIDIn) (taskCancelOut, error) {
+	}, func(ctx adk.ToolContext, in taskIDIn) (taskCancelOut, error) {
 		info, ok := resolve(ctx).Cancel(in.ID)
 		if !ok {
 			return taskCancelOut{Result: fmt.Sprintf("no task with id %q", in.ID)}, nil
@@ -206,7 +208,7 @@ func taskOutputTool(resolve queueResolver) tool.Tool {
 	t, _ := functiontool.New(functiontool.Config{
 		Name:        "bg_output",
 		Description: "Read the buffered output of a background task or monitor by its id.",
-	}, func(ctx tool.Context, in taskIDIn) (taskOutputOut, error) {
+	}, func(ctx adk.ToolContext, in taskIDIn) (taskOutputOut, error) {
 		out, info, ok := resolve(ctx).Output(in.ID)
 		if !ok {
 			return taskOutputOut{Status: "unknown", Output: fmt.Sprintf("no task with id %q", in.ID)}, nil

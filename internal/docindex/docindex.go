@@ -28,6 +28,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/semindex"
@@ -381,7 +382,7 @@ func (i *Index) Tools() []tool.Tool {
 			"`text` — ranked by meaning, not keyword. Use this to ground answers about omnis's features, " +
 			"configuration, and behaviour, then quote the returned text. Arguments: `query` (string, " +
 			"required); `k` (int, optional, default 6).",
-	}, func(_ tool.Context, in searchIn) (searchOut, error) {
+	}, func(_ adk.ToolContext, in searchIn) (searchOut, error) {
 		q := strings.TrimSpace(in.Query)
 		if q == "" {
 			return searchOut{}, fmt.Errorf("query is required")
@@ -399,7 +400,7 @@ func (i *Index) Tools() []tool.Tool {
 		Name: ReindexToolName,
 		Description: "Rebuild the semantic documentation index (incremental: only changed files are " +
 			"re-embedded). Call this if search_docs results look stale after the docs changed. No arguments.",
-	}, func(_ tool.Context, _ reindexIn) (reindexOut, error) {
+	}, func(_ adk.ToolContext, _ reindexIn) (reindexOut, error) {
 		indexed, removed, err := i.Reindex(context.Background())
 		if err != nil {
 			return reindexOut{}, err

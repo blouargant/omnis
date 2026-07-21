@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/adk/tool"
-
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/deps"
 	"github.com/blouargant/omnis/internal/skills"
@@ -25,7 +24,7 @@ func newSkillDepGate(reg *askuser.Registry) skills.DepGate {
 		return nil
 	}
 	confirm := deps.NewAskuserConfirmer(reg)
-	return func(tc tool.Context, skillName string) string {
+	return func(tc adk.ToolContext, skillName string) string {
 		reqs, err := skills.RequiresFor(skillName)
 		if err != nil || len(reqs) == 0 {
 			return ""

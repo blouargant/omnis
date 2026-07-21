@@ -17,6 +17,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -79,7 +80,7 @@ type curateOut struct {
 }
 
 // curateSessionTool returns the tool the lead mounts. The session key
-// is derived from the tool.Context at call time so each invocation marks
+// is derived from the adk.ToolContext at call time so each invocation marks
 // the right session.
 func curateSessionTool() tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
@@ -89,7 +90,7 @@ func curateSessionTool() tool.Tool {
 			"'remember how we solved this', or when you reached a non-trivial multi-step success " +
 			"the curator should learn from. The actual curation runs after the session ends. " +
 			"Argument: `reason` (string, required, one-line explanation).",
-	}, func(ctx tool.Context, in curateIn) (curateOut, error) {
+	}, func(ctx adk.ToolContext, in curateIn) (curateOut, error) {
 		msg, err := RequestCurateSession(ctx.UserID(), ctx.SessionID(), in.Reason)
 		if err != nil {
 			return curateOut{}, err

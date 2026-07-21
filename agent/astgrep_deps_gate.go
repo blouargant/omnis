@@ -1,8 +1,7 @@
 package agent
 
 import (
-	"google.golang.org/adk/tool"
-
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/deps"
@@ -23,7 +22,7 @@ func newAstgrepDepGate(reg *askuser.Registry) astgrep.DepGate {
 	}
 	confirm := deps.NewAskuserConfirmer(reg)
 	req := astgrep.Requirement()
-	return func(tc tool.Context) string {
+	return func(tc adk.ToolContext) string {
 		outcomes := deps.Ensure(tc, tc.SessionID(), []deps.Requirement{req}, confirm, deps.BashInstaller)
 		for _, o := range outcomes {
 			if !o.Available {

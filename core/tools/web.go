@@ -10,6 +10,8 @@ import (
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/PuerkitoBio/goquery"
 	"google.golang.org/adk/tool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 type WebFetchIn struct {
@@ -33,14 +35,14 @@ func NewWebTools() []tool.Tool {
 			"Fetch a web page and return its content as Markdown. "+
 				"Arguments: `url` (string, required) — the URL to fetch; "+
 				"`selector` (string, optional) — CSS selector to extract a specific page section (e.g. \"main\", \"article\", \"#content\").",
-			func(_ tool.Context, in WebFetchIn) (WebFetchOut, error) {
+			func(_ adk.ToolContext, in WebFetchIn) (WebFetchOut, error) {
 				out, _ := runWebFetch(context.Background(), in)
 				return WebFetchOut{Content: out}, nil
 			}),
 		mustTool("html_to_markdown",
 			"Convert an HTML string to Markdown. "+
 				"Arguments: `html` (string, required) — the HTML content to convert.",
-			func(_ tool.Context, in HTMLToMarkdownIn) (HTMLToMarkdownOut, error) {
+			func(_ adk.ToolContext, in HTMLToMarkdownIn) (HTMLToMarkdownOut, error) {
 				md, err := htmltomarkdown.ConvertString(in.HTML)
 				if err != nil {
 					return HTMLToMarkdownOut{Markdown: fmt.Sprintf("error: %v", err)}, nil

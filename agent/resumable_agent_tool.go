@@ -10,12 +10,13 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/blouargant/omnis/core/adk"
+
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/artifact"
 	"google.golang.org/adk/memory"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/agenttool"
 )
 
@@ -126,7 +127,7 @@ func (t *resumableAgentTool) Declaration() *genai.FunctionDeclaration {
 
 // Run resolves (resume or mint) a session, runs the sub-agent on the persistent
 // runner, and returns its output plus the `session` handle for later resumption.
-func (t *resumableAgentTool) Run(toolCtx tool.Context, args any) (map[string]any, error) {
+func (t *resumableAgentTool) Run(toolCtx adk.ToolContext, args any) (map[string]any, error) {
 	margs, ok := args.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("resumable sub-agent %q expects object arguments, got %T", t.Name(), args)
@@ -204,7 +205,7 @@ func buildSubAgentContent(name string, margs map[string]any) (*genai.Content, er
 // resolveSession returns the session handle to run on: the resumed one when the
 // handle is live and free, otherwise a freshly created session. It marks the
 // chosen handle in-use (released by Run's defer) and bounds the map by TTL + cap.
-func (t *resumableAgentTool) resolveSession(toolCtx tool.Context, resume string) (string, error) {
+func (t *resumableAgentTool) resolveSession(toolCtx adk.ToolContext, resume string) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sweepLocked()

@@ -1,9 +1,9 @@
 package settings
 
 import (
-	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/configedit"
 )
 
@@ -24,7 +24,7 @@ type rollbackOut struct {
 }
 
 func rollbackSettings(deps Deps) functiontool.Func[rollbackIn, rollbackOut] {
-	return func(_ tool.Context, in rollbackIn) (rollbackOut, error) {
+	return func(_ adk.ToolContext, in rollbackIn) (rollbackOut, error) {
 		steps := in.Steps
 		switch {
 		case in.All:
@@ -61,7 +61,7 @@ type historyOut struct {
 	Note    string                     `json:"note,omitempty"`
 }
 
-func settingsHistory(_ tool.Context, in historyIn) (historyOut, error) {
+func settingsHistory(_ adk.ToolContext, in historyIn) (historyOut, error) {
 	ch := configedit.History()
 	if in.Limit > 0 && len(ch) > in.Limit {
 		ch = ch[:in.Limit]

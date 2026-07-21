@@ -5,8 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"google.golang.org/adk/tool"
-
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/askuser"
 )
@@ -17,7 +16,7 @@ import (
 // id is the one the surface planted on the run context (propagated into the
 // sub-agent the same way WithCwd is), recovered via steerSessionID. Falls back
 // to tc.SessionID() when nothing was planted (e.g. CLI examples).
-func realSessionID(tc tool.Context) string {
+func realSessionID(tc adk.ToolContext) string {
 	if id := steerSessionID(tc); id != "" {
 		return id
 	}
@@ -59,7 +58,7 @@ type askUserPermissionAsker struct {
 	reg *askuser.Registry
 }
 
-func (a *askUserPermissionAsker) Ask(tc tool.Context, toolName, input, reason string) permissions.AskOutcome {
+func (a *askUserPermissionAsker) Ask(tc adk.ToolContext, toolName, input, reason string) permissions.AskOutcome {
 	if a.reg == nil {
 		return permissions.OutcomeDeny
 	}

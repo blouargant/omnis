@@ -10,6 +10,7 @@ import (
 	"google.golang.org/adk/tool/functiontool"
 	"gopkg.in/yaml.v3"
 
+	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -132,7 +133,7 @@ func NewTools(deps Deps) []tool.Tool {
 
 // ---- get_settings --------------------------------------------------------
 
-func getSettings(_ tool.Context, in getSettingsIn) (getSettingsOut, error) {
+func getSettings(_ adk.ToolContext, in getSettingsIn) (getSettingsOut, error) {
 	if strings.TrimSpace(in.Section) == "" {
 		out := getSettingsOut{Note: "Pass one of these as `section` to see its current value."}
 		for _, s := range sectionCatalogue {
@@ -223,7 +224,7 @@ type setPreferenceIn struct {
 	Value string `json:"value"`
 }
 
-func setPreference(_ tool.Context, in setPreferenceIn) (writeResult, error) {
+func setPreference(_ adk.ToolContext, in setPreferenceIn) (writeResult, error) {
 	key := strings.ToLower(strings.TrimSpace(in.Key))
 	val := strings.TrimSpace(in.Value)
 	// An empty value (or a "default"/"none"/"clear"/"reset" alias) means "revert
@@ -307,7 +308,7 @@ type setAgentIn struct {
 }
 
 func setAgent(deps Deps) functiontool.Func[setAgentIn, writeResult] {
-	return func(_ tool.Context, in setAgentIn) (writeResult, error) {
+	return func(_ adk.ToolContext, in setAgentIn) (writeResult, error) {
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
 			return writeResult{}, fmt.Errorf("name is required")
@@ -394,7 +395,7 @@ type setModelIn struct {
 }
 
 func setModel(deps Deps) functiontool.Func[setModelIn, writeResult] {
-	return func(tc tool.Context, in setModelIn) (writeResult, error) {
+	return func(tc adk.ToolContext, in setModelIn) (writeResult, error) {
 		ref := strings.TrimSpace(in.ModelRef)
 		if ref == "" {
 			return writeResult{}, fmt.Errorf("model_ref is required")
@@ -500,7 +501,7 @@ type updateConfigIn struct {
 }
 
 func updateConfig(deps Deps) functiontool.Func[updateConfigIn, writeResult] {
-	return func(tc tool.Context, in updateConfigIn) (writeResult, error) {
+	return func(tc adk.ToolContext, in updateConfigIn) (writeResult, error) {
 		section := normalizeSection(in.Section)
 		if strings.TrimSpace(in.ValueJSON) == "" {
 			return writeResult{}, fmt.Errorf("value_json is required (the new value, encoded as JSON)")
@@ -522,7 +523,7 @@ type removeConfigIn struct {
 }
 
 func removeConfig(deps Deps) functiontool.Func[removeConfigIn, writeResult] {
-	return func(tc tool.Context, in removeConfigIn) (writeResult, error) {
+	return func(tc adk.ToolContext, in removeConfigIn) (writeResult, error) {
 		section := normalizeSection(in.Section)
 		sensitive := section == "permissions" || section == "hooks" || pointerTouchesCredential(in.Pointer)
 		return applyConfigEdit(tc, deps, section, in.Pointer, sensitive, "Remove", func(root any) (any, error) {
@@ -533,7 +534,7 @@ func removeConfig(deps Deps) functiontool.Func[removeConfigIn, writeResult] {
 
 // applyConfigEdit loads the section's root, optionally confirms, applies edit,
 // computes restart_required for models, writes, and reloads.
-func applyConfigEdit(tc tool.Context, deps Deps, section, pointer string, sensitive bool, verb string, edit func(root any) (any, error)) (writeResult, error) {
+func applyConfigEdit(tc adk.ToolContext, deps Deps, section, pointer string, sensitive bool, verb string, edit func(root any) (any, error)) (writeResult, error) {
 	// Resolve where the section's data lives and how it is written back.
 	var (
 		root         any

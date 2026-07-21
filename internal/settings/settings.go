@@ -16,7 +16,7 @@ import (
 	"context"
 	"sync"
 
-	"google.golang.org/adk/tool"
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Deps wires the tool group to its host surface. Mirrors registries.Deps.
@@ -51,7 +51,7 @@ func SetConfirmer(c Confirmer) {
 // confirmSensitive asks the registered confirmer to approve a sensitive change.
 // Returns (proceed, reason): proceed=false with a reason when there is no
 // confirmer (off-surface safety) or the user declined.
-func confirmSensitive(tc tool.Context, summary string) (bool, string) {
+func confirmSensitive(tc adk.ToolContext, summary string) (bool, string) {
 	confirmerMu.RLock()
 	c := confirmer
 	confirmerMu.RUnlock()

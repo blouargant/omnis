@@ -12,6 +12,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // Worktree is a created git worktree.
@@ -113,7 +115,7 @@ func Tools(repo string) []tool.Tool {
 	c, _ := functiontool.New(functiontool.Config{
 		Name:        "worktree_create",
 		Description: "Create an isolated git worktree at `path` on a new branch `branch` (optionally from `base`, default HEAD).",
-	}, func(_ tool.Context, in createIn) (createOut, error) {
+	}, func(_ adk.ToolContext, in createIn) (createOut, error) {
 		w, err := Create(repo, in.Path, in.Branch, in.Base)
 		if err != nil {
 			return createOut{Result: "Error: " + err.Error()}, nil
@@ -123,7 +125,7 @@ func Tools(repo string) []tool.Tool {
 	r, _ := functiontool.New(functiontool.Config{
 		Name:        "worktree_remove",
 		Description: "Remove a worktree previously created with worktree_create.",
-	}, func(_ tool.Context, in removeIn) (removeOut, error) {
+	}, func(_ adk.ToolContext, in removeIn) (removeOut, error) {
 		if err := Remove(repo, in.Path); err != nil {
 			return removeOut{Result: "Error: " + err.Error()}, nil
 		}
@@ -132,7 +134,7 @@ func Tools(repo string) []tool.Tool {
 	m, _ := functiontool.New(functiontool.Config{
 		Name:        "worktree_merge",
 		Description: "Merge a worktree branch back into the current branch. Aborts cleanly on conflict and reports the conflicting files.",
-	}, func(_ tool.Context, in mergeIn) (mergeOut, error) {
+	}, func(_ adk.ToolContext, in mergeIn) (mergeOut, error) {
 		s, err := Merge(repo, in.Branch)
 		if err != nil {
 			return mergeOut{Result: "Error: " + err.Error()}, nil

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"google.golang.org/adk/tool"
+	"github.com/blouargant/omnis/core/adk"
 )
 
 // cwdCtxKey keys the per-invocation working directory carried on the Go context.
@@ -57,13 +57,13 @@ func SetCwdResolver(f func(sessionID string) string) {
 // sessionCwd returns the working directory for the given tool context's session,
 // or "" when no resolver is installed or it yields no directory (the caller then
 // falls back to the process working directory).
-func sessionCwd(ctx tool.Context) string {
+func sessionCwd(ctx adk.ToolContext) string {
 	if ctx == nil {
 		return ""
 	}
 	// A cwd planted on the invocation context wins — it survives into sub-agent
 	// runners (which generate a fresh session id) so delegated file ops share
-	// the leader's directory. tool.Context embeds context.Context.
+	// the leader's directory. adk.ToolContext embeds context.Context.
 	if c := cwdFromContext(ctx); c != "" {
 		return c
 	}
@@ -82,12 +82,12 @@ func sessionCwd(ctx tool.Context) string {
 // (CLI/one-shot). Exposed so the permissions layer can scope "Allow in this
 // project" to the very directory the tools will use, keeping rule matching and
 // tool execution in agreement.
-func CwdForContext(ctx tool.Context) string { return sessionCwd(ctx) }
+func CwdForContext(ctx adk.ToolContext) string { return sessionCwd(ctx) }
 
 // CwdFor resolves the working directory from a plain context plus an explicit
 // session id — the cwd planted by WithCwd wins, otherwise the SessionID
 // resolver. It mirrors sessionCwd for callers that only hold a context.Context
-// and a session id (e.g. a BeforeModelCallback), not a tool.Context. Empty when
+// and a session id (e.g. a BeforeModelCallback), not an adk.ToolContext. Empty when
 // neither resolves.
 func CwdFor(ctx context.Context, sessionID string) string {
 	if c := cwdFromContext(ctx); c != "" {
