@@ -129,7 +129,7 @@ func budgetCallbacks(store *budget.Store, reg *askuser.Registry, limits budget.L
 				// IsFinalResponse(), which ends the loop — a host-side guarantee, the
 				// same one the routing tools rely on, rather than another instruction.
 				if overBy > agentCapGraceCalls {
-					tc.Actions().SkipSummarization = true
+					adk.EndTurnAfterToolCall(tc)
 				}
 				return map[string]any{"output": agentCapNotice(agentName)}, nil
 			}

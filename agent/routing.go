@@ -193,7 +193,7 @@ func routeToSquadTool(reg *RouteRegistry, validTargets []string) tool.Tool {
 		// terminating the loop immediately after the call. This is the host-side
 		// guarantee the instruction ("emit nothing, just route and stop") cannot
 		// give on its own.
-		ctx.Actions().SkipSummarization = true
+		adk.EndTurnAfterToolCall(ctx)
 		return routeOut{Result: "Routed to the " + target + " squad; it will take over and answer the user's original message directly."}, nil
 	})
 	if err != nil {
@@ -229,7 +229,7 @@ func handoffToRouterTool(reg *RouteRegistry) tool.Tool {
 		// there is nothing more for it to do, so end the run here rather than
 		// letting the ADK loop give the model another (potentially looping)
 		// turn. See the note in routeToSquadTool.
-		ctx.Actions().SkipSummarization = true
+		adk.EndTurnAfterToolCall(ctx)
 		return handoffOut{Result: "Control handed back to the router; it will re-route the user's original message."}, nil
 	})
 	if err != nil {

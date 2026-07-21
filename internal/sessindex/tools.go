@@ -319,7 +319,7 @@ func NewTools(d Deps) []tool.Tool {
 		// to a search whose answer was already ready. Same host-side guarantee the
 		// routing tools use (see agent/routing.go). Mirror the "call this ONCE, as
 		// your final tool call" instruction in code.
-		ctx.Actions().SkipSummarization = true
+		adk.EndTurnAfterToolCall(ctx)
 		return reportOut{OK: true, Count: n}, nil
 	}); err == nil {
 		out = append(out, report)

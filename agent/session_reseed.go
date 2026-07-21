@@ -20,6 +20,8 @@ import (
 
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
+
+	adk "github.com/blouargant/omnis/core/adk"
 )
 
 // Exchange is one persisted user→assistant turn, flattened to plain text. The
@@ -136,7 +138,7 @@ func reseedSquadSession(ctx context.Context, sq *SquadInstance, userID, sessionI
 	}
 
 	appendEvent := func(author, role, text string) error {
-		ev := session.NewEvent("")
+		ev := adk.NewEvent(ctx, "")
 		ev.Author = author
 		ev.TurnComplete = true
 		ev.Content = &genai.Content{Role: role, Parts: []*genai.Part{{Text: text}}}
