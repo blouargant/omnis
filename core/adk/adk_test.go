@@ -3,6 +3,8 @@ package adk
 import (
 	"context"
 	"testing"
+
+	"google.golang.org/genai"
 )
 
 // TestSkipSummarizationImpliesFinalResponse pins the exact host-side guarantee
@@ -14,10 +16,22 @@ import (
 // spin forever. If this test breaks at the v2 bump, the termination design
 // (not just this package) needs rework.
 func TestSkipSummarizationImpliesFinalResponse(t *testing.T) {
+	// Build an event that is NON-final on its own merits: it carries a
+	// function call, so IsFinalResponse()'s "no function calls" branch does
+	// NOT fire. This is what makes the assertion below non-vacuous — the only
+	// thing that can make this event final is SkipSummarization.
 	ev := NewEvent(context.Background(), "canary")
+	ev.Content = &genai.Content{
+		Role:  "model",
+		Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: "route_to_squad"}}},
+	}
+	if ev.IsFinalResponse() {
+		t.Fatal("precondition failed: an event carrying a function call must NOT be final until SkipSummarization is set; the canary would be vacuous otherwise")
+	}
+
 	ev.Actions.SkipSummarization = true
 	if !ev.IsFinalResponse() {
-		t.Fatal("SkipSummarization must imply IsFinalResponse(): omnis relies on it to end a turn after route_to_squad / handoff_to_router / the budget cap / report_sessions")
+		t.Fatal("SkipSummarization must force IsFinalResponse(): omnis relies on it to end a turn after route_to_squad / handoff_to_router / the budget cap / report_sessions")
 	}
 }
 
