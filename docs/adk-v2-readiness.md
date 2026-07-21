@@ -22,13 +22,21 @@ announcement and the README-v2.md migration guide.
 
 ## Surface tracker
 
-Run `make adk-v2-status`. Definition of ready = the three aliased-seam counts
-are 0 AND `core/adk` compiles/tests green against the target ADK version.
+Run `make adk-v2-status`. Its "seams outside core/adk" line is not a separate
+hand-grepped count — it **runs `go test ./internal/adkguard/
+-run TestNoRawADKSeamsOutsideFacade`** and reports that test's own PASS/FAIL, so
+the dashboard can never drift from the guard. This matters because the guard's
+`rawADK` matcher is **alias-agnostic** (`\b(\w+)\.(ToolContext|CallbackContext|
+ReadonlyContext|InvocationContext)\b`, `\b(\w+)\.NewEvent(WithContext)?\(`,
+skipping only `adk.`-prefixed matches — our own façade): it catches a seam
+introduced under *any* import alias (e.g. `adksession.NewEvent(...)`, or a
+`CallbackContext` reached via an aliased `adk/agent` import), not just the
+default package names. Definition of ready = `make adk-v2-status` shows
+"seams outside core/adk: 0" (equivalently, `go test ./internal/adkguard/`
+passes) AND `core/adk` compiles/tests green against the target ADK version.
 
-- Baseline (2026-07-21, on v1.5): raw context types **0**, SkipSummarization
-  **0**, session.NewEvent **0**; direct ADK imports (stable types, expected
-  non-zero) **100 files**. Confirmed independently by
-  `go test ./internal/adkguard/` (PASS).
+- Baseline (2026-07-21, on v1.5): seams outside core/adk **0** (guard passes);
+  direct ADK imports (stable types, expected non-zero) **100 files**.
 
 ## Manual v2 spike procedure (run occasionally; do NOT commit the result)
 
