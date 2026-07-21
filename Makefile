@@ -44,6 +44,10 @@ fmt: ## Format sources
 vet: ## Run go vet
 	$(GO) vet ./...
 
+.PHONY: adk-v2-status
+adk-v2-status: ## Show ADK v2 migration surface + version drift
+	@bash scripts/adk-v2-status.sh
+
 MONACO_VERSION ?= 0.55.1
 .PHONY: vendor-monaco
 vendor-monaco: ## Vendor the Monaco Editor (min/vs) into web/monaco/vs for offline use
