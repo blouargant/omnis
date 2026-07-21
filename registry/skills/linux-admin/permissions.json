@@ -1,0 +1,107 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(systemctl status *)",
+      "Bash(systemctl is-enabled *)",
+      "Bash(systemctl is-active *)",
+      "Bash(systemctl is-failed *)",
+      "Bash(systemctl list-units *)",
+      "Bash(systemctl list-unit-files *)",
+      "Bash(systemctl list-timers *)",
+      "Bash(systemctl show *)",
+      "Bash(systemctl cat *)",
+      "Bash(journalctl *)",
+      "Bash(dpkg -l *)",
+      "Bash(dpkg -L *)",
+      "Bash(dpkg -S *)",
+      "Bash(dpkg-query *)",
+      "Bash(apt list *)",
+      "Bash(apt-cache *)",
+      "Bash(apt-get -s *)",
+      "Bash(rpm -q *)",
+      "Bash(rpm -qa *)",
+      "Bash(rpm -qi *)",
+      "Bash(rpm -ql *)",
+      "Bash(rpm -qf *)",
+      "Bash(pacman -Q *)",
+      "Bash(pacman -Qi *)",
+      "Bash(pacman -Ql *)",
+      "Bash(ss *)",
+      "Bash(ip route show *)",
+      "Bash(ip addr show *)",
+      "Bash(ip link show *)",
+      "Bash(sysctl -a *)",
+      "Bash(df *)",
+      "Bash(free *)",
+      "Bash(lsblk *)",
+      "Bash(lscpu *)",
+      "Bash(lsmod *)",
+      "Bash(uname *)",
+      "Bash(id *)",
+      "Bash(hostnamectl status *)",
+      "Bash(timedatectl status *)"
+    ],
+    "ask": [
+      {
+        "regex": "\\b(apt|apt-get|aptitude)\\s+(install|remove|purge|autoremove|reinstall|upgrade|dist-upgrade|full-upgrade)\\b",
+        "reason": "APT package change with system side effects — confirm the package(s) before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(dnf|yum)\\s+(install|remove|erase|upgrade|update|reinstall|downgrade|group[a-z-]*)\\b",
+        "reason": "DNF/YUM package change with system side effects — confirm the package(s) before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bpacman\\s+-\\S*[SRU]",
+        "reason": "pacman package change with system side effects — confirm the package(s) before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bzypper\\s+(in|install|rm|remove|up|update|dup|dist-upgrade)\\b",
+        "reason": "zypper package change with system side effects — confirm the package(s) before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bapk\\s+(add|del)\\b",
+        "reason": "apk package change with system side effects — confirm the package(s) before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bsystemctl\\s+(start|stop|restart|reload|reload-or-restart|enable|disable|mask|unmask|set-default|isolate|kill|edit)\\b",
+        "reason": "systemctl operation changes a service/unit or boot state — confirm the unit and effect before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(useradd|usermod|userdel|groupadd|groupmod|groupdel|passwd|chpasswd|gpasswd)\\b",
+        "reason": "user/group/credential change — confirm the account and change before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bip\\s+(addr|address|link|route|rule)\\s+(add|del|delete|change|replace|set|flush)\\b",
+        "reason": "network configuration change — confirm the interface/route before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(ufw|firewall-cmd|iptables|ip6tables|nft)\\b",
+        "reason": "firewall change — confirm the rule and that host security is preserved before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(mount|umount)\\b",
+        "reason": "filesystem mount change — confirm the device and mountpoint before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\bsysctl\\s+-w\\b",
+        "reason": "kernel parameter change — confirm the key and value before running",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(mkfs|mkswap|parted|fdisk|sfdisk|cfdisk|wipefs)\\b",
+        "reason": "disk/partition/filesystem operation — destructive; confirm the exact device before running",
+        "tools": ["Bash"]
+      }
+    ]
+  }
+}

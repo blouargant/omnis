@@ -25,7 +25,8 @@
     "code_scout",
     "code_docs",
     "reviewer",
-    "refactorer"
+    "refactorer",
+    "linux_admin"
   ],
   "app_name": "omnis",
   "bash_timeout_seconds": 120,
@@ -46,7 +47,8 @@
       "members": [
         "investigator",
         "summariser",
-        "helper"
+        "helper",
+        "linux_admin"
       ]
     },
     {

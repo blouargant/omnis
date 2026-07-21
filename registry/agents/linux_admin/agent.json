@@ -1,0 +1,29 @@
+{
+  "allow_file_attachments": true,
+  "builtin": false,
+  "description": "Careful Linux workstation change specialist. Applies host modifications with great care: installs/removes packages, manages systemd services and timers, edits and validates configuration files, and handles users/permissions and networking. Detects the distro and package manager, previews or simulates every change, backs up config files before editing, and prefers the package manager and drop-in overrides over clobbering package-managed files. Every mutating command is permission-gated. It does not diagnose from scratch — the leader briefs the target and the intended change; it determines HOW to make it safely and carries it out.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 1,
+  "model_ref": "balanced",
+  "name": "linux_admin",
+  "skills": [
+    "linux-admin"
+  ],
+  "softskills_dir": "",
+  "tools": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Grep",
+    "Glob",
+    "Skill",
+    "revert",
+    "mime",
+    "mcp",
+    "softskills",
+    "calc",
+    "bg"
+  ]
+}

@@ -17,10 +17,11 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
-## 1.9 (in development) — Collection memory management
+## 1.9 (in development) — Collection memory management & a Linux admin agent
 
 - **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.
 - **Automatic memory updates** — opt a collection into keeping its memory current from recent chats, with one-click revert.
+- **Linux admin agent** — the System squad can now make careful, preview-first changes to your Linux workstation (packages, systemd services, config files, users, networking), with every change permission-gated.
 
 ## 1.8 — Collection context & session search
 

@@ -344,7 +344,8 @@ main.go / server/
             │    │    │    └── a2a_<name>…   ← one tool per peer in a2a_config.json
             │    │    ├── investigator        ← read-only evidence gatherer (tool-wrapped, not transfer_to_agent)
             │    │    ├── summariser          ← condenses bulk output
-            │    │    └── helper               ← docs/registry/settings operator
+            │    │    ├── helper               ← docs/registry/settings operator
+            │    │    └── linux_admin          ← careful Linux workstation change executor (loads the linux-admin skill; preview-first, permission-gated; balanced model)
             │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer · agentmd_reviewer (read-only fresh-eyes verifier for /init-generated AGENT.md)
