@@ -91,6 +91,26 @@
   color: var(--col-accent, var(--text-muted));
   flex-shrink: 0;
 }
+/* Colour pastille shown IN PLACE of the folder glyph when the sidebar is
+ * collapsed to a rail (show/hide in features/sidebar.css): the collection's
+ * initials, in its own colour (--col-accent, mirroring the tinted glyph) on a
+ * faint disc of the same hue. Colouring the letter rather than filling the disc
+ * keeps every mid-tone hue legible and matches the expanded folder glyph.
+ * Hidden while the sidebar is expanded. */
+.collection-badge {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--col-accent, var(--text-muted));
+  background: color-mix(in srgb, var(--col-accent, var(--text-muted)) 16%, transparent);
+}
 .collection-name {
   flex: 1;
   overflow: hidden;

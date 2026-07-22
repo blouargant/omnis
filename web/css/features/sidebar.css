@@ -109,12 +109,17 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #new-chat-wrap { margin: 10px 8px 4px; }
 #sidebar.collapsed #new-chat { padding: 0; border-radius: 10px; }
 
-/* Collections: centred star/folder icons (names + counts hidden). The session
- * list itself lives in the middle #session-pane column, which never collapses. */
+/* Collections: names + counts hidden. General keeps its centred star; each user
+ * collection swaps its folder glyph for a colour pastille bearing the name's
+ * initials (see .collection-badge in features/collections.css). The full name is
+ * a hover tooltip (data-tip on the row). The session list itself lives in the
+ * middle #session-pane column, which never collapses. */
 #sidebar.collapsed #collections-list { padding: 6px 4px; }
 #sidebar.collapsed .collection-row { justify-content: center; padding: 6px 0; gap: 0; }
 #sidebar.collapsed .collection-name,
-#sidebar.collapsed .collection-count { display: none; }
+#sidebar.collapsed .collection-count,
+#sidebar.collapsed .collection-icon { display: none; }
+#sidebar.collapsed .collection-badge { display: inline-flex; }
 #sidebar.collapsed .collection-row.active::before { display: none; }
 
 /* The two-letter session glyph only exists for the (now removed) collapsed

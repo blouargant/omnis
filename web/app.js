@@ -6075,6 +6075,16 @@ function collectionAccentVar(color) {
   return color && COLLECTION_COLORS.includes(color) ? `var(--collection-${color})` : "";
 }
 
+// collectionInitials returns the 1–2 letter glyph shown on the colour pastille
+// in the collapsed sidebar rail: the initials of the first two words, else the
+// first two characters of a single-word name, uppercased (e.g. "Work Projects"
+// → "WP", "Research" → "RE").
+function collectionInitials(name) {
+  const words = String(name || "").trim().split(/[\s_\-/]+/).filter(Boolean);
+  const s = words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2);
+  return s.toUpperCase();
+}
+
 // collectionColorByName returns the palette key assigned to a collection (by
 // name, case-insensitive), or "" when unknown / uncoloured / General.
 function collectionColorByName(name) {
@@ -6141,12 +6151,21 @@ function buildCollectionRow(c) {
   const accent = collectionAccentVar(c.color);
   if (accent) li.style.setProperty("--col-accent", accent);
   if (c.name.toLowerCase() === activeCollection.toLowerCase()) li.classList.add("active");
+  // Expanded sidebar: a folder glyph (tinted with the collection colour) + name;
+  // General keeps its star. Collapsed to a rail: user collections swap the folder
+  // glyph for a colour pastille bearing the name's initials (General keeps the
+  // star — see the show/hide rules in web/css/features/sidebar.css). The full
+  // name is always a hover tooltip, so a truncated (expanded) or letters-only
+  // (collapsed) row stays identifiable.
   const icon = c.general
     ? `<span class="collection-star">${ICON_STAR}</span>`
-    : `<span class="collection-icon">${ICON_FOLDER}</span>`;
+    : `<span class="collection-icon">${ICON_FOLDER}</span><span class="collection-badge" aria-hidden="true"></span>`;
   li.innerHTML = `${icon}<span class="collection-name"></span><span class="collection-count"></span>`;
   li.querySelector(".collection-name").textContent = c.name;
   li.querySelector(".collection-count").textContent = c.count > 0 ? String(c.count) : "";
+  const badge = li.querySelector(".collection-badge");
+  if (badge) badge.textContent = collectionInitials(c.name);
+  li.setAttribute("data-tip", c.name);
   li.addEventListener("click", () => selectCollection(c.name));
   // Right-click → rename/delete (user collections only; General is fixed).
   if (!c.general) {

@@ -62,7 +62,7 @@ same colour/size in multiple partials.
 | File | Owns |
 |---|---|
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
-| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), the per-collection **colour** accent (`--col-accent` on the active bar + folder glyph) and the colour-picker swatch grid (`.collection-swatch*`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
+| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), the per-collection **colour** accent (`--col-accent` on the active bar + folder glyph), the collapsed-rail colour pastille (`.collection-badge` — initials in the collection colour; shown/hidden by `features/sidebar.css`) and the colour-picker swatch grid (`.collection-swatch*`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
 | `sidebar.css` | Left sidebar (app chrome + Collections + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, session rows, archived-sessions panel, sidebar resize handle |
 | `folders.css` | Folders browser panel + its right-click context menu |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
