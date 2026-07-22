@@ -51,3 +51,4 @@ dist/wheels/
 
 # stray build artifact (was committed by mistake)
 yoke
+.playwright-mcp/
