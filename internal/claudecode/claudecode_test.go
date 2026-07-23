@@ -5,26 +5,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blouargant/omnis/core/adk"
 )
 
-// stubToolContext embeds adk.ToolContext (nil) and overrides only the two
-// methods runClaudeCode actually reaches: SessionID() (used directly, and to
-// key the resumed-session store) and Value() (fstools.CwdForContext probes the
+// stubToolContext embeds adk.ToolContext (nil) and overrides the methods
+// runClaudeCode actually reaches: SessionID() (used directly, and to key the
+// resumed-session store) and Value() (fstools.CwdForContext probes the
 // context for a WithCwd-planted value before falling back to the session
-// resolver — with neither set here it must resolve to "", not panic). Any
-// other method would panic on the nil embedded interface, but the tested paths
-// never call them. Mirrors the fakeCtx/testCtx pattern in
-// internal/settings/settings_test.go, the repo's existing minimal-ToolContext-
-// stub convention.
+// resolver — with neither set here it must resolve to "", not panic). Since
+// runClaudeCode now derives its timeout context from tc directly
+// (context.WithTimeout(tc, ...) — tc embeds context.Context), the stub must
+// also satisfy context.Context itself: Deadline/Done/Err are overridden to
+// behave like context.Background() (no deadline, never cancelled) rather than
+// falling through to the nil embedded interface. Any other method would panic
+// on the nil embedded interface, but the tested paths never call them. Mirrors
+// the fakeCtx/testCtx pattern in internal/settings/settings_test.go, the
+// repo's existing minimal-ToolContext-stub convention.
 type stubToolContext struct {
 	adk.ToolContext
 	sid string
 }
 
-func (s stubToolContext) SessionID() string { return s.sid }
-func (s stubToolContext) Value(any) any     { return nil }
+func (s stubToolContext) SessionID() string           { return s.sid }
+func (s stubToolContext) Value(any) any               { return nil }
+func (s stubToolContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (s stubToolContext) Done() <-chan struct{}       { return nil }
+func (s stubToolContext) Err() error                  { return nil }
 
 func tcStub(sessionID string) adk.ToolContext {
 	return stubToolContext{sid: sessionID}
@@ -101,5 +109,40 @@ func TestClaudeCodeMissingBinary(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(out.Result), "claude") || !strings.Contains(out.Result, "install") {
 		t.Fatalf("expected a not-installed notice, got %q", out.Result)
+	}
+}
+
+func TestClaudeCodeAllowlistOverride(t *testing.T) {
+	argsLog := writeFakeClaude(t)
+	SetDepGate(nil)
+	SetAllowlistResolver(func(string) []string { return []string{"Read", "Bash(go test:*)"} })
+	t.Cleanup(func() { SetAllowlistResolver(nil); ForgetSession("sessC") })
+	if _, err := runClaudeCode(tcStub("sessC"), claudeCodeIn{Task: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	logged, _ := os.ReadFile(argsLog)
+	line := strings.TrimSpace(string(logged))
+	if !strings.Contains(line, "Read,Bash(go test:*)") {
+		t.Fatalf("custom allowlist not sent: %q", line)
+	}
+	if strings.Contains(line, "Glob") { // a default-only tool must be absent
+		t.Fatalf("default allowlist leaked despite override: %q", line)
+	}
+}
+
+func TestClaudeCodeReportsStderrOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho 'boom: auth failed' 1>&2\nexit 3\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	SetDepGate(nil)
+	out, err := runClaudeCode(tcStub("sessD"), claudeCodeIn{Task: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Result, "boom: auth failed") {
+		t.Fatalf("stderr not surfaced: %q", out.Result)
 	}
 }

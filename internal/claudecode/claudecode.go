@@ -1,6 +1,6 @@
 // Package claudecode drives an external Claude Code CLI (`claude`) as a headless
 // per-project worker: the `claude_code` tool runs `claude -p <task> --output-format
-// json [--resume <id>] --allowedTools <allowlist> [--model <m>]` in the session's
+// json [--resume <id>] --allowedTools <allowlist>` in the session's
 // working directory, parses the JSON envelope, and remembers the returned
 // session_id so later calls in the same driver session resume it. Modelled on
 // internal/astgrep (a deps-gated, explicit-argv, JSON-output binary tool). Imports
@@ -8,6 +8,7 @@
 package claudecode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -167,14 +168,23 @@ func runClaudeCode(tc adk.ToolContext, in claudeCodeIn) (claudeCodeOut, error) {
 		args = append(args, "--resume", rid)
 	}
 
-	cctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	cctx, cancel := context.WithTimeout(tc, runTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, binary, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
+	var errbuf bytes.Buffer
+	cmd.Stderr = &errbuf
 	stdout, err := cmd.Output()
 	if err != nil {
+		msg := strings.TrimSpace(errbuf.String())
+		if len(msg) > 2000 {
+			msg = msg[len(msg)-2000:]
+		}
+		if msg != "" {
+			return claudeCodeOut{Result: fmt.Sprintf("claude_code: the Claude Code worker failed: %v\n%s", err, msg)}, nil
+		}
 		return claudeCodeOut{Result: fmt.Sprintf("claude_code: the Claude Code worker failed: %v", err)}, nil
 	}
 	var env envelope
