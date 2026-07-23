@@ -200,6 +200,7 @@ func forgetSessionState(d serverDeps, id string) {
 		if infra := d.Manager.Infra(); infra != nil {
 			infra.RouteDirectives.Forget(id)
 			infra.SpawnDirectives.Forget(id)
+			infra.FleetDispatches.Forget(id)
 		}
 	}
 }

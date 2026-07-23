@@ -491,6 +491,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			// completion. Runs on the server root context inside drainSpawns so a
 			// Stop/disconnect on this turn never cancels the spawn.
 			drainSpawns(d, meta.ID, meta.UserID)
+			drainFleetDispatches(d, meta.ID, meta.UserID)
 			// Terminal event for the whole (possibly multi-turn) exchange. Carry the
 			// wall-clock time so the web UI can show "time taken" next to copy.
 			emitFrame("done", map[string]any{"duration_ms": time.Since(overallStart).Milliseconds()})

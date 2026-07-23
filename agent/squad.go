@@ -190,6 +190,12 @@ func buildSquadInstance(
 	if keySet["spawn"] && opts.SessionSpawning && !leaderless {
 		leadTools = append(leadTools, spawnSessionTool(infra.SpawnDirectives, routerSquadCatalogue(runtime)))
 	}
+	// fleet_dispatch — hand a coding task to a fleet project's Driver session.
+	// Same gating as spawn_session (leader-only, surface-gated): the server
+	// drains FleetDispatches after the turn and materialises the Driver.
+	if keySet["fleet_dispatch"] && opts.SessionSpawning && !leaderless {
+		leadTools = append(leadTools, fleetDispatchTool(infra.FleetDispatches))
+	}
 
 	// ── Always-on for any squad root: teammate mailbox + ask_user ──
 	// The mailbox keeps the root reachable by other sessions/squads (e.g. a
