@@ -51,3 +51,30 @@ func TestValidateOK(t *testing.T) {
 		t.Fatalf("unexpected: %v", err)
 	}
 }
+
+func TestValidateAggregatesMultipleProblems(t *testing.T) {
+	projects := []Project{
+		{Name: "", Cwd: "/x", Engine: EngineOmnis},
+		{Name: "b", Cwd: "/x/b", Engine: "python", DependsOn: []string{"ghost"}},
+	}
+	err := Validate(projects)
+	if err == nil {
+		t.Fatal("expected aggregated errors")
+	}
+	msg := err.Error()
+	for _, want := range []string{"blank name", "engine", "ghost"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("want %q in aggregated error, got %q", want, msg)
+		}
+	}
+}
+
+func TestTopoOrderDanglingEdgeIsNotCycle(t *testing.T) {
+	order, err := TopoOrder([]Project{p("a", "ghost")})
+	if err != nil {
+		t.Fatalf("dangling edge must not be reported as a cycle: %v", err)
+	}
+	if len(order) != 1 || order[0] != "a" {
+		t.Fatalf("expected [a], got %v", order)
+	}
+}
