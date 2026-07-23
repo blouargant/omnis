@@ -6,6 +6,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 
 	"github.com/blouargant/omnis/internal/fleet"
@@ -58,6 +59,10 @@ func drainFleetDispatches(d serverDeps, parentID, parentUserID string) {
 		opts, ok := fleetDriverOptions(dd.Project, parentUserID)
 		if !ok {
 			continue // unknown/unsupported — the tool already reported it to the model
+		}
+		if d.Manager != nil && !d.Manager.HasSquad(opts.Squad) {
+			log.Printf("fleet dispatch: skipping project %q — resolved squad %q does not exist", dd.Project, opts.Squad)
+			continue // avoid materializeSession silently falling back to the System squad
 		}
 		meta := materializeSession(d, opts)
 		if meta == nil {

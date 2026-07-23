@@ -589,6 +589,18 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	} else {
 		pm.bcast.broadcast(sseEvent, sessionID)
 	}
+
+	// Drain any spawns/dispatches this injected turn queued (e.g. a Conductor
+	// that dispatches a follow-up project while replying to a delivered Driver
+	// result). handleMessages drains after its own RunWithRouting exchange loop
+	// for interactive turns; injectTurnRouted is the equivalent completion point
+	// for mailbox/scheduler/spawn/dispatch-delivery turns, which never pass
+	// through handleMessages. Both drains are no-ops when nothing was queued,
+	// and the resulting recursion is bounded by the project DAG + the per-turn
+	// dispatch cap, so no extra loop guard is needed here.
+	drainSpawns(d, sessionID, userID)
+	drainFleetDispatches(d, sessionID, userID)
+
 	return reply
 }
 
