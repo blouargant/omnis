@@ -33,6 +33,7 @@ import (
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/docindex"
+	"github.com/blouargant/omnis/internal/fleet"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/regindex"
@@ -329,6 +330,11 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// is auto-installed on first use by the process-wide dependency gate
 			// (astgrep.SetDepGate, wired in infrastructure.go).
 			agentTools = append(agentTools, astgrep.Tools()...)
+		case "fleet":
+			// Read-only fleet registry tool (fleet_projects). Enumeration is
+			// backed by the process-wide resolver the server installs; with no
+			// resolver (CLI/TUI) it returns an empty list — no behavior.
+			agentTools = append(agentTools, fleet.Tools()...)
 		case "registries":
 			agentTools = append(agentTools, registries.NewTools(buildRegistriesDeps(runtime))...)
 			hasRegistries = true

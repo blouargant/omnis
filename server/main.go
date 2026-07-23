@@ -282,6 +282,13 @@ func run() error {
 	})
 	defer agent.SetCollectionResolver(nil)
 
+	// Wire the process-wide fleet project resolver to the collection registry:
+	// a fleet project is a collection whose profile has role:"project". This
+	// backs the fleet_projects tool (mounted via the "fleet" tool-group key).
+	// Server-only: CLI/TUI never call it, so fleet_projects returns an empty
+	// list there.
+	installFleetResolver()
+
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous
 	// run are cleaned up before the server starts accepting traffic.
