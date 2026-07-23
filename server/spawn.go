@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	toolkitagent "github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/internal/claudecode"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/sessions"
 )
@@ -203,6 +204,7 @@ func forgetSessionState(d serverDeps, id string) {
 			infra.FleetDispatches.Forget(id)
 		}
 	}
+	claudecode.ForgetSession(id)
 }
 
 // deleteSession permanently removes a session and all its state: the registry

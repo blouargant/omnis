@@ -17,6 +17,7 @@ import (
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/binpath"
 	"github.com/blouargant/omnis/internal/budget"
+	"github.com/blouargant/omnis/internal/claudecode"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/lsp"
@@ -227,6 +228,12 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 	// call installs the binary (asking the user first) if it's missing. Same
 	// model as the skill/LSP gates; process-wide + survives hot-reload.
 	astgrep.SetDepGate(newAstgrepDepGate(askUserReg))
+
+	// Install the process-wide claude_code dependency gate: the first
+	// claude_code call installs the `claude` CLI (asking the user first) if
+	// it's missing. Same model as the skill/LSP/astgrep gates; process-wide +
+	// survives hot-reload.
+	claudecode.SetDepGate(newClaudeCodeDepGate(askUserReg))
 
 	// Install the process-wide settings confirmer: the settings tool group
 	// (mounted on the Helper) uses it to gate security-sensitive changes

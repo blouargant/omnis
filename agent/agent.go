@@ -29,6 +29,7 @@ import (
 	"github.com/blouargant/omnis/internal/a2a"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/astgrep"
+	"github.com/blouargant/omnis/internal/claudecode"
 	"github.com/blouargant/omnis/internal/claudeformat"
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/configedit"
@@ -330,6 +331,14 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// is auto-installed on first use by the process-wide dependency gate
 			// (astgrep.SetDepGate, wired in infrastructure.go).
 			agentTools = append(agentTools, astgrep.Tools()...)
+		case "claude_code":
+			// Drives an external Claude Code CLI worker in the session's project
+			// directory (claude_code). The `claude` binary is auto-installed on
+			// first use by the process-wide dependency gate (claudecode.SetDepGate,
+			// wired in infrastructure.go); its allowlist is resolved per-session by
+			// the process-wide resolver the server installs (falls back to
+			// claudecode.DefaultAllowedTools with no resolver).
+			agentTools = append(agentTools, claudecode.Tools()...)
 		case "fleet":
 			// Read-only fleet registry tool (fleet_projects). Enumeration is
 			// backed by the process-wide resolver the server installs; with no

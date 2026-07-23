@@ -289,6 +289,12 @@ func run() error {
 	// list there.
 	installFleetResolver()
 
+	// Wire the process-wide claude_code allowlist resolver to the same session
+	// registry: a driver session's project (its collection) can override the
+	// default Claude Code --allowedTools list. Server-only: CLI/TUI never call
+	// it, so claude_code always falls back to claudecode.DefaultAllowedTools.
+	installClaudeAllowlistResolver(registry)
+
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous
 	// run are cleaned up before the server starts accepting traffic.
