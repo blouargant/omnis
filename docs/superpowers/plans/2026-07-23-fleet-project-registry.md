@@ -273,6 +273,33 @@ func TestValidateOK(t *testing.T) {
 		t.Fatalf("unexpected: %v", err)
 	}
 }
+
+func TestValidateAggregatesMultipleProblems(t *testing.T) {
+	projects := []Project{
+		{Name: "", Cwd: "/x", Engine: EngineOmnis},
+		{Name: "b", Cwd: "/x/b", Engine: "python", DependsOn: []string{"ghost"}},
+	}
+	err := Validate(projects)
+	if err == nil {
+		t.Fatal("expected aggregated errors")
+	}
+	msg := err.Error()
+	for _, want := range []string{"blank name", "engine", "ghost"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("want %q in aggregated error, got %q", want, msg)
+		}
+	}
+}
+
+func TestTopoOrderDanglingEdgeIsNotCycle(t *testing.T) {
+	order, err := TopoOrder([]Project{p("a", "ghost")})
+	if err != nil {
+		t.Fatalf("dangling edge must not be reported as a cycle: %v", err)
+	}
+	if len(order) != 1 || order[0] != "a" {
+		t.Fatalf("expected [a], got %v", order)
+	}
+}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -316,9 +343,15 @@ type Project struct {
 }
 
 // TopoOrder returns project names in dependency-first order (a project appears
-// after everything it depends on). It errors if the graph has a cycle. Order is
-// deterministic (ties broken alphabetically) so plans are reproducible.
+// after everything it depends on). It errors if the graph has a cycle. Edges to
+// names that are not themselves projects are ignored here (Validate reports them
+// as unknown dependencies), so a dangling edge is never mistaken for a cycle.
+// Order is deterministic (ties broken alphabetically) so plans are reproducible.
 func TopoOrder(projects []Project) ([]string, error) {
+	known := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		known[p.Name] = true
+	}
 	indeg := make(map[string]int, len(projects))
 	adj := make(map[string][]string, len(projects))
 	for _, p := range projects {
@@ -328,6 +361,9 @@ func TopoOrder(projects []Project) ([]string, error) {
 	}
 	for _, p := range projects {
 		for _, dep := range p.DependsOn {
+			if !known[dep] {
+				continue // unknown dep: a Validate concern, not an ordering/cycle one
+			}
 			adj[dep] = append(adj[dep], p.Name) // dep must precede p
 			indeg[p.Name]++
 		}
@@ -362,17 +398,22 @@ func TopoOrder(projects []Project) ([]string, error) {
 }
 
 // Validate aggregates all structural problems: blank names, unknown/self edges,
-// unknown engine, and cycles. Returns nil when the graph is sound.
+// unknown engine, and cycles. Returns nil when the graph is sound. It never
+// fail-fasts — a config with several mistakes reports them all at once.
 func Validate(projects []Project) error {
+	var problems []string
 	names := make(map[string]bool, len(projects))
-	for _, p := range projects {
+	for i, p := range projects {
 		if strings.TrimSpace(p.Name) == "" {
-			return errors.New("fleet: a project has a blank name")
+			problems = append(problems, fmt.Sprintf("project #%d has a blank name", i))
+			continue
 		}
 		names[p.Name] = true
 	}
-	var problems []string
 	for _, p := range projects {
+		if strings.TrimSpace(p.Name) == "" {
+			continue // already reported above
+		}
 		if p.Engine != EngineOmnis && p.Engine != EngineClaude {
 			problems = append(problems, fmt.Sprintf("project %q: unknown engine %q (want omnis|claude)", p.Name, p.Engine))
 		}
