@@ -26,11 +26,10 @@ func collectFleetProjects() []fleet.Project {
 			continue
 		}
 		out = append(out, fleet.Project{
-			Name:         name,
-			Cwd:          p.Cwd,
-			Engine:       fleet.Engine(p.Engine),
-			DependsOn:    p.DependsOn,
-			AllowedTools: p.ClaudeAllowedTools,
+			Name:      name,
+			Cwd:       p.Cwd,
+			Engine:    fleet.Engine(p.Engine),
+			DependsOn: p.DependsOn,
 		})
 	}
 	return out

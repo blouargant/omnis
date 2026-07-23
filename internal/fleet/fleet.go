@@ -30,9 +30,6 @@ type Project struct {
 	Cwd       string
 	Engine    Engine
 	DependsOn []string
-	// AllowedTools is the per-project Claude tool allowlist (engine:"claude"
-	// projects only); empty for omnis-engine projects.
-	AllowedTools []string
 }
 
 // TopoOrder returns project names in dependency-first order (a project appears
