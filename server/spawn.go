@@ -33,6 +33,7 @@ type spawnOptions struct {
 	DefaultSquad string // used when Squad is empty (may be empty ⇒ DefaultSquadName)
 	Title        string // friendly session title (empty ⇒ keep the petname id)
 	Dir          string // working directory to inherit (empty ⇒ default root)
+	Collection   string // file the new session under this collection (empty ⇒ none)
 	UserID       string // owning user (empty ⇒ DefaultUserID)
 }
 
@@ -72,6 +73,10 @@ func materializeSession(d serverDeps, o spawnOptions) *sessions.SessionMeta {
 	if title != "" {
 		d.Registry.SetTitle(meta.ID, title)
 		_ = sessions.SetConversationTitle(meta.ID, title)
+	}
+	if col := strings.TrimSpace(o.Collection); col != "" {
+		d.Registry.SetCollection(meta.ID, col)
+		_ = sessions.SetConversationCollection(meta.ID, col)
 	}
 	if d.RegisterSession != nil {
 		name := meta.ID
