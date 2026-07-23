@@ -30,6 +30,9 @@ type Project struct {
 	Cwd       string
 	Engine    Engine
 	DependsOn []string
+	// AllowedTools is the per-project Claude tool allowlist (engine:"claude"
+	// projects only); empty for omnis-engine projects.
+	AllowedTools []string
 }
 
 // TopoOrder returns project names in dependency-first order (a project appears
@@ -128,13 +131,16 @@ func Validate(projects []Project) error {
 // resolver (nil when no resolver is installed — e.g. CLI/TUI, or no server).
 func Projects() []Project { return currentProjects() }
 
-// EngineSquad maps a project engine to the squad name that runs a Driver for it.
-// omnis → the Coding squad. The claude engine has no squad yet (Plan 3) and
+// EngineSquad maps a project engine to the squad name that runs a Driver for it:
+// omnis → the Coding squad, claude → the Claude Worker squad. An unknown engine
 // returns ok=false so callers report it as not-yet-available rather than
 // silently running it on the wrong engine.
 func EngineSquad(e Engine) (string, bool) {
-	if e == EngineOmnis {
+	switch e {
+	case EngineOmnis:
 		return "coding", true
+	case EngineClaude:
+		return "claude worker", true
 	}
 	return "", false
 }

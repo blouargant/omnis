@@ -37,19 +37,22 @@ func TestFleetDispatchToolUnknownProject(t *testing.T) {
 	}
 }
 
-func TestFleetDispatchToolClaudeEngineNotReady(t *testing.T) {
+func TestFleetDispatchToolClaudeEngineDispatches(t *testing.T) {
 	fleet.SetProjectsResolver(func() []fleet.Project {
 		return []fleet.Project{{Name: "Service B", Cwd: "/x/b", Engine: fleet.EngineClaude}}
 	})
 	t.Cleanup(func() { fleet.SetProjectsResolver(nil) })
 	reg := NewFleetDispatchRegistry()
-	_, err := runFleetDispatch(reg, "sess1", fleetDispatchIn{Project: "Service B", Task: "x"})
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "claude") {
-		t.Fatalf("expected claude-not-ready error, got %v", err)
+	out, err := runFleetDispatch(reg, "sess1", fleetDispatchIn{Project: "Service B", Task: "x"})
+	if err != nil {
+		t.Fatalf("claude-engine dispatch errored: %v", err)
 	}
-	// nothing enqueued on error
-	if len(reg.Drain("sess1")) != 0 {
-		t.Fatal("must not enqueue on a rejected dispatch")
+	if !strings.Contains(out.Result, "Dispatched") {
+		t.Fatalf("unexpected result: %q", out.Result)
+	}
+	got := reg.Drain("sess1")
+	if len(got) != 1 || got[0].Project != "Service B" || got[0].Task != "x" {
+		t.Fatalf("expected one canonical directive, got %+v", got)
 	}
 	_ = adk.ToolContext(nil) // ensure the adk import is used if the test file needs it
 }
