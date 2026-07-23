@@ -153,6 +153,36 @@ func TestCollectionProfileFleetFields(t *testing.T) {
 	}
 }
 
+func TestCollectionProfileClaudeAllowedTools(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddCollection("Service C"); err != nil {
+		t.Fatal(err)
+	}
+	in := CollectionProfileData{
+		Cwd:                "/repos/service-c",
+		Engine:             "claude",
+		Role:               "project",
+		ClaudeAllowedTools: []string{"Read", "Bash(go test:*)"},
+	}
+	if err := SetCollectionProfileData("Service C", in); err != nil {
+		t.Fatal(err)
+	}
+	got := CollectionProfileFull("service c") // case-insensitive
+	if got.Role != "project" || got.Engine != "claude" || got.Cwd != "/repos/service-c" {
+		t.Fatalf("scalars not round-tripped: %+v", got)
+	}
+	if len(got.ClaudeAllowedTools) != 2 || got.ClaudeAllowedTools[0] != "Read" || got.ClaudeAllowedTools[1] != "Bash(go test:*)" {
+		t.Fatalf("claude_allowed_tools not round-tripped: %+v", got.ClaudeAllowedTools)
+	}
+	// All-empty drops the entry.
+	if err := SetCollectionProfileData("Service C", CollectionProfileData{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := CollectionProfileFull("Service C"); got.Role != "" || len(got.ClaudeAllowedTools) != 0 {
+		t.Fatalf("profile not cleared: %+v", got)
+	}
+}
+
 func TestUpdateCollectionProfilePreservesFleetFields(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	if _, _, err := AddCollection("Service A"); err != nil {
