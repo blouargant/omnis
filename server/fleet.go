@@ -22,7 +22,7 @@ func collectFleetProjects() []fleet.Project {
 	var out []fleet.Project
 	for _, name := range names {
 		p := sessions.CollectionProfileFull(name)
-		if p.Role != "project" {
+		if p.Role != fleet.RoleProject {
 			continue
 		}
 		out = append(out, fleet.Project{

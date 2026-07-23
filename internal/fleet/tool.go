@@ -54,7 +54,7 @@ type projectsOut struct {
 // runProjects is the handler, extracted so tests can call it without ADK plumbing.
 func runProjects(_ adk.ToolContext, _ projectsIn) (projectsOut, error) {
 	projects := currentProjects()
-	out := projectsOut{Valid: true}
+	out := projectsOut{Valid: true, Projects: []projectView{}}
 	for _, p := range projects {
 		out.Projects = append(out.Projects, projectView{
 			Name: p.Name, Cwd: p.Cwd, Engine: string(p.Engine), DependsOn: p.DependsOn,

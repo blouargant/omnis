@@ -42,6 +42,30 @@ func TestFleetProjectsToolValid(t *testing.T) {
 	}
 }
 
+func TestFleetProjectsToolNoResolver(t *testing.T) {
+	SetProjectsResolver(nil)
+	out, err := runProjects(nil, projectsIn{})
+	if err != nil {
+		t.Fatalf("no-resolver must not error: %v", err)
+	}
+	if !out.Valid {
+		t.Fatalf("empty fleet must be valid, problems=%v", out.Problems)
+	}
+	if len(out.Projects) != 0 || len(out.Order) != 0 {
+		t.Fatalf("expected empty projects/order, got %+v", out)
+	}
+}
+
+func TestFleetToolsShape(t *testing.T) {
+	ts := Tools()
+	if len(ts) != 1 {
+		t.Fatalf("expected exactly 1 fleet tool, got %d", len(ts))
+	}
+	if ts[0].Name() != "fleet_projects" {
+		t.Fatalf("expected tool name %q, got %q", "fleet_projects", ts[0].Name())
+	}
+}
+
 func TestFleetProjectsToolReportsCycle(t *testing.T) {
 	SetProjectsResolver(func() []Project {
 		return []Project{

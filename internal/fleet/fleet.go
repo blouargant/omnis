@@ -20,6 +20,10 @@ const (
 	EngineClaude Engine = "claude"
 )
 
+// RoleProject is the collection-profile Role value marking a collection as a
+// fleet project. A collection without this role is a plain collection.
+const RoleProject = "project"
+
 // Project is one fleet project, derived from a collection with role:"project".
 type Project struct {
 	Name      string

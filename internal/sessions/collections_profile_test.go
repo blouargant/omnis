@@ -153,6 +153,30 @@ func TestCollectionProfileFleetFields(t *testing.T) {
 	}
 }
 
+func TestUpdateCollectionProfilePreservesFleetFields(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddCollection("Service A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetCollectionProfileData("Service A", CollectionProfileData{
+		Squad: "Coding", Cwd: "/repos/a", Role: "project", Engine: "omnis",
+		DependsOn: []string{"Service B"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A squad/cwd-only update (the PATCH path) must preserve the fleet fields.
+	if err := SetCollectionProfile("Service A", "Kubernetes", "/repos/a2"); err != nil {
+		t.Fatal(err)
+	}
+	got := CollectionProfileFull("Service A")
+	if got.Squad != "Kubernetes" || got.Cwd != "/repos/a2" {
+		t.Fatalf("squad/cwd not updated: %+v", got)
+	}
+	if got.Role != "project" || got.Engine != "omnis" || len(got.DependsOn) != 1 || got.DependsOn[0] != "Service B" {
+		t.Fatalf("fleet fields not preserved: %+v", got)
+	}
+}
+
 func TestCollectionProfileConcurrentFieldUpdates(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	if _, _, err := AddCollection("Acme"); err != nil {

@@ -69,6 +69,29 @@ func TestValidateAggregatesMultipleProblems(t *testing.T) {
 	}
 }
 
+func TestValidateSelfEdge(t *testing.T) {
+	err := Validate([]Project{{Name: "a", Cwd: "/x/a", Engine: EngineOmnis, DependsOn: []string{"a"}}})
+	if err == nil || !strings.Contains(err.Error(), "itself") {
+		t.Fatalf("expected self-edge error, got %v", err)
+	}
+}
+
+func TestValidateAggregatesCycleWithOtherProblem(t *testing.T) {
+	projects := []Project{
+		{Name: "a", Cwd: "/x/a", Engine: EngineOmnis, DependsOn: []string{"b"}},
+		{Name: "b", Cwd: "/x/b", Engine: EngineOmnis, DependsOn: []string{"a"}},
+		{Name: "c", Cwd: "/x/c", Engine: "python"},
+	}
+	err := Validate(projects)
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "cycle") || !strings.Contains(msg, "engine") {
+		t.Fatalf("expected both cycle and engine in aggregated error, got %q", msg)
+	}
+}
+
 func TestTopoOrderDanglingEdgeIsNotCycle(t *testing.T) {
 	order, err := TopoOrder([]Project{p("a", "ghost")})
 	if err != nil {
