@@ -101,3 +101,15 @@ func TestTopoOrderDanglingEdgeIsNotCycle(t *testing.T) {
 		t.Fatalf("expected [a], got %v", order)
 	}
 }
+
+func TestEngineSquad(t *testing.T) {
+	if s, ok := EngineSquad(EngineOmnis); !ok || s != "coding" {
+		t.Fatalf("omnis => coding, got %q ok=%v", s, ok)
+	}
+	if _, ok := EngineSquad(EngineClaude); ok {
+		t.Fatal("claude engine has no squad yet (Plan 3)")
+	}
+	if _, ok := EngineSquad(Engine("bogus")); ok {
+		t.Fatal("unknown engine must not map")
+	}
+}

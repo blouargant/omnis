@@ -58,6 +58,13 @@ type Infrastructure struct {
 	// Process-wide so it survives hot-reload (requests are transient per turn).
 	SpawnDirectives *SpawnRegistry
 
+	// FleetDispatches holds pending "dispatch this task to this project's Driver"
+	// requests per Conductor session. Written by the fleet_dispatch leader tool
+	// during a turn and drained by the surface (server handleMessages) after the
+	// turn's runner finishes. Process-wide so it survives hot-reload (directives
+	// are transient per turn), mirroring SpawnDirectives.
+	FleetDispatches *FleetDispatchRegistry
+
 	// Session-scoped state holders. Each is a process-singleton that lazily
 	// creates per-(userID, sessionID) entries on disk, so they trivially
 	// outlive any single Instance.
@@ -264,6 +271,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),
+		FleetDispatches: NewFleetDispatchRegistry(),
 	}, nil
 }
 

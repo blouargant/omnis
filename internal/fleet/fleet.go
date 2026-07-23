@@ -123,3 +123,18 @@ func Validate(projects []Project) error {
 	}
 	return nil
 }
+
+// Projects returns the currently-configured fleet projects via the installed
+// resolver (nil when no resolver is installed — e.g. CLI/TUI, or no server).
+func Projects() []Project { return currentProjects() }
+
+// EngineSquad maps a project engine to the squad name that runs a Driver for it.
+// omnis → the Coding squad. The claude engine has no squad yet (Plan 3) and
+// returns ok=false so callers report it as not-yet-available rather than
+// silently running it on the wrong engine.
+func EngineSquad(e Engine) (string, bool) {
+	if e == EngineOmnis {
+		return "coding", true
+	}
+	return "", false
+}
