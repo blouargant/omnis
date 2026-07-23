@@ -123,6 +123,36 @@ func TestCollectionProfilePreservesFields(t *testing.T) {
 	}
 }
 
+func TestCollectionProfileFleetFields(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddCollection("Service B"); err != nil {
+		t.Fatal(err)
+	}
+	in := CollectionProfileData{
+		Cwd:       "/repos/service-b",
+		Engine:    "claude",
+		Role:      "project",
+		DependsOn: []string{"Service A"},
+	}
+	if err := SetCollectionProfileData("Service B", in); err != nil {
+		t.Fatal(err)
+	}
+	got := CollectionProfileFull("service b") // case-insensitive
+	if got.Role != "project" || got.Engine != "claude" || got.Cwd != "/repos/service-b" {
+		t.Fatalf("scalars not round-tripped: %+v", got)
+	}
+	if len(got.DependsOn) != 1 || got.DependsOn[0] != "Service A" {
+		t.Fatalf("depends_on not round-tripped: %+v", got.DependsOn)
+	}
+	// All-empty drops the entry.
+	if err := SetCollectionProfileData("Service B", CollectionProfileData{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := CollectionProfileFull("Service B"); got.Role != "" || len(got.DependsOn) != 0 {
+		t.Fatalf("profile not cleared: %+v", got)
+	}
+}
+
 func TestCollectionProfileConcurrentFieldUpdates(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	if _, _, err := AddCollection("Acme"); err != nil {

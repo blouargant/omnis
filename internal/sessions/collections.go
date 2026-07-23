@@ -62,6 +62,22 @@ type collectionProfile struct {
 	// commit; 0 ⇒ none. Drives the min-interval gate and the "auto-updated N ago"
 	// marker; cleared on revert or a manual memory save.
 	LastMemoryUpdate int64 `json:"last_memory_update,omitempty"`
+	// Role marks this collection as a fleet project ("project") vs a plain
+	// collection (""). Fleet fields are inert unless Role == "project".
+	Role string `json:"role,omitempty"`
+	// Engine selects the fleet worker backing this project: "omnis" | "claude".
+	Engine string `json:"engine,omitempty"`
+	// DependsOn lists the collection names this project depends on (the
+	// cross-project dependency edges used to order fleet work).
+	DependsOn []string `json:"depends_on,omitempty"`
+}
+
+// isEmpty reports whether the profile carries no data. Used instead of `==`
+// because DependsOn ([]string) makes collectionProfile non-comparable.
+func (p collectionProfile) isEmpty() bool {
+	return p.Squad == "" && p.Cwd == "" && p.MemorySize == "" &&
+		!p.AutoUpdate && p.LastMemoryUpdate == 0 &&
+		p.Role == "" && p.Engine == "" && len(p.DependsOn) == 0
 }
 
 // CollectionProfileData is a collection's full per-collection scalar bag.
@@ -71,6 +87,9 @@ type CollectionProfileData struct {
 	MemorySize       string
 	AutoUpdate       bool
 	LastMemoryUpdate int64
+	Role             string
+	Engine           string
+	DependsOn        []string
 }
 
 // CollectionProfileFull returns the full stored per-collection scalars. A missing
@@ -90,6 +109,7 @@ func CollectionProfileFull(name string) CollectionProfileData {
 	return CollectionProfileData{
 		Squad: p.Squad, Cwd: p.Cwd, MemorySize: p.MemorySize,
 		AutoUpdate: p.AutoUpdate, LastMemoryUpdate: p.LastMemoryUpdate,
+		Role: p.Role, Engine: p.Engine, DependsOn: cloneStrings(p.DependsOn),
 	}
 }
 
@@ -116,6 +136,7 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 	d := CollectionProfileData{
 		Squad: cur.Squad, Cwd: cur.Cwd, MemorySize: cur.MemorySize,
 		AutoUpdate: cur.AutoUpdate, LastMemoryUpdate: cur.LastMemoryUpdate,
+		Role: cur.Role, Engine: cur.Engine, DependsOn: cloneStrings(cur.DependsOn),
 	}
 	mutate(&d)
 	p := collectionProfile{
@@ -124,8 +145,11 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 		MemorySize:       strings.TrimSpace(d.MemorySize),
 		AutoUpdate:       d.AutoUpdate,
 		LastMemoryUpdate: d.LastMemoryUpdate,
+		Role:             strings.TrimSpace(d.Role),
+		Engine:           strings.TrimSpace(d.Engine),
+		DependsOn:        cleanStrings(d.DependsOn),
 	}
-	if p == (collectionProfile{}) {
+	if p.isEmpty() {
 		if f.Profiles != nil {
 			delete(f.Profiles, canon)
 		}
@@ -159,8 +183,11 @@ func SetCollectionProfileData(name string, d CollectionProfileData) error {
 		MemorySize:       strings.TrimSpace(d.MemorySize),
 		AutoUpdate:       d.AutoUpdate,
 		LastMemoryUpdate: d.LastMemoryUpdate,
+		Role:             strings.TrimSpace(d.Role),
+		Engine:           strings.TrimSpace(d.Engine),
+		DependsOn:        cleanStrings(d.DependsOn),
 	}
-	if p == (collectionProfile{}) {
+	if p.isEmpty() {
 		if f.Profiles != nil {
 			delete(f.Profiles, canon)
 		}
@@ -547,4 +574,29 @@ func SetCollectionColor(name, color string) error {
 		f.Colors[canon] = color
 	}
 	return saveFileLocked(f)
+}
+
+// cloneStrings returns a copy so callers can't mutate stored slices.
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+// cleanStrings trims each entry and drops blanks (keeps order, dedups).
+func cleanStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
