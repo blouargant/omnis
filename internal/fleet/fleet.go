@@ -1,0 +1,108 @@
+// Package fleet holds the multi-project coordination registry: the Project
+// type, the dependency-graph logic, and the read-only fleet_projects tool.
+// It imports only stdlib + ADK + core/adk so both `agent` and `server` can
+// depend on it without the agent<->sessions import cycle; collection data
+// reaches it through the resolver installed via SetProjectsResolver.
+package fleet
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// Engine selects the worker backing a project.
+type Engine string
+
+const (
+	EngineOmnis  Engine = "omnis"
+	EngineClaude Engine = "claude"
+)
+
+// Project is one fleet project, derived from a collection with role:"project".
+type Project struct {
+	Name      string
+	Cwd       string
+	Engine    Engine
+	DependsOn []string
+}
+
+// TopoOrder returns project names in dependency-first order (a project appears
+// after everything it depends on). It errors if the graph has a cycle. Order is
+// deterministic (ties broken alphabetically) so plans are reproducible.
+func TopoOrder(projects []Project) ([]string, error) {
+	indeg := make(map[string]int, len(projects))
+	adj := make(map[string][]string, len(projects))
+	for _, p := range projects {
+		if _, ok := indeg[p.Name]; !ok {
+			indeg[p.Name] = 0
+		}
+	}
+	for _, p := range projects {
+		for _, dep := range p.DependsOn {
+			adj[dep] = append(adj[dep], p.Name) // dep must precede p
+			indeg[p.Name]++
+		}
+	}
+	var ready []string
+	for name, d := range indeg {
+		if d == 0 {
+			ready = append(ready, name)
+		}
+	}
+	sort.Strings(ready)
+	var order []string
+	for len(ready) > 0 {
+		n := ready[0]
+		ready = ready[1:]
+		order = append(order, n)
+		var freed []string
+		for _, m := range adj[n] {
+			indeg[m]--
+			if indeg[m] == 0 {
+				freed = append(freed, m)
+			}
+		}
+		sort.Strings(freed)
+		ready = append(ready, freed...)
+		sort.Strings(ready)
+	}
+	if len(order) != len(indeg) {
+		return nil, fmt.Errorf("dependency cycle among fleet projects (ordered %d of %d)", len(order), len(indeg))
+	}
+	return order, nil
+}
+
+// Validate aggregates all structural problems: blank names, unknown/self edges,
+// unknown engine, and cycles. Returns nil when the graph is sound.
+func Validate(projects []Project) error {
+	names := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		if strings.TrimSpace(p.Name) == "" {
+			return errors.New("fleet: a project has a blank name")
+		}
+		names[p.Name] = true
+	}
+	var problems []string
+	for _, p := range projects {
+		if p.Engine != EngineOmnis && p.Engine != EngineClaude {
+			problems = append(problems, fmt.Sprintf("project %q: unknown engine %q (want omnis|claude)", p.Name, p.Engine))
+		}
+		for _, dep := range p.DependsOn {
+			switch {
+			case dep == p.Name:
+				problems = append(problems, fmt.Sprintf("project %q depends on itself", p.Name))
+			case !names[dep]:
+				problems = append(problems, fmt.Sprintf("project %q depends on unknown project %q", p.Name, dep))
+			}
+		}
+	}
+	if _, err := TopoOrder(projects); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
