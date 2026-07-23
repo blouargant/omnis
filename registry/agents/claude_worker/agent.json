@@ -1,0 +1,7 @@
+{
+  "name": "claude_worker",
+  "description": "Drives an external Claude Code CLI worker to carry out a coding task in one project's directory.",
+  "model_ref": "hosted",
+  "tools": ["claude_code"],
+  "skills": []
+}

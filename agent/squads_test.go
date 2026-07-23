@@ -231,6 +231,84 @@ func TestSquadsFleetConductorResolves(t *testing.T) {
 	}
 }
 
+// TestSquadsClaudeWorkerResolves verifies that the hidden, leaderless "Claude
+// Worker" squad resolves cleanly: Leader normalised to "" with exactly one
+// member (claude_worker), Hidden preserved (so it stays out of the router
+// catalogue but remains resolvable by name — the Session Search precedent,
+// see TestHiddenSquadIsNotRoutable), and that the squad name lower-cases to
+// "claude worker" to match fleet.EngineSquad(EngineClaude). It also checks
+// the claude_worker agent resolves as an enabled, non-leader agent whose
+// tools include claude_code.
+func TestSquadsClaudeWorkerResolves(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{
+			Name:  "claude_worker",
+			Tools: []string{"claude_code"},
+		},
+	})
+
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{
+  "agents": ["leader", "claude_worker"],
+  "squads": [
+    {"name": "system", "leader": "leader", "members": []},
+    {
+      "name": "Claude Worker",
+      "description": "Runs an external Claude Code worker on one project.",
+      "leader": "none",
+      "members": ["claude_worker"],
+      "hidden": true
+    }
+  ]
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{
+		ConfigPath:       cfgPath,
+		ConfigPathStrict: true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+
+	sq, ok := runtime.Squad("claude worker")
+	if !ok {
+		t.Fatal("\"claude worker\" squad missing after resolution — EngineSquad(EngineClaude) would fail to dispatch")
+	}
+	if sq.Leader != "" {
+		t.Fatalf("Claude Worker squad Leader = %q, want empty (leaderless)", sq.Leader)
+	}
+	if !equalStringSlice(sq.Members, []string{"claude_worker"}) {
+		t.Fatalf("Claude Worker squad members = %v, want [claude_worker]", sq.Members)
+	}
+	if !sq.Hidden {
+		t.Fatal("Claude Worker squad should be Hidden (machine-facing engine, not a chat squad)")
+	}
+
+	var worker RuntimeAgentConfig
+	found := false
+	for _, a := range runtime.Agents {
+		if a.Name == "claude_worker" {
+			worker = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("claude_worker agent missing from resolved runtime agents")
+	}
+	if !worker.Enabled {
+		t.Fatal("claude_worker agent should be enabled")
+	}
+	if worker.Leader {
+		t.Fatal("claude_worker agent should NOT be marked as leader (it's a leaderless squad's single member)")
+	}
+	if !containsString(worker.Tools, "claude_code") {
+		t.Fatalf("claude_worker tools = %v, want to include %q", worker.Tools, "claude_code")
+	}
+}
+
 // TestSquadsValidation covers the rejection paths.
 func TestSquadsValidation(t *testing.T) {
 	cases := []struct {

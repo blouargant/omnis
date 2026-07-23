@@ -27,7 +27,8 @@
     "reviewer",
     "refactorer",
     "linux_admin",
-    "conductor"
+    "conductor",
+    "claude_worker"
   ],
   "app_name": "omnis",
   "bash_timeout_seconds": 120,
@@ -117,6 +118,15 @@
       "leader": "none",
       "members": [
         "session_search"
+      ],
+      "hidden": true
+    },
+    {
+      "name": "Claude Worker",
+      "description": "Runs an external Claude Code worker on one project. Internal fleet engine — not a general chat squad.",
+      "leader": "none",
+      "members": [
+        "claude_worker"
       ],
       "hidden": true
     }
