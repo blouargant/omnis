@@ -26,7 +26,8 @@
     "code_docs",
     "reviewer",
     "refactorer",
-    "linux_admin"
+    "linux_admin",
+    "conductor"
   ],
   "app_name": "omnis",
   "bash_timeout_seconds": 120,
@@ -103,6 +104,12 @@
         "refactorer",
         "agentmd_reviewer"
       ]
+    },
+    {
+      "name": "Fleet",
+      "description": "Multi-project coordinator. Route here when the user wants to coordinate a change across SEVERAL of their projects at once — e.g. 'add this feature across the services', 'update the shared contract and every consumer', 'plan the work spanning projects A, B and C'. The Conductor reads the fleet project registry (collections marked as projects), plans the cross-project work, gets one approval, and dispatches each project's task to its own Driver. NOT for a change to a single project (that's the Coding squad).",
+      "leader": "conductor",
+      "members": []
     },
     {
       "name": "Session Search",

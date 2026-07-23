@@ -1,0 +1,8 @@
+{
+  "name": "conductor",
+  "description": "Multi-project fleet coordinator. Reads the fleet project registry, plans cross-project work, gets one approval, and dispatches coding tasks to each project's Driver.",
+  "leader": true,
+  "model_ref": "premium",
+  "tools": ["fleet", "fleet_dispatch", "planning"],
+  "skills": []
+}

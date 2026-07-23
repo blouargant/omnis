@@ -154,6 +154,83 @@ func TestSquadsLeaderless(t *testing.T) {
 	}
 }
 
+// TestSquadsFleetConductorResolves verifies that a led squad (Fleet, leader
+// conductor) with an EMPTY members list resolves cleanly — only a leaderless
+// squad requires exactly one member; a squad with a real leader:true agent
+// delegates to spawned sessions (fleet_dispatch), not squad members, so zero
+// declared members must be accepted. It also checks the conductor agent
+// resolves as an enabled leader whose tools include fleet, fleet_dispatch,
+// and planning.
+func TestSquadsFleetConductorResolves(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{
+			Name:     "conductor",
+			Leader:   ptrBool(true),
+			ModelRef: "",
+			Tools:    []string{"fleet", "fleet_dispatch", "planning"},
+		},
+	})
+
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{
+  "agents": ["leader", "conductor"],
+  "squads": [
+    {"name": "system", "leader": "leader", "members": []},
+    {
+      "name": "Fleet",
+      "description": "Multi-project coordinator.",
+      "leader": "conductor",
+      "members": []
+    }
+  ]
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{
+		ConfigPath:       cfgPath,
+		ConfigPathStrict: true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+
+	fleet, ok := runtime.Squad("fleet")
+	if !ok {
+		t.Fatal("Fleet squad missing after resolution")
+	}
+	if fleet.Leader != "conductor" {
+		t.Fatalf("Fleet squad leader = %q, want conductor", fleet.Leader)
+	}
+	if len(fleet.Members) != 0 {
+		t.Fatalf("Fleet squad members = %v, want empty", fleet.Members)
+	}
+
+	var conductor RuntimeAgentConfig
+	found := false
+	for _, a := range runtime.Agents {
+		if a.Name == "conductor" {
+			conductor = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("conductor agent missing from resolved runtime agents")
+	}
+	if !conductor.Enabled {
+		t.Fatal("conductor agent should be enabled")
+	}
+	if !conductor.Leader {
+		t.Fatal("conductor agent should be marked as leader")
+	}
+	for _, want := range []string{"fleet", "fleet_dispatch", "planning"} {
+		if !containsString(conductor.Tools, want) {
+			t.Fatalf("conductor tools = %v, want to include %q", conductor.Tools, want)
+		}
+	}
+}
+
 // TestSquadsValidation covers the rejection paths.
 func TestSquadsValidation(t *testing.T) {
 	cases := []struct {
