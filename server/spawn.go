@@ -218,6 +218,9 @@ func forgetSessionState(d serverDeps, id string) {
 		}
 	}
 	claudecode.ForgetSession(id)
+	// Clean up any per-project git worktrees created for this experiment
+	// session (removed only if clean; kept + logged if dirty).
+	fleetWorktreeCleanup(id)
 }
 
 // deleteSession permanently removes a session and all its state: the registry

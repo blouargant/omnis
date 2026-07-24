@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/blouargant/omnis/internal/worktree"
 )
 
 // newGitRepo makes a clean git repo with one commit (on a branch, not detached).
@@ -60,5 +62,56 @@ func TestFleetWorktreeDirDirtyRepoErrors(t *testing.T) {
 	t.Cleanup(func() { fleetWorktreeCleanup("expB") })
 	if _, err := fleetWorktreeDir("expB", "Svc", repo); err == nil {
 		t.Fatal("a dirty repo must fail worktree creation, not silently succeed")
+	}
+}
+
+// TestFleetWorktreeCleanupRemovesCleanKeepsDirty locks the teardown contract:
+// a clean experiment worktree is removed, a dirty one is kept (and logged) so
+// the user never silently loses uncommitted experiment work.
+func TestFleetWorktreeCleanupRemovesCleanKeepsDirty(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	repo := newGitRepo(t)
+
+	// Clean worktree ⇒ removed.
+	clean, err := fleetWorktreeDir("expClean", "Svc", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleetWorktreeCleanup("expClean")
+	if _, err := os.Stat(clean); !os.IsNotExist(err) {
+		t.Fatalf("clean worktree should be removed, still at %q (err=%v)", clean, err)
+	}
+
+	// Dirty worktree ⇒ kept.
+	dirty, err := fleetWorktreeDir("expDirty", "Svc", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dirty, "wip.txt"), []byte("z"), 0o644) // uncommitted
+	fleetWorktreeCleanup("expDirty")
+	if _, err := os.Stat(dirty); err != nil {
+		t.Fatalf("dirty worktree should be KEPT, but it's gone: %v", err)
+	}
+	// manual cleanup so the test dir is removable
+	_ = worktree.Remove(repo, dirty)
+}
+
+// TestForgetSessionStateCleansFleetWorktree verifies the teardown wiring
+// end-to-end: forgetSessionState (the shared helper called by both
+// deleteSession and the archive handler) must itself invoke
+// fleetWorktreeCleanup, not just leave it available. A zero-value serverDeps
+// is safe here — every field forgetSessionState dereferences is nil-checked
+// except claudecode.ForgetSession, which is a plain id-keyed map op.
+func TestForgetSessionStateCleansFleetWorktree(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	repo := newGitRepo(t)
+
+	clean, err := fleetWorktreeDir("expTeardown", "Svc", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgetSessionState(serverDeps{}, "expTeardown")
+	if _, err := os.Stat(clean); !os.IsNotExist(err) {
+		t.Fatalf("forgetSessionState should clean up the experiment worktree, still at %q (err=%v)", clean, err)
 	}
 }
