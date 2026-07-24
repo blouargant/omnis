@@ -154,6 +154,19 @@ func runSpawnedTask(d serverDeps, childID, childLabel, parentID, userID, task st
 	}()
 }
 
+// runSpawnedTaskNotice injects a one-way notice turn into sessionID — e.g. to
+// report that a fleet Driver could not be dispatched into its worktree. Like
+// the result-delivery half of runSpawnedTask, it uses "mailbox_push" (so an
+// open tab appends it) and replyTo="" (no reply expected back).
+func runSpawnedTaskNotice(d serverDeps, sessionID, userID, notice string) {
+	if d.PushMgr == nil || strings.TrimSpace(notice) == "" {
+		return
+	}
+	go func() {
+		d.PushMgr.injectTurn(d.rootCtx, d, sessionID, userOrDefault(userID), notice, "mailbox_push")
+	}()
+}
+
 // formatSpawnResultNotice builds the one-way message injected into the parent
 // session carrying a finished spawned session's result. It frames the result as
 // coming from a separate session and tells the leader not to reply back to it, so

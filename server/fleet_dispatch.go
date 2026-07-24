@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
@@ -63,6 +64,19 @@ func drainFleetDispatches(d serverDeps, parentID, parentUserID string) {
 		if d.Manager != nil && !d.Manager.HasSquad(opts.Squad) {
 			log.Printf("fleet dispatch: skipping project %q — resolved squad %q does not exist", dd.Project, opts.Squad)
 			continue // avoid materializeSession silently falling back to the System squad
+		}
+		// If the Conductor session is a forked experiment, isolate this project's
+		// Driver in a git worktree instead of the project's main checkout.
+		if meta, ok := d.Registry.Get(parentID); ok && meta.FleetExperiment {
+			wt, err := fleetWorktreeDir(parentID, dd.Project, opts.Dir)
+			if err != nil {
+				// Don't dispatch into the main tree — that would break isolation.
+				// Report the failure back to the Conductor so it can tell the user.
+				runSpawnedTaskNotice(d, parentID, parentUserID, fmt.Sprintf(
+					"Could not run project %q in this experiment: %v. Commit or stash that project's repo, then retry.", dd.Project, err))
+				continue
+			}
+			opts.Dir = wt
 		}
 		meta := materializeSession(d, opts)
 		if meta == nil {
