@@ -188,6 +188,26 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			}
 		}
 
+		// Validate the fleet role/engine closed sets BEFORE any scalar write below,
+		// so a PATCH mixing a valid scalar with an invalid role/engine 400s without
+		// persisting the scalar half — "profile unchanged on rejection" holds for
+		// the whole body, not just the fleet block. The actual fleet write still
+		// happens further down, after the scalar block.
+		if body.Role != nil {
+			r := strings.TrimSpace(*body.Role)
+			if r != "" && r != "project" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role (want \"project\" or empty)"})
+				return
+			}
+		}
+		if body.Engine != nil {
+			e := strings.TrimSpace(*body.Engine)
+			if e != "" && e != "omnis" && e != "claude" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid engine (want omnis|claude or empty)"})
+				return
+			}
+		}
+
 		// Per-collection scalars (squad / cwd / memory_size / auto_update). Validate
 		// the incoming values, then apply them ATOMICALLY via UpdateCollectionProfile
 		// (single locked read-modify-write) so a field edit here never clobbers the
@@ -236,23 +256,10 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 		}
 
 		// Fleet project fields (role/engine/depends_on/claude_allowed_tools). Only
-		// fields present in the body change; validate role + engine against their
-		// closed sets. Applied via UpdateCollectionProfile like the other scalars.
+		// fields present in the body change; role + engine were already validated
+		// against their closed sets above, before any write. Applied via
+		// UpdateCollectionProfile like the other scalars.
 		if body.Role != nil || body.Engine != nil || body.DependsOn != nil || body.ClaudeAllowedTools != nil {
-			if body.Role != nil {
-				r := strings.TrimSpace(*body.Role)
-				if r != "" && r != "project" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role (want \"project\" or empty)"})
-					return
-				}
-			}
-			if body.Engine != nil {
-				e := strings.TrimSpace(*body.Engine)
-				if e != "" && e != "omnis" && e != "claude" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid engine (want omnis|claude or empty)"})
-					return
-				}
-			}
 			if err := sessions.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
 				if body.Role != nil {
 					p.Role = strings.TrimSpace(*body.Role)

@@ -116,3 +116,57 @@ func TestUpdateCollectionRejectsBadEngine(t *testing.T) {
 		t.Fatalf("rejected values must not be applied: %+v", got)
 	}
 }
+
+// TestUpdateCollectionRejectsMixedBadFleetAtomically verifies that a PATCH
+// mixing a valid per-collection scalar (memory_size) with an invalid fleet
+// field (engine) is rejected wholesale — the closed-set validation on
+// role/engine runs before the scalar block writes, so the valid scalar is
+// never persisted alongside the rejected fleet value. "Profile unchanged on
+// rejection" must hold for the whole request body, not just the fleet block.
+func TestUpdateCollectionRejectsMixedBadFleetAtomically(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := sessions.AddCollection("Mixed"); err != nil {
+		t.Fatal(err)
+	}
+	reg := sessions.NewEmptyRegistry()
+	engine := newEngine(serverDeps{Registry: reg, rootCtx: context.Background()})
+
+	do := func(method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var r *http.Request
+		if body != nil {
+			b, _ := json.Marshal(body)
+			r = httptest.NewRequest(method, path, bytes.NewReader(b))
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, r)
+		return w
+	}
+
+	// Seed a known memory_size first so we can tell it was left untouched.
+	if w := do(http.MethodPatch, "/api/collections/Mixed", map[string]any{"memory_size": "small"}); w.Code != http.StatusOK {
+		t.Fatalf("seed PATCH status %d: %s", w.Code, w.Body.String())
+	}
+	if got := sessions.CollectionProfileFull("Mixed"); got.MemorySize != "small" {
+		t.Fatalf("seed memory_size not applied: %+v", got)
+	}
+
+	// A mixed body: valid scalar + invalid fleet field. Must 400 and must NOT
+	// persist the memory_size change.
+	if w := do(http.MethodPatch, "/api/collections/Mixed", map[string]any{
+		"memory_size": "large",
+		"engine":      "python",
+	}); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for mixed valid-scalar/bad-engine body, got %d: %s", w.Code, w.Body.String())
+	}
+
+	got := sessions.CollectionProfileFull("Mixed")
+	if got.MemorySize != "small" {
+		t.Fatalf("scalar must not be persisted when the fleet block rejects: memory_size = %q, want \"small\"", got.MemorySize)
+	}
+	if got.Engine != "" {
+		t.Fatalf("rejected engine must not be applied: %+v", got)
+	}
+}
