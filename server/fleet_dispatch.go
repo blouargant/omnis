@@ -53,6 +53,19 @@ func drainFleetDispatches(d serverDeps, parentID, parentUserID string) {
 		return
 	}
 	dirs := infra.FleetDispatches.Drain(parentID)
+	if len(dirs) == 0 {
+		return
+	}
+	// Resolve the Conductor's experiment status ONCE (not per-iteration): a
+	// concurrent delete/archive between the drain and a per-iteration lookup
+	// must NOT silently downgrade an experiment dispatch into the project's main
+	// checkout. If the parent is gone we can't confirm it's a non-experiment, so
+	// we skip the whole drain (nowhere to deliver results back to either).
+	parentMeta, parentOK := d.Registry.Get(parentID)
+	if !parentOK {
+		return
+	}
+	isExperiment := parentMeta.FleetExperiment
 	for _, dd := range dirs {
 		if dd == nil {
 			continue
@@ -67,7 +80,7 @@ func drainFleetDispatches(d serverDeps, parentID, parentUserID string) {
 		}
 		// If the Conductor session is a forked experiment, isolate this project's
 		// Driver in a git worktree instead of the project's main checkout.
-		if meta, ok := d.Registry.Get(parentID); ok && meta.FleetExperiment {
+		if isExperiment {
 			wt, err := fleetWorktreeDir(parentID, dd.Project, opts.Dir)
 			if err != nil {
 				// Don't dispatch into the main tree — that would break isolation.

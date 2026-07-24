@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/internal/fleet"
 	"github.com/blouargant/omnis/internal/sessions"
 )
@@ -86,5 +87,52 @@ func TestFleetDriverOptions(t *testing.T) {
 
 	if _, ok := fleetDriverOptions("Unknown", "alice"); ok {
 		t.Fatal("expected ok=false for an unknown project")
+	}
+}
+
+// TestDrainFleetDispatchesFailsClosedWhenParentGone guards the TOCTOU fix: if
+// the Conductor session has been deleted/archived (dropped from the registry)
+// between the fleet_dispatch tool queuing a directive and the drain running,
+// drainFleetDispatches must skip the WHOLE drain rather than falling through
+// to a non-experiment (main-checkout) dispatch. Building a fully-wired Manager
+// (real squads/runners) is disproportionate here — per the drainSpawns/
+// drainFleetDispatches precedent — so this uses the minimal Manager the
+// function actually touches on this path: an Infrastructure exposing
+// FleetDispatches, wrapping an empty Instance. The assertion is behavioural:
+// the queued directive is fully drained (consumed) and no session is
+// materialized, which is only possible if the function returned at the
+// hoisted parent lookup and never reached materializeSession.
+func TestDrainFleetDispatchesFailsClosedWhenParentGone(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+
+	infra := &toolkitagent.Infrastructure{FleetDispatches: toolkitagent.NewFleetDispatchRegistry()}
+	inst := &toolkitagent.Instance{Generation: 1, Squads: map[string]*toolkitagent.SquadInstance{}}
+	mgr := toolkitagent.NewManager(infra, inst)
+	if mgr == nil {
+		t.Fatal("NewManager returned nil")
+	}
+
+	reg := sessions.NewEmptyRegistry() // parentID deliberately absent
+	d := serverDeps{Registry: reg, Manager: mgr, rootCtx: context.Background()}
+
+	const parentID = "vanished-conductor"
+	if !infra.FleetDispatches.Enqueue(parentID, &toolkitagent.FleetDispatchDirective{
+		Project: "Service A",
+		Task:    "do the thing",
+	}) {
+		t.Fatal("Enqueue returned false")
+	}
+
+	// Must not panic, and must fail closed: no session materialized for the
+	// vanished parent.
+	drainFleetDispatches(d, parentID, "alice")
+
+	if got := reg.List(); len(got) != 0 {
+		t.Fatalf("expected no session materialized for a vanished parent, got %d: %+v", len(got), got)
+	}
+	// The directive was drained (and discarded) rather than left queued or
+	// re-processed — draining again returns nothing.
+	if left := infra.FleetDispatches.Drain(parentID); len(left) != 0 {
+		t.Fatalf("expected the directive to have been drained, %d left", len(left))
 	}
 }
