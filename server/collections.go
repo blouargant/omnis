@@ -147,6 +147,12 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			Cwd        *string `json:"cwd"`
 			MemorySize *string `json:"memory_size"`
 			AutoUpdate *bool   `json:"auto_update"`
+
+			// Fleet project fields (Plan 4b) — see the block below.
+			Role               *string   `json:"role"`
+			Engine             *string   `json:"engine"`
+			DependsOn          *[]string `json:"depends_on"`
+			ClaudeAllowedTools *[]string `json:"claude_allowed_tools"`
 		}
 		_ = c.ShouldBindJSON(&body)
 
@@ -222,6 +228,43 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 				}
 				if body.AutoUpdate != nil {
 					p.AutoUpdate = *body.AutoUpdate
+				}
+			}); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		// Fleet project fields (role/engine/depends_on/claude_allowed_tools). Only
+		// fields present in the body change; validate role + engine against their
+		// closed sets. Applied via UpdateCollectionProfile like the other scalars.
+		if body.Role != nil || body.Engine != nil || body.DependsOn != nil || body.ClaudeAllowedTools != nil {
+			if body.Role != nil {
+				r := strings.TrimSpace(*body.Role)
+				if r != "" && r != "project" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role (want \"project\" or empty)"})
+					return
+				}
+			}
+			if body.Engine != nil {
+				e := strings.TrimSpace(*body.Engine)
+				if e != "" && e != "omnis" && e != "claude" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid engine (want omnis|claude or empty)"})
+					return
+				}
+			}
+			if err := sessions.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
+				if body.Role != nil {
+					p.Role = strings.TrimSpace(*body.Role)
+				}
+				if body.Engine != nil {
+					p.Engine = strings.TrimSpace(*body.Engine)
+				}
+				if body.DependsOn != nil {
+					p.DependsOn = *body.DependsOn
+				}
+				if body.ClaudeAllowedTools != nil {
+					p.ClaudeAllowedTools = *body.ClaudeAllowedTools
 				}
 			}); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -316,6 +359,12 @@ func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
 			"auto_update":        prof.AutoUpdate,
 			"last_memory_update": prof.LastMemoryUpdate,
 			"has_prev_memory":    collectionctx.HasPrevMemory(name),
+
+			// Fleet project fields (Plan 4b).
+			"role":                 prof.Role,
+			"engine":               prof.Engine,
+			"depends_on":           prof.DependsOn,
+			"claude_allowed_tools": prof.ClaudeAllowedTools,
 		})
 	}
 }
