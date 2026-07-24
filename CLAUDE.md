@@ -361,7 +361,10 @@ main.go / server/
             │    │                         Not a squad member, so it is reached only through the
             │    │                         Helper (in chat) or the hidden Session Search squad
             │    │                         (the web UI search box). See "Session search".
-            │    └── "Session Search" ← HIDDEN leaderless squad (session_search) — machine-facing
+            │    ├── "Fleet"       ← multi-project coordinator (see "Fleet"): plans a change across SEVERAL projects, one approval, dispatches a Driver per project
+│    │    └── conductor          ← reads the project registry (fleet_projects) + dispatches per-project tasks (fleet_dispatch); Drivers are spawned sessions, not members
+│    ├── "Claude Worker" ← HIDDEN leaderless squad (claude_worker) — a claude-engine fleet Driver: drives an external `claude` CLI via the claude_code tool
+│    └── "Session Search" ← HIDDEN leaderless squad (session_search) — machine-facing
             │                           entry point for the web UI search box; never offered in the
             │                           squad picker and never routable (SquadEntry.Hidden)
             ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
@@ -794,6 +797,8 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/todo/` | Lightweight scratch list; persisted to `logs/agent_todo_<u>_<ts>.json` |
 | `internal/bg/` | Per-session background task queue + **task registry**: `bash_background` (one-shot), `monitor` (streaming line-matcher, [monitor.go](internal/bg/monitor.go)), and lifecycle `bg_list`/`bg_cancel`/`bg_output` ([tasks.go](internal/bg/tasks.go)) — named with a `bg_` prefix to avoid colliding with the `planning` group's task-graph `task_list`. Every launch registers a `Task{ID,Kind,Status,…}`; completions/streamed matches push a `Notification` consumed by the host (see "Background task notifications") |
 | `internal/worktree/` | Git worktree isolation tools |
+| `internal/fleet/` | **Fleet** multi-project coordination registry: `Project`/`Engine` types, the dependency-DAG logic (`TopoOrder`/`Validate`), workspace/git checks, the process-wide project **resolver hook** (`SetProjectsResolver`), `EngineSquad` (engine→driver-squad map), and the read-only `fleet_projects` tool. Imports only stdlib+ADK+`core/adk` (no `agent`/`sessions`) so both `agent` and `server` can depend on it — collection data reaches it through the resolver the server installs. See "Fleet" |
+| `internal/claudecode/` | The `claude_code` tool: drives an **external Claude Code CLI** (`claude -p <task> --output-format json [--resume <id>] --allowedTools <list>`) as a headless per-project fleet Driver, in the session cwd, parsing the JSON envelope + remembering the `session_id` per driver session. Modelled on `internal/astgrep` (deps-gated binary, explicit argv, JSON output); conservative default allowlist + per-project override via `SetAllowlistResolver`; never `--dangerously-skip-permissions`. See "Fleet" |
 | `internal/steer/` | Per-session **mid-turn steering** store (extra info the user types while a turn is computing): `Enqueue`/`Drain`/`TakeConsumed`/`TakePending`/`Forget`. Drained into the running turn by the steering plugin and looped by each surface (see "Mid-turn steering") |
 | `internal/scheduler/` | Timer that runs prompts on a schedule, backing `/loop` (in-memory, session-bound) and `/schedule` (durable cron/interval/one-shot routines, persisted to `schedules.json`): `Job`, `Scheduler` (process-wide, one `Run` goroutine + `fire` callback), `ParseSpec` (interval/`in`/`at`/cron via `robfig/cron/v3`). Surface-agnostic — each surface supplies the `fire` callback (see "Scheduled prompts") |
 | `internal/goal/` | Per-session **completion goals** backing `/goal`: `Store` (process-wide, one `Goal` per session — condition/turns/last-reason/achieved), `MaxTurns` (hard turn cap, `OMNIS_GOAL_MAX_TURNS`), `Directive` (the not-yet-met continuation prompt), `IsClearAlias`, `CleanCondition`. Surface-agnostic; the LLM judge is `Manager.EvaluateGoal` ([agent/goal_eval.go](agent/goal_eval.go)). See "Goals (`/goal`)" |
@@ -3587,6 +3592,114 @@ engine is [server/export_import.go](server/export_import.go).
   `sessionbar.import`, beside New chat). Toasts on success/failure. i18n keys
   `menu.export` / `sessionbar.import` / `app.export.failed` / `app.import.{badFile,
   failed,done}` (en/fr/es/de). CLI/TUI are untouched.
+
+### Fleet (multi-project coordination)
+
+Coordinate a change that spans **several interdependent projects** from one chat.
+The user talks to a **Conductor**; it plans the cross-project work, gets **one**
+approval, and dispatches each project's task to that project's **Driver**, which
+does the coding and reports its result back. Deliberately **general** — it encodes
+no language/build-tool knowledge; the domain "how-to" (gRPC steps, `buf`/`protoc`
+invocations, module paths, …) lives in each project's **collection instructions**,
+which omnis already injects. Whole design + phased plans in
+[docs/superpowers/specs/2026-07-23-omnis-fleet-coordination-design.md](docs/superpowers/specs/2026-07-23-omnis-fleet-coordination-design.md)
+and `docs/superpowers/plans/2026-07-2*-fleet-*.md`.
+
+**Vocabulary.** **Project** = an omnis collection with fleet profile fields (below).
+**Driver** = the per-project agent doing the work: a **spawned session** filed
+under the project's collection (so its cwd + instructions inject), addressable via
+the teammate mailbox by the project name — NOT a squad member. **Worker/engine** =
+what a Driver runs: `omnis` → the Coding squad; `claude` → the external Claude Code
+CLI. **Conductor** = leader of the routable **Fleet** squad.
+
+**Projects = extended collections.** The collection profile
+([internal/sessions/collections.go](internal/sessions/collections.go)) gained
+four fleet fields (all `omitempty`, cleared ⇒ a plain collection, byte-identical
+to before): `role` (`"project"` marks a fleet project), `engine`
+(`"omnis"`|`"claude"`), `depends_on` (project names — the cross-project edges),
+and `claude_allowed_tools` (per-project claude allowlist override). Editable from
+the collection editor's **Fleet project** section
+([web/app.js](web/app.js) `collectionContextDialog`) and via
+`PATCH/GET /api/collections/:name(/context)` ([server/collections.go](server/collections.go),
+`role`/`engine` validated against their closed sets, atomic-on-rejection).
+`internal/fleet` builds the dependency DAG from `depends_on`
+(`TopoOrder` = Kahn + cycle detection; `Validate` aggregates all problems; a
+dangling edge is an "unknown project", never a "cycle"; `ValidateWorkspaces`
+checks each cwd exists + is a git repo). Because `agent`↔`sessions` is an import
+cycle, `internal/fleet` never imports `sessions`; the **server installs a
+resolver** (`fleet.SetProjectsResolver` → `collectFleetProjects` in
+[server/fleet.go](server/fleet.go), keyed on `role=="project"`) so `agent`-side
+tools reach collection data through the hook (mirrors `agent.SetCollectionResolver`).
+
+**Dispatch reuses the spawn rail — no new orchestration primitive.** The Fleet
+composes the existing (ADK-v1-frozen) spawn/route/teammate rails rather than adding
+new fan-out ADK v2 provides. The Conductor's `fleet` tool group is `fleet_projects`
+(read-only: projects + engines + DAG + topo order + validation problems) plus
+`fleet_dispatch(project, task)` ([agent/fleet_dispatch.go](agent/fleet_dispatch.go),
+a leader-only + `SessionSpawning`-gated tool mirroring `spawn_session`: records a
+`FleetDispatchDirective` in a process-wide `FleetDispatchRegistry` on
+`Infrastructure`; validates the project + rejects a not-yet-supported engine before
+enqueuing). The server drains it after the turn
+([server/fleet_dispatch.go](server/fleet_dispatch.go) `drainFleetDispatches`,
+called after `drainSpawns` in `handleMessages` **and** in `injectTurnRouted` so a
+deliver-back turn's follow-up dispatch is drained too): for each directive it
+resolves the project's `spawnOptions` via `fleetDriverOptions` (Squad =
+`fleet.EngineSquad(engine)` — `omnis`→`"coding"`, `claude`→`"claude worker"`; Dir =
+project cwd; Collection = project) and runs it through **`materializeSession` +
+`runSpawnedTask`** — the same rail as `spawn_session`, so the Driver runs in the
+background and its result is **delivered back into the Conductor session** as a
+persisted injected turn. So the Conductor coordinates across **several turns**
+(dispatch → each result arrives as a new turn → dispatch the next per the DAG) —
+this is the spec's "wait on completion via the persisted injected-turn rail." A
+missing/unsupported engine or a wrong-squad config **skips** that project (never a
+silent wrong-engine fallback). Cross-project peer asks use the always-on teammate
+mailbox (each Driver is a squad root). The Conductor (`registry/agents/conductor/`)
++ the routable `Fleet` squad live in [config/agents.json](config/agents.json); its
+instruction encodes plan→approve→execute + dependency-order + new-scope-needs-approval.
+
+**Claude engine (`internal/claudecode`).** A `claude`-engine project's Driver is
+the leaderless **`Claude Worker`** squad (hidden; single member `claude_worker`,
+model `hosted`) whose `claude_code` tool shells out `claude -p <task>
+--output-format json [--resume <sid>] --allowedTools <list>` in the driver
+session's cwd (explicit argv — no shell, no injection), parses `{result,
+session_id}`, and **remembers the `session_id` keyed by the driver session** so
+later calls in that session `--resume` it (task-scoped; dropped on teardown). The
+subprocess context derives from the tool context (`tc`), so a Stop/session-end
+**cancels** the running `claude` (never orphaned for the 30-min timeout). Gated on
+the `claude` binary via the process-wide `internal/deps` gate
+(`claudecode.SetDepGate`, wired beside the astgrep gate). Allowlist = a conservative
+built-in `DefaultAllowedTools` (Read/Edit/Write/Grep/Glob + read-only git),
+**overridable per project** via `claudecode.SetAllowlistResolver` (the server maps
+the driver session → its collection's `claude_allowed_tools`); **never**
+`--dangerously-skip-permissions`.
+
+**Fork = isolated experiment (git worktrees).** Forking a Fleet chat marks the fork
+a `FleetExperiment` (a persisted session flag mirroring `Hidden`, set in
+[server/fork_rewind.go](server/fork_rewind.go) `handleFork` when the source squad is
+the Fleet squad). For an experiment Conductor, `drainFleetDispatches` runs each
+project's Driver in a **per-project git worktree** off the repo's HEAD
+([server/fleet_worktree.go](server/fleet_worktree.go), `internal/worktree.Create`),
+so competing forks never collide on a project's main checkout. The experiment status
+is resolved **once per drain and fails closed** — a concurrently-deleted Conductor
+skips the drain rather than dispatching into the main tree. `worktree.Preflight`
+requires a **clean, on-a-branch** repo, so a dirty/detached project fails that
+dispatch with an actionable message (never a silent main-tree fallback). On teardown
+(`forgetSessionState`, both delete + archive) `fleetWorktreeCleanup` removes each
+worktree **only when clean**; a worktree with uncommitted experiment work is **kept
++ logged** (never `--force`-removed). Merge-back is out of scope (the user merges a
+winning experiment branch; the `omnis-fleet/*` branches persist by design so
+committed experiment work is never lost).
+
+**No-op contract.** No `role:"project"` collections ⇒ nothing is ever dispatched,
+no worktree is created, `claude` is never launched; a build that never mounts the
+Fleet squad is byte-identical. `internal/fleet` with a nil resolver returns no
+projects. CLI/TUI don't set `SessionSpawning`, so `fleet_dispatch` isn't mounted
+there (the fleet is a server-mode capability). **Deferred (documented) follow-ups:**
+host-enforced topological parallelism (ordering is currently the Conductor's own
+instructed discipline), task-scoped mailbox addressing, the unattended-driver
+permission-mode question (`claude_code`/`Edit` are `ask`-gated, so a background
+Driver needs a session grant or a permissive mode), experiment branch merge-back +
+prune, and an Agent-SDK claude worker.
 
 ### Session spawning (`/spawn` + `spawn_session`)
 

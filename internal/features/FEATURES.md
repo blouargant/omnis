@@ -17,8 +17,12 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
-## 1.9 (in development) — Collection memory management & a Linux admin agent
+## 1.9 (in development) — Fleet multi-project coordination, collection memory management & a Linux admin agent
 
+- **Fleet: coordinate work across projects** — a new Fleet squad plans a change that spans several of your projects, gets your approval once, then dispatches each project's task to its own driver and brings the results back — so you no longer hand-carry a change (a shared contract, a dependency bump) between repos yourself.
+- **Projects run on omnis or Claude Code** — mark any collection as a fleet project and pick its engine: the built-in Coding squad, or a real external Claude Code worker running in that project's directory. Each project's driver can ask another project's driver for what it needs.
+- **Configure fleet projects in the UI** — the collection editor gained a Fleet-project section: turn it on and set the engine, which other projects it depends on, and (for Claude Code) its tool allowlist.
+- **Forked experiments are isolated** — forking a Fleet chat runs each project's work in its own git worktree, so two competing approaches never collide on disk; a clean experiment is cleaned up automatically and one with uncommitted work is kept.
 - **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.
 - **Automatic memory updates** — opt a collection into keeping its memory current from recent chats, with one-click revert.
 - **Collection colour pastilles in the collapsed sidebar** — when the sidebar is collapsed to a rail, each collection now shows its initials in its own colour (instead of a plain folder icon), and hovering shows the full collection name.
