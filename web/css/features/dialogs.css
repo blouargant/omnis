@@ -287,6 +287,16 @@
   flex: 1 1 0;
   min-width: 0;
 }
+/* Fleet project toggle + its (conditionally shown) engine/depends-on/allowlist
+   fields, sitting between the defaults row and the instructions field. */
+.cc-fleet { border-top: 1px solid var(--border, #333); padding-top: .6rem; margin-top: .2rem; }
+.cc-fleet-title { font-weight: 600; font-size: .85em; opacity: .75; margin-bottom: .35rem; }
+.cc-fleet-toggle { display: flex; align-items: center; gap: .4rem; }
+.cc-fleet-fields { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
+.cc-fleet-deps { display: flex; flex-wrap: wrap; gap: .5rem; }
+.cc-fleet-dep { display: inline-flex; align-items: center; gap: .3rem; }
+.cc-fleet-allow textarea, textarea.cc-fleet-allow { min-height: 4rem; font-family: var(--mono, monospace); }
+.cc-fleet-empty { opacity: .6; font-size: .85em; }
 .collection-ctx-modal .cc-grow-instr,
 .collection-ctx-modal .cc-grow-mem { min-height: 0; }
 .collection-ctx-modal .cc-grow-instr { flex: 3 1 0; }

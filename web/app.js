@@ -6214,8 +6214,9 @@ function openCollectionCtxMenu(ev, c) {
 }
 
 // editCollectionContext loads a collection's full snapshot (per-session defaults
-// + instructions/memory prose) and opens the context editor. Saving splits the
-// write: scalars (squad/cwd/memory_size/auto_update) via PATCH, prose via PUT …/context.
+// + instructions/memory prose + fleet project fields) and opens the context
+// editor. Saving splits the write: scalars (squad/cwd/memory_size/auto_update/
+// role/engine/depends_on/claude_allowed_tools) via PATCH, prose via PUT …/context.
 async function editCollectionContext(c) {
   let snap = {};
   try {
@@ -6227,7 +6228,10 @@ async function editCollectionContext(c) {
   try {
     const p = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}`, {
       method: "PATCH",
-      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd, memory_size: chosen.memory_size, auto_update: chosen.auto_update }),
+      body: JSON.stringify({
+        squad: chosen.squad, cwd: chosen.cwd, memory_size: chosen.memory_size, auto_update: chosen.auto_update,
+        role: chosen.role, engine: chosen.engine, depends_on: chosen.depends_on, claude_allowed_tools: chosen.claude_allowed_tools,
+      }),
     });
     if (!p.ok) {
       const b = await p.json().catch(() => ({}));
@@ -6320,8 +6324,10 @@ function ccHelpButton(text) {
 // collectionContextDialog is the per-collection context editor: a starting-squad
 // picker + default-folder field (the seeded per-session defaults) and two prose
 // textareas (stable instructions, evolving memory), plus the memory size/
-// auto-update controls. Resolves
-// { squad, cwd, instructions, memory, memory_size, auto_update } or null.
+// auto-update controls and the Fleet project toggle (engine/depends_on/
+// allowlist). Resolves
+// { squad, cwd, instructions, memory, memory_size, auto_update,
+//   role, engine, depends_on, claude_allowed_tools } or null.
 function collectionContextDialog(name, snap) {
   return new Promise((resolve) => {
     const overlay = uiModalShell(tr("collections.contextTitle", { name }));
@@ -6342,6 +6348,29 @@ function collectionContextDialog(name, snap) {
           <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
           <input type="text" class="cc-cwd" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.defaultCwdPlaceholder"))}" />
         </label>
+      </div>
+      <div class="cc-fleet" >
+        <div class="cc-fleet-title">${escHtml(tr("collections.fleetSection"))}</div>
+        <label class="cc-fleet-toggle">
+          <input type="checkbox" class="cc-fleet-cb"> <span class="cc-label-row cc-fleet-label">${escHtml(tr("collections.fleetToggle"))}</span>
+        </label>
+        <div class="cc-fleet-fields" hidden>
+          <label class="user-cmd-field">
+            <span class="user-cmd-field-label">${escHtml(tr("collections.fleetEngine"))}</span>
+            <select class="cc-fleet-engine">
+              <option value="omnis">${escHtml(tr("collections.fleetEngineOmnis"))}</option>
+              <option value="claude">${escHtml(tr("collections.fleetEngineClaude"))}</option>
+            </select>
+          </label>
+          <div class="user-cmd-field">
+            <span class="user-cmd-field-label" data-tip="${escHtml(tr("collections.fleetDependsOnHelp"))}">${escHtml(tr("collections.fleetDependsOn"))}</span>
+            <div class="cc-fleet-deps"></div>
+          </div>
+          <label class="user-cmd-field cc-fleet-allow-wrap" hidden>
+            <span class="user-cmd-field-label" data-tip="${escHtml(tr("collections.fleetAllowlistHelp"))}">${escHtml(tr("collections.fleetAllowlist"))}</span>
+            <textarea class="cc-fleet-allow" spellcheck="false" placeholder="${escHtml(tr("collections.fleetAllowlistPlaceholder"))}"></textarea>
+          </label>
+        </div>
       </div>
       <label class="user-cmd-field cc-grow-instr">
         <span class="user-cmd-field-label cc-label-row cc-instr-label">${escHtml(tr("collections.instructions"))}</span>
@@ -6378,6 +6407,38 @@ function collectionContextDialog(name, snap) {
     body.querySelector(".cc-squad-label").prepend(ccHelpButton(tr("collections.defaultSquadHelp")));
     body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
     body.querySelector(".cc-mem-label").prepend(ccHelpButton(tr("collections.memoryHelp")));
+
+    // ── Fleet project section ──
+    const fleetCb = body.querySelector(".cc-fleet-cb");
+    const fleetFields = body.querySelector(".cc-fleet-fields");
+    const engineSel = body.querySelector(".cc-fleet-engine");
+    const allowWrap = body.querySelector(".cc-fleet-allow-wrap");
+    const allowTa = body.querySelector(".cc-fleet-allow");
+    const depsBox = body.querySelector(".cc-fleet-deps");
+    body.querySelector(".cc-fleet-label").prepend(ccHelpButton(tr("collections.fleetToggleHelp")));
+
+    fleetCb.checked = (snap.role || "") === "project";
+    engineSel.value = (snap.engine === "claude") ? "claude" : "omnis";
+    allowTa.value = (snap.claude_allowed_tools || []).join("\n");
+    // depends_on candidates = every OTHER known fleet-eligible collection (General
+    // excluded via its `general` flag, not a literal name compare — collections
+    // are user-renameable, "General" is not).
+    const depSet = new Set((snap.depends_on || []).map((s) => s.toLowerCase()));
+    const others = (collectionsData || []).filter((c) => !c.general && c.name !== name);
+    if (others.length === 0) {
+      depsBox.innerHTML = `<span class="cc-fleet-empty">${escHtml(tr("collections.fleetNoProjects"))}</span>`;
+    } else {
+      depsBox.innerHTML = others.map((c) =>
+        `<label class="cc-fleet-dep"><input type="checkbox" value="${escHtml(c.name)}"${depSet.has(c.name.toLowerCase()) ? " checked" : ""}> ${escHtml(c.name)}</label>`
+      ).join("");
+    }
+    const syncFleetVis = () => {
+      fleetFields.hidden = !fleetCb.checked;
+      allowWrap.hidden = !(fleetCb.checked && engineSel.value === "claude");
+    };
+    fleetCb.addEventListener("change", syncFleetVis);
+    engineSel.addEventListener("change", syncFleetVis);
+    syncFleetVis();
 
     // ── Memory size (soft target) + live word counter ──
     const CC_SIZE_LIMITS = { small: 200, medium: 350, large: 700 };
@@ -6483,6 +6544,11 @@ function collectionContextDialog(name, snap) {
       memory: body.querySelector(".cc-mem").value,
       memory_size: currentSize(),
       auto_update: autoCb.checked,
+      role: fleetCb.checked ? "project" : "",
+      engine: fleetCb.checked ? engineSel.value : "",
+      depends_on: fleetCb.checked ? Array.from(depsBox.querySelectorAll("input:checked")).map((i) => i.value) : [],
+      claude_allowed_tools: (fleetCb.checked && engineSel.value === "claude")
+        ? allowTa.value.split("\n").map((s) => s.trim()).filter(Boolean) : [],
     });
     ok.addEventListener("click", submit);
     overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
