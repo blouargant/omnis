@@ -59,6 +59,14 @@ type SessionMeta struct {
 	// HTTP session-list handler filters them out. Persisted in the conversation
 	// file so the flag survives server restarts.
 	Hidden bool `json:"hidden,omitempty"`
+	// FleetExperiment marks a session forked from a Fleet (Conductor) chat: an
+	// isolated experiment whose per-project Drivers run in git worktrees (see
+	// server/fleet_worktree.go), so competing forks never collide on the
+	// projects' main checkouts. Set once at fork time and otherwise behaves
+	// like any normal session (still listed, pinned, watched, retained). The
+	// flag is persisted in the conversation file so it survives server
+	// restarts.
+	FleetExperiment bool `json:"fleet_experiment,omitempty"`
 	// Goal is the session's active /goal completion condition, mirrored from the
 	// conversation file so the server can restore an in-progress goal on restart.
 	// Empty when no goal is active. The live goal state lives in the process-wide
@@ -278,6 +286,27 @@ func (r *Registry) SetHidden(id string, v bool) bool {
 	go func() {
 		if err := SetConversationHidden(id, v); err != nil {
 			log.Printf("sessions: failed to persist hidden flag for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
+// SetFleetExperiment sets (or clears) the fleet-experiment flag on a session
+// (in-memory + persisted to the conversation file asynchronously, mirroring
+// SetHidden/SetArchived). Returns true when a session was found.
+func (r *Registry) SetFleetExperiment(id string, v bool) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.FleetExperiment = v
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationFleetExperiment(id, v); err != nil {
+			log.Printf("sessions: failed to persist fleet-experiment flag for session %s: %v", id, err)
 		}
 	}()
 	return true

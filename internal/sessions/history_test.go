@@ -226,6 +226,74 @@ func TestHiddenFlagRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFleetExperimentFlagRoundTrip verifies the fleet-experiment flag (set on
+// a fork of a Fleet chat, see server/fork_rewind.go) persists and is read back
+// by LoadPersistedSessions without disturbing the conversation turns —
+// mirroring the hidden flag.
+func TestFleetExperimentFlagRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("OMNIS_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	const sid = "fleet-experiment-test"
+	if err := AppendConversationTurn(sid, "hi", "hello"); err != nil {
+		t.Fatalf("AppendConversationTurn: %v", err)
+	}
+	reloaded := func() *SessionMeta {
+		for _, m := range LoadPersistedSessions() {
+			if m.ID == sid {
+				return m
+			}
+		}
+		return nil
+	}
+
+	if err := SetConversationFleetExperiment(sid, true); err != nil {
+		t.Fatalf("SetConversationFleetExperiment: %v", err)
+	}
+	meta := reloaded()
+	if meta == nil {
+		t.Fatalf("session %q missing after setting fleet-experiment", sid)
+	}
+	if !meta.FleetExperiment {
+		t.Fatalf("FleetExperiment = false after set, want true")
+	}
+	if meta.Turns != 1 {
+		t.Fatalf("Turns = %d after set, want 1 (turns must be preserved)", meta.Turns)
+	}
+
+	if err := SetConversationFleetExperiment(sid, false); err != nil {
+		t.Fatalf("SetConversationFleetExperiment(false): %v", err)
+	}
+	if meta := reloaded(); meta == nil || meta.FleetExperiment {
+		t.Fatalf("FleetExperiment still set after clearing: %+v", meta)
+	}
+}
+
+// TestRegistrySetFleetExperiment verifies the in-memory flag toggles and the
+// missing session case returns false, mirroring TestRegistrySetArchived.
+func TestRegistrySetFleetExperiment(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("OMNIS_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	reg := NewEmptyRegistry()
+	m := reg.New("")
+	if !reg.SetFleetExperiment(m.ID, true) {
+		t.Fatalf("SetFleetExperiment(existing) = false, want true")
+	}
+	if got, _ := reg.Get(m.ID); got == nil || !got.FleetExperiment {
+		t.Fatalf("in-memory FleetExperiment not set: %+v", got)
+	}
+	if reg.SetFleetExperiment("does-not-exist", true) {
+		t.Fatalf("SetFleetExperiment(missing) = true, want false")
+	}
+}
+
 // TestConcurrentMutatorsDoNotLoseTurns exercises the per-session lock: many
 // goroutines append turns while others flip the harvested/archived/title flags
 // on the same session. Every append must survive — the old unsynchronised

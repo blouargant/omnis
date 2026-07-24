@@ -169,6 +169,14 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		// start in the same place.
 		bashCwd.set(newMeta.ID, bashCwd.get(id))
 
+		// A fork of a Fleet (Conductor) chat is an isolated experiment: its
+		// per-project Drivers run in git worktrees (see server/fleet_worktree.go),
+		// so competing forks never collide on the projects' main checkouts.
+		if isFleetSquad(srcSquad) {
+			d.Registry.SetFleetExperiment(newMeta.ID, true)
+			_ = sessions.SetConversationFleetExperiment(newMeta.ID, true)
+		}
+
 		// Mirror the POST /sessions wiring so the fork is a first-class session.
 		if d.RegisterSession != nil {
 			name := newMeta.ID

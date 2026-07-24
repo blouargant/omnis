@@ -1,9 +1,17 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/blouargant/omnis/internal/fleet"
 	"github.com/blouargant/omnis/internal/sessions"
 )
+
+// isFleetSquad reports whether a squad name is the Fleet coordinator squad (the
+// one whose Conductor dispatches per-project Drivers). Keyed on the shipped
+// squad name; squad names are case-insensitive at the point this is called
+// (config/agents.json ships it as "Fleet").
+func isFleetSquad(name string) bool { return strings.EqualFold(strings.TrimSpace(name), "fleet") }
 
 // installFleetResolver wires the process-wide fleet project resolver to the
 // collection registry: a fleet project is a collection whose profile has

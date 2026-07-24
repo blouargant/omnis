@@ -124,6 +124,10 @@ type ConversationFile struct {
 	// Hidden marks a utility session kept out of the sidebar list (see
 	// SessionMeta.Hidden). Persisted so the flag survives a server restart.
 	Hidden bool `json:"hidden,omitempty"`
+	// FleetExperiment marks a session forked from a Fleet (Conductor) chat as
+	// an isolated experiment (see SessionMeta.FleetExperiment). Persisted so
+	// the flag survives a server restart.
+	FleetExperiment bool `json:"fleet_experiment,omitempty"`
 	// Goal is the session's active /goal completion condition, persisted so an
 	// in-progress goal is restored on a server restart (resume semantics: the
 	// condition carries over, the timer/turn count reset). Empty when no goal is
@@ -404,6 +408,13 @@ func SetConversationHidden(sessionID string, v bool) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Hidden = v })
 }
 
+// SetConversationFleetExperiment persists the FleetExperiment flag to disk
+// without touching the conversation turns. Called when a session is forked
+// from a Fleet (Conductor) chat.
+func SetConversationFleetExperiment(sessionID string, v bool) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.FleetExperiment = v })
+}
+
 // SetConversationSquad persists the squad name to disk without touching the
 // conversation turns. Called when a new session is first created so the
 // choice survives a server restart.
@@ -485,19 +496,20 @@ func LoadPersistedSessions() []*SessionMeta {
 			continue
 		}
 		out = append(out, &SessionMeta{
-			ID:         id,
-			Title:      f.Title,
-			Squad:      f.Squad,
-			Harvested:  f.Harvested,
-			Archived:   f.Archived,
-			Hidden:     f.Hidden,
-			Goal:       f.Goal,
-			Cwd:        f.Cwd,
-			Collection: f.Collection,
-			UserID:     DefaultUserID,
-			CreatedAt:  f.Turns[0].At,
-			LastUsedAt: f.Turns[len(f.Turns)-1].At,
-			Turns:      len(f.Turns),
+			ID:              id,
+			Title:           f.Title,
+			Squad:           f.Squad,
+			Harvested:       f.Harvested,
+			Archived:        f.Archived,
+			Hidden:          f.Hidden,
+			FleetExperiment: f.FleetExperiment,
+			Goal:            f.Goal,
+			Cwd:             f.Cwd,
+			Collection:      f.Collection,
+			UserID:          DefaultUserID,
+			CreatedAt:       f.Turns[0].At,
+			LastUsedAt:      f.Turns[len(f.Turns)-1].At,
+			Turns:           len(f.Turns),
 		})
 	}
 	return out
