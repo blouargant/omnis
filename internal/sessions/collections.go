@@ -73,6 +73,9 @@ type collectionProfile struct {
 	// ClaudeAllowedTools is the per-project Claude tool allowlist (e.g.
 	// "Read", "Bash(go test:*)") used when Engine == "claude".
 	ClaudeAllowedTools []string `json:"claude_allowed_tools,omitempty"`
+	// Fleet names the fleet this project belongs to (membership). Empty ⇒ the
+	// project is Ungrouped. Inert unless Role == "project".
+	Fleet string `json:"fleet,omitempty"`
 }
 
 // isEmpty reports whether the profile carries no data. Used instead of `==`
@@ -81,7 +84,7 @@ func (p collectionProfile) isEmpty() bool {
 	return p.Squad == "" && p.Cwd == "" && p.MemorySize == "" &&
 		!p.AutoUpdate && p.LastMemoryUpdate == 0 &&
 		p.Role == "" && p.Engine == "" && len(p.DependsOn) == 0 &&
-		len(p.ClaudeAllowedTools) == 0
+		len(p.ClaudeAllowedTools) == 0 && p.Fleet == ""
 }
 
 // CollectionProfileData is a collection's full per-collection scalar bag.
@@ -95,6 +98,7 @@ type CollectionProfileData struct {
 	Engine             string
 	DependsOn          []string
 	ClaudeAllowedTools []string
+	Fleet              string
 }
 
 // CollectionProfileFull returns the full stored per-collection scalars. A missing
@@ -116,6 +120,7 @@ func CollectionProfileFull(name string) CollectionProfileData {
 		AutoUpdate: p.AutoUpdate, LastMemoryUpdate: p.LastMemoryUpdate,
 		Role: p.Role, Engine: p.Engine, DependsOn: cloneStrings(p.DependsOn),
 		ClaudeAllowedTools: cloneStrings(p.ClaudeAllowedTools),
+		Fleet:              p.Fleet,
 	}
 }
 
@@ -144,6 +149,7 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 		AutoUpdate: cur.AutoUpdate, LastMemoryUpdate: cur.LastMemoryUpdate,
 		Role: cur.Role, Engine: cur.Engine, DependsOn: cloneStrings(cur.DependsOn),
 		ClaudeAllowedTools: cloneStrings(cur.ClaudeAllowedTools),
+		Fleet:              cur.Fleet,
 	}
 	mutate(&d)
 	p := collectionProfile{
@@ -156,6 +162,7 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 		Engine:             strings.TrimSpace(d.Engine),
 		DependsOn:          cleanStrings(d.DependsOn),
 		ClaudeAllowedTools: cleanStrings(d.ClaudeAllowedTools),
+		Fleet:              strings.TrimSpace(d.Fleet),
 	}
 	if p.isEmpty() {
 		if f.Profiles != nil {
@@ -195,6 +202,7 @@ func SetCollectionProfileData(name string, d CollectionProfileData) error {
 		Engine:             strings.TrimSpace(d.Engine),
 		DependsOn:          cleanStrings(d.DependsOn),
 		ClaudeAllowedTools: cleanStrings(d.ClaudeAllowedTools),
+		Fleet:              strings.TrimSpace(d.Fleet),
 	}
 	if p.isEmpty() {
 		if f.Profiles != nil {
