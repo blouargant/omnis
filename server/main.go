@@ -289,6 +289,13 @@ func run() error {
 	// list there.
 	installFleetResolver()
 
+	// Wire the process-wide session→fleet hook to the same session registry: a
+	// Conductor chat's fleet scope is its SessionMeta.Fleet, and this is what
+	// confines fleet_dispatch/fleet_projects to the projects tagged to that
+	// fleet. Server-only: CLI/TUI never call it, so every session is unscoped
+	// (Ungrouped) there.
+	installFleetSessionResolver(registry)
+
 	// Wire the process-wide claude_code allowlist resolver to the same session
 	// registry: a driver session's project (its collection) can override the
 	// default Claude Code --allowedTools list. Server-only: CLI/TUI never call

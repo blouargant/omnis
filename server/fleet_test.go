@@ -57,3 +57,38 @@ func TestInstallFleetResolverEnumeratesProjectCollections(t *testing.T) {
 		t.Fatal("plain collection must not appear as a fleet project")
 	}
 }
+
+func TestCollectFleetProjectsMapsFleetTagAndFolds(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := sessions.AddFleet("Payments", sessions.FleetMetaData{}); err != nil {
+		t.Fatalf("AddFleet: %v", err)
+	}
+	if _, _, err := sessions.AddCollection("api"); err != nil {
+		t.Fatalf("AddCollection api: %v", err)
+	}
+	if _, _, err := sessions.AddCollection("orphan"); err != nil {
+		t.Fatalf("AddCollection orphan: %v", err)
+	}
+	if err := sessions.AssignProject("Payments", "api"); err != nil {
+		t.Fatalf("AssignProject: %v", err)
+	}
+	// A project tagged to a fleet that does not exist must fold to "" (Ungrouped).
+	if err := sessions.UpdateCollectionProfile("orphan", func(p *sessions.CollectionProfileData) {
+		p.Role = "project"
+		p.Engine = "omnis"
+		p.Fleet = "GhostFleet"
+	}); err != nil {
+		t.Fatalf("tag orphan: %v", err)
+	}
+
+	got := map[string]string{}
+	for _, p := range collectFleetProjects() {
+		got[p.Name] = p.Fleet
+	}
+	if got["api"] != "Payments" {
+		t.Fatalf("api fleet = %q, want Payments", got["api"])
+	}
+	if got["orphan"] != "" {
+		t.Fatalf("orphan fleet = %q, want \"\" (unknown fleet folds to Ungrouped)", got["orphan"])
+	}
+}

@@ -104,3 +104,36 @@ func TestFleetDispatchToolCapRejected(t *testing.T) {
 		t.Fatal("over-cap dispatch must error")
 	}
 }
+
+func TestRunFleetDispatchScopedToSessionFleet(t *testing.T) {
+	fleet.SetProjectsResolver(func() []fleet.Project {
+		return []fleet.Project{
+			{Name: "api", Engine: fleet.EngineOmnis, Fleet: "Payments"},
+			{Name: "ledger", Engine: fleet.EngineOmnis, Fleet: "Billing"},
+		}
+	})
+	defer fleet.SetProjectsResolver(nil)
+	fleet.SetSessionFleetResolver(func(sid string) string {
+		if sid == "cond-pay" {
+			return "Payments"
+		}
+		return ""
+	})
+	defer fleet.SetSessionFleetResolver(nil)
+
+	reg := NewFleetDispatchRegistry()
+	// In-fleet dispatch succeeds and enqueues.
+	if _, err := runFleetDispatch(reg, "cond-pay", fleetDispatchIn{Project: "api", Task: "do x"}); err != nil {
+		t.Fatalf("in-fleet dispatch errored: %v", err)
+	}
+	if got := reg.Drain("cond-pay"); len(got) != 1 || got[0].Project != "api" {
+		t.Fatalf("in-fleet dispatch enqueued %v, want [api]", got)
+	}
+	// Out-of-fleet project is invisible ⇒ rejected as unknown, nothing enqueued.
+	if _, err := runFleetDispatch(reg, "cond-pay", fleetDispatchIn{Project: "ledger", Task: "do y"}); err == nil {
+		t.Fatalf("out-of-fleet dispatch to ledger should be rejected")
+	}
+	if got := reg.Drain("cond-pay"); len(got) != 0 {
+		t.Fatalf("out-of-fleet dispatch enqueued %v, want none", got)
+	}
+}

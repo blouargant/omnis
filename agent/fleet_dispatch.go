@@ -102,7 +102,7 @@ func runFleetDispatch(reg *FleetDispatchRegistry, sessionID string, in fleetDisp
 	if name == "" || task == "" {
 		return fleetDispatchOut{}, fmt.Errorf("both project and task are required")
 	}
-	projects := fleet.Projects()
+	projects := fleet.ProjectsForSession(sessionID)
 	var match *fleet.Project
 	var names []string
 	for i := range projects {

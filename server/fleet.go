@@ -33,14 +33,36 @@ func collectFleetProjects() []fleet.Project {
 		if p.Role != fleet.RoleProject {
 			continue
 		}
+		fleetTag := strings.TrimSpace(p.Fleet)
+		if fleetTag != "" && !sessions.FleetExists(fleetTag) {
+			fleetTag = "" // unknown fleet ⇒ Ungrouped (self-healing, mirrors FleetMembers)
+		}
 		out = append(out, fleet.Project{
 			Name:      name,
 			Cwd:       p.Cwd,
 			Engine:    fleet.Engine(p.Engine),
 			DependsOn: p.DependsOn,
+			Fleet:     fleetTag,
 		})
 	}
 	return out
+}
+
+// installFleetSessionResolver wires the process-wide session→fleet hook to the
+// live session registry: a Conductor chat's fleet scope is its SessionMeta.Fleet.
+// Called once at server startup beside installFleetResolver. CLI/TUI never call
+// it, so every session is unscoped (Ungrouped) there — the no-op default.
+func installFleetSessionResolver(reg *sessions.Registry) {
+	fleet.SetSessionFleetResolver(func(sessionID string) string {
+		if reg == nil {
+			return ""
+		}
+		m, ok := reg.Get(sessionID)
+		if !ok || m == nil {
+			return ""
+		}
+		return strings.TrimSpace(m.Fleet)
+	})
 }
 
 // fleetProjectsForTest exposes the collected projects to the package test
