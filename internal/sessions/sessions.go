@@ -41,6 +41,10 @@ type SessionMeta struct {
 	// The set of user-created collections is persisted separately in
 	// collections.json; this only records which one a session belongs to.
 	Collection string `json:"collection,omitempty"`
+	// Fleet names the fleet a Conductor chat coordinates. Empty ⇒ the session is
+	// not fleet-scoped (it sees the Ungrouped project pool). Set by the Coordinate
+	// action (POST /sessions {fleet}); scopes fleet_projects/fleet_dispatch.
+	Fleet string `json:"fleet,omitempty"`
 	// Harvested is set by the idle harvester after it fires curator evaluation
 	// for this session. A harvested session is skipped by the idle scanner until
 	// new activity (Touch) clears the flag. The flag is persisted in the
@@ -351,6 +355,27 @@ func (r *Registry) SetCollection(id, collection string) bool {
 	go func() {
 		if err := SetConversationCollection(id, collection); err != nil {
 			log.Printf("sessions: failed to persist collection for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
+// SetFleet scopes a session to a fleet (in-memory + persisted to the conversation
+// file asynchronously, mirroring SetCollection). An empty name clears the scope
+// (Ungrouped). Returns true when a session was found.
+func (r *Registry) SetFleet(id, fleet string) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.Fleet = fleet
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationFleet(id, fleet); err != nil {
+			log.Printf("sessions: failed to persist fleet for session %s: %v", id, err)
 		}
 	}()
 	return true

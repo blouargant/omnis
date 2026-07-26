@@ -142,8 +142,11 @@ type ConversationFile struct {
 	// Collection is the thematic folder ("Collection") the session is filed
 	// under. Empty means the virtual "General" collection. Persisted so the
 	// filing survives a server restart (see SessionMeta.Collection).
-	Collection string             `json:"collection,omitempty"`
-	Turns      []ConversationTurn `json:"turns"`
+	Collection string `json:"collection,omitempty"`
+	// Fleet is the fleet a Conductor chat coordinates (see SessionMeta.Fleet),
+	// persisted so the scope survives a restart.
+	Fleet string             `json:"fleet,omitempty"`
+	Turns []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -433,6 +436,12 @@ func SetConversationCollection(sessionID, collection string) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Collection = collection })
 }
 
+// SetConversationFleet persists the session's fleet scope to disk without
+// touching the conversation turns.
+func SetConversationFleet(sessionID, fleet string) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.Fleet = fleet })
+}
+
 // SetConversationGoal persists (or clears, when condition is empty) the active
 // /goal completion condition without touching turns. The persisted value lets a
 // server restart restore an in-progress goal.
@@ -506,6 +515,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Goal:            f.Goal,
 			Cwd:             f.Cwd,
 			Collection:      f.Collection,
+			Fleet:           f.Fleet,
 			UserID:          DefaultUserID,
 			CreatedAt:       f.Turns[0].At,
 			LastUsedAt:      f.Turns[len(f.Turns)-1].At,
