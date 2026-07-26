@@ -81,6 +81,14 @@
       </button>
     </div>
     <ul id="collections-list" aria-label="collections"></ul>
+    <div id="fleets-section" hidden>
+      <div class="fleets-head">
+        <span class="fleets-head-label" data-i18n="fleets.sectionLabel">Fleets</span>
+        <button id="new-fleet-btn" type="button" class="fleets-new-btn"
+                data-i18n-tip="fleets.newTip" data-tip="New fleet" aria-label="New fleet">+</button>
+      </div>
+      <ul id="fleets-list" aria-label="fleets"></ul>
+    </div>
     <div id="archived-panel" class="collapsed" hidden>
       <div id="archived-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle archived sessions" data-i18n-tip="archived.toggle">
         <svg class="archived-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
@@ -470,9 +478,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=61" defer></script>
+  <script src="assets/i18n/locales.js?v=62" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=89" defer></script>
+  <script src="assets/app.js?v=90" defer></script>
   <script src="assets/settings.js?v=60" defer></script>
 </body>
 </html>

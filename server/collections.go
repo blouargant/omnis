@@ -28,6 +28,10 @@ type collectionInfo struct {
 	Squad      string `json:"squad,omitempty"`
 	Cwd        string `json:"cwd,omitempty"`
 	HasContext bool   `json:"has_context,omitempty"`
+	// Role is the collection's fleet role ("project" ⇒ it is a fleet project and
+	// the web UI files it under Fleets, not the Collections rail; "" ⇒ a normal
+	// collection).
+	Role string `json:"role,omitempty"`
 }
 
 // collectionCounts tallies non-hidden sessions by their effective collection.
@@ -80,14 +84,15 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
 		for _, n := range known {
-			squad, cwd := sessions.CollectionProfile(n)
+			prof := sessions.CollectionProfileFull(n)
 			out = append(out, collectionInfo{
 				Name:       n,
 				Count:      counts[n],
 				Color:      colors[n],
-				Squad:      squad,
-				Cwd:        cwd,
+				Squad:      prof.Squad,
+				Cwd:        prof.Cwd,
 				HasContext: collectionctx.HasContext(n),
+				Role:       prof.Role,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"collections": out})

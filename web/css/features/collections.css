@@ -324,3 +324,211 @@
   opacity: 0.7;
 }
 .collection-swatch-none.selected { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 3px var(--border); }
+
+/* ─── Fleets section (inside the left #sidebar, below Collections) ──────────
+ * A fleet groups several "project" collections (role:"project") that are
+ * lifted OUT of the plain Collections rail above (see renderCollections's
+ * role filter in web/app.js) into their own collapsible list here. Local
+ * engine-badge tokens reuse the existing collection palette hues so no new
+ * brand colours are introduced (omnis = indigo, claude = orange). */
+:root {
+  --eng-omnis:  var(--collection-indigo);
+  --eng-claude: var(--collection-orange);
+}
+
+#fleets-section { flex-shrink: 0; }
+
+.fleets-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 4px 14px;
+}
+.fleets-head-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.fleets-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.fleets-new-btn:hover { background: var(--bg-raised-hover); color: var(--text); }
+
+#fleets-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One fleet: a bordered card so a project group reads as an unmistakable
+ * unit, distinct from the flat Collections rows above it. */
+.fleet-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-raised) 45%, transparent);
+}
+.fleet-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.fleet-hd:hover { background: var(--bg-raised-hover); }
+.fleet-chev {
+  display: inline-flex;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+.fleet-group.collapsed .fleet-chev { transform: rotate(-90deg); }
+.fleet-ficon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--fleet-accent, var(--accent-strong));
+}
+.fleet-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.fleet-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.fleet-dots { display: inline-flex; align-items: center; gap: 3px; }
+.fleet-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.fleet-dot.eng-omnis  { background: var(--eng-omnis); }
+.fleet-dot.eng-claude { background: var(--eng-claude); }
+.fleet-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-coord {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 40%, transparent);
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.fleet-hd:hover .fleet-coord {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+}
+
+.fleet-body {
+  list-style: none;
+  margin: 0;
+  padding: 2px 6px 6px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fleet-group.collapsed .fleet-body { display: none; }
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 6px;
+  cursor: default;
+  color: var(--text);
+  font-size: 13px;
+}
+.project-row:hover { background: var(--bg-raised); }
+.project-hex {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--col-accent, var(--text-muted));
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-dep {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.project-eng {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+.project-eng.omnis {
+  color: var(--eng-omnis);
+  background: color-mix(in srgb, var(--eng-omnis) 13%, transparent);
+  border-color: color-mix(in srgb, var(--eng-omnis) 30%, transparent);
+}
+.project-eng.claude {
+  color: var(--eng-claude);
+  background: color-mix(in srgb, var(--eng-claude) 14%, transparent);
+  border-color: color-mix(in srgb, var(--eng-claude) 32%, transparent);
+}
+
+/* Ungrouped is a dashed/muted degenerate "fleet" (untagged projects) — no
+ * metadata dots/count-pill styling difference beyond colour, and no
+ * Coordinate button (buildFleetGroup omits it) since there's nothing to
+ * coordinate as one unit. */
+.fleet-group.ungrouped {
+  background: none;
+  border-style: dashed;
+  opacity: 0.9;
+}
+.fleet-group.ungrouped .fleet-ficon { color: var(--text-faint); }
+.fleet-group.ungrouped .fleet-name { color: var(--text-muted); font-weight: 500; }

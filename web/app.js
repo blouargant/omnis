@@ -157,6 +157,9 @@ const els = {
   sessionSelectCount: document.getElementById("session-select-count"),
   collectionsList: document.getElementById("collections-list"),
   collectionsNew:  document.getElementById("collections-new"),
+  fleetsSection: document.getElementById("fleets-section"),
+  fleetsList:    document.getElementById("fleets-list"),
+  newFleetBtn:   document.getElementById("new-fleet-btn"),
   archivedPanel: document.getElementById("archived-panel"),
   archivedHeader:document.getElementById("archived-header"),
   archivedList:  document.getElementById("archived-list"),
@@ -1427,6 +1430,7 @@ const sessionTitles     = new Map(); // sessionId → display title (for pane ta
 const GENERAL_COLLECTION = "General";
 let activeCollection = GENERAL_COLLECTION; // which collection the middle list is filtered to
 let collectionsData  = [];                 // [{name,count,general}] from GET /api/collections
+let fleetsData = []; // [{name,color,description,default_engine,project_count,engines,members,ungrouped}] from GET /api/fleets
 // sessionMeta is a lazily-grown id → session-meta cache. GET /api/sessions is now
 // paginated, so we no longer hold the whole list; every row we fetch (a page, a
 // prefix reload, a single open) is remembered here so colour lookups, the pane
@@ -6060,6 +6064,14 @@ function setSessionBusy(sessionId, busy) {
 const ICON_STAR = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>`;
 const ICON_FOLDER = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
 const ICON_SWATCH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5.5 0 10 4.5 10 10a4 4 0 0 1-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/></svg>`;
+// ICON_CHEVRON/ICON_HEX/ICON_NODES/ICON_ARROW back the Fleets section below:
+// a collapse chevron, a hexagon (fleet project glyph), a three-node cluster
+// (fleet glyph), and a short → (depends-on chip). Paths mirror the fleet
+// grouping mockup.
+const ICON_CHEVRON = `<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>`;
+const ICON_HEX = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 2.6l7.5 4.33v9.14L12 20.4l-7.5-4.33V6.93z"/></svg>`;
+const ICON_NODES = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="7" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M8 8.2l3 8M16 8.2l-3 8M8 7h8"/></svg>`;
+const ICON_ARROW = `<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h8M8 4l4 4-4 4"/></svg>`;
 
 // COLLECTION_COLORS is the palette of predefined collection colours, in swatch /
 // proposal order. Each key maps to a --collection-<key> theme token defined in
@@ -6135,7 +6147,10 @@ function renderCollections(list) {
     activeCollection = GENERAL_COLLECTION;
   }
   els.collectionsList.innerHTML = "";
-  for (const c of collectionsData) els.collectionsList.appendChild(buildCollectionRow(c));
+  for (const c of collectionsData) {
+    if ((c.role || "") === "project") continue; // projects live under Fleets, not here
+    els.collectionsList.appendChild(buildCollectionRow(c));
+  }
   // The rail only paints itself now — the (paginated) session list is refetched
   // by its own callers (selectCollection on a rail click, loadSessions on a
   // collections_changed push). Effective-collection folding is server-side, so
@@ -6187,6 +6202,109 @@ function buildCollectionRow(c) {
   });
   return li;
 }
+
+// ─── Fleets (grouped, multi-project coordination) ────────────────────────────
+
+// fleetProjectNames returns the set (lowercased) of collection names that are
+// fleet projects — the ones filtered OUT of the Collections rail and every
+// "Move to" picker, and refused as chat-drop targets.
+function fleetProjectNames() {
+  const set = new Set();
+  for (const f of fleetsData) for (const m of (f.members || [])) set.add(String(m.name).toLowerCase());
+  return set;
+}
+
+// loadFleets fetches the fleet groups (named fleets + a virtual Ungrouped when it
+// has members) and repaints the Fleets section. Idempotent; called at boot and on
+// every fleets_changed / collections_changed push.
+async function loadFleets() {
+  try {
+    const res = await apiFetch("/api/fleets", { cache: "no-store" });
+    fleetsData = await res.json();
+    if (!Array.isArray(fleetsData)) fleetsData = [];
+  } catch (e) { console.error("loadFleets:", e); fleetsData = []; }
+  renderFleets();
+}
+
+function renderFleets() {
+  const list = els.fleetsList;
+  if (!list) return;
+  list.innerHTML = "";
+  for (const f of fleetsData) list.appendChild(buildFleetGroup(f));
+  // Hide the whole section when there are no fleets AND no ungrouped projects.
+  if (els.fleetsSection) els.fleetsSection.hidden = fleetsData.length === 0;
+}
+
+// buildFleetGroup renders one collapsible fleet: a header (chevron, node-cluster
+// icon in the fleet colour, name, engine-mix dots, project count, Coordinate) and
+// its project rows. Ungrouped is a dashed/muted variant with no metadata/Coordinate.
+function buildFleetGroup(f) {
+  const wrap = document.createElement("li");
+  wrap.className = "fleet-group" + (f.ungrouped ? " ungrouped" : "");
+  wrap.dataset.fleet = f.name;
+  const accent = collectionAccentVar(f.color);
+  if (accent) wrap.style.setProperty("--fleet-accent", accent);
+
+  const hd = document.createElement("div");
+  hd.className = "fleet-hd";
+  const dots = (f.engines || []).map((e) =>
+    `<i class="fleet-dot ${e === "claude" ? "eng-claude" : "eng-omnis"}" title="${escHtml(e)}"></i>`).join("");
+  hd.innerHTML =
+    `<span class="fleet-chev">${ICON_CHEVRON}</span>` +
+    `<span class="fleet-ficon">${f.ungrouped ? ICON_HEX : ICON_NODES}</span>` +
+    `<span class="fleet-name"></span>` +
+    `<span class="fleet-meta"><span class="fleet-dots">${dots}</span>` +
+    `<span class="fleet-count">${f.project_count || 0}</span>` +
+    (f.ungrouped ? "" : `<button type="button" class="fleet-coord" data-i18n="fleets.coordinate">Coordinate</button>`) +
+    `</span>`;
+  hd.querySelector(".fleet-name").textContent = f.ungrouped ? tr("fleets.ungrouped") : f.name;
+  wrap.appendChild(hd);
+
+  const body = document.createElement("ul");
+  body.className = "fleet-body";
+  for (const m of (f.members || [])) body.appendChild(buildProjectRow(f, m));
+  wrap.appendChild(body);
+
+  // Collapse toggle (skip clicks on the Coordinate button — Task 2 wires it).
+  hd.addEventListener("click", (ev) => {
+    if (ev.target.closest(".fleet-coord")) return;
+    wrap.classList.toggle("collapsed");
+  });
+  // Fleet-header context menu (Task 3 fills it in). Ungrouped has none.
+  if (!f.ungrouped) hd.addEventListener("contextmenu", (ev) => openFleetCtxMenu(ev, f));
+  return wrap;
+}
+
+// buildProjectRow renders one project: hexagon glyph in the project's collection
+// colour, name, engine badge, and a →dep chip when it depends on others.
+function buildProjectRow(f, m) {
+  const li = document.createElement("li");
+  li.className = "project-row";
+  li.dataset.name = m.name;
+  li.dataset.fleet = f.name;
+  const accent = collectionAccentVar(collectionColorByName(m.name));
+  if (accent) li.style.setProperty("--col-accent", accent);
+  const eng = m.engine === "claude" ? "claude" : "omnis";
+  const dep = (m.depends_on && m.depends_on.length)
+    ? `<span class="project-dep" title="${escHtml((m.depends_on || []).join(", "))}">${ICON_ARROW}${escHtml(m.depends_on[0])}${m.depends_on.length > 1 ? "…" : ""}</span>`
+    : "";
+  li.innerHTML =
+    `<span class="project-hex">${ICON_HEX}</span>` +
+    `<span class="project-name"></span>${dep}` +
+    `<span class="project-eng ${eng}">${escHtml(eng)}</span>`;
+  li.querySelector(".project-name").textContent = m.name;
+  li.setAttribute("data-tip", m.name);
+  // Project rows are NOT chat-drop targets (guarded — Task 4 also excludes them
+  // from Move-to). A context menu (Task 4) offers Coordinate/Edit/Remove.
+  li.addEventListener("contextmenu", (ev) => openProjectCtxMenu(ev, f, m));
+  return li;
+}
+
+// openFleetCtxMenu / openProjectCtxMenu are stubs filled in by later tasks
+// (fleet CRUD + project management context menus). Declared here so the
+// listeners wired above don't throw a ReferenceError before those land.
+function openFleetCtxMenu(ev, f) { /* Task 3 */ }
+function openProjectCtxMenu(ev, f, m) { /* Task 4 */ }
 
 // selectCollection switches the middle list's filter. The list is paginated, so
 // this refetches page 1 for the newly selected collection (both active + archived
@@ -7865,9 +7983,17 @@ async function subscribeGlobalEvents() {
         } else if (event === "collections_changed") {
           // A collection was created/renamed/deleted (here or elsewhere) —
           // repaint the rail and re-fetch sessions (a rename/delete cascaded
-          // onto their Collection field).
+          // onto their Collection field). Also refresh Fleets — a role change
+          // (assign/unassign) moves a collection between the two lists.
           loadCollections();
+          loadFleets();
           loadSessions();
+        } else if (event === "fleets_changed") {
+          // A fleet was created/renamed/deleted, or gained/lost a project —
+          // refresh both lists (membership changes affect the Collections
+          // rail's project filter too).
+          loadFleets();
+          loadCollections();
         } else if (event === "session_moved" && sid) {
           // A session was filed under a different collection (here or elsewhere)
           // — refresh both lists so counts + filtering stay correct.
@@ -12422,6 +12548,7 @@ async function restoreLayout(rec, liveIds) {
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
   wireSessionBar();
   await loadCollections();
+  await loadFleets();
   await loadSessions();
 
   // Collect live session ids for layout validation. The session list is now
