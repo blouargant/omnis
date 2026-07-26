@@ -261,3 +261,148 @@ func UpdateFleetMeta(name string, mutate func(m *FleetMetaData)) error {
 	}
 	return saveFleetsLocked(f)
 }
+
+// FleetMembers returns the collection names belonging to a fleet. For a real
+// fleet, that is every role:"project" collection whose `fleet` tag matches. For
+// UngroupedFleet, it is every project whose tag is empty OR names a fleet that no
+// longer exists (fold-unknown → Ungrouped). Order follows ListCollections.
+//
+// It reads collections (collectionsMu) and the fleet list (fleetsMu) via the
+// public functions, sequentially — it never holds both locks at once.
+func FleetMembers(fleet string) []string {
+	cols, err := ListCollections()
+	if err != nil {
+		return nil
+	}
+	known, _ := ListFleets()
+	ungrouped := strings.EqualFold(strings.TrimSpace(fleet), UngroupedFleet)
+	var out []string
+	for _, c := range cols {
+		p := CollectionProfileFull(c)
+		if p.Role != "project" {
+			continue
+		}
+		tag := strings.TrimSpace(p.Fleet)
+		effective := tag == "" || indexOfFold(known, tag) < 0 // ⇒ Ungrouped
+		if ungrouped {
+			if effective {
+				out = append(out, c)
+			}
+			continue
+		}
+		if !effective && strings.EqualFold(tag, fleet) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// AssignProject files a collection under a fleet: it validates the fleet exists,
+// marks the collection role:"project" (if it isn't already), seeds its engine from
+// the fleet's default (falling back to "omnis") when the collection has none, and
+// writes the `fleet` tag. An unknown fleet or collection is an error.
+func AssignProject(fleet, collection string) error {
+	fleet = strings.TrimSpace(fleet)
+	if !FleetExists(fleet) {
+		return fmt.Errorf("fleet %q not found", fleet)
+	}
+	def := strings.TrimSpace(FleetMetaFor(fleet).DefaultEngine)
+	return UpdateCollectionProfile(collection, func(p *CollectionProfileData) {
+		p.Role = "project"
+		if strings.TrimSpace(p.Engine) == "" {
+			if def != "" {
+				p.Engine = def
+			} else {
+				p.Engine = "omnis"
+			}
+		}
+		p.Fleet = fleet
+	})
+}
+
+// UnassignProject clears a collection's fleet tag, returning it to Ungrouped. It
+// leaves role:"project" intact (it is still a project, just not in a named fleet).
+// An unknown collection is an error.
+func UnassignProject(collection string) error {
+	return UpdateCollectionProfile(collection, func(p *CollectionProfileData) {
+		p.Fleet = ""
+	})
+}
+
+// RenameFleet renames a fleet, migrating its metadata AND rewriting every member's
+// `fleet` tag. Errors on an invalid newName or a collision with a different fleet.
+// Not atomic across the two files, but self-healing: during the brief window a
+// member may fold to Ungrouped, which resolves once the rewrite completes.
+func RenameFleet(old, newName string) ([]string, bool, error) {
+	newName = strings.TrimSpace(newName)
+	if !ValidFleetName(newName) {
+		return nil, false, fmt.Errorf("invalid fleet name %q", newName)
+	}
+	members := FleetMembers(old) // capture BEFORE the object rename
+
+	fleetsMu.Lock()
+	f, err := loadFleetsLocked()
+	if err != nil {
+		fleetsMu.Unlock()
+		return nil, false, err
+	}
+	i := indexOfFold(f.Fleets, old)
+	if i < 0 {
+		fleetsMu.Unlock()
+		return f.Fleets, false, nil
+	}
+	if j := indexOfFold(f.Fleets, newName); j >= 0 && j != i {
+		fleetsMu.Unlock()
+		return f.Fleets, false, fmt.Errorf("fleet %q already exists", newName)
+	}
+	oldCanon := f.Fleets[i]
+	renamed := !strings.EqualFold(oldCanon, newName)
+	if f.Meta != nil && renamed {
+		if m, ok := f.Meta[oldCanon]; ok {
+			delete(f.Meta, oldCanon)
+			f.Meta[newName] = m
+		}
+	}
+	f.Fleets[i] = newName
+	names := f.Fleets
+	if err := saveFleetsLocked(f); err != nil {
+		fleetsMu.Unlock()
+		return nil, false, err
+	}
+	fleetsMu.Unlock() // release BEFORE touching collections (no two-lock hold)
+
+	if renamed {
+		for _, c := range members {
+			_ = UpdateCollectionProfile(c, func(p *CollectionProfileData) { p.Fleet = newName })
+		}
+	}
+	return names, true, nil
+}
+
+// RemoveFleet deletes a fleet: it first clears every member's `fleet` tag (→
+// Ungrouped, leaving role:"project" intact), then drops the fleet object. Returns
+// the updated list and whether an entry was removed.
+func RemoveFleet(name string) ([]string, bool, error) {
+	for _, c := range FleetMembers(name) {
+		_ = UnassignProject(c)
+	}
+	fleetsMu.Lock()
+	defer fleetsMu.Unlock()
+	f, err := loadFleetsLocked()
+	if err != nil {
+		return nil, false, err
+	}
+	i := indexOfFold(f.Fleets, name)
+	if i < 0 {
+		return f.Fleets, false, nil
+	}
+	canon := f.Fleets[i]
+	if f.Meta != nil {
+		delete(f.Meta, canon)
+	}
+	f.Fleets = append(f.Fleets[:i:i], f.Fleets[i+1:]...)
+	if err := saveFleetsLocked(f); err != nil {
+		return nil, false, err
+	}
+	return f.Fleets, true, nil
+}
