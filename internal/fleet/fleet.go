@@ -30,6 +30,11 @@ type Project struct {
 	Cwd       string
 	Engine    Engine
 	DependsOn []string
+	// Fleet is the fleet this project belongs to ("" ⇒ Ungrouped). The server sets
+	// it from the collection's `fleet` tag, folding a tag that names an unknown
+	// fleet to "" (so this is always empty-or-a-real-fleet). Used to scope a
+	// Conductor to its fleet.
+	Fleet string
 }
 
 // TopoOrder returns project names in dependency-first order (a project appears

@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"google.golang.org/adk/tool"
@@ -35,6 +36,50 @@ func currentProjects() []Project {
 	return f()
 }
 
+var (
+	sessionFleetMu sync.RWMutex
+	sessionFleetFn func(sessionID string) string
+)
+
+// SetSessionFleetResolver installs the process-wide hook mapping a session id to
+// the fleet it coordinates (""=unscoped ⇒ Ungrouped). The server installs one
+// backed by the session registry; nil clears it (tests, CLI/TUI, no-fleet
+// default). Mirrors SetProjectsResolver.
+func SetSessionFleetResolver(f func(sessionID string) string) {
+	sessionFleetMu.Lock()
+	sessionFleetFn = f
+	sessionFleetMu.Unlock()
+}
+
+func sessionFleet(sessionID string) string {
+	sessionFleetMu.RLock()
+	f := sessionFleetFn
+	sessionFleetMu.RUnlock()
+	if f == nil {
+		return ""
+	}
+	return strings.TrimSpace(f(sessionID))
+}
+
+// ProjectsForSession returns the projects visible to a session: those whose Fleet
+// matches the session's fleet scope. An unscoped session ("" fleet) sees the
+// Ungrouped pool (projects with an empty Fleet). This is what confines a Conductor
+// to its own fleet.
+func ProjectsForSession(sessionID string) []Project {
+	return projectsForFleet(sessionFleet(sessionID))
+}
+
+func projectsForFleet(fleetName string) []Project {
+	fleetName = strings.TrimSpace(fleetName)
+	var out []Project
+	for _, p := range currentProjects() {
+		if strings.EqualFold(strings.TrimSpace(p.Fleet), fleetName) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 type projectsIn struct{}
 
 type projectView struct {
@@ -52,8 +97,12 @@ type projectsOut struct {
 }
 
 // runProjects is the handler, extracted so tests can call it without ADK plumbing.
-func runProjects(_ adk.ToolContext, _ projectsIn) (projectsOut, error) {
-	projects := currentProjects()
+func runProjects(ctx adk.ToolContext, _ projectsIn) (projectsOut, error) {
+	sessionID := ""
+	if ctx != nil {
+		sessionID = ctx.SessionID()
+	}
+	projects := ProjectsForSession(sessionID)
 	out := projectsOut{Valid: true, Projects: []projectView{}}
 	for _, p := range projects {
 		out.Projects = append(out.Projects, projectView{
