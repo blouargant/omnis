@@ -311,6 +311,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			Dir        string `json:"dir"`
 			Hidden     bool   `json:"hidden"`
 			Collection string `json:"collection"`
+			Fleet      string `json:"fleet"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		// Resolve the target collection first (canonical stored casing, "" for
@@ -380,6 +381,13 @@ func newEngine(d serverDeps) *gin.Engine {
 		// File the new chat under the resolved collection (empty ⇒ General).
 		if collection != "" {
 			d.Registry.SetCollection(meta.ID, collection)
+		}
+		// Scope a Conductor chat to a fleet (the "Coordinate" action). Only an
+		// existing fleet is honoured; an unknown name is ignored, mirroring the
+		// collection-fold behaviour.
+		if fl := strings.TrimSpace(body.Fleet); fl != "" && sessions.FleetExists(fl) {
+			d.Registry.SetFleet(meta.ID, fl)
+			_ = sessions.SetConversationFleet(meta.ID, fl)
 		}
 		// Hidden utility sessions (e.g. the in-Settings assistant) are kept out
 		// of the sidebar list but otherwise behave normally.
