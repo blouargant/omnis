@@ -710,6 +710,10 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.PUT("/collections/:name/context", handleSetCollectionContext(d))
 	auth.POST("/collections/:name/memory/distill", handleDistillCollectionMemory(d))
 	auth.POST("/collections/:name/memory/revert", handleRevertCollectionMemory(d))
+
+	// Fleets — named groups of project-collections (see server/fleets.go).
+	registerFleetRoutes(auth, d)
+
 	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
 		id := c.Param("id")
