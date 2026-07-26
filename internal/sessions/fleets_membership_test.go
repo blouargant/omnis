@@ -90,7 +90,54 @@ func TestFleetMembershipLifecycle(t *testing.T) {
 	}
 }
 
-func sortedCopy(in []string) []string { out := append([]string(nil), in...); sort.Strings(out); return out }
+// TestRenameFleetCaseOnlyPreservesMetadata guards the case-only-rename edge: the
+// stored key changes casing, so metadata (and member tags) must migrate with it —
+// otherwise FleetMetaFor's exact-key lookup misses and the colour/default-engine
+// silently read back as zero.
+func TestRenameFleetCaseOnlyPreservesMetadata(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddFleet("payments", FleetMetaData{Color: "blue", DefaultEngine: "omnis"}); err != nil {
+		t.Fatalf("AddFleet: %v", err)
+	}
+	mustAddCollection(t, "api")
+	if err := AssignProject("payments", "api"); err != nil {
+		t.Fatalf("AssignProject: %v", err)
+	}
+	if _, ok, err := RenameFleet("payments", "Payments"); err != nil || !ok {
+		t.Fatalf("RenameFleet case-only: ok=%v err=%v", ok, err)
+	}
+	if m := FleetMetaFor("Payments"); m.Color != "blue" || m.DefaultEngine != "omnis" {
+		t.Fatalf("case-only rename lost metadata: %+v", m)
+	}
+	if got := CollectionProfileFull("api").Fleet; got != "Payments" {
+		t.Fatalf("case-only rename didn't re-case member tag: %q", got)
+	}
+}
+
+// TestRenameFleetCollisionRejected guards the "rename onto a different existing
+// fleet" error path.
+func TestRenameFleetCollisionRejected(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := AddFleet("Payments", FleetMetaData{}); err != nil {
+		t.Fatalf("AddFleet Payments: %v", err)
+	}
+	if _, _, err := AddFleet("Billing", FleetMetaData{}); err != nil {
+		t.Fatalf("AddFleet Billing: %v", err)
+	}
+	if _, ok, err := RenameFleet("Payments", "Billing"); err == nil || ok {
+		t.Fatalf("RenameFleet onto existing fleet should error: ok=%v err=%v", ok, err)
+	}
+	// Both fleets still exist after the rejected rename.
+	if !FleetExists("Payments") || !FleetExists("Billing") {
+		t.Fatalf("rejected rename mutated the fleet list")
+	}
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

@@ -225,6 +225,11 @@ func FleetMetaFor(name string) FleetMetaData {
 
 // UpdateFleetMeta applies mutate to a fleet's metadata under a single held lock
 // (atomic read-modify-write). An unknown fleet is an error.
+//
+// The mutate closure runs while fleetsMu is held, so it MUST NOT call any
+// function that takes collectionsMu (the collections.go APIs) — that would create
+// a fleetsMu→collectionsMu acquisition and reopen the deadlock the two-lock
+// discipline exists to prevent. It should only read/write the passed *FleetMetaData.
 func UpdateFleetMeta(name string, mutate func(m *FleetMetaData)) error {
 	name = strings.TrimSpace(name)
 	fleetsMu.Lock()
@@ -283,14 +288,14 @@ func FleetMembers(fleet string) []string {
 			continue
 		}
 		tag := strings.TrimSpace(p.Fleet)
-		effective := tag == "" || indexOfFold(known, tag) < 0 // ⇒ Ungrouped
+		orphan := tag == "" || indexOfFold(known, tag) < 0 // empty/dangling tag ⇒ Ungrouped
 		if ungrouped {
-			if effective {
+			if orphan {
 				out = append(out, c)
 			}
 			continue
 		}
-		if !effective && strings.EqualFold(tag, fleet) {
+		if !orphan && strings.EqualFold(tag, fleet) {
 			out = append(out, c)
 		}
 	}
@@ -356,7 +361,11 @@ func RenameFleet(old, newName string) ([]string, bool, error) {
 		return f.Fleets, false, fmt.Errorf("fleet %q already exists", newName)
 	}
 	oldCanon := f.Fleets[i]
-	renamed := !strings.EqualFold(oldCanon, newName)
+	// Exact-string compare (not EqualFold): a case-only re-case ("payments" →
+	// "Payments") still changes the stored key, so metadata and member tags must
+	// migrate to the new casing — otherwise FleetMetaFor's exact-key lookup misses
+	// and the colour/description/default-engine silently read back as zero.
+	renamed := oldCanon != newName
 	if f.Meta != nil && renamed {
 		if m, ok := f.Meta[oldCanon]; ok {
 			delete(f.Meta, oldCanon)
