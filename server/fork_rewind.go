@@ -164,6 +164,11 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		if meta.Collection != "" {
 			d.Registry.SetCollection(newMeta.ID, meta.Collection)
 		}
+		if meta.Fleet != "" {
+			// A fork of a fleet-scoped Conductor (a FleetExperiment) must stay scoped to
+			// the same fleet, or it silently drops to the Ungrouped project pool.
+			d.Registry.SetFleet(newMeta.ID, meta.Fleet)
+		}
 
 		// The fork inherits the source's working directory so its tools/`!cd`
 		// start in the same place.

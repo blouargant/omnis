@@ -387,7 +387,6 @@ func newEngine(d serverDeps) *gin.Engine {
 		// collection-fold behaviour.
 		if fl := strings.TrimSpace(body.Fleet); fl != "" && sessions.FleetExists(fl) {
 			d.Registry.SetFleet(meta.ID, fl)
-			_ = sessions.SetConversationFleet(meta.ID, fl)
 		}
 		// Hidden utility sessions (e.g. the in-Settings assistant) are kept out
 		// of the sidebar list but otherwise behave normally.

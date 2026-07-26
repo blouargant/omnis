@@ -385,6 +385,7 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 		Title:      title,
 		Squad:      src.Squad,
 		Collection: src.Collection, // fork stays in the source's collection
+		Fleet:      src.Fleet,      // fork inherits the source's fleet scope (a FleetExperiment must coordinate the same fleet)
 		Turns:      kept,
 	}
 	if err := SaveConversationFile(dstID, dst); err != nil {

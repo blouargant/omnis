@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blouargant/omnis/internal/sessions"
 )
@@ -61,7 +62,10 @@ func TestNewSession_ScopesToFleet(t *testing.T) {
 	if meta.Fleet != "Payments" {
 		t.Fatalf("registry Fleet = %q, want %q", meta.Fleet, "Payments")
 	}
-	f, err := sessions.LoadConversationFile(id)
+	// Registry.SetFleet persists to the conversation file asynchronously
+	// (mirroring Registry.SetCollection), so poll briefly instead of assuming
+	// the background write already landed by the time the handler returns.
+	f, err := waitForPersistedFleet(t, id, "Payments")
 	if err != nil {
 		t.Fatalf("load conversation: %v", err)
 	}
@@ -84,5 +88,23 @@ func TestNewSession_ScopesToFleet(t *testing.T) {
 	}
 	if ghostFile.Fleet != "" {
 		t.Fatalf("persisted Fleet for unknown fleet = %q, want empty", ghostFile.Fleet)
+	}
+}
+
+// waitForPersistedFleet polls the persisted conversation file for up to ~200ms
+// until its Fleet field matches want (or returns the last-seen state on
+// timeout), since Registry.SetFleet's disk write happens on a background
+// goroutine.
+func waitForPersistedFleet(t *testing.T, id, want string) (*sessions.ConversationFile, error) {
+	t.Helper()
+	deadline := time.Now().Add(200 * time.Millisecond)
+	var f *sessions.ConversationFile
+	var err error
+	for {
+		f, err = sessions.LoadConversationFile(id)
+		if err != nil || f.Fleet == want || time.Now().After(deadline) {
+			return f, err
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
