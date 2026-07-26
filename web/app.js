@@ -6255,7 +6255,7 @@ function buildFleetGroup(f) {
     `<span class="fleet-name"></span>` +
     `<span class="fleet-meta"><span class="fleet-dots">${dots}</span>` +
     `<span class="fleet-count">${f.project_count || 0}</span>` +
-    (f.ungrouped ? "" : `<button type="button" class="fleet-coord" data-i18n="fleets.coordinate">Coordinate</button>`) +
+    (f.ungrouped ? "" : `<button type="button" class="fleet-coord">${escHtml(tr("fleets.coordinate"))}</button>`) +
     `</span>`;
   hd.querySelector(".fleet-name").textContent = f.ungrouped ? tr("fleets.ungrouped") : f.name;
   wrap.appendChild(hd);
