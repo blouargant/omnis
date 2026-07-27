@@ -7784,7 +7784,10 @@ function currentSquadChoice() {
 // squad for this session only (used by the empty-pane picker); when omitted the
 // globally-selected squad applies. `dirOverride` roots the session at a chosen
 // folder (the Folders panel's "Open Chat here"); when omitted it starts at the
-// fixed initial root. Returns the new id.
+// fixed initial root. `fleetOverride` scopes the session to a Fleet (the
+// Coordinate action); when set, the session is NOT filed under the active
+// collection and the squad is NOT persisted as the sticky New-Chat default.
+// Returns the new id.
 async function newChat(panel, squadOverride, dirOverride, fleetOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   closeNav(); // "New Chat" lives in the drawer; dismiss it so the composer is visible.
