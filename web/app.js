@@ -6226,6 +6226,14 @@ async function loadFleets() {
   renderFleets();
 }
 
+// coordinateFleet opens a new Conductor chat scoped to a fleet: a Fleet-squad
+// session pinned to that fleet, so fleet_projects/fleet_dispatch see only its
+// projects. Reuses newChat's create-then-open-in-pane path with the fleet scope
+// (which also skips normal-collection filing + the sticky-squad write).
+function coordinateFleet(name) {
+  return newChat(null, "Fleet", null, name);
+}
+
 function renderFleets() {
   const list = els.fleetsList;
   if (!list) return;
@@ -6265,10 +6273,15 @@ function buildFleetGroup(f) {
   for (const m of (f.members || [])) body.appendChild(buildProjectRow(f, m));
   wrap.appendChild(body);
 
-  // Collapse toggle (skip clicks on the Coordinate button — Task 2 wires it).
+  // Collapse toggle (skip clicks on the Coordinate button — wired below).
   hd.addEventListener("click", (ev) => {
     if (ev.target.closest(".fleet-coord")) return;
     wrap.classList.toggle("collapsed");
+  });
+  const coordBtn = hd.querySelector(".fleet-coord");
+  if (coordBtn) coordBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation(); // don't toggle the fleet's collapse
+    coordinateFleet(f.name);
   });
   // Fleet-header context menu (Task 3 fills it in). Ungrouped has none.
   if (!f.ungrouped) hd.addEventListener("contextmenu", (ev) => openFleetCtxMenu(ev, f));
@@ -7772,7 +7785,7 @@ function currentSquadChoice() {
 // globally-selected squad applies. `dirOverride` roots the session at a chosen
 // folder (the Folders panel's "Open Chat here"); when omitted it starts at the
 // fixed initial root. Returns the new id.
-async function newChat(panel, squadOverride, dirOverride) {
+async function newChat(panel, squadOverride, dirOverride, fleetOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   closeNav(); // "New Chat" lives in the drawer; dismiss it so the composer is visible.
   panel = panel || fp();
@@ -7784,9 +7797,12 @@ async function newChat(panel, squadOverride, dirOverride) {
   try {
     const body = { squad };
     if (dirOverride) body.dir = dirOverride;
+    if (fleetOverride) body.fleet = fleetOverride;
     // File the new chat under the collection the rail has selected (General ⇒
-    // leave un-filed). The server ignores an unknown collection.
-    if (activeCollection && activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
+    // leave un-filed). The server ignores an unknown collection. A fleet
+    // Coordinate chat is scoped by `fleet`, not the sidebar's active collection —
+    // skip filing it there so it lands in General, findable.
+    if (!fleetOverride && activeCollection && activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
       body.collection = activeCollection;
     }
     const res = await apiFetch("/api/sessions", {
@@ -7808,8 +7824,10 @@ async function newChat(panel, squadOverride, dirOverride) {
     }
     const data = await res.json();
     const newId = data.session_id;
-    // Persist the choice so the same squad is preselected next time.
-    if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
+    // Persist the choice so the same squad is preselected next time. Skipped
+    // for a fleet Coordinate chat — "Fleet" must not become the sticky
+    // New-Chat default squad.
+    if (squad && !fleetOverride) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
     // Open the new session as a tab in the pane and make it active. If the
     // active tab is a pending draft, the session takes that draft's slot.
