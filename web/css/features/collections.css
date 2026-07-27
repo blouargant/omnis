@@ -532,3 +532,27 @@
 }
 .fleet-group.ungrouped .fleet-ficon { color: var(--text-faint); }
 .fleet-group.ungrouped .fleet-name { color: var(--text-muted); font-weight: 500; }
+
+/* addProjectToFleet's modal chooser — a plain list of candidate collections,
+ * one button per row. */
+.fleet-assign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.fleet-assign-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.fleet-assign-item:hover {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}

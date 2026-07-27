@@ -6313,10 +6313,106 @@ function buildProjectRow(f, m) {
   return li;
 }
 
-// openFleetCtxMenu / openProjectCtxMenu are stubs filled in by later tasks
-// (fleet CRUD + project management context menus). Declared here so the
-// listeners wired above don't throw a ReferenceError before those land.
-function openFleetCtxMenu(ev, f) { /* Task 3 */ }
+// openFleetCtxMenu shows the fleet-header context menu: Coordinate / Add
+// project / Rename / Edit / Delete.
+function openFleetCtxMenu(ev, f) {
+  showFolderCtxMenu(ev, [
+    [tr("fleets.coordinate"), () => coordinateFleet(f.name)],
+    [tr("fleets.addProject"), () => addProjectToFleet(f.name)],
+    SEP,
+    [tr("common.rename"), () => renameFleet(f.name)],
+    [tr("fleets.editFleet"), () => editFleet(f)],
+    SEP,
+    [tr("common.delete"), () => deleteFleet(f.name)],
+  ]);
+}
+
+// renameFleet renames a fleet (member project collection tags follow
+// server-side).
+async function renameFleet(name) {
+  const nn = await uiPrompt({ title: tr("fleets.renameTitle"), label: tr("collections.name"), value: name, confirmText: tr("common.rename") });
+  if (nn == null) return;
+  const trimmed = nn.trim();
+  if (!trimmed || trimmed === name) return;
+  try {
+    const res = await apiFetch(`/api/fleets/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ name: trimmed }) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections(); // member collection tags followed the rename server-side
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
+
+// editFleet opens the fleetDialog prefilled with the fleet's current
+// name/colour/default engine and PATCHes the changes.
+async function editFleet(f) {
+  const chosen = await fleetDialog({ title: tr("fleets.editFleet"), name: f.name, color: f.color || "", engine: f.default_engine || "omnis", confirmText: tr("common.save") });
+  if (!chosen) return;
+  try {
+    // name is always sent — the server skips the rename when it EqualFolds the
+    // current name, so this is safe even when the name didn't change.
+    const res = await apiFetch(`/api/fleets/${encodeURIComponent(f.name)}`, { method: "PATCH", body: JSON.stringify({ name: chosen.name, color: chosen.color, default_engine: chosen.default_engine }) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
+
+// deleteFleet removes the fleet; its member projects return to Ungrouped
+// (they stay projects — only the fleet grouping is gone).
+async function deleteFleet(name) {
+  const ok = await uiConfirm({ title: tr("fleets.deleteTitle"), message: tr("fleets.deleteConfirm", { name }), confirmText: tr("common.delete"), cancelText: tr("common.cancel"), danger: true });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/fleets/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
+
+// addProjectToFleet offers a small modal chooser of collections that aren't
+// already fleet projects, and assigns/promotes the chosen one. A modal (not a
+// nested context menu) — this codebase's context-menu items open modals, and
+// a re-anchored context menu risks the capture-phase dismiss closing it
+// immediately (see showFolderCtxMenu's capture-phase click/contextmenu/scroll
+// listeners).
+async function addProjectToFleet(name) {
+  const candidates = (collectionsData || []).filter((c) => !c.general && (c.role || "") !== "project");
+  if (!candidates.length) { showToast(tr("fleets.noAssignable"), "err"); return; }
+  const overlay = uiModalShell(tr("fleets.addProjectTitle"));
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  const list = document.createElement("div");
+  list.className = "fleet-assign-list";
+  for (const c of candidates) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fleet-assign-item";
+    btn.textContent = c.name; // textContent → safe
+    btn.addEventListener("click", async () => {
+      overlay.remove();
+      try {
+        const res = await apiFetch(`/api/fleets/${encodeURIComponent(name)}/projects`, { method: "POST", body: JSON.stringify({ collection: c.name }) });
+        if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+        await loadFleets();
+        await loadCollections();
+      } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+    });
+    list.appendChild(btn);
+  }
+  body.appendChild(list);
+  // This modal confirms by picking a row, not the default OK button.
+  const ok = overlay.querySelector(".ui-modal-ok");
+  if (ok) ok.style.display = "none";
+  const close = () => overlay.remove();
+  overlay.querySelector(".ui-modal-cancel")?.addEventListener("click", close);
+  overlay.querySelector(".ui-modal-close")?.addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", function onKey(e) { if (e.key === "Escape") { e.preventDefault(); overlay.remove(); document.removeEventListener("keydown", onKey, true); } }, true);
+}
+
+// openProjectCtxMenu is a stub filled in by Task 4 (project-side context
+// menu: Coordinate/Edit/Remove from fleet). Declared here so the listener
+// wired above doesn't throw a ReferenceError before that lands.
 function openProjectCtxMenu(ev, f, m) { /* Task 4 */ }
 
 // selectCollection switches the middle list's filter. The list is paginated, so
@@ -6958,6 +7054,63 @@ function collectionDialog({ title, name = "", color = "", withName = true, confi
     };
     document.addEventListener("keydown", onKey, true);
     if (input) setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+// fleetDialog is collectionDialog + an engine <select> — used for both
+// creating a new fleet and editing an existing one. Returns
+// {name, color, default_engine} or null on cancel.
+function fleetDialog({ title, name = "", color = "", engine = "omnis", confirmText }) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(title);
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    const swatches = [
+      `<button type="button" class="collection-swatch collection-swatch-none" data-color="" data-tip="${escHtml(tr("collections.noColor"))}" aria-label="${escHtml(tr("collections.noColor"))}"></button>`,
+      ...COLLECTION_COLORS.map((k) =>
+        `<button type="button" class="collection-swatch" data-color="${k}" style="--sw: var(--collection-${k})" aria-label="${k}"></button>`),
+    ].join("");
+    // Engine option values ("omnis"/"claude") are product nouns (glossary) →
+    // kept literal, never translated.
+    body.innerHTML = `
+      <label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("collections.name"))}</span>
+        <input type="text" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("collections.namePlaceholder"))}" /></label>
+      <div class="collection-color-field">
+        <span class="collection-color-label">${escHtml(tr("collections.color"))}</span>
+        <div class="collection-swatches">${swatches}</div>
+      </div>
+      <label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("fleets.engineLabel"))}</span>
+        <select class="fleet-engine-sel">
+          <option value="omnis">omnis</option>
+          <option value="claude">claude</option>
+        </select></label>`;
+    const input = body.querySelector("input");
+    input.value = name;
+    const engSel = body.querySelector(".fleet-engine-sel");
+    engSel.value = engine === "claude" ? "claude" : "omnis";
+    let sel = COLLECTION_COLORS.includes(color) ? color : "";
+    const swEls = [...body.querySelectorAll(".collection-swatch")];
+    const paint = () => swEls.forEach((el) => el.classList.toggle("selected", el.dataset.color === sel));
+    paint();
+    swEls.forEach((el) => el.addEventListener("click", () => { sel = el.dataset.color; paint(); }));
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = confirmText || tr("common.save");
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const submit = () => {
+      const nm = input.value.trim();
+      if (!nm) { input.focus(); return; }
+      close({ name: nm, color: sel, default_engine: engSel.value });
+    };
+    ok.addEventListener("click", submit);
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter" && document.activeElement === input) { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
   });
 }
 
@@ -12567,6 +12720,15 @@ async function restoreLayout(rec, liveIds) {
   // BEFORE sessions so the very first render already knows which collection each
   // session belongs to (no fold-to-General flash for filed sessions).
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
+  els.newFleetBtn?.addEventListener("click", async () => {
+    const chosen = await fleetDialog({ title: tr("fleets.newTitle"), color: proposeCollectionColor(), engine: "omnis", confirmText: tr("common.create") });
+    if (!chosen) return;
+    try {
+      const res = await apiFetch("/api/fleets", { method: "POST", body: JSON.stringify(chosen) });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+      await loadFleets();
+    } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+  });
   wireSessionBar();
   await loadCollections();
   await loadFleets();
