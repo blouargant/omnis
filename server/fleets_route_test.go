@@ -102,3 +102,49 @@ func TestFleetsRoutesCRUDAndAssign(t *testing.T) {
 		t.Fatalf("fleet still present after delete")
 	}
 }
+
+// TestFleetRouteCaseOnlyRename guards the HTTP layer against silently dropping a
+// case-only re-case ("payments" → "Payments"). The data layer's RenameFleet
+// supports it (exact-string compare, with TestRenameFleetCaseOnlyPreservesMetadata),
+// but handleUpdateFleet used EqualFold, so the PATCH skipped the rename and the
+// stored key/metadata stayed under the old casing — reachable code the UI could
+// never trigger. This drives the real route and asserts the re-case migrates the
+// fleet key, its metadata, and the member tag (mirroring handleUpdateCollection).
+func TestFleetRouteCaseOnlyRename(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+
+	reg := sessions.NewEmptyRegistry()
+	engine := newEngine(serverDeps{Registry: reg, rootCtx: context.Background()})
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := do(http.MethodPost, "/api/fleets", `{"name":"payments","color":"blue","default_engine":"claude"}`); w.Code != http.StatusOK {
+		t.Fatalf("create fleet: %d %s", w.Code, w.Body.String())
+	}
+	if _, _, err := sessions.AddCollection("api"); err != nil {
+		t.Fatalf("AddCollection: %v", err)
+	}
+	if w := do(http.MethodPost, "/api/fleets/payments/projects", `{"collection":"api"}`); w.Code != http.StatusOK {
+		t.Fatalf("assign: %d %s", w.Code, w.Body.String())
+	}
+
+	// Case-only rename via PATCH must migrate everything.
+	if w := do(http.MethodPatch, "/api/fleets/payments", `{"name":"Payments"}`); w.Code != http.StatusOK {
+		t.Fatalf("case-only rename: %d %s", w.Code, w.Body.String())
+	}
+	if !sessions.FleetExists("Payments") {
+		t.Fatalf("case-only rename didn't move the fleet key to 'Payments'")
+	}
+	if m := sessions.FleetMetaFor("Payments"); m.Color != "blue" || m.DefaultEngine != "claude" {
+		t.Fatalf("case-only rename lost metadata: %+v", m)
+	}
+	if got := sessions.CollectionProfileFull("api").Fleet; got != "Payments" {
+		t.Fatalf("case-only rename didn't re-case the member tag: %q", got)
+	}
+}

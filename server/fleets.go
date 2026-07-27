@@ -133,7 +133,13 @@ func handleUpdateFleet(d serverDeps) gin.HandlerFunc {
 		final := name
 		if body.Name != nil {
 			nn := strings.TrimSpace(*body.Name)
-			if !strings.EqualFold(nn, name) {
+			// Exact-string compare (not EqualFold) so a case-only re-case
+			// ("payments" → "Payments") reaches RenameFleet, which supports it and
+			// migrates the metadata + member tags. Mirrors handleUpdateCollection;
+			// a case-only skip here would silently strand the data-layer support
+			// and diverge from collection renames. nn is already validated non-empty
+			// + ValidFleetName above.
+			if nn != name {
 				if _, _, err := sessions.RenameFleet(name, nn); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return

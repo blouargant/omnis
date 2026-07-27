@@ -6284,7 +6284,8 @@ function buildFleetGroup(f) {
     ev.stopPropagation(); // don't toggle the fleet's collapse
     coordinateFleet(f.name);
   });
-  // Fleet-header context menu (Task 3 fills it in). Ungrouped has none.
+  // Fleet-header context menu (Coordinate / Add project / rename / edit / delete).
+  // Ungrouped is a virtual bucket with no metadata, so it has no menu.
   if (!f.ungrouped) hd.addEventListener("contextmenu", (ev) => openFleetCtxMenu(ev, f));
   return wrap;
 }
@@ -6308,8 +6309,9 @@ function buildProjectRow(f, m) {
     `<span class="project-eng ${eng}">${escHtml(eng)}</span>`;
   li.querySelector(".project-name").textContent = m.name;
   li.setAttribute("data-tip", m.name);
-  // Project rows are NOT chat-drop targets (guarded — Task 4 also excludes them
-  // from Move-to). A context menu (Task 4) offers Coordinate/Edit/Remove.
+  // Project rows are NOT chat-drop targets (guarded — projects are also excluded
+  // from the "Move to" pickers). The context menu offers Coordinate / Edit
+  // project / Remove from fleet — deliberately no New-chat / Move / Colour.
   li.addEventListener("contextmenu", (ev) => openProjectCtxMenu(ev, f, m));
   return li;
 }
