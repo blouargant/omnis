@@ -78,6 +78,11 @@
   outline-offset: -2px;
 }
 
+/* Fleets section refuses a dragged session — a project is not a topic folder
+ * (see fleetProjectNames / the #fleets-list dragover/drop guard in app.js). */
+#fleets-list.drop-refused { outline: 2px dashed var(--danger, #c0392b); outline-offset: -2px; border-radius: 8px; }
+#fleets-list.drop-refused * { cursor: no-drop; }
+
 .collection-star {
   display: inline-flex;
   color: var(--accent-strong);

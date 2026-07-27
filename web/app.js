@@ -5681,7 +5681,8 @@ function openSessionCtxMenu(ev, s, archived, li) {
   // submenus). The session's current collection is shown disabled so the target
   // set is unambiguous. General is always offered.
   const cur = effectiveCollection(s);
-  const targets = [GENERAL_COLLECTION, ...collectionsData.filter(c => !c.general).map(c => c.name)];
+  const projects = fleetProjectNames();
+  const targets = [GENERAL_COLLECTION, ...collectionsData.filter(c => !c.general && !projects.has(String(c.name).toLowerCase())).map(c => c.name)];
   if (targets.length > 1) {
     items.push(SEP);
     items.push([tr("collections.moveTo"), null, { disabled: true }]);
@@ -6410,10 +6411,37 @@ async function addProjectToFleet(name) {
   document.addEventListener("keydown", function onKey(e) { if (e.key === "Escape") { e.preventDefault(); overlay.remove(); document.removeEventListener("keydown", onKey, true); } }, true);
 }
 
-// openProjectCtxMenu is a stub filled in by Task 4 (project-side context
-// menu: Coordinate/Edit/Remove from fleet). Declared here so the listener
-// wired above doesn't throw a ReferenceError before that lands.
-function openProjectCtxMenu(ev, f, m) { /* Task 4 */ }
+// openProjectCtxMenu shows the project-row context menu: Coordinate / Edit
+// project / Remove from fleet. Deliberately WITHOUT New chat here / Move to /
+// Change color — a project is not a topic folder (see fleetProjectNames).
+function openProjectCtxMenu(ev, f, m) {
+  showFolderCtxMenu(ev, [
+    [tr("fleets.coordinate"), () => coordinateFleet(f.name)],
+    [tr("fleets.editProject"), () => editCollectionContext({ name: m.name })], // reuse the context editor
+    SEP,
+    [tr("fleets.removeFromFleet"), () => removeProjectFromFleet(f.name, m.name)],
+  ]);
+}
+
+// removeProjectFromFleet unassigns a project from a fleet: it returns to
+// Ungrouped but KEEPS role:project, so it stays under Fleets/Ungrouped, not
+// back in the Collections rail.
+async function removeProjectFromFleet(fleet, collection) {
+  const ok = await uiConfirm({
+    title: tr("fleets.removeFromFleet"),
+    message: tr("fleets.removeConfirm", { name: collection }),
+    confirmText: tr("fleets.removeFromFleet"),
+    cancelText: tr("common.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/fleets/${encodeURIComponent(fleet)}/projects/${encodeURIComponent(collection)}`, { method: "DELETE" });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
 
 // selectCollection switches the middle list's filter. The list is paginated, so
 // this refetches page 1 for the newly selected collection (both active + archived
@@ -7323,7 +7351,8 @@ function setSessionSort(key) {
 function openBatchMenu(ev) {
   if (selectedSessions.size === 0) { showToast(tr("sessionbar.noneSelected"), "err"); return; }
   const items = [[tr("collections.moveTo"), null, { disabled: true }]];
-  const targets = [GENERAL_COLLECTION, ...collectionsData.filter((c) => !c.general).map((c) => c.name)];
+  const projects = fleetProjectNames();
+  const targets = [GENERAL_COLLECTION, ...collectionsData.filter((c) => !c.general && !projects.has(String(c.name).toLowerCase())).map((c) => c.name)];
   for (const name of targets) items.push([name, () => batchMove(name), { icon: ICON_FOLDER }]);
   items.push(SEP);
   items.push([tr("menu.archive"), () => batchArchive(), { icon: ICON_ARCHIVE }]);
@@ -12729,6 +12758,25 @@ async function restoreLayout(rec, liveIds) {
       await loadFleets();
     } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
   });
+  // Refuse a dragged session dropped over the Fleets section — a project is not a
+  // topic folder. #fleets-list has no move handler, so this is a visible no-op cue.
+  if (els.fleetsList) {
+    els.fleetsList.addEventListener("dragover", (ev) => {
+      if (!sessionDrag) return;              // ignore OS-file / tab drags
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
+      els.fleetsList.classList.add("drop-refused");
+    });
+    els.fleetsList.addEventListener("dragleave", (ev) => {
+      // only clear when the pointer actually left the list (not on child transitions)
+      if (!els.fleetsList.contains(ev.relatedTarget)) els.fleetsList.classList.remove("drop-refused");
+    });
+    els.fleetsList.addEventListener("drop", (ev) => {
+      els.fleetsList.classList.remove("drop-refused");
+      if (!sessionDrag) return;
+      ev.preventDefault();                   // consume — never files the session here
+    });
+  }
   wireSessionBar();
   await loadCollections();
   await loadFleets();
