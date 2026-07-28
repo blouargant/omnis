@@ -6414,15 +6414,25 @@ async function addProjectToFleet(name) {
 }
 
 // openProjectCtxMenu shows the project-row context menu: Coordinate / Edit
-// project / Remove from fleet. Deliberately WITHOUT New chat here / Move to /
-// Change color — a project is not a topic folder (see fleetProjectNames).
+// project / (Remove from fleet | Remove from Fleets) / Delete project.
+// Deliberately WITHOUT New chat here / Move to / Change color — a project is not
+// a topic folder (see fleetProjectNames). The "remove" action depends on where
+// the project sits: a project IN a named fleet offers "Remove from fleet"
+// (→ Ungrouped, still a project); an already-Ungrouped project offers "Remove
+// from Fleets" (demote back to a normal collection, out of the Fleets area).
 function openProjectCtxMenu(ev, f, m) {
-  showFolderCtxMenu(ev, [
+  const items = [
     [tr("fleets.coordinate"), () => coordinateFleet(f.name)],
     [tr("fleets.editProject"), () => editCollectionContext({ name: m.name })], // reuse the context editor
     SEP,
-    [tr("fleets.removeFromFleet"), () => removeProjectFromFleet(f.name, m.name)],
-  ]);
+  ];
+  if (f.ungrouped) {
+    items.push([tr("fleets.removeFromFleets"), () => removeProjectFromFleets(m.name)]);
+  } else {
+    items.push([tr("fleets.removeFromFleet"), () => removeProjectFromFleet(f.name, m.name)]);
+  }
+  items.push(SEP, [tr("fleets.deleteProject"), () => deleteProject(m.name)]);
+  showFolderCtxMenu(ev, items);
 }
 
 // removeProjectFromFleet unassigns a project from a fleet: it returns to
@@ -6439,6 +6449,49 @@ async function removeProjectFromFleet(fleet, collection) {
   if (!ok) return;
   try {
     const res = await apiFetch(`/api/fleets/${encodeURIComponent(fleet)}/projects/${encodeURIComponent(collection)}`, { method: "DELETE" });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
+
+// removeProjectFromFleets demotes an (Ungrouped) project back to a normal
+// collection by clearing role:project — it leaves the Fleets area entirely and
+// returns to the Collections list. The server accepts role:"" on the collection
+// PATCH; a stale (empty) fleet tag is harmless once role is no longer "project".
+async function removeProjectFromFleets(collection) {
+  const ok = await uiConfirm({
+    title: tr("fleets.removeFromFleets"),
+    message: tr("fleets.removeFromFleetsConfirm", { name: collection }),
+    confirmText: tr("fleets.removeFromFleets"),
+    cancelText: tr("common.cancel"),
+  });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(collection)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role: "" }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+    await loadCollections();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
+}
+
+// deleteProject deletes a project's underlying collection outright, removing it
+// from the Fleets area. Destructive (confirm first); the server moves any chats
+// filed under the collection back to General rather than deleting them.
+async function deleteProject(collection) {
+  const ok = await uiConfirm({
+    title: tr("fleets.deleteProject"),
+    message: tr("fleets.deleteProjectConfirm", { name: collection }),
+    confirmText: tr("common.delete"),
+    cancelText: tr("common.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await apiFetch(`/api/collections/${encodeURIComponent(collection)}`, { method: "DELETE" });
     if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
     await loadFleets();
     await loadCollections();
@@ -6506,6 +6559,7 @@ async function editCollectionContext(c) {
     }
     showToast(tr("collections.contextSaved"), "ok");
     await loadCollections();
+    await loadFleets(); // the Fleet-project toggle may have (de)promoted this collection
   } catch (e) { console.error(e); }
 }
 
