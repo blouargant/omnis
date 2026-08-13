@@ -568,6 +568,28 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 		if cfg.Manager.PendingRoute(cfg.SessionID) {
 			return "", nil // routed → discard the router's chatter
 		}
+		// "No route" has two very different causes: the router genuinely chose to
+		// talk to the user, or its model WROTE a tool call into the message instead
+		// of emitting one. Printing the latter shows raw call syntax and ends the
+		// turn with nobody having answered, so retry the hop once with a corrective
+		// nudge (see agent.WrittenToolCallName).
+		if name := toolkitagent.WrittenToolCallName(text); name != "" {
+			if showTrace {
+				fmt.Fprintf(cfg.Stderr, "\n\x1b[2m── router wrote %s(...) as text; retrying hop ──\x1b[0m\n", name)
+			}
+			retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+			retrySeq := sq.Runner.Run(rctx, cfg.UserID, cfg.SessionID,
+				&genai.Content{Role: "user", Parts: retryParts},
+				adkagent.RunConfig{})
+			retryText, retryErr := stream(retrySeq, true /*quiet*/)
+			if retryErr != nil {
+				return retryText, retryErr
+			}
+			if cfg.Manager.PendingRoute(cfg.SessionID) {
+				return "", nil // the retry routed → discard its chatter
+			}
+			text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
+		}
 		// Router chose to talk to the user (no route): print its reply now.
 		if strings.TrimSpace(text) != "" {
 			fmt.Fprint(cfg.Stdout, text)

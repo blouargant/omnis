@@ -607,14 +607,20 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   answered (observed live: ~1 session in 53 routed, on the `balanced` router
   model — `route_to_squad` had executed as a real tool 1520× on the same
   gateway/model, so this is weak-model sampling, not a parsing failure). So
-  before treating router-hop text as a reply, `runHop` ([server/sse.go](server/sse.go))
-  calls `agent.WrittenToolCallName` ([agent/routing.go](agent/routing.go)) and, on
-  a hit, **retries the hop once** with `WrittenToolCallNudge` — a corrective part
-  naming the offending tool (a vague "try again" reproduces the failure, since the
-  model doesn't know it wrote rather than called). The retry either routes (the
-  dispatch loop takes the directive) or produces a real reply; failing twice — or
-  returning nothing — falls back to `routerConfusedFallback` rather than showing
-  syntax or ending silently. **The detector requires call *syntax* (name + open
+  before treating router-hop text as a reply, **all three surfaces'** `runHop`
+  ([server/sse.go](server/sse.go), [internal/cli/cli.go](internal/cli/cli.go),
+  [internal/tui/tui.go](internal/tui/tui.go)) call `agent.WrittenToolCallName`
+  ([agent/routing.go](agent/routing.go)) and, on a hit, **retry the hop once** with
+  `WrittenToolCallNudge` — a corrective part naming the offending tool (a vague
+  "try again" reproduces the failure, since the model doesn't know it wrote rather
+  than called). The retry either routes (the dispatch loop takes the directive) or
+  produces a real reply; failing twice — or returning nothing — yields
+  `agent.RouterConfusedFallback` rather than showing syntax or ending silently.
+  That last rule is subtle enough to drift between three surfaces, so it lives in
+  the shared `agent.FinalizeWrittenToolCallRetry`, which each surface calls rather
+  than re-deriving. (The TUI's hop body was extracted into a `consumeHop(parts)`
+  closure so the retry can re-run it with fresh buffers instead of inheriting the
+  first run's accumulated text.) **The detector requires call *syntax* (name + open
   paren), never a bare mention**: a false positive costs the user their actual
   clarifying question, so "route your request" or "the `route_to_squad` mechanism"
   must not match. Instructions can't prevent this (the model believes it *is*

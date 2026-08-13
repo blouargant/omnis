@@ -346,13 +346,9 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 					if d.Manager.PendingRoute(meta.ID) {
 						return "", nil // the retry routed → drop its chatter
 					}
-					text = retryText
-					// Failed the same way twice (or said nothing): never show call
-					// syntax, and never end the turn silently — that silence is the
-					// bug being fixed. Ask the user for a steer instead.
-					if toolkitagent.WrittenToolCallName(text) != "" || strings.TrimSpace(text) == "" {
-						text = routerConfusedFallback
-					}
+					// Failed the same way twice (or said nothing) → shared fallback,
+					// never raw syntax and never silence.
+					text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
 				}
 				// Router chose to talk to the user (no route): show its reply now.
 				if strings.TrimSpace(text) != "" {
@@ -707,14 +703,6 @@ func handleSteer(d serverDeps) gin.HandlerFunc {
 // events here (keyed on rootAgent) and attribute the ADK-stream usage to it —
 // otherwise a squad root named e.g. "omnis"/"knowledge_leader" (which slips past
 // the broadcaster's legacy "leader"-only filter) gets counted twice.
-// routerConfusedFallback is the last-resort reply when the router wrote a tool
-// call as text twice in a row (see runHop). Showing the raw call syntax is not
-// an option, and returning nothing reproduces the "and then nothing happens"
-// dead-end, so the turn ends by asking the user for a steer. English, like the
-// other server-emitted strings.
-const routerConfusedFallback = "Sorry — I could not work out which part of the system should handle that. " +
-	"Could you rephrase your request, or say which area it concerns?"
-
 // routerVisibleTools are the only tools the Omnis router legitimately calls.
 // On the router hop (suppressText), any other tool name is an LLM hallucination
 // whose tool-call + tool-not-found error are suppressed so the hop stays silent

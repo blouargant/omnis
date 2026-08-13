@@ -1657,89 +1657,116 @@ func Run(ctx context.Context, cfg Config) error {
 			// route (a clarifying question); a route discards it. The "── routed to
 			// X squad ──" line (notify) is the only visible routing signal.
 			runHop := func(rctx context.Context, hopSq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
-				seq := hopSq.Runner.Run(rctx, cfg.UserID, sessionID,
-					&genai.Content{Role: "user", Parts: hopParts},
-					adkagent.RunConfig{})
-
 				isRouter := routerSquad != "" && squadName == routerSquad
 
-				// Buffer assistant text per turn; flush as rendered markdown
-				// either when a non-text part arrives (tool call/response)
-				// or when the stream completes. Also accumulate the plain
-				// assistant text so we can persist the turn at the end.
-				var mdBuf strings.Builder
-				var assistantText strings.Builder
-				var subAgentStack []string
-				currentSubAgent := func() string {
-					if len(subAgentStack) == 0 {
-						return ""
+				// consumeHop runs and renders ONE event sequence for this hop. It
+				// owns the per-run buffers, so the corrective retry below can call it
+				// a second time without inheriting the first run's accumulated text.
+				consumeHop := func(runParts []*genai.Part) (string, error) {
+					seq := hopSq.Runner.Run(rctx, cfg.UserID, sessionID,
+						&genai.Content{Role: "user", Parts: runParts},
+						adkagent.RunConfig{})
+
+					// Buffer assistant text per turn; flush as rendered markdown
+					// either when a non-text part arrives (tool call/response)
+					// or when the stream completes. Also accumulate the plain
+					// assistant text so we can persist the turn at the end.
+					var mdBuf strings.Builder
+					var assistantText strings.Builder
+					var subAgentStack []string
+					currentSubAgent := func() string {
+						if len(subAgentStack) == 0 {
+							return ""
+						}
+						return subAgentStack[len(subAgentStack)-1]
 					}
-					return subAgentStack[len(subAgentStack)-1]
-				}
-				// On the router hop, mid-stream rendering is suppressed (mdBuf still
-				// accumulates so we can decide what to show afterwards).
-				flush := func() {
-					if isRouter {
-						return
+					// On the router hop, mid-stream rendering is suppressed (mdBuf still
+					// accumulates so we can decide what to show afterwards).
+					flush := func() {
+						if isRouter {
+							return
+						}
+						flushMarkdown(&mdBuf, currentSubAgent())
 					}
-					flushMarkdown(&mdBuf, currentSubAgent())
-				}
-				chat := func(format string, args ...any) {
-					if isRouter {
-						return
+					chat := func(format string, args ...any) {
+						if isRouter {
+							return
+						}
+						appendChat(format, args...)
 					}
-					appendChat(format, args...)
-				}
-				for ev, err := range seq {
-					if err != nil {
-						flush()
-						chat("\n[red]error: %v[-]\n", err)
-						return assistantText.String(), err
-					}
-					if ev == nil || ev.Content == nil {
-						continue
-					}
-					for _, p := range ev.Content.Parts {
-						if p == nil {
+					for ev, err := range seq {
+						if err != nil {
+							flush()
+							chat("\n[red]error: %v[-]\n", err)
+							return assistantText.String(), err
+						}
+						if ev == nil || ev.Content == nil {
 							continue
 						}
-						switch {
-						case p.Text != "":
-							clean := stripTerminalControlSequences(p.Text)
-							mdBuf.WriteString(clean)
-							assistantText.WriteString(clean)
-						case p.FunctionCall != nil:
-							flush()
-							if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(p.FunctionCall.Name))]; ok {
-								subAgentStack = append(subAgentStack, p.FunctionCall.Name)
-								chat("[yellow][::b]--- entering sub-agent: %s ---[-]\n", p.FunctionCall.Name)
+						for _, p := range ev.Content.Parts {
+							if p == nil {
+								continue
 							}
-							chat("[aqua]⚙ %s[-] %s\n",
-								p.FunctionCall.Name, shortArgs(p.FunctionCall.Args))
-						case p.FunctionResponse != nil:
-							flush()
-							chat("[gray]↳ %s[-]\n", p.FunctionResponse.Name)
-							if len(subAgentStack) > 0 && subAgentStack[len(subAgentStack)-1] == p.FunctionResponse.Name {
-								chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", p.FunctionResponse.Name)
-								subAgentStack = subAgentStack[:len(subAgentStack)-1]
+							switch {
+							case p.Text != "":
+								clean := stripTerminalControlSequences(p.Text)
+								mdBuf.WriteString(clean)
+								assistantText.WriteString(clean)
+							case p.FunctionCall != nil:
+								flush()
+								if _, ok := subAgentSet[strings.ToLower(strings.TrimSpace(p.FunctionCall.Name))]; ok {
+									subAgentStack = append(subAgentStack, p.FunctionCall.Name)
+									chat("[yellow][::b]--- entering sub-agent: %s ---[-]\n", p.FunctionCall.Name)
+								}
+								chat("[aqua]⚙ %s[-] %s\n",
+									p.FunctionCall.Name, shortArgs(p.FunctionCall.Args))
+							case p.FunctionResponse != nil:
+								flush()
+								chat("[gray]↳ %s[-]\n", p.FunctionResponse.Name)
+								if len(subAgentStack) > 0 && subAgentStack[len(subAgentStack)-1] == p.FunctionResponse.Name {
+									chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", p.FunctionResponse.Name)
+									subAgentStack = subAgentStack[:len(subAgentStack)-1]
+								}
 							}
 						}
 					}
-				}
-				for i := len(subAgentStack) - 1; i >= 0; i-- {
-					chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", subAgentStack[i])
-				}
-				flush()
-
-				if isRouter {
-					if cfg.Manager.PendingRoute(sessionID) {
-						return "", nil // routed → discard the router's chatter
+					for i := len(subAgentStack) - 1; i >= 0; i-- {
+						chat("[yellow][::b]--- leaving sub-agent: %s ---[-]\n", subAgentStack[i])
 					}
-					// Router chose to talk to the user (no route): render its reply.
-					flushMarkdown(&mdBuf, "")
+					flush()
 					return assistantText.String(), nil
 				}
-				return assistantText.String(), nil
+
+				text, err := consumeHop(hopParts)
+				if err != nil || !isRouter {
+					return text, err
+				}
+				if cfg.Manager.PendingRoute(sessionID) {
+					return "", nil // routed → discard the router's chatter
+				}
+				// "No route" has two very different causes: the router genuinely
+				// chose to talk to the user, or its model WROTE a tool call into the
+				// message instead of emitting one. Rendering the latter shows raw call
+				// syntax and ends the turn with nobody having answered, so retry the
+				// hop once with a corrective nudge (see agent.WrittenToolCallName).
+				if name := toolkitagent.WrittenToolCallName(text); name != "" {
+					retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+					retryText, retryErr := consumeHop(retryParts)
+					if retryErr != nil {
+						return retryText, retryErr
+					}
+					if cfg.Manager.PendingRoute(sessionID) {
+						return "", nil // the retry routed → discard its chatter
+					}
+					text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
+				}
+				// Router chose to talk to the user (no route): render its reply. The
+				// router hop suppresses mid-stream rendering, so nothing has been
+				// shown yet and `text` is the whole reply.
+				var out strings.Builder
+				out.WriteString(text)
+				flushMarkdown(&out, "")
+				return text, nil
 			}
 			// notify prints the routing transition and re-points the session at
 			// the new squad so the next turn resumes there.

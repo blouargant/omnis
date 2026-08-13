@@ -456,6 +456,25 @@ func WrittenToolCallNudge(name string) *genai.Part {
 		"with no tool syntax at all. Do not mention this correction."}
 }
 
+// RouterConfusedFallback is the last-resort reply when the router wrote a tool
+// call as text twice in a row. Showing the raw call syntax is not an option, and
+// returning nothing reproduces the "and then nothing happens" dead-end this
+// guard exists to fix, so the turn ends by asking the user for a steer. English,
+// like the other host-emitted strings.
+const RouterConfusedFallback = "Sorry — I could not work out which part of the system should handle that. " +
+	"Could you rephrase your request, or say which area it concerns?"
+
+// FinalizeWrittenToolCallRetry decides what a surface shows after a corrective
+// retry hop that did NOT route: the retry's own text when it is a genuine reply,
+// or RouterConfusedFallback when the model failed the same way twice or returned
+// nothing. Shared by all three surfaces so this rule cannot drift between them.
+func FinalizeWrittenToolCallRetry(retryText string) string {
+	if strings.TrimSpace(retryText) == "" || WrittenToolCallName(retryText) != "" {
+		return RouterConfusedFallback
+	}
+	return retryText
+}
+
 // verdictReason extracts the trailing reason after a verdict token, trimming a
 // leading separator and capping it to one short line.
 func verdictReason(text string, from int) string {

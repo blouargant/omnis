@@ -558,6 +558,25 @@ func TestWrittenToolCallNameNoFalsePositives(t *testing.T) {
 	}
 }
 
+// TestFinalizeWrittenToolCallRetry pins the "failed twice" rule the three
+// surfaces share: a clean retry reply is shown as-is, but a retry that wrote the
+// call AGAIN — or said nothing at all — must never reach the user as syntax or
+// as silence, because silence is the original dead-end.
+func TestFinalizeWrittenToolCallRetry(t *testing.T) {
+	if got := FinalizeWrittenToolCallRetry("Voulez-vous du code ou de la recherche ?"); got != "Voulez-vous du code ou de la recherche ?" {
+		t.Errorf("clean retry text was replaced: %q", got)
+	}
+	for name, text := range map[string]string{
+		"wrote it again": `ask_squad(squad="helper", request="…")`,
+		"empty":          "",
+		"whitespace":     "  \n\t ",
+	} {
+		if got := FinalizeWrittenToolCallRetry(text); got != RouterConfusedFallback {
+			t.Errorf("%s: got %q, want the fallback", name, got)
+		}
+	}
+}
+
 // TestWrittenToolCallNudgeNamesTheTool checks the corrective retry part tells
 // the model concretely what went wrong, since a vague nudge reproduces the bug.
 func TestWrittenToolCallNudgeNamesTheTool(t *testing.T) {
