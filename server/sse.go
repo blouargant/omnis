@@ -325,6 +325,35 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				if d.Manager.PendingRoute(meta.ID) {
 					return "", nil // routed → drop the router's chatter entirely
 				}
+				// No route was recorded — but "no route" has two very different
+				// causes. Either the router genuinely chose to talk to the user, or
+				// its model WROTE a tool call into the message instead of emitting
+				// one (agent.WrittenToolCallName). Flushing the latter shows the user
+				// raw call syntax and ends the turn with nobody having answered, the
+				// router still holding the conversation. So retry the hop once with a
+				// corrective nudge: the retry either routes (the dispatch loop picks
+				// the directive up) or produces a real reply.
+				if name := toolkitagent.WrittenToolCallName(text); name != "" {
+					log.Printf("server: router hop wrote %s(...) as text instead of calling it; retrying hop once", name)
+					retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+					reseq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
+						&genai.Content{Role: "user", Parts: retryParts},
+						agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
+					retryText, retryErr := streamEvents(rctx, sink, reseq, subCh, cwd, rootAgent, meta.ID, true /*suppressText*/, usageAccum, priceFor)
+					if retryErr != nil {
+						return retryText, retryErr
+					}
+					if d.Manager.PendingRoute(meta.ID) {
+						return "", nil // the retry routed → drop its chatter
+					}
+					text = retryText
+					// Failed the same way twice (or said nothing): never show call
+					// syntax, and never end the turn silently — that silence is the
+					// bug being fixed. Ask the user for a steer instead.
+					if toolkitagent.WrittenToolCallName(text) != "" || strings.TrimSpace(text) == "" {
+						text = routerConfusedFallback
+					}
+				}
 				// Router chose to talk to the user (no route): show its reply now.
 				if strings.TrimSpace(text) != "" {
 					emitFrame("message", map[string]string{"text": text})
@@ -678,6 +707,14 @@ func handleSteer(d serverDeps) gin.HandlerFunc {
 // events here (keyed on rootAgent) and attribute the ADK-stream usage to it —
 // otherwise a squad root named e.g. "omnis"/"knowledge_leader" (which slips past
 // the broadcaster's legacy "leader"-only filter) gets counted twice.
+// routerConfusedFallback is the last-resort reply when the router wrote a tool
+// call as text twice in a row (see runHop). Showing the raw call syntax is not
+// an option, and returning nothing reproduces the "and then nothing happens"
+// dead-end, so the turn ends by asking the user for a steer. English, like the
+// other server-emitted strings.
+const routerConfusedFallback = "Sorry — I could not work out which part of the system should handle that. " +
+	"Could you rephrase your request, or say which area it concerns?"
+
 // routerVisibleTools are the only tools the Omnis router legitimately calls.
 // On the router hop (suppressText), any other tool name is an LLM hallucination
 // whose tool-call + tool-not-found error are suppressed so the hop stays silent

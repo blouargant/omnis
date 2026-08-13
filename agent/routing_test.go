@@ -508,3 +508,64 @@ func TestEnsureRouterSquadRespectsExisting(t *testing.T) {
 		t.Fatalf("existing router agent overwritten: %q", cfg.Description)
 	}
 }
+
+// ── Written-as-text tool call (weak-model failure) ───────────────────────────
+
+// TestWrittenToolCallNameDetectsHallucinatedCall pins the failure this guard
+// exists for: the router's model WROTE a tool call into its message instead of
+// emitting a function call, so ADK saw a tool-call-free response, ended the
+// run, recorded no directive, and the surface flushed the call syntax to the
+// user as if it were a genuine reply. The observed case is verbatim from
+// conversation_subtle-bedbug.json.
+func TestWrittenToolCallNameDetectsHallucinatedCall(t *testing.T) {
+	observed := "\n\nask_squad(squad=\"helper\", request=\"L'utilisateur demande s'il existe un moyen de donner accès à des files Slack à un agent IA comme Claude Code pour rechercher dans l'historique.\")"
+	if got := WrittenToolCallName(observed); got != "ask_squad" {
+		t.Fatalf("observed failure: got %q, want %q", got, "ask_squad")
+	}
+
+	cases := []struct{ name, text, want string }{
+		{"route call", `route_to_squad(squad="Knowledge", reason="web research")`, "route_to_squad"},
+		{"handoff call", "handoff_to_router(reason=\"out of scope\")", "handoff_to_router"},
+		{"ask_user call", `ask_user(question="which one?")`, "ask_user"},
+		{"after narration", "Je transmets votre demande.\n\nroute_to_squad(squad=\"Coding\")", "route_to_squad"},
+		{"space before paren", "ask_squad (squad=\"helper\")", "ask_squad"},
+		{"markdown fenced", "```\nroute_to_squad(squad=\"Knowledge\")\n```", "route_to_squad"},
+	}
+	for _, c := range cases {
+		if got := WrittenToolCallName(c.text); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestWrittenToolCallNameNoFalsePositives guards the expensive half: a genuine
+// clarifying question must never be discarded as a hallucinated call. A false
+// positive costs the user their reply, so the detector requires call *syntax*
+// (an open paren), not a mere mention of a tool or squad name.
+func TestWrittenToolCallNameNoFalsePositives(t *testing.T) {
+	for _, text := range []string{
+		"",
+		"   \n ",
+		"Souhaitez-vous que je transmette votre demande au squad Knowledge ou au squad Helper ?",
+		"Je peux router votre demande, mais j'ai besoin de savoir si c'est pour du code ou de la recherche.",
+		"I could ask a squad about this, but which environment do you mean?",
+		"The route_to_squad mechanism is internal and I will not describe it further.",
+		"Voulez-vous une réponse courte (rapide) ou détaillée ?",
+	} {
+		if got := WrittenToolCallName(text); got != "" {
+			t.Errorf("false positive on %q: got %q, want \"\"", text, got)
+		}
+	}
+}
+
+// TestWrittenToolCallNudgeNamesTheTool checks the corrective retry part tells
+// the model concretely what went wrong, since a vague nudge reproduces the bug.
+func TestWrittenToolCallNudgeNamesTheTool(t *testing.T) {
+	p := WrittenToolCallNudge("ask_squad")
+	if p == nil || strings.TrimSpace(p.Text) == "" {
+		t.Fatal("nudge part is empty")
+	}
+	if !strings.Contains(p.Text, "ask_squad") {
+		t.Errorf("nudge does not name the tool: %q", p.Text)
+	}
+}

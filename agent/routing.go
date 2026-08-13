@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -392,6 +393,67 @@ func parseCapabilityVerdict(text string) (bool, string) {
 		reason = "no clear verdict from the squad"
 	}
 	return false, reason
+}
+
+// ── Written-as-text tool call (weak-model salvage) ───────────────────────────
+//
+// A weak router model occasionally WRITES one of its calls into the message
+// text — e.g. `ask_squad(squad="helper", request="…")` as prose — instead of
+// emitting a real function call. Nothing downstream catches that: the ADK flow
+// loop sees a tool-call-free response, treats it as final and ends the run; no
+// directive is recorded, so PendingRoute is empty; and the surface's no-route
+// branch then reads the text as "the router chose to talk to the user" and
+// flushes the call syntax verbatim. The turn dead-ends with the router still
+// holding the conversation and the user's request never answered.
+//
+// This is the mirror image of the chatter problem the text suppression already
+// solves. Instructions cannot prevent it (the model believes it *is* calling
+// the tool), so the guarantee has to be host-side: the surface detects the
+// written call and retries the hop once with a corrective nudge.
+
+// routerWrittenTools are the router hop's own tools — the only calls whose
+// written-out form we salvage. Kept as a list so the pattern below cannot
+// drift from it.
+var routerWrittenTools = []string{"route_to_squad", "ask_squad", "handoff_to_router", "ask_user"}
+
+// writtenToolCallRe matches call SYNTAX: a router tool name followed by an open
+// paren. Requiring the paren is deliberate — it is what separates a hallucinated
+// call from a genuine clarifying question that merely mentions a tool or squad
+// name. A false positive costs the user their actual reply, so the bar is
+// syntax, never a bare mention.
+var writtenToolCallRe = regexp.MustCompile(
+	`(?i)\b(` + strings.Join(quoteAll(routerWrittenTools), "|") + `)\s*\(`)
+
+func quoteAll(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = regexp.QuoteMeta(n)
+	}
+	return out
+}
+
+// WrittenToolCallName reports which router tool the given assistant text calls
+// in prose, or "" when the text is a genuine reply that should be shown to the
+// user. Surfaces call this on a router hop that produced text but recorded no
+// route.
+func WrittenToolCallName(text string) string {
+	m := writtenToolCallRe.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	return strings.ToLower(m[1])
+}
+
+// WrittenToolCallNudge builds the corrective part appended to the router's
+// input for the single retry hop. It names the offending tool explicitly: a
+// vague "try again" reproduces the same failure, because the model does not
+// know it wrote the call rather than made it.
+func WrittenToolCallNudge(name string) *genai.Part {
+	return &genai.Part{Text: "SYSTEM CORRECTION — your previous response contained the text `" + name +
+		"(...)` written inside your message instead of an actual tool call. Written-out calls do " +
+		"nothing: the tool never ran and the user saw raw syntax. Either invoke `" + name +
+		"` now as a real tool call, or — if you meant to address the user — reply in plain prose " +
+		"with no tool syntax at all. Do not mention this correction."}
 }
 
 // verdictReason extracts the trailing reason after a verdict token, trimming a

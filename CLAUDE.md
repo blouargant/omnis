@@ -596,6 +596,31 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   also explicitly tells it to treat run/execute/file requests as a routing signal
   and never call an execution tool — but the host-side drop is the guarantee, since
   instructions can't *prevent* the hallucination.
+- **A tool call WRITTEN as text is salvaged, not shown.** The mirror image of the
+  chatter problem above: the router's model occasionally *writes*
+  `ask_squad(squad="helper", request="…")` into its **message text** instead of
+  emitting a function call. Nothing downstream catches that — ADK's flow loop sees
+  a tool-call-free response and ends the run, no directive is recorded, so
+  `PendingRoute` is empty and `runHop`'s no-route branch reads the text as "the
+  router chose to talk to the user" and **flushes the raw call syntax**; the turn
+  dead-ends with the router still holding the conversation and the request never
+  answered (observed live: ~1 session in 53 routed, on the `balanced` router
+  model — `route_to_squad` had executed as a real tool 1520× on the same
+  gateway/model, so this is weak-model sampling, not a parsing failure). So
+  before treating router-hop text as a reply, `runHop` ([server/sse.go](server/sse.go))
+  calls `agent.WrittenToolCallName` ([agent/routing.go](agent/routing.go)) and, on
+  a hit, **retries the hop once** with `WrittenToolCallNudge` — a corrective part
+  naming the offending tool (a vague "try again" reproduces the failure, since the
+  model doesn't know it wrote rather than called). The retry either routes (the
+  dispatch loop takes the directive) or produces a real reply; failing twice — or
+  returning nothing — falls back to `routerConfusedFallback` rather than showing
+  syntax or ending silently. **The detector requires call *syntax* (name + open
+  paren), never a bare mention**: a false positive costs the user their actual
+  clarifying question, so "route your request" or "the `route_to_squad` mechanism"
+  must not match. Instructions can't prevent this (the model believes it *is*
+  calling the tool), which is why the guarantee is host-side — same reasoning as
+  the two bullets above. `RunWithRouting` itself is untouched (the retry lives in
+  the surface's hop callback), so the frozen dispatch loop stays frozen.
 - **Per-squad context is retained within a session.** Because each
   `SquadInstance` owns a private `session.InMemoryService` and is stable across
   turns within a pinned generation, going squad A → B → A returns the **same** A
