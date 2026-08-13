@@ -372,6 +372,11 @@ func buildSquadInstance(
 		// paraphrase strip the scope their wording carried (see
 		// languagePolicyBlock).
 		rootInstruction += languagePolicyBlock(!leaderless)
+		// A decision the user must make belongs in an AskUserQuestion menu, which
+		// keeps the turn alive — not in prose, which ends it (see
+		// choicePolicyBlock). Same block carries the guard against using a menu to
+		// offload a decision the root itself owns.
+		rootInstruction += choicePolicyBlock(routingEnabled)
 		// Make the root aware it can be steered mid-turn and should forward a
 		// relevant note to a delegated sub-agent (see steeringAwarenessBlock).
 		if infra.SteerStore != nil {

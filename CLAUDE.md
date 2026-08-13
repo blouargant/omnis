@@ -687,6 +687,30 @@ unconditionally, their `agent.json` now declares them explicitly
 (`planning`/`worktree`/`bg`, plus `softskills`/`calc` for `skill_editor`) so
 behaviour is unchanged.
 
+**A choice put to the user goes in a MENU, not in prose** — `choicePolicyBlock`
+([agent/choice_policy.go](agent/choice_policy.go)), appended to every **non-router**
+root beside `languagePolicyBlock`/`steeringAwarenessBlock`. The always-on
+`AskUserQuestion` tool ([core/tools/ask_user.go](core/tools/ask_user.go), mounted
+unconditionally on every squad root) takes `kind` `single`/`multi`/`text`/`confirm`
+with 2–4 `choices` and renders as the web UI's ask-user wizard. The distinction
+is not stylistic — **it decides whether the turn survives**: a question written in
+prose is a tool-call-free response, so ADK's flow loop treats it as final and
+**ends the run** (the user must retype an answer and the agent restarts, losing
+in-flight work), whereas `AskUserQuestion` blocks inside the tool call and the
+answer returns as the tool result in the **same** turn. Observed live: the Helper
+answered a "does a way to do X exist?" question with a prose either/or and the
+turn simply stopped — to the user it read as the agent giving up. **The block's
+second half is the guard that keeps this from inverting:** a menu is for a choice
+only the *user* can make (a preference, a trade-off, an ambiguity in their intent,
+permission for something consequential) and **never** a way to offload a decision
+the agent owns — which squad should handle this, which tool to consult, whether a
+lookup is worth doing. That same prose question was *also* asking the user to
+resolve a **routing** decision the Helper's own instruction tells it to hand back,
+so rendering it as tidy buttons would have institutionalised the bug. When routing
+is enabled the block therefore ends by pointing an out-of-scope request at
+`handoff_to_router`; with routing off that sentence is omitted, since naming a
+tool the root does not have is how hallucinated calls start.
+
 Sub-agents are wrapped via `agenttool.New()` and exposed as **tools** on
 the leader (not via `transfer_to_agent`), so control always returns to
 the leader after a sub-agent call.
