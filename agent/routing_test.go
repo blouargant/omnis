@@ -22,7 +22,12 @@ func routingTestManager(router string, squadNames ...string) (*Manager, *Infrast
 	}
 	for _, n := range squadNames {
 		inst.Squads[n] = &SquadInstance{Name: n, Runner: &runner.Runner{}}
+		// Mirror the squad into Settings too: the router catalogue (which gates a
+		// salvaged route's destination) is resolved from RuntimeSettings, not from
+		// the built Squads map.
+		inst.Settings.Squads = append(inst.Settings.Squads, RuntimeSquadConfig{Name: n})
 	}
+	inst.Settings.RouterSquad = router
 	return NewManager(infra, inst), infra
 }
 
@@ -558,21 +563,99 @@ func TestWrittenToolCallNameNoFalsePositives(t *testing.T) {
 	}
 }
 
-// TestFinalizeWrittenToolCallRetry pins the "failed twice" rule the three
-// surfaces share: a clean retry reply is shown as-is, but a retry that wrote the
-// call AGAIN — or said nothing at all — must never reach the user as syntax or
-// as silence, because silence is the original dead-end.
-func TestFinalizeWrittenToolCallRetry(t *testing.T) {
-	if got := FinalizeWrittenToolCallRetry("Voulez-vous du code ou de la recherche ?"); got != "Voulez-vous du code ou de la recherche ?" {
-		t.Errorf("clean retry text was replaced: %q", got)
+// TestResolveRouterHopTextSalvagesWrittenRoute pins the SECOND observed shape of
+// this failure, verbatim from conversation_select-moth.json: the model wrote only
+// the argument object, with no function name — so the syntax detector cannot see
+// it, and the raw JSON reached the user. The model's intent is unambiguous there,
+// so it must be executed as a real route rather than retried or apologised for.
+func TestResolveRouterHopTextSalvagesWrittenRoute(t *testing.T) {
+	m, infra := routingTestManager("omnis", "omnis", "knowledge", "helper")
+	observed := "\n\n{\"squad\":\"knowledge\",\"reason\":\"Recherche sur les méthodes pour connecter un agent IA (comme Claude Code) aux conversations Slack via l'API.\"}"
+
+	show, nudge := m.ResolveRouterHopText("s1", observed, true)
+	if show != "" || nudge != nil {
+		t.Fatalf("salvage should show nothing and not retry; got show=%q nudge=%v", show, nudge)
 	}
+	d := infra.RouteDirectives.Take("s1")
+	if d == nil {
+		t.Fatal("no directive recorded: the written route was not salvaged")
+	}
+	if d.Kind != routeKindRoute || d.Target != "knowledge" {
+		t.Fatalf("directive = %+v, want route→knowledge", d)
+	}
+	if !strings.Contains(d.Reason, "Slack") {
+		t.Errorf("reason not carried over: %q", d.Reason)
+	}
+
+	// Call syntax naming a valid squad is salvageable the same way.
+	if show, nudge := m.ResolveRouterHopText("s2", `route_to_squad(squad="Helper", reason="settings question")`, true); show != "" || nudge != nil {
+		t.Errorf("call-syntax route not salvaged: show=%q nudge=%v", show, nudge)
+	} else if d := infra.RouteDirectives.Take("s2"); d == nil || d.Target != "helper" {
+		t.Errorf("directive = %+v, want route→helper", d)
+	}
+}
+
+// TestResolveRouterHopTextRetriesThenFallsBack covers the non-salvageable paths:
+// ask_squad (an optional private probe, so there is nothing to execute) gets one
+// corrective retry, and a second failure — or silence — must yield the fallback
+// rather than raw syntax or an empty turn.
+func TestResolveRouterHopTextRetriesThenFallsBack(t *testing.T) {
+	m, infra := routingTestManager("omnis", "omnis", "knowledge")
+
+	show, nudge := m.ResolveRouterHopText("s1", `ask_squad(squad="knowledge", request="…")`, true)
+	if show != "" || nudge == nil {
+		t.Fatalf("ask_squad should retry, not show; got show=%q nudge=%v", show, nudge)
+	}
+	if !strings.Contains(nudge.Text, "ask_squad") {
+		t.Errorf("nudge does not name the tool: %q", nudge.Text)
+	}
+	if d := infra.RouteDirectives.Take("s1"); d != nil {
+		t.Errorf("ask_squad must not record a route: %+v", d)
+	}
+
+	// An unknown squad is not salvageable — route_to_squad itself would refuse it.
+	if _, nudge := m.ResolveRouterHopText("s2", `{"squad":"nope","reason":"x"}`, true); nudge == nil {
+		t.Error("unknown squad should fall through to a retry, not be routed")
+	}
+	if d := infra.RouteDirectives.Take("s2"); d != nil {
+		t.Errorf("unknown squad was routed anyway: %+v", d)
+	}
+
+	// allowRetry=false is the retry hop: no second retry, fallback instead.
 	for name, text := range map[string]string{
-		"wrote it again": `ask_squad(squad="helper", request="…")`,
-		"empty":          "",
-		"whitespace":     "  \n\t ",
+		"wrote it again":  `ask_squad(squad="knowledge", request="…")`,
+		"bare args again": `{"squad":"nope","reason":"x"}`,
+		"empty":           "",
+		"whitespace":      "  \n\t ",
 	} {
-		if got := FinalizeWrittenToolCallRetry(text); got != RouterConfusedFallback {
-			t.Errorf("%s: got %q, want the fallback", name, got)
+		show, nudge := m.ResolveRouterHopText("s3", text, false)
+		if nudge != nil {
+			t.Errorf("%s: retried twice", name)
+		}
+		if show != RouterConfusedFallback {
+			t.Errorf("%s: got %q, want the fallback", name, show)
+		}
+	}
+}
+
+// TestResolveRouterHopTextPassesGenuineReplies is the expensive half: a real
+// clarifying question must reach the user untouched, and must not be mistaken for
+// a written call or replaced by the fallback.
+func TestResolveRouterHopTextPassesGenuineReplies(t *testing.T) {
+	m, _ := routingTestManager("omnis", "omnis", "knowledge")
+	for _, text := range []string{
+		"Souhaitez-vous que je transmette votre demande au squad Knowledge ?",
+		"I could ask a squad about this, but which environment do you mean?",
+		"Voici un exemple de configuration : {\"key\": \"value\"} — est-ce ce que vous cherchez ?",
+	} {
+		for _, allowRetry := range []bool{true, false} {
+			show, nudge := m.ResolveRouterHopText("s", text, allowRetry)
+			if nudge != nil {
+				t.Errorf("genuine reply triggered a retry (allowRetry=%v): %q", allowRetry, text)
+			}
+			if show != text {
+				t.Errorf("genuine reply altered (allowRetry=%v): got %q, want %q", allowRetry, show, text)
+			}
 		}
 	}
 }

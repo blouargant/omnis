@@ -22,6 +22,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -464,15 +465,149 @@ func WrittenToolCallNudge(name string) *genai.Part {
 const RouterConfusedFallback = "Sorry — I could not work out which part of the system should handle that. " +
 	"Could you rephrase your request, or say which area it concerns?"
 
-// FinalizeWrittenToolCallRetry decides what a surface shows after a corrective
-// retry hop that did NOT route: the retry's own text when it is a genuine reply,
-// or RouterConfusedFallback when the model failed the same way twice or returned
-// nothing. Shared by all three surfaces so this rule cannot drift between them.
-func FinalizeWrittenToolCallRetry(retryText string) string {
-	if strings.TrimSpace(retryText) == "" || WrittenToolCallName(retryText) != "" {
-		return RouterConfusedFallback
+// writtenRouteIntent is a routing call the model WROTE into its message instead
+// of emitting as a function call, recovered from the text.
+type writtenRouteIntent struct {
+	Tool   string // route_to_squad | ask_squad | handoff_to_router | ask_user
+	Squad  string // route_to_squad / ask_squad destination (may be empty)
+	Reason string // rationale, when the text carried one
+}
+
+// The written form comes in (at least) two shapes, both observed live on the
+// `balanced` router model for the SAME request:
+//
+//  1. call syntax   ask_squad(squad="helper", request="…")
+//  2. bare payload  {"squad":"knowledge","reason":"…"}
+//
+// Shape 2 has no function name at all, so the syntax-based detector cannot see
+// it — yet a lone JSON object is never a legitimate router reply either (the
+// router answers the user in prose), which is what makes it safely recognisable.
+var (
+	writtenSquadArgRe  = regexp.MustCompile(`(?i)["']?squad["']?\s*[:=]\s*["']([^"']+)["']`)
+	writtenReasonArgRe = regexp.MustCompile(`(?i)["']?reason["']?\s*[:=]\s*["']([^"']*)["']`)
+)
+
+// stripCodeFence unwraps a ```…``` block so a fenced written call is recognised
+// the same as a bare one.
+func stripCodeFence(text string) string {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "```") {
+		return t
 	}
-	return retryText
+	t = strings.TrimPrefix(t, "```")
+	if i := strings.IndexByte(t, '\n'); i >= 0 {
+		t = t[i+1:] // drop an info string such as ```json
+	}
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(t), "```"))
+}
+
+// writtenArgsObject recovers the intent from shape 2: a message that is nothing
+// but a JSON object carrying a routing tool's argument keys. Requiring the WHOLE
+// trimmed message to be that object is what keeps this from firing on prose that
+// merely happens to contain braces.
+func writtenArgsObject(text string) (writtenRouteIntent, bool) {
+	t := stripCodeFence(text)
+	if !strings.HasPrefix(t, "{") || !strings.HasSuffix(t, "}") {
+		return writtenRouteIntent{}, false
+	}
+	var raw struct {
+		Squad   string `json:"squad"`
+		Reason  string `json:"reason"`
+		Request string `json:"request"`
+	}
+	if err := json.Unmarshal([]byte(t), &raw); err != nil {
+		return writtenRouteIntent{}, false
+	}
+	switch {
+	case raw.Squad != "" && raw.Request != "":
+		return writtenRouteIntent{Tool: "ask_squad", Squad: raw.Squad, Reason: raw.Request}, true
+	case raw.Squad != "":
+		return writtenRouteIntent{Tool: "route_to_squad", Squad: raw.Squad, Reason: raw.Reason}, true
+	}
+	return writtenRouteIntent{}, false
+}
+
+// parseWrittenIntent recovers a written routing call from a router hop's text,
+// covering both shapes above. Returns false for a genuine reply.
+func parseWrittenIntent(text string) (writtenRouteIntent, bool) {
+	if name := WrittenToolCallName(text); name != "" {
+		in := writtenRouteIntent{Tool: name}
+		if m := writtenSquadArgRe.FindStringSubmatch(text); m != nil {
+			in.Squad = m[1]
+		}
+		if m := writtenReasonArgRe.FindStringSubmatch(text); m != nil {
+			in.Reason = m[1]
+		}
+		return in, true
+	}
+	return writtenArgsObject(text)
+}
+
+// validRouteTarget resolves a written destination against the same catalogue
+// route_to_squad itself validates against (non-router, non-hidden squads of the
+// session's pinned generation), so a salvaged route can never reach a squad the
+// tool would have refused.
+func (m *Manager) validRouteTarget(sessionID, squad string) (string, bool) {
+	want := lowerTrim(squad)
+	if want == "" {
+		return "", false
+	}
+	inst := m.Lookup(sessionID)
+	if inst == nil {
+		return "", false
+	}
+	for _, name := range routerSquadCatalogue(inst.Settings) {
+		if lowerTrim(name) == want {
+			return want, true
+		}
+	}
+	return "", false
+}
+
+// ResolveRouterHopText is the single decision point for what a surface does with
+// a router hop that produced text but recorded no route. It exists because that
+// judgment is subtle and would otherwise be re-derived — differently — in the
+// server, CLI and TUI hop callbacks.
+//
+// Returns:
+//   - show != "", nudge == nil → show this text to the user (a genuine reply, or
+//     RouterConfusedFallback when the model failed twice / said nothing)
+//   - show == "", nudge == nil → show nothing: a written route was SALVAGED into
+//     a real directive, so the dispatch loop will route on it
+//   - nudge != nil             → re-run this hop once with nudge appended
+//
+// allowRetry must be true on the first attempt and false on the retry, which is
+// what bounds the correction to a single extra hop.
+func (m *Manager) ResolveRouterHopText(sessionID, text string, allowRetry bool) (show string, nudge *genai.Part) {
+	intent, written := parseWrittenIntent(text)
+	if !written {
+		// A retry that produced nothing at all must not end the turn silently —
+		// that silence is the dead-end this whole guard exists to remove.
+		if !allowRetry && strings.TrimSpace(text) == "" {
+			return RouterConfusedFallback, nil
+		}
+		return text, nil
+	}
+	// A written route names its destination, so the model's intent is
+	// unambiguous: execute it instead of asking the model to try again. This is
+	// what turns a failed turn into the answer the user actually asked for.
+	// Only route_to_squad is salvageable — ask_squad is an optional private probe
+	// that needs a live LLM call, and its absence costs the user nothing.
+	if intent.Tool == "route_to_squad" {
+		if target, ok := m.validRouteTarget(sessionID, intent.Squad); ok {
+			m.infra.RouteDirectives.Set(sessionID, &RouteDirective{
+				Kind:   routeKindRoute,
+				Target: target,
+				Reason: strings.TrimSpace(intent.Reason),
+			})
+			return "", nil
+		}
+	}
+	if allowRetry {
+		return "", WrittenToolCallNudge(intent.Tool)
+	}
+	// Failed the same way twice and not salvageable: never show call syntax.
+	return RouterConfusedFallback, nil
 }
 
 // verdictReason extracts the trailing reason after a verdict token, trimming a

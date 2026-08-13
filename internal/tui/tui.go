@@ -1745,12 +1745,14 @@ func Run(ctx context.Context, cfg Config) error {
 					return "", nil // routed → discard the router's chatter
 				}
 				// "No route" has two very different causes: the router genuinely
-				// chose to talk to the user, or its model WROTE a tool call into the
-				// message instead of emitting one. Rendering the latter shows raw call
-				// syntax and ends the turn with nobody having answered, so retry the
-				// hop once with a corrective nudge (see agent.WrittenToolCallName).
-				if name := toolkitagent.WrittenToolCallName(text); name != "" {
-					retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+				// chose to talk to the user, or its model WROTE the call into the
+				// message instead of emitting it. Rendering the latter shows raw call
+				// syntax and ends the turn with nobody having answered.
+				// ResolveRouterHopText salvages a written route into a real directive,
+				// or hands back a nudge to re-run this hop once.
+				show, nudge := cfg.Manager.ResolveRouterHopText(sessionID, text, true /*allowRetry*/)
+				if nudge != nil {
+					retryParts := append(append([]*genai.Part{}, hopParts...), nudge)
 					retryText, retryErr := consumeHop(retryParts)
 					if retryErr != nil {
 						return retryText, retryErr
@@ -1758,15 +1760,18 @@ func Run(ctx context.Context, cfg Config) error {
 					if cfg.Manager.PendingRoute(sessionID) {
 						return "", nil // the retry routed → discard its chatter
 					}
-					text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
+					show, _ = cfg.Manager.ResolveRouterHopText(sessionID, retryText, false /*no second retry*/)
+				}
+				if cfg.Manager.PendingRoute(sessionID) {
+					return "", nil // a written route was salvaged → let it route
 				}
 				// Router chose to talk to the user (no route): render its reply. The
 				// router hop suppresses mid-stream rendering, so nothing has been
-				// shown yet and `text` is the whole reply.
+				// shown yet and `show` is the whole reply.
 				var out strings.Builder
-				out.WriteString(text)
+				out.WriteString(show)
 				flushMarkdown(&out, "")
-				return text, nil
+				return show, nil
 			}
 			// notify prints the routing transition and re-points the session at
 			// the new squad so the next turn resumes there.

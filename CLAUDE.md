@@ -606,27 +606,50 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   dead-ends with the router still holding the conversation and the request never
   answered (observed live: ~1 session in 53 routed, on the `balanced` router
   model — `route_to_squad` had executed as a real tool 1520× on the same
-  gateway/model, so this is weak-model sampling, not a parsing failure). So
-  before treating router-hop text as a reply, **all three surfaces'** `runHop`
+  gateway/model, so this is weak-model sampling, not a parsing failure).
+  **It comes in TWO shapes** — both observed live on the *same* request, the
+  second one on the corrective retry for the first:
+  1. **call syntax** — `ask_squad(squad="helper", request="…")`
+  2. **bare payload** — `{"squad":"knowledge","reason":"…"}`, the argument object
+     with **no function name at all**, so a syntax-based detector cannot see it.
+
+  So before treating router-hop text as a reply, **all three surfaces'** `runHop`
   ([server/sse.go](server/sse.go), [internal/cli/cli.go](internal/cli/cli.go),
-  [internal/tui/tui.go](internal/tui/tui.go)) call `agent.WrittenToolCallName`
-  ([agent/routing.go](agent/routing.go)) and, on a hit, **retry the hop once** with
-  `WrittenToolCallNudge` — a corrective part naming the offending tool (a vague
-  "try again" reproduces the failure, since the model doesn't know it wrote rather
-  than called). The retry either routes (the dispatch loop takes the directive) or
-  produces a real reply; failing twice — or returning nothing — yields
-  `agent.RouterConfusedFallback` rather than showing syntax or ending silently.
-  That last rule is subtle enough to drift between three surfaces, so it lives in
-  the shared `agent.FinalizeWrittenToolCallRetry`, which each surface calls rather
-  than re-deriving. (The TUI's hop body was extracted into a `consumeHop(parts)`
-  closure so the retry can re-run it with fresh buffers instead of inheriting the
-  first run's accumulated text.) **The detector requires call *syntax* (name + open
-  paren), never a bare mention**: a false positive costs the user their actual
-  clarifying question, so "route your request" or "the `route_to_squad` mechanism"
-  must not match. Instructions can't prevent this (the model believes it *is*
-  calling the tool), which is why the guarantee is host-side — same reasoning as
-  the two bullets above. `RunWithRouting` itself is untouched (the retry lives in
-  the surface's hop callback), so the frozen dispatch loop stays frozen.
+  [internal/tui/tui.go](internal/tui/tui.go)) call the single decision point
+  **`Manager.ResolveRouterHopText(sessionID, text, allowRetry)`**
+  ([agent/routing.go](agent/routing.go)), which returns either text to show, or a
+  nudge part meaning "re-run this hop once". It resolves in this order:
+  - **Salvage.** A written **`route_to_squad`** names its destination, so the
+    intent is unambiguous: `parseWrittenIntent` recovers it from *either* shape
+    and, when `validRouteTarget` accepts the squad (checked against the same
+    `routerSquadCatalogue` the tool validates against, so a salvaged route can
+    never reach a squad the tool would have refused), the directive is recorded
+    directly and the dispatch loop routes on it — the user gets the answer they
+    asked for instead of an apology, and the routing chip + squad persistence come
+    free via `notify`. **`ask_squad` is deliberately NOT salvaged**: it is an
+    optional private probe needing a live LLM call, and skipping it costs nothing.
+  - **Retry once** (`allowRetry`) with `WrittenToolCallNudge` — a corrective part
+    **naming the offending tool**, because a vague "try again" reproduces the
+    failure: the model does not know it wrote rather than called.
+  - **Fallback.** Failing again — or returning nothing — yields
+    `agent.RouterConfusedFallback`, never raw syntax and never an empty turn
+    (that silence *is* the bug).
+
+  **Both detectors are deliberately conservative, because a false positive costs
+  the user their actual clarifying question.** Shape 1 requires call *syntax*
+  (name + open paren), never a bare mention — "route your request" and "the
+  `route_to_squad` mechanism" must not match. Shape 2 requires the **whole
+  trimmed message** to be that JSON object, so prose merely *containing* braces
+  (`Voici un exemple : {"key": "value"}`) is untouched; a lone JSON object is
+  never a legitimate router reply, which is what makes it safely recognisable.
+  (The TUI's hop body was extracted into a `consumeHop(parts)` closure so the
+  retry can re-run it with fresh buffers instead of inheriting the first run's
+  accumulated text.) Instructions can't prevent any of this (the model believes it
+  *is* calling the tool), which is why the guarantee is host-side — same reasoning
+  as the two bullets above. `RunWithRouting` itself is untouched (retry + salvage
+  live in the surface callback and the registry), so the frozen dispatch loop
+  stays frozen. **GOTCHA:** the surfaces must re-check `PendingRoute` *after*
+  `ResolveRouterHopText`, since a salvage records a directive out of band.
 - **Per-squad context is retained within a session.** Because each
   `SquadInstance` owns a private `session.InMemoryService` and is stable across
   turns within a pinned generation, going squad A → B → A returns the **same** A

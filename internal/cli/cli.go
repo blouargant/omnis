@@ -569,15 +569,16 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 			return "", nil // routed → discard the router's chatter
 		}
 		// "No route" has two very different causes: the router genuinely chose to
-		// talk to the user, or its model WROTE a tool call into the message instead
-		// of emitting one. Printing the latter shows raw call syntax and ends the
-		// turn with nobody having answered, so retry the hop once with a corrective
-		// nudge (see agent.WrittenToolCallName).
-		if name := toolkitagent.WrittenToolCallName(text); name != "" {
+		// talk to the user, or its model WROTE the call into the message instead of
+		// emitting it. Printing the latter shows raw call syntax and ends the turn
+		// with nobody having answered. ResolveRouterHopText salvages a written route
+		// into a real directive, or hands back a nudge to re-run this hop once.
+		show, nudge := cfg.Manager.ResolveRouterHopText(cfg.SessionID, text, true /*allowRetry*/)
+		if nudge != nil {
 			if showTrace {
-				fmt.Fprintf(cfg.Stderr, "\n\x1b[2m── router wrote %s(...) as text; retrying hop ──\x1b[0m\n", name)
+				fmt.Fprint(cfg.Stderr, "\n\x1b[2m── router wrote its call as text; retrying hop ──\x1b[0m\n")
 			}
-			retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+			retryParts := append(append([]*genai.Part{}, hopParts...), nudge)
 			retrySeq := sq.Runner.Run(rctx, cfg.UserID, cfg.SessionID,
 				&genai.Content{Role: "user", Parts: retryParts},
 				adkagent.RunConfig{})
@@ -588,13 +589,16 @@ func runTurn(ctx context.Context, cfg Config, prompt string, showTrace bool, sta
 			if cfg.Manager.PendingRoute(cfg.SessionID) {
 				return "", nil // the retry routed → discard its chatter
 			}
-			text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
+			show, _ = cfg.Manager.ResolveRouterHopText(cfg.SessionID, retryText, false /*no second retry*/)
+		}
+		if cfg.Manager.PendingRoute(cfg.SessionID) {
+			return "", nil // a written route was salvaged → let it route
 		}
 		// Router chose to talk to the user (no route): print its reply now.
-		if strings.TrimSpace(text) != "" {
-			fmt.Fprint(cfg.Stdout, text)
+		if strings.TrimSpace(show) != "" {
+			fmt.Fprint(cfg.Stdout, show)
 		}
-		return text, nil
+		return show, nil
 	}
 	notify := func(from, to, reason string) {
 		if showTrace {

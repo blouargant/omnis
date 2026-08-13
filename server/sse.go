@@ -327,15 +327,15 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				}
 				// No route was recorded — but "no route" has two very different
 				// causes. Either the router genuinely chose to talk to the user, or
-				// its model WROTE a tool call into the message instead of emitting
-				// one (agent.WrittenToolCallName). Flushing the latter shows the user
-				// raw call syntax and ends the turn with nobody having answered, the
-				// router still holding the conversation. So retry the hop once with a
-				// corrective nudge: the retry either routes (the dispatch loop picks
-				// the directive up) or produces a real reply.
-				if name := toolkitagent.WrittenToolCallName(text); name != "" {
-					log.Printf("server: router hop wrote %s(...) as text instead of calling it; retrying hop once", name)
-					retryParts := append(append([]*genai.Part{}, hopParts...), toolkitagent.WrittenToolCallNudge(name))
+				// its model WROTE the call into the message instead of emitting it.
+				// Flushing the latter shows raw call syntax and ends the turn with
+				// nobody having answered. ResolveRouterHopText decides which it is:
+				// it salvages a written route into a real directive, or hands back a
+				// nudge to re-run this hop once.
+				show, nudge := d.Manager.ResolveRouterHopText(meta.ID, text, true /*allowRetry*/)
+				if nudge != nil {
+					log.Printf("server: router hop wrote its call as text; retrying hop once")
+					retryParts := append(append([]*genai.Part{}, hopParts...), nudge)
 					reseq := hopSq.Runner.Run(rctx, meta.UserID, meta.ID,
 						&genai.Content{Role: "user", Parts: retryParts},
 						agent.RunConfig{StreamingMode: agent.StreamingModeSSE})
@@ -346,15 +346,16 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 					if d.Manager.PendingRoute(meta.ID) {
 						return "", nil // the retry routed → drop its chatter
 					}
-					// Failed the same way twice (or said nothing) → shared fallback,
-					// never raw syntax and never silence.
-					text = toolkitagent.FinalizeWrittenToolCallRetry(retryText)
+					show, _ = d.Manager.ResolveRouterHopText(meta.ID, retryText, false /*no second retry*/)
+				}
+				if d.Manager.PendingRoute(meta.ID) {
+					return "", nil // a written route was salvaged → let it route
 				}
 				// Router chose to talk to the user (no route): show its reply now.
-				if strings.TrimSpace(text) != "" {
-					emitFrame("message", map[string]string{"text": text})
+				if strings.TrimSpace(show) != "" {
+					emitFrame("message", map[string]string{"text": show})
 				}
-				return text, nil
+				return show, nil
 			}
 			// notify fires when control moves to another squad: persist the new
 			// squad on the session (so the next turn resumes there and it survives
