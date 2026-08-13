@@ -753,6 +753,23 @@ questions only when the second genuinely *depends* on the first one's answer. Th
 `Description()` from `max_instances`**, so it cannot drift from the config the way a
 hand-written instruction does.
 
+**A sub-agent call is SYNCHRONOUS and one-shot — and the leader must be told so.**
+`buildSubAgentCapabilitiesBlock` ([agent/agent.go](agent/agent.go)) opens with this
+because the block otherwise only said "wait for its findings", which does not exclude
+the reading that the sub-agent keeps working in the background. Observed live: a
+`knowledge_leader` (`premium`) called `web_agent` (`balanced`) **six times in one
+turn** — each call one model round-trip, 0.2–2.1 s, no search tool ever invoked —
+narrating *"le web_agent est en cours de recherche, je vais attendre ses résultats"*,
+*"il initialise encore ses outils"*, then gave up and answered from its own
+knowledge. Cost: **167k prompt tokens** on the leader for zero retrieved evidence.
+There is no initialization phase and nothing runs after the call returns, so the
+block now states that the returned text **is** the final answer, that re-calling
+never "lets it finish", that an identical re-call reproduces an unhelpful result,
+and that **after two unhelpful attempts the leader must stop** — do the work itself
+or answer with what it has, flagging what is unverified. (The underlying cause there
+was the sub-agent's model not emitting its tool call at all; this rule bounds the
+*leader's* reaction to it, which is the half that is instructable.)
+
 **Dispatch contract (do not break):** the wrapper's `ProcessRequest` packs **itself**
 (via the local `packToolDecl`, a copy of ADK's unexported `toolutils.PackTool`), not
 the inner agenttool. ADK dispatches function calls by the object stored in

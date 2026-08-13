@@ -567,6 +567,31 @@ func TestDefaultAgentInstructionsDescribeEvidenceContract(t *testing.T) {
 	}
 }
 
+// TestSubAgentCapabilitiesBlockStatesCallIsSynchronous pins the rule added after
+// a knowledge_leader called web_agent SIX times in one turn (167k prompt tokens),
+// narrating "le web_agent initialise encore ses outils / je vais attendre ses
+// résultats". An agenttool call is synchronous and one-shot: the returned text is
+// the final answer, so a leader must never wait on it or re-call it to "let it
+// finish", and must stop after two unhelpful attempts.
+func TestSubAgentCapabilitiesBlockStatesCallIsSynchronous(t *testing.T) {
+	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
+		{Name: "web_agent", Enabled: true, Tools: []string{"web"}},
+	}, RuntimeSettings{})
+
+	for _, want := range []string{
+		"synchronous and one-shot",
+		"complete, final answer",
+		"no initialization phase",
+		"never tell the user you are waiting",
+		"identical re-call will reproduce it",
+		"After two unhelpful attempts on the same sub-agent",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("capabilities block missing %q", want)
+		}
+	}
+}
+
 func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 	block := buildSubAgentCapabilitiesBlock([]RuntimeAgentConfig{
 		{Name: "leader", Enabled: true, Leader: true},
