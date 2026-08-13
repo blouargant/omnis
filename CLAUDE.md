@@ -3631,6 +3631,52 @@ resolver** (`fleet.SetProjectsResolver` → `collectFleetProjects` in
 [server/fleet.go](server/fleet.go), keyed on `role=="project"`) so `agent`-side
 tools reach collection data through the hook (mirrors `agent.SetCollectionResolver`).
 
+**A project is CREATED, not borrowed from the collections.** A project reuses the
+collection mechanism for *storage* only — it is a workspace a Driver is dispatched
+into, not a topic folder for chats — so the fleet header's **"New project…"**
+(`newProjectInFleet` → `projectDialog` in [web/app.js](web/app.js)) asks for what a
+project actually needs (name, **workspace directory**, engine, dependencies, Claude
+allowlist) and the server makes the collection for it. It deliberately does **not**
+offer to convert one of the user's existing collections; that direction still exists
+(the collection editor's Fleet-project toggle), and such a project — like any
+Ungrouped one — is filed into a fleet from the project row's **"Add to fleet…" /
+"Move to another fleet…"** (`moveProjectToFleet`).
+
+`POST /api/fleets/:name/projects` therefore has **two modes**
+([server/fleets.go](server/fleets.go) `handleAssignProject`): `{name, dir, …}`
+**creates** (`createFleetProject`), `{collection}` **assigns an existing one** (the
+pre-existing behaviour, unchanged). Create-mode invariants, all load-bearing:
+- **The workspace directory is mandatory and must exist.** A Driver runs *in* it, so
+  a project without one would dispatch against the server's own working directory.
+- **It never adopts an existing collection** (409 on a case-insensitive name clash) —
+  silently absorbing a topic folder is the exact conflation this mode exists to end.
+- **Everything is validated before the first write, and the new collection is rolled
+  back if a later write fails**, so a refused create leaves no stray collection.
+- A non-git directory is **allowed but advertised**: the response carries
+  `warning: "not_a_git_repo"` (the fork/worktree isolation needs a repo), which the
+  UI surfaces as a toast. Not an error — a docs folder is a legitimate project.
+- The dialog validates client-side first (name given + free, path absolute, and one
+  `POST /api/fileref/resolve` probe that the folder exists) and **stays open with the
+  input intact** on any refusal, including a server one. Directory completion reuses
+  `GET /api/complete-file` filtered to directories. An **absolute** path is required:
+  the completer resolves a relative one against the session/global browse cwd while
+  the server's `os.Stat` resolves it against the process cwd — the same text would
+  mean two different folders.
+
+**Sidebar Fleets area (web UI).** `#fleets-section`, below the Collections rail
+([web/index.html](web/index.html); `loadFleets`/`renderFleets` in [web/app.js](web/app.js);
+[web/css/features/collections.css](web/css/features/collections.css)), renders one
+collapsible card per fleet — plus a virtual **Ungrouped** bucket — from
+`GET /api/fleets`. A project collection appears **only** here: it is filtered out of
+the Collections rail and every "Move to" picker and refuses a chat drop
+(`fleetProjectNames`). **The section is always visible, even with no fleets** — it
+then renders one dashed `+ Create a fleet` row (`buildFleetsEmpty` → the shared
+`createFleet`, the same flow as the header `+`), because a section that only appears
+*once a fleet exists* leaves the user who has none with no way to make the first one.
+The only place it is hidden is the **collapsed icon rail** (52px cannot hold a fleet
+name + engine dots + Coordinate — same treatment as the Archived/Files panels, in
+[web/css/features/sidebar.css](web/css/features/sidebar.css)).
+
 **Dispatch reuses the spawn rail — no new orchestration primitive.** The Fleet
 composes the existing (ADK-v1-frozen) spawn/route/teammate rails rather than adding
 new fan-out ADK v2 provides. The Conductor's `fleet` tool group is `fleet_projects`

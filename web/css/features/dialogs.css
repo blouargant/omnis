@@ -214,6 +214,13 @@
   gap: 4px;
   font-size: 13px;
 }
+/* `display: flex` above out-ranks the UA's `[hidden] { display: none }` (equal
+ * specificity, author sheet wins), so a conditionally-shown field written as
+ * `<label class="user-cmd-field" hidden>` would stay VISIBLE — the same trap as
+ * `.sched-edit[hidden]` in settings/automation.css. Re-assert it once here so every
+ * dialog field (the Claude allowlists in the collection-context + new-project
+ * dialogs, and any future one) can rely on the `hidden` attribute. */
+.user-cmd-field[hidden] { display: none; }
 .user-cmd-field-label {
   font-weight: 500;
   color: var(--text);
@@ -297,6 +304,22 @@
 .cc-fleet-dep { display: inline-flex; align-items: center; gap: .3rem; }
 .cc-fleet-allow textarea, textarea.cc-fleet-allow { min-height: 4rem; font-family: var(--mono, monospace); }
 .cc-fleet-empty { opacity: .6; font-size: .85em; }
+
+/* New-project dialog (fleet header → "New project…"). Reuses .user-cmd-field and
+   the .cc-fleet-dep* / .cc-fleet-allow field styles above; these are the bits that
+   are its own: the inline error line the modal stays open on, and the workspace
+   directory's live found/missing hint. */
+.proj-err {
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  padding: .4rem .55rem;
+  font-size: .85em;
+  color: var(--danger-fg);
+  background: var(--danger-bg-soft);
+}
+.proj-dir-hint { font-size: .8em; opacity: .8; min-height: 1em; }
+.proj-dir-hint.ok { color: var(--collection-green); }
+.proj-dir-hint.bad { color: var(--danger-fg); }
 .collection-ctx-modal .cc-grow-instr,
 .collection-ctx-modal .cc-grow-mem { min-height: 0; }
 .collection-ctx-modal .cc-grow-instr { flex: 3 1 0; }

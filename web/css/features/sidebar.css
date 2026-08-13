@@ -84,7 +84,10 @@
 }
 body.resizing #sidebar { transition: none; }
 
-/* Hide everything that needs horizontal room in rail mode. */
+/* Hide everything that needs horizontal room in rail mode. The Fleets section is
+ * in that list: a fleet card carries a name + engine dots + a Coordinate button,
+ * none of which survive a 52px rail — so fleets need the expanded sidebar (same
+ * treatment as the Archived and Files panels). */
 #sidebar.collapsed .app-logo,
 #sidebar.collapsed .app-name,
 #sidebar.collapsed .new-chat-text,
@@ -94,6 +97,7 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #collections-header,
 #sidebar.collapsed #archived-panel,
 #sidebar.collapsed #folders-panel,
+#sidebar.collapsed #fleets-section,
 #sidebar.collapsed #settings-btn span,
 #sidebar.collapsed #appearance-btn span,
 #sidebar.collapsed #documentation-btn span {

@@ -6,11 +6,14 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/blouargant/omnis/internal/fleet"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -29,6 +32,15 @@ type fleetView struct {
 	Engines       []string          `json:"engines,omitempty"`
 	Members       []fleetMemberView `json:"members"`
 	Ungrouped     bool              `json:"ungrouped,omitempty"`
+}
+
+// fleetProjectResponse is a fleetView plus a non-fatal advisory (embedded, so the
+// JSON stays the flat fleet object and an empty warning is omitted — byte-identical
+// to the bare view). Used to tell the caller "the project was created, but its
+// directory is not a git repository", which the fork/worktree isolation needs.
+type fleetProjectResponse struct {
+	fleetView
+	Warning string `json:"warning,omitempty"`
 }
 
 // buildFleetView assembles one fleet's row: metadata + derived members (each with
@@ -186,14 +198,45 @@ func handleDeleteFleet(d serverDeps) gin.HandlerFunc {
 	}
 }
 
+// handleAssignProject puts a project in a fleet. Two modes, keyed on which field
+// the body carries:
+//
+//	{"name":…, "dir":…, "engine":…, "depends_on":[…]}  — CREATE a purpose-built
+//	  project: a NEW collection that exists to BE a project, with the things a
+//	  Driver actually needs (its workspace directory, engine, dependencies) set at
+//	  birth. This is what the web UI's "New project…" does. A project only reuses
+//	  the collection mechanism for storage — it serves a different purpose, so the
+//	  UI never asks the user to sacrifice a topic folder to make one.
+//	{"collection":"<existing>"}  — assign/promote an EXISTING collection: the route
+//	  a collection promoted via the collection editor's Fleet-project toggle takes
+//	  into a fleet, and how a project is moved between fleets.
+//
+// Create mode validates EVERYTHING before writing anything and rolls the new
+// collection back if a later write fails: a half-made project (no workspace, or one
+// silently shadowing an existing topic folder) is worse than a clean refusal.
 func handleAssignProject(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		name := strings.TrimSpace(c.Param("name"))
+		fleetName := strings.TrimSpace(c.Param("name"))
 		var body struct {
-			Collection string `json:"collection"`
+			Collection         string   `json:"collection"`
+			Name               string   `json:"name"`
+			Dir                string   `json:"dir"`
+			Color              string   `json:"color"`
+			Engine             string   `json:"engine"`
+			DependsOn          []string `json:"depends_on"`
+			ClaudeAllowedTools []string `json:"claude_allowed_tools"`
 		}
 		_ = c.ShouldBindJSON(&body)
-		if err := sessions.AssignProject(name, strings.TrimSpace(body.Collection)); err != nil {
+
+		warning := ""
+		if name := strings.TrimSpace(body.Name); name != "" {
+			warn, status, err := createFleetProject(fleetName, name, body.Dir, body.Color, body.Engine, body.DependsOn, body.ClaudeAllowedTools)
+			if err != nil {
+				c.JSON(status, gin.H{"error": err.Error()})
+				return
+			}
+			warning = warn
+		} else if err := sessions.AssignProject(fleetName, strings.TrimSpace(body.Collection)); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -201,8 +244,91 @@ func handleAssignProject(d serverDeps) gin.HandlerFunc {
 			d.PushEvents.broadcast("fleets_changed", "")
 			d.PushEvents.broadcast("collections_changed", "")
 		}
-		c.JSON(http.StatusOK, buildFleetView(name, false))
+		c.JSON(http.StatusOK, fleetProjectResponse{fleetView: buildFleetView(fleetName, false), Warning: warning})
 	}
+}
+
+// createFleetProject creates a new project collection and files it under fleetName.
+// Returns a non-fatal warning (empty when none) and the HTTP status to use on error.
+// Every check runs before the first write.
+func createFleetProject(fleetName, name, dir, color, engine string, dependsOn, allowedTools []string) (string, int, error) {
+	name = strings.TrimSpace(name)
+	dir = strings.TrimSpace(dir)
+	color = strings.TrimSpace(color)
+	engine = strings.TrimSpace(engine)
+
+	if !sessions.FleetExists(fleetName) {
+		return "", http.StatusNotFound, fmt.Errorf("fleet %q not found", fleetName)
+	}
+	if !sessions.ValidCollectionName(name) || strings.EqualFold(name, sessions.GeneralCollection) {
+		return "", http.StatusBadRequest, fmt.Errorf("invalid project name %q", name)
+	}
+	// A create must never silently adopt an existing collection — that is exactly
+	// the topic-folder/project conflation this mode exists to avoid.
+	existing, err := sessions.ListCollections()
+	if err != nil {
+		return "", http.StatusInternalServerError, err
+	}
+	for _, e := range existing {
+		if strings.EqualFold(e, name) {
+			return "", http.StatusConflict, fmt.Errorf("a collection named %q already exists", e)
+		}
+	}
+	if !sessions.ValidCollectionColor(color) {
+		return "", http.StatusBadRequest, fmt.Errorf("invalid colour")
+	}
+	if engine != "" && engine != "omnis" && engine != "claude" {
+		return "", http.StatusBadRequest, fmt.Errorf("invalid engine (want omnis|claude or empty)")
+	}
+	// The workspace directory is mandatory: a Driver is dispatched INTO it, so a
+	// project without one would run against the server's own working directory.
+	if dir == "" {
+		return "", http.StatusBadRequest, fmt.Errorf("a project needs a workspace directory")
+	}
+	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+		return "", http.StatusBadRequest, fmt.Errorf("workspace directory %q is not a directory", dir)
+	}
+	deps := []string{}
+	for _, dp := range dependsOn {
+		if dp = strings.TrimSpace(dp); dp != "" && !strings.EqualFold(dp, name) {
+			deps = append(deps, dp)
+		}
+	}
+
+	if _, _, err := sessions.AddCollection(name); err != nil {
+		return "", http.StatusBadRequest, err
+	}
+	// From here on, unwind the collection on any failure so a rejected create never
+	// leaves a stray collection behind.
+	fail := func(status int, err error) (string, int, error) {
+		_, _, _ = sessions.RemoveCollection(name)
+		return "", status, err
+	}
+	if color != "" {
+		if err := sessions.SetCollectionColor(name, color); err != nil {
+			return fail(http.StatusBadRequest, err)
+		}
+	}
+	if err := sessions.UpdateCollectionProfile(name, func(p *sessions.CollectionProfileData) {
+		p.Cwd = dir
+		p.Role = "project"
+		p.Engine = engine
+		p.DependsOn = deps
+		if engine == "claude" {
+			p.ClaudeAllowedTools = allowedTools
+		}
+	}); err != nil {
+		return fail(http.StatusBadRequest, err)
+	}
+	// AssignProject writes the fleet tag and seeds the engine from the fleet default
+	// when the caller left it empty.
+	if err := sessions.AssignProject(fleetName, name); err != nil {
+		return fail(http.StatusBadRequest, err)
+	}
+	if !fleet.IsGitRepo(dir) {
+		return "not_a_git_repo", http.StatusOK, nil
+	}
+	return "", http.StatusOK, nil
 }
 
 func handleUnassignProject(d serverDeps) gin.HandlerFunc {

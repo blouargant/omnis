@@ -6235,13 +6235,45 @@ function coordinateFleet(name) {
   return newChat(null, "Fleet", null, name);
 }
 
+// renderFleets repaints the section. It is ALWAYS visible — a first fleet has to
+// be creatable from the rail, and a section that only appears once a fleet exists
+// leaves no entry point for the user who has none. With nothing to show it renders
+// a single "Create a fleet" row instead of the group cards.
 function renderFleets() {
   const list = els.fleetsList;
   if (!list) return;
+  if (els.fleetsSection) els.fleetsSection.hidden = false;
   list.innerHTML = "";
+  if (!fleetsData.length) { list.appendChild(buildFleetsEmpty()); return; }
   for (const f of fleetsData) list.appendChild(buildFleetGroup(f));
-  // Hide the whole section when there are no fleets AND no ungrouped projects.
-  if (els.fleetsSection) els.fleetsSection.hidden = fleetsData.length === 0;
+}
+
+// buildFleetsEmpty is the no-fleets placeholder: a muted dashed row that doubles
+// as a create affordance (same flow as the section header's + button).
+function buildFleetsEmpty() {
+  const li = document.createElement("li");
+  li.className = "fleets-empty";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "fleets-empty-btn";
+  btn.setAttribute("data-tip", tr("fleets.emptyHint"));
+  btn.innerHTML = `<span class="fleets-empty-plus">+</span><span class="fleets-empty-text"></span>`;
+  btn.querySelector(".fleets-empty-text").textContent = tr("fleets.emptyCreate");
+  btn.addEventListener("click", createFleet);
+  li.appendChild(btn);
+  return li;
+}
+
+// createFleet prompts for a name/colour/default engine and POSTs the new fleet.
+// Shared by the section header's + button and the empty-state row.
+async function createFleet() {
+  const chosen = await fleetDialog({ title: tr("fleets.newTitle"), color: proposeCollectionColor(), engine: "omnis", confirmText: tr("common.create") });
+  if (!chosen) return;
+  try {
+    const res = await apiFetch("/api/fleets", { method: "POST", body: JSON.stringify(chosen) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
+    await loadFleets();
+  } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
 }
 
 // buildFleetGroup renders one collapsible fleet: a header (chevron, node-cluster
@@ -6316,12 +6348,15 @@ function buildProjectRow(f, m) {
   return li;
 }
 
-// openFleetCtxMenu shows the fleet-header context menu: Coordinate / Add
-// project / Rename / Edit / Delete.
+// openFleetCtxMenu shows the fleet-header context menu: Coordinate / New
+// project / Rename / Edit / Delete. "New project…" CREATES one (a project is not a
+// repurposed topic folder — see newProjectInFleet); an existing collection joins a
+// fleet via the project row's "Add to fleet…" after the collection editor's
+// Fleet-project toggle promotes it.
 function openFleetCtxMenu(ev, f) {
   showFolderCtxMenu(ev, [
     [tr("fleets.coordinate"), () => coordinateFleet(f.name)],
-    [tr("fleets.addProject"), () => addProjectToFleet(f.name)],
+    [tr("fleets.newProject"), () => newProjectInFleet(f)],
     SEP,
     [tr("common.rename"), () => renameFleet(f.name)],
     [tr("fleets.editFleet"), () => editFleet(f)],
@@ -6373,28 +6408,230 @@ async function deleteFleet(name) {
   } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
 }
 
-// addProjectToFleet offers a small modal chooser of collections that aren't
-// already fleet projects, and assigns/promotes the chosen one. A modal (not a
-// nested context menu) — this codebase's context-menu items open modals, and
-// a re-anchored context menu risks the capture-phase dismiss closing it
-// immediately (see showFolderCtxMenu's capture-phase click/contextmenu/scroll
-// listeners).
-async function addProjectToFleet(name) {
-  const candidates = (collectionsData || []).filter((c) => !c.general && (c.role || "") !== "project");
-  if (!candidates.length) { showToast(tr("fleets.noAssignable"), "err"); return; }
-  const overlay = uiModalShell(tr("fleets.addProjectTitle"));
+// newProjectInFleet CREATES a project in the fleet. A project only reuses the
+// collection mechanism for storage — it serves a different purpose (a workspace a
+// Driver is dispatched into, not a topic folder for chats), so this asks for what a
+// project actually needs (name, workspace directory, engine, dependencies) and the
+// server makes the collection for it. It deliberately does NOT offer to sacrifice
+// one of the user's existing collections; an existing collection becomes a project
+// via the collection editor's Fleet-project toggle, and is then filed into a fleet
+// with the project row's "Add to fleet…".
+// The dialog is re-opened with the user's input on a server rejection, so a typo
+// never costs the whole form.
+async function newProjectInFleet(f) {
+  const siblings = (f.members || []).map((m) => m.name);
+  let draft = {
+    name: "", dir: "", color: proposeCollectionColor(),
+    engine: f.default_engine === "claude" ? "claude" : "omnis",
+    depends_on: [], claude_allowed_tools: [],
+  };
+  let error = "";
+  for (;;) {
+    const spec = await projectDialog({
+      title: tr("fleets.newProjectTitle", { fleet: f.name }),
+      confirmText: tr("common.create"),
+      siblings, error, ...draft,
+    });
+    if (!spec) return;
+    draft = spec;
+    error = "";
+    try {
+      const res = await apiFetch(`/api/fleets/${encodeURIComponent(f.name)}/projects`, { method: "POST", body: JSON.stringify(spec) });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok) { error = b.error || tr("fleets.saveFailed"); continue; }
+      await loadFleets();
+      await loadCollections();
+      if (b.warning === "not_a_git_repo") showToast(tr("fleets.projectNotGit", { dir: spec.dir }), "err");
+      return;
+    } catch (e) { console.error(e); error = tr("fleets.saveFailed"); }
+  }
+}
+
+// projectDialog collects one project's fields. Everything it can check without the
+// server (name given + not colliding, absolute path) plus the one thing it must ask
+// the server (does the folder exist) is validated HERE, so the modal stays open with
+// the input intact instead of closing onto a toast. Resolves the spec, or null.
+function projectDialog({ title, confirmText, siblings = [], error = "", name = "", dir = "", color = "", engine = "omnis", depends_on = [], claude_allowed_tools = [] }) {
+  return new Promise((resolve) => {
+    const overlay = uiModalShell(title);
+    const body = overlay.querySelector(".user-cmd-modal-body");
+    const swatches = [
+      `<button type="button" class="collection-swatch collection-swatch-none" data-color="" data-tip="${escHtml(tr("collections.noColor"))}" aria-label="${escHtml(tr("collections.noColor"))}"></button>`,
+      ...COLLECTION_COLORS.map((k) =>
+        `<button type="button" class="collection-swatch" data-color="${k}" style="--sw: var(--collection-${k})" aria-label="${k}"></button>`),
+    ].join("");
+    const depSet = new Set((depends_on || []).map((s) => String(s).toLowerCase()));
+    const deps = siblings.length
+      ? siblings.map((s) =>
+        `<label class="cc-fleet-dep"><input type="checkbox" value="${escHtml(s)}"${depSet.has(s.toLowerCase()) ? " checked" : ""}> ${escHtml(s)}</label>`).join("")
+      : `<span class="cc-fleet-empty">${escHtml(tr("collections.fleetNoProjects"))}</span>`;
+    // Engine option values ("omnis"/"claude") are product nouns (glossary) → literal.
+    body.innerHTML = `
+      <div class="proj-err" hidden></div>
+      <label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("fleets.projectName"))}</span>
+        <input type="text" class="proj-name" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("fleets.projectNamePlaceholder"))}" /></label>
+      <label class="user-cmd-field">
+        <span class="user-cmd-field-label" data-tip="${escHtml(tr("fleets.projectDirHelp"))}">${escHtml(tr("fleets.projectDir"))}</span>
+        <input type="text" class="proj-dir" autocomplete="off" spellcheck="false" list="proj-dir-cands" placeholder="${escHtml(tr("fleets.projectDirPlaceholder"))}" />
+        <datalist id="proj-dir-cands"></datalist>
+        <span class="proj-dir-hint"></span></label>
+      <div class="collection-color-field">
+        <span class="collection-color-label">${escHtml(tr("collections.color"))}</span>
+        <div class="collection-swatches">${swatches}</div>
+      </div>
+      <label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("collections.fleetEngine"))}</span>
+        <select class="proj-engine">
+          <option value="omnis">${escHtml(tr("collections.fleetEngineOmnis"))}</option>
+          <option value="claude">${escHtml(tr("collections.fleetEngineClaude"))}</option>
+        </select></label>
+      <div class="user-cmd-field">
+        <span class="user-cmd-field-label" data-tip="${escHtml(tr("collections.fleetDependsOnHelp"))}">${escHtml(tr("collections.fleetDependsOn"))}</span>
+        <div class="cc-fleet-deps">${deps}</div>
+      </div>
+      <label class="user-cmd-field proj-allow-wrap" hidden>
+        <span class="user-cmd-field-label" data-tip="${escHtml(tr("collections.fleetAllowlistHelp"))}">${escHtml(tr("collections.fleetAllowlist"))}</span>
+        <textarea class="cc-fleet-allow" spellcheck="false" placeholder="${escHtml(tr("collections.fleetAllowlistPlaceholder"))}"></textarea></label>`;
+    const errBox = body.querySelector(".proj-err");
+    const nameEl = body.querySelector(".proj-name");
+    const dirEl = body.querySelector(".proj-dir");
+    const hintEl = body.querySelector(".proj-dir-hint");
+    const candList = body.querySelector("#proj-dir-cands");
+    const engineEl = body.querySelector(".proj-engine");
+    const depsBox = body.querySelector(".cc-fleet-deps");
+    const allowWrap = body.querySelector(".proj-allow-wrap");
+    const allowTa = body.querySelector(".cc-fleet-allow");
+    nameEl.value = name;
+    dirEl.value = dir;
+    engineEl.value = engine === "claude" ? "claude" : "omnis";
+    allowTa.value = (claude_allowed_tools || []).join("\n");
+    const syncEngine = () => { allowWrap.hidden = engineEl.value !== "claude"; };
+    engineEl.addEventListener("change", syncEngine);
+    syncEngine();
+
+    let sel = COLLECTION_COLORS.includes(color) ? color : "";
+    const swEls = [...body.querySelectorAll(".collection-swatch")];
+    const paint = () => swEls.forEach((el) => el.classList.toggle("selected", el.dataset.color === sel));
+    paint();
+    swEls.forEach((el) => el.addEventListener("click", () => { sel = el.dataset.color; paint(); }));
+
+    const showErr = (msg) => { errBox.textContent = msg || ""; errBox.hidden = !msg; };
+    showErr(error);
+    // A rejection is about the values as they were — editing any of them clears it,
+    // so a stale "no such folder" never contradicts the live hint below the field.
+    for (const el of [nameEl, dirEl, engineEl]) el.addEventListener("input", () => showErr(""));
+
+    // Directory completion + a live found/missing hint. Candidates come from the
+    // same server-side completer the `@file` picker uses, filtered to directories
+    // (a trailing "/" marks one — see shellcomplete.completePaths).
+    let dirSeq = 0;
+    const refreshDir = debounceFn(async () => {
+      const val = dirEl.value.trim();
+      const seq = ++dirSeq;
+      candList.innerHTML = "";
+      hintEl.textContent = "";
+      hintEl.className = "proj-dir-hint";
+      if (!val) return;
+      try {
+        const res = await apiFetch(`/api/complete-file?path=${encodeURIComponent(val)}`);
+        const b = await res.json();
+        if (seq !== dirSeq) return;
+        for (const cand of (b.candidates || []).filter((c) => c.endsWith("/"))) {
+          const opt = document.createElement("option");
+          opt.value = cand;
+          candList.appendChild(opt);
+        }
+      } catch { /* completion is a convenience — never block typing */ }
+      const kind = await dirKind(val);
+      if (seq !== dirSeq) return;
+      hintEl.textContent = kind === "dir" ? tr("fleets.projectDirOk") : tr("fleets.projectDirMissing");
+      hintEl.className = "proj-dir-hint" + (kind === "dir" ? " ok" : " bad");
+    }, 220);
+    dirEl.addEventListener("input", refreshDir);
+    if (dir) refreshDir();
+
+    const ok = overlay.querySelector(".ui-modal-ok");
+    ok.textContent = confirmText || tr("common.save");
+    let done = false;
+    const close = (val) => { if (done) return; done = true; overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const collect = () => ({
+      name: nameEl.value.trim(),
+      dir: dirEl.value.trim(),
+      color: sel,
+      engine: engineEl.value,
+      depends_on: [...depsBox.querySelectorAll("input:checked")].map((i) => i.value),
+      claude_allowed_tools: engineEl.value === "claude"
+        ? allowTa.value.split("\n").map((s) => s.trim()).filter(Boolean)
+        : [],
+    });
+    const submit = async () => {
+      if (done || ok.disabled) return;
+      const spec = collect();
+      if (!spec.name) { showErr(tr("fleets.projectNameRequired")); nameEl.focus(); return; }
+      const taken = (collectionsData || []).some((c) => c.name.toLowerCase() === spec.name.toLowerCase())
+        || fleetProjectNames().has(spec.name.toLowerCase());
+      if (taken) { showErr(tr("fleets.projectNameTaken")); nameEl.focus(); return; }
+      if (!spec.dir) { showErr(tr("fleets.projectDirRequired")); dirEl.focus(); return; }
+      if (!isAbsPath(spec.dir)) { showErr(tr("fleets.projectDirAbs")); dirEl.focus(); return; }
+      ok.disabled = true;
+      const kind = await dirKind(spec.dir);
+      ok.disabled = false;
+      if (kind !== "dir") { showErr(tr("fleets.projectDirMissing")); dirEl.focus(); return; }
+      close(spec);
+    };
+    ok.addEventListener("click", submit);
+    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter" && (e.target === nameEl || e.target === dirEl)) { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    setTimeout(() => { nameEl.focus(); nameEl.select(); }, 0);
+  });
+}
+
+// isAbsPath accepts a POSIX "/…" or a Windows "C:\…" path. A project's workspace
+// must be absolute: the browser's completion and the server's own os.Stat resolve a
+// relative path against different working directories, so a relative one would mean
+// two different folders depending on who looked.
+function isAbsPath(p) { return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p); }
+
+// dirKind asks the server what a path is ("dir" / "file" / "missing"), reusing the
+// @file-reference classifier. Returns "missing" when the probe itself fails.
+async function dirKind(path) {
+  try {
+    const res = await apiFetch("/api/fileref/resolve", { method: "POST", body: JSON.stringify({ paths: [path], session: activeSessionId || "" }) });
+    const b = await res.json();
+    return (b.kinds || {})[path] || "missing";
+  } catch { return "missing"; }
+}
+
+// debounceFn is a tiny trailing-edge debounce for the dialog's live probes.
+function debounceFn(fn, ms) {
+  let t = 0;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+// moveProjectToFleet re-files an existing project under another (or a first) fleet.
+// This is the assign path — the project already exists, so it keeps its directory,
+// engine and dependencies; only its fleet tag changes.
+async function moveProjectToFleet(collection, currentFleet) {
+  const targets = (fleetsData || []).filter((f) => !f.ungrouped && f.name !== currentFleet).map((f) => f.name);
+  if (!targets.length) { showToast(tr("fleets.noFleetTarget"), "err"); return; }
+  const overlay = uiModalShell(tr("fleets.moveToFleetTitle"));
   const body = overlay.querySelector(".user-cmd-modal-body");
   const list = document.createElement("div");
   list.className = "fleet-assign-list";
-  for (const c of candidates) {
+  for (const name of targets) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "fleet-assign-item";
-    btn.textContent = c.name; // textContent → safe
+    btn.textContent = name; // textContent → safe
     btn.addEventListener("click", async () => {
       overlay.remove();
       try {
-        const res = await apiFetch(`/api/fleets/${encodeURIComponent(name)}/projects`, { method: "POST", body: JSON.stringify({ collection: c.name }) });
+        const res = await apiFetch(`/api/fleets/${encodeURIComponent(name)}/projects`, { method: "POST", body: JSON.stringify({ collection }) });
         if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
         await loadFleets();
         await loadCollections();
@@ -6414,10 +6651,10 @@ async function addProjectToFleet(name) {
 }
 
 // openProjectCtxMenu shows the project-row context menu: Coordinate / Edit
-// project / (Remove from fleet | Remove from Fleets) / Delete project.
-// Deliberately WITHOUT New chat here / Move to / Change color — a project is not
-// a topic folder (see fleetProjectNames). The "remove" action depends on where
-// the project sits: a project IN a named fleet offers "Remove from fleet"
+// project / (Add|Move) to fleet / (Remove from fleet | Remove from Fleets) /
+// Delete project. Deliberately WITHOUT New chat here / Move to / Change color — a
+// project is not a topic folder (see fleetProjectNames). The "remove" action depends
+// on where the project sits: a project IN a named fleet offers "Remove from fleet"
 // (→ Ungrouped, still a project); an already-Ungrouped project offers "Remove
 // from Fleets" (demote back to a normal collection, out of the Fleets area).
 function openProjectCtxMenu(ev, f, m) {
@@ -6426,6 +6663,14 @@ function openProjectCtxMenu(ev, f, m) {
     [tr("fleets.editProject"), () => editCollectionContext({ name: m.name })], // reuse the context editor
     SEP,
   ];
+  // Re-file this project under another fleet — the only route into a fleet for a
+  // project that already exists (Ungrouped, or promoted from a collection). Hidden
+  // when there is no other fleet to move it to.
+  const targets = (fleetsData || []).filter((x) => !x.ungrouped && x.name !== f.name).length;
+  if (targets) {
+    items.push([tr(f.ungrouped ? "fleets.addToFleet" : "fleets.moveToFleet"),
+      () => moveProjectToFleet(m.name, f.ungrouped ? "" : f.name)]);
+  }
   if (f.ungrouped) {
     items.push([tr("fleets.removeFromFleets"), () => removeProjectFromFleets(m.name)]);
   } else {
@@ -12805,15 +13050,7 @@ async function restoreLayout(rec, liveIds) {
   // BEFORE sessions so the very first render already knows which collection each
   // session belongs to (no fold-to-General flash for filed sessions).
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
-  els.newFleetBtn?.addEventListener("click", async () => {
-    const chosen = await fleetDialog({ title: tr("fleets.newTitle"), color: proposeCollectionColor(), engine: "omnis", confirmText: tr("common.create") });
-    if (!chosen) return;
-    try {
-      const res = await apiFetch("/api/fleets", { method: "POST", body: JSON.stringify(chosen) });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); showToast(b.error || tr("fleets.saveFailed"), "err"); return; }
-      await loadFleets();
-    } catch (e) { console.error(e); showToast(tr("fleets.saveFailed"), "err"); }
-  });
+  els.newFleetBtn?.addEventListener("click", createFleet);
   // Refuse a dragged session dropped over the Fleets section — a project is not a
   // topic folder. #fleets-list has no move handler, so this is a visible no-op cue.
   if (els.fleetsList) {
