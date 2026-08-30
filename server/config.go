@@ -926,16 +926,42 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						// Build a clean AgentEntry: keep only real config fields (drop
 						// instruction + display-only keys) and DROP empty scalar/null
 						// values. The GET hands back every agent with its full resolved
-						// config — including empty "model"/"mcp_config_path"/… and null
+						// config — including empty "mcp_config_path"/… and null
 						// lists — so without this an UNCHANGED agent would diff non-empty
 						// against the shipped agent.json and fork a pointless overlay.
 						// Empty arrays are kept: a cleared list (e.g. skills: []) is a
 						// deliberate override of a non-empty shipped value.
+						//
+						// GOTCHA — "model" is DELIBERATELY excluded from this allowlist.
+						// AgentEntry (agent/runtime_config.go) has NO Model field at all —
+						// model selection is owned exclusively by models.json via
+						// model_ref. The GET handler nonetheless surfaces "model" in each
+						// agent's map as informational display data: it is
+						// RuntimeAgentConfig.Model, the underlying model string RESOLVED
+						// from model_ref (or inherited from the leader when model_ref is
+						// empty) — exactly like the sibling derived fields "source" and
+						// "recommended_model", which are likewise absent from this
+						// allowlist. Unlike those two, "model" used to be allowlisted here,
+						// which meant it was ALWAYS non-empty for a resolvable agent and
+						// NEVER present in any on-disk agent.json (there is no field for it
+						// to occupy) — so isEmptyOverlayValue could never filter it and the
+						// per-agent delta writer (configedit.AgentEntryOverlayBytes) saw a
+						// "new" key on every single save, forking every agent from the
+						// system layer into the user layer even when nothing was edited
+						// (observed live: 27 stray registry/agents/<name>/agent.json files,
+						// 23 containing only {"model": "..."}). This is the CLAUDE.md GOTCHA
+						// "a GET must return the AUTHORED config, never the RESOLVED one" —
+						// the same family as the squad-normalisation hazard above, but here
+						// there is no authored representation to fall back to (the value
+						// only exists on the READ side), so the fix belongs on the WRITE
+						// side: never let a purely-derived key reach the persisted overlay,
+						// regardless of what the client echoes back. See
+						// server/config_agent_model_test.go.
 						cleanAgent := map[string]any{}
 						for k, v := range agentMap {
 							switch k {
 							case "name", "description", "enabled", "leader", "builtin",
-								"model_ref", "provider", "model", "base_url", "api_key",
+								"model_ref", "provider", "base_url", "api_key",
 								"tools", "skills", "softskills_dir", "allow_file_attachments",
 								"mcp_config_path", "mcp_servers", "permissions_config_path",
 								"a2a_agents", "max_instances", "resumable_sessions",
