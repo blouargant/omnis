@@ -6119,8 +6119,16 @@ const BASE_PATH = window.BASE_PATH || "";
       container.appendChild(warn);
     }
 
-    if (!Array.isArray(agent.skills)) agent.skills = [];
-    const selected = new Set(agent.skills);
+    // Read-only local: do NOT coerce agent.skills to [] here. This block
+    // renders on every agent-detail view (not just when the user opens the
+    // Skills section), so writing agent.skills would materialise a rendering
+    // artifact the whole-document Save then persists for EVERY save,
+    // including one that never touches Skills at all — silently turning a
+    // shipped agent's `skills: null` into a persisted `skills: []` overlay.
+    // Only the click handlers below (a genuine user action) may assign
+    // agent.skills.
+    const currentSkills = Array.isArray(agent.skills) ? agent.skills : [];
+    const selected = new Set(currentSkills);
 
     if (!registry.length) {
       const p = document.createElement("p"); p.className = "empty";
@@ -6251,8 +6259,14 @@ const BASE_PATH = window.BASE_PATH || "";
       return true;
     });
 
-    if (!Array.isArray(agent.subagents)) agent.subagents = [];
-    const selected = new Set(agent.subagents.map(n => (n || "").toLowerCase()));
+    // Read-only local — see the identical note in renderSkillBlockContent:
+    // this block renders on every agent-detail view, so mutating
+    // agent.subagents here (rather than only in the click handler below,
+    // which is a genuine user action) would materialise a `subagents: []`
+    // rendering artifact that the whole-document Save then persists for
+    // EVERY save of this agent, even one that never touches Team at all.
+    const currentSubagents = Array.isArray(agent.subagents) ? agent.subagents : [];
+    const selected = new Set(currentSubagents.map(n => (n || "").toLowerCase()));
 
     const hint = document.createElement("p");
     hint.className = "agent-gen-hint";
@@ -6335,8 +6349,14 @@ const BASE_PATH = window.BASE_PATH || "";
       return;
     }
 
-    if (!Array.isArray(agent.mcp_servers)) agent.mcp_servers = [];
-    const selected = new Set(agent.mcp_servers);
+    // Read-only local — see the identical note in renderSkillBlockContent:
+    // this block renders on every agent-detail view, so mutating
+    // agent.mcp_servers here (rather than only in a click handler, a genuine
+    // user action) would materialise an `mcp_servers: []` rendering artifact
+    // that the whole-document Save then persists for EVERY save of this
+    // agent, even one that never touches MCP Servers at all.
+    const currentMcpServers = Array.isArray(agent.mcp_servers) ? agent.mcp_servers : [];
+    const selected = new Set(currentMcpServers);
 
     const mcpIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/><line x1="8" y1="16" x2="8" y2="20"/><line x1="16" y1="16" x2="16" y2="20"/></svg>`;
 

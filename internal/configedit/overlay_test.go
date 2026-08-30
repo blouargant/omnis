@@ -183,3 +183,101 @@ func TestPerAgentEntryDeltaAndEvolution(t *testing.T) {
 		t.Fatalf("package-added tool must flow through the user overlay; got %v", tools)
 	}
 }
+
+// TestDiffGenericDropsEmptyListAgainstAbsentBase locks in the DiffGeneric
+// GOTCHA documented above the function: an empty-array desired value for a
+// key the base does not declare at all (absent, or explicit JSON null) must
+// NOT be persisted. Observed live: the web UI's agent-detail renderer used to
+// seed a rendering-only `[]` for `skills`/`subagents`/`mcp_servers` whenever
+// an agent's detail view was opened (regardless of whether the user touched
+// those sections), and because the Settings editor has no per-agent PATCH
+// route — only a whole-document PUT — that seeded `[]` rode along on every
+// subsequent save. Two agents with NO team at all (`skills: null`, no
+// `subagents` key) came back from a no-op save with a user-layer overlay of
+// `{"skills": [], "subagents": []}`.
+func TestDiffGenericDropsEmptyListAgainstAbsentBase(t *testing.T) {
+	userDir := t.TempDir()
+	sysDir := t.TempDir()
+	t.Setenv("OMNIS_HOME", userDir)
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", sysDir)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
+
+	// Shipped shape of web_agent / omnis: skills explicitly null, no
+	// subagents key at all (no team).
+	writeJSON(t, filepath.Join(sysDir, "registry", "agents", "web_agent", "agent.json"), map[string]any{
+		"name":      "web_agent",
+		"builtin":   false,
+		"leader":    false,
+		"model_ref": "balanced",
+		"skills":    nil,
+		"tools":     []any{"web"},
+	})
+
+	entry, _, _, err := ReadAgentEntry("web_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the client-side rendering artifact directly: an unrelated
+	// no-op save whose payload nonetheless materialises empty lists for
+	// fields the base never declared.
+	entry["skills"] = []any{}
+	entry["subagents"] = []any{}
+	if _, _, err := WriteAgentEntry("web_agent", entry); err != nil {
+		t.Fatal(err)
+	}
+
+	overlayPath := filepath.Join(userDir, "registry", "agents", "web_agent", "agent.json")
+	if _, err := os.Stat(overlayPath); os.IsNotExist(err) {
+		return // ideal: nothing written at all
+	}
+	overlay := readJSONMap(t, overlayPath)
+	if _, ok := overlay["skills"]; ok {
+		t.Fatalf("empty 'skills' against an absent/null base must not be persisted: %v", overlay)
+	}
+	if _, ok := overlay["subagents"]; ok {
+		t.Fatalf("empty 'subagents' against an absent base must not be persisted: %v", overlay)
+	}
+}
+
+// TestDiffGenericKeepsEmptyListAgainstNonEmptyBase is the other half of the
+// same GOTCHA: dropping every empty-array overlay unconditionally would
+// break the legitimate "the user cleared a previously non-empty list"
+// feature the cleanAgent allowlist comment in server/config.go depends on
+// (research_critic's `subagents: ["web_fetcher"]` gatherer team must still
+// be clearable). The rule only elides an empty value when the base has NO
+// value for that key at all.
+func TestDiffGenericKeepsEmptyListAgainstNonEmptyBase(t *testing.T) {
+	userDir := t.TempDir()
+	sysDir := t.TempDir()
+	t.Setenv("OMNIS_HOME", userDir)
+	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", sysDir)
+	t.Setenv("OMNIS_CONFIG_DIRS", "")
+
+	writeJSON(t, filepath.Join(sysDir, "registry", "agents", "research_critic", "agent.json"), map[string]any{
+		"name":      "research_critic",
+		"builtin":   false,
+		"leader":    false,
+		"model_ref": "high",
+		"skills":    []any{},
+		"subagents": []any{"web_fetcher"},
+	})
+
+	entry, _, _, err := ReadAgentEntry("research_critic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The user genuinely empties the team via the UI.
+	entry["subagents"] = []any{}
+	if _, _, err := WriteAgentEntry("research_critic", entry); err != nil {
+		t.Fatal(err)
+	}
+
+	overlay := readJSONMap(t, filepath.Join(userDir, "registry", "agents", "research_critic", "agent.json"))
+	subs, ok := overlay["subagents"]
+	if !ok {
+		t.Fatalf("a deliberate clear of a non-empty subagents list must still be persisted: %v", overlay)
+	}
+	if list, _ := subs.([]any); len(list) != 0 {
+		t.Fatalf("cleared subagents overlay should be empty, got %v", subs)
+	}
+}

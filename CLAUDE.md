@@ -1349,6 +1349,131 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
   (`configedit.WriteSection`/`WriteAgentEntry`), and permissions/hooks (both
   reloaders are fed the full `ConfigLayerCandidates` chain instead of just
   base+user, so a shipped allow-list is no longer shadowed by a user file).
+- **GOTCHA — a GET must return the AUTHORED config, never the RESOLVED one.**
+  The editor PUTs back verbatim what the GET handed it, and the delta writer
+  keys collections by id (`squads` by `name`), so any value the read side
+  *normalises* is persisted as a deliberate user override. `resolveSquadEntries`
+  ([agent/runtime_config.go](agent/runtime_config.go)) lower-cases a squad name,
+  rewrites leader `"none"` → `""`, and drops the leader from its own members —
+  so `GET /api/config/parsed/agent` returning `settings.Squads` made a **no-op
+  save fork the WHOLE squad list** into the user layer under new (lower-cased)
+  ids, plus a `squads_removed` tombstone for every shipped one. The fleet then
+  froze (package squad updates stopped flowing) and a squad left from an
+  experiment kept referencing a since-removed agent, so `ResolveRuntimeSettings`
+  failed outright. The handler now hands back the merged **authored** squads and
+  only falls back to `settings.Squads` when no layer declares a squads block (so
+  the synthesized default squad stays visible) — see
+  [server/config.go](server/config.go) and
+  [server/config_agent_squads_test.go](server/config_agent_squads_test.go).
+  **A resolve error on that route is now a 400, never a silent fallback**: the
+  raw `agents` value is a list of NAMES, which the editor renders as a fleet of
+  "(unnamed)" rows and whose save wipes every per-user agent overlay (the PUT
+  skips non-object entries, so the list saves back empty — as `agents_removed` —
+  and the orphan sweep deletes the registry dirs). The PUT additionally refuses
+  an `agents` list that carries no agent objects.
+  **The same family bit the PER-AGENT fan-out too, via a purely DERIVED field
+  this time, not a normalised one.** Each agent object in that same GET response
+  carries a `"model"` key set from `RuntimeAgentConfig.Model` — the underlying
+  model string *resolved* from `model_ref` through `models.json` (or inherited
+  from the leader when `model_ref` is empty). `AgentEntry` — the actual
+  agent.json schema — has **no `Model` field at all** (model selection is owned
+  exclusively by `model_ref`; see the doc comment on `AgentEntry` in
+  [agent/runtime_config.go](agent/runtime_config.go)). The PUT handler's
+  `cleanAgent` allowlist nonetheless included `"model"` as if it were a real
+  field, so it was **always** non-empty for a resolvable agent and **never**
+  present in any on-disk agent.json (there is no field for it to occupy) —
+  `isEmptyOverlayValue` could never filter it, and `configedit.AgentEntryOverlayBytes`
+  saw a "new" key on every save. Observed live: a no-op Settings save forked
+  **27** agents from the system layer into the user layer, 23 of them with an
+  overlay containing nothing but `{"model": "..."}`. Harmless only because
+  nothing reads an agent's `model` key back — the moment a `Model` field is
+  ever added to `AgentEntry`, every one of those forked files activates
+  silently. Unlike the squads case, there is **no authored value to fall back
+  to** — `model` only ever exists on the read side — so the fix is on the
+  **write** side, not the read side: `"model"` was dropped from the `cleanAgent`
+  allowlist, exactly like its derived siblings `"source"` and
+  `"recommended_model"` (computed in the same GET handler, never writable) —
+  GET keeps surfacing it for display (the agent-info modal and the
+  instruction-drafting assistant's capability summary both fall back to it
+  when `model_ref` is empty), but a round-trip can no longer persist it. See
+  [server/config.go](server/config.go) (the `cleanAgent` switch) and
+  [server/config_agent_model_test.go](server/config_agent_model_test.go)
+  (`TestParsedAgentRoundTripDoesNotForkModelField`, which drives a real
+  GET→PUT round trip against an agent whose `model_ref` resolves to a genuine
+  `models.json` entry — the case none of the pre-existing agent-config tests
+  exercised, since they all leave `model_ref` unresolvable or hand-zero the
+  `model` field in the payload). **When auditing this class of bug**: any key
+  the GET handler adds to an agent/squad/whatever object that is not a real
+  field of the underlying config struct is safe to READ but must be excluded
+  from whatever allowlist the PUT handler uses to build the persisted overlay
+  — check both sides, not just one, whenever a new display-only field is added.
+  The three other legacy scalar keys in the same `cleanAgent` allowlist
+  (`provider`, `base_url`, `api_key` — pre-model_ref inline fields `AgentEntry`
+  no longer declares either, silently dropped by the JSON decoder per the same
+  doc comment) are **not** part of this defect: the GET handler never emits
+  them, so an unmodified round trip can't manufacture them — they only matter
+  for a hand-edited Raw JSON file, where they are inert but harmless.
+  **A second, more dangerous manifestation hit the SAME allowlist's list
+  fields (`skills`/`subagents`/`mcp_servers`) — this one CAN silently strip a
+  shipped capability, unlike the inert `model` key.** The GET handler itself
+  is innocent here: `a.Skills`/`a.SubAgents` are `nil` when unset
+  (`agent.normalizeNames` returns `nil` for a zero-length input), and Go's
+  `encoding/json` marshals a nil slice as `null`, not `[]` — verified directly
+  (`json.Marshal(map[string]any{"skills": []string(nil)})` → `{"skills":null}`).
+  The manufactured `[]` came from the **web UI client**: `renderSkillBlockContent`
+  / `renderAgentTeamBlock` / `renderAgentMCPBlockContent`
+  ([web/settings.js](web/settings.js)) used to coerce `agent.skills`/
+  `agent.subagents`/`agent.mcp_servers` to `[]` the moment an agent's detail
+  view rendered — merely to have an array to seed a checkbox `Set` from —
+  **regardless of whether the user touched that section**. Because the
+  Settings editor has **no per-agent PATCH route** (only a whole-document PUT
+  resending every agent's current client-side state — see the earlier
+  agents-name-list note above), that materialised `[]` rode along on **any**
+  subsequent save of the fleet. Observed live: a no-op save forked `web_agent`
+  and `omnis` (both `skills: null`, no `subagents` key — no team) into the
+  user layer as `{"skills": [], "subagents": []}`. Harmless for those two
+  specifically (nil and `[]` resolve identically for these fields — the exact
+  equivalence `agent.normalizeNames` establishes), but the SAME code path
+  would have silently emptied `helper`'s real `subagents: ["session_search"]`
+  or `research_critic`'s `subagents: ["web_fetcher"]` gatherer team the moment
+  their in-memory copy was similarly coerced — precisely the regression the
+  `cleanAgent` allowlist's own "subagents must be here or editing any
+  unrelated field of research_critic would silently strip its gatherer team"
+  comment warns about, just from a different direction. **Fixed on both
+  sides, because the client fix alone cannot be trusted as the only guard
+  (nothing stops a future rendering helper from doing the same thing):**
+  - **Client** ([web/settings.js](web/settings.js)): all three renderers now
+    read a **local, non-mutating** fallback (`const currentSkills =
+    Array.isArray(agent.skills) ? agent.skills : [];`) to seed the `Set`,
+    mirroring the pattern the A2A picker (`renderAgentA2ABlockContent`) already
+    used correctly. `agent.skills`/`agent.subagents`/`agent.mcp_servers` are
+    now mutated **only** inside the click handlers — a genuine user action —
+    never merely by rendering.
+  - **Server** ([internal/configedit/overlay.go](internal/configedit/overlay.go)
+    `DiffGeneric`): an empty-array `desired` value for a key the base does
+    **not** declare at all (absent, or explicit JSON `null` — both decode to a
+    nil interface in a parsed map) is now dropped from the overlay rather than
+    persisted. Scoped to `DiffGeneric` only — **not** the shared
+    `DiffSection`/`diffValue` used by every other config section's generic
+    diff pass — because `DiffGeneric` has exactly one caller family
+    (`AgentEntryOverlayBytes`, i.e. per-agent registry entries), so the rule's
+    blast radius is precisely "list-typed `AgentEntry` fields", all of which
+    (`skills`/`subagents`/`tools`/`mcp_servers`/`a2a_agents`) are normalised
+    identically for `nil` vs `[]` on read — making the rule a pure no-op
+    functionally, and a real safety net structurally. **The legitimate "user
+    cleared a previously non-empty list" case is untouched**: the rule only
+    elides an empty value when the base has **no** value for that key at all;
+    an empty `desired` against a **non-empty** base (a genuine team-clearing
+    edit) still diffs as a real, persisted override. See
+    [internal/configedit/overlay_test.go](internal/configedit/overlay_test.go)
+    (`TestDiffGenericDropsEmptyListAgainstAbsentBase` /
+    `TestDiffGenericKeepsEmptyListAgainstNonEmptyBase`, locking in both halves)
+    and [server/config_agent_lists_test.go](server/config_agent_lists_test.go)
+    (`TestParsedAgentRoundTripPreservesNonEmptyTeams` — a byte-verbatim
+    GET→PUT round trip for `helper`/`research_critic` leaves their real teams
+    untouched; `TestParsedAgentRoundTripDropsSpuriousEmptyListsForNoTeamAgent`
+    — simulates the client artifact directly in the PUT payload and asserts
+    the server refuses it, independent of whether the JS fix holds).
 - **Reads return the merged effective view**: `ResolveRuntimeSettings`,
   `mcp.LoadMerged`/`a2a.LoadMerged`, and the web-UI/settings readers
   (`configedit.ReadSection`/`ReadAgentEntry`/`ReadAgentsConfig`) all surface the

@@ -27,8 +27,56 @@ func MergeGeneric(layers []map[string]any) map[string]any {
 // MergeGeneric([base, DiffGeneric(base, desired)]) == desired (for
 // additive/modifying edits — field removal inside an object is not
 // representable, see diffValue).
+//
+// GOTCHA — an empty-array `desired` value for a key with NO base counterpart
+// at all (base[key] absent, or explicit JSON `null` — both decode to a nil
+// interface in a parsed map) is dropped from the overlay rather than
+// persisted. DiffGeneric has exactly one caller family: per-agent registry
+// entries (registry/agents/<name>/agent.json, via AgentEntryOverlayBytes).
+// Every list-typed AgentEntry field this feeds — skills, subagents, tools,
+// mcp_servers, a2a_agents — is normalised on read (agent.normalizeNames /
+// normalizeTools collapse a nil slice and an empty slice to the exact same
+// resolved value), so an empty list persisted against an absent base is
+// functionally inert either way. It is also a genuine hazard: the web UI's
+// agent-detail renderer used to seed a *rendering-only* `[]` for a list field
+// the GET response omitted or returned `null` for (so it had something to
+// build checkboxes from), and because the Settings editor has no per-agent
+// PATCH route — only a whole-document PUT — that seeded `[]` rode along on
+// ANY subsequent save of the fleet, not just one that touched that field.
+// Observed live: a no-op save forked `web_agent`/`omnis` (both `skills: null`,
+// no `subagents` key at all) into the user layer with
+// `{"skills": [], "subagents": []}`. (The renderer itself was also fixed —
+// see web/settings.js renderSkillBlockContent / renderAgentTeamBlock /
+// renderAgentMCPBlockContent — but this rule is the backstop: it holds
+// regardless of what a client sends, current or future.)
+//
+// This does NOT touch the legitimate "the user cleared a previously non-empty
+// list" case: the rule only fires when base[key] is absent/nil. An empty
+// `desired` value against a NON-EMPTY base (e.g. clearing research_critic's
+// real `subagents: ["web_fetcher"]` team down to nothing) still diffs as a
+// genuine, persisted override — exactly what the cleanAgent allowlist comment
+// in server/config.go depends on.
+//
+// Scoped to DiffGeneric only (NOT the shared DiffSection/diffValue used by
+// every other config section) precisely because DiffGeneric has no other
+// caller — see server/config_agent_model_test.go and
+// TestDiffGenericDropsEmptyListAgainstAbsentBase in this package for the
+// regression coverage.
 func DiffGeneric(base, desired map[string]any) map[string]any {
-	return DiffSection("", base, desired)
+	overlay := DiffSection("", base, desired)
+	for k, v := range overlay {
+		list, ok := v.([]any)
+		if !ok || len(list) != 0 {
+			continue // not an empty-array overlay entry — leave it alone
+		}
+		if base[k] == nil {
+			delete(overlay, k)
+		}
+	}
+	if len(overlay) == 0 {
+		return nil
+	}
+	return overlay
 }
 
 // layerRank orders the config layers low→high: system < user < local. Unknown
