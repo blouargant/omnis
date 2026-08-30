@@ -746,7 +746,19 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		// agent definitions, not just the names from config/agents.json.
 		if name == "agent" && parsed != nil {
 			settings, err := agent.ResolveRuntimeSettings(agent.Options{ConfigPathStrict: true})
-			if err == nil && parsed != nil {
+			// A resolve failure must NOT be swallowed. `parsed` then still holds
+			// the RAW agents value from agents.json — a list of NAMES, not agent
+			// objects — which the editor renders as a fleet of "(unnamed)" rows
+			// with an empty detail panel, and whose save is destructive: the PUT
+			// skips every non-object entry, so the agents list saves back EMPTY
+			// and the orphan sweep deletes every per-user agent overlay. Fail
+			// loudly instead — the resolver's message names the offending
+			// squad/agent, so the user can repair agents.json in the Raw JSON view.
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("agent configuration is invalid: %v — repair agents.json in the Raw JSON view", err)})
+				return
+			}
+			if parsed != nil {
 				// Merge the runtime agents and models back into the parsed config
 				// so the UI displays the full agent details.
 				if m, ok := parsed.(map[string]any); ok {
@@ -825,29 +837,44 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					})
 					m["agents"] = agents
 
-					// Mirror the agents-side override for squads: use the resolved
-					// settings (3-layer chain) so newly-installed squads under
-					// $OMNIS_HOME/config become visible even when the raw parse
-					// above hit a cached lower-precedence file path.
-					squads := make([]any, 0, len(settings.Squads))
-					for _, sq := range settings.Squads {
-						entry := map[string]any{
-							"name":        sq.Name,
-							"description": sq.Description,
-							"leader":      sq.Leader,
-							"members":     sq.Members,
+					// Squads: hand back the AUTHORED entries from the merged view
+					// (system → user → local) untouched. Do NOT substitute
+					// settings.Squads here — resolveSquadEntries NORMALISES a squad
+					// (lower-cases its name, rewrites leader "none" → "", drops the
+					// leader from its own members list). The editor PUTs back exactly
+					// what this GET returned and the delta writer keys squads by
+					// `name`, so a save after a normalised GET emitted the WHOLE squad
+					// list into the user layer under new (lower-cased) ids *plus* a
+					// `squads_removed` tombstone for every shipped one. That froze the
+					// fleet: package squad updates stopped flowing through, and a squad
+					// left over from an experiment kept referencing an agent that no
+					// longer exists — breaking config resolution outright (and, before
+					// the guard above, showing every agent as "(unnamed)").
+					// The merged view already spans all three layers, so a
+					// newly-installed squad under $OMNIS_HOME is visible without the
+					// resolved list. Fall back to it only when NO layer declares a
+					// squads block, so the synthesized default squad stays visible.
+					if declared, ok := m["squads"].([]any); !ok || len(declared) == 0 {
+						squads := make([]any, 0, len(settings.Squads))
+						for _, sq := range settings.Squads {
+							entry := map[string]any{
+								"name":        sq.Name,
+								"description": sq.Description,
+								"leader":      sq.Leader,
+								"members":     sq.Members,
+							}
+							// Round-trip `hidden`: this map is what the editor PUTs
+							// back, so a key omitted here is a key DELETED from
+							// agents.json on the next save — which would make the
+							// Session Search squad surface in the picker and become a
+							// routing target the moment the user edits anything else.
+							if sq.Hidden {
+								entry["hidden"] = true
+							}
+							squads = append(squads, entry)
 						}
-						// Round-trip `hidden`: this map is what the editor PUTs
-						// back, so a key omitted here is a key DELETED from
-						// agents.json on the next save — which would make the
-						// Session Search squad surface in the picker and become a
-						// routing target the moment the user edits anything else.
-						if sq.Hidden {
-							entry["hidden"] = true
-						}
-						squads = append(squads, entry)
+						m["squads"] = squads
 					}
-					m["squads"] = squads
 				}
 			}
 		}
@@ -1036,6 +1063,18 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						}
 
 						agentNames = append(agentNames, agentName)
+					}
+
+					// Guard: the loop above skips every entry that is not an agent
+					// OBJECT. A payload carrying a plain NAME list — the shape the GET
+					// used to fall back to when the config failed to resolve — would
+					// therefore save an EMPTY agents list and make the orphan sweep
+					// below delete every per-user agent overlay. Refuse it: an
+					// intentional "remove every agent" save carries an empty list, not
+					// a list of strings.
+					if len(agentsList) > 0 && len(agentNames) == 0 {
+						c.JSON(http.StatusBadRequest, gin.H{"error": "agents list contains no agent objects — refusing to save (reload the page and retry)"})
+						return
 					}
 
 					// Update the main config to reference agents by name only.

@@ -1349,6 +1349,28 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
   (`configedit.WriteSection`/`WriteAgentEntry`), and permissions/hooks (both
   reloaders are fed the full `ConfigLayerCandidates` chain instead of just
   base+user, so a shipped allow-list is no longer shadowed by a user file).
+- **GOTCHA — a GET must return the AUTHORED config, never the RESOLVED one.**
+  The editor PUTs back verbatim what the GET handed it, and the delta writer
+  keys collections by id (`squads` by `name`), so any value the read side
+  *normalises* is persisted as a deliberate user override. `resolveSquadEntries`
+  ([agent/runtime_config.go](agent/runtime_config.go)) lower-cases a squad name,
+  rewrites leader `"none"` → `""`, and drops the leader from its own members —
+  so `GET /api/config/parsed/agent` returning `settings.Squads` made a **no-op
+  save fork the WHOLE squad list** into the user layer under new (lower-cased)
+  ids, plus a `squads_removed` tombstone for every shipped one. The fleet then
+  froze (package squad updates stopped flowing) and a squad left from an
+  experiment kept referencing a since-removed agent, so `ResolveRuntimeSettings`
+  failed outright. The handler now hands back the merged **authored** squads and
+  only falls back to `settings.Squads` when no layer declares a squads block (so
+  the synthesized default squad stays visible) — see
+  [server/config.go](server/config.go) and
+  [server/config_agent_squads_test.go](server/config_agent_squads_test.go).
+  **A resolve error on that route is now a 400, never a silent fallback**: the
+  raw `agents` value is a list of NAMES, which the editor renders as a fleet of
+  "(unnamed)" rows and whose save wipes every per-user agent overlay (the PUT
+  skips non-object entries, so the list saves back empty — as `agents_removed` —
+  and the orphan sweep deletes the registry dirs). The PUT additionally refuses
+  an `agents` list that carries no agent objects.
   **The same family bit the PER-AGENT fan-out too, via a purely DERIVED field
   this time, not a normalised one.** Each agent object in that same GET response
   carries a `"model"` key set from `RuntimeAgentConfig.Model` — the underlying
