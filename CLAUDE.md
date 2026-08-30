@@ -221,6 +221,34 @@ and **pip wheels** (`make wheels`). All non-FHS wrappers rely on omnis embedding
 **no** defaults — they bundle the config/registry/web tree and point the binaries
 at it via `OMNIS_SYSTEM_CONFIG_DIR` + `OMNIS_WEB_DIR` (see the env-var table).
 
+**`.deb`/`.rpm` — no config-path env var needed, and must never set one.** The
+nfpms install lays `agents.json`/`models.json`/`permissions.json`/… directly at
+`/etc/omnis/`, which is already `paths.SystemConfigDir`'s **default** — the
+search chain's built-in lowest-precedence layer — so the package needs **no**
+env var to find its config at all. `/etc/profile.d/omnis.sh`
+([packaging/profile.d/omnis.sh](packaging/profile.d/omnis.sh), sourced by every
+login shell) therefore exports only `OMNIS_WEB_DIR`. **It must never export
+`OMNIS_CONFIG_PATH`**: that variable is the explicit-file bypass (see
+`OMNIS_CONFIG_PATH` in the env-var table below) — it reads `agents.json`
+verbatim from one path with **no** 3-layer merge, so exporting it in a
+login-shell profile silently and permanently disables every per-user override
+living in `agents.json` (the `agents` list, `squads`, `router_squad`,
+`turn_budget`, `embed_model_ref`, `eval_model_ref`, `serper_key`, …) for the
+life of the install — including changes made through the Settings UI, whose
+own edit still lands correctly in `$HOME/.omnis/agents.json` (the fork-on-
+first-edit write path is layer-aware and unaffected) and whose own `GET` for
+that section still *displays* the change (`configedit.LoadMergedSection`
+always merges the real 3-layer chain regardless of the bypass), so nothing
+looks wrong in the UI — the live agent generation (built from the same
+process-wide `agent.Options` the bypass poisoned) simply never incorporates
+it, with no error anywhere. This shipped as a real defect once
+(`packaging/profile.d/omnis.sh` used to export both); the regression guard is
+[packaging/profile_test.go](packaging/profile_test.go)
+(`TestProfileScriptDoesNotBypassConfigLayers`). Note this only catches the
+*shipped* script — a reinstalled/upgraded package on a machine that already
+sourced the old profile script keeps the stale export in its running shells
+until they're restarted (or the machine rebooted / profile re-sourced).
+
 **pip — `omnis-agent`** ([packaging/pip/](packaging/pip/), built by
 [scripts/build_wheels.py](scripts/build_wheels.py)): per-platform binary wheels
 (`py3-none-<plat>`) that bundle the two static Go binaries + a `sysconf/`
@@ -1852,7 +1880,7 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 | `OMNIS_CONFIG_DIRS` | Colon-separated config search chain, high→low precedence. Replaces the default `.agents:$OMNIS_HOME:/etc/omnis` |
 | `OMNIS_SYSTEM_CONFIG_DIR` | Overrides **only** the system layer (`paths.SystemConfigDir`, default `/etc/omnis`), leaving `.agents` and `$HOME/.omnis` in the chain — unlike `OMNIS_CONFIG_DIRS` which replaces the whole chain. Used by non-FHS package wrappers (Homebrew formula → `$(brew --prefix)/share/omnis`; Windows MSI → `C:\ProgramData\Omnis`; pip wheel launcher → the bundled `_dist/sysconf`) to relocate bundled config/registry without a rebuild |
 | `OMNIS_AGENTSKILLS_DIR` | Relocates (or, set empty, **disables**) the shared Agent-Skills registry layer (`paths.AgentSkillsDir`, default `/etc/agentskills`) — a lowest-precedence, registry-only `/etc/omnis/registry`-shaped root (`agents/` + `skills/` subdirs) appended below `/etc/omnis` in the agent/skill search chains |
-| `OMNIS_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain |
+| `OMNIS_CONFIG_PATH` | Explicit `agents.json` path; bypasses the chain (reads that one file verbatim, no 3-layer merge). **Not set by any shipped packaging wrapper** — the `.deb`/`.rpm` profile script deliberately exports only `OMNIS_WEB_DIR` (see "Distribution / packaging"); set this only in your own shell/unit file if you genuinely want the old single-file behavior, and never in a login-shell profile a whole machine sources |
 | `OMNIS_SKILLS_REGISTRY_DIR` | Where the web UI installs imported skills (default `$OMNIS_HOME/registry/skills`) |
 | `OMNIS_AGENTS_REGISTRY_DIR` | Where the web UI installs imported agents (default `$OMNIS_HOME/registry/agents`) |
 | `OMNIS_DEBUG` | Log full conversation/event payloads + per-stream SSE timing line |
@@ -4210,6 +4238,47 @@ model to follow a prompt. Backed by [internal/deps/](internal/deps/) (`Ensure`).
   as unreachable. Enforcement guarantees *"no silent skip of the install once a
   dependency-bearing skill/server is engaged"* — it does **not** override the
   model's choice of which skill to use in the first place (that stays prompt-led).
+
+### Web search provider precedence (`serper` / `serpapi` / `ddg`)
+
+Three tool GROUPS in `toolsForAgentConfig` ([agent/agent.go](agent/agent.go))
+back web search — `"serper"` (Serper.dev, [core/tools/serper.go](core/tools/serper.go)),
+`"serpapi"` (SerpAPI, [core/tools/serpapi.go](core/tools/serpapi.go)), and
+`"ddg"` (DuckDuckGo scrape, [core/tools/ddg.go](core/tools/ddg.go), needs no
+key) — and **all three register a tool literally named `WebSearch`**. ADK
+rejects two tools sharing a name (`internal/toolinternal/toolutils`:
+`"duplicate tool: %q"`), so **at most one of the three may ever be mounted on
+one agent**, chosen by **`resolveWebSearchTools`** ([agent/agent.go](agent/agent.go)),
+called once before the tool-group loop (the loop's own `"ddg"`/`"serpapi"`/
+`"serper"` cases are then deliberate no-ops — appending independently there is
+exactly the bug this replaced). Precedence: **Serper > SerpAPI > DDG**
+(Serper is the recommended, cheaper provider), matching the sibling
+`buildNamedToolMap` helper that resolves the same precedence for individually
+named tools (as opposed to group keys) listed directly in an agent's `tools`.
+
+**An agent may declare more than one of the three groups on purpose** — the
+shipped `web_agent` ([registry/agents/web_agent/agent.json](registry/agents/web_agent/agent.json))
+declares `["Skill","serper","ddg","web","softskills"]`, meaning "use Serper
+when `serper_key` is configured, otherwise fall back to DuckDuckGo (no key
+needed)". Declaring a single keyed provider (`"serpapi"` or `"serper"` alone)
+with no matching key configured still yields **no** WebSearch tool at all —
+unchanged from `NewSerpAPITools`/`NewSerperTools`'s own nil-on-empty-key
+behaviour; DDG only kicks in as a fallback when the agent explicitly declared
+`"ddg"` too.
+
+**GOTCHA — this precedence is what keeps a configured `serper_key` from
+breaking `web_agent`.** Before `resolveWebSearchTools` existed, each of the
+three switch cases appended its own `WebSearch` tool independently, so
+`web_agent`'s declared `serper`+`ddg` pair "worked" only by accident, because
+an unset `serper_key` made `NewSerperTools` return `nil` — the moment
+`serper_key` is configured (in **any** config layer, including a per-user
+`agents.json` overlay), the agent's tool list carried two `WebSearch` entries
+and building it failed. Adding a **fourth** web-search-backed tool group in
+the future must go through `resolveWebSearchTools` too, or this regresses
+silently the same way. Regression coverage:
+[agent/websearch_provider_test.go](agent/websearch_provider_test.go)
+(`TestToolsForAgentConfig_WebSearchProviderPrecedence`,
+`TestResolveWebSearchTools_AllThreeProviders`).
 
 ### Adding a skill
 

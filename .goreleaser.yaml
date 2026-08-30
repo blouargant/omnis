@@ -170,7 +170,8 @@ nfpms:
         file_info:
           mode: 0644
 
-      # Login-shell env defaults (OMNIS_CONFIG_PATH, OMNIS_WEB_DIR).
+      # Login-shell env default (OMNIS_WEB_DIR). Deliberately does NOT export
+      # OMNIS_CONFIG_PATH — see packaging/profile.d/omnis.sh for why.
       - src: packaging/profile.d/omnis.sh
         dst: /etc/profile.d/omnis.sh
         file_info:

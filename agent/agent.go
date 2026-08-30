@@ -282,7 +282,14 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	// configured (Serper is the recommended provider).
 	namedTools := buildNamedToolMap(runtime.SerpAPIKey, runtime.SerperKey)
 
+	// Resolve the "ddg"/"serpapi"/"serper" group keys to AT MOST ONE WebSearch
+	// tool before the loop below, following the same Serper > SerpAPI > DDG
+	// precedence as namedTools above — see resolveWebSearchTools for why this
+	// can't be decided per-key inside the switch.
+	webSearchTools := resolveWebSearchTools(keys, runtime.SerpAPIKey, runtime.SerperKey)
+
 	agentTools := []tool.Tool{}
+	agentTools = append(agentTools, webSearchTools...)
 	toolsets := []tool.Toolset{}
 	hasSkills, hasSoftSkills, hasRegistries, hasSettings := false, false, false, false
 	var mountedMCPNames []string
@@ -309,12 +316,16 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			}
 		case "calc":
 			agentTools = append(agentTools, fstools.NewCalcTools()...)
-		case "ddg":
-			agentTools = append(agentTools, fstools.NewDDGTools()...)
-		case "serpapi":
-			agentTools = append(agentTools, fstools.NewSerpAPITools(runtime.SerpAPIKey)...)
-		case "serper":
-			agentTools = append(agentTools, fstools.NewSerperTools(runtime.SerperKey)...)
+		case "ddg", "serpapi", "serper":
+			// Handled once, above the loop, by resolveWebSearchTools. Each of
+			// the three tool groups registers a tool named "WebSearch"
+			// (core/tools/serper.go, serpapi.go, ddg.go); ADK rejects two
+			// tools sharing a name, so appending independently here would
+			// break the moment an agent declares more than one of these
+			// groups AND the corresponding key is configured — exactly how a
+			// configured serper_key broke the shipped web_agent, which
+			// declares both "serper" and "ddg" so it can fall back to
+			// DuckDuckGo when no key is set.
 		case "web":
 			agentTools = append(agentTools, fstools.NewWebTools()...)
 		case "tests":
@@ -997,6 +1008,47 @@ func buildNamedToolMap(serpAPIKey, serperKey string) map[string]tool.Tool {
 		}
 	}
 	return m
+}
+
+// resolveWebSearchTools implements the WebSearch provider precedence for the
+// "ddg" / "serpapi" / "serper" tool GROUPS (as opposed to buildNamedToolMap,
+// which resolves the same precedence for individually-named tools listed
+// directly in an agent's "tools"). Each provider — core/tools/serper.go,
+// serpapi.go, ddg.go — registers a tool literally named "WebSearch"; ADK
+// rejects two tools sharing a name (internal/toolinternal/toolutils:
+// "duplicate tool: %q"). An agent is free to declare more than one of these
+// groups (the shipped web_agent declares both "serper" and "ddg", meaning
+// "prefer Serper when configured, otherwise fall back to DuckDuckGo"), so at
+// most one WebSearch tool may ever be built from them — chosen here, once,
+// rather than by each switch case appending independently.
+//
+// Precedence: Serper > SerpAPI > DDG, matching buildNamedToolMap and the
+// doc comment above it. DDG is the only provider with no key requirement, so
+// it is the fallback — but ONLY when the agent actually declared "ddg";
+// declaring "serpapi" or "serper" alone with no matching key configured
+// yields no WebSearch tool at all, unchanged from each provider's own
+// existing nil-on-empty-key behavior (NewSerpAPITools/NewSerperTools).
+func resolveWebSearchTools(keys []string, serpAPIKey, serperKey string) []tool.Tool {
+	var wantsDDG, wantsSerpAPI, wantsSerper bool
+	for _, k := range keys {
+		switch k {
+		case "ddg":
+			wantsDDG = true
+		case "serpapi":
+			wantsSerpAPI = true
+		case "serper":
+			wantsSerper = true
+		}
+	}
+	switch {
+	case wantsSerper && strings.TrimSpace(serperKey) != "":
+		return fstools.NewSerperTools(serperKey)
+	case wantsSerpAPI && strings.TrimSpace(serpAPIKey) != "":
+		return fstools.NewSerpAPITools(serpAPIKey)
+	case wantsDDG:
+		return fstools.NewDDGTools()
+	}
+	return nil
 }
 
 // selectA2AAgents returns the subset of agents defined in cfg whose names

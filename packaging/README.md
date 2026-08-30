@@ -21,7 +21,10 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     registry/skills/           bundled skill playbooks (read-only)
 /usr/share/omnis/web/           static UI assets served by omnis-server
 /var/lib/omnis/softskills/      curator-managed soft-skill library (mutable)
-/etc/profile.d/omnis.sh         exports OMNIS_CONFIG_PATH and OMNIS_WEB_DIR
+/etc/profile.d/omnis.sh         exports OMNIS_WEB_DIR (deliberately NOT
+                                 OMNIS_CONFIG_PATH — see the script's own
+                                 comment; /etc/omnis is already the config
+                                 search chain's default system layer)
 /usr/share/doc/omnis/           LICENSE + README.md
 ```
 
@@ -45,7 +48,10 @@ pipeline will unpack to source the binaries + `web/` assets.
   `agents.json` here mirrors `config/agents.json` with every relative path
   rewritten to its FHS location.
 - `profile.d/omnis.sh` — sourced by login shells; tells both binaries where
-  to find the system-wide config and web assets.
+  to find the static web assets. It does NOT point at the config — `/etc/omnis`
+  is already the config search chain's default system layer, so no env var is
+  needed, and setting `OMNIS_CONFIG_PATH` here would bypass the 3-layer merge
+  and silently disable every per-user override in `$HOME/.omnis/agents.json`.
 
 The `config/filters/` directory and the `skills/`, `web/`, `LICENSE`, and
 `README.md` files are pulled directly from the source tree by goreleaser —
