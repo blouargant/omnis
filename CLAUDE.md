@@ -1809,7 +1809,56 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
 
 `defaults → agents.json → ENV → Options (struct/flags)`
 
-`api_key` and `base_url` values in the config file are resolved as environment variable names first (if an env var with that name exists and is non-empty, its value is used).
+`api_key` and `base_url` values in the config file (`providers.*.api_key`/
+`base_url`, `models.*.api_key`/`base_url`, `serpapi_key`, `serper_key`) are
+resolved as environment variable **names** first: if an env var with that
+exact name exists and is non-empty, its value is used
+([agent/runtime_config.go](agent/runtime_config.go) `resolveAPIKeyReference`/
+`resolveBaseURLReference`).
+
+**An unresolved name-shaped reference is treated as "not configured", never
+as the literal name.** When the config value looks like an env-var name
+(`^[A-Z][A-Z0-9_]*$`, `looksLikeEnvVarName`) — real keys and URLs are always
+mixed-case and/or carry characters outside that set ("sk-...",
+"https://...") — but the named variable is unset or empty, both resolvers
+return `""` and log a warning naming the field and the variable (`log.Printf`,
+the `agent` package's existing convention — see `agent/embedder.go`). A value
+that is *not* name-shaped (an actual literal secret/URL) is returned
+unchanged either way.
+
+**GOTCHA (silent-garbage-key path — do not reintroduce):**
+`resolveAPIKeyReference` used to fall back to returning the env-var **name
+itself** when the variable was unset — a non-empty, garbage "credential"
+indistinguishable from a real key to any caller that only checks
+`apiKey == ""` to decide whether something is configured. This broke
+production silently: `agents.json` had `"serper_key": "SERPER_KEY"` (the
+documented, correct way to reference an env var) but `SERPER_KEY` was never
+exported into the server process, so the resolved key came out as the
+literal 10-byte string `"SERPER_KEY"`. `fstools.NewSerperTools` only skips
+registering its `WebSearch` tool on an **empty** key, so it registered
+anyway, won the Serper > SerpAPI > DDG web-search provider precedence over
+the working DuckDuckGo fallback, and failed authentication on every search —
+with nothing logged anywhere. It was caught only by noticing
+`len(SerperKey) == 10` against an expected ~40. Every consumer of a resolved
+`api_key`/`base_url` already has an "empty ⇒ unconfigured, fall back"
+path (`core/llm.NewWithSelection` retries the provider's standard env var
+then errors clearly; `core/tools.NewSerpAPITools`/`NewSerperTools` skip
+registration; `inheritAgentModelFromLeader` falls through to the leader's
+key; the Settings "Test connection" route reports "no API key set") — so
+returning `""` is what makes every one of them behave correctly instead of
+authenticating as garbage. If you touch either resolver, keep the
+name-shape check and the `""` return on failure; a regression back to
+"return the unresolved name" reintroduces this exact class of bug.
+
+The model-catalog resolution (`normalizeModelCatalog`) deliberately resolves
+the model's own `api_key`/`base_url` **before** falling back to the
+provider's (`firstNonEmpty(resolveAPIKeyReference(m.APIKey, …),
+refProvider.APIKey)`), not the other way around
+(`resolveAPIKeyReference(firstNonEmpty(m.APIKey, refProvider.APIKey))`) — the
+provider's value has already been through the resolver once, and re-running
+an already-resolved literal secret through the env-var-name heuristic a
+second time is an avoidable (if unlikely) way for a working credential to be
+mistaken for a broken reference.
 
 ### Environment variables
 
