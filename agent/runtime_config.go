@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -505,8 +507,8 @@ func normalizeProviderCatalog(providers map[string]ProviderEntry) map[string]Run
 		out[name] = RuntimeProviderConfig{
 			Name:    name,
 			Kind:    strings.TrimSpace(p.Kind),
-			BaseURL: resolveBaseURLReference(strings.TrimSpace(p.BaseURL)),
-			APIKey:  resolveAPIKeyReference(strings.TrimSpace(p.APIKey)),
+			BaseURL: resolveBaseURLReference(strings.TrimSpace(p.BaseURL), fmt.Sprintf("provider %q base_url", name)),
+			APIKey:  resolveAPIKeyReference(strings.TrimSpace(p.APIKey), fmt.Sprintf("provider %q api_key", name)),
 		}
 	}
 	return out
@@ -533,11 +535,19 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 		}
 		provider := firstNonEmpty(strings.TrimSpace(m.Provider), refProvider.Kind)
 		out[name] = RuntimeModelConfig{
-			Name:                              name,
-			Provider:                          provider,
-			Model:                             strings.TrimSpace(m.Model),
-			BaseURL:                           resolveBaseURLReference(firstNonEmpty(strings.TrimSpace(m.BaseURL), refProvider.BaseURL)),
-			APIKey:                            resolveAPIKeyReference(firstNonEmpty(strings.TrimSpace(m.APIKey), refProvider.APIKey)),
+			Name:     name,
+			Provider: provider,
+			Model:    strings.TrimSpace(m.Model),
+			// Resolve the model's OWN reference first, falling back to the
+			// provider's ALREADY-RESOLVED value only when the model doesn't
+			// override it (or its override doesn't resolve). Deliberately not
+			// `resolveXReference(firstNonEmpty(m.X, refProvider.X))`: refProvider.X
+			// has already been through resolveXReference once, and re-running an
+			// already-resolved literal secret/URL through the env-var-name
+			// heuristic a second time is an unnecessary (if unlikely) way for a
+			// working credential to be mistaken for a broken reference.
+			BaseURL:                           firstNonEmpty(resolveBaseURLReference(strings.TrimSpace(m.BaseURL), fmt.Sprintf("model %q base_url", name)), refProvider.BaseURL),
+			APIKey:                            firstNonEmpty(resolveAPIKeyReference(strings.TrimSpace(m.APIKey), fmt.Sprintf("model %q api_key", name)), refProvider.APIKey),
 			ContextLength:                     m.ContextLength,
 			InputTokenPricePerMillion:         m.InputTokenPricePerMillion,
 			OutputTokenPricePerMillion:        m.OutputTokenPricePerMillion,
@@ -1086,10 +1096,10 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		out.HooksConfigPath = strings.TrimSpace(cfg.HooksConfigPath)
 	}
 	if strings.TrimSpace(cfg.SerpAPIKey) != "" {
-		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey))
+		out.SerpAPIKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerpAPIKey), "serpapi_key")
 	}
 	if strings.TrimSpace(cfg.SerperKey) != "" {
-		out.SerperKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerperKey))
+		out.SerperKey = resolveAPIKeyReference(strings.TrimSpace(cfg.SerperKey), "serper_key")
 	}
 	if strings.TrimSpace(cfg.EmbedModelRef) != "" {
 		out.EmbedModelRef = strings.ToLower(strings.TrimSpace(cfg.EmbedModelRef))
@@ -1267,20 +1277,68 @@ func applyModelOverride(rs *RuntimeSettings) {
 	}
 }
 
-// resolveAPIKeyReference interprets api_key as either a literal key or an
-// environment variable name. If an env var with that exact name exists and is
-// non-empty, the env value is used.
-func resolveAPIKeyReference(v string) string {
+// envVarNameRE matches strings shaped like an environment variable name:
+// upper-case letters, digits, and underscores, starting with a letter. Real
+// API keys and base URLs are essentially never shaped like this — they are
+// mixed-case and/or contain characters outside this set (e.g. "sk-...",
+// "https://...", base64/hex tokens) — so it safely distinguishes "the user
+// wrote an env-var reference" from "the user pasted a literal value".
+var envVarNameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// looksLikeEnvVarName reports whether v is shaped like an environment
+// variable name rather than a literal secret/URL. See envVarNameRE.
+func looksLikeEnvVarName(v string) bool {
+	return envVarNameRE.MatchString(v)
+}
+
+// resolveAPIKeyReference interprets v as either a literal API key or the
+// name of an environment variable holding the real key — the documented
+// contract in CLAUDE.md's "Configuration precedence" section. If an env var
+// named v exists and is non-empty, its value is returned.
+//
+// GOTCHA (do not revert): when v is shaped like an env-var reference (see
+// looksLikeEnvVarName) but that variable is unset or empty, the reference
+// did NOT resolve — that means "not configured", not "here is a credential
+// that happens to look like an env var name". This function used to fall
+// back to returning v itself in that case, handing every caller a
+// non-empty, garbage "key" indistinguishable from a real one. That silently
+// broke production: agents.json had "serper_key": "SERPER_KEY" (the
+// documented, correct way to reference an env var) but SERPER_KEY was never
+// exported into the server process, so this function returned the literal
+// 10-byte string "SERPER_KEY". fstools.NewSerperTools only skips
+// registration on an EMPTY key, so it registered a WebSearch tool that then
+// won the Serper > SerpAPI > DDG provider precedence over the working
+// DuckDuckGo fallback — and every web search failed authentication, with
+// nothing logged anywhere. An unresolved name-shaped reference therefore
+// returns "" (and logs a warning naming the field and the variable) so every
+// caller's existing "empty ⇒ not configured / fall back" path does the
+// right thing, exactly like resolveBaseURLReference below already did for
+// the same class of mistake.
+//
+// A literal key that is not name-shaped (virtually every real key: mixed
+// case, dashes, digits — e.g. "sk-...") is returned unchanged, exactly as
+// before this fix. label identifies the config field for the warning
+// message (e.g. "serper_key", `provider "openai-prod" api_key`) — it has no
+// effect on resolution.
+func resolveAPIKeyReference(v, label string) string {
 	if v == "" {
 		return ""
 	}
 	if resolved := os.Getenv(v); resolved != "" {
 		return resolved
 	}
+	if looksLikeEnvVarName(v) {
+		log.Printf("config: %s references environment variable %q, which is not set — treating as unconfigured", label, v)
+		return ""
+	}
 	return v
 }
 
-func resolveBaseURLReference(v string) string {
+// resolveBaseURLReference interprets v as either a literal base URL or the
+// name of an environment variable holding the real URL, mirroring
+// resolveAPIKeyReference. label identifies the config field for the warning
+// message; it has no effect on resolution.
+func resolveBaseURLReference(v, label string) string {
 	if v == "" {
 		return ""
 	}
@@ -1291,7 +1349,11 @@ func resolveBaseURLReference(v string) string {
 	if strings.Contains(v, "://") {
 		return v
 	}
-	return os.Getenv(v)
+	if resolved := os.Getenv(v); resolved != "" {
+		return resolved
+	}
+	log.Printf("config: %s references environment variable %q, which is not set — treating as unconfigured", label, v)
+	return ""
 }
 
 func parseBoolEnv(name string) (bool, bool) {

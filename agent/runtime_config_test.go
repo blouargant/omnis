@@ -168,6 +168,66 @@ func TestResolveRuntimeSettingsBaseURLFromProviderEnv(t *testing.T) {
 	}
 }
 
+// TestResolveRuntimeSettingsUnresolvedSerperKeyIsTreatedAsUnconfigured
+// reproduces the production incident this fix addresses: agents.json
+// declared "serper_key": "SERPER_KEY" (the documented, correct way to
+// reference an env var), but SERPER_KEY was never exported into the process
+// environment. resolveAPIKeyReference used to fall back to returning the
+// literal name "SERPER_KEY" as the "key" — a non-empty, garbage credential
+// that made fstools.NewSerperTools register a WebSearch tool (it only skips
+// on an EMPTY key), which then beat the working DuckDuckGo fallback in the
+// WebSearch provider precedence and failed authentication on every search.
+// RuntimeSettings.SerperKey must come out empty so every consumer's existing
+// "empty ⇒ not configured" path applies instead.
+func TestResolveRuntimeSettingsUnresolvedSerperKeyIsTreatedAsUnconfigured(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "serper_key": "SERPER_KEY"
+}`))
+	// Deliberately NOT set: t.Setenv("SERPER_KEY", ...) is absent, and make sure
+	// nothing in the ambient test environment has leaked it in either.
+	os.Unsetenv("SERPER_KEY")
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	if runtime.SerperKey != "" {
+		t.Fatalf("runtime.SerperKey = %q, want empty string (unresolved env-var reference must be treated as unconfigured, not used as a literal credential)", runtime.SerperKey)
+	}
+}
+
+// TestResolveRuntimeSettingsResolvedSerperKeyUsesEnvValue is the positive
+// counterpart: when the referenced variable IS set, its value must still be
+// used (the documented, working case must not regress).
+func TestResolveRuntimeSettingsResolvedSerperKeyUsesEnvValue(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{
+  "agents": ["leader"],
+  "serper_key": "SERPER_KEY"
+}`))
+	t.Setenv("SERPER_KEY", "a-real-serper-key-40-chars-xxxxxxxxxxxxxx")
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	if runtime.SerperKey != "a-real-serper-key-40-chars-xxxxxxxxxxxxxx" {
+		t.Fatalf("runtime.SerperKey = %q, want the resolved env value", runtime.SerperKey)
+	}
+}
+
 func TestResolveRuntimeSettingsRejectsLegacyModelsInAgentsJSON(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
