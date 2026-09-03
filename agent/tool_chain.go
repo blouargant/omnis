@@ -11,8 +11,15 @@ import "google.golang.org/adk/agent/llmagent"
 // three failed validation attempts the user clicked "allow" three times for
 // calls that were then rejected, which trains reflexive approval and degrades
 // the permission layer — the only protection that existed before the validation
-// work. It also made hooks' documented permissionDecision:"allow" bypass
-// (internal/hooks/run.go:76) unreachable dead code, since the prompt had fired.
+// work. That is what this order fixes, and it is reason enough on its own.
+//
+// It does NOT make hooks' documented permissionDecision:"allow" bypass
+// (internal/hooks/run.go:76) work. That is still dead: nothing in agent/
+// consumes hooks.DecisionAllow — hookToolCallbacks returns non-nil only on
+// out.Blocked(), and returning nil merely means "proceed", which is not a
+// signal the gate can act on. Honouring "allow" would additionally require the
+// hook callback to tell the gate to skip (e.g. by seeding the approval cache).
+// This order is a precondition for that, not the feature.
 //
 // budget LAST: a call already refused by a hook or by the user must not be
 // charged to the turn's budget.

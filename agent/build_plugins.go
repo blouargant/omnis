@@ -78,10 +78,10 @@ func buildPlugins(
 	// listeners are wired once on the bus by Infrastructure.Hooks. The router
 	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
 	//
-	// Mounted BEFORE the permission gate, for the reasons in beforeToolChain
+	// Mounted BEFORE the permission gate, for the reason in beforeToolChain
 	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
-	// already approved the call, and permissionDecision:"allow" can only bypass a
-	// prompt that has not fired yet. Keep these two in this order.
+	// already approved the call. Keep these two in this order. (It does not make
+	// permissionDecision:"allow" work — see that comment.)
 	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
