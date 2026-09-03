@@ -12,6 +12,7 @@ import (
 
 	"github.com/blouargant/omnis/core/agentkit"
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/docindex"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
@@ -35,6 +36,7 @@ func buildSubAgents(
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
 	sessIdx sessionIndexFn,
+	attestStore *attest.Store,
 	steerStore *steer.Store,
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
@@ -55,7 +57,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -96,6 +98,7 @@ func buildSubAgentsFromConfigs(
 	regIdx *regindex.Index,
 	docIdx *docindex.Index,
 	sessIdx sessionIndexFn,
+	attestStore *attest.Store,
 	steerStore *steer.Store,
 	permGate llmagent.BeforeToolCallback,
 	hooksBeforeTool llmagent.BeforeToolCallback,
@@ -144,7 +147,7 @@ func buildSubAgentsFromConfigs(
 			instr = defaultAgentInstruction(cfg.Name)
 		}
 
-		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, false, nil)
+		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore, false, nil)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 

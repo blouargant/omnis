@@ -14,6 +14,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/astgrep"
+	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/binpath"
 	"github.com/blouargant/omnis/internal/budget"
@@ -99,6 +100,11 @@ type Infrastructure struct {
 	// hot-reload) and shared across a squad's root and sub-agents — see
 	// hookToolCallbacks for why a per-callback counter would be wrong.
 	HookState *hookstate.Store
+
+	// Attest holds per-session reviewer verdicts (see internal/attest).
+	// Process-wide so it survives a hot-reload; lost on restart, which forces a
+	// re-review — the correct fail-closed direction.
+	Attest *attest.Store
 
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
@@ -269,6 +275,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		GoalStore:       goal.New(),
 		Budget:          budget.New(),
 		HookState:       hookstate.New(),
+		Attest:          attest.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),

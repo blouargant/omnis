@@ -15,6 +15,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/askuser"
+	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/hookstate"
 	"github.com/blouargant/omnis/internal/paths"
@@ -86,12 +87,12 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 // routes (it runs no real tools and the user turn it sees is a clean router
 // view), so UserPromptSubmit / tool hooks must fire on the answering squad, not
 // the router hop. Returns (nil, nil) for the router so the caller mounts nothing.
-func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, isRouter bool) (*plugin.Plugin, error) {
+func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, isRouter bool) (*plugin.Plugin, error) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
 
-	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, isRouter)
+	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, attestStore, isRouter)
 
 	onUserMsg := func(ctx adk.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
@@ -157,7 +158,7 @@ func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hook
 // not the user turn), and a sub-agent's completion is already covered by the
 // SubagentStop bus hook — firing Stop on it would misfire the "main agent
 // finished" hook.
-func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
@@ -171,13 +172,14 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 		sid := realSessionID(tc)
 		attempt, consecutive := state.Attempt(sid, t.Name(), args)
 		in := hooks.Input{
-			SessionID:   sid,
-			Cwd:         cwd,
-			ToolName:    t.Name(),
-			ToolInput:   args,
-			AgentName:   tc.AgentName(),
-			Attempt:     attempt,
-			Consecutive: consecutive,
+			SessionID:    sid,
+			Cwd:          cwd,
+			ToolName:     t.Name(),
+			ToolInput:    args,
+			AgentName:    tc.AgentName(),
+			Attempt:      attempt,
+			Consecutive:  consecutive,
+			Attestations: attestStore.For(sid),
 		}
 		out := cfg.Run(tc, hooks.PreToolUse, t.Name(), in, cwd, hookDefaultTimeout)
 

@@ -152,7 +152,7 @@ func buildSquadInstance(
 	// recall; a leaderless root uses sub-agent (glob) soft-skill semantics.
 	capTools, capToolsets, capInstruction, capHandles := toolsForAgentConfig(
 		ctx, rootCfg, runtime, skillTS, softSkillTS, leaderHandles,
-		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, !leaderless, emb)
+		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, !leaderless, emb)
 	allMCPHandles = append(allMCPHandles, capHandles...)
 
 	leadTools := append([]tool.Tool{}, capTools...)
@@ -245,7 +245,7 @@ func buildSquadInstance(
 	// (before the sub-agents) from the process-wide hooks engine; nil for the
 	// router squad. UserPromptSubmit/Stop stay leader-only (see hookToolCallbacks).
 	hooksEngine := infra.Hooks(runtime)
-	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, infra.AskUserRegistry, infra.HookState, isRouter)
+	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, isRouter)
 
 	// ── Per-turn spend ceiling, shared like the gate ──
 	// Same two-place wiring, for the same reason: the plugin (buildPlugins) counts
@@ -301,7 +301,7 @@ func buildSquadInstance(
 		subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, berr = buildSubAgentsFromConfigs(
 			ctx, memberCfgs, runtime,
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
-			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.SteerStore,
+			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
 			budgetBeforeTool, budgetAfterModel,
 		)

@@ -19,13 +19,13 @@ import (
 func TestBuildHooksPluginRouterSkipped(t *testing.T) {
 	engine := hooks.NewReloader(filepath.Join(t.TempDir(), "hooks.json"), nil)
 
-	if p, err := buildHooksPlugin(engine, nil, nil, true); err != nil || p != nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, nil, true); err != nil || p != nil {
 		t.Fatalf("router squad: got (%v, %v), want (nil, nil)", p, err)
 	}
-	if p, err := buildHooksPlugin(engine, nil, nil, false); err != nil || p == nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, nil, false); err != nil || p == nil {
 		t.Fatalf("answering squad: got (%v, %v), want a plugin", p, err)
 	}
-	if p, err := buildHooksPlugin(nil, nil, nil, false); err != nil || p != nil {
+	if p, err := buildHooksPlugin(nil, nil, nil, nil, false); err != nil || p != nil {
 		t.Fatalf("nil engine: got (%v, %v), want (nil, nil)", p, err)
 	}
 }
@@ -111,7 +111,7 @@ func TestHookCallbacksLeaveTheStoreUntouchedWhenNoHookMatches(t *testing.T) {
 	engine := hooks.NewReloader(cfgPath, nil)
 	state := hookstate.New()
 
-	before, _ := hookToolCallbacks(engine, nil, state, false)
+	before, _ := hookToolCallbacks(engine, nil, state, nil, false)
 	if before == nil {
 		t.Fatal("hookToolCallbacks returned a nil BeforeToolCallback")
 	}
@@ -159,8 +159,8 @@ func TestHookCallbacksRecordBlockedAndAllowedOutcomes(t *testing.T) {
 	// config): the store — not the engine — is what carries the consecutive
 	// counter across the two calls below.
 	state := hookstate.New()
-	beforeBlock, _ := hookToolCallbacks(hooks.NewReloader(blockPath, nil), nil, state, false)
-	beforeAllow, _ := hookToolCallbacks(hooks.NewReloader(allowPath, nil), nil, state, false)
+	beforeBlock, _ := hookToolCallbacks(hooks.NewReloader(blockPath, nil), nil, state, nil, false)
+	beforeAllow, _ := hookToolCallbacks(hooks.NewReloader(allowPath, nil), nil, state, nil, false)
 
 	sid, toolName := "outcome-session", "Bash"
 	args := map[string]any{"command": "irrelevant"}

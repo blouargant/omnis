@@ -29,6 +29,7 @@ import (
 	"github.com/blouargant/omnis/internal/a2a"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/astgrep"
+	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/claudeformat"
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/configedit"
@@ -232,7 +233,7 @@ func defaultToolKeys(name string) []string {
 // conversation files directly.
 type sessionIndexFn func() *sessindex.Index
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, attestStore *attest.Store, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -373,6 +374,17 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// changes apply directly and hot-reload via RequestReload.
 			agentTools = append(agentTools, settings.NewTools(buildSettingsDeps())...)
 			hasSettings = true
+		case "attest":
+			// Mount ONLY on a reviewer agent. An agent holding this can approve
+			// its own changes, which is exactly the hole internal/attest exists
+			// to close (a verdict file would be forgeable by any agent with
+			// Write; this tool is the deliberate, narrow write path). A nil store
+			// (CLI/examples) mounts nothing, so the group is inert there.
+			if attestStore != nil {
+				// realSessionID is the SAME resolver hookToolCallbacks uses to key
+				// the attestations it reads, so both sides agree by construction.
+				agentTools = append(agentTools, attest.Tools(attestStore, realSessionID)...)
+			}
 		case "code_search":
 			// Mounted only when a semantic embedder is configured; otherwise
 			// the agent falls back to grep/read (additive contract).

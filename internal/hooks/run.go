@@ -38,6 +38,12 @@ type Input struct {
 	Attempt     int `json:"attempt,omitempty"`
 	Consecutive int `json:"consecutive,omitempty"`
 
+	// Attestations are the unexpired review verdicts recorded for this session,
+	// keyed by subject hash. Omnis extension. This is how a hook can require a
+	// reviewer's sign-off without a query channel into the process — and why the
+	// verdict cannot be forged by an agent holding a file-writing tool.
+	Attestations map[string]any `json:"attestations,omitempty"`
+
 	// UserPromptSubmit.
 	Prompt string `json:"prompt,omitempty"`
 

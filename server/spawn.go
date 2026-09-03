@@ -181,10 +181,11 @@ func spawnLabel(name, id string) string {
 // drainSpawns materialises every session the leader requested via spawn_session
 // during the just-finished exchange on parentID. Each new session inherits the
 // forgetSessionState drops the transient, in-memory per-session stores for id:
-// steering notes, hook attempt counters, and any pending route/spawn directive.
-// Called on session delete AND archive so a session that is merely set aside
-// doesn't leave stranded notes, counters, or directives behind on the
-// process-wide registries. It intentionally does NOT touch the goal store — a
+// steering notes, hook attempt counters, reviewer verdicts, and any pending
+// route/spawn directive. Called on session delete AND archive so a session
+// that is merely set aside doesn't leave stranded notes, counters, verdicts,
+// or directives behind on the process-wide registries. It intentionally does
+// NOT touch the goal store — a
 // goal is persisted and meant to resume on unarchive / restart, so goal removal
 // is scoped to the (permanent) delete path. Safe to call with nil components
 // (each guards internally).
@@ -197,6 +198,7 @@ func forgetSessionState(d serverDeps, id string) {
 			infra.RouteDirectives.Forget(id)
 			infra.SpawnDirectives.Forget(id)
 			infra.HookState.Forget(id)
+			infra.Attest.Forget(id)
 		}
 	}
 }
