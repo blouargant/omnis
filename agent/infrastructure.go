@@ -19,6 +19,7 @@ import (
 	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/goal"
+	"github.com/blouargant/omnis/internal/hookstate"
 	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
@@ -92,6 +93,12 @@ type Infrastructure struct {
 	// that never calls StartTurn leaves turns unbounded, exactly as before.
 	// Process-wide so it survives hot-reload, like SteerStore.
 	Budget *budget.Store
+
+	// HookState holds the per-session hook attempt counters exposed to hook
+	// commands as `attempt` / `consecutive`. Process-wide (so it survives a
+	// hot-reload) and shared across a squad's root and sub-agents — see
+	// hookToolCallbacks for why a per-callback counter would be wrong.
+	HookState *hookstate.Store
 
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
@@ -261,6 +268,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		Scheduler:       scheduler.New(paths.SchedulesPath()),
 		GoalStore:       goal.New(),
 		Budget:          budget.New(),
+		HookState:       hookstate.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),

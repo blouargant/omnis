@@ -14,7 +14,9 @@ import (
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
 	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/hooks"
+	"github.com/blouargant/omnis/internal/hookstate"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -84,12 +86,12 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 // routes (it runs no real tools and the user turn it sees is a clean router
 // view), so UserPromptSubmit / tool hooks must fire on the answering squad, not
 // the router hop. Returns (nil, nil) for the router so the caller mounts nothing.
-func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, error) {
+func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, isRouter bool) (*plugin.Plugin, error) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
 
-	beforeTool, afterTool := hookToolCallbacks(engine, isRouter)
+	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, isRouter)
 
 	onUserMsg := func(ctx adk.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
@@ -143,17 +145,19 @@ func buildHooksPlugin(engine *hooks.Reloader, isRouter bool) (*plugin.Plugin, er
 // are used both by the squad root's runner plugin (buildHooksPlugin) AND
 // attached directly to every sub-agent, so a sub-agent's internal tool calls —
 // which run in agenttool's plugin-less runner and never see the runner plugin —
-// fire PreToolUse/PostToolUse too. Unlike the permission gate there is no shared
-// mutable state to thread: each callback queries engine.Snapshot() live, so
-// building an independent pair per sub-agent is equivalent. Returns (nil, nil)
-// for the router squad or an absent engine, so the caller attaches nothing.
+// fire PreToolUse/PostToolUse too. The counters in `state` ARE shared mutable
+// state and must be threaded, unlike the config snapshot: the callbacks are
+// built independently per sub-agent, so a per-pair counter would let a
+// sub-agent and its leader count attempts on the same command separately and
+// let a delegation bounce reset the count. Returns (nil, nil) for the router
+// squad or an absent engine, so the caller attaches nothing.
 //
 // The turn-level hooks stay leader-only and are NOT returned here: UserPromptSubmit
 // applies to the user's prompt (a sub-agent receives the leader's delegated task,
 // not the user turn), and a sub-agent's completion is already covered by the
 // SubagentStop bus hook — firing Stop on it would misfire the "main agent
 // finished" hook.
-func hookToolCallbacks(engine *hooks.Reloader, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
@@ -164,13 +168,37 @@ func hookToolCallbacks(engine *hooks.Reloader, isRouter bool) (llmagent.BeforeTo
 			return nil, nil
 		}
 		cwd := fstools.CwdForContext(tc)
+		sid := realSessionID(tc)
+		attempt, consecutive := state.Attempt(sid, t.Name(), args)
 		in := hooks.Input{
-			SessionID: realSessionID(tc),
-			Cwd:       cwd,
-			ToolName:  t.Name(),
-			ToolInput: args,
+			SessionID:   sid,
+			Cwd:         cwd,
+			ToolName:    t.Name(),
+			ToolInput:   args,
+			AgentName:   tc.AgentName(),
+			Attempt:     attempt,
+			Consecutive: consecutive,
 		}
 		out := cfg.Run(tc, hooks.PreToolUse, t.Name(), in, cwd, hookDefaultTimeout)
+
+		// An escalation is resolved here, not by the engine: the engine reports
+		// a decision, the host owns the user interaction.
+		if out.Asks() {
+			reason := out.Reason
+			if reason == "" {
+				reason = "a PreToolUse hook asked for confirmation"
+			}
+			if askHookPermission(tc, reg, sid, t.Name(), reason) {
+				state.RecordOutcome(sid, t.Name(), false)
+				return nil, nil
+			}
+			state.RecordOutcome(sid, t.Name(), true)
+			return map[string]any{
+				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s (the user declined)", t.Name(), reason),
+			}, nil
+		}
+
+		state.RecordOutcome(sid, t.Name(), out.Blocked())
 		if out.Blocked() {
 			reason := out.Reason
 			if reason == "" {

@@ -82,7 +82,7 @@ func buildPlugins(
 	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
 	// already approved the call. Keep these two in this order. (It does not make
 	// permissionDecision:"allow" work — see that comment.)
-	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
+	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
 	// The permission gate is built once per squad by the caller (so the same

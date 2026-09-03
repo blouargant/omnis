@@ -24,6 +24,19 @@ type Input struct {
 	ToolName     string         `json:"tool_name,omitempty"`
 	ToolInput    map[string]any `json:"tool_input,omitempty"`
 	ToolResponse map[string]any `json:"tool_response,omitempty"`
+	// AgentName is the agent making the call. Omnis extension (additive, so a
+	// Claude Code script ignores it): without it a hook cannot apply a rule to
+	// one agent — e.g. requiring an ephemeral-resource label for a cleanup
+	// agent's deletes but not for a change agent's, which may legitimately
+	// delete a real resource.
+	AgentName string `json:"agent_name,omitempty"`
+	// Attempt is how many times this tool has been called with these exact
+	// arguments in this session, 1 on the first. Consecutive is how many calls
+	// of this tool were blocked back-to-back before this one. Omnis extensions:
+	// the engine reports them, the script decides what they mean, so a
+	// retry-then-escalate policy stays in configuration.
+	Attempt     int `json:"attempt,omitempty"`
+	Consecutive int `json:"consecutive,omitempty"`
 
 	// UserPromptSubmit.
 	Prompt string `json:"prompt,omitempty"`

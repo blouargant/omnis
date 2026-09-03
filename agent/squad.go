@@ -245,7 +245,7 @@ func buildSquadInstance(
 	// (before the sub-agents) from the process-wide hooks engine; nil for the
 	// router squad. UserPromptSubmit/Stop stay leader-only (see hookToolCallbacks).
 	hooksEngine := infra.Hooks(runtime)
-	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, isRouter)
+	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, infra.AskUserRegistry, infra.HookState, isRouter)
 
 	// ── Per-turn spend ceiling, shared like the gate ──
 	// Same two-place wiring, for the same reason: the plugin (buildPlugins) counts

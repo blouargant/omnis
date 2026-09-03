@@ -17,13 +17,13 @@ import (
 func TestBuildHooksPluginRouterSkipped(t *testing.T) {
 	engine := hooks.NewReloader(filepath.Join(t.TempDir(), "hooks.json"), nil)
 
-	if p, err := buildHooksPlugin(engine, true); err != nil || p != nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, true); err != nil || p != nil {
 		t.Fatalf("router squad: got (%v, %v), want (nil, nil)", p, err)
 	}
-	if p, err := buildHooksPlugin(engine, false); err != nil || p == nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, false); err != nil || p == nil {
 		t.Fatalf("answering squad: got (%v, %v), want a plugin", p, err)
 	}
-	if p, err := buildHooksPlugin(nil, false); err != nil || p != nil {
+	if p, err := buildHooksPlugin(nil, nil, nil, false); err != nil || p != nil {
 		t.Fatalf("nil engine: got (%v, %v), want (nil, nil)", p, err)
 	}
 }
