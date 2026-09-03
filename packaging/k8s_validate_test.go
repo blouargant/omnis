@@ -40,6 +40,11 @@ func runHook(t *testing.T, in map[string]any, extraPath string) (string, int) {
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	_ = cmd.Run()
+	// A traceback on stderr would otherwise read as "no opinion" and pass
+	// silently, which is the worst possible failure for a guard.
+	if errb.Len() > 0 {
+		t.Fatalf("hook wrote to stderr: %s", errb.String())
+	}
 	return out.String(), cmd.ProcessState.ExitCode()
 }
 
@@ -67,6 +72,54 @@ func bashInput(command, agent string) map[string]any {
 		"agent_name":      agent,
 		"attempt":         1,
 		"consecutive":     0,
+	}
+}
+
+// Verb identification is where both failure directions live, and neither is
+// observable from a bare "did it say something" assertion — which is why the
+// first version of this file could not detect that `kubectl -A get pods` was
+// denied while `helm --debug uninstall` sailed through. Table-drive the DECISION
+// for every shape that has bitten, in both directions.
+func TestDecisionForCommandShapes(t *testing.T) {
+	cases := []struct {
+		name, command, agent, want string // want: "" = proceed
+	}{
+		// Boolean global flags must not swallow the verb (false-positive axis).
+		{"bare -A before a read verb", "kubectl -A get pods", "k8s_investigator", ""},
+		{"long boolean global", "kubectl --all-namespaces get pods", "k8s_investigator", ""},
+		{"another boolean global", "kubectl --insecure-skip-tls-verify get pods", "k8s_investigator", ""},
+		{"value-taking global", "kubectl -n demo get pods", "k8s_investigator", ""},
+		{"inline value global", "kubectl --context=prod get pods", "k8s_investigator", ""},
+		// ... and must not hide a mutation either (false-negative axis).
+		{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny"},
+		{"helm boolean global before upgrade", "helm --debug upgrade r ./c -n demo", "k8s_editor", "deny"},
+		{"helm boolean global before uninstall", "helm --debug uninstall r -n demo", "k8s_editor", "deny"},
+		// Wrappers must not hide a mutation.
+		{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		// Separators the first regex missed entirely.
+		{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		// Not this guard's business.
+		{"grep that merely mentions kubectl", "grep -rn kubectl deploy.sh > /tmp/out", "coder", ""},
+		{"redirect on a READ", "kubectl get pods -o json > /tmp/pods.json", "k8s_investigator", ""},
+		{"stderr redirect on a read", "kubectl get pods 2>&1", "k8s_investigator", ""},
+		{"not kubernetes at all", "go test ./...", "coder", ""},
+		// Shapes we refuse to reason about.
+		{"heredoc apply", "kubectl apply -f - <<EOF\nkind: Pod\nEOF", "k8s_editor", "deny"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, code := runHook(t, bashInput(c.command, c.agent), "")
+			got := decisionOf(t, out)
+			if got != c.want {
+				t.Fatalf("decision = %q, want %q (exit=%d stdout=%q)", got, c.want, code, out)
+			}
+			if c.want == "" && strings.TrimSpace(out) != "" {
+				t.Fatalf("a proceed must emit nothing, got %q", out)
+			}
+		})
 	}
 }
 
