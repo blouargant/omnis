@@ -62,6 +62,13 @@ func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
 		"kubectl get pods 2>&1",
 		"kubectl get pods &> out",
 		"kubectl get po; ; kubectl get svc",
+		// Degenerate inputs. splitCompound returns the whole trimmed input when
+		// every fragment is blank; a regex-style "drop the empties" does not, and
+		// the divergence was unpinned until it was measured.
+		"", "   ", ";", ";;", "&&", "|", "\n",
+		"kubectl get pods;",
+		"; kubectl get pods",
+		"kubectl exec pod -- sh -c 'echo a && echo b'",
 	}
 	for _, cmd := range corpus {
 		got := pySegments(t, cmd)

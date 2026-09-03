@@ -108,6 +108,41 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		{"not kubernetes at all", "go test ./...", "coder", ""},
 		// Shapes we refuse to reason about.
 		{"heredoc apply", "kubectl apply -f - <<EOF\nkind: Pod\nEOF", "k8s_editor", "deny"},
+		// A substitution hides a whole nested command, so the outer verb is
+		// irrelevant. Both of these previously PROCEEDED and the nested delete ran.
+		{"nested delete in a substitution", "kubectl get pods $(kubectl delete pod x -n demo)", "k8s_editor", "deny"},
+		{"nested delete in backticks", "kubectl describe pod `kubectl delete pod victim -n demo`", "k8s_editor", "deny"},
+		// A wrapper with a bare operand must not make an honest read deny.
+		{"timeout wrapper before a read", "timeout 30 kubectl get pods -n demo", "k8s_investigator", ""},
+		{"nice wrapper before a read", "nice -n 10 kubectl get pods", "k8s_investigator", ""},
+		// A segment that merely CONTAINS the letters is not an invocation. The
+		// second of these hides "helm" inside "overwhelming".
+		{"helm-named script under sudo", "sudo -u jenkins /opt/scripts/deploy-helm.sh", "linux_admin", ""},
+		{"helm as a substring of a package name", "sudo -u root apt-get install foo-overwhelming", "linux_admin", ""},
+		{"k8s read then an unrelated sudo", "kubectl rollout status deploy/x -n demo && sudo -u root systemctl restart nginx", "linux_admin", ""},
+		{"k8s read then a build", "kubectl get pods -n demo && timeout 30 make build", "coder", ""},
+		// A piped delete is the commonest cleanup idiom and must be caught.
+		{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny"},
+		// helm read aliases and local verbs are not cluster changes.
+		{"helm ls alias", "helm ls -n demo", "k8s_investigator", ""},
+		{"helm pull is local", "helm pull oci://reg/chart", "k8s_investigator", ""},
+		{"helm repo add is local", "helm repo add x https://example.com", "k8s_investigator", ""},
+		// Verbs whose SUBCOMMANDS differ. `auth reconcile` writes RBAC and
+		// `config use-context` rewrites the shared kubeconfig, so neither is a read.
+		{"auth reconcile writes RBAC", "kubectl auth reconcile -f rbac.yaml", "k8s_editor", "deny"},
+		{"auth can-i reads", "kubectl auth can-i create pods", "k8s_investigator", ""},
+		{"config use-context writes", "kubectl config use-context prod", "k8s_editor", "deny"},
+		{"config view reads", "kubectl config view", "k8s_investigator", ""},
+		{"rollout status reads", "kubectl rollout status deploy/x -n demo", "k8s_investigator", ""},
+		{"rollout history reads", "kubectl rollout history deploy/x -n demo", "k8s_investigator", ""},
+		{"rollout undo writes", "kubectl rollout undo deploy/x -n demo", "k8s_editor", "deny"},
+		{"rollout restart writes", "kubectl rollout restart deploy/x -n demo", "k8s_editor", "deny"},
+		{"port-forward is not a read", "kubectl port-forward svc/x 8080:80 -n demo", "k8s_editor", "deny"},
+		// An unknown value-taking flag makes its value read as the verb, which
+		// must fail CLOSED rather than proceed.
+		{"unknown value flag fails closed", "kubectl --totally-unknown-flag zzz get pods", "k8s_investigator", "deny"},
+		{"known value flag is consumed", "kubectl --as-uid 1000 get pods", "k8s_investigator", ""},
+		{"helm value flag is consumed", "helm --registry-config /tmp/r.yaml list -n demo", "k8s_investigator", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
