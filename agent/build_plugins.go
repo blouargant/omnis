@@ -72,20 +72,25 @@ func buildPlugins(
 	if eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging}); err == nil {
 		plugins = append(plugins, eventsPlugin)
 	}
-	// The permission gate is built once per squad by the caller (so the same
-	// enforcement — one approval cache/asker — also attaches to sub-agents) and
-	// passed in as a runner plugin here, mounted right after events so its
-	// deny/ask short-circuit runs before the mutating plugins (hooks, …).
-	if permPlugin != nil {
-		plugins = append(plugins, permPlugin)
-	}
 	// Claude Code-style lifecycle hooks. The per-squad runner plugin carries the
 	// blocking/injecting hooks (PreToolUse/PostToolUse/UserPromptSubmit/Stop) and
 	// reads the shared hot-reloading engine; the fire-and-forget lifecycle
 	// listeners are wired once on the bus by Infrastructure.Hooks. The router
 	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
+	//
+	// Mounted BEFORE the permission gate, for the reasons in beforeToolChain
+	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
+	// already approved the call, and permissionDecision:"allow" can only bypass a
+	// prompt that has not fired yet. Keep these two in this order.
 	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
+	}
+	// The permission gate is built once per squad by the caller (so the same
+	// enforcement — one approval cache/asker — also attaches to sub-agents) and
+	// passed in as a runner plugin here, mounted after the hooks so a hook that
+	// already refused the call never reaches the user as a prompt.
+	if permPlugin != nil {
+		plugins = append(plugins, permPlugin)
 	}
 	// Per-turn spend ceiling. Counts the root's tool calls + tokens against the
 	// session's budget (the same callbacks are attached to every sub-agent, so the

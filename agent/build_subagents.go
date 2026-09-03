@@ -197,22 +197,8 @@ func buildSubAgentsFromConfigs(
 		// runner-level permissions AND hooks plugins never see its tool calls —
 		// attach their tool-level callbacks here so a sub-agent's
 		// Edit/Write/Bash/MCP calls are gated + hooked exactly like the leader's.
-		// Before-tool order mirrors the leader's plugin order (events → perms →
-		// hooks PreToolUse); the first non-nil return short-circuits the tool.
-		// After-tool: events → hooks PostToolUse. Nil ⇒ that layer is skipped, so
-		// a sub-agent built with no gate/hooks is byte-identical to before.
-		beforeTool := []llmagent.BeforeToolCallback{callbacks.BeforeTool}
-		if permGate != nil {
-			beforeTool = append(beforeTool, permGate)
-		}
-		if hooksBeforeTool != nil {
-			beforeTool = append(beforeTool, hooksBeforeTool)
-		}
-		// Last in the chain: a call the user or a hook already rejected must not
-		// be charged to the turn's budget.
-		if budgetBeforeTool != nil {
-			beforeTool = append(beforeTool, budgetBeforeTool)
-		}
+		// Order lives in one place: see beforeToolChain (agent/tool_chain.go).
+		beforeTool := beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {
 			afterTool = append(afterTool, hooksAfterTool)
