@@ -1792,6 +1792,11 @@ func runHook(t *testing.T, in map[string]any, extraPath string) (string, int) {
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	_ = cmd.Run()
+	// A traceback on stderr would otherwise read as "no opinion" and pass
+	// silently, which is the worst possible failure for a guard.
+	if errb.Len() > 0 {
+		t.Fatalf("hook wrote to stderr: %s", errb.String())
+	}
 	return out.String(), cmd.ProcessState.ExitCode()
 }
 
@@ -1819,6 +1824,54 @@ func bashInput(command, agent string) map[string]any {
 		"agent_name":      agent,
 		"attempt":         1,
 		"consecutive":     0,
+	}
+}
+
+// Verb identification is where both failure directions live, and neither is
+// observable from a bare "did it say something" assertion — which is why the
+// first version of this file could not detect that `kubectl -A get pods` was
+// denied while `helm --debug uninstall` sailed through. Table-drive the DECISION
+// for every shape that has bitten, in both directions.
+func TestDecisionForCommandShapes(t *testing.T) {
+	cases := []struct {
+		name, command, agent, want string // want: "" = proceed
+	}{
+		// Boolean global flags must not swallow the verb (false-positive axis).
+		{"bare -A before a read verb", "kubectl -A get pods", "k8s_investigator", ""},
+		{"long boolean global", "kubectl --all-namespaces get pods", "k8s_investigator", ""},
+		{"another boolean global", "kubectl --insecure-skip-tls-verify get pods", "k8s_investigator", ""},
+		{"value-taking global", "kubectl -n demo get pods", "k8s_investigator", ""},
+		{"inline value global", "kubectl --context=prod get pods", "k8s_investigator", ""},
+		// ... and must not hide a mutation either (false-negative axis).
+		{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny"},
+		{"helm boolean global before upgrade", "helm --debug upgrade r ./c -n demo", "k8s_editor", "deny"},
+		{"helm boolean global before uninstall", "helm --debug uninstall r -n demo", "k8s_editor", "deny"},
+		// Wrappers must not hide a mutation.
+		{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		// Separators the first regex missed entirely.
+		{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny"},
+		// Not this guard's business.
+		{"grep that merely mentions kubectl", "grep -rn kubectl deploy.sh > /tmp/out", "coder", ""},
+		{"redirect on a READ", "kubectl get pods -o json > /tmp/pods.json", "k8s_investigator", ""},
+		{"stderr redirect on a read", "kubectl get pods 2>&1", "k8s_investigator", ""},
+		{"not kubernetes at all", "go test ./...", "coder", ""},
+		// Shapes we refuse to reason about.
+		{"heredoc apply", "kubectl apply -f - <<EOF\nkind: Pod\nEOF", "k8s_editor", "deny"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, code := runHook(t, bashInput(c.command, c.agent), "")
+			got := decisionOf(t, out)
+			if got != c.want {
+				t.Fatalf("decision = %q, want %q (exit=%d stdout=%q)", got, c.want, code, out)
+			}
+			if c.want == "" && strings.TrimSpace(out) != "" {
+				t.Fatalf("a proceed must emit nothing, got %q", out)
+			}
+		})
 	}
 }
 
@@ -1887,13 +1940,20 @@ Reads the omnis hook input on stdin and writes the Claude Code hook output
 protocol on stdout. All Kubernetes policy lives here, in configuration, so the
 Go core stays domain-free (see the design contract in CLAUDE.md).
 
-Two rules govern everything below:
+Three rules govern everything below:
 
-1. FAIL CLOSED. This script executes commands, so it must never risk executing
-   the mutation itself. It validates a segment only when it can fully
-   re-tokenise it and replay it as argv with no shell. Anything carrying a
-   redirection, heredoc, substitution or interpolation is refused.
-2. The engine reports `attempt` / `consecutive`; this script decides what they
+1. FAIL CLOSED, and fail closed on IDENTIFICATION too. This script executes
+   commands, so it must never risk executing the mutation itself: it validates a
+   segment only when it can fully re-tokenise it and replay it as argv with no
+   shell. But the subtler rule is that when a segment LOOKS like a kubectl/helm
+   invocation and we cannot identify its verb, that is also a refusal — never a
+   pass. Guessing "probably harmless" is how an unvalidated `helm uninstall`
+   slips through.
+2. Do not refuse what is not ours. A guard that fires on honest work gets
+   disabled by its users, so the refusal gates key on "the first real word of
+   this segment is kubectl/helm", never on "this text contains the word
+   kubectl". `grep -rn kubectl deploy.sh > out` is not a cluster mutation.
+3. The engine reports `attempt` / `consecutive`; this script decides what they
    mean. That is what keeps the engine generic.
 
 Python 3 standard library only.
@@ -1916,10 +1976,35 @@ READ_ONLY_VERBS = {
 APPLY_VERBS = {"apply", "create", "replace"}
 IMPERATIVE_VERBS = {"patch", "set", "scale", "annotate", "label", "expose", "autoscale", "rollout"}
 DESTRUCTIVE_VERBS = {"delete", "drain", "cordon", "uncordon", "taint"}
-HELM_CHANGE_VERBS = {"install", "upgrade"}
-HELM_DESTRUCTIVE_VERBS = {"uninstall", "rollback"}
 
-WRAPPERS = {"sudo", "env", "time", "nice", "ionice", "nohup", "command", "exec"}
+# helm uses an ALLOWLIST of read-only verbs, symmetric with kubectl above, so an
+# unknown helm verb fails closed. A denylist of change verbs would let any future
+# mutating verb through by default, and combined with a verb misparse that is how
+# an unvalidated `helm uninstall` reaches the cluster.
+HELM_READ_ONLY_VERBS = {
+    "list", "status", "get", "history", "show", "search", "template", "lint",
+    "version", "env", "repo", "dependency", "plugin", "verify", "diff",
+}
+
+WRAPPERS = {"sudo", "env", "time", "nice", "ionice", "nohup", "command", "exec",
+            "timeout", "stdbuf"}
+
+# Global flags that take a SEPARATE value, so the token after them is not the verb.
+# Every other flag is treated as boolean. Inferring this instead from "the next
+# token is not a flag" is what made `kubectl -A get pods` parse its verb as `pods`
+# (denying an ordinary read-only command) and `helm --debug uninstall r` parse as
+# `r` (letting a destructive command through unvalidated).
+VALUE_FLAGS = {
+    "-n", "--namespace", "--context", "--kube-context", "--kubeconfig",
+    "--cluster", "--user", "--as", "--as-group", "--token", "--server", "-s",
+    "--request-timeout", "--cache-dir", "--tls-server-name",
+    "--client-certificate", "--client-key", "--certificate-authority",
+    "-v", "--v", "--log-flush-frequency", "--profile", "--profile-output",
+}
+
+# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
+# not read as two `&`. The parity test in core/permissions pins the two lists.
+COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 
 # Shapes we refuse to reason about rather than risk mis-parsing.
 UNSAFE_SHELL = re.compile(r"<<|>>|[<>]|\$\(|`|\$\{")
@@ -1939,7 +2024,11 @@ def emit(decision, reason):
 
 
 def proceed(note=""):
-    """No opinion: the tool call continues to the permission layer."""
+    """No opinion: the tool call continues to the permission layer.
+
+    A note is surfaced to the user through the hook protocol's systemMessage,
+    which is how the validated diff reaches the permission card.
+    """
     if note:
         json.dump({"systemMessage": note}, sys.stdout)
         sys.stdout.write("\n")
@@ -1959,21 +2048,118 @@ def refuse(reason, attempt, consecutive):
     emit("deny", reason)
 
 
+def _is_redirect_amp(command, i):
+    """True when the `&` at i belongs to a redirect (2>&1, >&2, &>file) rather
+    than backgrounding a command. Mirrors isRedirectAmp in match_bash.go: the
+    nearest non-blank neighbour on either side being `>` makes it a redirect."""
+    j = i - 1
+    while j >= 0 and command[j] in " \t":
+        j -= 1
+    if j >= 0 and command[j] == ">":
+        return True
+    k = i + 1
+    while k < len(command) and command[k] in " \t":
+        k += 1
+    return k < len(command) and command[k] == ">"
+
+
 def segments(command):
     """Split a shell command line into independently-classified segments.
 
-    Mirrors splitCompound in core/permissions/match_bash.go: a mutation hidden
-    behind `&&`, `||`, `;` or a pipe must still be seen.
+    Mirrors splitCompound in core/permissions/match_bash.go, including its quote
+    awareness and its redirect carve-out for `&`. A regex cannot do this: it
+    would split inside a quoted argument (turning `note="a && b"` into two
+    unbalanced halves) and it would miss `\\n` and `&`, so a mutation on the
+    second line of a multi-line command would never be examined. Like the Go
+    side, backslash escapes are NOT interpreted.
     """
-    parts = re.split(r"&&|\|\||[;|]", command)
-    return [p.strip() for p in parts if p.strip()]
+    out, buf = [], []
+    quote = ""
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if quote:
+            buf.append(c)
+            if c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+            buf.append(c)
+            i += 1
+            continue
+        matched = ""
+        for op in COMPOUND_OPS:
+            if command.startswith(op, i):
+                matched = op
+                break
+        if matched == "&" and _is_redirect_amp(command, i):
+            buf.append(c)
+            i += 1
+            continue
+        if matched:
+            out.append("".join(buf))
+            buf = []
+            i += len(matched)
+            continue
+        buf.append(c)
+        i += 1
+    out.append("".join(buf))
+    return [s.strip() for s in out if s.strip()]
+
+
+def looks_like_k8s_invocation(segment):
+    """True when this segment plausibly invokes kubectl or helm.
+
+    Deliberately NOT a substring test on the text: `grep -rn kubectl deploy.sh`
+    merely mentions the word and must not be refused. It walks leading wrappers
+    and their flags to find the real binary; if a wrapper was stripped and the
+    binary still cannot be identified (`sudo -u root kubectl …`), it returns True
+    so the caller fails closed rather than guessing.
+    """
+    stripped_wrapper = False
+    for word in segment.split():
+        base = word.split("/")[-1]
+        if base in ("kubectl", "helm"):
+            return True
+        if base in WRAPPERS:
+            stripped_wrapper = True
+            continue
+        if word.startswith("-") or ("=" in word and not word.startswith("-")):
+            continue
+        return stripped_wrapper
+    return stripped_wrapper
+
+
+def _strip_wrappers(argv):
+    """Drop leading process wrappers, their own flags, and env assignments.
+
+    Basenames each token so /usr/bin/sudo is recognised (classify basenames too),
+    and drops a stripped wrapper's flags so `sudo -n kubectl delete` does not
+    leave `-n` as the apparent binary.
+    """
+    while argv:
+        head = argv[0]
+        base = head.split("/")[-1]
+        if base in WRAPPERS:
+            argv = argv[1:]
+            while argv and argv[0].startswith("-"):
+                argv = argv[1:]
+            continue
+        if "=" in head and not head.startswith("-"):
+            argv = argv[1:]
+            continue
+        break
+    return argv
 
 
 def tokenise(segment):
     """Return the segment's argv with wrappers stripped, or None if unsafe.
 
-    None means "this shape cannot be validated" and is always a refusal — never
-    a pass — because a shape we cannot read is a shape we cannot check.
+    None means "this shape cannot be validated". For a segment that looks like a
+    kubectl/helm MUTATION that is a refusal, never a pass — a shape we cannot read
+    is a shape we cannot check.
     """
     if UNSAFE_SHELL.search(segment):
         return None
@@ -1981,16 +2167,29 @@ def tokenise(segment):
         argv = shlex.split(segment)
     except ValueError:
         return None
-    while argv and (argv[0] in WRAPPERS or "=" in argv[0] and not argv[0].startswith("-")):
-        argv = argv[1:]
-    return argv or None
+    return _strip_wrappers(argv) or None
+
+
+def raw_classify(segment):
+    """Best-effort (tool, verb) from the raw text, skipping shlex.
+
+    Used for one purpose: to spare a READ-ONLY command whose shape we refuse to
+    tokenise. A redirect on `kubectl get pods -o json > out` is harmless, and
+    refusing it would be exactly the false positive that gets a guard disabled by
+    its users. Never used to permit a mutation — an unrecognised or mutating verb
+    still falls through to the refusal, and `segments` has already split the line,
+    so an `apply` later in the command line is its own segment.
+    """
+    argv = _strip_wrappers(segment.split())
+    return classify(argv) if argv else (None, None)
 
 
 def classify(argv):
     """Return (tool, verb) for a kubectl/helm invocation, else (None, None).
 
-    Global flags may precede the verb (`kubectl --context=x -n y apply`), so the
-    verb is the first bare token after the binary.
+    Global flags may precede the verb. Only flags known to take a SEPARATE value
+    consume the following token; every other flag is boolean, so a bare global
+    like -A or --debug cannot swallow the verb.
     """
     if not argv:
         return None, None
@@ -2000,15 +2199,21 @@ def classify(argv):
     i = 1
     while i < len(argv):
         tok = argv[i]
-        if tok.startswith("-"):
-            # A flag taking a separate value consumes the next token.
-            if "=" not in tok and i + 1 < len(argv) and not argv[i + 1].startswith("-"):
-                i += 2
-                continue
+        if not tok.startswith("-"):
+            return binary, tok
+        if "=" in tok:
             i += 1
             continue
-        return binary, tok
+        if tok in VALUE_FLAGS and i + 1 < len(argv):
+            i += 2
+            continue
+        i += 1
     return binary, None
+
+
+def is_read_only(tool, verb):
+    return (tool == "kubectl" and verb in READ_ONLY_VERBS) or \
+           (tool == "helm" and verb in HELM_READ_ONLY_VERBS)
 
 
 def main():
@@ -2023,33 +2228,50 @@ def main():
     command = (data.get("tool_input") or {}).get("command") or ""
 
     # Fast path. This hook fires on EVERY Bash call in the fleet, so anything
-    # not mentioning kubectl or helm must cost only interpreter startup.
+    # not mentioning kubectl or helm must cost only interpreter startup. This is
+    # a substring test by design: an alias (`k delete …`) or an indirection
+    # (`$KUBECTL delete …`) is a known, accepted blind spot of the cheap path.
     if "kubectl" not in command and "helm" not in command:
         sys.exit(0)
 
     agent = data.get("agent_name") or ""
     cwd = data.get("cwd") or None
-    attempt = int(data.get("attempt") or 1)
-    consecutive = int(data.get("consecutive") or 0)
+    try:
+        attempt = int(data.get("attempt") or 1)
+        consecutive = int(data.get("consecutive") or 0)
+    except (TypeError, ValueError):
+        attempt, consecutive = 1, 0
     attestations = data.get("attestations") or {}
 
     for segment in segments(command):
         argv = tokenise(segment)
         if argv is None:
-            if "kubectl" in segment or "helm" in segment:
+            if looks_like_k8s_invocation(segment):
+                rtool, rverb = raw_classify(segment)
+                if rtool and rverb and is_read_only(rtool, rverb):
+                    # A redirect on a read is not this guard's business.
+                    continue
                 refuse(
-                    "This command shape cannot be validated (it uses a redirection, heredoc or "
-                    "substitution), so it is refused rather than applied unchecked. Write the "
-                    "change to a manifest file and apply that file instead.",
+                    "This command shape cannot be validated (it uses a redirection, heredoc "
+                    "or substitution), so it is refused rather than applied unchecked. Write "
+                    "the change to a manifest file and apply that file instead.",
                     attempt, consecutive,
                 )
             continue
         tool, verb = classify(argv)
         if tool is None or verb is None:
+            # Fail closed on identification: a segment that looks like a
+            # kubectl/helm invocation whose verb we cannot read is refused, not
+            # waved through.
+            if looks_like_k8s_invocation(segment):
+                refuse(
+                    "This looks like a kubectl/helm command but its verb could not be "
+                    "identified, so it cannot be validated. Re-run it without process "
+                    "wrappers (sudo/env/time) and with the verb immediately after the binary.",
+                    attempt, consecutive,
+                )
             continue
-        if tool == "kubectl" and verb in READ_ONLY_VERBS:
-            continue
-        if tool == "helm" and verb not in HELM_CHANGE_VERBS | HELM_DESTRUCTIVE_VERBS:
+        if is_read_only(tool, verb):
             continue
         validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations)
 
@@ -2089,12 +2311,26 @@ script path from there is `filepath.Join("..", "..", "config", "hooks", "k8s-val
 // in Go. That duplication is accepted (see the spec, §3), so it is pinned: both
 // must segment the same corpus identically.
 func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
+	// The first five pin the separators both sides always implemented — where
+	// agreement was never in doubt. The rest are the cases that ACTUALLY
+	// diverged before the Python side was rewritten to mirror splitCompound:
+	// newline and bare `&` (absent from the original regex), `|&` (one operator
+	// in Go, two characters to a regex), a separator inside quotes (Go is
+	// quote-aware, a regex is not), and the two redirect shapes isRedirectAmp
+	// exists for. Verified to agree on all twelve.
 	corpus := []string{
 		"kubectl get pods && kubectl delete pod x",
 		"sudo kubectl apply -f a.yaml; echo done",
 		"kubectl get pods | grep Running",
 		"helm upgrade r c -n ns || kubectl rollout undo deploy/x",
 		"echo hi",
+		"kubectl get pods\nkubectl delete pod x -n demo",
+		"kubectl get pods & kubectl delete pod x -n demo",
+		"kubectl logs x |& tee log",
+		"kubectl annotate pod x note=\"a && b\" -n demo",
+		"kubectl get pods 2>&1",
+		"kubectl get pods &> out",
+		"kubectl get po; ; kubectl get svc",
 	}
 	for _, cmd := range corpus {
 		got := pySegments(t, cmd)
