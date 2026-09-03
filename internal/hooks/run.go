@@ -75,6 +75,10 @@ const (
 	// DecisionAllow means a hook explicitly allowed a tool (PreToolUse
 	// permissionDecision="allow"), bypassing the permission prompt.
 	DecisionAllow
+	// DecisionAsk means a hook wants the user to decide (PreToolUse
+	// permissionDecision="ask"). Only PreToolUse has a user to ask, so every
+	// other consumer ignores it — Blocked() stays false for it deliberately.
+	DecisionAsk
 )
 
 // Outcome is the combined result of running all matched hook commands for one
@@ -90,6 +94,9 @@ type Outcome struct {
 
 // Blocked reports whether the outcome denies the action.
 func (o Outcome) Blocked() bool { return o.Decision == DecisionBlock }
+
+// Asks reports whether the outcome defers the decision to the user.
+func (o Outcome) Asks() bool { return o.Decision == DecisionAsk }
 
 // Run executes every hook command configured for (event, subject), piping in as
 // stdin JSON and interpreting each command's exit code + stdout per Claude
@@ -232,14 +239,23 @@ func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]stri
 
 	// Per-event permission / block semantics.
 	if hs := jo.HookSpecific; hs != nil {
+		// Aggregation across several matched hooks: Block > Ask > Allow > Proceed.
+		// A permissive hook must never cancel another hook's deny or escalation.
 		switch strings.ToLower(hs.PermissionDecision) {
 		case "deny":
 			out.Decision = DecisionBlock
 			if out.Reason == "" {
 				out.Reason = firstNonEmpty(hs.PermissionDecisionReason, jo.Reason)
 			}
-		case "allow":
+		case "ask":
 			if out.Decision != DecisionBlock {
+				out.Decision = DecisionAsk
+				if out.Reason == "" {
+					out.Reason = firstNonEmpty(hs.PermissionDecisionReason, jo.Reason)
+				}
+			}
+		case "allow":
+			if out.Decision != DecisionBlock && out.Decision != DecisionAsk {
 				out.Decision = DecisionAllow
 			}
 		}

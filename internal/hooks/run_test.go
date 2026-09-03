@@ -178,3 +178,49 @@ func TestWithoutFailClosedNonZeroExitStillProceeds(t *testing.T) {
 		t.Fatalf("decision = %v, want DecisionProceed (unchanged default)", out.Decision)
 	}
 }
+
+func TestPermissionDecisionAskYieldsAsk(t *testing.T) {
+	skipOnWindows(t)
+	cmd := `echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"validation failed 3x"}}'`
+	out := run(t, PreToolUse, "Bash", cmd, Input{ToolName: "Bash"})
+	if out.Decision != DecisionAsk {
+		t.Fatalf("decision = %v, want DecisionAsk", out.Decision)
+	}
+	if out.Reason != "validation failed 3x" {
+		t.Fatalf("reason = %q, want the ask reason carried through", out.Reason)
+	}
+}
+
+// Aggregation is Block > Ask > Allow > Proceed. A second hook must never soften
+// another hook's deny into a question.
+func TestDenyBeatsAsk(t *testing.T) {
+	skipOnWindows(t)
+	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"unsure\"}}'"},
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"never\"}}'"}
+	]}]}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	out := cfg.Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, t.TempDir(), 10*time.Second)
+	if out.Decision != DecisionBlock {
+		t.Fatalf("decision = %v, want DecisionBlock (deny must win over ask)", out.Decision)
+	}
+}
+
+// And Ask must win over Allow, or a permissive hook would silently cancel a
+// guard hook's escalation.
+func TestAskBeatsAllow(t *testing.T) {
+	skipOnWindows(t)
+	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"},
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"}
+	]}]}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	out := cfg.Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, t.TempDir(), 10*time.Second)
+	if out.Decision != DecisionAsk {
+		t.Fatalf("decision = %v, want DecisionAsk (ask must win over allow)", out.Decision)
+	}
+}
