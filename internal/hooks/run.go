@@ -134,10 +134,16 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 		// Non-zero, non-blocking outcomes: log and move on.
 		if res.Blocked {
 			fmt.Fprintf(os.Stderr, "[hooks] %s: command refused by safety floor: %s\n", event, res.Stderr)
+			if cmd.FailClosed {
+				failClosedBlock(&out, event, cmd.Command, "refused by the safety floor")
+			}
 			continue
 		}
 		if res.TimedOut {
 			fmt.Fprintf(os.Stderr, "[hooks] %s: command timed out: %s\n", event, cmd.Command)
+			if cmd.FailClosed {
+				failClosedBlock(&out, event, cmd.Command, "timed out")
+			}
 			continue
 		}
 		if res.ExitCode == 2 {
@@ -153,6 +159,9 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 			// the user but proceeds).
 			if s := strings.TrimSpace(res.Stderr); s != "" {
 				fmt.Fprintf(os.Stderr, "[hooks] %s: command exited %d: %s\n", event, res.ExitCode, s)
+			}
+			if cmd.FailClosed {
+				failClosedBlock(&out, event, cmd.Command, fmt.Sprintf("exited %d", res.ExitCode))
 			}
 			continue
 		}
@@ -174,6 +183,17 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 		out.AdditionalContext = strings.Join(contexts, "\n\n")
 	}
 	return out
+}
+
+// failClosedBlock turns a command that produced no usable verdict into a block,
+// for commands that opted in via fail_closed. why names the cause so the model
+// (and the user) can tell "the guard refused this" from "the guard is broken".
+func failClosedBlock(out *Outcome, event, command, why string) {
+	out.Decision = DecisionBlock
+	if out.Reason == "" {
+		out.Reason = fmt.Sprintf("hook did not complete (%s) and is declared fail_closed; refusing the action", why)
+	}
+	fmt.Fprintf(os.Stderr, "[hooks] %s: fail_closed block (%s): %s\n", event, why, command)
 }
 
 // addsContext reports whether plain exit-0 stdout is injected as context for

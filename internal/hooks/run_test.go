@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"runtime"
 	"testing"
 	"time"
@@ -39,6 +40,22 @@ func jsonString(s string) string {
 		}
 	}
 	return string(append(out, '"'))
+}
+
+// runOne parses a single-command config from c and runs it, so a test can set
+// fields (timeout, fail_closed) the string-based `run` helper cannot express.
+func runOne(t *testing.T, event, subject string, c Command, in Input, defaultTimeout time.Duration) Outcome {
+	t.Helper()
+	f := File{Hooks: map[string][]Matcher{event: {{Matcher: subject, Hooks: []Command{c}}}}}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	return cfg.Run(context.Background(), event, subject, in, t.TempDir(), defaultTimeout)
 }
 
 func TestRunExitTwoBlocks(t *testing.T) {
@@ -111,5 +128,53 @@ func TestRunNoMatchNoExec(t *testing.T) {
 	out := cfg.Run(context.Background(), PreToolUse, "Write", Input{ToolName: "Write"}, t.TempDir(), time.Second)
 	if out.Ran != 0 || out.Blocked() {
 		t.Fatalf("non-matching tool should run no hooks: ran=%d blocked=%v", out.Ran, out.Blocked())
+	}
+}
+
+// A fail_closed hook that crashes must BLOCK. Without this, a validation hook
+// whose script has a syntax error silently stops validating.
+func TestFailClosedBlocksOnNonZeroExit(t *testing.T) {
+	skipOnWindows(t)
+	out := runOne(t, PreToolUse, "Bash",
+		Command{Command: "exit 1", FailClosed: true},
+		Input{ToolName: "Bash"}, 10*time.Second)
+	if out.Decision != DecisionBlock {
+		t.Fatalf("decision = %v, want DecisionBlock", out.Decision)
+	}
+	if out.Reason == "" {
+		t.Fatal("a fail-closed block must carry a reason naming the cause")
+	}
+}
+
+// The packaging failure mode: hooks.json ships but the script does not, so the
+// shell returns 127. This must block, not proceed.
+func TestFailClosedBlocksOnMissingCommand(t *testing.T) {
+	skipOnWindows(t)
+	out := runOne(t, PreToolUse, "Bash",
+		Command{Command: "omnis-definitely-not-a-real-binary-xyz", FailClosed: true},
+		Input{ToolName: "Bash"}, 10*time.Second)
+	if out.Decision != DecisionBlock {
+		t.Fatalf("decision = %v, want DecisionBlock", out.Decision)
+	}
+}
+
+func TestFailClosedBlocksOnTimeout(t *testing.T) {
+	skipOnWindows(t)
+	out := runOne(t, PreToolUse, "Bash",
+		Command{Command: "sleep 5", Timeout: 1, FailClosed: true},
+		Input{ToolName: "Bash"}, 10*time.Second)
+	if out.Decision != DecisionBlock {
+		t.Fatalf("decision = %v, want DecisionBlock", out.Decision)
+	}
+}
+
+// The no-op contract: without the flag, Claude Code semantics are unchanged.
+func TestWithoutFailClosedNonZeroExitStillProceeds(t *testing.T) {
+	skipOnWindows(t)
+	out := runOne(t, PreToolUse, "Bash",
+		Command{Command: "exit 1"},
+		Input{ToolName: "Bash"}, 10*time.Second)
+	if out.Decision != DecisionProceed {
+		t.Fatalf("decision = %v, want DecisionProceed (unchanged default)", out.Decision)
 	}
 }

@@ -48,6 +48,14 @@ type Command struct {
 	Type    string `json:"type,omitempty"`
 	Command string `json:"command"`
 	Timeout int    `json:"timeout,omitempty"` // seconds; 0 = engine default
+	// FailClosed makes a command whose execution yields no usable verdict —
+	// a timeout, a non-zero non-2 exit (a crashed or MISSING script: the shell
+	// returns 127), or a safety-floor refusal — block the action instead of
+	// proceeding. Claude Code has no such flag and its default (proceed) is
+	// kept, so this is opt-in: a guard hook sets it, an advisory hook does not.
+	// Without it a validation hook that fails to run stops validating silently,
+	// which is the one failure mode a guard must not have.
+	FailClosed bool `json:"fail_closed,omitempty"`
 }
 
 // Matcher groups hook commands under a tool-name (or sub-event) regexp. An empty
