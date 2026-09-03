@@ -249,7 +249,7 @@ git commit -m "fix(hooks): fail_closed so a hook that cannot run blocks instead 
 - Consumes: nothing.
 - Produces: `beforeToolChain(eventsCB, hooksCB, permCB, budgetCB llmagent.BeforeToolCallback) []llmagent.BeforeToolCallback` — the single source of truth for chain order.
 
-**Why:** two defects, one cause. (a) With permissions first, a hook's refusal reaches the agent *after* the user approved the call — three permission cards for three failed validations, training reflexive clicking and degrading the permission layer. (b) `internal/hooks/run.go:76` documents that `permissionDecision: "allow"` "bypass[es] the permission prompt", which is unreachable when the prompt already fired. Blast radius is nil: no `hooks.json` exists in any layer.
+**Why:** two defects, one cause. (a) With permissions first, a hook's refusal reaches the agent *after* the user approved the call — three permission cards for three failed validations, training reflexive clicking and degrading the permission layer. (b) **Corrected after review — do not restate the old claim.** An earlier draft held that the reorder also revives hooks' documented `permissionDecision: "allow"` bypass (`internal/hooks/run.go:76`). It does not: `DecisionAllow` is dead because **nothing in `agent/` consumes it** — `hookToolCallbacks` returns non-nil only on `out.Blocked()`, and a `nil` return means "proceed", not "skip the gate". Reordering is a *precondition* for honouring `"allow"`, never the feature. Defect (a) is on its own a sufficient reason for this task. Blast radius is nil: no `hooks.json` exists in any layer.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -276,9 +276,8 @@ func mark(log *[]string, name string) llmagent.BeforeToolCallback {
 }
 
 // Hooks must run BEFORE permissions: a PreToolUse hook that refuses a call must
-// do so without the user having already approved it, and hooks'
-// permissionDecision:"allow" bypass is unreachable if the prompt already fired.
-// Budget stays LAST so a call refused by a hook or the user is not charged.
+// do so without the user having already approved it. Budget stays LAST so a call
+// refused by a hook or the user is not charged.
 func TestBeforeToolChainRunsHooksBeforePermissions(t *testing.T) {
 	var log []string
 	chain := beforeToolChain(
@@ -337,8 +336,15 @@ import "google.golang.org/adk/agent/llmagent"
 // three failed validation attempts the user clicked "allow" three times for
 // calls that were then rejected, which trains reflexive approval and degrades
 // the permission layer — the only protection that existed before the validation
-// work. It also made hooks' documented permissionDecision:"allow" bypass
-// (internal/hooks/run.go:76) unreachable dead code, since the prompt had fired.
+// work. That is what this order fixes, and it is reason enough on its own.
+//
+// It does NOT make hooks' documented permissionDecision:"allow" bypass
+// (internal/hooks/run.go:76) work. That is still dead: nothing in agent/
+// consumes hooks.DecisionAllow — hookToolCallbacks returns non-nil only on
+// out.Blocked(), and returning nil merely means "proceed", which is not a
+// signal the gate can act on. Honouring "allow" would additionally require the
+// hook callback to tell the gate to skip (e.g. by seeding the approval cache).
+// This order is a precondition for that, not the feature.
 //
 // budget LAST: a call already refused by a hook or by the user must not be
 // charged to the turn's budget.
@@ -388,10 +394,10 @@ In `agent/build_plugins.go`, move the `buildHooksPlugin` block **above** the `pe
 	// listeners are wired once on the bus by Infrastructure.Hooks. The router
 	// squad mounts none (hooks fire on the answering squad — see buildHooksPlugin).
 	//
-	// Mounted BEFORE the permission gate, for the reasons in beforeToolChain
+	// Mounted BEFORE the permission gate, for the reason in beforeToolChain
 	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
-	// already approved the call, and permissionDecision:"allow" can only bypass a
-	// prompt that has not fired yet. Keep these two in this order.
+	// already approved the call. Keep these two in this order. (It does not make
+	// permissionDecision:"allow" work — see that comment.)
 	if hp, herr := buildHooksPlugin(hooksEngine, isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
@@ -443,9 +449,13 @@ Expected: PASS, no vet findings.
 git add agent/tool_chain.go agent/tool_chain_test.go agent/build_subagents.go agent/build_plugins.go
 git commit -m "fix(hooks): run PreToolUse before the permission gate
 
-Restores the documented permissionDecision:\"allow\" bypass (dead code while
-the prompt fired first) and stops a hook refusal from arriving after the user
-already approved the call."
+Stops a hook refusal from arriving after the user has already approved the
+call, which on repeated validation failures would train reflexive approval
+and degrade the permission layer itself.
+
+This does NOT revive permissionDecision:\"allow\": nothing in agent/ consumes
+hooks.DecisionAllow, so that stays dead code. The reorder is a precondition
+for honouring it, not the feature."
 ```
 
 ---
@@ -2671,8 +2681,11 @@ edits in the sections named:
   `config/hooks.json` now ships (so the "no `hooks.json` is shipped" statement is
   now false and must be corrected wherever it appears).
 - **Permission nomenclature / the gate section** — record the chain order change
-  (`events → hooks → permissions → budget`), why, and that it revived
-  `permissionDecision: "allow"`.
+  (`events → hooks → permissions → budget`) and why. **Do not claim it revived
+  `permissionDecision: "allow"`** — still dead code, since nothing in `agent/`
+  consumes `hooks.DecisionAllow`; record that as a known remaining gap instead.
+  Also fix the now-stale order at **`CLAUDE.md:3299`**, which still reads "Mounted
+  last in the before-tool chain (events → perms → hooks → budget)".
 - **Configuration files** table — add `hooks.json` and `hooks/k8s-validate.py`.
 - **Distribution / packaging** — note that `config/hooks/` must ship on every
   channel and that `packaging/hooks_assets_test.go` guards it.
