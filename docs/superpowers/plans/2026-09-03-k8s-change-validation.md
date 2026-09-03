@@ -1530,6 +1530,11 @@ git commit -m "feat(attest): in-memory, per-session review verdicts a hook can r
 - Modify: `internal/hooks/run.go` (`Input.Attestations`)
 - Modify: `agent/agent.go` (the tool-group switch, near `case "settings":` at `:369`)
 - Modify: `agent/hooks_plugin.go` (fill `Attestations`), `agent/squad.go`, `agent/infrastructure.go`
+- Modify (forced by widening a shared signature — sweep them all with
+  `grep -rn "toolsForAgentConfig(" agent/`): `agent/build_subagents.go`, plus every
+  test that calls it (`agent/nested_build_test.go`,
+  `agent/websearch_provider_test.go`, `agent/hooks_plugin_test.go`)
+- Modify: `server/spawn.go` (`Attest.Forget` beside the other Infrastructure stores)
 - Test: `agent/attest_mount_test.go`
 
 **Interfaces:**
@@ -1565,12 +1570,16 @@ import (
 // has no reviewer. This property is invisible when reading the config, so it is
 // tested.
 func TestAttestGroupMountsOnlyWhereDeclared(t *testing.T) {
+	// A REAL store on both branches. A nil store would make the negative
+	// assertion pass because of the `attestStore != nil` mount guard rather than
+	// because the group was not declared — a test that passes either way.
+	store := attest.New()
 	has := func(keys []string) bool {
 		tools, _, _, _ := toolsForAgentConfig(
 			context.Background(),
 			RuntimeAgentConfig{Name: "probe", Tools: keys},
 			RuntimeSettings{},
-			nil, nil, nil, nil, nil, nil, nil, nil, false, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, store, false, nil,
 		)
 		for _, tl := range tools {
 			if tl.Name() == "record_validation" {
@@ -1641,7 +1650,7 @@ and mount it as:
 			if attestStore != nil {
 				// realSessionID is the SAME resolver hookToolCallbacks uses to key
 				// the attestations it reads, so both sides agree by construction.
-				tools = append(tools, attest.Tools(attestStore, realSessionID)...)
+				agentTools = append(agentTools, attest.Tools(attestStore, realSessionID)...)
 			}
 ```
 
