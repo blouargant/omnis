@@ -206,17 +206,24 @@ nothing. The real damage is not annoyance: it **trains the user to click "allow"
 reflexively**, degrading the permission layer — the only protection that existed before
 this work.
 
-**It also kills a documented feature.** `internal/hooks/run.go:76` says a
-`permissionDecision: "allow"` *"bypass[es] the permission prompt"*. That is impossible
-in the current order — the card has already been shown — and consistently,
-`hookToolCallbacks` only ever consults `out.Blocked()`, so `DecisionAllow` is never
-acted upon in the tool path.
+**What it does NOT fix — claim withdrawn after Task 2's review.** An earlier draft of
+this section held that the reorder also revives hooks' documented
+`permissionDecision: "allow"` bypass (`internal/hooks/run.go:76`). That was wrong.
+`DecisionAllow` *is* dead in the tool path, but the ordering is not why: **nothing in
+`agent/` consumes `hooks.DecisionAllow` at all** — verified by grep, whose only other
+hits are `internal/hooks`' own tests and the unrelated same-named constant in
+`core/permissions`. `hookToolCallbacks` returns non-nil only on `out.Blocked()`, and a
+`nil` return means "proceed", which is not a signal the permission gate can act on.
+Honouring `"allow"` would additionally require the hook callback to tell the gate to
+skip (e.g. by seeding the approval cache). This order is a **precondition** for that
+feature, never the feature itself — and the double-ask defect above is on its own a
+sufficient reason for the reorder.
 
 **Blast radius of the reorder: nil.** No `hooks.json` exists in any layer (`config/`,
 `/etc/omnis/`, `$HOME/.omnis/` — all verified absent), so nothing depends on the current
 order.
 
-**We do not use the `allow` we just revived.** A green validation returns `Proceed`, so
+**We do not use `allow` at all.** A green validation returns `Proceed`, so
 the permission card still appears: removing the user's confirmation on a cluster
 mutation is not acceptable. Instead the card gets *better* — the hook returns the diff
 via `systemMessage`, which is surfaced to the user. Today they approve
@@ -394,8 +401,10 @@ paths — exit code 1, timeout, **command not found**; and injection of `attempt
 `consecutive` and the attestation map.
 
 **Chain order:** a test asserting `events → hooks → permissions → budget`, named after
-the defect it prevents. Without it a refactor silently reintroduces the double-ask and
-re-kills `DecisionAllow`.
+the defect it prevents — otherwise a refactor silently reintroduces the double-ask. The
+chain is assembled in two places, so **both** need a guard: the sub-agent call site
+(where all four callbacks share one type, so a positional swap compiles and passes a
+helper-only test) and the root plugin list.
 
 **The script** — the genuinely safety-critical part. A table-driven Go test that pipes
 JSON into the **real script as shipped** (`t.Skip` when `python3` is absent), so it stays
