@@ -1598,11 +1598,16 @@ func TestShippedMutatingAgentsCannotAttest(t *testing.T) {
 }
 ```
 
-**Note for the implementer:** `toolsForAgentConfig`'s parameter list is long and
-may drift — read its current signature at `agent/agent.go:234` and pass zero
-values for everything you do not need. `readShippedAgentJSON` is a small helper
-reading `../registry/agents/<name>/agent.json` relative to the package dir; if
-`agent/` already has such a helper, reuse it.
+**Both helpers are settled — the controller checked.** `toolsForAgentConfig`'s
+current signature (verified at `agent/agent.go:235`) is exactly the one above minus
+`attestStore`, which this task inserts before `asLeader`; pass zero values for
+every parameter you do not need. `readShippedAgentJSON(t, name)` is a small helper
+reading `filepath.Join("..", "registry", "agents", name, "agent.json")` relative to
+the package directory — no such helper exists yet, so write it. Precedents for
+asserting against shipped config live in `agent/websearch_provider_test.go` (which
+reasons about the shipped `web_agent`'s `agent.json`) and
+`agent/runtime_config_test.go:735` (`setupAgentsRegistry`); read the former before
+writing yours in case it already has what you need.
 
 - [ ] **Step 3: Run to verify it fails**
 
