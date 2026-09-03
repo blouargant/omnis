@@ -634,7 +634,11 @@ Create `internal/hookstate/hookstate_test.go`:
 ```go
 package hookstate
 
-import "testing"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"testing"
+)
 
 // The exact counter answers "how many times has this same command been tried",
 // so a genuinely corrected command starts over at 1 — the counter only climbs
@@ -690,6 +694,21 @@ func TestSessionsAreIsolatedAndForgettable(t *testing.T) {
 }
 
 // The hash must not depend on map iteration order, or every call would look new.
+// The Python hook script recomputes this hash with
+// json.dumps(..., sort_keys=True, separators=(",",":")), which does not escape
+// HTML. Go's encoding/json escapes &, < and > by default, and every compound
+// shell command contains "&&" — so a regression back to json.Marshal would make
+// the two sides disagree on exactly the commands that matter most, and every
+// compound command would be refused as "not reviewed". Pin the exact bytes.
+func TestHashArgsMatchesPlainJSONWithoutHTMLEscaping(t *testing.T) {
+	args := map[string]any{"command": "kubectl get pods && kubectl delete pod x"}
+	canonical := `{"command":"kubectl get pods && kubectl delete pod x"}`
+	sum := sha256.Sum256([]byte(canonical))
+	if got, want := HashArgs(args), hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("HashArgs = %s, want %s — the hash of the UN-escaped canonical JSON %s", got, want, canonical)
+	}
+}
+
 func TestHashArgsIsStableAcrossKeyOrder(t *testing.T) {
 	h1 := HashArgs(map[string]any{"command": "x", "timeout": 5})
 	h2 := HashArgs(map[string]any{"timeout": 5, "command": "x"})
@@ -728,6 +747,7 @@ Create `internal/hookstate/hookstate.go`:
 package hookstate
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -802,17 +822,29 @@ func (s *Store) Forget(sid string) {
 }
 
 // HashArgs is the canonical hash of a tool call's arguments. It is the attempt
-// key and, in internal/attest, the attestation subject — the two must agree, so
-// there is exactly one implementation. encoding/json sorts object keys, so the
-// hash does not depend on map iteration order.
+// key and, in internal/attest, the attestation subject; the Python hook script
+// computes the same value independently, so the two encodings must agree exactly.
+// encoding/json sorts object keys, so the hash does not depend on map iteration
+// order.
+//
+// SetEscapeHTML(false) is load-bearing, not a style choice. Go escapes &, < and >
+// in strings by default, while the script's
+// json.dumps(..., sort_keys=True, separators=(",",":")) does not — and EVERY
+// compound shell command contains "&&". With the default escaping the two sides
+// would disagree on precisely the commands that matter most, no attestation would
+// ever match, and every compound command would be refused as "not reviewed" —
+// a failure that looks intermittent rather than systematic.
 func HashArgs(args map[string]any) string {
-	b, err := json.Marshal(args)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(args); err != nil {
 		// Unmarshalable args cannot be identified, so give every such call its
 		// own bucket rather than colliding them into one.
 		return ""
 	}
-	sum := sha256.Sum256(b)
+	// Encode appends a newline; the Python side produces none.
+	sum := sha256.Sum256(bytes.TrimRight(buf.Bytes(), "\n"))
 	return hex.EncodeToString(sum[:])
 }
 
