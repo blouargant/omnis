@@ -1785,7 +1785,8 @@ func runHook(t *testing.T, in map[string]any, extraPath string) (string, int) {
 	cmd := exec.Command("python3", script(t))
 	cmd.Stdin = bytes.NewReader(data)
 	if extraPath != "" {
-		cmd.Env = append(cmd.Environ(), "PATH="+extraPath+":"+cmd.Environ()[0])
+		// Prepend, so a stub shadows a real kubectl/helm on the machine.
+		cmd.Env = append(os.Environ(), "PATH="+extraPath+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
@@ -2075,11 +2076,18 @@ The spec accepts duplicating `core/permissions/match_bash.go`'s splitting in
 Python; this is what keeps the two from drifting apart silently. Append to
 `packaging/k8s_validate_test.go`:
 
+**Where this test lives — decided, do not re-litigate.** It goes in
+**`core/permissions/bash_split_parity_test.go`**, package `permissions`, NOT in
+`packaging/`. `splitCompound` is unexported, and exporting a `SplitCompoundForTest`
+seam in a non-test file would widen a package's public API permanently for a test's
+benefit. From inside `core/permissions` the function is already visible, and that
+package's tests already assert against shipped config, so this is consistent. The
+script path from there is `filepath.Join("..", "..", "config", "hooks", "k8s-validate.py")`.
+
 ```go
-// The script reimplements the compound-splitting that
-// core/permissions/match_bash.go already does in Go. That duplication is
-// accepted (see the spec, §3), so it is pinned: both must segment the same
-// corpus identically.
+// The script reimplements the compound-splitting that match_bash.go already does
+// in Go. That duplication is accepted (see the spec, §3), so it is pinned: both
+// must segment the same corpus identically.
 func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
 	corpus := []string{
 		"kubectl get pods && kubectl delete pod x",
@@ -2090,7 +2098,7 @@ func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
 	}
 	for _, cmd := range corpus {
 		got := pySegments(t, cmd)
-		want := permissions.SplitCompoundForTest(cmd)
+		want := splitCompound(cmd)
 		if len(got) != len(want) {
 			t.Fatalf("%q: python segments %v, go segments %v", cmd, got, want)
 		}
@@ -2103,15 +2111,11 @@ func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
 }
 ```
 
-**Note for the implementer:** two pieces are needed. (1) `pySegments` — run
-`python3 -c` importing the script and printing `json.dumps(segments(cmd))`; add a
-`if __name__` guard so importing does not execute `main` (already the case). (2)
-`splitCompound` is unexported in `core/permissions`; export a thin test seam
-(`func SplitCompoundForTest(cmd string) []string { return splitCompound(cmd) }`
-in a new `core/permissions/export_test_seam.go`, in package `permissions`, **not**
-a `_test.go` file, so `packaging` can import it). If the maintainer prefers not to
-widen that API, put this test in `core/permissions/` instead and shell out to
-python from there.
+**`pySegments`** is the only helper you need to write: run `python3 -c` with a
+snippet that imports the script by path (`importlib.util.spec_from_file_location`)
+and prints `json.dumps(segments(cmd))`, then unmarshal that. The script's
+`if __name__ == "__main__"` guard means importing it does not run `main`. Skip the
+test when `python3` is not on PATH.
 
 - [ ] **Step 6: Run and commit**
 
