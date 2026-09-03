@@ -178,8 +178,6 @@ func spawnLabel(name, id string) string {
 	return id
 }
 
-// drainSpawns materialises every session the leader requested via spawn_session
-// during the just-finished exchange on parentID. Each new session inherits the
 // forgetSessionState drops the transient, in-memory per-session stores for id:
 // steering notes, hook attempt counters, reviewer verdicts, and any pending
 // route/spawn directive. Called on session delete AND archive so a session
@@ -264,6 +262,8 @@ func deleteSession(d serverDeps, id string) bool {
 	return true
 }
 
+// drainSpawns materialises every session the leader requested via spawn_session
+// during the just-finished exchange on parentID. Each new session inherits the
 // parent's working directory and, when given a task, auto-runs it in the
 // background. Uses the server root context so a client disconnect / Stop on the
 // parent turn never cancels the spawn.

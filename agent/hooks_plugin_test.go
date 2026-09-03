@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
+	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/hookstate"
 )
@@ -181,5 +184,73 @@ func TestHookCallbacksRecordBlockedAndAllowedOutcomes(t *testing.T) {
 	}
 	if _, cons := state.Attempt(sid, toolName, args); cons != 0 {
 		t.Fatalf("consecutive after an allowed call = %d, want 0 (reset)", cons)
+	}
+}
+
+// The record-to-read join: a verdict recorded through the tool's store must reach
+// the hook's stdin under the SAME session key. Both sides resolve the session with
+// realSessionID; this fails if that ever stops being true.
+func TestRecordedAttestationReachesTheHookInput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hook exec assumes a POSIX /bin/sh")
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "hooks.json")
+	toolName := "Bash"
+	body := `{"hooks":{"PreToolUse":[{"matcher":"^` + toolName + `$","hooks":[{"command":"cat > input.json"}]}]}}`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := hooks.NewReloader(cfgPath, nil)
+	state := hookstate.New()
+	store := attest.New()
+
+	sid := "attest-session"
+	args := map[string]any{"command": "kubectl apply -f manifest.yaml"}
+	subject := hookstate.HashArgs(args)
+	store.Record(sid, subject, attest.VerdictApproved, "helm-owned check passed")
+
+	before, _ := hookToolCallbacks(engine, nil, state, store, false)
+	if before == nil {
+		t.Fatal("hookToolCallbacks returned a nil BeforeToolCallback")
+	}
+
+	// The hook command runs with the tool context's cwd as its working
+	// directory (see beforeTool: cwd := fstools.CwdForContext(tc)), so
+	// `cat > input.json` lands in dir — planted via fstools.WithCwd exactly
+	// like a real invocation context carries it.
+	tc := hookTestCtx{
+		ctx:       fstools.WithCwd(context.Background(), dir),
+		sessionID: sid,
+		agentName: "test-agent",
+	}
+	if _, err := before(tc, hookTestTool{name: toolName}, args); err != nil {
+		t.Fatalf("beforeTool: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "input.json"))
+	if err != nil {
+		t.Fatalf("read captured hook stdin: %v", err)
+	}
+	var captured map[string]any
+	if err := json.Unmarshal(raw, &captured); err != nil {
+		t.Fatalf("unmarshal captured hook stdin: %v (raw: %s)", err, raw)
+	}
+
+	// A wrong SESSION key would make this an empty map — assert it isn't, so
+	// that failure mode is distinguishable from a wrong SUBJECT key below.
+	attestations, ok := captured["attestations"].(map[string]any)
+	if !ok || len(attestations) == 0 {
+		t.Fatalf("captured input has no attestations for session %q (wrong session key?): %v", sid, captured)
+	}
+
+	// A wrong SUBJECT key would make the entry for `subject` missing even
+	// though the map itself is non-empty.
+	rec, ok := attestations[subject].(map[string]any)
+	if !ok {
+		t.Fatalf("attestations has no entry for subject %q (wrong subject key?): %v", subject, attestations)
+	}
+	if rec["verdict"] != string(attest.VerdictApproved) {
+		t.Fatalf("attestations[%q].verdict = %v, want %q", subject, rec["verdict"], attest.VerdictApproved)
 	}
 }
