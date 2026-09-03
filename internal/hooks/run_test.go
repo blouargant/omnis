@@ -210,11 +210,17 @@ func TestDenyBeatsAsk(t *testing.T) {
 
 // And Ask must win over Allow, or a permissive hook would silently cancel a
 // guard hook's escalation.
+//
+// THE ORDER MATTERS AND MUST STAY [ask, allow]. With [allow, ask] this test is
+// vacuous: `allow` runs first while Decision is still Proceed, so the amended
+// `!= DecisionAsk` clause is never evaluated against Ask, and `ask` then wins via
+// its own unrelated `!= DecisionBlock` guard — reverting the allow guard would not
+// fail the test. Ask-then-allow is what actually exercises the new clause.
 func TestAskBeatsAllow(t *testing.T) {
 	skipOnWindows(t)
 	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
-		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"},
-		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"}
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"},
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"}
 	]}]}}`))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -222,5 +228,38 @@ func TestAskBeatsAllow(t *testing.T) {
 	out := cfg.Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, t.TempDir(), 10*time.Second)
 	if out.Decision != DecisionAsk {
 		t.Fatalf("decision = %v, want DecisionAsk (ask must win over allow)", out.Decision)
+	}
+}
+
+// Bundled test: also cover [deny, ask] order to test the ask case's own guard.
+func TestDenyBeatsAskReversed(t *testing.T) {
+	skipOnWindows(t)
+	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"never\"}}'"},
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"unsure\"}}'"}
+	]}]}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	out := cfg.Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, t.TempDir(), 10*time.Second)
+	if out.Decision != DecisionBlock {
+		t.Fatalf("decision = %v, want DecisionBlock (deny must win over ask, even when deny runs first)", out.Decision)
+	}
+}
+
+// The legacy decision protocol must also respect ask: a hook using the modern
+// permissionDecision="ask" must not be downgraded by a legacy decision="approve".
+func TestAskBeatsLegacyApprove(t *testing.T) {
+	skipOnWindows(t)
+	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"},
+		{"command":"echo '{\"decision\":\"approve\"}'"}
+	]}]}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	out := cfg.Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, t.TempDir(), 10*time.Second)
+	if out.Decision != DecisionAsk {
+		t.Fatalf("decision = %v, want DecisionAsk (legacy approve must not downgrade ask)", out.Decision)
 	}
 }

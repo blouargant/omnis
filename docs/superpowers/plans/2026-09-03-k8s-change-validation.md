@@ -506,11 +506,17 @@ func TestDenyBeatsAsk(t *testing.T) {
 
 // And Ask must win over Allow, or a permissive hook would silently cancel a
 // guard hook's escalation.
+//
+// THE ORDER MATTERS AND MUST STAY [ask, allow]. With [allow, ask] this test is
+// vacuous: `allow` runs first while Decision is still Proceed, so the amended
+// `!= DecisionAsk` clause is never evaluated against Ask, and `ask` then wins via
+// its own unrelated `!= DecisionBlock` guard — reverting the allow guard would not
+// fail the test. Ask-then-allow is what actually exercises the new clause.
 func TestAskBeatsAllow(t *testing.T) {
 	skipOnWindows(t)
 	cfg, err := Parse([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
-		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"},
-		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"}
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"check\"}}'"},
+		{"command":"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"}
 	]}]}}`))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -569,6 +575,28 @@ In `applyJSONOutput`, replace the `switch strings.ToLower(hs.PermissionDecision)
 			}
 		}
 ```
+
+**And the sibling legacy switch, a few lines below, needs the same guard.** `applyJSONOutput`
+has a *second* path to the same `Outcome` — the top-level `decision` field (`approve`/`block`),
+the older Claude Code protocol. Its `approve` case guards only against `DecisionBlock`, so a
+hook using the legacy protocol can downgrade another hook's `ask` to `allow` — the exact
+failure the aggregation rule exists to prevent, reached through the other protocol. Amend it:
+
+```go
+	case "approve":
+		if out.Decision != DecisionBlock && out.Decision != DecisionAsk && event == PreToolUse {
+			out.Decision = DecisionAllow
+		}
+```
+
+and cover it with a test in the same shape as `TestAskBeatsAllow`, whose first hook emits
+`hookSpecificOutput.permissionDecision: "ask"` and whose second emits the legacy
+`{"decision":"approve"}`, asserting the outcome stays `DecisionAsk`.
+
+**Also update `Run()`'s own doc comment** (`internal/hooks/run.go`, the "Aggregation:" paragraph).
+It describes only deny/allow and still says non-zero exits and timeouts "do not stop the turn",
+which Task 1 made conditional on `fail_closed`. One rewrite should now state both: the full
+`Block > Ask > Allow > Proceed` order, and the `fail_closed` exception.
 
 - [ ] **Step 4: Run to verify they pass**
 

@@ -103,12 +103,18 @@ func (o Outcome) Asks() bool { return o.Decision == DecisionAsk }
 // Code's protocol. cwd is the working directory for the commands (and the hook
 // input's "cwd"); defaultTimeout applies when a command sets none.
 //
-// Aggregation: any deny/block (exit 2, decision="block", permissionDecision=
-// "deny") yields DecisionBlock with the first reason. An explicit
-// permissionDecision="allow" (and no deny) yields DecisionAllow. additionalContext
-// fragments are joined with blank lines. Non-blocking command errors (exit codes
-// other than 0/2, timeouts, safety-floor blocks) are logged to stderr and do not
-// stop the turn — matching Claude Code, only exit code 2 is treated as blocking.
+// Aggregation across matched hooks: Block > Ask > Allow > Proceed. Any deny/block
+// (exit 2, decision="block", permissionDecision="deny") yields DecisionBlock with
+// the first reason. A permissionDecision="ask" or legacy decision="approve" (with
+// no deny) yields DecisionAsk or DecisionAllow respectively — but ask wins over
+// allow, so a permissive hook never cancels another's escalation to user input.
+// additionalContext fragments are joined with blank lines.
+//
+// Non-blocking command errors (exit codes other than 0/2, timeouts, safety-floor
+// blocks) are logged to stderr and do not stop the turn, EXCEPT when a command
+// opts in via fail_closed — then any non-zero/timeout/blocked result yields
+// DecisionBlock instead. The fail_closed flag lets a command enforce its own
+// contract and refuse to be ignored.
 func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd string, defaultTimeout time.Duration) Outcome {
 	cmds := c.Match(event, subject)
 	out := Outcome{Decision: DecisionProceed}
@@ -271,7 +277,7 @@ func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]stri
 			out.Reason = jo.Reason
 		}
 	case "approve":
-		if out.Decision != DecisionBlock && event == PreToolUse {
+		if out.Decision != DecisionBlock && out.Decision != DecisionAsk && event == PreToolUse {
 			out.Decision = DecisionAllow
 		}
 	}
