@@ -1688,6 +1688,38 @@ Update both call sites (`agent/squad.go` and `buildHooksPlugin`) to pass
 `(*Store).For` is nil-safe (it returns an empty map), so a build without the
 store is unaffected.
 
+- [ ] **Step 5b: Pin the record-to-read join end to end**
+
+This is the join the whole design rests on: the tool records a verdict keyed by
+session, and the hook callback reads it back by session. Both sides use
+`realSessionID`, so they agree *by construction* — but nothing fails if a future
+refactor renames or reorders that variable in `beforeTool`. Pin it.
+
+The scaffolding already exists: `agent/hooks_plugin_test.go` has the
+`hookTestCtx`/`hookTestTool` stubs from the previous task, and `hooks.Command`
+runs through a shell, so a hook whose command is `cat > input.json` (with the
+test's temp dir as the run cwd) captures the exact stdin the engine produced.
+
+Add to `agent/hooks_plugin_test.go`:
+
+```go
+// The record-to-read join: a verdict recorded through the tool's store must reach
+// the hook's stdin under the SAME session key. Both sides resolve the session with
+// realSessionID; this fails if that ever stops being true.
+func TestRecordedAttestationReachesTheHookInput(t *testing.T) {
+	// - dir := t.TempDir(); build a hooks config whose PreToolUse command is
+	//   `cat > input.json`, matching the stub tool's name
+	// - store := attest.New(); store.Record(sid, subject, attest.VerdictApproved, "ok")
+	//   using the same sid the stub context reports and a subject from hookstate.HashArgs
+	// - invoke beforeTool with that context and those args
+	// - read dir/input.json, json.Unmarshal it, and assert
+	//   input["attestations"][subject]["verdict"] == "APPROVED"
+}
+```
+
+Write the body out fully. Assert on the **subject key** as well as the verdict, so
+a wrong session key (empty map) and a wrong subject key are both caught.
+
 - [ ] **Step 6: Run to verify it passes**
 
 Run: `go build ./... && go test ./agent/... ./internal/attest/... -v`
