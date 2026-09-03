@@ -49,6 +49,11 @@ packaging/pip/build/
 packaging/pip/**/*.egg-info/
 dist/wheels/
 
+# Python bytecode caches (e.g. from running config/hooks/k8s-validate.py
+# directly or importing it from core/permissions/bash_split_parity_test.go)
+__pycache__/
+*.pyc
+
 # stray build artifact (was committed by mistake)
 yoke
 .playwright-mcp/
