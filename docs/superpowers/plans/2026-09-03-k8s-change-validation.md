@@ -1045,9 +1045,12 @@ const (
 // unanswered card is ended by a Stop / session end / shutdown but survives a
 // mere client disconnect, so a backgrounded tab keeps the question pending.
 //
-// With no registry (a CLI one-shot, an example binary) it denies: nobody is
-// going to authorise the call, and proceeding unvalidated is the one outcome the
-// guard exists to prevent.
+// With no registry it denies: nobody is going to authorise the call, and
+// proceeding unvalidated is the one outcome the guard exists to prevent. Note
+// this is a caller-passes-nil case only — every shipped surface builds a registry
+// (Infrastructure sets AskUserRegistry unconditionally), so in practice it is
+// reached from tests and embedders, NOT from a CLI one-shot. A real CLI run has a
+// registry and therefore waits on the question rather than auto-denying.
 func askHookPermission(ctx context.Context, reg *askuser.Registry, sid, toolName, reason string) bool {
 	if reg == nil {
 		return false
@@ -1173,6 +1176,43 @@ and `buildPlugins`' `buildHooksPlugin(hooksEngine, isRouterSquad)` call gains
 Finally, wherever `Infrastructure` already drops per-session state on session end
 (grep `SteerStore.Forget` / `Budget.Forget` in `agent/` and `server/`), add
 `HookState.Forget(sid)` alongside.
+
+- [ ] **Step 7b: Pin the two invariants of the wiring**
+
+Nothing currently constructs the callback pair with a real store, so the no-op
+ordering and the outcome matrix are unasserted. Both are cheap to pin: `tool.Tool`
+is a **three-method** interface (`Name`, `Description`, `IsLongRunning`), and this
+very package already stubs an `adk.ToolContext` by embedding — see `cancelCtx` in
+`agent/concurrent_agent_tool_test.go:187`. Follow that pattern.
+
+Add to `agent/hooks_plugin_test.go`:
+
+```go
+// The no-op contract, pinned. With a PreToolUse matcher that does not match this
+// tool, the callback must return BEFORE touching the counter store — otherwise
+// every Bash call in the fleet mutates a map on a build with no relevant hooks.
+func TestHookCallbacksLeaveTheStoreUntouchedWhenNoHookMatches(t *testing.T) {
+	// engine with a PreToolUse matcher for some OTHER tool name
+	// state := hookstate.New()
+	// before, _ := ... assert Attempt on a probe key is 1
+	// invoke beforeTool with a stub tool whose Name() does not match
+	// assert the store's counters are unchanged
+}
+
+// The consecutive counter is what makes escalation possible: advanced on a block,
+// reset on anything else. Drift here fires the escalation early or never.
+func TestHookCallbacksRecordBlockedAndAllowedOutcomes(t *testing.T) {
+	// matching hook that exits 2 -> expect consecutive to advance
+	// matching hook that exits 0 -> expect consecutive to reset
+}
+```
+
+Write the bodies out fully — the sketches above name the assertions, not the code.
+**If the `adk.ToolContext` stub proves genuinely infeasible**, do not burn the round
+on it: fall back to a source-text guard asserting that in `agent/hooks_plugin.go`
+the `state.Attempt(` call appears after the `len(cfg.Match(` early return (the
+technique `TestRootPluginOrderMountsHooksBeforePermissions` already uses), and say
+in your report which route you took and why.
 
 - [ ] **Step 8: Verify the whole build and suite**
 
