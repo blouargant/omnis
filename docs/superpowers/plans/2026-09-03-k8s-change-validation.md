@@ -2181,32 +2181,26 @@ def raw_classify(segment):
     so an `apply` later in the command line is its own segment.
     """
     argv = _strip_wrappers(segment.split())
-    return classify(argv) if argv else (None, None, -1)
+    return classify(argv) if argv else (None, None)
 
 
 def classify(argv):
-    """Return (tool, verb, verb_index) for a kubectl/helm invocation.
+    """Return (tool, verb) for a kubectl/helm invocation, else (None, None).
 
-    Returns (None, None, -1) when this is not one. Global flags may precede the
-    verb. Only flags known to take a SEPARATE value consume the following token;
-    every other flag is boolean, so a bare global like -A or --debug cannot
-    swallow the verb.
-
-    The INDEX is returned because the validators need the operands that follow the
-    verb, and a fixed slice like argv[2:] is wrong the moment a global flag
-    precedes it — `helm --debug uninstall myrel` would take "uninstall" as the
-    release name. One walk, one source of truth for where the verb is.
+    Global flags may precede the verb. Only flags known to take a SEPARATE value
+    consume the following token; every other flag is boolean, so a bare global
+    like -A or --debug cannot swallow the verb.
     """
     if not argv:
-        return None, None, -1
+        return None, None
     binary = argv[0].split("/")[-1]
     if binary not in ("kubectl", "helm"):
-        return None, None, -1
+        return None, None
     i = 1
     while i < len(argv):
         tok = argv[i]
         if not tok.startswith("-"):
-            return binary, tok, i
+            return binary, tok
         if "=" in tok:
             i += 1
             continue
@@ -2214,12 +2208,7 @@ def classify(argv):
             i += 2
             continue
         i += 1
-    return binary, None, -1
-
-
-def operands(argv, verb_idx):
-    """Everything after the verb: the resource or release operands and their flags."""
-    return argv[verb_idx + 1:] if verb_idx >= 0 else []
+    return binary, None
 
 
 def is_read_only(tool, verb):
@@ -2258,7 +2247,7 @@ def main():
         argv = tokenise(segment)
         if argv is None:
             if looks_like_k8s_invocation(segment):
-                rtool, rverb, _ = raw_classify(segment)
+                rtool, rverb = raw_classify(segment)
                 if rtool and rverb and is_read_only(rtool, rverb):
                     # A redirect on a read is not this guard's business.
                     continue
@@ -2269,7 +2258,7 @@ def main():
                     attempt, consecutive,
                 )
             continue
-        tool, verb, verb_idx = classify(argv)
+        tool, verb = classify(argv)
         if tool is None or verb is None:
             # Fail closed on identification: a segment that looks like a
             # kubectl/helm invocation whose verb we cannot read is refused, not
@@ -2284,12 +2273,12 @@ def main():
             continue
         if is_read_only(tool, verb):
             continue
-        validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations)
+        validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations)
 
     proceed()
 
 
-def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
+def validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations):
     """Validate one mutating segment. Filled in by Task 9."""
     refuse("Validation for `%s %s` is not implemented yet." % (tool, verb), attempt, consecutive)
 
@@ -2516,6 +2505,62 @@ hash must match `hookstate.HashArgs`, so compute it by calling that function:
 
 Run: `go test ./packaging/ -run 'Diff|DryRun|Delete|Cleaner|Editor|Production' -v`
 Expected: FAIL — `validate` is still the Task 8 stub.
+
+- [ ] **Step 2b: Teach `classify` where the verb is, and stop slicing from a fixed index**
+
+The validators below need the operands that FOLLOW the verb. A fixed slice like
+`argv[2:]` is wrong the moment a global flag precedes the verb — for
+`helm --debug uninstall myrel`, `argv[2]` is `uninstall`, so the release name would
+be read as "uninstall" and the `helm history` pre-check would query a release that
+does not exist. This is the same class of assumption whose sibling was a Critical
+finding in the previous task (a bare `-A` swallowing the verb), so it is fixed the
+same way: one walk, one source of truth for where the verb is.
+
+Change `classify` in `config/hooks/k8s-validate.py` to return the index as well,
+add a small accessor beside it, and update the call sites:
+
+```python
+def classify(argv):
+    """Return (tool, verb, verb_index) for a kubectl/helm invocation.
+
+    Returns (None, None, -1) when this is not one. Global flags may precede the
+    verb. Only flags known to take a SEPARATE value consume the following token;
+    every other flag is boolean, so a bare global like -A or --debug cannot
+    swallow the verb.
+
+    The INDEX is returned because the validators need the operands after the verb,
+    and a fixed slice is wrong the moment a global flag precedes it.
+    """
+    if not argv:
+        return None, None, -1
+    binary = argv[0].split("/")[-1]
+    if binary not in ("kubectl", "helm"):
+        return None, None, -1
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if not tok.startswith("-"):
+            return binary, tok, i
+        if "=" in tok:
+            i += 1
+            continue
+        if tok in VALUE_FLAGS and i + 1 < len(argv):
+            i += 2
+            continue
+        i += 1
+    return binary, None, -1
+
+
+def operands(argv, verb_idx):
+    """Everything after the verb: the resource or release operands and their flags."""
+    return argv[verb_idx + 1:] if verb_idx >= 0 else []
+```
+
+Three call sites follow: `raw_classify`'s empty-argv return becomes
+`(None, None, -1)`; `main` unpacks `tool, verb, verb_idx = classify(argv)` and its
+`rtool, rverb, _ = raw_classify(segment)`; and `validate` gains `verb_idx` after
+`argv`. Run the previous task's `TestDecisionForCommandShapes` after this change —
+it must still pass unchanged, since none of the decisions move.
 
 - [ ] **Step 3: Implement the validators**
 
