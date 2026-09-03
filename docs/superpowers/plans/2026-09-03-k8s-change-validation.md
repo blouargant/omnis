@@ -2181,26 +2181,32 @@ def raw_classify(segment):
     so an `apply` later in the command line is its own segment.
     """
     argv = _strip_wrappers(segment.split())
-    return classify(argv) if argv else (None, None)
+    return classify(argv) if argv else (None, None, -1)
 
 
 def classify(argv):
-    """Return (tool, verb) for a kubectl/helm invocation, else (None, None).
+    """Return (tool, verb, verb_index) for a kubectl/helm invocation.
 
-    Global flags may precede the verb. Only flags known to take a SEPARATE value
-    consume the following token; every other flag is boolean, so a bare global
-    like -A or --debug cannot swallow the verb.
+    Returns (None, None, -1) when this is not one. Global flags may precede the
+    verb. Only flags known to take a SEPARATE value consume the following token;
+    every other flag is boolean, so a bare global like -A or --debug cannot
+    swallow the verb.
+
+    The INDEX is returned because the validators need the operands that follow the
+    verb, and a fixed slice like argv[2:] is wrong the moment a global flag
+    precedes it — `helm --debug uninstall myrel` would take "uninstall" as the
+    release name. One walk, one source of truth for where the verb is.
     """
     if not argv:
-        return None, None
+        return None, None, -1
     binary = argv[0].split("/")[-1]
     if binary not in ("kubectl", "helm"):
-        return None, None
+        return None, None, -1
     i = 1
     while i < len(argv):
         tok = argv[i]
         if not tok.startswith("-"):
-            return binary, tok
+            return binary, tok, i
         if "=" in tok:
             i += 1
             continue
@@ -2208,7 +2214,12 @@ def classify(argv):
             i += 2
             continue
         i += 1
-    return binary, None
+    return binary, None, -1
+
+
+def operands(argv, verb_idx):
+    """Everything after the verb: the resource or release operands and their flags."""
+    return argv[verb_idx + 1:] if verb_idx >= 0 else []
 
 
 def is_read_only(tool, verb):
@@ -2247,7 +2258,7 @@ def main():
         argv = tokenise(segment)
         if argv is None:
             if looks_like_k8s_invocation(segment):
-                rtool, rverb = raw_classify(segment)
+                rtool, rverb, _ = raw_classify(segment)
                 if rtool and rverb and is_read_only(rtool, rverb):
                     # A redirect on a read is not this guard's business.
                     continue
@@ -2258,7 +2269,7 @@ def main():
                     attempt, consecutive,
                 )
             continue
-        tool, verb = classify(argv)
+        tool, verb, verb_idx = classify(argv)
         if tool is None or verb is None:
             # Fail closed on identification: a segment that looks like a
             # kubectl/helm invocation whose verb we cannot read is refused, not
@@ -2273,12 +2284,12 @@ def main():
             continue
         if is_read_only(tool, verb):
             continue
-        validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations)
+        validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations)
 
     proceed()
 
 
-def validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations):
+def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
     """Validate one mutating segment. Filled in by Task 9."""
     refuse("Validation for `%s %s` is not implemented yet." % (tool, verb), attempt, consecutive)
 
@@ -2587,7 +2598,7 @@ def check_attested(argv, attestations, attempt, consecutive, subject):
 def validate_manifest(argv, cwd, attempt, consecutive):
     path = flag_value(argv, "-f", "--filename")
     if not path:
-        return validate_imperative(argv, cwd, attempt, consecutive)
+        return validate_imperative(argv, "apply", cwd, attempt, consecutive)
     code, out, err = run_argv([argv[0], "diff", "-f", path] + scope_flags(argv), cwd)
     # exit 1 means "a diff exists" — the normal case. Only >1 is an error.
     if code > 1:
@@ -2610,28 +2621,29 @@ def scope_flags(argv):
     return flags
 
 
-def validate_imperative(argv, cwd, attempt, consecutive):
+def validate_imperative(argv, verb, cwd, attempt, consecutive):
     code, out, err = run_argv(argv + ["--dry-run=server"], cwd)
     if code != 0:
         text = (err or out).strip()
         if "unknown flag" in text or "unknown shorthand" in text:
             refuse("`%s` does not support a server-side dry run, so this change cannot be "
                    "validated as written. Express it as a manifest and apply that file "
-                   "instead." % " ".join(argv[:2]), attempt, consecutive)
+                   "instead." % ("%s %s" % (argv[0], verb)), attempt, consecutive)
         refuse("The API server rejected this change in a dry run:\n\n%s" % text,
                attempt, consecutive)
     return out.strip()
 
 
-def validate_helm(verb, argv, cwd, attempt, consecutive):
+def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
+    ops = operands(argv, verb_idx)
     if verb in HELM_DESTRUCTIVE_VERBS:
-        code, out, err = run_argv(["helm", "history"] + argv[2:3] + scope_flags(argv), cwd)
+        code, out, err = run_argv(["helm", "history"] + ops[:1] + scope_flags(argv), cwd)
         if code != 0:
             refuse("No such Helm release, so `helm %s` cannot be validated:\n\n%s"
                    % (verb, (err or out).strip()), attempt, consecutive)
         return out.strip()
     code, _, _ = run_argv(["helm", "plugin", "list"], cwd)
-    preview = ["helm", "diff", "upgrade"] + argv[2:] if code == 0 else argv + ["--dry-run=server"]
+    preview = ["helm", "diff", "upgrade"] + ops if code == 0 else argv + ["--dry-run=server"]
     code, out, err = run_argv(preview, cwd)
     if code != 0:
         refuse("The Helm change could not be previewed:\n\n%s" % ((err or out).strip()),
@@ -2639,12 +2651,13 @@ def validate_helm(verb, argv, cwd, attempt, consecutive):
     return out.strip()
 
 
-def validate_destructive(argv, agent, cwd, attempt, consecutive):
-    if has_flag(argv, "--all") or not [a for a in argv[2:] if not a.startswith("-")]:
+def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
+    ops = operands(argv, verb_idx)
+    if has_flag(argv, "--all") or not [a for a in ops if not a.startswith("-")]:
         refuse("This deletion names no specific resource, so its blast radius is "
                "unbounded. Name the resources to delete explicitly.", attempt, consecutive)
-    # argv[2:] already carries -n/--context, so scope_flags would duplicate them.
-    code, out, _ = run_argv([argv[0], "get"] + argv[2:] + ["-o", "json"], cwd)
+    # ops already carries -n/--context, so scope_flags would duplicate them.
+    code, out, _ = run_argv([argv[0], "get"] + ops + ["-o", "json"], cwd)
     if code != 0:
         refuse("The deletion target could not be resolved, so it cannot be checked. "
                "Verify the resource exists before deleting it.", attempt, consecutive)
@@ -2668,16 +2681,16 @@ def validate_destructive(argv, agent, cwd, attempt, consecutive):
     return "%d resource(s) would be deleted." % max(len(items), 1)
 
 
-def validate(tool, verb, argv, agent, cwd, attempt, consecutive, attestations):
+def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
     check_production(argv, attempt, consecutive)
     if tool == "helm":
-        preview = validate_helm(verb, argv, cwd, attempt, consecutive)
+        preview = validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive)
     elif verb in DESTRUCTIVE_VERBS:
-        preview = validate_destructive(argv, agent, cwd, attempt, consecutive)
+        preview = validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive)
     elif verb in APPLY_VERBS:
         preview = validate_manifest(argv, cwd, attempt, consecutive)
     elif verb in IMPERATIVE_VERBS:
-        preview = validate_imperative(argv, cwd, attempt, consecutive)
+        preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
     else:
         refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
                "rather than applied unchecked." % (tool, verb), attempt, consecutive)
