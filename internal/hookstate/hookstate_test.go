@@ -47,6 +47,32 @@ func TestConsecutiveResetsOnASuccessfulCall(t *testing.T) {
 	}
 }
 
+// A nil args map must hash like an empty one: nil encodes as JSON `null`, while
+// the Python hook script always sends an object, so without normalising, a
+// no-argument tool call would never match its own attestation.
+func TestHashArgsTreatsNilLikeEmpty(t *testing.T) {
+	if HashArgs(nil) != HashArgs(map[string]any{}) {
+		t.Fatal("HashArgs(nil) must equal HashArgs(empty) — the Python side always sends an object")
+	}
+	sum := sha256.Sum256([]byte(`{}`))
+	if HashArgs(nil) != hex.EncodeToString(sum[:]) {
+		t.Fatal("HashArgs(nil) must hash the canonical empty object")
+	}
+}
+
+// Forget must clear BOTH counters. A simplification that dropped the second loop
+// would pass every other test in this file, so it gets its own.
+func TestForgetClearsTheConsecutiveCounterToo(t *testing.T) {
+	s := New()
+	s.Attempt("sess", "Bash", map[string]any{"command": "a"})
+	s.RecordOutcome("sess", "Bash", true)
+	s.RecordOutcome("sess", "Bash", true)
+	s.Forget("sess")
+	if _, cons := s.Attempt("sess", "Bash", map[string]any{"command": "b"}); cons != 0 {
+		t.Fatalf("consecutive = %d after Forget, want 0", cons)
+	}
+}
+
 func TestSessionsAreIsolatedAndForgettable(t *testing.T) {
 	s := New()
 	s.Attempt("a", "Bash", map[string]any{"command": "x"})

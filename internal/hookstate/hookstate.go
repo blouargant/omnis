@@ -38,6 +38,15 @@ func New() *Store {
 // number — 1 on the first — together with the consecutive-blocked count
 // accumulated by PREVIOUS calls of that tool.
 //
+// Degrade contract: with no store or no session id it reports (1, 0) on every
+// call, so a hook always sees a brand-new attempt and never escalates. That
+// degrades the ESCALATION, not the blocking: these numbers only ever choose
+// between refusing and asking the user — never between refusing and allowing —
+// so an unwired store means "refuse indefinitely", not "let it through". The
+// opposite choice (reporting a huge count when unwired) was rejected: it would
+// spam the user with a card on every tool call. In practice the store is built
+// unconditionally on Infrastructure, so nil occurs only in tests and examples.
+//
 // The split in update timing is deliberate and cannot be collapsed: an attempt
 // on identical arguments is knowable before the hook runs, whereas a block is
 // only knowable after, so the consecutive count is advanced by RecordOutcome.
@@ -102,12 +111,18 @@ func (s *Store) Forget(sid string) {
 // ever match, and every compound command would be refused as "not reviewed" —
 // a failure that looks intermittent rather than systematic.
 func HashArgs(args map[string]any) string {
+	if args == nil {
+		// A nil map encodes as JSON `null`, but the Python hook script always
+		// receives an object — `{}` for a call with no arguments — so the two
+		// sides would hash differently for exactly that case. Normalise.
+		args = map[string]any{}
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(args); err != nil {
-		// Unmarshalable args cannot be identified, so give every such call its
-		// own bucket rather than colliding them into one.
+		// Unencodable args cannot be identified at all, so they all share one
+		// bucket. Practically unreachable: tool arguments arrive as decoded JSON.
 		return ""
 	}
 	// Encode appends a newline; the Python side produces none.
