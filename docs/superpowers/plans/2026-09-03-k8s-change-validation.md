@@ -1435,7 +1435,6 @@ import (
 	"google.golang.org/adk/tool/functiontool"
 
 	"github.com/blouargant/omnis/core/adk"
-	"github.com/blouargant/omnis/core/events"
 )
 
 type recordIn struct {
@@ -1450,7 +1449,22 @@ type recordOut struct {
 
 // Tools returns the attestation tool set (one tool). Mount it ONLY on a reviewer
 // agent: an agent that can attest its own work has no reviewer.
-func Tools(store *Store) []tool.Tool {
+//
+// sessionOf resolves the USER-FACING session from a tool context, and is injected
+// rather than chosen here for a reason that is easy to get wrong. A reviewer runs
+// as a sub-agent, so its own ctx.SessionID() is an ephemeral agenttool session;
+// a verdict recorded under that id is invisible to the hook, which reads
+// attestations by the real session. The codebase has exactly one correct resolver
+// (agent.realSessionID: steer-session first, then ctx.SessionID()), and attest
+// cannot import agent without a cycle — so the caller passes it in, and both
+// sides of the attestation are keyed by literally the same function.
+//
+// Do NOT substitute events.RootSessionFromContext here: WithRootSession is planted
+// only by the server (server/sse.go, server/mailbox_push.go, server/a2a_server.go)
+// and NOT by the CLI or TUI, so on those surfaces it resolves empty and every
+// Kubernetes mutation would be refused as "not reviewed" — on the one refusal path
+// that deliberately never escalates to the user.
+func Tools(store *Store, sessionOf func(adk.ToolContext) string) []tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
 		Name: "record_validation",
 		Description: "Record your review verdict for one specific change so the host can act on it. " +
@@ -1464,9 +1478,11 @@ func Tools(store *Store) []tool.Tool {
 		if strings.EqualFold(strings.TrimSpace(in.Verdict), string(VerdictApproved)) {
 			v = VerdictApproved
 		}
-		sid := events.RootSessionFromContext(ctx)
+		sid := sessionOf(ctx)
 		if sid == "" {
-			sid = ctx.SessionID()
+			// Loud rather than silent: a verdict with no session to key it under
+			// would be recorded where no hook will ever read it.
+			return recordOut{Result: "Error: no session could be resolved, so the verdict cannot be recorded."}, nil
 		}
 		if strings.TrimSpace(in.Subject) == "" {
 			return recordOut{Result: "Error: subject is required — use the change identifier you were given."}, nil
@@ -1481,12 +1497,18 @@ func Tools(store *Store) []tool.Tool {
 }
 ```
 
-**Note for the implementer:** the session id must be the **user-facing** one, not
-the ephemeral agenttool session a sub-agent runs under, or the hook would never
-see the verdict. `events.RootSessionFromContext` is the mechanism the codebase
-already uses for exactly this (see the cross-session bus guard in `server/sse.go`);
-verify its exact name and signature before writing, and mirror how
-`agent/budget_plugin.go` resolves `realSessionID` if it differs.
+**Session resolution is settled — do not re-decide it.** The controller verified
+which context keys each surface plants: `WithSteerSession` is planted by all three
+surfaces (`server/sse.go:224`, `internal/cli/cli.go:473`,
+`internal/tui/tui.go:1796`), while `WithRootSession` is planted **only by the
+server** (`server/sse.go:229`, `server/mailbox_push.go:461`,
+`server/a2a_server.go:572`). So `events.RootSessionFromContext` would resolve empty
+on CLI and TUI. `agent.realSessionID` reads the steer key first and is the one
+correct resolver; `attest` cannot import `agent` without a cycle, hence the
+injected `sessionOf` parameter. Task 7 passes `realSessionID` in.
+
+Add a test that a nil-ish/empty resolver yields the error result rather than
+recording under an empty key.
 
 - [ ] **Step 5: Run to verify they pass**
 
@@ -1612,7 +1634,9 @@ and mount it as:
 			// Write; this tool is the deliberate, narrow write path). A nil store
 			// (CLI/examples) mounts nothing, so the group is inert there.
 			if attestStore != nil {
-				tools = append(tools, attest.Tools(attestStore)...)
+				// realSessionID is the SAME resolver hookToolCallbacks uses to key
+				// the attestations it reads, so both sides agree by construction.
+				tools = append(tools, attest.Tools(attestStore, realSessionID)...)
 			}
 ```
 
