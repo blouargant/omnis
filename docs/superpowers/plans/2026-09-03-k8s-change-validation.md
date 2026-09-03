@@ -897,6 +897,7 @@ func awaitPending(t *testing.T, reg *askuser.Registry, sid string) askuser.Quest
 	t.Fatal("no pending question appeared within 2s")
 	return askuser.Question{}
 }
+```
 
 - [ ] **Step 3: Run to verify it fails**
 
@@ -1437,10 +1438,8 @@ Expected: FAIL — the `attest` group is unknown, so no `record_validation` tool
 
 - [ ] **Step 4: Add the tool group**
 
-In `agent/agent.go`'s tool-group switch, beside `case "settings":`:
-
-```go
-(the code is in the note below — it depends on a signature change)
+In `agent/agent.go`'s tool-group switch, beside `case "settings":`. The exact code
+is in the note below, because it depends on a signature change:
 
 **Threading the store — decided, do not re-litigate.** `toolsForAgentConfig`
 receives `runtime RuntimeSettings`, which holds only config-derived values (it has
