@@ -23,9 +23,12 @@ const (
 // unanswered card is ended by a Stop / session end / shutdown but survives a
 // mere client disconnect, so a backgrounded tab keeps the question pending.
 //
-// With no registry (a CLI one-shot, an example binary) it denies: nobody is
-// going to authorise the call, and proceeding unvalidated is the one outcome the
-// guard exists to prevent.
+// With no registry it denies: nobody is going to authorise the call, and
+// proceeding unvalidated is the one outcome the guard exists to prevent. Note
+// this is a caller-passes-nil case only — every shipped surface builds a registry
+// (Infrastructure sets AskUserRegistry unconditionally), so in practice it is
+// reached from tests and embedders, NOT from a CLI one-shot. A real CLI run has a
+// registry and therefore waits on the question rather than auto-denying.
 func askHookPermission(ctx context.Context, reg *askuser.Registry, sid, toolName, reason string) bool {
 	if reg == nil {
 		return false

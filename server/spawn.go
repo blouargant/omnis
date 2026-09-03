@@ -184,10 +184,10 @@ func spawnLabel(name, id string) string {
 // steering notes, hook attempt counters, and any pending route/spawn directive.
 // Called on session delete AND archive so a session that is merely set aside
 // doesn't leave stranded notes, counters, or directives behind on the
-// process-wide registries. It intentionally does NOT
-// touch the goal store — a goal is persisted and meant to resume on unarchive /
-// restart, so goal removal is scoped to the (permanent) delete path. Safe to
-// call with nil components (each guards internally).
+// process-wide registries. It intentionally does NOT touch the goal store — a
+// goal is persisted and meant to resume on unarchive / restart, so goal removal
+// is scoped to the (permanent) delete path. Safe to call with nil components
+// (each guards internally).
 func forgetSessionState(d serverDeps, id string) {
 	if d.SteerStore != nil {
 		d.SteerStore.Forget(id)
