@@ -5109,7 +5109,7 @@ calls) and both maps are cleared on session delete.
 `ask_user` questions for a session render as a **single multi-step wizard
 card** in the pane's `#ask-user-slot` (above the composer), not a stack of
 separate cards. The model lives in [web/app.js](web/app.js): `askWizards`
-(sessionId → wizard `{ row, card, steps, current, busy, _submit }`) plus
+(sessionId → wizard `{ row, card, steps, current, collapsed, busy, _submit }`) plus
 `pendingAskWidgets` (questionId → `{ sessionId }`, so a server `ask_user_cancel`
 can find the owning wizard). Each **step** is either `{type:"single", q,
 resolved, answer}` or `{type:"group", group, questions[], scopeIdx, resolved,
@@ -5136,6 +5136,35 @@ moved into the transcript). Revisiting a resolved step via the rail shows a
 read-only summary. On tab-hide the wizard requeues only its **unanswered**
 questions into `queuedAskWidgets` and is torn down (rebuilt fresh on reselect);
 session delete clears `askWizards`.
+
+**The card folds to one line.** A pending question sits above the composer and
+can be tall enough to hide the very reply it is asking about, so the card's first
+child is a full-width toggle (`buildWizardHead` → `.ask-wizard-head`: chevron +
+label + an `n/total` counter): clicking it collapses the card to that single line
+— the transcript reclaims the height and stays readable — and clicking again
+reopens it to answer. **Folding toggles a class (`.is-collapsed`, which
+`display:none`s every other child), it does NOT re-render**, so a half-typed
+answer or a picked choice survives the fold; `renderWizard` re-applies the class
+from `wiz.collapsed`, and `finalizeWizard` clears it (a folded class left on the
+resolved card would hide its summary). The label shows the step's title **only
+while folded** — unfolded, the prompt is right below it, so it names the action
+instead. That title (`stepTitle`) is now visible chrome rather than a tooltip, so
+it is localised (`app.askwizard.{collapse,expand,question}`). Two keyboard
+guards: the card-level Enter handler ignores events from the toggle (it is a
+`<button>` — Enter there must fold, not submit) and ignores Enter entirely while
+folded (never answer a question that is not on screen). A question arriving while
+folded **keeps the fold** and refreshes the counter (`refreshWizardRail` swaps the
+head too — it holds no user input, and it must stay the card's first child).
+
+**GOTCHA — `updateAskCardBounds` must charge the transcript's padding to the
+chrome.** The cap is `composerTop − transcriptTop − 12`, but `#transcript` is
+`flex:1; min-height:0` and yields *all* its space to the card except its own
+vertical padding (28px while a card shows), which is part of its box and can
+never collapse. The cap therefore overshot by exactly that much, so a card at the
+cap overflowed `#ask-user-slot` (`overflow-y:auto`) and its bottom — the
+Submit/Skip row — was clipped and scrolled out of reach. Subtracting the measured
+padding fixes it; padding does not depend on the card's height, so it adds no
+measurement feedback loop.
 
 ### Web UI small-screen layout (phone drawer)
 

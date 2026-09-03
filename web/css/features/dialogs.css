@@ -904,6 +904,62 @@
 }
 .ask-user-prompt pre code { background: none; padding: 0; }
 
+/* The card's title line, and its fold toggle: clicking it collapses the card to
+   this single line so the transcript underneath stays readable while a question
+   is pending, and clicking again reopens it to answer. Folding hides every other
+   child rather than re-rendering, so a half-typed answer survives it. */
+.ask-wizard-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.ask-wizard-head:hover { color: var(--text); }
+.ask-wizard-head-chev {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  transform: rotate(90deg); /* expanded by default */
+}
+.ask-wizard-head-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+/* Unfolded, the line names the action rather than repeating the prompt below it,
+   so it recedes to a muted hint instead of reading as a title. */
+.ask-wizard-head-title.is-action {
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.ask-wizard-head:hover .ask-wizard-head-title.is-action { color: var(--text); }
+.ask-wizard-head-count {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ask-user-card.is-collapsed { padding-top: 9px; padding-bottom: 9px; }
+.ask-user-card.is-collapsed > *:not(.ask-wizard-head) { display: none; }
+.ask-user-card.is-collapsed .ask-wizard-head { margin-bottom: 0; }
+.ask-user-card.is-collapsed .ask-wizard-head-chev { transform: rotate(0deg); }
+
 /* Multi-step ask-user wizard: a step rail above the active question body, with
    one clickable chip per step (current highlighted, resolved steps marked). */
 .ask-wizard-rail {

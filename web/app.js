@@ -1245,7 +1245,15 @@ function updateAskCardBounds(panel) {
   if (!pe || !pe.transcript || !pe.composerWrap) return;
   const top = pe.transcript.getBoundingClientRect().top;
   const bottom = pe.composerWrap.getBoundingClientRect().top;
-  const avail = Math.max(120, Math.round(bottom - top - 12));
+  // The transcript is flex:1 with min-height:0, so it yields all its space to the
+  // card — all but its own vertical padding, which is part of its box and can
+  // never collapse. Charge that to the chrome, or the cap overshoots by exactly
+  // that much and the card's bottom (the Submit/Skip row) is clipped by the slot,
+  // which then scrolls it out of reach. Padding doesn't depend on the card's
+  // height, so measuring it introduces no feedback loop.
+  const cs = getComputedStyle(pe.transcript);
+  const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const avail = Math.max(120, Math.round(bottom - top - 12 - pad));
   if (panel._askMaxH === avail) return;
   panel._askMaxH = avail;
   panel.root.style.setProperty("--ask-card-max-h", avail + "px");
@@ -4770,7 +4778,7 @@ function ensureWizard(sessionId, slot) {
   card.className = "ask-user-card ask-wizard-card";
   row.appendChild(card);
   slot.appendChild(row);
-  wiz = { sessionId, row, card, steps: [], current: null, busy: false, _submit: null };
+  wiz = { sessionId, row, card, steps: [], current: null, busy: false, collapsed: false, _submit: null };
   row._askWizard = wiz; // so a tab switch can requeue unanswered questions
   // Enter activates the current step's primary action (submit, or advance on a
   // resolved step). Wired once; the handler reads wiz._submit, which each render
@@ -4778,6 +4786,11 @@ function ensureWizard(sessionId, slot) {
   card.addEventListener("keydown", e => {
     if (e.key !== "Enter" || e.shiftKey) return;
     if (e.target && e.target.tagName === "TEXTAREA") return;
+    // The title line is itself a button: let Enter on it toggle the fold rather
+    // than submit the step hidden behind it. Same for a folded card, whose inputs
+    // aren't on screen — Enter there must never answer unseen.
+    if (e.target && e.target.closest && e.target.closest(".ask-wizard-head")) return;
+    if (wiz.collapsed) return;
     e.preventDefault();
     if (wiz._submit) wiz._submit();
   });
@@ -4824,12 +4837,70 @@ function renderWizard(wiz) {
     wiz.current = i >= 0 ? i : 0;
   }
 
+  card.appendChild(buildWizardHead(wiz));
+  card.classList.toggle("is-collapsed", !!wiz.collapsed);
+
   const rail = buildWizardRail(wiz);
   if (rail) card.appendChild(rail);
 
   const step = steps[wiz.current];
   if (step.type === "group") renderGroupStepBody(wiz, step);
   else renderSingleStepBody(wiz, step);
+}
+
+// buildWizardHead returns the card's title line: a chevron, the current step's
+// title, and a step counter when there are several. The line doubles as the
+// fold toggle, so the card can be collapsed to just this line to read the
+// transcript underneath it, then reopened to answer.
+function buildWizardHead(wiz) {
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "ask-wizard-head";
+  const chev = document.createElement("span");
+  chev.className = "ask-wizard-head-chev";
+  chev.textContent = "\u25B6";
+  head.appendChild(chev);
+  const title = document.createElement("span");
+  title.className = "ask-wizard-head-title";
+  head.appendChild(title); // filled by paintWizardHead (it depends on the fold)
+  if (wiz.steps.length > 1) {
+    const count = document.createElement("span");
+    count.className = "ask-wizard-head-count";
+    count.textContent = (wiz.current + 1) + "/" + wiz.steps.length;
+    head.appendChild(count);
+  }
+  paintWizardHead(wiz, head);
+  head.addEventListener("click", () => setWizardCollapsed(wiz, !wiz.collapsed));
+  return head;
+}
+
+// paintWizardHead syncs the toggle's label + affordances (the chevron itself is
+// rotated by CSS off the card's .is-collapsed class). Folded, the line IS the
+// card, so it carries the step's title; unfolded, the prompt is right below it
+// and repeating it there would only be noise — so it names the action instead.
+function paintWizardHead(wiz, head) {
+  const title = head.querySelector(".ask-wizard-head-title");
+  if (title) {
+    title.textContent = wiz.collapsed ? stepTitle(wiz.steps[wiz.current]) : tr("app.askwizard.collapse");
+    title.classList.toggle("is-action", !wiz.collapsed);
+  }
+  head.setAttribute("aria-expanded", wiz.collapsed ? "false" : "true");
+  head.setAttribute("data-tip", tr(wiz.collapsed ? "app.askwizard.expand" : "app.askwizard.collapse"));
+}
+
+// setWizardCollapsed folds the card to its title line (or unfolds it). It only
+// toggles a class — no re-render — so a half-typed answer or a picked choice
+// survives a fold; the folded card keeps its place above the composer, and the
+// transcript reclaims the freed height.
+function setWizardCollapsed(wiz, collapsed) {
+  wiz.collapsed = !!collapsed;
+  wiz.card.classList.toggle("is-collapsed", wiz.collapsed);
+  const head = wiz.card.querySelector(":scope > .ask-wizard-head");
+  if (head) paintWizardHead(wiz, head);
+  // scrollBottom is a no-op unless the pane was already following the bottom, so
+  // a user reading further up is never yanked down by a fold.
+  const panel = panelsForSession(wiz.sessionId)[0];
+  if (panel) scrollBottom(panel);
 }
 
 // buildWizardRail returns the clickable step rail element, or null when there
@@ -4864,13 +4935,20 @@ function buildWizardRail(wiz) {
 // untouched — used when a new question lands while the user may be mid-answer
 // on the current step, so their typed input / selection survives.
 function refreshWizardRail(wiz) {
+  // The title line carries the step counter, which also moves when a step lands,
+  // and it holds no user input — so swap it wholesale alongside the rail. It must
+  // stay the card's first child (the fold hides everything after it).
+  const oldHead = wiz.card.querySelector(":scope > .ask-wizard-head");
+  const head = buildWizardHead(wiz);
+  if (oldHead) wiz.card.replaceChild(head, oldHead);
+  else wiz.card.insertBefore(head, wiz.card.firstChild);
   const existing = wiz.card.querySelector(":scope > .ask-wizard-rail");
   const rail = buildWizardRail(wiz);
   if (existing) {
     if (rail) wiz.card.replaceChild(rail, existing);
     else existing.remove();
   } else if (rail) {
-    wiz.card.insertBefore(rail, wiz.card.firstChild);
+    wiz.card.insertBefore(rail, head.nextSibling);
   }
 }
 
@@ -4994,7 +5072,7 @@ function renderSingleStepBody(wiz, step) {
   // Focus the selected radio / text input (or the primary button) so Enter
   // works without a prior click — only when this pane is focused.
   const panel = panelsForSession(wiz.sessionId)[0];
-  if (panel && focusedPanelId === panel.id) {
+  if (panel && focusedPanelId === panel.id && !wiz.collapsed) {
     (input.focusEl || nav.submitBtn || card).focus();
   }
 }
@@ -5273,15 +5351,13 @@ function stepSummaryText(step) {
   return "✓ " + summary;
 }
 
-// stepTitle is the rail-chip tooltip: the question prompt (plain-ish, truncated)
-// or a label for a group step.
+// stepTitle is the rail-chip tooltip AND the fold header's title (the only thing
+// a collapsed card shows), so it is localised: the question prompt (plain-ish,
+// truncated) or a label for a group step.
 function stepTitle(step) {
-  if (step.type === "group") {
-    const n = step.questions.length;
-    return "Install " + n + " item" + (n === 1 ? "" : "s");
-  }
+  if (step.type === "group") return trN("app.askuser.installItems", step.questions.length);
   const t = (step.q.prompt || "").replace(/[#*_`>\n]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!t) return "Question";
+  if (!t) return tr("app.askwizard.question");
   return t.length > 80 ? t.slice(0, 80) + "…" : t;
 }
 
@@ -5294,6 +5370,7 @@ function finalizeWizard(wiz) {
     else pendingAskWidgets.delete(step.q.question_id);
   }
   const { row, card, sessionId } = wiz;
+  card.classList.remove("is-collapsed");
   card.classList.add("resolved");
   row.classList.add("resolved");
   while (card.lastChild) card.removeChild(card.lastChild);
