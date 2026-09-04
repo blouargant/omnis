@@ -614,46 +614,55 @@ def local_target_digest(argv, cwd):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _local_chart_dir(argv, verb_idx, cwd):
-    """The Helm chart argument, IF it names a local directory — one
-    containing Chart.yaml, Helm's own chart marker (Helm requires exactly
-    this name; it does not accept "Chart.yml"). Scans every BARE (non-flag)
-    token after the verb rather than trying to identify Helm's [RELEASE]
-    [CHART] positional pair by position: Helm's install/upgrade flags are
-    extensive and many take a separate-token value (`--timeout 5m`, `--set
-    k=v`, …), so knowing which token is a flag's VALUE — as opposed to a
-    genuine positional — would need Helm's own flag-arity table, which is
-    exactly the unbounded enumeration this guard rejects everywhere else (a
-    previous version of this function built one, and it terminally denied
-    ordinary commands carrying any flag outside a small kubectl-oriented
-    set: `--install`, `--set`, `--wait`, `--atomic`, `--timeout`, and others
-    were all refused as "a flag this guard does not recognise", even though
-    a bare `helm upgrade myrel ./chart` was fine).
+def _local_chart_candidates(argv, verb_idx, cwd):
+    """Every BARE token after the verb that could be the Helm chart
+    argument: a directory containing Chart.yaml (Helm's own chart marker —
+    it does not accept "Chart.yml"), or a local packaged chart archive (a
+    ".tgz" file Helm can install directly). Returns a LIST — the caller
+    (helm_content_digest) decides what to do with the count: exactly one
+    candidate is used, zero or more than one both refuse, for different,
+    clearly-labelled reasons.
 
-    Scanning for "does this token happen to be a real chart directory"
-    instead needs no such table: a flag's VALUE (a duration like "5m", a
-    boolean-ish string, a namespace) essentially never also happens to be a
-    path containing a Chart.yaml, so a false match is not a realistic risk,
-    and a token starting with "-" is never even considered — verified
-    directly against `--timeout 5m --set replicas=2 -n demo --atomic`
-    interspersed around the real chart path, which the scan still finds
-    correctly.
+    Skips the value of any KNOWN value-taking flag (VALUE_FLAGS — the same
+    global set kubectl's own verb/operand identification already uses —
+    plus HELM_VALUES_FLAGS) before considering a token a candidate at all.
+    This is what closes a real bypass: a decoy chart directory named as a
+    flag's value was previously read as an operand and, being the FIRST
+    bare token the old scan found, silently replaced the real chart —
+    `helm upgrade --kubeconfig ./decoy myrel ./chart -n demo` bound
+    ./decoy, and rewriting the REAL chart afterwards left the subject
+    unchanged. Reproduced live before this fix (see the fix commit's
+    message) — the same bug CLASS as Task 9's `ops[:1]` (a flag's value
+    read as an operand), which subverb_of's own docstring already warns
+    against elsewhere in this file.
 
-    Returns (raw_token, resolved_path), or (None, None) when no bare token
-    resolves to a chart directory — either this command has no local chart
-    argument at all (should not happen for install/upgrade: mechanical
-    validation would already have failed) or the chart is a NON-local
-    reference (a repo alias like bitnami/nginx, an OCI reference, a packaged
-    .tgz, a URL) — see helm_content_digest for why that refuses rather than
-    falling back to anything.
+    Deliberately NOT a full Helm flag-arity table (the unbounded thing an
+    earlier round wrongly reached for): an UNKNOWN flag's value is still
+    scanned as a candidate, so `--timeout 5m` is safe only because "5m"
+    happens not to resolve to a real chart — it is the CANDIDATE-COUNT rule
+    below (in helm_content_digest), not per-flag knowledge, that makes an
+    unknown flag's value safe in general. VALUE_FLAGS/HELM_VALUES_FLAGS
+    only need to cover the flags that could plausibly precede a genuine
+    chart operand and whose value could plausibly BE a real chart path —
+    --kubeconfig is exactly that shape.
     """
+    known_value_flags = VALUE_FLAGS | set(HELM_VALUES_FLAGS)
+    candidates = []
+    skip_next = False
     for tok in argv[verb_idx + 1:]:
+        if skip_next:
+            skip_next = False
+            continue
         if tok.startswith("-"):
+            if "=" not in tok and tok in known_value_flags:
+                skip_next = True
             continue
         full = os.path.join(cwd or ".", tok)
         if os.path.isfile(os.path.join(full, "Chart.yaml")):
-            return tok, full
-    return None, None
+            candidates.append((tok, full, "dir"))
+        elif tok.endswith(".tgz") and os.path.isfile(full):
+            candidates.append((tok, full, "tgz"))
+    return candidates
 
 
 def helm_content_digest(verb, argv, verb_idx, cwd):
@@ -663,44 +672,65 @@ def helm_content_digest(verb, argv, verb_idx, cwd):
     subchart dependency, since Helm stores a chart's dependencies INSIDE the
     chart directory rather than by reference — the property a kustomization
     lacks, via `resources: [../../base]`, which is why kustomize genuinely
-    needs a render and Helm never did) PLUS the bytes of every -f/--values
-    target (_local_target_digest — identical treatment for both spellings).
+    needs a render and Helm never did) — or, for a local packaged chart
+    (a ".tgz" Helm can install directly), a memoised hash of its own bytes
+    (_file_digest) — PLUS the bytes of every -f/--values target
+    (_local_target_digest — identical treatment for both spellings).
 
     "" for a Helm verb with no chart argument at all (uninstall, rollback —
     release-name-only mutations already identified by argv alone). `--set
     k=v` needs no special handling: its value is literally a token in argv,
     and argv is already part of the subject (see subject_hash) — nothing
-    here parses Helm's flags at all (see _local_chart_dir's docstring for
-    why that is deliberate).
+    here parses Helm's flags at all beyond the KNOWN value-flag skip in
+    _local_chart_candidates (see its own docstring for why that is bounded,
+    not a flag-arity table).
 
-    TERMINALLY refuses (like _resolve_local_path — see its docstring) when
-    the chart argument does not resolve to a LOCAL DIRECTORY: a repo alias,
-    an OCI reference, a packaged .tgz, or a URL can each change server-side,
-    or simply cannot be walked, so there is nothing on this machine to bind
-    — the same "cannot verify, so cannot attest" state a remote -f manifest
-    is in. Told to `helm pull` it locally first, the same shape
-    _resolve_local_path gives for a remote kubectl manifest.
+    TERMINALLY refuses (like _resolve_local_path — see its docstring) in
+    two distinct cases, both because a click past three attempts must not
+    substitute for a review of content this guard could not pin down:
+    - ZERO local candidates: a repo alias, an OCI reference, a non-local
+      .tgz reference, or a URL can each change server-side, or simply
+      cannot be read from here — there is nothing on this machine to bind.
+      Told to `helm pull` it locally first, the same shape
+      _resolve_local_path gives for a remote kubectl manifest.
+    - MORE THAN ONE local candidate: which one Helm would actually use
+      cannot be determined from here — guessing (the previous version of
+      this function picked the FIRST bare token, unconditionally) is
+      exactly what produced the ./decoy bypass above. Refusing as
+      ambiguous is the fail-closed direction; the caller can remove
+      whichever operand is not the real chart and retry.
 
     A previous version of this function rendered via `helm template`
     instead, replaying the command's own flags into it. Retired: proven live
     that the render EXCLUDES crds/ unless --include-crds — while a real
     install/upgrade DOES apply them — so rewriting a CRD's own content left
     the render-based subject unchanged; separately, building the replay
-    argv correctly needed Helm's own flag-arity table (see
-    _local_chart_dir's docstring), which is exactly the unbounded
-    enumeration this guard rejects everywhere else. The walk needs neither a
-    subprocess nor a flag table, and binds crds/ that the render dropped.
+    argv correctly needed Helm's own flag-arity table, which is exactly the
+    unbounded enumeration this guard rejects everywhere else. The walk
+    needs neither a subprocess nor a flag table, and binds crds/ that the
+    render dropped.
     """
     if verb in HELM_DESTRUCTIVE_VERBS:
         return ""
-    _, chart_dir = _local_chart_dir(argv, verb_idx, cwd)
-    if chart_dir is None:
+    candidates = _local_chart_candidates(argv, verb_idx, cwd)
+    if not candidates:
         emit("deny",
              "This Helm command's chart argument does not name a local "
-             "directory (containing Chart.yaml), so its content cannot be "
-             "verified. `helm pull` it locally and point at that directory "
-             "instead.")
-    entries = [["chart", _memoized(("walk", chart_dir), lambda: _dir_digest(chart_dir))]]
+             "directory (containing Chart.yaml) or a local packaged chart "
+             "(.tgz), so its content cannot be verified. `helm pull` it "
+             "locally and point at that directory/archive instead.")
+    if len(candidates) > 1:
+        emit("deny",
+             "This command's operands name more than one possible chart "
+             "target (%s); which one Helm would actually use cannot be "
+             "determined, so its content cannot be verified." %
+             ", ".join(repr(c[0]) for c in candidates))
+    _, chart_path, kind = candidates[0]
+    if kind == "dir":
+        chart_digest = _memoized(("walk", chart_path), lambda: _dir_digest(chart_path))
+    else:
+        chart_digest = _memoized(("file", chart_path), lambda: _file_digest(chart_path))
+    entries = [["chart", chart_digest]]
     for path in flag_values(argv, *HELM_VALUES_FLAGS):
         entries.append([path, _local_target_digest(cwd, path)])
     canonical = json.dumps(sorted(entries), separators=(",", ":"))

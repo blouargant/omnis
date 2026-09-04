@@ -1,7 +1,9 @@
 package packaging
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"os"
@@ -2179,5 +2181,154 @@ print(len(calls))
 	}
 	if lines[1] != "1" {
 		t.Fatalf("kubectl kustomize invoked %s time(s) for the same target resolved twice, want 1 (memoised)", lines[1])
+	}
+}
+
+// --- I1 (review round 4): a flag's value must never be read as the chart
+// operand ---
+
+// writeChartAt is writeChart's shape, but at a caller-chosen directory
+// (writeChart always makes a fresh t.TempDir()) — needed here because the
+// decoy and the real chart must be two SIBLING directories under one
+// t.TempDir(), not two independent temp roots.
+func writeChartAt(t *testing.T, dir, configMapName string) {
+	t.Helper()
+	write := func(rel, contents string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	write("Chart.yaml", "apiVersion: v2\nname: demo\nversion: 0.1.0\n")
+	write("templates/cm.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+configMapName+"\n")
+}
+
+// THE bypass the coordinator measured: a decoy chart directory named as a
+// KNOWN value-flag's value (--kubeconfig) used to be read as the chart
+// operand — being the FIRST bare token the old scan found — instead of the
+// real chart named later on the same command line. Same discipline as
+// every other content-binding test: one fixed command, one attestation,
+// vary exactly one directory's content at a time.
+func TestHelmFlagValueDecoyDoesNotBindInsteadOfRealChart(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	root := t.TempDir()
+	real := filepath.Join(root, "chart")
+	decoy := filepath.Join(root, "decoy")
+	writeChartAt(t, real, "real-configmap")
+	writeChartAt(t, decoy, "decoy-configmap")
+
+	command := "helm upgrade --kubeconfig " + decoy + " myrel " + real + " -n demo"
+	in := bashInput(command, "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the command, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: the REAL chart (named as the ordinary chart
+	// operand, not hidden behind any flag).
+	writeChartAt(t, real, "SNEAKY-configmap")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME command, the REAL chart rewritten, decision = %q, want deny (%s) — "+
+			"the decoy named by --kubeconfig was bound instead of the real chart", got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+
+	// The complement: mutating the DECOY alone (real chart back to its
+	// attested content) must NOT change the subject at all — proving the
+	// decoy plays no part in the binding, not merely that a re-run works.
+	writeChartAt(t, real, "real-configmap")
+	subjBefore := discoverSegmentSubject(t, in, dir)
+	writeChartAt(t, decoy, "decoy-edited")
+	subjAfter := discoverSegmentSubject(t, in, dir)
+	if subjBefore != subjAfter {
+		t.Fatalf("editing ONLY the decoy changed the subject (%s -> %s) — "+
+			"the decoy must play no part in content-binding", subjBefore, subjAfter)
+	}
+}
+
+// If more than one operand on the command line resolves to a real local
+// chart, which one Helm would actually use cannot be determined from here
+// — the earlier (buggy) design picked the first one found, unconditionally,
+// which is exactly how the decoy bypass above was possible. Refusing as
+// ambiguous is the fail-closed alternative to guessing.
+func TestHelmAmbiguousChartOperandsRefusedTerminally(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	root := t.TempDir()
+	chartA := filepath.Join(root, "chart-a")
+	chartB := filepath.Join(root, "chart-b")
+	writeChartAt(t, chartA, "a")
+	writeChartAt(t, chartB, "b")
+
+	in := bashInput("helm upgrade myrel "+chartA+" "+chartB+" -n demo", "k8s_editor")
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("two candidate charts at attempt=3, decision = %q, want deny (never ask): %s", got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "more than one possible chart target") {
+		t.Fatalf("reason = %q, want it to explain the ambiguity", reasonOf(t, out))
+	}
+}
+
+// A local packaged chart (.tgz) is a file whose bytes can be hashed
+// directly — strictly better than refusing it, since binding it costs
+// nothing a remote/non-local reference would need (a fetch, a build). Same
+// discipline: one fixed command, one attestation, only the tarball's own
+// bytes (rebuilt at the same path) change between runs.
+func TestHelmLocalPackagedChartContentBinds(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	root := t.TempDir()
+	tgz := filepath.Join(root, "chart-0.1.0.tgz")
+	writeTgz := func(contents string) {
+		t.Helper()
+		f, err := os.Create(tgz)
+		if err != nil {
+			t.Fatalf("create tgz: %v", err)
+		}
+		defer f.Close()
+		gz := gzip.NewWriter(f)
+		defer gz.Close()
+		tw := tar.NewWriter(gz)
+		defer tw.Close()
+		data := []byte(contents)
+		if err := tw.WriteHeader(&tar.Header{Name: "data.txt", Mode: 0o644, Size: int64(len(data))}); err != nil {
+			t.Fatalf("tar header: %v", err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatalf("tar write: %v", err)
+		}
+	}
+	writeTgz("v1 content\n")
+
+	in := bashInput("helm upgrade myrel "+tgz+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the tarball, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: rebuild the SAME tarball path with different
+	// bytes inside it.
+	writeTgz("v2 DIFFERENT content\n")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME command, tarball rebuilt with DIFFERENT content, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
 	}
 }
