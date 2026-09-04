@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: refuse a Kubernetes mutation that has not been validated.
+"""PreToolUse hook: allow a Kubernetes command only when it is provably read-only.
 
 Reads the omnis hook input on stdin and writes the Claude Code hook output
 protocol on stdout. All Kubernetes policy lives here, in configuration, so the
 Go core stays domain-free (see the design contract in CLAUDE.md).
 
-Three rules govern everything below:
+THE RULE IS AN INVERSION, and it is the whole design. Earlier versions of this
+script tried to RECOGNISE mutations and let everything else past. That problem is
+unbounded: `bash -c "kubectl delete …"`, `eval`, `$(kubectl delete …)`,
+`helm del`, `ssh host kubectl delete …` are each a legitimate spelling of the same
+mutation, so every round of pattern-work closed the named cases and left the class
+open. Three rounds of review demonstrated exactly that, by execution.
 
-1. FAIL CLOSED, and fail closed on IDENTIFICATION too. This script executes
-   commands, so it must never risk executing the mutation itself: it validates a
-   segment only when it can fully re-tokenise it and replay it as argv with no
-   shell. But the subtler rule is that when a segment LOOKS like a kubectl/helm
-   invocation and we cannot identify its verb, that is also a refusal — never a
-   pass. Guessing "probably harmless" is how an unvalidated `helm uninstall`
-   slips through.
-2. Do not refuse what is not ours. A guard that fires on honest work gets
-   disabled by its users, so the refusal gates key on "the first real word of
-   this segment is kubectl/helm", never on "this text contains the word
-   kubectl". `grep -rn kubectl deploy.sh > out` is not a cluster mutation.
-3. The engine reports `attempt` / `consecutive`; this script decides what they
-   mean. That is what keeps the engine generic.
+So this script does not decide whether a command mutates. It decides whether a
+command is **provably read-only**, and refuses everything else that names kubectl
+or helm. Proving a read requires all of: the segment tokenises cleanly; it carries
+no command substitution; after stripping a known process wrapper by an explicit
+spec, the binary IS kubectl or helm; and the verb (with its subcommand, where the
+verb has one) is in that tool's read set. Anything else is refused with an
+instruction to express it as a direct invocation.
+
+That inverts the cost of being wrong. An unlisted read verb now costs friction —
+one refusal, one rewrite, and a line added to a set — whereas an unlisted way of
+spelling a mutation used to cost an unvalidated cluster change. The read sets are
+enumerable; the ways to spell a mutation are not.
 
 Python 3 standard library only.
 """
@@ -33,78 +37,92 @@ import sys
 MAX_ATTEMPTS = 3          # matches agentCapGraceCalls in agent/budget_plugin.go
 VALIDATE_TIMEOUT = 45     # seconds; below the hook's own timeout so we can explain
 
-READ_ONLY_VERBS = {
+# kubectl verbs that are provably reads: they report state and change none.
+# port-forward and proxy open a local tunnel and change nothing in the cluster;
+# they are standard investigator practice, so refusing them would be friction for
+# no safety gain.
+KUBECTL_READ_VERBS = {
     "get", "describe", "logs", "top", "explain", "events", "api-resources",
-    "api-versions", "cluster-info", "version", "auth", "config", "diff", "wait",
+    "api-versions", "cluster-info", "version", "diff", "wait", "port-forward",
+    "proxy", "options", "help",
 }
 
-APPLY_VERBS = {"apply", "create", "replace"}
-IMPERATIVE_VERBS = {"patch", "set", "scale", "annotate", "label", "expose", "autoscale", "rollout"}
-DESTRUCTIVE_VERBS = {"delete", "drain", "cordon", "uncordon", "taint"}
+# kubectl verbs that touch nothing outside this machine. `kustomize` renders,
+# `completion` prints a shell script. Same doctrine as helm's local verbs: this
+# guard exists for cluster changes, and Bash is permission-gated for the rest.
+KUBECTL_LOCAL_VERBS = {"kustomize", "completion"}
 
-# helm verbs that do not change a cluster, split in two because they are wrong for
-# different reasons: a CLUSTER READ contacts the cluster and changes nothing; a
-# LOCAL verb never touches the cluster at all (it edits ~/.config/helm, fetches a
-# chart, renders a template). Both proceed — this guard exists for cluster
-# changes, and Bash is permission-gated for everything else. `helm plugin install`
-# fetching executable code is a real concern, but it is the permission layer's,
-# and pretending otherwise here would also refuse `helm repo add`.
-HELM_CLUSTER_READ_VERBS = {"list", "ls", "status", "get", "history", "diff", "test"}
-HELM_LOCAL_VERBS = {
-    "show", "search", "template", "lint", "version", "env", "repo", "plugin",
-    "dependency", "dep", "pull", "package", "create", "completion", "registry",
-    "verify", "docs",
-}
-
-# kubectl treats `auth` and `config` as verbs, but only SOME of their subcommands
-# read: `kubectl auth reconcile -f rbac.yaml` writes RBAC, and `kubectl config
-# use-context prod` rewrites the shared kubeconfig. The shipped
-# config/permissions.json already enumerates the read-only ones in its own allow
-# rule; this mirrors that list rather than inventing a second one.
+# Verbs whose SUBCOMMANDS differ, so the verb alone proves nothing. `auth can-i`
+# reads but `auth reconcile -f rbac.yaml` writes RBAC; `config view` reads but
+# `config use-context` rewrites the shared kubeconfig; `rollout status` reads but
+# `rollout undo` rolls a Deployment back. The read lists mirror what the shipped
+# config/permissions.json already declares in its own allow rule, rather than
+# inventing a second source of truth.
 READ_ONLY_SUBVERBS = {
     "auth": {"can-i"},
     "config": {"view", "current-context", "get-contexts", "get-clusters", "get-users"},
-    # `rollout status` and `rollout history` read; undo/restart/pause/resume write.
-    # Treating the whole verb as a mutation denied `kubectl rollout status`, which
-    # is one of the commonest calls the triage playbook makes after an edit.
     "rollout": {"status", "history"},
     "plugin": {"list"},
 }
 
-WRAPPERS = {"sudo", "env", "time", "nice", "ionice", "nohup", "command", "exec",
-            "timeout", "stdbuf"}
+# helm verbs that contact the cluster and change nothing, INCLUDING the aliases.
+# `hist` is history's alias. `test` is deliberately NOT here: it runs the chart's
+# test hooks, which create Pods from chart-supplied specs.
+HELM_READ_VERBS = {"list", "ls", "status", "get", "history", "hist", "diff"}
 
-# Global flags that take a SEPARATE value, so the token after them is not the verb.
-# Every other flag is treated as boolean. Inferring this instead from "the next
-# token is not a flag" is what made `kubectl -A get pods` parse its verb as `pods`
-# (denying an ordinary read-only command) and `helm --debug uninstall r` parse as
-# `r` (letting a destructive command through unvalidated).
+# helm verbs that never touch the cluster at all — they edit ~/.config/helm, fetch
+# a chart, render a template. `inspect` aliases show, `fetch` aliases pull.
+# `helm plugin install` fetching executable code is a real concern, but it is the
+# permission layer's, and excluding it here would also refuse `helm repo add`.
+HELM_LOCAL_VERBS = {
+    "show", "inspect", "search", "template", "lint", "version", "env", "repo",
+    "plugin", "dependency", "dep", "pull", "fetch", "package", "create",
+    "completion", "registry", "verify", "docs", "help",
+}
+
+# Global flags that take a SEPARATE value, so the token after them is not the
+# verb. Every other flag is treated as boolean: inferring this from "the next
+# token is not a flag" made a bare -A swallow the verb.
 VALUE_FLAGS = {
     "-n", "--namespace", "--context", "--kube-context", "--kubeconfig",
-    "--cluster", "--user", "--as", "--as-group", "--token", "--server", "-s",
-    "--request-timeout", "--cache-dir", "--tls-server-name",
+    "--cluster", "--user", "--as", "--as-group", "--as-uid", "--token",
+    "--server", "-s", "--request-timeout", "--cache-dir", "--tls-server-name",
     "--client-certificate", "--client-key", "--certificate-authority",
-    "-v", "--v", "--log-flush-frequency", "--profile", "--profile-output",
-    "--as-uid", "--username", "--password", "--vmodule",
+    "-v", "--v", "--vmodule", "--username", "--password",
+    "--log-flush-frequency", "--profile", "--profile-output",
     "--registry-config", "--repository-config", "--repository-cache",
     "--kube-apiserver", "--kube-token", "--kube-ca-file", "--kube-as-user",
     "--kube-as-group", "--kube-tls-server-name", "--qps", "--burst-limit",
 }
 
-# The full verb vocabulary of each tool. Used ONLY to decide whether a kubectl or
-# helm token that is not the first word of a segment is a command or just an
-# argument: `timeout 30 kubectl get pods` is an invocation, `grep -rn kubectl
-# deploy.sh` is not. Missing an exotic verb behind a wrapper is the known residual
-# — it leaves that one invocation unrecognised rather than mis-refusing honest work.
-KUBECTL_VERBS = READ_ONLY_VERBS | APPLY_VERBS | IMPERATIVE_VERBS | DESTRUCTIVE_VERBS | {
-    "edit", "run", "debug", "exec", "cp", "port-forward", "proxy", "attach",
-    "kustomize", "completion", "certificate", "plugin", "wait",
-}
-HELM_VERBS = HELM_CLUSTER_READ_VERBS | HELM_LOCAL_VERBS | {
-    "install", "upgrade", "uninstall", "rollback",
+# Process wrappers, each with an explicit spec, because guessing a wrapper's
+# argument arity is what previously denied `timeout 30 kubectl get pods`: the
+# bare operand `30` was left looking like the binary. value_flags are the
+# wrapper's own flags that consume the next token; operands is how many bare
+# tokens it takes before the command it wraps.
+WRAPPER_SPEC = {
+    "sudo": ({"-u", "--user", "-g", "--group", "-p", "--prompt", "-C",
+              "--close-from", "-r", "--role", "-t", "--type", "-h", "--host"}, 0),
+    "env": ({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}, 0),
+    "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),
+    "nice": ({"-n", "--adjustment"}, 0),
+    "ionice": ({"-c", "-n", "-p", "-P", "-u"}, 0),
+    "stdbuf": ({"-i", "-o", "-e", "--input", "--output", "--error"}, 0),
+    "xargs": ({"-I", "-i", "-n", "-L", "-P", "-d", "-E", "-s", "--replace",
+               "--max-args", "--max-procs", "--delimiter"}, 0),
+    "nohup": (set(), 0),
+    "time": ({"-f", "--format", "-o", "--output"}, 0),
+    "command": (set(), 0),
 }
 
-# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
+# Commands that do not execute their arguments, so a kubectl command line quoted
+# or echoed as TEXT is not an invocation. Bounded on purpose: anything not listed
+# is refused rather than assumed inert.
+INERT_COMMANDS = {"echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "sed",
+                  "awk", "head", "tail", "wc", "tee", "less", "more", "comm",
+                  "diff", "git", "true", "false", "test"}
+
+# Mirrors compoundOps# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
 # not read as two `&`. The parity test in core/permissions pins the two lists.
 COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 
@@ -113,7 +131,13 @@ COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 # delete pod x)` runs a delete no amount of outer-verb inspection can see — so it
 # is always refused. A plain REDIRECT hides nothing: the command is fully visible,
 # we simply cannot replay it as argv, so a read-only command may proceed.
-SUBSTITUTION = re.compile(r"\$\(|`|\$\{|<\(")
+# Only the forms that can EXECUTE a command. `${VAR}` is a plain expansion and
+# hides nothing runnable — every bash ${x:-…} form that does run something also
+# contains $( or a backtick, both matched here — so including it only denied the
+# commonest idiom in agent-written shell.
+MENTIONS_K8S = re.compile(r"\b(kubectl|helm)\b")
+
+COMMAND_SUBSTITUTION = re.compile(r"\$\(|`|<\(|\$\{[^}]*\$\(")
 REDIRECT = re.compile(r"<<|>>|[<>]")
 
 
@@ -241,22 +265,6 @@ def _strip_wrappers(argv):
     return argv
 
 
-def tokenise(segment):
-    """Return the segment's argv with wrappers stripped, or None if unsafe.
-
-    None means "this shape cannot be validated". For a segment that looks like a
-    kubectl/helm MUTATION that is a refusal, never a pass — a shape we cannot read
-    is a shape we cannot check.
-    """
-    if SUBSTITUTION.search(segment) or REDIRECT.search(segment):
-        return None
-    try:
-        argv = shlex.split(segment)
-    except ValueError:
-        return None
-    return _strip_wrappers(argv) or None
-
-
 def _verb_from(argv, start):
     """Walk global flags from index `start`, returning (verb, verb_index).
 
@@ -279,46 +287,77 @@ def _verb_from(argv, start):
     return None, -1
 
 
-def find_invocation(argv):
-    """Return (index, tool) of the kubectl/helm invocation in argv, else (-1, None).
+def _strip_wrappers(argv):
+    """Drop leading process wrappers using WRAPPER_SPEC, returning the remainder.
 
-    ONE rule replaces the three overlapping heuristics that preceded it, each of
-    which was wrong in a different direction. A token is an invocation when it
-    basenames to kubectl or helm AND either it is the first word of the segment —
-    so any verb, even an unknown one, is ours and fails closed — or the verb
-    following it belongs to that tool's vocabulary.
-
-    The second clause is what separates `timeout 30 kubectl get pods` and `xargs
-    kubectl delete pod x`, both invocations, from `grep -rn kubectl deploy.sh`,
-    which merely names the word. It needs no wrapper grammar, which is precisely
-    why it replaced the wrapper-stripping guesswork: that denied `timeout 30
-    kubectl get pods`, and denied `sudo -u root apt-get install foo-overwhelming`
-    because "helm" hides inside "overwhelming".
+    Each wrapper is stripped by its explicit spec — its own value-taking flags and
+    its declared count of bare operands — rather than by guessing. Guessing is what
+    left `30` looking like the binary in `timeout 30 kubectl get pods` and denied
+    an ordinary read. Nested wrappers are handled by looping.
     """
-    for i, tok in enumerate(argv):
-        base = tok.split("/")[-1]
-        if base not in ("kubectl", "helm"):
+    while argv:
+        base = argv[0].split("/")[-1]
+        if base not in WRAPPER_SPEC:
+            break
+        value_flags, operand_count = WRAPPER_SPEC[base]
+        argv = argv[1:]
+        while argv and argv[0].startswith("-"):
+            flag = argv[0]
+            argv = argv[1:]
+            if flag in value_flags and argv:
+                argv = argv[1:]
+        for _ in range(operand_count):
+            if argv and not argv[0].startswith("-"):
+                base_next = argv[0].split("/")[-1]
+                if base_next in ("kubectl", "helm") or base_next in WRAPPER_SPEC:
+                    break
+                argv = argv[1:]
+    return argv
+
+
+def _verb_after(argv, start):
+    """Walk global flags from index `start`, returning (verb, verb_index).
+
+    Only flags known to take a SEPARATE value consume the following token; every
+    other flag is boolean, so a bare global like -A or --debug cannot swallow the
+    verb.
+    """
+    i = start + 1
+    while i < len(argv):
+        tok = argv[i]
+        if not tok.startswith("-"):
+            return tok, i
+        if "=" in tok:
+            i += 1
             continue
-        if i == 0:
-            return i, base
-        verb, _ = _verb_from(argv, i)
-        vocab = KUBECTL_VERBS if base == "kubectl" else HELM_VERBS
-        if verb in vocab:
-            return i, base
-    return -1, None
+        if tok in VALUE_FLAGS and i + 1 < len(argv):
+            i += 2
+            continue
+        i += 1
+    return None, -1
 
 
 def classify(argv):
-    """Return (tool, verb, verb_index), or (None, None, -1) if this is not ours.
+    """Return (tool, verb, verb_index) when argv is a DIRECT kubectl/helm
+    invocation, else (None, None, -1).
 
-    The index is returned because the validators need the operands AFTER the verb,
-    and a fixed slice like argv[2:] is wrong the moment a global flag precedes it:
-    for `helm --debug uninstall myrel`, argv[2] is "uninstall".
+    Direct means the binary is at the head. The caller strips wrappers ONCE and
+    passes the result here, so every index this returns refers to the same argv the
+    caller then hands to provably_read_only and operands — stripping again inside
+    would return indices into a different list, which silently mis-resolved
+    `timeout 60s kubectl rollout status` as a mutation.
+
+    That strictness is the inversion: a command carried inside a quoted payload
+    (`bash -c "kubectl delete …"`) or named as text (`echo kubectl delete …`) is
+    deliberately NOT an invocation here, and the caller refuses or spares it by
+    the rules in main rather than by trying to interpret shell.
     """
-    idx, tool = find_invocation(argv)
-    if tool is None:
+    if not argv:
         return None, None, -1
-    verb, verb_idx = _verb_from(argv, idx)
+    tool = argv[0].split("/")[-1]
+    if tool not in ("kubectl", "helm"):
+        return None, None, -1
+    verb, verb_idx = _verb_after(argv, 0)
     return tool, verb, verb_idx
 
 
@@ -327,18 +366,62 @@ def operands(argv, verb_idx):
     return argv[verb_idx + 1:] if verb_idx >= 0 else []
 
 
-def is_read_only(tool, verb, ops):
-    """True when this invocation cannot change a cluster.
+def subverb_of(argv, verb_idx):
+    """The subcommand token after a verb like `auth` or `rollout`.
 
-    `auth` and `config` are verbs whose subcommands differ: `auth can-i` reads,
-    `auth reconcile -f rbac.yaml` writes RBAC.
+    Uses the same flag grammar as the verb walk, because a bare
+    `next(o for o in ops if not o.startswith("-"))` reads a flag's VALUE as the
+    subcommand — which both refused `kubectl auth -n demo can-i …` and, far worse,
+    permitted `kubectl rollout -n status undo deploy/x` by reading "status".
     """
+    sub, _ = _verb_after(argv, verb_idx)
+    return sub
+
+
+def provably_read_only(tool, verb, argv, verb_idx):
+    """True only when this invocation is PROVEN to change no cluster state.
+
+    Anything unproven is refused by the caller. That is the inversion: this
+    function's sets are enumerable, whereas the set of ways to spell a mutation is
+    not.
+    """
+    if verb is None:
+        return False
     if tool == "helm":
-        return verb in HELM_CLUSTER_READ_VERBS or verb in HELM_LOCAL_VERBS
+        return verb in HELM_READ_VERBS or verb in HELM_LOCAL_VERBS
     if verb in READ_ONLY_SUBVERBS:
-        sub_verb = next((o for o in ops if not o.startswith("-")), None)
-        return sub_verb in READ_ONLY_SUBVERBS[verb]
-    return verb in READ_ONLY_VERBS
+        return subverb_of(argv, verb_idx) in READ_ONLY_SUBVERBS[verb]
+    return verb in KUBECTL_READ_VERBS or verb in KUBECTL_LOCAL_VERBS
+
+
+def is_inert(argv):
+    """True when argv's head is a command that does not execute its arguments, so
+    a kubectl command line appearing in it is text rather than an invocation.
+
+    Takes an already-stripped argv, like classify.
+    """
+    if not argv:
+        return False
+    return argv[0].split("/")[-1] in INERT_COMMANDS
+
+
+def names_k8s(tokens):
+    """True when these tokens actually name kubectl or helm, as opposed to merely
+    containing the letters.
+
+    Two shapes count. A token whose BASENAME is exactly kubectl or helm is the
+    binary — this is what excludes `/opt/scripts/deploy-helm.sh`, where a hyphen is
+    a word boundary so a naive \\b regex matched and refused an honest script. And
+    a token that contains the word AND whitespace is a quoted payload
+    (`bash -c "kubectl delete …"`), which must still be caught even though its
+    basename is the whole string.
+    """
+    for t in tokens:
+        if t.split("/")[-1] in ("kubectl", "helm"):
+            return True
+        if (" " in t or "\t" in t or "\n" in t) and MENTIONS_K8S.search(t):
+            return True
+    return False
 
 
 def main():
@@ -356,7 +439,10 @@ def main():
     # not mentioning kubectl or helm must cost only interpreter startup. This is
     # a substring test by design: an alias (`k delete …`) or an indirection
     # (`$KUBECTL delete …`) is a known, accepted blind spot of the cheap path.
-    if "kubectl" not in command and "helm" not in command:
+    # Word boundaries, not substrings: "overwhelming" contains "helm" and
+    # denying `apt-get install foo-overwhelming` is exactly the friction that
+    # gets a guard disabled.
+    if not MENTIONS_K8S.search(command):
         sys.exit(0)
 
     agent = data.get("agent_name") or ""
@@ -369,53 +455,67 @@ def main():
     attestations = data.get("attestations") or {}
 
     for segment in segments(command):
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            words = segment.split()
-        _, tool = find_invocation(words) if words else (-1, None)
-        if tool is None:
-            # Not a kubectl/helm invocation, so not this guard's business. A
-            # segment that merely NAMES the word lands here.
+        # A shell comment is text, not a command.
+        if segment.lstrip().startswith("#"):
             continue
 
-        # A substitution hides a whole nested command, so it is refused whatever
-        # the outer verb is: `kubectl get pods $(kubectl delete pod x)` would
-        # otherwise read as a harmless get while the delete executes.
-        if SUBSTITUTION.search(segment):
+        # A command substitution hides a whole nested command from us, whatever
+        # the outer word is. Checked BEFORE any identification, because gating it
+        # behind "is the outer command kubectl?" is exactly what let
+        # `echo $(kubectl delete pod x)` through.
+        if COMMAND_SUBSTITUTION.search(segment) and MENTIONS_K8S.search(segment):
             refuse(
                 "This command substitutes another command inside itself, so what it would "
-                "actually run cannot be inspected. Run the inner command on its own, or "
-                "write the change to a manifest file and apply that file.",
+                "actually run cannot be read. Run the inner command on its own line as a "
+                "direct kubectl/helm invocation.",
                 attempt, consecutive,
             )
 
-        argv = tokenise(segment)
-        if argv is None:
-            # A plain redirect hides nothing, so spare it if it only reads.
-            rtool, rverb, ridx = classify(words)
-            if rtool and rverb and is_read_only(rtool, rverb, operands(words, ridx)):
-                continue
-            refuse(
-                "This command shape cannot be validated (it uses a redirection or heredoc), "
-                "so it is refused rather than applied unchecked. Write the change to a "
-                "manifest file and apply that file instead.",
-                attempt, consecutive,
-            )
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            if MENTIONS_K8S.search(segment):
+                refuse(
+                    "This command has an unbalanced quote, so it cannot be read. Rewrite it as "
+                    "a direct kubectl/helm invocation.",
+                    attempt, consecutive,
+                )
+            continue
+
+        if not names_k8s(tokens):
+            continue
+
+        # Strip wrappers exactly ONCE, so every index below refers to this argv.
+        argv = _strip_wrappers(tokens)
+
+        if is_inert(argv):
+            # echo/grep/git and friends do not execute their arguments.
             continue
 
         tool, verb, verb_idx = classify(argv)
-        if verb is None:
-            # Fail closed on identification.
+        if tool is None:
+            # Names kubectl or helm but is not a direct invocation of either:
+            # a quoted payload (bash -c "…"), an eval, an ssh, an unknown
+            # launcher. Unprovable, therefore refused.
             refuse(
-                "This looks like a kubectl/helm command but its verb could not be "
-                "identified, so it cannot be validated. Re-run it with the verb "
-                "immediately after the binary.",
+                "This command names kubectl or helm but does not invoke it directly, so what "
+                "it would run cannot be proven safe. Express it as a direct kubectl/helm "
+                "command instead of wrapping it in a shell, an eval, or a remote call.",
                 attempt, consecutive,
             )
+
+        if provably_read_only(tool, verb, argv, verb_idx):
             continue
-        if is_read_only(tool, verb, operands(argv, verb_idx)):
-            continue
+
+        if REDIRECT.search(segment):
+            # Not provably a read, and not replayable as argv either.
+            refuse(
+                "This command changes the cluster and uses a redirection or heredoc, so it "
+                "cannot be validated. Write the change to a manifest file and apply that file "
+                "instead.",
+                attempt, consecutive,
+            )
+
         validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations)
 
     proceed()
