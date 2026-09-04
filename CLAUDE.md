@@ -3057,13 +3057,38 @@ so an existing Claude Code config is portable.
   — an event-grouped editor (matcher cards + command/timeout rows) reusing the
   generic config-editor routes (`GET/PUT /api/config/parsed/hooks`); `hooks` is
   registered in the config name-map in [server/config.go](server/config.go). No
-  new server routes. **The form does not surface `fail_closed`** — only
-  `command`/`timeout` are rendered — but it is not destroyed by an edit: every
-  handler mutates the existing command object's fields in place
-  (`cmd.command = …`, `cmd.timeout = …`) rather than rebuilding a fresh one, so
-  a `fail_closed` key already on disk (the shipped Kubernetes hook has one)
-  survives a save. A visible checkbox is still worth adding — a user editing
-  this hook currently has no way to see, from the UI, why it blocks.
+  new server routes. The form renders `command`, `timeout` and a **`fail_closed`
+  checkbox** (i18n `set.hook.failClosed`). Every handler mutates the existing
+  command object's fields in place (`cmd.command = …`, `cmd.timeout = …`,
+  `cmd.fail_closed = …`) rather than rebuilding a fresh one, and the checkbox's
+  paint statement (`fcIn.checked = !!cmd.fail_closed`) never writes — so
+  rendering a hook cannot materialise a value the way the agents editor once
+  did. Unticking **deletes** the key rather than writing `false`, matching
+  `json:"fail_closed,omitempty"`, so an untouched config never churns.
+  `TestHooksConfigRoundTripPreservesFailClosed` ([server/config_hooks_test.go](server/config_hooks_test.go))
+  pins the GET→PUT survival: unlike `agent`, the `hooks` section has no
+  `cleanAgent`-style key allowlist, so it round-trips through the generic
+  `configedit.OverlayBytes` delta write.
+
+  **GOTCHA — editing a SHIPPED hook through this form ADDS an entry, it does not
+  override one, and the hook then runs TWICE.** Hook layering is deliberately
+  additive (`internal/hooks/reloader.go`: "Hooks are additive — overlays add
+  commands rather than replacing them"), and `mergeHooks`/`valueListUnion` treat
+  a whole `{matcher, hooks:[…]}` block as one opaque value compared by
+  `reflect.DeepEqual`. So unticking `fail_closed` on the shipped Kubernetes hook
+  writes a user-layer entry *without* the flag while the system-layer entry
+  *with* it remains — verified by driving the real `DiffSection`/`MergeSection`:
+  2 matcher entries survive, 1 still `fail_closed: true`. Since
+  `Config.Match` accumulates commands from **every** matching matcher entry, the
+  guard then executes twice per `Bash` call — two interpreter starts, two
+  `kubectl diff`/dry-run round-trips against the cluster — and still blocks,
+  because the original entry is untouched. The checkbox therefore reads as a
+  control over a shipped hook and is not one. This is pre-existing and systemic
+  (editing a shipped hook's `command` or `timeout` behaves identically), not
+  specific to `fail_closed`; the fix would be identity-aware merging of hook
+  matchers so a user layer can override a shipped entry instead of duplicating
+  it. Until then, disable a shipped hook with a `hooks_removed` tombstone, not by
+  editing its fields.
 - **No-op contract**: an absent/empty `hooks.json` mounts an inert engine and the
   behaviour is byte-identical to a build without hooks. **Limitations (v1):**
   Stop/SubagentStop hooks fire as notifications but cannot force-continue; PreCompact
