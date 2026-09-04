@@ -2598,9 +2598,12 @@ def is_launcher(argv):
     Takes an already-stripped argv, like classify. This is the inverse of the
     "inert commands" list it replaced, and the inversion matters: enumerating what
     is SAFE to ignore put `awk`, `sed` and `git` on the safe list, and all three
-    execute their arguments. Enumerating what LAUNCHES is the bounded direction —
-    an unlisted launcher falls through to the "does not invoke it directly"
-    refusal rather than being waved past.
+    execute their arguments. Enumerating what LAUNCHES is the bounded direction,
+    but it is not free: an UNLISTED launcher is treated as an ordinary program, so
+    the kubectl token in it reads as an argument and the segment proceeds. That is
+    the residual this direction accepts, in exchange for not refusing every
+    `gh pr create --title "…kubectl…"`. `git -c alias.x='!cmd'` is the known
+    instance, and it takes deliberate obfuscation to reach.
     """
     if not argv:
         return False
