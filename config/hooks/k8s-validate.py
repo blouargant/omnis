@@ -99,6 +99,15 @@ DESTRUCTIVE_VERBS = {"delete", "drain", "cordon", "uncordon", "taint"}
 # against the release's own history instead of a chart diff.
 HELM_DESTRUCTIVE_VERBS = {"uninstall", "rollback"}
 
+# `rollout` sub-verbs that support no --dry-run at all (verified against the
+# real binary: `error: unknown flag: --dry-run`), so validate_imperative's
+# normal dry-run attempt permanently refuses them with advice that cannot be
+# followed — "express it as a manifest" is impossible for an action that
+# recreates pods rather than changing desired state. `undo` is deliberately
+# NOT here: it DOES accept --dry-run=server (it just fails without a reachable
+# cluster, the same as any other verb), so the normal path already handles it.
+ROLLOUT_SCOPE_VERBS = {"restart", "pause", "resume"}
+
 # Global flags that take a SEPARATE value, so the token after them is not the
 # verb. Every other flag is treated as boolean: inferring this from "the next
 # token is not a flag" made a bare -A swallow the verb.
@@ -707,6 +716,57 @@ def flag_value(argv, *names):
     return None
 
 
+def first_operand(argv, start):
+    """The first bare token after index `start`, using the SAME value-flag walk
+    `_verb_after` uses to find a verb: UNPROVABLE when a flag this guard does
+    not recognise makes the token unknowable, None when there is none.
+
+    Reused here (not just for verbs) so a flag's VALUE is never mistaken for
+    the operand that follows it. `ops[:1]` used to make exactly that mistake
+    for a Helm release name preceded by a flag — `helm uninstall -n demo
+    myrel` built `helm history -n -n demo`, which cannot resolve any release
+    and either wrongly refuses or, worse, wrongly matches an unrelated one.
+    """
+    return _verb_after(argv, start)
+
+
+def bare_operands(argv, start):
+    """The non-flag tokens after index `start`: the actual resource/release
+    identifiers, as opposed to a value-flag's VALUE.
+
+    Uses the same VALUE_FLAGS/BOOLEAN_FLAGS grammar `_verb_after` uses to find
+    a verb, reused here so a flag's value is never mistaken for a named
+    resource. `[a for a in ops if not a.startswith("-")]` made exactly that
+    mistake: `kubectl delete pod -n demo` counted `demo` — the NAMESPACE
+    VALUE — as if it were a second named resource, so the blast-radius check
+    could not tell "a resource is named" from "a flag was given a value".
+
+    A flag this guard does not recognise is treated as taking no value
+    (skipped alone) rather than refused: unlike identifying THE verb,
+    collecting operands has no single right answer to fail closed on, and
+    erring toward "not a flag's value" only ever makes this check MORE
+    willing to find a named resource — never less, so it can never
+    manufacture a missing one. The real safety net for an under-specified
+    delete is resolve_target's fail-closed `get`, not this presence check.
+    """
+    out = []
+    i = start + 1
+    while i < len(argv):
+        tok = argv[i]
+        if not tok.startswith("-"):
+            out.append(tok)
+            i += 1
+            continue
+        if "=" in tok:
+            i += 1
+            continue
+        if tok in VALUE_FLAGS:
+            i += 2
+            continue
+        i += 1  # a boolean flag, known or not — see the docstring above
+    return out
+
+
 def target_scope(argv):
     """Return the namespace and context this command targets, if named."""
     return (flag_value(argv, "-n", "--namespace") or "",
@@ -745,16 +805,29 @@ def check_attested(argv, attestations, attempt, consecutive, subject):
              "The reviewer REJECTED this change:\n\n%s" % (rec.get("reasons") or "(no reasons given)"))
 
 
-def validate_manifest(argv, cwd, attempt, consecutive):
+def validate_manifest(verb, argv, cwd, attempt, consecutive):
     path = flag_value(argv, "-f", "--filename")
     if not path:
-        return validate_imperative(argv, "apply", cwd, attempt, consecutive)
-    code, out, err = run_argv([argv[0], "diff", "-f", path] + scope_flags(argv), cwd)
+        return validate_imperative(argv, verb, cwd, attempt, consecutive)
+    # kubectl, never argv[0]: argv[0] is the RAW head token — "(kubectl" for a
+    # paren-glued segment, "kubectl.real"/"kubectl3" for a suffixed install —
+    # and running it verbatim with cwd from the hook input (the session's
+    # writable working directory) let an agent-planted `./kubectl`/`kubectl`
+    # shim answer the guard's own probe instead of the real binary.
+    code, out, err = run_argv(["kubectl", "diff", "-f", path] + scope_flags(argv), cwd)
     # exit 1 means "a diff exists" — the normal case. Only >1 is an error.
     if code > 1:
         refuse("`kubectl diff` failed, so the change could not be previewed:\n\n%s"
                % (err.strip() or out.strip()), attempt, consecutive)
-    code, out, err = run_argv(list(argv) + ["--server-side", "--dry-run=server"], cwd)
+    dry_run = ["kubectl"] + list(argv[1:])
+    if verb == "apply":
+        # --server-side is an apply-only flag: `kubectl replace --server-side`
+        # and `kubectl create --server-side` both fail with "unknown flag:
+        # --server-side", permanently blocking both verbs and blaming the API
+        # server for a flag the guard itself injected.
+        dry_run += ["--server-side"]
+    dry_run += ["--dry-run=server"]
+    code, out, err = run_argv(dry_run, cwd)
     if code != 0:
         refuse("The API server rejected this change in a server-side dry run:\n\n%s"
                % (err.strip() or out.strip()), attempt, consecutive)
@@ -772,28 +845,99 @@ def scope_flags(argv):
 
 
 def validate_imperative(argv, verb, cwd, attempt, consecutive):
-    code, out, err = run_argv(argv + ["--dry-run=server"], cwd)
+    # kubectl, never argv[0] — see validate_manifest's comment.
+    code, out, err = run_argv(["kubectl"] + list(argv[1:]) + ["--dry-run=server"], cwd)
     if code != 0:
         text = (err or out).strip()
         if "unknown flag" in text or "unknown shorthand" in text:
             refuse("`%s` does not support a server-side dry run, so this change cannot be "
                    "validated as written. Express it as a manifest and apply that file "
-                   "instead." % ("%s %s" % (argv[0], verb)), attempt, consecutive)
+                   "instead." % ("%s %s" % ("kubectl", verb)), attempt, consecutive)
         refuse("The API server rejected this change in a dry run:\n\n%s" % text,
                attempt, consecutive)
     return out.strip()
 
 
+def validate_rollout_action(argv, verb_idx, cwd, attempt, consecutive):
+    """rollout restart/pause/resume support no --dry-run at all, so validate by
+    resolving the target and reporting its scope instead of dead-ending —
+    the same pre-check shape validate_destructive uses, without the
+    deletion-specific ownership/label checks (none of these three verbs can
+    change desired state beyond recreating pods, so a resolve-and-report
+    validation is the right trade against permanently refusing the canonical
+    safe rolling restart with advice that cannot be followed: restart is a
+    patch, not a manifest)."""
+    items = resolve_target(argv, verb_idx, cwd, attempt, consecutive)
+    return "%d resource(s) in scope." % len(items)
+
+
+def resolve_target(argv, verb_idx, cwd, attempt, consecutive):
+    """Resolve the verb's target with a plain `get` — never the mutating verb
+    itself — and fail CLOSED: a non-zero exit, unparseable output, or zero
+    identifiable items is refused rather than treated as "nothing to check".
+
+    `doc.get("items", [doc]) if doc else []` used to default to `[]` — an
+    empty, therefore skipped, per-item loop — whenever stdout was empty or
+    not valid JSON, which is exactly what a zero-exit `kubectl` prints on a
+    server hiccup (`{}` is falsy) or a plain-text server error (not JSON at
+    all). Both let a delete's ownership/ephemeral-label checks run zero
+    times and PROCEED. Provably resolving at least one real item is the
+    inversion's own doctrine — "anything unproven is refused" — applied to
+    the one validator that exists purely as a safety pre-check.
+    """
+    ops = operands(argv, verb_idx)
+    # kubectl, never argv[0] — see validate_manifest's comment. This is the
+    # probe an agent-planted shim was made to answer with a forged label.
+    code, out, err = run_argv(["kubectl", "get"] + ops + ["-o", "json"], cwd)
+    if code != 0:
+        refuse("The target could not be resolved, so it cannot be checked:\n\n%s"
+               % (err.strip() or out.strip()), attempt, consecutive)
+    try:
+        doc = json.loads(out)
+    except ValueError:
+        doc = None
+    items = doc.get("items", [doc]) if isinstance(doc, dict) else None
+    if not items or not all(
+        isinstance(i, dict) and (i.get("metadata") or {}).get("name") for i in items
+    ):
+        refuse("The target's state could not be read, so it cannot be checked. "
+               "The API server's response was not the JSON of an identifiable "
+               "resource:\n\n%s" % out.strip(), attempt, consecutive)
+    return items
+
+
 def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
     ops = operands(argv, verb_idx)
     if verb in HELM_DESTRUCTIVE_VERBS:
-        code, out, err = run_argv(["helm", "history"] + ops[:1] + scope_flags(argv), cwd)
+        release, _ = first_operand(argv, verb_idx)
+        if release is None or release is UNPROVABLE:
+            refuse("The Helm release name could not be determined from this command "
+                   "(a flag this guard does not recognise may be hiding it), so "
+                   "`helm %s` cannot be validated." % verb, attempt, consecutive)
+        code, out, err = run_argv(["helm", "history", release] + scope_flags(argv), cwd)
         if code != 0:
             refuse("No such Helm release, so `helm %s` cannot be validated:\n\n%s"
                    % (verb, (err or out).strip()), attempt, consecutive)
         return out.strip()
-    code, _, _ = run_argv(["helm", "plugin", "list"], cwd)
-    preview = ["helm", "diff", "upgrade"] + ops if code == 0 else argv + ["--dry-run=server"]
+    # `helm plugin list` exits 0 even with ZERO plugins installed — verified
+    # against the real binary, it prints only the header row — so gating on
+    # its EXIT CODE (rather than whether "diff" actually appears in its
+    # output) made the fallback branch dead code: every Helm change tried
+    # `helm diff upgrade`, which does not exist without the plugin, and every
+    # one hard-blocked with `unknown command "diff"`.
+    diff_installed = False
+    code, out, _ = run_argv(["helm", "plugin", "list"], cwd)
+    if code == 0:
+        for line in out.splitlines()[1:]:  # skip the header row
+            fields = line.split()
+            if fields and fields[0] == "diff":
+                diff_installed = True
+                break
+    if diff_installed:
+        preview = ["helm", "diff", "upgrade"] + ops
+    else:
+        # helm, never argv[0] — see validate_manifest's comment.
+        preview = ["helm"] + list(argv[1:]) + ["--dry-run=server"]
     code, out, err = run_argv(preview, cwd)
     if code != 0:
         refuse("The Helm change could not be previewed:\n\n%s" % ((err or out).strip()),
@@ -802,22 +946,12 @@ def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
 
 
 def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
-    ops = operands(argv, verb_idx)
-    if has_flag(argv, "--all") or not [a for a in ops if not a.startswith("-")]:
+    if has_flag(argv, "--all") or not bare_operands(argv, verb_idx):
         refuse("This deletion names no specific resource, so its blast radius is "
                "unbounded. Name the resources to delete explicitly.", attempt, consecutive)
-    # ops already carries -n/--context, so scope_flags would duplicate them.
-    code, out, _ = run_argv([argv[0], "get"] + ops + ["-o", "json"], cwd)
-    if code != 0:
-        refuse("The deletion target could not be resolved, so it cannot be checked. "
-               "Verify the resource exists before deleting it.", attempt, consecutive)
-    try:
-        doc = json.loads(out or "{}")
-    except ValueError:
-        doc = {}
-    items = doc.get("items", [doc]) if doc else []
+    items = resolve_target(argv, verb_idx, cwd, attempt, consecutive)
     for item in items:
-        meta = (item or {}).get("metadata") or {}
+        meta = item["metadata"]
         labels = meta.get("labels") or {}
         if agent in CLEANUP_AGENTS and labels.get(EPHEMERAL_LABEL) != "true":
             refuse("%r is not labelled %s=true, so it is not a leftover this agent may "
@@ -828,7 +962,7 @@ def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
                    "recreate it. Change or remove the owner instead."
                    % (meta.get("name", "?"), meta["ownerReferences"][0].get("kind", "a controller")),
                    attempt, consecutive)
-    return "%d resource(s) would be deleted." % max(len(items), 1)
+    return "%d resource(s) would be deleted." % len(items)
 
 
 def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
@@ -838,7 +972,19 @@ def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attes
     elif verb in DESTRUCTIVE_VERBS:
         preview = validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive)
     elif verb in APPLY_VERBS:
-        preview = validate_manifest(argv, cwd, attempt, consecutive)
+        preview = validate_manifest(verb, argv, cwd, attempt, consecutive)
+    elif verb == "rollout":
+        # sub_idx (not verb_idx) is what operands()/resolve_target must walk
+        # from: verb_idx still points at "rollout" itself, so operands(argv,
+        # verb_idx) would include the SUB-verb ("restart") as if it were the
+        # first resource operand — `kubectl get restart deploy/x -n demo`,
+        # which cannot resolve anything. subverb_of already computes this
+        # walk internally and throws its index away; do it once here instead.
+        sub, sub_idx = _verb_after(argv, verb_idx)
+        if sub in ROLLOUT_SCOPE_VERBS:
+            preview = validate_rollout_action(argv, sub_idx, cwd, attempt, consecutive)
+        else:
+            preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
     elif verb in IMPERATIVE_VERBS:
         preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
     else:

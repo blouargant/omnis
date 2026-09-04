@@ -105,6 +105,65 @@ func stubBin(t *testing.T, name, body string) string {
 	return dir
 }
 
+// The stub kubectl/helm behaviours a commandShapeCases row can request via
+// commandShapeStubs, so a row whose command reaches validate()'s real
+// subprocess calls gets a DETERMINISTIC outcome instead of depending on this
+// machine's kubectl/helm installation or cluster reachability. Review round 1
+// proved the coupling live: with a stub kubectl returning a resolvable
+// unowned pod instead of "no cluster", "time -p kubectl delete pod x -n demo"
+// and "setsid kubectl delete pod x -n demo" both flip from deny to proceed —
+// the wrapper-stripping property those rows exist to pin can no longer tell a
+// real regression from a different machine.
+const (
+	stubNone              = ""                   // never reaches a subprocess call — real PATH is fine
+	stubKubectlDiffFails  = "kubectl-diff-fail"  // validate_manifest's `kubectl diff` step fails (exit 2)
+	stubKubectlGetFails   = "kubectl-get-fail"   // resolve_target's `kubectl get` fails (exit 1)
+	stubHelmUnpreviewable = "helm-unpreviewable" // validate_helm: no release, and no diff plugin
+)
+
+// stubBodies gives the /bin/sh script body for each stub key above.
+var stubBodies = map[string]string{
+	stubKubectlDiffFails: `
+case "$*" in
+  *diff*) exit 2 ;;
+  *)      exit 0 ;;
+esac`,
+	stubKubectlGetFails: `
+case "$*" in
+  *get*) exit 1 ;;
+  *)     exit 0 ;;
+esac`,
+	stubHelmUnpreviewable: `
+case "$*" in
+  *history*) exit 1 ;;
+  *plugin*)  printf 'NAME\tVERSION\n' ;;
+  *)         exit 1 ;;
+esac`,
+}
+
+// stubFor installs the script for key as BOTH kubectl and helm in a fresh dir
+// and returns it for PATH — or "" (the real PATH, unchanged) for stubNone. A
+// row only ever exercises one of the two tools, so installing both under one
+// fixed body is harmless and keeps commandShapeStubs to one line per row.
+func stubFor(t *testing.T, key string) string {
+	t.Helper()
+	if key == stubNone {
+		return ""
+	}
+	body, ok := stubBodies[key]
+	if !ok {
+		t.Fatalf("unknown stub key %q", key)
+	}
+	dir := t.TempDir()
+	for _, bin := range []string{"kubectl", "helm"} {
+		p := filepath.Join(dir, bin)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatalf("write stub %s: %v", bin, err)
+		}
+	}
+	return dir
+}
+
 // approvedFor builds an attestations map whose single key is the subject hash
 // of in["tool_input"], with verdict APPROVED. The hash must match
 // hookstate.HashArgs — the Python hook script's own subject computation (wired
@@ -358,10 +417,47 @@ var commandShapeCases = []struct {
 	{"busybox launches a shell", "busybox sh -c 'kubectl delete pod x'", "k8s_editor", "deny", "another program to execute"},
 }
 
+// commandShapeStubs names, by row name, the stub kubectl/helm behaviour a row
+// needs — see stubFor. A row absent here never reaches validate()'s
+// subprocess calls at all (refused earlier by identification, or refused by
+// a static message with no subprocess involved — e.g. check_production or
+// the "no validation rule" catch-all) and is unaffected by which
+// kubectl/helm happen to be on this machine, so it keeps running against the
+// real PATH ("" — stubFor's stubNone). Kept as a separate map, rather than a
+// new field on commandShapeCases, so adding a stub never touches the ~150
+// existing row literals.
+var commandShapeStubs = map[string]string{
+	"boolean global before apply":          stubKubectlDiffFails,
+	"helm boolean global before upgrade":   stubHelmUnpreviewable,
+	"helm boolean global before uninstall": stubHelmUnpreviewable,
+	"sudo with its own flag":               stubKubectlGetFails,
+	"absolute-path wrapper":                stubKubectlGetFails,
+	"wrapper flag with a value":            stubKubectlGetFails,
+	"xargs kubectl delete":                 stubKubectlGetFails,
+	"helm2 delete":                         stubHelmUnpreviewable,
+	"suffixed kubectl path":                stubKubectlGetFails,
+	"paren glued to the binary":            stubKubectlGetFails,
+	"paren glued after a read":             stubKubectlGetFails,
+	"paren glued inside a loop":            stubKubectlGetFails,
+	"paren mid-token after if":             stubKubectlGetFails,
+	"setsid execs argv":                    stubKubectlGetFails,
+	"taskset execs argv":                   stubKubectlGetFails,
+	"chrt takes a priority operand":        stubKubectlGetFails,
+	"unshare execs argv":                   stubKubectlGetFails,
+	"strace execs argv":                    stubKubectlGetFails,
+	"systemd-run execs argv":               stubKubectlGetFails,
+	"time -p hides a delete":               stubKubectlGetFails,
+	"time -o hides a delete":               stubKubectlGetFails,
+	"xargs -a hides a delete":              stubKubectlGetFails,
+	"sudo --chroot hides a delete":         stubKubectlGetFails,
+	"sudo --chdir hides a delete":          stubKubectlGetFails,
+}
+
 func TestDecisionForCommandShapes(t *testing.T) {
 	for _, c := range commandShapeCases {
 		t.Run(c.name, func(t *testing.T) {
-			out, code := runHook(t, bashInput(c.command, c.agent), "")
+			dir := stubFor(t, commandShapeStubs[c.name])
+			out, code := runHook(t, bashInput(c.command, c.agent), dir)
 			if got := decisionOf(t, out); got != c.want {
 				t.Fatalf("decision = %q, want %q (exit=%d stdout=%q)", got, c.want, code, out)
 			}
@@ -424,18 +520,24 @@ func TestGuardOnlyEverPreviews(t *testing.T) {
 
 	// These three are expected to invoke kubectl/helm now — that is the whole
 	// point of Task 9. What must never appear among the recorded calls is the
-	// bare mutating verb running for real.
+	// bare mutating verb running for real. The helm command deliberately
+	// targets a NON-production namespace: review round 1 found that "-n
+	// prod" made check_production intercept before validate_helm ever ran,
+	// so this oracle asserted NOTHING WHATSOEVER about the one validator that
+	// appends a preview flag to an argv already naming a mutating verb —
+	// exactly the shape this test exists to catch.
 	for _, cmd := range []string{
 		"kubectl apply -f app.yaml",
 		"kubectl delete pod x -n demo",
-		"helm uninstall myrel -n prod",
+		"helm uninstall myrel -n demo",
 	} {
 		runHook(t, bashInput(cmd, "k8s_editor"), dir)
 	}
 
 	b, err := os.ReadFile(marker)
 	if err != nil {
-		return // nothing was invoked at all, which is trivially safe
+		t.Fatalf("none of the three mutating commands invoked kubectl/helm at all — " +
+			"validate() should have previewed each of them")
 	}
 	for _, rec := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		fields := strings.Fields(rec)
@@ -754,5 +856,195 @@ func TestProductionTargetEscalatesAfterThreeAttempts(t *testing.T) {
 	out, _ := runHook(t, in, dir)
 	if decisionOf(t, out) != "ask" {
 		t.Fatalf("third attempt decision = %q, want ask", decisionOf(t, out))
+	}
+}
+
+// --- Review round 1 fixes ---
+
+// CRITICAL, fail-open (Finding A). `doc.get("items", [doc]) if doc else []`
+// defaulted to `[]` — an empty, therefore skipped, per-item loop — whenever
+// the `get` pre-check's stdout was empty or unparseable, which is exactly
+// what a ZERO-EXIT kubectl prints on a server hiccup or a plain-text error.
+// Both let a k8s_cleaner delete PROCEED with no ephemeral-label or
+// ownerReferences check ever having run. Proven the same way the reviewer
+// proved it was open: a stub kubectl that exits 0 with empty stdout, and one
+// that exits 0 with unparseable stdout, must both deny.
+func TestDestructiveFailsClosedOnUnusableGetOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"empty stdout", "exit 0"},
+		{"unparseable stdout", `echo "Error from server: gateway timeout"; exit 0`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stubBin(t, "kubectl", tc.body)
+			out, _ := runHook(t, bashInput("kubectl delete pod real-app -n demo", "k8s_cleaner"), dir)
+			if decisionOf(t, out) != "deny" {
+				t.Fatalf("a delete whose pre-check could not be read = %q, want deny (%s)", decisionOf(t, out), out)
+			}
+		})
+	}
+}
+
+// Finding B, overriding the brief. classify() already normalises the binary
+// to "kubectl"/"helm"; the validators used to exec argv[0] instead — the RAW
+// head token, which is "(kubectl" for a paren-glued segment or a relative
+// path like "./kubectl" for an explicit relative invocation. run_argv's cwd
+// comes straight from the hook input (the session's writable working
+// directory), so an agent-planted `./kubectl` shim in that cwd answered the
+// guard's own resolve_target probe instead of the real binary — proven here
+// with a forged ephemeral label that would otherwise make a k8s_cleaner
+// delete PROCEED.
+func TestGuardExecsTheNormalisedBinaryNeverArgvZero(t *testing.T) {
+	cwd := t.TempDir()
+	shim := filepath.Join(cwd, "kubectl")
+	body := "#!/bin/sh\necho '{\"metadata\":{\"name\":\"real-app\",\"labels\":{\"omnis.dev/ephemeral\":\"true\"}}}'\nexit 0\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+	in := bashInput("./kubectl delete pod real-app -n demo", "k8s_cleaner")
+	in["cwd"] = cwd
+	// No extraPath: PATH is whatever this machine has (real kubectl, or
+	// none). Either way it must NOT be the cwd-planted shim, whose forged
+	// label would make this proceed.
+	out, _ := runHook(t, in, "")
+	if decisionOf(t, out) == "" {
+		t.Fatalf("the guard's own cwd-planted shim answered its probe and let the delete proceed: %s", out)
+	}
+}
+
+// Finding C. `helm plugin list` exits 0 even with ZERO plugins installed —
+// verified against the real binary, it prints only the header row — so
+// gating on the EXIT CODE made the fallback branch dead code: every Helm
+// change tried `helm diff upgrade`, which does not exist without the
+// plugin, and hard-blocked with `unknown command "diff"` regardless of
+// whether the plugin was actually there.
+func TestHelmDiffPluginDetectedByOutputNotExitCode(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		pluginListed bool
+	}{
+		{"diff plugin installed", true},
+		{"no plugins installed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pluginLine := ""
+			if tc.pluginListed {
+				pluginLine = `echo "diff 3.9.0 preview-helm-changes"`
+			}
+			dir := stubBin(t, "helm", `
+case "$*" in
+  "plugin list")
+    echo "NAME VERSION DESCRIPTION"
+    `+pluginLine+`
+    exit 0 ;;
+  "diff upgrade myrel ./chart -n demo") exit 7 ;;
+  *) exit 0 ;;
+esac`)
+			out, _ := runHook(t, bashInput("helm upgrade myrel ./chart -n demo", "k8s_editor"), dir)
+			usedDiffCmd := decisionOf(t, out) == "deny"
+			if usedDiffCmd != tc.pluginListed {
+				t.Fatalf("used `helm diff upgrade` = %v, want %v (%s)", usedDiffCmd, tc.pluginListed, out)
+			}
+		})
+	}
+}
+
+// Finding D. --server-side is an apply-only flag: `kubectl create
+// --server-side` and `kubectl replace --server-side` both fail with "unknown
+// flag: --server-side" (verified against the real binary), which
+// permanently blocked both verbs and blamed the API server for a flag the
+// guard itself injected. The stub exits 3 (recorded as deny) iff
+// --server-side appears in the dry-run step, so the DECISION itself proves
+// whether the flag was sent.
+func TestServerSideAppliesOnlyToApply(t *testing.T) {
+	for _, tc := range []struct {
+		verb           string
+		wantServerSide bool
+	}{
+		{"apply", true},
+		{"create", false},
+		{"replace", false},
+	} {
+		t.Run(tc.verb, func(t *testing.T) {
+			dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*) exit 1 ;;
+  *--server-side*) exit 3 ;;
+  *) exit 0 ;;
+esac`)
+			out, _ := runHook(t, bashInput("kubectl "+tc.verb+" -f app.yaml -n demo", "k8s_editor"), dir)
+			gotServerSide := decisionOf(t, out) == "deny"
+			if gotServerSide != tc.wantServerSide {
+				t.Fatalf("%s: --server-side present = %v, want %v (%s)", tc.verb, gotServerSide, tc.wantServerSide, out)
+			}
+		})
+	}
+}
+
+// Design ruling for Finding E. rollout restart/pause/resume support no
+// --dry-run at all (verified against the real binary: "unknown flag:
+// --dry-run"), so validate_imperative's normal path permanently refused them
+// with "express it as a manifest and apply that file instead" — impossible
+// advice for an action that recreates pods rather than changing desired
+// state. The fix resolves the target and reports its scope instead: a
+// resolvable target now PROCEEDS (the canonical safe rolling restart is no
+// longer dead-ended), and an unresolvable one still denies, exactly like
+// validate_destructive's own pre-check.
+func TestRolloutRestartResolvesInsteadOfDeadEnding(t *testing.T) {
+	for _, action := range []string{"restart", "pause", "resume"} {
+		t.Run(action, func(t *testing.T) {
+			t.Run("resolvable target proceeds", func(t *testing.T) {
+				dir := stubBin(t, "kubectl", `
+case "$*" in
+  *get*) echo '{"metadata":{"name":"x","labels":{}}}'; exit 0 ;;
+  *)     exit 1 ;;
+esac`)
+				out, _ := runHook(t, bashInput("kubectl rollout "+action+" deploy/x -n demo", "k8s_editor"), dir)
+				if decisionOf(t, out) == "deny" {
+					t.Fatalf("a resolvable rollout %s target was denied instead of previewed: %s", action, out)
+				}
+			})
+			t.Run("unresolvable target still denies", func(t *testing.T) {
+				dir := stubBin(t, "kubectl", "exit 1")
+				out, _ := runHook(t, bashInput("kubectl rollout "+action+" deploy/x -n demo", "k8s_editor"), dir)
+				if decisionOf(t, out) != "deny" {
+					t.Fatalf("an unresolvable rollout %s target decision = %q, want deny", action, decisionOf(t, out))
+				}
+			})
+		})
+	}
+}
+
+// Finding H, first bug. ops[:1] mis-selected the release name whenever a
+// flag preceded it: "helm uninstall -n demo myrel" built
+// "helm history -n -n demo", which can never resolve any real release. The
+// stub only succeeds for the correctly-parsed args, so a deny here proves
+// the release name was misidentified.
+func TestHelmReleaseNameSkipsAPrecedingFlag(t *testing.T) {
+	dir := stubBin(t, "helm", `
+case "$*" in
+  "history myrel -n demo") exit 0 ;;
+  *)                       exit 9 ;;
+esac`)
+	out, _ := runHook(t, bashInput("helm uninstall -n demo myrel", "k8s_editor"), dir)
+	if decisionOf(t, out) == "deny" {
+		t.Fatalf("the release name was not correctly identified from behind a preceding flag: %s", out)
+	}
+}
+
+// Finding H, second bug. `[a for a in ops if not a.startswith("-")]` counted
+// a flag's VALUE as if it were a named resource: "kubectl delete -n demo"
+// has no resource at all, only a namespace value, yet the old check saw
+// `["demo"]` and let it through. This needs no stub — the blast-radius check
+// runs before any subprocess call, so it is deterministic on any machine.
+func TestBlastRadiusIgnoresAFlagsValue(t *testing.T) {
+	out, _ := runHook(t, bashInput("kubectl delete -n demo", "k8s_editor"), "")
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("decision = %q, want deny", decisionOf(t, out))
+	}
+	if !strings.Contains(reasonOf(t, out), "names no specific resource") {
+		t.Fatalf("reason = %q, want it to explain no resource was named", reasonOf(t, out))
 	}
 }
