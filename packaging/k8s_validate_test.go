@@ -2207,12 +2207,19 @@ func writeChartAt(t *testing.T, dir, configMapName string) {
 	write("templates/cm.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+configMapName+"\n")
 }
 
-// THE bypass the coordinator measured: a decoy chart directory named as a
-// KNOWN value-flag's value (--kubeconfig) used to be read as the chart
-// operand — being the FIRST bare token the old scan found — instead of the
-// real chart named later on the same command line. Same discipline as
-// every other content-binding test: one fixed command, one attestation,
-// vary exactly one directory's content at a time.
+// THE bypass the coordinator measured in round 4: a decoy chart directory
+// positioned as a flag's value (--kubeconfig, which happens to be in the
+// KNOWN value-flag set) used to be read as the chart operand — being the
+// FIRST bare token the old first-match scan found — instead of the real
+// chart named later on the same command line. The CURRENT rule (round 5) is
+// purely positional — any bare token immediately after ANY "-"-prefixed
+// token is excluded, whether or not that flag is "known" — so this case now
+// passes for a structural reason, not because --kubeconfig happens to be
+// recognised. See TestHelmUnlistedFlagDecoyWithRemoteChartIsRefusedWithNoIdentifier
+// for the harder case this rewrite closes: the identical shape behind a
+// flag this guard has never heard of. Same discipline as every other
+// content-binding test: one fixed command, one attestation, vary exactly
+// one directory's content at a time.
 func TestHelmFlagValueDecoyDoesNotBindInsteadOfRealChart(t *testing.T) {
 	dir := stubBin(t, "helm", helmMechanicalBody)
 	root := t.TempDir()
@@ -2330,5 +2337,110 @@ func TestHelmLocalPackagedChartContentBinds(t *testing.T) {
 	}
 	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
 		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// --- round 5: the candidate rule must be POSITIONAL, not flag-list-based ---
+
+// THE bypass the coordinator measured in round 5: `--post-renderer` is a
+// real Helm flag that takes a value, but it is in NEITHER VALUE_FLAGS NOR
+// HELM_VALUES_FLAGS — the two sets round 4's fix skipped values for. So a
+// decoy chart directory named as ITS value was still scanned as a bare
+// candidate, and being the ONLY local candidate on a line whose real chart
+// (bitnami/nginx) is a remote repo alias with nothing on this machine to
+// bind, the decoy was bound, attested, and applied in place of a chart that
+// was never local at all. The fix makes the rule purely positional (skip
+// any token immediately after ANY "-"-prefixed token, known or not), which
+// closes this by construction — there is no set of flags to have missed.
+//
+// The critical assertion is not just "deny": it is that NO change
+// identifier is ever produced for this shape, at any attempt count. A
+// content-binding refusal is written with emit() directly (see
+// helm_content_digest), never refuse() — so, unlike an ordinary "has not
+// been reviewed" refusal, it structurally cannot escalate to "ask" no
+// matter how many times the same command is retried. A user click must
+// never substitute for a review of content this guard could not pin down.
+func TestHelmUnlistedFlagDecoyWithRemoteChartIsRefusedWithNoIdentifier(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	root := t.TempDir()
+	decoy := filepath.Join(root, "decoy")
+	writeChartAt(t, decoy, "decoy-configmap")
+
+	command := "helm upgrade myrel bitnami/nginx --post-renderer " + decoy + " -n demo"
+
+	// attempt=1: the very first try must already refuse, with no identifier.
+	in1 := bashInput(command, "k8s_editor")
+	out1, _ := runHook(t, in1, dir)
+	if got := decisionOf(t, out1); got != "deny" {
+		t.Fatalf("remote chart with a decoy behind an UNLISTED flag, decision = %q, want deny: %s", got, out1)
+	}
+	reason1 := reasonOf(t, out1)
+	if changeIDRe.MatchString(reason1) {
+		t.Fatalf("a change identifier was issued for a chart this guard could not verify as local — "+
+			"the decoy must never be bound, attested, or applied: %q", reason1)
+	}
+	if !strings.Contains(reason1, "in a position this guard can verify") {
+		t.Fatalf("reason = %q, want the content-binding refusal, not some other denial", reason1)
+	}
+
+	// attempt=3, consecutive=3: still "deny", never "ask" — proving this
+	// refusal is TERMINAL and does not escalate like an ordinary
+	// not-yet-reviewed refusal would.
+	in2 := bashInput(command, "k8s_editor")
+	in2["attempt"] = 3
+	in2["consecutive"] = 3
+	out2, _ := runHook(t, in2, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("same command at attempt=3/consecutive=3, decision = %q, want deny (never ask): %s", got, out2)
+	}
+	reason2 := reasonOf(t, out2)
+	if changeIDRe.MatchString(reason2) {
+		t.Fatalf("a change identifier was issued at attempt=3 — this must stay unidentifiable "+
+			"forever, not just on the first try: %q", reason2)
+	}
+	if strings.Contains(reason2, "Validation has failed") {
+		t.Fatalf("reason = %q, escalated to the ask-wrapper text — emit() must bypass refuse() entirely here", reason2)
+	}
+}
+
+// The accepted cost of the positional rule, ruled explicitly by the
+// coordinator: a flag placed BETWEEN the release name and the chart path
+// now refuses, even though the chart is perfectly real and local, because
+// the token immediately preceding it starts with "-". This is deliberate —
+// distinguishing a boolean flag (--atomic) from a value-taking one to
+// recover this case needs Helm's own flag-arity table again, exactly the
+// unbounded enumeration the positional rule exists to avoid. The refusal
+// must name the fix (move the chart path) so the cost is cheap to pay.
+func TestHelmFlagBeforeChartRefusedWithPositionalAdvice(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	chart := writeChart(t)
+
+	command := "helm upgrade myrel --atomic " + chart + " -n demo"
+	in := bashInput(command, "k8s_editor")
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("real chart preceded by --atomic, decision = %q, want deny (positional rule, accepted cost): %s", got, out)
+	}
+	reason := reasonOf(t, out)
+	if changeIDRe.MatchString(reason) {
+		t.Fatalf("a change identifier was issued despite the chart following a flag: %q", reason)
+	}
+	if !strings.Contains(reason, "immediately after the release name") {
+		t.Fatalf("reason = %q, want it to tell the user to move the chart path", reason)
+	}
+
+	// Moving the SAME chart to immediately follow the release name (the
+	// flag now trailing the chart instead of preceding it) must reach an
+	// ordinary change identifier — proving the refusal above was positional
+	// friction, not some other problem with this chart or command.
+	command2 := "helm upgrade myrel " + chart + " --atomic -n demo"
+	in2 := bashInput(command2, "k8s_editor")
+	out2, _ := runHook(t, in2, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("unattested change, decision = %q, want deny (unreviewed, not a flag refusal): %s", got, out2)
+	}
+	reason2 := reasonOf(t, out2)
+	if !changeIDRe.MatchString(reason2) {
+		t.Fatalf("moving the chart after the release name should reach a change identifier, got: %q", reason2)
 	}
 }

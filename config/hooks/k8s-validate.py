@@ -615,48 +615,50 @@ def local_target_digest(argv, cwd):
 
 
 def _local_chart_candidates(argv, verb_idx, cwd):
-    """Every BARE token after the verb that could be the Helm chart
-    argument: a directory containing Chart.yaml (Helm's own chart marker —
-    it does not accept "Chart.yml"), or a local packaged chart archive (a
-    ".tgz" file Helm can install directly). Returns a LIST — the caller
-    (helm_content_digest) decides what to do with the count: exactly one
-    candidate is used, zero or more than one both refuse, for different,
-    clearly-labelled reasons.
+    """Every BARE token after the verb, in a POSITION this guard can trust,
+    that resolves to something local this guard can read: a directory
+    containing Chart.yaml (Helm's own chart marker — it does not accept
+    "Chart.yml"), or a local packaged chart archive (a ".tgz" file Helm can
+    install directly). Returns a LIST — the caller (helm_content_digest)
+    decides what to do with the count: exactly one candidate is used, zero
+    or more than one both refuse, for different, clearly-labelled reasons.
 
-    Skips the value of any KNOWN value-taking flag (VALUE_FLAGS — the same
-    global set kubectl's own verb/operand identification already uses —
-    plus HELM_VALUES_FLAGS) before considering a token a candidate at all.
-    This is what closes a real bypass: a decoy chart directory named as a
-    flag's value was previously read as an operand and, being the FIRST
-    bare token the old scan found, silently replaced the real chart —
-    `helm upgrade --kubeconfig ./decoy myrel ./chart -n demo` bound
-    ./decoy, and rewriting the REAL chart afterwards left the subject
-    unchanged. Reproduced live before this fix (see the fix commit's
-    message) — the same bug CLASS as Task 9's `ops[:1]` (a flag's value
-    read as an operand), which subverb_of's own docstring already warns
-    against elsewhere in this file.
+    "A position this guard can trust" means: the token immediately BEFORE
+    it does not start with "-". This is deliberately POSITIONAL, not based
+    on a set of known value-taking flags (an earlier version of this
+    function skipped only the value of a flag it recognised — VALUE_FLAGS
+    plus HELM_VALUES_FLAGS — which closed the ./decoy-behind-a-KNOWN-flag
+    bypass but left the identical shape open behind an UNKNOWN one:
+    `helm upgrade myrel bitnami/nginx --post-renderer ./decoy -n demo`
+    installs the REMOTE chart bitnami/nginx, but --post-renderer is not in
+    either flag set, so ./decoy — its value — was still scanned as a bare
+    candidate, became the SOLE local match, and got bound, attested, and
+    applied in place of the actual (non-local, therefore unbindable)
+    chart. Reproduced live before this fix. Same bug CLASS as Task 9's
+    `ops[:1]` — a flag's value read as an operand — which subverb_of's own
+    docstring already warns against elsewhere in this file, and the same
+    lesson repeated: enumerating which flags are "known" is unbounded;
+    "does this token immediately follow ANY flag" is not.
 
-    Deliberately NOT a full Helm flag-arity table (the unbounded thing an
-    earlier round wrongly reached for): an UNKNOWN flag's value is still
-    scanned as a candidate, so `--timeout 5m` is safe only because "5m"
-    happens not to resolve to a real chart — it is the CANDIDATE-COUNT rule
-    below (in helm_content_digest), not per-flag knowledge, that makes an
-    unknown flag's value safe in general. VALUE_FLAGS/HELM_VALUES_FLAGS
-    only need to cover the flags that could plausibly precede a genuine
-    chart operand and whose value could plausibly BE a real chart path —
-    --kubeconfig is exactly that shape.
+    The accepted cost, deliberately: a flag placed BETWEEN the release name
+    and the chart (`helm upgrade myrel --atomic ./chart`) makes the chart
+    token "follow a flag" too, so it is excluded here — this refuses with
+    actionable advice (see helm_content_digest) rather than guessing, and
+    the fix (move the chart path so nothing precedes it but the release
+    name) is trivial for whoever wrote the command. Distinguishing a
+    boolean flag like --atomic from a value-taking one to recover that case
+    would need Helm's own flag-arity table again, by another name — exactly
+    the unbounded enumeration this guard rejects everywhere else. A flag
+    AFTER the chart path is unaffected either way (`--timeout 5m` following
+    the chart never touches this rule; verified directly).
     """
-    known_value_flags = VALUE_FLAGS | set(HELM_VALUES_FLAGS)
+    tokens = argv[verb_idx + 1:]
     candidates = []
-    skip_next = False
-    for tok in argv[verb_idx + 1:]:
-        if skip_next:
-            skip_next = False
-            continue
+    for i, tok in enumerate(tokens):
         if tok.startswith("-"):
-            if "=" not in tok and tok in known_value_flags:
-                skip_next = True
             continue
+        if i > 0 and tokens[i - 1].startswith("-"):
+            continue  # follows a flag positionally — never a candidate, known or not
         full = os.path.join(cwd or ".", tok)
         if os.path.isfile(os.path.join(full, "Chart.yaml")):
             candidates.append((tok, full, "dir"))
@@ -681,24 +683,28 @@ def helm_content_digest(verb, argv, verb_idx, cwd):
     release-name-only mutations already identified by argv alone). `--set
     k=v` needs no special handling: its value is literally a token in argv,
     and argv is already part of the subject (see subject_hash) — nothing
-    here parses Helm's flags at all beyond the KNOWN value-flag skip in
-    _local_chart_candidates (see its own docstring for why that is bounded,
-    not a flag-arity table).
+    here parses Helm's flags at all: _local_chart_candidates' rule is
+    purely positional (see its own docstring for why that, not a flag
+    table, is what closes the bypass).
 
     TERMINALLY refuses (like _resolve_local_path — see its docstring) in
     two distinct cases, both because a click past three attempts must not
-    substitute for a review of content this guard could not pin down:
-    - ZERO local candidates: a repo alias, an OCI reference, a non-local
-      .tgz reference, or a URL can each change server-side, or simply
-      cannot be read from here — there is nothing on this machine to bind.
-      Told to `helm pull` it locally first, the same shape
-      _resolve_local_path gives for a remote kubectl manifest.
+    substitute for a review of content this guard could not pin down, and
+    both name the fix rather than just the failure:
+    - ZERO local candidates: either a repo alias, an OCI reference, a
+      non-local .tgz reference, or a URL (nothing on this machine to bind
+      — told to `helm pull` it locally first, the same shape
+      _resolve_local_path gives for a remote kubectl manifest), OR a real
+      local chart whose token happens to follow a flag (see
+      _local_chart_candidates — the accepted cost of the positional rule).
+      Both are told to put the chart path immediately after the release
+      name.
     - MORE THAN ONE local candidate: which one Helm would actually use
-      cannot be determined from here — guessing (the previous version of
-      this function picked the FIRST bare token, unconditionally) is
-      exactly what produced the ./decoy bypass above. Refusing as
-      ambiguous is the fail-closed direction; the caller can remove
-      whichever operand is not the real chart and retry.
+      cannot be determined from here — guessing (an earlier version of
+      this function picked the FIRST bare token unconditionally, then
+      merely the first UNFLAGGED one) is exactly what produced two
+      successive real bypasses. Refusing as ambiguous is the fail-closed
+      direction; told to leave only the real chart's path unflagged.
 
     A previous version of this function rendered via `helm template`
     instead, replaying the command's own flags into it. Retired: proven live
@@ -717,13 +723,19 @@ def helm_content_digest(verb, argv, verb_idx, cwd):
         emit("deny",
              "This Helm command's chart argument does not name a local "
              "directory (containing Chart.yaml) or a local packaged chart "
-             "(.tgz), so its content cannot be verified. `helm pull` it "
-             "locally and point at that directory/archive instead.")
+             "(.tgz) in a position this guard can verify — the chart "
+             "operand must not be preceded by a flag. Put the chart path "
+             "immediately after the release name (e.g. `helm upgrade "
+             "RELEASE ./chart ...`), or if the chart is genuinely remote, "
+             "`helm pull` it locally and point at that directory/archive, "
+             "then retry.")
     if len(candidates) > 1:
         emit("deny",
              "This command's operands name more than one possible chart "
              "target (%s); which one Helm would actually use cannot be "
-             "determined, so its content cannot be verified." %
+             "determined. Put the chart path immediately after the "
+             "release name, with no other operand unflagged before it, "
+             "and retry." %
              ", ".join(repr(c[0]) for c in candidates))
     _, chart_path, kind = candidates[0]
     if kind == "dir":
