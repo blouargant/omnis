@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/blouargant/omnis/internal/hookstate"
 )
 
 // script returns the path to the shipped hook script.
@@ -88,6 +90,34 @@ func bashInput(command, agent string) map[string]any {
 		"agent_name":      agent,
 		"attempt":         1,
 		"consecutive":     0,
+	}
+}
+
+// stubBin writes an executable stub named name into a fresh dir and returns the
+// dir, for prepending to PATH. body is a /bin/sh script.
+func stubBin(t *testing.T, name, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	return dir
+}
+
+// approvedFor builds an attestations map whose single key is the subject hash
+// of in["tool_input"], with verdict APPROVED. The hash must match
+// hookstate.HashArgs — the Python hook script's own subject computation (wired
+// in Task 10) is required to agree with it exactly.
+func approvedFor(t *testing.T, in map[string]any) map[string]any {
+	t.Helper()
+	ti, ok := in["tool_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_input is not a map[string]any: %#v", in["tool_input"])
+	}
+	subject := hookstate.HashArgs(ti)
+	return map[string]any{
+		subject: map[string]any{"verdict": "APPROVED"},
 	}
 }
 
@@ -170,15 +200,15 @@ var commandShapeCases = []struct {
 	// regressed, `sudo -u root kubectl delete` would deny as "does not
 	// invoke it directly", the table would stay green, and Task 9's
 	// validation would silently never run on any wrapped command.
-	{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny", "is not implemented yet"},
-	{"helm boolean global before upgrade", "helm --debug upgrade myrel ./chart -n demo", "k8s_editor", "deny", "is not implemented yet"},
-	{"helm boolean global before uninstall", "helm --debug uninstall myrel -n demo", "k8s_editor", "deny", "is not implemented yet"},
-	{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
-	{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
-	{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
+	{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny", "could not be previewed"},
+	{"helm boolean global before upgrade", "helm --debug upgrade myrel ./chart -n demo", "k8s_editor", "deny", "The Helm change could not be previewed"},
+	{"helm boolean global before uninstall", "helm --debug uninstall myrel -n demo", "k8s_editor", "deny", "No such Helm release"},
+	{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
+	{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
+	{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
 	{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
-	{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
+	{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"auth reconcile writes RBAC", "kubectl auth reconcile -f rbac.yaml", "k8s_editor", "deny", ""},
 	{"config use-context rewrites kubeconfig", "kubectl config use-context prod", "k8s_editor", "deny", ""},
 	{"rollout undo writes", "kubectl rollout undo deploy/x -n demo", "k8s_editor", "deny", ""},
@@ -186,9 +216,9 @@ var commandShapeCases = []struct {
 	{"helm test creates Pods", "helm test prod-app -n prod", "k8s_editor", "deny", ""},
 	// helm's canonical destructive verb under each of its live aliases. All
 	// three previously proceeded behind a wrapper and uninstalled unvalidated.
-	{"helm delete alias behind sudo", "sudo helm delete myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
-	{"helm del alias behind sudo", "sudo helm del myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
-	{"helm un alias behind sudo", "sudo helm un myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+	{"helm delete alias behind sudo", "sudo helm delete myrel -n prod", "k8s_editor", "deny", "looks like production"},
+	{"helm del alias behind sudo", "sudo helm del myrel -n prod", "k8s_editor", "deny", "looks like production"},
+	{"helm un alias behind sudo", "sudo helm un myrel -n prod", "k8s_editor", "deny", "looks like production"},
 	{"helm delete behind timeout", "timeout 60 helm delete myrel -n prod", "k8s_editor", "deny", ""},
 	// A value flag shifting the sub-verb in the OPEN direction: these ran a
 	// rollback and an RBAC write unvalidated.
@@ -238,15 +268,15 @@ var commandShapeCases = []struct {
 
 	// ---- a suffixed binary name is a real install, not an evasion ----
 	// A trailing \b made the whole guard exit on these.
-	{"helm3 uninstall", "helm3 uninstall myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
-	{"helm2 delete", "helm2 delete myrel", "k8s_editor", "deny", "is not implemented yet"},
-	{"suffixed kubectl path", "/usr/local/bin/kubectl.real delete pod x -n demo", "k8s_editor", "deny", "is not implemented yet"},
-	{"read then a suffixed mutation", "kubectl get pods; helm3 uninstall myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+	{"helm3 uninstall", "helm3 uninstall myrel -n prod", "k8s_editor", "deny", "looks like production"},
+	{"helm2 delete", "helm2 delete myrel", "k8s_editor", "deny", "The Helm change could not be previewed"},
+	{"suffixed kubectl path", "/usr/local/bin/kubectl.real delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"read then a suffixed mutation", "kubectl get pods; helm3 uninstall myrel -n prod", "k8s_editor", "deny", "looks like production"},
 
 	// ---- proxy hands out a credentialed API endpoint ----
 	// The process changes nothing; what it enables is a full read-write API
 	// on localhost, and the follow-up curl names neither tool.
-	{"proxy is not a read", "kubectl proxy --port=8001", "k8s_investigator", "deny", "is not implemented yet"},
+	{"proxy is not a read", "kubectl proxy --port=8001", "k8s_investigator", "deny", "no validation rule"},
 
 	// ---- shell control flow around an ordinary READ ----
 	// Five shapes, all reads. Refusing these is the investigator's normal
@@ -287,12 +317,12 @@ var commandShapeCases = []struct {
 	// dead code that read as coverage. These now reach validate with the REAL
 	// verb — a stronger outcome than refusing them as unidentifiable, and the
 	// reason proves the wrapper's own flag was consumed rather than guessed.
-	{"time -p hides a delete", "time -p kubectl delete pod x -n demo", "k8s_editor", "deny", "`kubectl delete`"},
-	{"time -o hides a delete", "/usr/bin/time -o /tmp/t kubectl delete pod x -n demo", "k8s_editor", "deny", "`kubectl delete`"},
-	{"time -p hides an uninstall", "time -p helm uninstall myrel -n prod", "k8s_editor", "deny", "`helm uninstall`"},
-	{"xargs -a hides a delete", "xargs -a /tmp/l kubectl delete pod -n demo", "k8s_editor", "deny", "`kubectl delete`"},
-	{"sudo --chroot hides a delete", "sudo -R / kubectl delete pod x -n demo", "k8s_editor", "deny", "`kubectl delete`"},
-	{"sudo --chdir hides a delete", "sudo -D /tmp kubectl delete pod x -n demo", "k8s_editor", "deny", "`kubectl delete`"},
+	{"time -p hides a delete", "time -p kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"time -o hides a delete", "/usr/bin/time -o /tmp/t kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"time -p hides an uninstall", "time -p helm uninstall myrel -n prod", "k8s_editor", "deny", "looks like production"},
+	{"xargs -a hides a delete", "xargs -a /tmp/l kubectl delete pod -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"sudo --chroot hides a delete", "sudo -R / kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"sudo --chdir hides a delete", "sudo -D /tmp kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
 
 	// When stripping does NOT land on a bare program name, identification has
 	// failed and the inversion refuses. flock's `-c` genuinely hands a string to
@@ -305,11 +335,11 @@ var commandShapeCases = []struct {
 	// Grouping punctuation glued to the binary defeated the ^-anchored basename
 	// test. The spaced `( kubectl … )` row above was green throughout, which is
 	// exactly why the glued form was never generated.
-	{"paren glued to the binary", "(kubectl delete pod x -n demo)", "k8s_editor", "deny", "not implemented yet"},
-	{"paren glued, helm", "(helm uninstall myrel -n prod)", "k8s_editor", "deny", "not implemented yet"},
-	{"paren glued after a read", "kubectl get pods -n demo; (kubectl delete pod x -n demo)", "k8s_editor", "deny", "not implemented yet"},
-	{"paren glued inside a loop", "for i in 1; do (kubectl delete pod x -n demo); done", "k8s_editor", "deny", "not implemented yet"},
-	{"paren mid-token after if", "if(kubectl delete pod x -n demo); then echo y; fi", "k8s_editor", "deny", "not implemented yet"},
+	{"paren glued to the binary", "(kubectl delete pod x -n demo)", "k8s_editor", "deny", "could not be resolved"},
+	{"paren glued, helm", "(helm uninstall myrel -n prod)", "k8s_editor", "deny", "looks like production"},
+	{"paren glued after a read", "kubectl get pods -n demo; (kubectl delete pod x -n demo)", "k8s_editor", "deny", "could not be resolved"},
+	{"paren glued inside a loop", "for i in 1; do (kubectl delete pod x -n demo); done", "k8s_editor", "deny", "could not be resolved"},
+	{"paren mid-token after if", "if(kubectl delete pod x -n demo); then echo y; fi", "k8s_editor", "deny", "could not be resolved"},
 
 	// >( is the same execute-a-nested-command shape as <(, which was listed.
 	{"output process substitution", "echo hi > >(kubectl delete pod x -n demo)", "k8s_editor", "deny", "substitutes another command"},
@@ -317,14 +347,14 @@ var commandShapeCases = []struct {
 
 	// Wrappers that exec argv[1..]: the verb is in plain sight, there was simply
 	// no entry, so the segment was spared instead of scrutinised.
-	{"setsid execs argv", "setsid kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
-	{"setsid execs argv, helm", "setsid helm uninstall myrel -n prod", "k8s_editor", "deny", "not implemented yet"},
-	{"taskset execs argv", "taskset -c 0 kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
+	{"setsid execs argv", "setsid kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"setsid execs argv, helm", "setsid helm uninstall myrel -n prod", "k8s_editor", "deny", "looks like production"},
+	{"taskset execs argv", "taskset -c 0 kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
 	{"taskset before a read", "taskset -c 0 kubectl get pods -n demo", "k8s_investigator", "", ""},
-	{"chrt takes a priority operand", "chrt -f 10 kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
-	{"unshare execs argv", "unshare -r kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
-	{"strace execs argv", "strace -f kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
-	{"systemd-run execs argv", "systemd-run --scope kubectl delete pod x -n demo", "k8s_editor", "deny", "not implemented yet"},
+	{"chrt takes a priority operand", "chrt -f 10 kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"unshare execs argv", "unshare -r kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"strace execs argv", "strace -f kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
+	{"systemd-run execs argv", "systemd-run --scope kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
 	{"busybox launches a shell", "busybox sh -c 'kubectl delete pod x'", "k8s_editor", "deny", "another program to execute"},
 }
 
@@ -345,11 +375,37 @@ func TestDecisionForCommandShapes(t *testing.T) {
 	}
 }
 
-// The skeleton must decide without running anything. Round 0's worst failure mode
-// was the guard executing the very mutation it was inspecting, and nothing tested
-// for it — the stub-PATH parameter existed but was passed "" at every call site.
-// A stub that records its own invocation makes that detectable.
-func TestGuardExecutesNoSubprocess(t *testing.T) {
+// mutatingVerbs names the kubectl/helm verbs that actually change cluster
+// state. Shared by TestGuardOnlyEverPreviews (a recorded invocation whose verb
+// is here must carry a --dry-run marker) and TestProceedsAreInertUnderBash (a
+// proceed row must never reach one of these at all). A mutation spelled with a
+// verb absent here is not detected by either oracle — the same enumeration
+// risk the guard itself carries, which is why the sets are shared in spirit
+// with config/hooks/k8s-validate.py.
+var mutatingVerbs = map[string]bool{
+	"delete": true, "apply": true, "create": true, "replace": true, "patch": true,
+	"scale": true, "annotate": true, "label": true, "taint": true, "drain": true,
+	"cordon": true, "uncordon": true, "edit": true, "set": true, "expose": true,
+	"run": true, "attach": true, "cp": true, "debug": true, "certificate": true,
+	"exec": true, "install": true, "upgrade": true, "uninstall": true, "del": true,
+	"un": true, "rollback": true, "push": true, "restart": true, "undo": true,
+	"pause": true, "reconcile": true,
+}
+
+// Round 0's worst failure mode was the guard executing the very mutation it
+// was inspecting, and nothing tested for it. This test used to assert the
+// guard ran NOTHING — true only while validate() was the Task 8 stub. Task 9
+// gives validate() real work: a manifest apply is diffed and server
+// dry-run'd, a destructive delete is pre-checked with a plain `get`, so
+// "executes nothing" is no longer the property that holds for a mutating
+// command. The property that must ALWAYS hold — renamed to say so — is
+// narrower but no weaker: a provably read-only command still causes no
+// kubectl/helm execution at all, and for a mutating command every kubectl/
+// helm invocation the guard makes is either an inherently non-mutating verb
+// (get, diff, history, plugin list, …) or carries a --dry-run marker — never
+// the bare mutating verb running for real. A stub that records its own
+// invocation, as before, makes that detectable.
+func TestGuardOnlyEverPreviews(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "invoked.log")
 	for _, bin := range []string{"kubectl", "helm"} {
@@ -358,16 +414,41 @@ func TestGuardExecutesNoSubprocess(t *testing.T) {
 			t.Fatalf("write stub %s: %v", bin, err)
 		}
 	}
+
+	// A provably read-only command must still cause NO kubectl/helm execution
+	// at all — this half of the original property is unchanged by Task 9.
+	runHook(t, bashInput("kubectl get pods -n demo", "k8s_editor"), dir)
+	if b, err := os.ReadFile(marker); err == nil {
+		t.Fatalf("a provably read-only command executed kubectl/helm:\n%s", b)
+	}
+
+	// These three are expected to invoke kubectl/helm now — that is the whole
+	// point of Task 9. What must never appear among the recorded calls is the
+	// bare mutating verb running for real.
 	for _, cmd := range []string{
 		"kubectl apply -f app.yaml",
 		"kubectl delete pod x -n demo",
 		"helm uninstall myrel -n prod",
-		"kubectl get pods -n demo",
 	} {
 		runHook(t, bashInput(cmd, "k8s_editor"), dir)
 	}
-	if b, err := os.ReadFile(marker); err == nil {
-		t.Fatalf("the guard executed kubectl/helm while only deciding:\n%s", b)
+
+	b, err := os.ReadFile(marker)
+	if err != nil {
+		return // nothing was invoked at all, which is trivially safe
+	}
+	for _, rec := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		fields := strings.Fields(rec)
+		if len(fields) < 2 {
+			continue
+		}
+		verb := verbPosition(fields[1:])
+		if !mutatingVerbs[verb] {
+			continue // get, diff, history, plugin list, … — inherently safe reads
+		}
+		if !strings.Contains(rec, "dry-run") {
+			t.Fatalf("the guard ran the bare mutation instead of previewing it:\n  %s", rec)
+		}
 	}
 }
 
@@ -505,18 +586,10 @@ func TestProceedsAreInertUnderBash(t *testing.T) {
 		}
 	}
 
-	// Verbs that change cluster state. A mutation spelled with a verb absent here
-	// is not detected — the same enumeration risk the guard itself carries, which
-	// is why the sets are shared in spirit with config/hooks/k8s-validate.py.
-	mutating := map[string]bool{
-		"delete": true, "apply": true, "create": true, "replace": true, "patch": true,
-		"scale": true, "annotate": true, "label": true, "taint": true, "drain": true,
-		"cordon": true, "uncordon": true, "edit": true, "set": true, "expose": true,
-		"run": true, "attach": true, "cp": true, "debug": true, "certificate": true,
-		"exec": true, "install": true, "upgrade": true, "uninstall": true, "del": true,
-		"un": true, "rollback": true, "push": true, "restart": true, "undo": true,
-		"pause": true, "reconcile": true,
-	}
+	// Verbs that change cluster state — mutatingVerbs, shared with
+	// TestGuardOnlyEverPreviews. A mutation spelled with a verb absent there is
+	// not detected — the same enumeration risk the guard itself carries.
+	mutating := mutatingVerbs
 	isK8s := func(bin string) bool {
 		return strings.HasPrefix(bin, "kubectl") || strings.HasPrefix(bin, "helm")
 	}
@@ -583,4 +656,103 @@ func verbPosition(args []string) string {
 		}
 	}
 	return ""
+}
+
+// THE trap: `kubectl diff` exits 1 when a diff EXISTS. That is the normal case
+// for any real change, so treating exit 1 as failure would refuse every correct
+// apply. Only >1 is an error.
+func TestKubectlDiffExitOneIsNotAFailure(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)      echo "~ spec.replicas: 1 -> 2"; exit 1 ;;
+  *dry-run*)   echo "deployment.apps/x configured (server dry run)"; exit 0 ;;
+  *)           exit 0 ;;
+esac`)
+	in := bashInput("kubectl apply -f change.yaml -n demo", "k8s_editor")
+	in["attestations"] = approvedFor(t, in)
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got == "deny" || got == "ask" {
+		t.Fatalf("a normal diff (exit 1) must not be refused: %q", out)
+	}
+}
+
+// A dry-run the API server rejects must be refused, with the server's own error
+// carried back so the agent can correct it.
+func TestServerDryRunFailureIsRefusedWithTheServerError(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)    exit 1 ;;
+  *dry-run*) echo "error: unknown field spec.replica" >&2; exit 1 ;;
+  *)         exit 0 ;;
+esac`)
+	out, _ := runHook(t, bashInput("kubectl apply -f change.yaml -n demo", "k8s_editor"), dir)
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("failed dry-run decision = %q, want deny", decisionOf(t, out))
+	}
+	if !strings.Contains(out, "unknown field") {
+		t.Fatalf("the refusal must carry the server error verbatim: %q", out)
+	}
+}
+
+// A delete with no name and no selector has an unbounded blast radius.
+func TestDeleteAllIsRefused(t *testing.T) {
+	dir := stubBin(t, "kubectl", "exit 0")
+	out, _ := runHook(t, bashInput("kubectl delete pods --all -n demo", "k8s_cleaner"), dir)
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("delete --all decision = %q, want deny", decisionOf(t, out))
+	}
+}
+
+// The cleaner's documented contract, now enforced: it removes only resources
+// labelled ephemeral. This needs agent_name — see Task 5.
+func TestCleanerCannotDeleteAnUnlabelledResource(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *"-o json"*) echo '{"metadata":{"name":"real-app","labels":{}}}' ;;
+  *)           exit 0 ;;
+esac`)
+	out, _ := runHook(t, bashInput("kubectl delete pod real-app -n demo", "k8s_cleaner"), dir)
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("unlabelled delete by the cleaner = %q, want deny", decisionOf(t, out))
+	}
+	if !strings.Contains(out, "ephemeral") {
+		t.Fatalf("the refusal must name the missing label: %q", out)
+	}
+}
+
+// The same delete by the change agent is not gated on that label: k8s_editor may
+// legitimately remove a real resource.
+func TestEditorMayDeleteAnUnlabelledResource(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *"-o json"*) echo '{"metadata":{"name":"real-app","labels":{}}}' ;;
+  *)           exit 0 ;;
+esac`)
+	in := bashInput("kubectl delete pod real-app -n demo", "k8s_editor")
+	in["attestations"] = approvedFor(t, in)
+	out, _ := runHook(t, in, dir)
+	if strings.Contains(out, "ephemeral") {
+		t.Fatalf("the ephemeral rule must apply to the cleaner only: %q", out)
+	}
+}
+
+// A production target is a validation failure like any other — refused with a
+// diagnostic, escalated after MAX_ATTEMPTS, never a special harder policy
+// (nothing has been written yet, and a typo must not hard-block).
+func TestProductionTargetIsRefusedOnTheStandardPath(t *testing.T) {
+	dir := stubBin(t, "kubectl", "exit 0")
+	out, _ := runHook(t, bashInput("kubectl apply -f change.yaml -n production", "k8s_editor"), dir)
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("production apply decision = %q, want deny", decisionOf(t, out))
+	}
+}
+
+func TestProductionTargetEscalatesAfterThreeAttempts(t *testing.T) {
+	dir := stubBin(t, "kubectl", "exit 0")
+	in := bashInput("kubectl apply -f change.yaml -n production", "k8s_editor")
+	in["attempt"] = 3
+	out, _ := runHook(t, in, dir)
+	if decisionOf(t, out) != "ask" {
+		t.Fatalf("third attempt decision = %q, want ask", decisionOf(t, out))
+	}
 }

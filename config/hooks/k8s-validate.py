@@ -84,6 +84,21 @@ HELM_LOCAL_VERBS = {
     "completion", "registry", "verify", "docs", "help",
 }
 
+# The three kubectl verb families `validate` routes on. These are NOT about
+# whether a verb is a read — provably_read_only already settled that, and
+# anything reaching validate is already known to mutate. They exist purely to
+# pick WHICH validator applies: a manifest-shaped change can be diffed and
+# server-dry-run'd; an imperative one only supports a dry run; a destructive
+# one needs the blast-radius/ownership pre-checks instead of either.
+APPLY_VERBS = {"apply", "create", "replace"}
+IMPERATIVE_VERBS = {"patch", "set", "scale", "annotate", "label", "expose", "autoscale", "rollout"}
+DESTRUCTIVE_VERBS = {"delete", "drain", "cordon", "uncordon", "taint"}
+
+# helm verbs that remove or roll back a release, as opposed to installing or
+# upgrading one — `validate_helm` previews the latter and pre-checks the former
+# against the release's own history instead of a chart diff.
+HELM_DESTRUCTIVE_VERBS = {"uninstall", "rollback"}
+
 # Global flags that take a SEPARATE value, so the token after them is not the
 # verb. Every other flag is treated as boolean: inferring this from "the next
 # token is not a flag" made a bare -A swallow the verb.
@@ -657,9 +672,179 @@ def main():
     proceed()
 
 
+PROD_PATTERN = re.compile(r"prod|prd|production", re.IGNORECASE)
+EPHEMERAL_LABEL = "omnis.dev/ephemeral"
+CLEANUP_AGENTS = {"k8s_cleaner"}
+
+
+def run_argv(argv, cwd):
+    """Run argv with no shell and return (exit_code, stdout, stderr)."""
+    try:
+        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                           timeout=VALIDATE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return 124, "", "timed out after %ds" % VALIDATE_TIMEOUT
+    except OSError as e:
+        return 127, "", str(e)
+    return p.returncode, p.stdout, p.stderr
+
+
+def has_flag(argv, *names):
+    for tok in argv:
+        for n in names:
+            if tok == n or tok.startswith(n + "="):
+                return True
+    return False
+
+
+def flag_value(argv, *names):
+    for i, tok in enumerate(argv):
+        for n in names:
+            if tok == n and i + 1 < len(argv):
+                return argv[i + 1]
+            if tok.startswith(n + "="):
+                return tok.split("=", 1)[1]
+    return None
+
+
+def target_scope(argv):
+    """Return the namespace and context this command targets, if named."""
+    return (flag_value(argv, "-n", "--namespace") or "",
+            flag_value(argv, "--context") or "")
+
+
+def check_production(argv, attempt, consecutive):
+    ns, ctx = target_scope(argv)
+    for label, value in (("namespace", ns), ("context", ctx)):
+        if value and PROD_PATTERN.search(value):
+            refuse(
+                "The target %s is %r, which looks like production. Nothing has been "
+                "changed. If this is genuinely the intended target, say so explicitly; "
+                "if it is a typo, correct the %s and retry."
+                % (label, value, label),
+                attempt, consecutive,
+            )
+
+
+def check_attested(argv, attestations, attempt, consecutive, subject):
+    """Require an APPROVED verdict from the reviewer for this exact change.
+
+    A missing verdict is a TERMINAL refusal: it must never escalate to `ask`, or
+    the guarantee would be removable by disabling the reviewer agent and then
+    clicking "allow".
+    """
+    rec = attestations.get(subject) if isinstance(attestations, dict) else None
+    if not rec:
+        emit("deny",
+             "This change has not been reviewed. Delegate it to the k8s_validator "
+             "sub-agent with the change identifier `%s`, and retry once it has "
+             "recorded an APPROVED verdict. (If no validation agent is configured, "
+             "Kubernetes changes are refused by design.)" % subject)
+    if rec.get("verdict") != "APPROVED":
+        emit("deny",
+             "The reviewer REJECTED this change:\n\n%s" % (rec.get("reasons") or "(no reasons given)"))
+
+
+def validate_manifest(argv, cwd, attempt, consecutive):
+    path = flag_value(argv, "-f", "--filename")
+    if not path:
+        return validate_imperative(argv, "apply", cwd, attempt, consecutive)
+    code, out, err = run_argv([argv[0], "diff", "-f", path] + scope_flags(argv), cwd)
+    # exit 1 means "a diff exists" — the normal case. Only >1 is an error.
+    if code > 1:
+        refuse("`kubectl diff` failed, so the change could not be previewed:\n\n%s"
+               % (err.strip() or out.strip()), attempt, consecutive)
+    code, out, err = run_argv(list(argv) + ["--server-side", "--dry-run=server"], cwd)
+    if code != 0:
+        refuse("The API server rejected this change in a server-side dry run:\n\n%s"
+               % (err.strip() or out.strip()), attempt, consecutive)
+    return out.strip()
+
+
+def scope_flags(argv):
+    flags = []
+    ns, ctx = target_scope(argv)
+    if ns:
+        flags += ["-n", ns]
+    if ctx:
+        flags += ["--context", ctx]
+    return flags
+
+
+def validate_imperative(argv, verb, cwd, attempt, consecutive):
+    code, out, err = run_argv(argv + ["--dry-run=server"], cwd)
+    if code != 0:
+        text = (err or out).strip()
+        if "unknown flag" in text or "unknown shorthand" in text:
+            refuse("`%s` does not support a server-side dry run, so this change cannot be "
+                   "validated as written. Express it as a manifest and apply that file "
+                   "instead." % ("%s %s" % (argv[0], verb)), attempt, consecutive)
+        refuse("The API server rejected this change in a dry run:\n\n%s" % text,
+               attempt, consecutive)
+    return out.strip()
+
+
+def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
+    ops = operands(argv, verb_idx)
+    if verb in HELM_DESTRUCTIVE_VERBS:
+        code, out, err = run_argv(["helm", "history"] + ops[:1] + scope_flags(argv), cwd)
+        if code != 0:
+            refuse("No such Helm release, so `helm %s` cannot be validated:\n\n%s"
+                   % (verb, (err or out).strip()), attempt, consecutive)
+        return out.strip()
+    code, _, _ = run_argv(["helm", "plugin", "list"], cwd)
+    preview = ["helm", "diff", "upgrade"] + ops if code == 0 else argv + ["--dry-run=server"]
+    code, out, err = run_argv(preview, cwd)
+    if code != 0:
+        refuse("The Helm change could not be previewed:\n\n%s" % ((err or out).strip()),
+               attempt, consecutive)
+    return out.strip()
+
+
+def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
+    ops = operands(argv, verb_idx)
+    if has_flag(argv, "--all") or not [a for a in ops if not a.startswith("-")]:
+        refuse("This deletion names no specific resource, so its blast radius is "
+               "unbounded. Name the resources to delete explicitly.", attempt, consecutive)
+    # ops already carries -n/--context, so scope_flags would duplicate them.
+    code, out, _ = run_argv([argv[0], "get"] + ops + ["-o", "json"], cwd)
+    if code != 0:
+        refuse("The deletion target could not be resolved, so it cannot be checked. "
+               "Verify the resource exists before deleting it.", attempt, consecutive)
+    try:
+        doc = json.loads(out or "{}")
+    except ValueError:
+        doc = {}
+    items = doc.get("items", [doc]) if doc else []
+    for item in items:
+        meta = (item or {}).get("metadata") or {}
+        labels = meta.get("labels") or {}
+        if agent in CLEANUP_AGENTS and labels.get(EPHEMERAL_LABEL) != "true":
+            refuse("%r is not labelled %s=true, so it is not a leftover this agent may "
+                   "remove. Only resources the squad created for diagnosis are in scope."
+                   % (meta.get("name", "?"), EPHEMERAL_LABEL), attempt, consecutive)
+        if meta.get("ownerReferences"):
+            refuse("%r is owned by %s, so deleting it is futile — its controller will "
+                   "recreate it. Change or remove the owner instead."
+                   % (meta.get("name", "?"), meta["ownerReferences"][0].get("kind", "a controller")),
+                   attempt, consecutive)
+    return "%d resource(s) would be deleted." % max(len(items), 1)
+
+
 def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
-    """Validate one mutating segment. Filled in by Task 9."""
-    refuse("Validation for `%s %s` is not implemented yet." % (tool, verb), attempt, consecutive)
+    check_production(argv, attempt, consecutive)
+    if tool == "helm":
+        preview = validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive)
+    elif verb in DESTRUCTIVE_VERBS:
+        preview = validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive)
+    elif verb in APPLY_VERBS:
+        preview = validate_manifest(argv, cwd, attempt, consecutive)
+    elif verb in IMPERATIVE_VERBS:
+        preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
+    else:
+        refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
+               "rather than applied unchecked." % (tool, verb), attempt, consecutive)
+    return preview
 
 
 if __name__ == "__main__":
