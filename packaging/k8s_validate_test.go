@@ -7,13 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/blouargant/omnis/internal/hookstate"
 )
 
 // script returns the path to the shipped hook script.
@@ -51,7 +50,38 @@ func runHook(t *testing.T, in map[string]any, extraPath string) (string, int) {
 	if errb.Len() > 0 {
 		t.Fatalf("hook wrote to stderr: %s", errb.String())
 	}
-	return out.String(), cmd.ProcessState.ExitCode()
+	code := cmd.ProcessState.ExitCode()
+	// decisionOf returns "" for BOTH "proceeded, no note" (the honest case)
+	// and "stdout did not parse as a decision" — a caller checking only
+	// `decisionOf(...) != "deny"` cannot tell them apart, so a non-zero exit
+	// that somehow produced neither a stderr message (caught above) nor
+	// parseable JSON on stdout would silently read as an approval. Every
+	// intentional non-zero exit in the script writes to stderr FIRST (see
+	// its own two sys.exit(1) call sites), so this should never fire for any
+	// legitimate path — it exists to fail LOUDLY, at the source every test
+	// shares, if that invariant is ever broken by a future change instead of
+	// letting the ambiguity flow silently into forty decisionOf call sites.
+	if code != 0 && !looksLikeHookOutput(out.String()) {
+		t.Fatalf("hook exited %d with no stderr and no parseable hookSpecificOutput/systemMessage "+
+			"on stdout — a silent crash would be indistinguishable from a proceed: stdout=%q", code, out.String())
+	}
+	return out.String(), code
+}
+
+// looksLikeHookOutput reports whether stdout is a JSON object carrying either
+// half of the hook protocol this file cares about.
+func looksLikeHookOutput(stdout string) bool {
+	s := strings.TrimSpace(stdout)
+	if s == "" {
+		return false
+	}
+	var jo map[string]any
+	if err := json.Unmarshal([]byte(s), &jo); err != nil {
+		return false
+	}
+	_, hasDecision := jo["hookSpecificOutput"]
+	_, hasMessage := jo["systemMessage"]
+	return hasDecision || hasMessage
 }
 
 func decisionOf(t *testing.T, stdout string) string {
@@ -181,20 +211,86 @@ func stubFor(t *testing.T, key string) string {
 	return dir
 }
 
-// approvedFor builds an attestations map whose single key is the subject hash
-// of in["tool_input"], with verdict APPROVED. The hash must match
-// hookstate.HashArgs — the Python hook script's own subject computation (wired
-// in Task 10) is required to agree with it exactly.
-func approvedFor(t *testing.T, in map[string]any) map[string]any {
+// writeManifest writes real bytes to a fresh temp file and returns its
+// absolute path. Needed wherever a command names a -f/-k target: the guard
+// now independently re-reads that target's own bytes to bind the subject
+// (see local_target_digest in config/hooks/k8s-validate.py) — a path a
+// STUBBED kubectl merely pretends to accept is not enough once that read is
+// for real, and a relative path with no "cwd" set in the hook input would
+// resolve against the test BINARY's own working directory, not a per-test
+// sandbox, so every caller uses the absolute path this returns.
+func writeManifest(t *testing.T, contents string) string {
 	t.Helper()
-	ti, ok := in["tool_input"].(map[string]any)
-	if !ok {
-		t.Fatalf("tool_input is not a map[string]any: %#v", in["tool_input"])
+	dir := t.TempDir()
+	path := filepath.Join(dir, "change.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
-	subject := hookstate.HashArgs(ti)
-	return map[string]any{
-		subject: map[string]any{"verdict": "APPROVED"},
+	return path
+}
+
+// changeIDRe extracts the change identifier check_attested's own "not
+// reviewed" deny message carries — the literal subject string it just
+// computed. This is the ONLY reliable way a test (or a real k8s_validator
+// sub-agent) learns a segment's subject: subject_hash binds the manifest
+// target's CONTENT (see its own doc comment), so it cannot be recomputed
+// independently without reimplementing the script's exact algorithm — and
+// deliberately so, since nothing on the calling side is meant to.
+var changeIDRe = regexp.MustCompile("change identifier `([0-9a-f]{64})`")
+
+func subjectFromDeny(t *testing.T, reason string) string {
+	t.Helper()
+	m := changeIDRe.FindStringSubmatch(reason)
+	if m == nil {
+		t.Fatalf("no change identifier found in deny reason: %q", reason)
 	}
+	return m[1]
+}
+
+// discoverSegmentSubject runs the hook against `in` once — WITHOUT
+// attestations — expecting the standard "not reviewed" deny for the first
+// mutating segment it reaches, and extracts the subject the hook itself
+// computed for THAT segment. This is exactly the discovery a real
+// k8s_validator sub-agent performs (it is handed the change identifier from
+// the deny message, never expected to compute it), so it works regardless of
+// subject_hash's internal algorithm — content-bound, per-segment, or
+// otherwise — without this test file reimplementing it.
+//
+// extraPath must be the SAME stub PATH the caller will use for its own runs,
+// and `in` must already carry any "cwd"/absolute paths the mechanical
+// validation needs (a real manifest file on disk, etc.) — this function only
+// discovers the subject; it changes nothing about `in`.
+func discoverSegmentSubject(t *testing.T, in map[string]any, extraPath string) string {
+	t.Helper()
+	probe := make(map[string]any, len(in))
+	for k, v := range in {
+		probe[k] = v
+	}
+	delete(probe, "attestations")
+	out, _ := runHook(t, probe, extraPath)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("expected an unattested first run to deny \"not reviewed\", got %q: %s", got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+		t.Fatalf("expected an unattested first run's reason to say \"not reviewed\", got: %q",
+			reasonOf(t, out))
+	}
+	return subjectFromDeny(t, reasonOf(t, out))
+}
+
+// approveOneSegment discovers `in`'s subject (see discoverSegmentSubject) and
+// returns an attestations map recording an APPROVED verdict for it.
+func approveOneSegment(t *testing.T, in map[string]any, extraPath string) map[string]any {
+	t.Helper()
+	subject := discoverSegmentSubject(t, in, extraPath)
+	return map[string]any{subject: map[string]any{"verdict": "APPROVED"}}
+}
+
+// rejectOneSegment mirrors approveOneSegment for the other verdict.
+func rejectOneSegment(t *testing.T, in map[string]any, extraPath, reasons string) map[string]any {
+	t.Helper()
+	subject := discoverSegmentSubject(t, in, extraPath)
+	return map[string]any{subject: map[string]any{"verdict": "REJECTED", "reasons": reasons}}
 }
 
 // The guard's rule is an INVERSION: a command is allowed only when it is provably
@@ -809,8 +905,9 @@ case "$*" in
   *dry-run*)   echo "deployment.apps/x configured (server dry run)"; exit 0 ;;
   *)           exit 0 ;;
 esac`)
-	in := bashInput("kubectl apply -f change.yaml -n demo", "k8s_editor")
-	in["attestations"] = approvedFor(t, in)
+	manifest := writeManifest(t, "replicas: 1\n")
+	in := bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
 	out, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out); got == "deny" || got == "ask" {
 		t.Fatalf("a normal diff (exit 1) must not be refused: %q", out)
@@ -870,8 +967,14 @@ case "$*" in
   *)           exit 0 ;;
 esac`)
 	in := bashInput("kubectl delete pod real-app -n demo", "k8s_editor")
-	in["attestations"] = approvedFor(t, in)
+	in["attestations"] = approveOneSegment(t, in, dir)
 	out, _ := runHook(t, in, dir)
+	// A deny for an UNRELATED reason (e.g. the attestation not matching)
+	// would also fail to mention "ephemeral" and pass the check below for
+	// the wrong reason — assert the positive outcome too.
+	if got := decisionOf(t, out); got == "deny" || got == "ask" {
+		t.Fatalf("an approved, mechanically-clean editor delete was not allowed to proceed: %q", out)
+	}
 	if strings.Contains(out, "ephemeral") {
 		t.Fatalf("the ephemeral rule must apply to the cleaner only: %q", out)
 	}
@@ -986,15 +1089,18 @@ case "$*" in
   "diff upgrade myrel ./chart -n demo") exit 7 ;;
   *) exit 0 ;;
 esac`)
-			// Task 10 requires an APPROVED attestation for the mechanical
-			// validation to actually PROCEED (rather than deny "not
-			// reviewed"). Attested unconditionally: the "diff plugin
-			// installed" case still denies before check_attested ever runs
-			// (its dry-run stub exits 7), so this only changes the
-			// "no plugins installed" case's decision from a false-positive
-			// "not reviewed" deny back to what this test exists to check.
+			// A mechanically-clean change now also needs an APPROVED
+			// attestation to PROCEED. Only the "no plugins installed" case
+			// reaches that far — "diff plugin installed" already denies
+			// mechanically (its dry-run stub exits 7), so discovering a
+			// subject via approveOneSegment (which itself requires a "not
+			// reviewed" deny) would fail there for the wrong reason; the
+			// mechanical deny alone already gives that branch its correct
+			// `usedDiffCmd == true` signal.
 			in := bashInput("helm upgrade myrel ./chart -n demo", "k8s_editor")
-			in["attestations"] = approvedFor(t, in)
+			if !tc.pluginListed {
+				in["attestations"] = approveOneSegment(t, in, dir)
+			}
 			out, _ := runHook(t, in, dir)
 			usedDiffCmd := decisionOf(t, out) == "deny"
 			if usedDiffCmd != tc.pluginListed {
@@ -1027,13 +1133,17 @@ case "$*" in
   *--server-side*) exit 3 ;;
   *) exit 0 ;;
 esac`)
-			// Attested unconditionally (Task 10): "apply" still denies before
-			// check_attested runs (its dry-run stub exits 3), but "create"/
-			// "replace" now reach check_attested on a clean dry-run and would
-			// otherwise deny as "not reviewed" — a false positive for
-			// gotServerSide that has nothing to do with --server-side.
-			in := bashInput("kubectl "+tc.verb+" -f app.yaml -n demo", "k8s_editor")
-			in["attestations"] = approvedFor(t, in)
+			// "create"/"replace" reach check_attested on a clean dry-run and
+			// need an attestation to actually proceed, or the deny would be
+			// "not reviewed" rather than the --server-side signal this test
+			// reads; "apply" always denies mechanically first (its dry-run
+			// stub exits 3), so discovering a subject for it would fail
+			// (the probe would see a mechanical deny, not "not reviewed").
+			manifest := writeManifest(t, "app: "+tc.verb+"\n")
+			in := bashInput("kubectl "+tc.verb+" -f "+manifest+" -n demo", "k8s_editor")
+			if !tc.wantServerSide {
+				in["attestations"] = approveOneSegment(t, in, dir)
+			}
 			out, _ := runHook(t, in, dir)
 			gotServerSide := decisionOf(t, out) == "deny"
 			if gotServerSide != tc.wantServerSide {
@@ -1061,12 +1171,12 @@ case "$*" in
   *get*) echo '{"metadata":{"name":"x","labels":{}}}'; exit 0 ;;
   *)     exit 1 ;;
 esac`)
-				// Attested (Task 10): a resolvable target now reaches
-				// check_attested, and an unattested "not reviewed" deny would
-				// be indistinguishable from the dead-end this test guards
+				// Attested: a resolvable target now reaches check_attested,
+				// and an unattested "not reviewed" deny would be
+				// indistinguishable from the dead-end this test guards
 				// against.
 				in := bashInput("kubectl rollout "+action+" deploy/x -n demo", "k8s_editor")
-				in["attestations"] = approvedFor(t, in)
+				in["attestations"] = approveOneSegment(t, in, dir)
 				out, _ := runHook(t, in, dir)
 				if decisionOf(t, out) == "deny" {
 					t.Fatalf("a resolvable rollout %s target was denied instead of previewed: %s", action, out)
@@ -1099,7 +1209,7 @@ esac`)
 	// indistinguishable from the misidentification bug this test guards
 	// against.
 	in := bashInput("helm uninstall -n demo myrel", "k8s_editor")
-	in["attestations"] = approvedFor(t, in)
+	in["attestations"] = approveOneSegment(t, in, dir)
 	out, _ := runHook(t, in, dir)
 	if decisionOf(t, out) == "deny" {
 		t.Fatalf("the release name was not correctly identified from behind a preceding flag: %s", out)
@@ -1123,13 +1233,16 @@ func TestBlastRadiusIgnoresAFlagsValue(t *testing.T) {
 
 // --- Task 10: the attestation requirement ---
 
-// subjectHashPy runs the script's OWN subject_hash against toolInput and
-// returns the hex digest. It loads the script as a module (rather than
-// `python3 -B script.py`) so `if __name__ == "__main__": main()` never runs
-// and blocks on stdin.
-func subjectHashPy(t *testing.T, toolInput map[string]any) string {
+// subjectHashPy runs the script's OWN subject_hash(tool, verb, argv,
+// content_digest) and returns the hex digest. It loads the script as a
+// module (rather than `python3 -B script.py`) so `if __name__ ==
+// "__main__": main()` never runs and blocks on stdin.
+func subjectHashPy(t *testing.T, tool, verb string, argv []string, contentDigest string) string {
 	t.Helper()
-	data, err := json.Marshal(toolInput)
+	payload := map[string]any{
+		"tool": tool, "verb": verb, "argv": argv, "content_digest": contentDigest,
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -1141,7 +1254,8 @@ import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("k8s_validate", ` + strconv.Quote(script(t)) + `)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-print(mod.subject_hash(json.load(sys.stdin)))
+p = json.load(sys.stdin)
+print(mod.subject_hash(p["tool"], p["verb"], p["argv"], p["content_digest"]))
 `
 	cmd := exec.Command("python3", "-B", "-c", py)
 	cmd.Stdin = bytes.NewReader(data)
@@ -1153,30 +1267,59 @@ print(mod.subject_hash(json.load(sys.stdin)))
 	return strings.TrimSpace(out.String())
 }
 
-// THE central claim: the subject hash binds CONTENT, computed identically by
-// the Go engine (hookstate.HashArgs, the attestation-store key) and the
-// Python hook script (subject_hash, what main() actually looks up). If they
-// ever disagree, every attestation would look "not reviewed" to the hook —
-// or worse, two DIFFERENT tool_inputs could collide on the same subject,
-// letting an attestation for one command authorize a different one.
-func TestSubjectHashAgreesWithHashArgs(t *testing.T) {
+// subject_hash is deliberately UNRELATED to hookstate.HashArgs — see
+// subject_hash's own doc comment in config/hooks/k8s-validate.py. HashArgs
+// hashes only the raw tool_input and keys the Go engine's attempt/consecutive
+// counters, a coarser job with no reason to read the filesystem; subject_hash
+// is the Python side's own value, binding a specific segment's normalised
+// argv PLUS its manifest target's actual bytes (via content_digest — see
+// local_target_digest), so an earlier version of this test that asserted
+// subject_hash(tool_input) == HashArgs(tool_input) encoded exactly the
+// property this file's review found broken: the subject didn't change when
+// the file's content did.
+//
+// What must hold instead — pinned here — is what the attestation guarantee
+// actually depends on: subject_hash is a deterministic, pure function of its
+// four inputs, and it is sensitive to EACH of them independently. The
+// content-sensitivity half is the property that matters most; it is also
+// demonstrated end to end (a real file, rewritten between two runs of the
+// SAME command) by TestAttestationDoesNotCrossDifferentChanges below.
+func TestSubjectHashIsDeterministicAndSensitiveToContentAndArgv(t *testing.T) {
 	script(t) // skips early on windows / no python3, before spending on cases
-	cases := []map[string]any{
-		{"command": "kubectl get pods"},
-		// A compound command containing "&&" is the exact case Go's
-		// SetEscapeHTML(false) exists for (see hookstate.HashArgs's doc
-		// comment) — every compound shell command contains it.
-		{"command": "kubectl apply -f a.yaml && kubectl delete pod x -n demo"},
-		{}, // an empty tool_input, same as a malformed/absent one
-		{"command": "kubectl get pods -n demo", "timeout": 30.0},
-		{"command": `helm upgrade myrel ./chart --set "a<b&c>d"`},
+
+	argv := []string{"kubectl", "apply", "-f", "change.yaml", "-n", "demo"}
+	base := subjectHashPy(t, "kubectl", "apply", argv, "aaaa...content-digest-a")
+	again := subjectHashPy(t, "kubectl", "apply", argv, "aaaa...content-digest-a")
+	if base != again {
+		t.Fatalf("subject_hash is not deterministic for identical inputs: %s vs %s", base, again)
 	}
-	for _, ti := range cases {
-		want := hookstate.HashArgs(ti)
-		got := subjectHashPy(t, ti)
-		if got != want {
-			t.Fatalf("tool_input=%#v: Python subject_hash=%s, Go HashArgs=%s", ti, got, want)
-		}
+
+	differentContent := subjectHashPy(t, "kubectl", "apply", argv, "bbbb...content-digest-b")
+	if differentContent == base {
+		t.Fatalf("subject_hash did not change when ONLY the content digest changed: %s", base)
+	}
+
+	differentArgv := subjectHashPy(t, "kubectl", "apply",
+		[]string{"kubectl", "apply", "-f", "other.yaml", "-n", "demo"}, "aaaa...content-digest-a")
+	if differentArgv == base {
+		t.Fatalf("subject_hash did not change when ONLY argv changed: %s", base)
+	}
+
+	differentVerb := subjectHashPy(t, "kubectl", "delete", argv, "aaaa...content-digest-a")
+	if differentVerb == base {
+		t.Fatalf("subject_hash did not change when ONLY the verb changed: %s", base)
+	}
+
+	// A verb with no manifest target (content_digest == "") must still be
+	// deterministic — the normalised argv alone identifies the change.
+	deleteArgv := []string{"kubectl", "delete", "pod", "x", "-n", "demo"}
+	empty := subjectHashPy(t, "kubectl", "delete", deleteArgv, "")
+	emptyAgain := subjectHashPy(t, "kubectl", "delete", deleteArgv, "")
+	if empty != emptyAgain {
+		t.Fatalf("subject_hash with an empty content digest is not deterministic: %s vs %s", empty, emptyAgain)
+	}
+	if empty == base {
+		t.Fatalf("an unrelated delete collided with the apply subject: %s", empty)
 	}
 }
 
@@ -1193,7 +1336,8 @@ case "$*" in
   *diff*) exit 1 ;;
   *)      exit 0 ;;
 esac`)
-	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
+	manifest := writeManifest(t, "app: missing-attestation\n")
+	in := bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_editor")
 	// attempt is AT the escalation threshold — if check_attested behaved like
 	// refuse(), this would come back "ask", not "deny".
 	in["attempt"] = 3
@@ -1215,14 +1359,11 @@ case "$*" in
   *diff*) exit 1 ;;
   *)      exit 0 ;;
 esac`)
-	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
+	manifest := writeManifest(t, "app: rejected-attestation\n")
+	in := bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_editor")
 	in["attempt"] = 3
 	in["consecutive"] = 3
-	ti := in["tool_input"].(map[string]any)
-	subject := hookstate.HashArgs(ti)
-	in["attestations"] = map[string]any{
-		subject: map[string]any{"verdict": "REJECTED", "reasons": "wrong namespace"},
-	}
+	in["attestations"] = rejectOneSegment(t, in, dir, "wrong namespace")
 	out, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out); got != "deny" {
 		t.Fatalf("rejected attestation at attempt=3 decision = %q, want deny (never ask)", got)
@@ -1242,8 +1383,9 @@ case "$*" in
   *dry-run*) echo "deployment.apps/x configured (server dry run)"; exit 0 ;;
   *)         exit 0 ;;
 esac`)
-	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
-	in["attestations"] = approvedFor(t, in)
+	manifest := writeManifest(t, "app: approved-diff\n")
+	in := bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
 	out, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out); got == "deny" || got == "ask" {
 		t.Fatalf("an approved, mechanically-clean change was not allowed to proceed: %q", out)
@@ -1269,6 +1411,15 @@ esac`)
 // way a "v2" would actually show up to the guard — a different -f path, or a
 // different verb/target) never share a subject, so approving one can never
 // silently authorize the other.
+// THE demonstration that the hash binds CONTENT, varying exactly ONE thing at
+// a time as the review demanded: the SAME command string, the SAME
+// attestations map, across two runs — the only thing that changes between
+// them is the target FILE's own bytes, rewritten on disk in place. An
+// earlier version of this test instead used two DIFFERENT command strings
+// (`-f v1.yaml` vs `-f v2.yaml`), which only proved that two different
+// commands get different subjects — a property that was already true before
+// this fix, and true independently of content-binding. When a proof's setup
+// varies two things at once, it establishes neither.
 func TestAttestationDoesNotCrossDifferentChanges(t *testing.T) {
 	dir := stubBin(t, "kubectl", `
 case "$*" in
@@ -1276,21 +1427,34 @@ case "$*" in
   *dry-run*) exit 0 ;;
   *)         exit 0 ;;
 esac`)
-	v1 := bashInput("kubectl apply -f v1.yaml -n demo", "k8s_editor")
-	v1["attestations"] = approvedFor(t, v1) // approves ONLY v1's subject
-	v2 := bashInput("kubectl apply -f v2.yaml -n demo", "k8s_editor")
-	v2["attestations"] = v1["attestations"] // the SAME (now-stale) attestations map
-
-	outV1, _ := runHook(t, v1, dir)
-	if got := decisionOf(t, outV1); got == "deny" || got == "ask" {
-		t.Fatalf("v1, attested for its own subject, was not allowed to proceed: %q", outV1)
+	manifest := filepath.Join(t.TempDir(), "change.yaml")
+	if err := os.WriteFile(manifest, []byte("replicas: 1\n"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
-	outV2, _ := runHook(t, v2, dir)
+
+	// ONE fixed command string, attested once against the file's CURRENT
+	// (replicas: 1) content.
+	in := bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	outV1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, outV1); got == "deny" || got == "ask" {
+		t.Fatalf("the change, attested for its own content, was not allowed to proceed: %q", outV1)
+	}
+
+	// Vary exactly ONE thing: rewrite the SAME file's bytes in place. `in` —
+	// the command string and the attestations map — is untouched.
+	if err := os.WriteFile(manifest, []byte("replicas: 99\n"), 0o644); err != nil {
+		t.Fatalf("rewrite manifest: %v", err)
+	}
+
+	outV2, _ := runHook(t, in, dir)
 	if got := decisionOf(t, outV2); got != "deny" {
-		t.Fatalf("v2, carrying only v1's attestation, decision = %q, want deny", got)
+		t.Fatalf("the SAME command, now naming a file with DIFFERENT content, decision = %q, want deny (%s)",
+			got, outV2)
 	}
 	if !strings.Contains(reasonOf(t, outV2), "has not been reviewed") {
-		t.Fatalf("v2's refusal reason = %q, want it to say the change was not reviewed",
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed",
 			reasonOf(t, outV2))
 	}
 }
@@ -1309,14 +1473,18 @@ case "$*" in
   *"-o json"*) echo "not json at all"; exit 0 ;;
   *)           exit 0 ;;
 esac`)
-	// Segment 1 (apply) mechanically validates cleanly. Segment 2 (delete)
-	// fails resolve_target's fail-closed JSON parse — if the guard stopped
-	// checking after segment 1, this whole line would proceed and delete an
-	// unvalidated resource.
-	command := "kubectl apply -f app.yaml -n demo && kubectl delete pod x -n demo"
+	manifest := writeManifest(t, "app: segment-one\n")
+	// Segment 1 (apply) mechanically validates cleanly and needs its OWN
+	// attestation to clear check_attested. Segment 2 (delete) fails
+	// resolve_target's fail-closed JSON parse — if the guard stopped checking
+	// after segment 1's attestation cleared, this whole line would proceed
+	// and delete an unvalidated resource.
+	command := "kubectl apply -f " + manifest + " -n demo && kubectl delete pod x -n demo"
 	in := bashInput(command, "k8s_editor")
-	subject := hookstate.HashArgs(in["tool_input"].(map[string]any))
-	in["attestations"] = map[string]any{subject: map[string]any{"verdict": "APPROVED"}}
+	// Discover + approve ONLY segment 1's subject: the loop denies there
+	// first on an unattested run (it mechanically validates cleanly, so it
+	// reaches check_attested before segment 2 is ever examined).
+	in["attestations"] = approveOneSegment(t, in, dir)
 	out, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out); got != "deny" {
 		t.Fatalf("a compound command's mechanically-broken SECOND segment decision = %q, want deny (%s)",
@@ -1331,7 +1499,15 @@ esac`)
 // mechanically validate, under ONE attestation covering the whole line
 // (record_validation's caller reviews the whole tool_input, not one
 // segment), both get previewed and the combined diff reaches the user.
-func TestTwoMutatingSegmentsBothPreviewUnderOneAttestation(t *testing.T) {
+// Each mutating segment of a compound command needs its OWN attestation —
+// not one attestation covering the whole line. Per-segment binding is a
+// direct consequence of content-binding: two segments can name completely
+// different manifests with completely different content, so one shared
+// subject for the whole line would let an attestation of the first
+// authorize the second's unreviewed content too. Demonstrated by attesting
+// one segment at a time and watching the guard deny the NEXT one until it,
+// too, is independently attested.
+func TestEachMutatingSegmentNeedsItsOwnAttestation(t *testing.T) {
 	dir := stubBin(t, "kubectl", `
 case "$*" in
   *diff*)      echo "~ segment one"; exit 1 ;;
@@ -1339,14 +1515,147 @@ case "$*" in
   *"-o json"*) echo '{"metadata":{"name":"x","labels":{}}}'; exit 0 ;;
   *)           exit 0 ;;
 esac`)
-	command := "kubectl apply -f app.yaml -n demo && kubectl delete pod x -n demo"
+	manifest := writeManifest(t, "app: two-segments\n")
+	command := "kubectl apply -f " + manifest + " -n demo && kubectl delete pod x -n demo"
 	in := bashInput(command, "k8s_editor")
-	in["attestations"] = approvedFor(t, in)
+	attestations := map[string]any{}
+
+	// Round 1 (implicit, inside discoverSegmentSubject): neither segment is
+	// attested, so the loop denies at segment 1 — it mechanically validates
+	// cleanly and reaches check_attested before segment 2 is examined.
+	subj1 := discoverSegmentSubject(t, in, dir)
+	attestations[subj1] = map[string]any{"verdict": "APPROVED"}
+	in["attestations"] = attestations
+
+	// Round 2: segment 1 now clears check_attested; segment 2 also
+	// mechanically succeeds (this stub resolves its delete target), so it
+	// reaches ITS OWN check_attested and denies "not reviewed" for its own,
+	// DIFFERENT subject — proving the two segments do NOT share one.
 	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("segment 2, still unattested, decision = %q, want deny (%s)", got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+		t.Fatalf("segment 2's refusal reason = %q, want \"not reviewed\"", reasonOf(t, out))
+	}
+	subj2 := subjectFromDeny(t, reasonOf(t, out))
+	if subj2 == subj1 {
+		t.Fatalf("segment 2 got the SAME subject as segment 1 — two different targets must not collide")
+	}
+	attestations[subj2] = map[string]any{"verdict": "APPROVED"}
+	in["attestations"] = attestations
+
+	// Round 3: both segments independently attested — both proceed, and the
+	// combined diff mentions both.
+	out, _ = runHook(t, in, dir)
 	if got := decisionOf(t, out); got == "deny" || got == "ask" {
-		t.Fatalf("two mechanically-clean, attested segments were not allowed to proceed: %q", out)
+		t.Fatalf("two mechanically-clean segments, EACH independently attested, were not allowed to proceed: %q", out)
 	}
 	if !strings.Contains(out, "apply") || !strings.Contains(out, "delete") {
 		t.Fatalf("the combined diff must mention BOTH validated segments: %q", out)
+	}
+}
+
+// A -f target the guard cannot read bytes from before apply time (kubectl
+// fetches it itself) must be refused outright — content binding is
+// meaningless against a target that could serve DIFFERENT bytes on the next
+// apply while the URL string in the command line stays identical. This is
+// the mechanical refusal resolve_target_digest raises; it fires even for a
+// FIRST attempt, before attestation is ever considered.
+func TestURLManifestTargetIsRefused(t *testing.T) {
+	dir := stubBin(t, "kubectl", "exit 0") // never reached — refused first
+	out, _ := runHook(t, bashInput(
+		"kubectl apply -f https://example.com/manifest.yaml -n demo", "k8s_editor"), dir)
+	if decisionOf(t, out) != "deny" {
+		t.Fatalf("a URL manifest target decision = %q, want deny", decisionOf(t, out))
+	}
+	if !strings.Contains(reasonOf(t, out), "remote target") {
+		t.Fatalf("reason = %q, want it to explain the target is remote", reasonOf(t, out))
+	}
+}
+
+// The same content-binding property TestAttestationDoesNotCrossDifferentChanges
+// proves for a -f FILE also holds for a -k kustomize DIRECTORY target: an
+// attestation is bound to what the whole tree currently contains, not to the
+// directory's path. Same discipline — one fixed command string, one
+// attestations map, only the target's on-disk bytes change between runs.
+func TestKustomizeDirectoryTargetContentBinds(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)    exit 1 ;;
+  *dry-run*) exit 0 ;;
+  *)         exit 0 ;;
+esac`)
+	overlay := t.TempDir()
+	writeFile := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(overlay, name), []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeFile("kustomization.yaml", "resources:\n- deploy.yaml\n")
+	writeFile("deploy.yaml", "replicas: 1\n")
+
+	in := bashInput("kubectl apply -k "+overlay+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the overlay, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: a file INSIDE the same overlay directory.
+	writeFile("deploy.yaml", "replicas: 99\n")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME command, overlay directory now holding DIFFERENT content, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// --- Minor: the joined systemMessage must be capped too ---
+
+// Each validated segment's own preview is capped to 4000 chars, but that cap
+// is PER segment — a compound command with many mutating segments can still
+// join into an unbounded systemMessage. Exercised directly against
+// build_proceed_note (loaded as a module, like subjectHashPy) rather than
+// running six real mutating segments through the whole guard: this is a pure
+// string-formatting property, and this is the narrower, faster way to pin it.
+func TestJoinedSystemMessageIsCapped(t *testing.T) {
+	script(t)
+	py := `
+import importlib.util
+spec = importlib.util.spec_from_file_location("k8s_validate", ` + strconv.Quote(script(t)) + `)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+validated = [("kubectl", "apply", "X" * 5000) for _ in range(6)]
+note = mod.build_proceed_note(validated)
+print(len(note))
+print(mod.SYSTEM_MESSAGE_MAX)
+print("truncated" in note)
+`
+	cmd := exec.Command("python3", "-B", "-c", py)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("build_proceed_note failed: %v\nstderr: %s", err, errb.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+	noteLen, maxLen := lines[0], lines[1]
+	if lines[2] != "True" {
+		t.Fatalf("a truncated joined note must say so: length=%s max=%s mentions truncation=%s",
+			noteLen, maxLen, lines[2])
+	}
+	// 30000 chars of raw preview material (6 * 5000, itself already under the
+	// 4000-per-segment cap) must not survive intact into one systemMessage.
+	if noteLen == "30000" {
+		t.Fatal("the joined note was not capped at all")
 	}
 }

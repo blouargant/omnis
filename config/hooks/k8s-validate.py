@@ -30,6 +30,7 @@ Python 3 standard library only.
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -37,6 +38,9 @@ import sys
 
 MAX_ATTEMPTS = 3          # matches agentCapGraceCalls in agent/budget_plugin.go
 VALIDATE_TIMEOUT = 45     # seconds; below the hook's own timeout so we can explain
+SYSTEM_MESSAGE_MAX = 16000  # cap on the JOINED systemMessage; each segment's own
+                             # preview is already capped to 4000, but that cap is
+                             # per segment, not per compound command
 
 # kubectl verbs that are provably reads: they report state and change none.
 # port-forward and proxy open a local tunnel and change nothing in the cluster;
@@ -291,6 +295,27 @@ def proceed(note=""):
     sys.exit(0)
 
 
+def build_proceed_note(validated):
+    """The systemMessage for a proceed with ≥1 validated segment: every
+    segment's own diff, joined, so the permission card is informative for a
+    compound command too — not just the first mutating segment.
+
+    Each segment's own preview is already capped to 4000 chars, but that cap
+    is PER segment: a compound line with many mutating segments (`a.yaml &&
+    b.yaml && c.yaml && …`) can still join into an unbounded systemMessage, so
+    the JOINED result is capped to SYSTEM_MESSAGE_MAX too.
+    """
+    note = "\n\n---\n\n".join(
+        "**Validated change** (`%s %s`):\n\n```\n%s\n```" % (tool, verb, preview[:4000])
+        for tool, verb, preview in validated
+    )
+    if len(note) > SYSTEM_MESSAGE_MAX:
+        note = (note[:SYSTEM_MESSAGE_MAX] +
+                "\n\n... (truncated: %d validated changes in this command; showing the first ones. "
+                "Split this into separate calls to see each diff in full.)" % len(validated))
+    return note
+
+
 def refuse(reason, attempt, consecutive):
     """Deny with a diagnostic, or escalate once the agent stops learning.
 
@@ -304,15 +329,130 @@ def refuse(reason, attempt, consecutive):
     emit("deny", reason)
 
 
-def subject_hash(tool_input):
-    """The change identifier. Must match hookstate.HashArgs in Go: sha256 of the
-    canonical JSON of the tool arguments. json.dumps with sort_keys and no
-    spaces reproduces encoding/json's object output for these values — verified
-    directly against HashArgs by TestSubjectHashAgreesWithHashArgs, not just by
-    reading both implementations: encoding/json sorts object keys the same way,
-    and HashArgs' Encoder has SetEscapeHTML(false) specifically so the two sides
-    agree on a command containing "&&", which is every compound shell command."""
-    canonical = json.dumps(tool_input, sort_keys=True, separators=(",", ":"))
+# Flags that name a local manifest/kustomization target whose CONTENT the
+# subject must bind, not just the flag's own text — kubectl accepts each more
+# than once (`-f a.yaml -f b.yaml`), so every occurrence is folded in.
+MANIFEST_TARGET_FLAGS = ("-f", "--filename", "-k", "--kustomize")
+
+# A remote scheme this guard cannot read bytes from before apply time. This is
+# not the only remote shape (kustomize also treats a bare VCS-style reference
+# like `github.com/org/repo` as remote, with no "://" at all) — that shape is
+# caught separately, by resolve_target_digest failing to find it as a local
+# path, rather than by trying to enumerate every non-URL remote syntax.
+URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+
+def flag_values(argv, *names):
+    """Every VALUE for a repeatable value-flag, in argv order — the plural
+    sibling of flag_value, which returns only the first match."""
+    out = []
+    for i, tok in enumerate(argv):
+        for n in names:
+            if tok == n and i + 1 < len(argv):
+                out.append(argv[i + 1])
+                break
+            if tok.startswith(n + "="):
+                out.append(tok.split("=", 1)[1])
+                break
+    return out
+
+
+def _file_digest(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _dir_digest(path):
+    """A digest of every regular file under `path`, sensitive to CONTENT
+    only: sorted RELATIVE paths, each paired with its own file digest, so the
+    result depends on the tree's bytes — never os.walk's traversal order
+    (unspecified), never mtimes or permissions, which can change with the
+    content untouched."""
+    entries = []
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for name in sorted(files):
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, path).replace(os.sep, "/")
+            entries.append([rel, _file_digest(full)])
+    entries.sort(key=lambda e: e[0])
+    canonical = json.dumps(entries, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def resolve_target_digest(cwd, path, attempt, consecutive):
+    """Content digest of one -f/-k target, resolved against cwd exactly as
+    kubectl itself resolves it (never argv[0]'s cwd — see run_argv's callers'
+    own comment on that trap). REFUSES rather than returning a placeholder for
+    anything whose bytes the guard cannot pin down right now:
+
+    - a URL, or a reference that merely LOOKS remote (caught below as "does
+      not exist locally" rather than enumerated by scheme): the API server
+      would fetch its content independently at apply time, so an attestation
+      of "these bytes" could never be re-verified — the exact hole a v1/v2
+      manifest swap exploited before this function existed.
+    - a path that resolves to neither a file nor a directory: nothing to
+      bind, and proceeding as if there were nothing to check would silently
+      drop the guarantee for a typo'd path.
+    """
+    if URL_SCHEME_RE.match(path or ""):
+        refuse(
+            "%r is a remote target; the API server would fetch its content "
+            "independently at apply time, so it cannot be bound to a "
+            "reviewed change. Fetch it to a local file first (e.g. `curl -Lo "
+            "change.yaml %s`) and apply that file instead." % (path, path),
+            attempt, consecutive,
+        )
+    full = os.path.join(cwd or ".", path)
+    if os.path.isdir(full):
+        return _dir_digest(full)
+    if os.path.isfile(full):
+        return _file_digest(full)
+    refuse(
+        "The manifest target %r could not be found (resolved to %r), so its "
+        "content cannot be verified. A remote target cannot be validated "
+        "either — fetch it to a local file first." % (path, full),
+        attempt, consecutive,
+    )
+
+
+def local_target_digest(argv, cwd, attempt, consecutive):
+    """The content half of this segment's subject: "" when the verb carries
+    no local manifest/kustomization target at all (delete-by-name, patch,
+    rollout, a helm release name, …) — the normalised argv alone already
+    identifies those changes. Otherwise, a digest that changes when and only
+    when the target's own bytes change, so an attestation of "this manifest"
+    can never be replayed against a DIFFERENTLY-CONTENTED file or directory
+    reachable via the identical command line — the property
+    TestAttestationDoesNotCrossDifferentChanges demonstrates end to end.
+    """
+    targets = flag_values(argv, *MANIFEST_TARGET_FLAGS)
+    if not targets:
+        return ""
+    digests = [[path, resolve_target_digest(cwd, path, attempt, consecutive)]
+               for path in targets]
+    canonical = json.dumps(sorted(digests), separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def subject_hash(tool, verb, argv, content_digest):
+    """The change identifier for ONE mutating segment: canonicalised,
+    normalised argv (tool, verb, and every token, in order — the design
+    spec's "normalised argv") PLUS content_digest, the manifest target's own
+    bytes when the verb names one (see local_target_digest). Folding content
+    in is what makes "validate v1, apply v2" refuse even though the command
+    line naming the target is byte-identical in both cases.
+
+    Deliberately UNRELATED to hookstate.HashArgs in Go: HashArgs hashes only
+    the raw tool_input and exists solely to key the attempt/consecutive
+    counters — a coarser job with no reason to touch the filesystem. This is
+    the Python side's own, independent value, and nothing on the Go side
+    needs to reproduce it: record_validation's caller is always TOLD the
+    subject verbatim, from a deny message's "change identifier `...`", never
+    expected to recompute it (see check_attested's own deny message below).
+    """
+    payload = {"tool": tool, "verb": verb, "argv": list(argv), "content": content_digest}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -592,12 +732,12 @@ def main():
     except (TypeError, ValueError):
         attempt, consecutive = 1, 0
     attestations = data.get("attestations") or {}
-    # One subject for the WHOLE tool call, not per segment: it must equal
-    # hookstate.HashArgs(tool_input) exactly, because that is the same key
-    # record_validation's caller is told to attest against (see
-    # subject_hash's docstring). A compound command with two mutating
-    # segments is one review action covering the whole line, not two.
-    subject = subject_hash(tool_input)
+    # Each mutating segment gets its OWN subject, computed inside validate()
+    # from that segment's own argv + manifest content (see subject_hash) —
+    # not one subject for the whole tool call. A compound command's two
+    # mutating segments can name completely different targets with completely
+    # different content, so binding them to one shared subject would let an
+    # attestation of the first authorize the second's unreviewed content too.
 
     # Every validated segment's preview, so the final proceed() can show the
     # diff. Collected rather than shown per-segment: `validate()` must not
@@ -706,19 +846,13 @@ def main():
             )
 
         preview = validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive,
-                           attestations, subject)
+                           attestations)
         validated.append((tool, verb, preview))
 
     if not validated:
         proceed()
     else:
-        # Every validated segment's diff, so the permission card is
-        # informative for a compound command too — not just the first
-        # mutating segment.
-        proceed("\n\n---\n\n".join(
-            "**Validated change** (`%s %s`):\n\n```\n%s\n```" % (tool, verb, preview[:4000])
-            for tool, verb, preview in validated
-        ))
+        proceed(build_proceed_note(validated))
 
 
 PROD_PATTERN = re.compile(r"prod|prd|production", re.IGNORECASE)
@@ -1011,7 +1145,7 @@ def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
     return "%d resource(s) would be deleted." % len(items)
 
 
-def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations, subject):
+def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
     check_production(argv, attempt, consecutive)
     if tool == "helm":
         preview = validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive)
@@ -1036,14 +1170,25 @@ def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attes
     else:
         refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
                "rather than applied unchecked." % (tool, verb), attempt, consecutive)
-    # Mechanical validation passed for THIS segment; now require the
-    # reviewer's verdict for the change as a whole. Checked here (not once
-    # after the loop) so a missing/rejected attestation denies at the first
-    # mutating segment it reaches — the same fail-fast shape every mechanical
-    # check above already has — while a successful check returns normally
-    # instead of ending the run, so main()'s loop still reaches any FURTHER
-    # mutating segment in a compound command and mechanically validates it
-    # too (see the `validated` comment in main).
+    # Mechanical validation passed for THIS segment. Bind ITS OWN subject to
+    # the manifest target's actual CONTENT now (see local_target_digest) —
+    # deliberately AFTER the per-verb branch above, not before: that branch
+    # already proved (via kubectl diff / a dry run) that the target is
+    # readable, so by the time we independently re-read it here it is
+    # expected to exist; a URL target still refuses here even though kubectl
+    # itself could "successfully" preview it (kubectl fetches it; the guard
+    # then refuses to bind an attestation to bytes it cannot re-verify).
+    content_digest = local_target_digest(argv, cwd, attempt, consecutive)
+    subject = subject_hash(tool, verb, argv, content_digest)
+    # Now require the reviewer's verdict for THIS segment's own subject.
+    # Checked here (not once after the loop) so a missing/rejected
+    # attestation denies at the first mutating segment it reaches — the same
+    # fail-fast shape every mechanical check above already has — while a
+    # successful check returns normally instead of ending the run, so
+    # main()'s loop still reaches any FURTHER mutating segment in a compound
+    # command, mechanically validates it, and requires ITS OWN attestation
+    # too (see the `validated` comment in main — one shared subject for a
+    # whole compound line was the earlier, less precise design).
     check_attested(argv, attestations, subject)
     return preview
 
