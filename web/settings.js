@@ -4804,12 +4804,18 @@ const BASE_PATH = window.BASE_PATH || "";
           row.innerHTML = `
             <input type="text" class="hook-cmd" placeholder="${escHtml(tr("set.hook.cmdPlaceholder"))}" />
             <input type="number" class="hook-timeout" min="0" placeholder="${escHtml(tr("set.hook.timeoutPlaceholder"))}" />
+            <label class="hook-failclosed-label" data-tip="${escHtml(tr("set.hook.failClosedTip"))}">
+              <input type="checkbox" class="hook-failclosed" />
+              <span>${escHtml(tr("set.hook.failClosed"))}</span>
+            </label>
             <button type="button" class="del-btn">${escHtml(tr("common.remove"))}</button>
           `;
           const cmdIn = row.querySelector(".hook-cmd");
           const toIn = row.querySelector(".hook-timeout");
+          const fcIn = row.querySelector(".hook-failclosed");
           cmdIn.value = cmd.command || "";
           if (cmd.timeout) toIn.value = cmd.timeout;
+          fcIn.checked = !!cmd.fail_closed;
           cmdIn.addEventListener("input", () => {
             cmd.type = "command";
             cmd.command = cmdIn.value;
@@ -4818,6 +4824,12 @@ const BASE_PATH = window.BASE_PATH || "";
           toIn.addEventListener("input", () => {
             const n = parseInt(toIn.value, 10);
             if (Number.isFinite(n) && n > 0) cmd.timeout = n; else delete cmd.timeout;
+            markFormDirty("hooks");
+          });
+          fcIn.addEventListener("change", () => {
+            // Mutate in place and delete rather than store false, so an
+            // unchecked box leaves hooks.json clean (the Go field is omitempty).
+            if (fcIn.checked) cmd.fail_closed = true; else delete cmd.fail_closed;
             markFormDirty("hooks");
           });
           row.querySelector(".del-btn").addEventListener("click", () => {

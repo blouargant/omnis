@@ -602,6 +602,8 @@
   "set.hook.noCommands": "Aucune commande.",
   "set.hook.cmdPlaceholder": "commande (ex. ./scripts/guard.sh)",
   "set.hook.timeoutPlaceholder": "délai s",
+  "set.hook.failClosed": "Bloquer si le hook échoue",
+  "set.hook.failClosedTip": "Refuser l'action si ce hook expire, plante ou est absent. À utiliser pour un hook de garde : sans cela, un hook qui ne peut pas s'exécuter cesse silencieusement de protéger.",
   "hook.hint.PreToolUse": "Avant l'exécution d'un outil. matcher = regex du nom d'outil (ex. Write|Edit). Un code de sortie 2 ou un {\"decision\":\"block\"} / permissionDecision \"deny\" bloque l'outil.",
   "hook.hint.PostToolUse": "Après l'exécution d'un outil. matcher = regex du nom d'outil. Une décision de blocage renvoie la raison au modèle.",
   "hook.hint.UserPromptSubmit": "À la soumission d'un prompt. stdout (ou additionalContext) est injecté dans le tour ; un code de sortie 2 / blocage l'interrompt.",

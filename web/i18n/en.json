@@ -602,6 +602,8 @@
   "set.hook.noCommands": "No commands.",
   "set.hook.cmdPlaceholder": "command (e.g. ./scripts/guard.sh)",
   "set.hook.timeoutPlaceholder": "timeout s",
+  "set.hook.failClosed": "Block if the hook fails",
+  "set.hook.failClosedTip": "Refuse the action when this hook times out, crashes, or is missing. Use it for a guard hook: without it, a hook that cannot run silently stops guarding.",
   "hook.hint.PreToolUse": "Before a tool runs. matcher = tool-name regexp (e.g. Write|Edit). Exit 2 or a {\"decision\":\"block\"} / permissionDecision \"deny\" blocks the tool.",
   "hook.hint.PostToolUse": "After a tool runs. matcher = tool-name regexp. A block decision feeds the reason back to the model.",
   "hook.hint.UserPromptSubmit": "When a prompt is submitted. stdout (or additionalContext) is injected into the turn; exit 2 / block aborts it.",

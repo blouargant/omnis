@@ -602,6 +602,8 @@
   "set.hook.noCommands": "Keine Befehle.",
   "set.hook.cmdPlaceholder": "Befehl (z. B. ./scripts/guard.sh)",
   "set.hook.timeoutPlaceholder": "Timeout s",
+  "set.hook.failClosed": "Blockieren, wenn der Hook fehlschlägt",
+  "set.hook.failClosedTip": "Verweigert die Aktion, wenn dieser Hook das Zeitlimit überschreitet, abstürzt oder fehlt. Für einen Schutz-Hook verwenden: ohne dies hört ein Hook, der nicht ausgeführt werden kann, stillschweigend auf zu schützen.",
   "hook.hint.PreToolUse": "Bevor ein Werkzeug ausgeführt wird. matcher = Regex des Werkzeugnamens (z. B. Write|Edit). Exit 2 oder ein {\"decision\":\"block\"} / permissionDecision \"deny\" blockiert das Werkzeug.",
   "hook.hint.PostToolUse": "Nachdem ein Werkzeug ausgeführt wurde. matcher = Regex des Werkzeugnamens. Eine Block-Entscheidung gibt den Grund an das Modell zurück.",
   "hook.hint.UserPromptSubmit": "Wenn ein Prompt gesendet wird. stdout (oder additionalContext) wird in den Zug injiziert; Exit 2 / Block bricht ihn ab.",
