@@ -108,14 +108,26 @@ func stubBin(t *testing.T, name, body string) string {
 // The stub kubectl/helm behaviours a commandShapeCases row can request via
 // commandShapeStubs, so a row whose command reaches validate()'s real
 // subprocess calls gets a DETERMINISTIC outcome instead of depending on this
-// machine's kubectl/helm installation or cluster reachability. Review round 1
-// proved the coupling live: with a stub kubectl returning a resolvable
-// unowned pod instead of "no cluster", "time -p kubectl delete pod x -n demo"
-// and "setsid kubectl delete pod x -n demo" both flip from deny to proceed —
-// the wrapper-stripping property those rows exist to pin can no longer tell a
-// real regression from a different machine.
+// machine's kubectl/helm installation or cluster reachability.
+//
+// The default is HERMETIC, not the real PATH. An unlisted row used to fall
+// through to "" (the real kubectl/helm), which made hermeticity depend on
+// every row that reaches a subprocess call being remembered and opted in by
+// hand — an enumeration exactly like the ones this file's own doctrine
+// warns against. Review round 1 audited the table and stubbed 24 such rows;
+// round 2's re-review found FOUR MORE round 1 missed ("newline-separated",
+// "ampersand-separated", "rollout undo writes", "value flag hides rollout
+// undo" — all target a non-production namespace and reach a real subprocess
+// call, verified live: a stub kubectl returning a resolvable target makes
+// all three PROCEED). An opt-in stub can always be under-enumerated by the
+// next row added; an opt-in ESCAPE from a hermetic default cannot, because
+// forgetting to opt in now means "deterministically denies", never "silently
+// depends on this machine". So stubFor NEVER returns the real PATH: an
+// unlisted row (commandShapeStubs[name] == "") gets stubDefaultDeny, a
+// kubectl/helm that fails for ANY invocation. A row that genuinely needs a
+// specific canned response still opts in via commandShapeStubs, as before.
 const (
-	stubNone              = ""                   // never reaches a subprocess call — real PATH is fine
+	stubDefaultDeny       = "default-deny"       // unlisted rows: kubectl/helm fail deterministically for anything
 	stubKubectlDiffFails  = "kubectl-diff-fail"  // validate_manifest's `kubectl diff` step fails (exit 2)
 	stubKubectlGetFails   = "kubectl-get-fail"   // resolve_target's `kubectl get` fails (exit 1)
 	stubHelmUnpreviewable = "helm-unpreviewable" // validate_helm: no release, and no diff plugin
@@ -123,6 +135,7 @@ const (
 
 // stubBodies gives the /bin/sh script body for each stub key above.
 var stubBodies = map[string]string{
+	stubDefaultDeny: "exit 1",
 	stubKubectlDiffFails: `
 case "$*" in
   *diff*) exit 2 ;;
@@ -141,14 +154,17 @@ case "$*" in
 esac`,
 }
 
-// stubFor installs the script for key as BOTH kubectl and helm in a fresh dir
-// and returns it for PATH — or "" (the real PATH, unchanged) for stubNone. A
-// row only ever exercises one of the two tools, so installing both under one
-// fixed body is harmless and keeps commandShapeStubs to one line per row.
+// stubFor installs the script for key — or, for "" (a row absent from
+// commandShapeStubs), stubDefaultDeny — as BOTH kubectl and helm in a fresh
+// dir and returns it for PATH. It never returns "": see the doc comment
+// above the stub-key constants for why an unlisted row must not reach the
+// real PATH. A row only ever exercises one of the two tools, so installing
+// both under one fixed body is harmless and keeps commandShapeStubs to one
+// line per row.
 func stubFor(t *testing.T, key string) string {
 	t.Helper()
-	if key == stubNone {
-		return ""
+	if key == "" {
+		key = stubDefaultDeny
 	}
 	body, ok := stubBodies[key]
 	if !ok {
@@ -265,12 +281,12 @@ var commandShapeCases = []struct {
 	{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
-	{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
-	{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
+	{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
+	{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny", "could not be resolved"},
 	{"auth reconcile writes RBAC", "kubectl auth reconcile -f rbac.yaml", "k8s_editor", "deny", ""},
 	{"config use-context rewrites kubeconfig", "kubectl config use-context prod", "k8s_editor", "deny", ""},
-	{"rollout undo writes", "kubectl rollout undo deploy/x -n demo", "k8s_editor", "deny", ""},
+	{"rollout undo writes", "kubectl rollout undo deploy/x -n demo", "k8s_editor", "deny", "rejected this change in a dry run"},
 	{"exec is not a read", "kubectl exec pod -- rm -rf /data", "k8s_editor", "deny", ""},
 	{"helm test creates Pods", "helm test prod-app -n prod", "k8s_editor", "deny", ""},
 	// helm's canonical destructive verb under each of its live aliases. All
@@ -281,7 +297,7 @@ var commandShapeCases = []struct {
 	{"helm delete behind timeout", "timeout 60 helm delete myrel -n prod", "k8s_editor", "deny", ""},
 	// A value flag shifting the sub-verb in the OPEN direction: these ran a
 	// rollback and an RBAC write unvalidated.
-	{"value flag hides rollout undo", "kubectl rollout -n status undo deploy/x", "k8s_editor", "deny", ""},
+	{"value flag hides rollout undo", "kubectl rollout -n status undo deploy/x", "k8s_editor", "deny", "rejected this change in a dry run"},
 	{"value flag hides auth reconcile", "kubectl auth -n can-i reconcile -f rbac.yaml", "k8s_editor", "deny", ""},
 	{"value flag hides config use-context", "kubectl config --context view use-context prod", "k8s_editor", "deny", ""},
 	{"unknown value flag fails closed", "kubectl --totally-unknown-flag zzz get pods", "k8s_investigator", "deny", ""},
@@ -418,14 +434,15 @@ var commandShapeCases = []struct {
 }
 
 // commandShapeStubs names, by row name, the stub kubectl/helm behaviour a row
-// needs — see stubFor. A row absent here never reaches validate()'s
-// subprocess calls at all (refused earlier by identification, or refused by
-// a static message with no subprocess involved — e.g. check_production or
-// the "no validation rule" catch-all) and is unaffected by which
-// kubectl/helm happen to be on this machine, so it keeps running against the
-// real PATH ("" — stubFor's stubNone). Kept as a separate map, rather than a
-// new field on commandShapeCases, so adding a stub never touches the ~150
-// existing row literals.
+// needs — see stubFor. A row absent here is not exempt from stubbing: it
+// simply gets stubFor's default (stubDefaultDeny) — either because it never
+// reaches validate()'s subprocess calls at all (refused earlier by
+// identification, or by a static message with no subprocess involved, e.g.
+// check_production or the "no validation rule" catch-all), in which case the
+// default is never even invoked, or because "kubectl/helm fail
+// deterministically for anything" is exactly the outcome that row wants.
+// Kept as a separate map, rather than a new field on commandShapeCases, so
+// adding a stub never touches the ~150 existing row literals.
 var commandShapeStubs = map[string]string{
 	"boolean global before apply":          stubKubectlDiffFails,
 	"helm boolean global before upgrade":   stubHelmUnpreviewable,
@@ -518,25 +535,32 @@ func TestGuardOnlyEverPreviews(t *testing.T) {
 		t.Fatalf("a provably read-only command executed kubectl/helm:\n%s", b)
 	}
 
-	// These three are expected to invoke kubectl/helm now — that is the whole
+	// These four are expected to invoke kubectl/helm now — that is the whole
 	// point of Task 9. What must never appear among the recorded calls is the
-	// bare mutating verb running for real. The helm command deliberately
-	// targets a NON-production namespace: review round 1 found that "-n
-	// prod" made check_production intercept before validate_helm ever ran,
-	// so this oracle asserted NOTHING WHATSOEVER about the one validator that
-	// appends a preview flag to an argv already naming a mutating verb —
-	// exactly the shape this test exists to catch.
+	// bare mutating verb running for real. Both helm commands deliberately
+	// target a NON-production namespace: review round 1 found that "-n prod"
+	// made check_production intercept before validate_helm ever ran, so this
+	// oracle asserted NOTHING WHATSOEVER about the validators that append a
+	// preview flag to an argv already naming a mutating verb — exactly the
+	// shape this test exists to catch. Round 2's re-review found that
+	// "helm uninstall" alone only exercises validate_helm's DESTRUCTIVE
+	// branch (the `helm history` pre-check, which names no mutating verb at
+	// all) — never the non-destructive branch that appends --dry-run=server
+	// to an argv that already names "upgrade"/"install", which is the one
+	// place a bug could run the bare mutation for real. "helm upgrade" closes
+	// that gap.
 	for _, cmd := range []string{
 		"kubectl apply -f app.yaml",
 		"kubectl delete pod x -n demo",
 		"helm uninstall myrel -n demo",
+		"helm upgrade myrel ./chart -n demo",
 	} {
 		runHook(t, bashInput(cmd, "k8s_editor"), dir)
 	}
 
 	b, err := os.ReadFile(marker)
 	if err != nil {
-		t.Fatalf("none of the three mutating commands invoked kubectl/helm at all — " +
+		t.Fatalf("none of the four mutating commands invoked kubectl/helm at all — " +
 			"validate() should have previewed each of them")
 	}
 	for _, rec := range strings.Split(strings.TrimSpace(string(b)), "\n") {
@@ -618,7 +642,14 @@ func TestMalformedToolInputDoesNotTraceback(t *testing.T) {
 // so the diagnostic's wrongness is on the record: it tells the agent its file
 // write changes the cluster.
 func TestHeredocBodyIsRefusedKnownLimitation(t *testing.T) {
-	out, _ := runHook(t, bashInput("cat > /tmp/runbook.sh <<'SH'\nkubectl delete pod x -n demo\nSH", "coder"), "")
+	// The heredoc's "kubectl delete" line reaches validate_destructive like
+	// any other segment (see the doc comment above), so — round 2's
+	// re-review — this needs a deterministic stub exactly like every other
+	// row that reaches a real subprocess call; otherwise this passes only
+	// because this machine's kubectl cannot resolve anything, same coupling
+	// as Finding F.
+	dir := stubBin(t, "kubectl", "exit 1")
+	out, _ := runHook(t, bashInput("cat > /tmp/runbook.sh <<'SH'\nkubectl delete pod x -n demo\nSH", "coder"), dir)
 	if got := decisionOf(t, out); got != "deny" {
 		t.Fatalf("decision = %q, want deny — if this now proceeds, the heredoc limitation was fixed and this test should be replaced", got)
 	}
@@ -636,9 +667,16 @@ func TestNonKubernetesCommandEmitsNothing(t *testing.T) {
 // The escalation is the script's, not the engine's: the engine reports attempt
 // and consecutive and compares nothing.
 func TestEscalatesToAskOnThirdAttempt(t *testing.T) {
+	// A deterministic failure — round 2's re-review found this relied on the
+	// real kubectl (extraPath "") failing to preview the change, which is
+	// the same machine-coupling Finding F closed for commandShapeCases. On
+	// a machine where the dry run happened to succeed this would silently
+	// proceed instead of escalating, and attempt=3 would never be tested at
+	// all.
+	dir := stubBin(t, "kubectl", "exit 1")
 	in := bashInput("kubectl apply -f app.yaml", "k8s_editor")
 	in["attempt"] = 3
-	out, _ := runHook(t, in, "")
+	out, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out); got != "ask" {
 		t.Fatalf("third attempt decision = %q, want ask", got)
 	}
@@ -903,13 +941,18 @@ func TestGuardExecsTheNormalisedBinaryNeverArgvZero(t *testing.T) {
 	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
 		t.Fatalf("write shim: %v", err)
 	}
+	// The LEGITIMATE kubectl on PATH is a deterministic stub that behaves
+	// DIFFERENTLY from the shim — it fails to resolve anything — so the two
+	// are distinguishable by decision alone: round 2's re-review found the
+	// original extraPath "" (real PATH) version was itself the same
+	// machine-coupling Finding F closed elsewhere — on a machine whose real
+	// kubectl also happened to resolve the target, "decision != proceed"
+	// couldn't tell a legitimate resolve from the shim's forged one.
+	dir := stubBin(t, "kubectl", "exit 1")
 	in := bashInput("./kubectl delete pod real-app -n demo", "k8s_cleaner")
 	in["cwd"] = cwd
-	// No extraPath: PATH is whatever this machine has (real kubectl, or
-	// none). Either way it must NOT be the cwd-planted shim, whose forged
-	// label would make this proceed.
-	out, _ := runHook(t, in, "")
-	if decisionOf(t, out) == "" {
+	out, _ := runHook(t, in, dir)
+	if decisionOf(t, out) != "deny" {
 		t.Fatalf("the guard's own cwd-planted shim answered its probe and let the delete proceed: %s", out)
 	}
 }
