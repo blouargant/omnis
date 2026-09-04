@@ -537,3 +537,19 @@ the permission card now carries the diff.
   that `exec`s its argv — is undecidable from argv alone (`setsid kubectl delete` is
   shape-identical to `echo kubectl delete`); the common members are listed and the
   bare-program-name rule catches what a wrapper leaves behind.
+- **The guard has its own network and filesystem surface**, new with per-verb
+  validation (§7.4). `kubectl -f` accepts a URL, so previewing `apply -f https://…`
+  makes the *hook* fetch an agent-supplied URL twice (diff, then dry run). No new
+  exposure versus running the real command — but it is the guard reaching the
+  network, not the agent, so it is neither permission-gated nor recorded as a tool
+  call. Same class as the note above about the hook's `kubectl` subprocesses.
+- **A namespace deletion passes the blast-radius check.** `kubectl delete namespace
+  demo` names a specific resource, so the "no name and a broad selector" refusal
+  does not fire, even though it cascades to every object inside. Follow-up: count
+  the contents of a namespace as its blast radius, not the one object named.
+- **The validators only ever run preview forms**, and that is verified by execution
+  rather than asserted: `TestGuardOnlyEverPreviews` records every kubectl/helm
+  invocation the guard makes under a stub PATH and requires each to be a read verb
+  or to carry a dry-run/diff marker. A provably read-only command must cause no
+  execution at all. The property worth stating is narrow and load-bearing: the
+  guard must never run the mutation it was asked to inspect.
