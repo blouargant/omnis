@@ -24,6 +24,7 @@
 - **Collection colour pastilles in the collapsed sidebar** — when the sidebar is collapsed to a rail, each collection now shows its initials in its own colour (instead of a plain folder icon), and hovering shows the full collection name.
 - **Foldable question card** — a pending agent question can be collapsed to its title line so you can read the conversation behind it, then reopened to answer; a half-typed answer survives the fold.
 - **Linux admin agent** — the System squad can now make careful, preview-first changes to your Linux workstation (packages, systemd services, config files, users, networking), with every change permission-gated.
+- **Validated Kubernetes changes** — every cluster change is now previewed and checked before it can be applied: manifests are diffed and dry-run against the API server, deletions are checked for blast radius and ownership, and an independent reviewer agent must approve the change before it can proceed.
 
 ## 1.8 — Collection context & session search
 
