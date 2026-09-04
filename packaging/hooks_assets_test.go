@@ -1,9 +1,12 @@
 package packaging
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -94,8 +97,13 @@ func readStripped(t *testing.T, path string) string {
 // goreleaserConfig is a deliberately minimal view of .goreleaser.yaml — only
 // the fields these tests need, not the full goreleaser schema.
 type goreleaserConfig struct {
+	Archives []struct {
+		Files []yaml.Node `yaml:"files"`
+	} `yaml:"archives"`
 	Nfpms []struct {
-		Contents []struct {
+		Dependencies []string                     `yaml:"dependencies"`
+		Overrides    map[string]nfpmsFormatConfig `yaml:"overrides"`
+		Contents     []struct {
 			Src      string `yaml:"src"`
 			Dst      string `yaml:"dst"`
 			Type     string `yaml:"type"`
@@ -105,8 +113,38 @@ type goreleaserConfig struct {
 		} `yaml:"contents"`
 	} `yaml:"nfpms"`
 	Brews []struct {
-		Install string `yaml:"install"`
+		Install      string `yaml:"install"`
+		Dependencies []struct {
+			Name string `yaml:"name"`
+		} `yaml:"dependencies"`
 	} `yaml:"brews"`
+}
+
+type nfpmsFormatConfig struct {
+	Dependencies []string `yaml:"dependencies"`
+}
+
+// archivesFileSources returns the "src" of every archives[].files[] entry
+// that is a {src, dst} mapping (a bare string entry like "LICENSE" carries
+// no separate src and is skipped — it names itself).
+func archivesFileSources(t *testing.T, files []yaml.Node) []string {
+	t.Helper()
+	var out []string
+	for _, node := range files {
+		if node.Kind != yaml.MappingNode {
+			continue
+		}
+		var entry struct {
+			Src string `yaml:"src"`
+		}
+		if err := node.Decode(&entry); err != nil {
+			t.Fatalf("decode archives files entry: %v", err)
+		}
+		if entry.Src != "" {
+			out = append(out, entry.Src)
+		}
+	}
+	return out
 }
 
 func loadGoreleaserConfig(t *testing.T) goreleaserConfig {
@@ -243,5 +281,125 @@ func TestPipStagesTheHookScriptDirectory(t *testing.T) {
 	if !strings.Contains(data, `os.path.join(REPO_ROOT, "config", "hooks")`) {
 		t.Fatal("scripts/build_wheels.py no longer stages config/hooks/ into sysconf/ " +
 			"(the real copytree call, not a comment) — the pip wheel would ship hooks.json with no script behind it")
+	}
+}
+
+// C1 (review round 2): the pip Windows wheels (win_amd64/win_arm64) still
+// shipped hooks.json after round 1's fix, reproducing the exact brick —
+// stage_assets() was platform-independent, and the pip launcher points
+// OMNIS_SYSTEM_CONFIG_DIR at the SAME staged sysconf/ on every platform,
+// Windows included. Exercised directly against stage_assets(goos), loaded as
+// a module (mirrors subjectHashPy's pattern), rather than building real
+// cross-compiled wheels — no cross-compiler toolchain is assumed here.
+func TestPipStageAssetsExcludesHooksJSONOnWindowsOnly(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	buildWheelsPath, err := filepath.Abs(filepath.Join("..", "scripts", "build_wheels.py"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			dist := t.TempDir()
+			py := `
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("build_wheels", ` + strconv.Quote(buildWheelsPath) + `)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod.DIST_STAGE = ` + strconv.Quote(dist) + `
+mod.stage_assets(` + strconv.Quote(goos) + `)
+sysconf = os.path.join(mod.DIST_STAGE, "sysconf")
+print("hooks.json" in os.listdir(sysconf))
+print(os.path.isfile(os.path.join(sysconf, "hooks", "k8s-validate.py")))
+`
+			cmd := exec.Command("python3", "-B", "-c", py)
+			var out, errb bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &out, &errb
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("stage_assets(%q) failed: %v\nstderr: %s", goos, err, errb.String())
+			}
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("unexpected output: %q", out.String())
+			}
+			hasHooksJSON, hasScript := lines[0] == "True", lines[1] == "True"
+			wantHooksJSON := goos != "windows"
+			if hasHooksJSON != wantHooksJSON {
+				t.Fatalf("goos=%s: hooks.json staged into sysconf/ = %v, want %v", goos, hasHooksJSON, wantHooksJSON)
+			}
+			if !hasScript {
+				t.Fatalf("goos=%s: the hook SCRIPT must ship regardless of platform", goos)
+			}
+		})
+	}
+}
+
+// M4 (review round 2): nothing pinned the .goreleaser.yaml `archives.files`
+// entry for the hook script — the entry Critical 1's fix in round 1 added
+// after discovering the Windows MSI job stages from exactly this archive.
+// Losing it again would break the release BUILD itself (the MSI job's
+// Copy-Item would have no source to copy), loudly, under CI — as opposed to
+// the dependency pin below, which regresses silently.
+func TestArchivesFilesShipsTheHookScript(t *testing.T) {
+	cfg := loadGoreleaserConfig(t)
+	if len(cfg.Archives) == 0 {
+		t.Fatal("no archives block in .goreleaser.yaml")
+	}
+	srcs := archivesFileSources(t, cfg.Archives[0].Files)
+	for _, s := range srcs {
+		if s == "config/hooks/k8s-validate.py" {
+			return
+		}
+	}
+	t.Fatalf("archives[0].files has no entry for config/hooks/k8s-validate.py (found: %v)", srcs)
+}
+
+// M4: pin the python3 runtime dependency (Important 2) at the structural
+// level nfpms actually resolves it at — the per-format `overrides` REPLACE
+// rather than merge with the top-level `dependencies:`, which is exactly
+// how it was silently defeated once already during this task (caught only
+// by rebuilding a real .deb/.rpm and inspecting the package metadata, not by
+// reading the YAML). Checks all three declaration sites: the top-level
+// nfpms list, and both format overrides.
+func TestNfpmsAndHomebrewDeclarePython3Dependency(t *testing.T) {
+	cfg := loadGoreleaserConfig(t)
+	if len(cfg.Nfpms) == 0 {
+		t.Fatal("no nfpms block in .goreleaser.yaml")
+	}
+	has := func(deps []string) bool {
+		for _, d := range deps {
+			if d == "python3" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(cfg.Nfpms[0].Dependencies) {
+		t.Fatalf("nfpms top-level dependencies does not declare python3: %v", cfg.Nfpms[0].Dependencies)
+	}
+	for _, format := range []string{"rpm", "deb"} {
+		override, ok := cfg.Nfpms[0].Overrides[format]
+		if !ok {
+			t.Fatalf("nfpms has no %q override block", format)
+		}
+		if !has(override.Dependencies) {
+			t.Fatalf("nfpms overrides.%s.dependencies does not restate python3 (%v) — "+
+				"a format override REPLACES, not merges with, the top-level dependencies list, "+
+				"so an empty override here would silently defeat the top-level declaration",
+				format, override.Dependencies)
+		}
+	}
+	if len(cfg.Brews) == 0 {
+		t.Fatal("no brews block in .goreleaser.yaml")
+	}
+	var brewHasPython3 bool
+	for _, d := range cfg.Brews[0].Dependencies {
+		if d.Name == "python@3" {
+			brewHasPython3 = true
+		}
+	}
+	if !brewHasPython3 {
+		t.Fatalf("brews[0].dependencies does not declare python@3: %v", cfg.Brews[0].Dependencies)
 	}
 }

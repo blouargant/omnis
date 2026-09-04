@@ -18,10 +18,14 @@
     <StageDir>\data\agents.json, ...      -> C:\ProgramData\Omnis
     <StageDir>\data\server.yaml
     <StageDir>\data\filters\...
-    <StageDir>\data\hooks\k8s-validate.py -- the k8s-validate PreToolUse hook;
-      data\hooks.json (from the *.json glob) points at it via
-      OMNIS_SYSTEM_CONFIG_DIR, so this directory must ship alongside it or a
-      fail_closed hooks.json blocks every Bash call on this channel.
+    <StageDir>\data\hooks\k8s-validate.py -- the k8s-validate hook SCRIPT
+      only. The DECLARATION (data\hooks.json) is deliberately EXCLUDED from
+      staging on this channel — its command is POSIX shell, native Windows
+      Bash calls run via cmd.exe (which does not expand it), and shipping the
+      declaration with no working guard would block every Bash call on every
+      Windows install (see the "msi" job's Copy-Item/Exclude in
+      .github/workflows/release.yml and packaging/README.md). The script
+      still ships so a WSL/Git-Bash host can wire its own hooks.json to it.
     <StageDir>\data\registry\agents\...
     <StageDir>\data\registry\skills\...
 

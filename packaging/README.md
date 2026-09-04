@@ -43,8 +43,17 @@ dependency, not left as an undocumented precondition:
 - **deb/rpm**: `dependencies: [python3]` in the nfpms block — `apt`/`dnf`
   install it automatically as part of `omnis`.
 - **Homebrew**: `depends_on "python@3"` in the `brews:` block.
-- **pip (`omnis-agent`)**: implicit — the distribution IS a Python package,
-  so `pip`/`pipx` already guarantee an interpreter is present.
+- **pip (`omnis-agent`), non-Windows platforms**: implicit — the
+  distribution IS a Python package, so `pip`/`pipx` already guarantee an
+  interpreter is present.
+- **pip (`omnis-agent`), Windows platforms (`win_amd64`/`win_arm64`)**: the
+  interpreter being present was never the failure mode here — a bundled
+  `hooks.json` still runs under native Windows `cmd.exe`, which does not
+  expand `${VAR:-default}` and would pass it through literally (same defect
+  as the MSI channel below). `scripts/build_wheels.py`'s `stage_assets(goos)`
+  therefore excludes `hooks.json` from the two Windows wheels specifically —
+  `pip install omnis-agent` on native Windows ships the guard SCRIPT but not
+  its declaration, exactly like the MSI.
 - **Windows MSI**: moot — see the Windows section below, `hooks.json` is not
   shipped/declared on that channel at all.
 

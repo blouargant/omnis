@@ -114,13 +114,32 @@ def pep440(version):
     return "0.0.0.dev0"
 
 
-def stage_assets():
-    """Copy the bundled config/registry/web tree into ``_dist`` (binaries added later)."""
+def stage_assets(goos):
+    """Copy the bundled config/registry/web tree into ``_dist`` (binaries added later).
+
+    ``goos`` gates exactly one thing: on Windows, ``hooks.json`` is EXCLUDED
+    from the staged config. Its command is POSIX shell
+    (``${OMNIS_SYSTEM_CONFIG_DIR:-/etc/omnis}`` parameter expansion, a
+    python3 invocation meant for /bin/sh); the pip launcher
+    (packaging/pip/src/omnis/launcher.py) points OMNIS_SYSTEM_CONFIG_DIR at
+    exactly this staged sysconf/, making it the system config layer on a
+    native Windows install too. Native Windows Bash calls run via
+    ``cmd.exe /C`` (core/tools/bash_windows.go), which does not expand that
+    syntax and passes it through literally, so python3 fails to open a file
+    by that literal name and exits non-zero — internal/hooks/run.go maps
+    that straight to a block BEFORE any fail_closed branch runs, refusing
+    every Bash call in every squad. Same defect, same fix as the Windows MSI
+    channel (.github/workflows/release.yml's "msi" job): ship the SCRIPT
+    (harmless, and usable by a WSL/Git-Bash host with its own hooks.json)
+    but not the declaration. See packaging/README.md.
+    """
     sysconf = os.path.join(DIST_STAGE, "sysconf")
     os.makedirs(sysconf, exist_ok=True)
     os.makedirs(os.path.join(DIST_STAGE, "bin"), exist_ok=True)
 
     for name in CONFIG_FILES:
+        if goos == "windows" and name == "hooks.json":
+            continue
         shutil.copy2(os.path.join(REPO_ROOT, "config", name), os.path.join(sysconf, name))
 
     shutil.copytree(
@@ -200,7 +219,7 @@ def main(argv):
         plat_tag = PLATFORMS[target]
         print(">> {}  ->  {}".format(target, plat_tag))
         shutil.rmtree(DIST_STAGE, ignore_errors=True)
-        stage_assets()
+        stage_assets(goos)
         build_binaries(goos, goarch, version, commit, date)
         build_wheel(plat_tag, wheel_version)
         built.append(plat_tag)
