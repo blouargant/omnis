@@ -122,7 +122,12 @@ VALUE_FLAGS = {
 # `if kubectl delete pod x; then` still reaches validate.
 SHELL_KEYWORDS = {"for", "while", "until", "if", "then", "elif", "else", "do",
                   "done", "fi", "case", "esac", "in", "select", "function",
-                  "(", ")", "{", "}", "!", "[[", "]]", "&&", "||", "time"}
+                  "(", ")", "{", "}", "!", "[[", "]]", "&&", "||"}
+# NOTE: `time` is deliberately NOT above, though it is a shell keyword. This set is
+# consulted BEFORE WRAPPER_SPEC, so listing it here made its WRAPPER_SPEC entry
+# unreachable dead code that read as coverage: `time` was stripped without
+# consuming its own `-p`/`-o FILE`, the leftover flag became the head, classify
+# returned None, and `time -p kubectl delete pod x` proceeded AND ran.
 
 # Process wrappers, each with an explicit spec, because guessing a wrapper's
 # argument arity is what previously denied `timeout 30 kubectl get pods`: the
@@ -131,17 +136,40 @@ SHELL_KEYWORDS = {"for", "while", "until", "if", "then", "elif", "else", "do",
 # tokens it takes before the command it wraps.
 WRAPPER_SPEC = {
     "sudo": ({"-u", "--user", "-g", "--group", "-p", "--prompt", "-C",
-              "--close-from", "-r", "--role", "-t", "--type", "-h", "--host"}, 0),
+              "--close-from", "-r", "--role", "-t", "--type", "-h", "--host",
+              "-R", "--chroot", "-D", "--chdir", "-a", "--auth-type"}, 0),
     "env": ({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}, 0),
     "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),
     "nice": ({"-n", "--adjustment"}, 0),
     "ionice": ({"-c", "-n", "-p", "-P", "-u"}, 0),
     "stdbuf": ({"-i", "-o", "-e", "--input", "--output", "--error"}, 0),
     "xargs": ({"-I", "-i", "-n", "-L", "-P", "-d", "-E", "-s", "--replace",
-               "--max-args", "--max-procs", "--delimiter"}, 0),
+               "--max-args", "--max-procs", "--delimiter",
+               "-a", "--arg-file", "--process-slot-var"}, 0),
     "nohup": (set(), 0),
     "time": ({"-f", "--format", "-o", "--output"}, 0),
     "command": (set(), 0),
+    # These exec argv[1..] directly, so the real verb is in plain sight and a
+    # missing entry meant the segment was spared, not scrutinised: `setsid
+    # kubectl delete pod x` proceeded and deleted. The open-ended tail (an
+    # arbitrary unlisted wrapper) is undecidable — `setsid kubectl delete` is
+    # shape-identical to `echo kubectl delete` — so this enumerates the members
+    # actually present on a workstation rather than pretending to be complete.
+    "setsid": (set(), 0),
+    "unshare": ({"--map-user", "--map-group", "--propagation", "--setgroups",
+                 "-S", "--setuid", "-G", "--setgid"}, 0),
+    "taskset": ({"-c", "--cpu-list", "-p", "--pid"}, 1),
+    "chrt": (set(), 1),
+    "strace": ({"-o", "-e", "-p", "-s", "-E", "-P"}, 0),
+    "ltrace": ({"-o", "-e", "-p", "-s"}, 0),
+    "systemd-run": ({"--unit", "-p", "--property", "--slice", "--description",
+                     "--uid", "--gid", "--setenv", "-E"}, 0),
+    "doas": ({"-u", "-C"}, 0),
+    # flock execs argv after its lockfile operand, so as a LAUNCHER it refused an
+    # honest `flock /tmp/l kubectl get pods`. Its `-c` form DOES hand a string to
+    # sh, and that is caught by the post-strip head check in main: the payload is
+    # left at the head, which is not a bare program name.
+    "flock": ({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}, 1),
 }
 
 # Commands that EXECUTE a string handed to them. A kubectl command line quoted
@@ -154,7 +182,7 @@ LAUNCHERS = {
     "bash", "sh", "zsh", "dash", "ksh", "csh", "fish", "eval", "source",
     "ssh", "su", "nsenter", "chroot", "docker", "podman", "nerdctl",
     "python", "python3", "perl", "ruby", "node", "php",
-    "awk", "gawk", "sed", "make", "watch", "parallel", "flock",
+    "awk", "gawk", "sed", "make", "watch", "parallel", "busybox",
 }
 # NOTE: `xargs` is a WRAPPER, not a launcher — after stripping it, kubectl is at
 # the head, so `xargs kubectl delete pod x` reaches validate with the real verb
@@ -184,8 +212,33 @@ COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 MENTIONS_K8S = re.compile(r"\b(kubectl|helm)[\w.-]*")
 K8S_BINARY = re.compile(r"^(kubectl|helm)[\w.-]*$")
 
-COMMAND_SUBSTITUTION = re.compile(r"\$\(|`|<\(|\$\{[^}]*\$\(")
+COMMAND_SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(|\$\{[^}]*\$\(")
 REDIRECT = re.compile(r"<<|>>|[<>]")
+# Shell grouping punctuation, which may be glued to a program name on either
+# side or in the middle of the token. See _basename.
+GROUPING = re.compile(r"[(){}]")
+
+
+def _basename(token):
+    """The program name a token denotes, with shell grouping punctuation removed.
+
+    `(` may be glued to the binary — `(kubectl delete pod x)` is ordinary bash —
+    and the token is then `(kubectl`, whose ^-anchored basename test failed and
+    whose lack of whitespace failed the quoted-payload test, so the segment
+    proceeded and deleted. SHELL_KEYWORDS' `(` entry only ever fired on the
+    spaced form, which is why the table's `( kubectl get pods )` row was green
+    while the glued form was never generated.
+
+    Splitting rather than trimming is load-bearing: bash also allows the
+    punctuation MID-token (`if(kubectl delete pod x)`, `while(...)`), where a
+    trim leaves `if(kubectl` untouched and the same bypass survives. A token
+    that is nothing BUT punctuation is returned as-is, so SHELL_KEYWORDS still
+    recognises a lone `(`.
+    """
+    parts = [x for x in GROUPING.split(token) if x]
+    if not parts:
+        return token
+    return parts[-1].split("/")[-1]
 
 
 def emit(decision, reason):
@@ -299,7 +352,7 @@ def _strip_wrappers(argv):
     an ordinary read. Nested wrappers are handled by looping.
     """
     while argv:
-        base = argv[0].split("/")[-1]
+        base = _basename(argv[0])
         # Leading shell keywords and env assignments come before any wrapper.
         if base in SHELL_KEYWORDS:
             argv = argv[1:]
@@ -320,7 +373,7 @@ def _strip_wrappers(argv):
                 argv = argv[1:]
         for _ in range(operand_count):
             if argv and not argv[0].startswith("-"):
-                base_next = argv[0].split("/")[-1]
+                base_next = _basename(argv[0])
                 if base_next in ("kubectl", "helm") or base_next in WRAPPER_SPEC:
                     break
                 argv = argv[1:]
@@ -374,7 +427,7 @@ def classify(argv):
     """
     if not argv:
         return None, None, -1
-    base = argv[0].split("/")[-1]
+    base = _basename(argv[0])
     if not K8S_BINARY.match(base):
         return None, None, -1
     tool = "helm" if base.startswith("helm") else "kubectl"
@@ -434,11 +487,15 @@ def is_launcher(argv):
     the kubectl token in it reads as an argument and the segment proceeds. That is
     the residual this direction accepts, in exchange for not refusing every
     `gh pr create --title "…kubectl…"`. `git -c alias.x='!cmd'` is the known
-    instance, and it takes deliberate obfuscation to reach.
+    instance that needs deliberate obfuscation, but an ordinary unlisted
+    program that execs its argv is the same hole with no obfuscation at all,
+    so WRAPPER_SPEC carries the members that actually exist on a workstation
+    and the post-strip head check in main refuses whatever a wrapper leaves
+    unidentifiable. The general case cannot be decided from argv alone.
     """
     if not argv:
         return False
-    return argv[0].split("/")[-1] in LAUNCHERS
+    return _basename(argv[0]) in LAUNCHERS
 
 
 def names_k8s(tokens):
@@ -453,7 +510,7 @@ def names_k8s(tokens):
     basename is the whole string.
     """
     for t in tokens:
-        if K8S_BINARY.match(t.split("/")[-1]):
+        if K8S_BINARY.match(_basename(t)):
             return True
         if (" " in t or "\t" in t or "\n" in t) and MENTIONS_K8S.search(t):
             return True
@@ -532,6 +589,21 @@ def main():
 
         # Strip wrappers exactly ONCE, so every index below refers to this argv.
         argv = _strip_wrappers(tokens)
+
+        # Stripping must land on a bare program name. Anything else means a
+        # wrapper consumed the binary, left its own flag at the head, or left a
+        # quoted payload there — and every one of those fell through to
+        # `tool is None` below, i.e. was SPARED rather than examined. That is a
+        # failure to identify, which under the inversion is a refusal: it is how
+        # `time -p kubectl delete pod x` and `flock /tmp/l -c '…'` both ran.
+        head = argv[0] if argv else ""
+        if not head or head.startswith("-") or any(c.isspace() for c in head):
+            refuse(
+                "After removing the process wrappers this guard recognises, the command it "
+                "would actually run could not be identified. Express it as a direct "
+                "kubectl/helm command, with the binary first.",
+                attempt, consecutive,
+            )
 
         if is_launcher(argv):
             refuse(
