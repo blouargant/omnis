@@ -28,6 +28,7 @@ enumerable; the ways to spell a mutation are not.
 Python 3 standard library only.
 """
 
+import hashlib
 import json
 import re
 import shlex
@@ -301,6 +302,18 @@ def refuse(reason, attempt, consecutive):
     if attempt >= MAX_ATTEMPTS or consecutive >= MAX_ATTEMPTS:
         emit("ask", "Validation has failed %d times.\n\n%s" % (max(attempt, consecutive), reason))
     emit("deny", reason)
+
+
+def subject_hash(tool_input):
+    """The change identifier. Must match hookstate.HashArgs in Go: sha256 of the
+    canonical JSON of the tool arguments. json.dumps with sort_keys and no
+    spaces reproduces encoding/json's object output for these values — verified
+    directly against HashArgs by TestSubjectHashAgreesWithHashArgs, not just by
+    reading both implementations: encoding/json sorts object keys the same way,
+    and HashArgs' Encoder has SetEscapeHTML(false) specifically so the two sides
+    agree on a command containing "&&", which is every compound shell command."""
+    canonical = json.dumps(tool_input, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _is_redirect_amp(command, i):
@@ -579,6 +592,22 @@ def main():
     except (TypeError, ValueError):
         attempt, consecutive = 1, 0
     attestations = data.get("attestations") or {}
+    # One subject for the WHOLE tool call, not per segment: it must equal
+    # hookstate.HashArgs(tool_input) exactly, because that is the same key
+    # record_validation's caller is told to attest against (see
+    # subject_hash's docstring). A compound command with two mutating
+    # segments is one review action covering the whole line, not two.
+    subject = subject_hash(tool_input)
+
+    # Every validated segment's preview, so the final proceed() can show the
+    # diff. Collected rather than shown per-segment: `validate()` must not
+    # exit on success, or a SECOND mutating segment in a compound command
+    # (`kubectl apply -f a.yaml && kubectl delete ns x`) would never even
+    # reach mechanical validation — the first segment's proceed() would end
+    # the process before the loop got to it. Refusal is unaffected: `refuse`/
+    # `emit("deny", …)` still exit immediately, which is the correct
+    # direction for a failure (nothing in the compound command should run).
+    validated = []
 
     for segment in segments(command):
         # A shell comment is text, not a command.
@@ -676,9 +705,20 @@ def main():
                 attempt, consecutive,
             )
 
-        validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations)
+        preview = validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive,
+                           attestations, subject)
+        validated.append((tool, verb, preview))
 
-    proceed()
+    if not validated:
+        proceed()
+    else:
+        # Every validated segment's diff, so the permission card is
+        # informative for a compound command too — not just the first
+        # mutating segment.
+        proceed("\n\n---\n\n".join(
+            "**Validated change** (`%s %s`):\n\n```\n%s\n```" % (tool, verb, preview[:4000])
+            for tool, verb, preview in validated
+        ))
 
 
 PROD_PATTERN = re.compile(r"prod|prd|production", re.IGNORECASE)
@@ -786,12 +826,18 @@ def check_production(argv, attempt, consecutive):
             )
 
 
-def check_attested(argv, attestations, attempt, consecutive, subject):
+def check_attested(argv, attestations, subject):
     """Require an APPROVED verdict from the reviewer for this exact change.
 
     A missing verdict is a TERMINAL refusal: it must never escalate to `ask`, or
     the guarantee would be removable by disabling the reviewer agent and then
-    clicking "allow".
+    clicking "allow". `attempt`/`consecutive` are deliberately NOT parameters
+    here (unlike every other check_* function) — `refuse()` is the only thing
+    that can turn a denial into an escalation, and it needs those two numbers
+    to do it. Leaving them out of this function's scope means escalating a
+    missing attestation would take a signature change, not just a stray call
+    to `refuse(reason, attempt, consecutive)` with the numbers sitting right
+    there. See TestMissingAttestationNeverEscalates.
     """
     rec = attestations.get(subject) if isinstance(attestations, dict) else None
     if not rec:
@@ -965,7 +1011,7 @@ def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
     return "%d resource(s) would be deleted." % len(items)
 
 
-def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
+def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations, subject):
     check_production(argv, attempt, consecutive)
     if tool == "helm":
         preview = validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive)
@@ -990,6 +1036,15 @@ def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attes
     else:
         refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
                "rather than applied unchecked." % (tool, verb), attempt, consecutive)
+    # Mechanical validation passed for THIS segment; now require the
+    # reviewer's verdict for the change as a whole. Checked here (not once
+    # after the loop) so a missing/rejected attestation denies at the first
+    # mutating segment it reaches — the same fail-fast shape every mechanical
+    # check above already has — while a successful check returns normally
+    # instead of ending the run, so main()'s loop still reaches any FURTHER
+    # mutating segment in a compound command and mechanically validates it
+    # too (see the `validated` comment in main).
+    check_attested(argv, attestations, subject)
     return preview
 
 

@@ -221,10 +221,15 @@ jobs:
           # Binaries + static web UI -> Program Files\Omnis
           Copy-Item "$ex\omnis.exe","$ex\omnis-server.exe" "$stage\install\"
           Copy-Item "$ex\web\*" "$stage\install\web\" -Recurse
-          # System config layer -> ProgramData\Omnis (flatten config\, keep filters\ + registry\)
+          # System config layer -> ProgramData\Omnis (flatten config\, keep filters\ + hooks\ + registry\)
           Copy-Item "$ex\config\*.json" "$stage\data\"
           Copy-Item "$ex\config\server.yaml" "$stage\data\"
           Copy-Item "$ex\config\filters" "$stage\data\filters" -Recurse
+          # The k8s-validate hook script: config\hooks.json (already copied by
+          # the *.json glob above) points at it via OMNIS_SYSTEM_CONFIG_DIR, so
+          # omitting this copy would ship a fail_closed guard whose script is
+          # missing — a silent, total Bash block on every Windows install.
+          Copy-Item "$ex\config\hooks" "$stage\data\hooks" -Recurse
           Copy-Item "$ex\registry" "$stage\data\registry" -Recurse
           "STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
 

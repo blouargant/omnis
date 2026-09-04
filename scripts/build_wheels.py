@@ -48,6 +48,7 @@ CONFIG_FILES = [
     "preferences.json",
     "remote_registries.json",
     "a2a_config.json",
+    "hooks.json",
     "server.yaml",
 ]
 
@@ -125,6 +126,16 @@ def stage_assets():
     shutil.copytree(
         os.path.join(REPO_ROOT, "config", "filters"),
         os.path.join(sysconf, "filters"),
+    )
+    # The k8s-validate hook script. copytree's default copy_function (copy2)
+    # preserves the source file's mode bits, including the executable bit
+    # config/hooks/k8s-validate.py already carries in git (100755) — required
+    # since hooks.json's command runs it as `python3 <path>`, not via the
+    # shebang, but a future direct-exec caller must not find it non-executable.
+    shutil.copytree(
+        os.path.join(REPO_ROOT, "config", "hooks"),
+        os.path.join(sysconf, "hooks"),
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     for kind in ("agents", "skills"):
         shutil.copytree(

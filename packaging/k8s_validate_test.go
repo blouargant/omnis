@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -985,7 +986,16 @@ case "$*" in
   "diff upgrade myrel ./chart -n demo") exit 7 ;;
   *) exit 0 ;;
 esac`)
-			out, _ := runHook(t, bashInput("helm upgrade myrel ./chart -n demo", "k8s_editor"), dir)
+			// Task 10 requires an APPROVED attestation for the mechanical
+			// validation to actually PROCEED (rather than deny "not
+			// reviewed"). Attested unconditionally: the "diff plugin
+			// installed" case still denies before check_attested ever runs
+			// (its dry-run stub exits 7), so this only changes the
+			// "no plugins installed" case's decision from a false-positive
+			// "not reviewed" deny back to what this test exists to check.
+			in := bashInput("helm upgrade myrel ./chart -n demo", "k8s_editor")
+			in["attestations"] = approvedFor(t, in)
+			out, _ := runHook(t, in, dir)
 			usedDiffCmd := decisionOf(t, out) == "deny"
 			if usedDiffCmd != tc.pluginListed {
 				t.Fatalf("used `helm diff upgrade` = %v, want %v (%s)", usedDiffCmd, tc.pluginListed, out)
@@ -1017,7 +1027,14 @@ case "$*" in
   *--server-side*) exit 3 ;;
   *) exit 0 ;;
 esac`)
-			out, _ := runHook(t, bashInput("kubectl "+tc.verb+" -f app.yaml -n demo", "k8s_editor"), dir)
+			// Attested unconditionally (Task 10): "apply" still denies before
+			// check_attested runs (its dry-run stub exits 3), but "create"/
+			// "replace" now reach check_attested on a clean dry-run and would
+			// otherwise deny as "not reviewed" — a false positive for
+			// gotServerSide that has nothing to do with --server-side.
+			in := bashInput("kubectl "+tc.verb+" -f app.yaml -n demo", "k8s_editor")
+			in["attestations"] = approvedFor(t, in)
+			out, _ := runHook(t, in, dir)
 			gotServerSide := decisionOf(t, out) == "deny"
 			if gotServerSide != tc.wantServerSide {
 				t.Fatalf("%s: --server-side present = %v, want %v (%s)", tc.verb, gotServerSide, tc.wantServerSide, out)
@@ -1044,7 +1061,13 @@ case "$*" in
   *get*) echo '{"metadata":{"name":"x","labels":{}}}'; exit 0 ;;
   *)     exit 1 ;;
 esac`)
-				out, _ := runHook(t, bashInput("kubectl rollout "+action+" deploy/x -n demo", "k8s_editor"), dir)
+				// Attested (Task 10): a resolvable target now reaches
+				// check_attested, and an unattested "not reviewed" deny would
+				// be indistinguishable from the dead-end this test guards
+				// against.
+				in := bashInput("kubectl rollout "+action+" deploy/x -n demo", "k8s_editor")
+				in["attestations"] = approvedFor(t, in)
+				out, _ := runHook(t, in, dir)
 				if decisionOf(t, out) == "deny" {
 					t.Fatalf("a resolvable rollout %s target was denied instead of previewed: %s", action, out)
 				}
@@ -1071,7 +1094,13 @@ case "$*" in
   "history myrel -n demo") exit 0 ;;
   *)                       exit 9 ;;
 esac`)
-	out, _ := runHook(t, bashInput("helm uninstall -n demo myrel", "k8s_editor"), dir)
+	// Attested (Task 10): a correctly-resolved release now reaches
+	// check_attested, and an unattested "not reviewed" deny would be
+	// indistinguishable from the misidentification bug this test guards
+	// against.
+	in := bashInput("helm uninstall -n demo myrel", "k8s_editor")
+	in["attestations"] = approvedFor(t, in)
+	out, _ := runHook(t, in, dir)
 	if decisionOf(t, out) == "deny" {
 		t.Fatalf("the release name was not correctly identified from behind a preceding flag: %s", out)
 	}
@@ -1089,5 +1118,235 @@ func TestBlastRadiusIgnoresAFlagsValue(t *testing.T) {
 	}
 	if !strings.Contains(reasonOf(t, out), "names no specific resource") {
 		t.Fatalf("reason = %q, want it to explain no resource was named", reasonOf(t, out))
+	}
+}
+
+// --- Task 10: the attestation requirement ---
+
+// subjectHashPy runs the script's OWN subject_hash against toolInput and
+// returns the hex digest. It loads the script as a module (rather than
+// `python3 -B script.py`) so `if __name__ == "__main__": main()` never runs
+// and blocks on stdin.
+func subjectHashPy(t *testing.T, toolInput map[string]any) string {
+	t.Helper()
+	data, err := json.Marshal(toolInput)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// strconv.Quote produces a Go double-quoted string literal, which Python
+	// also accepts as a double-quoted literal (both escape the same way for
+	// any path this test produces — under t.TempDir()).
+	py := `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("k8s_validate", ` + strconv.Quote(script(t)) + `)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(mod.subject_hash(json.load(sys.stdin)))
+`
+	cmd := exec.Command("python3", "-B", "-c", py)
+	cmd.Stdin = bytes.NewReader(data)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("subject_hash failed: %v\nstderr: %s", err, errb.String())
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// THE central claim: the subject hash binds CONTENT, computed identically by
+// the Go engine (hookstate.HashArgs, the attestation-store key) and the
+// Python hook script (subject_hash, what main() actually looks up). If they
+// ever disagree, every attestation would look "not reviewed" to the hook —
+// or worse, two DIFFERENT tool_inputs could collide on the same subject,
+// letting an attestation for one command authorize a different one.
+func TestSubjectHashAgreesWithHashArgs(t *testing.T) {
+	script(t) // skips early on windows / no python3, before spending on cases
+	cases := []map[string]any{
+		{"command": "kubectl get pods"},
+		// A compound command containing "&&" is the exact case Go's
+		// SetEscapeHTML(false) exists for (see hookstate.HashArgs's doc
+		// comment) — every compound shell command contains it.
+		{"command": "kubectl apply -f a.yaml && kubectl delete pod x -n demo"},
+		{}, // an empty tool_input, same as a malformed/absent one
+		{"command": "kubectl get pods -n demo", "timeout": 30.0},
+		{"command": `helm upgrade myrel ./chart --set "a<b&c>d"`},
+	}
+	for _, ti := range cases {
+		want := hookstate.HashArgs(ti)
+		got := subjectHashPy(t, ti)
+		if got != want {
+			t.Fatalf("tool_input=%#v: Python subject_hash=%s, Go HashArgs=%s", ti, got, want)
+		}
+	}
+}
+
+// The design's non-negotiable property (see check_attested's docstring): a
+// missing attestation must be a TERMINAL refusal, never an escalation to
+// `ask`. If it escalated, the whole guarantee would be removable by
+// unticking the validator agent in Settings and then clicking "allow" on the
+// resulting card — reinstating the exact hole record_validation closes. This
+// is what `attempt`/`consecutive` being absent from check_attested's
+// signature is FOR: it structurally cannot call `refuse`.
+func TestMissingAttestationNeverEscalates(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*) exit 1 ;;
+  *)      exit 0 ;;
+esac`)
+	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
+	// attempt is AT the escalation threshold — if check_attested behaved like
+	// refuse(), this would come back "ask", not "deny".
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("missing attestation at attempt=3 decision = %q, want deny (never ask)", got)
+	}
+	if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+		t.Fatalf("reason = %q, want it to name the missing review", reasonOf(t, out))
+	}
+}
+
+// A REJECTED verdict must deny too, and must not escalate either — same
+// property, the other verdict.
+func TestRejectedAttestationNeverEscalates(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*) exit 1 ;;
+  *)      exit 0 ;;
+esac`)
+	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	ti := in["tool_input"].(map[string]any)
+	subject := hookstate.HashArgs(ti)
+	in["attestations"] = map[string]any{
+		subject: map[string]any{"verdict": "REJECTED", "reasons": "wrong namespace"},
+	}
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("rejected attestation at attempt=3 decision = %q, want deny (never ask)", got)
+	}
+	if !strings.Contains(reasonOf(t, out), "REJECTED") {
+		t.Fatalf("reason = %q, want it to name the rejection", reasonOf(t, out))
+	}
+}
+
+// An APPROVED attestation for the exact subject lets a mechanically-valid
+// change proceed, and the diff is carried back via systemMessage so the
+// permission card stays informative.
+func TestApprovedAttestationProceedsWithDiff(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)    echo "~ spec.replicas: 1 -> 2"; exit 1 ;;
+  *dry-run*) echo "deployment.apps/x configured (server dry run)"; exit 0 ;;
+  *)         exit 0 ;;
+esac`)
+	in := bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor")
+	in["attestations"] = approvedFor(t, in)
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got == "deny" || got == "ask" {
+		t.Fatalf("an approved, mechanically-clean change was not allowed to proceed: %q", out)
+	}
+	// validate_manifest's returned "preview" is the server dry run's own
+	// confirmation text (what `kubectl diff` printed is used only to decide
+	// pass/fail, not carried forward) — that is what must reach the user via
+	// systemMessage, alongside the identifying `kubectl apply` header.
+	if !strings.Contains(out, "deployment.apps/x configured") || !strings.Contains(out, "kubectl apply") {
+		t.Fatalf("the validated preview must reach the user via systemMessage: %q", out)
+	}
+}
+
+// THE demonstration that the hash binds CONTENT: an attestation recorded for
+// v1 of a manifest must NOT authorize applying v2 — even though both are
+// `kubectl apply -f change.yaml`, the file's own bytes differ and command-line
+// attestation is keyed on tool_input (the command string), which is
+// identical for both. This is exactly why record_validation's caller must
+// pass the CURRENT tool_input's subject: the guard cannot tell v1 from v2
+// apart on the command line alone, so a real workflow's attestation is only
+// as trustworthy as the reviewer re-hashing before approving. What THIS test
+// pins is narrower and unconditional: two DIFFERENT commands (the ordinary
+// way a "v2" would actually show up to the guard — a different -f path, or a
+// different verb/target) never share a subject, so approving one can never
+// silently authorize the other.
+func TestAttestationDoesNotCrossDifferentChanges(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)    exit 1 ;;
+  *dry-run*) exit 0 ;;
+  *)         exit 0 ;;
+esac`)
+	v1 := bashInput("kubectl apply -f v1.yaml -n demo", "k8s_editor")
+	v1["attestations"] = approvedFor(t, v1) // approves ONLY v1's subject
+	v2 := bashInput("kubectl apply -f v2.yaml -n demo", "k8s_editor")
+	v2["attestations"] = v1["attestations"] // the SAME (now-stale) attestations map
+
+	outV1, _ := runHook(t, v1, dir)
+	if got := decisionOf(t, outV1); got == "deny" || got == "ask" {
+		t.Fatalf("v1, attested for its own subject, was not allowed to proceed: %q", outV1)
+	}
+	outV2, _ := runHook(t, v2, dir)
+	if got := decisionOf(t, outV2); got != "deny" {
+		t.Fatalf("v2, carrying only v1's attestation, decision = %q, want deny", got)
+	}
+	if !strings.Contains(reasonOf(t, outV2), "has not been reviewed") {
+		t.Fatalf("v2's refusal reason = %q, want it to say the change was not reviewed",
+			reasonOf(t, outV2))
+	}
+}
+
+// A compound command with TWO mutating segments must have BOTH mechanically
+// validated before either is allowed to run — not just the first. Before
+// Task 10, `validate()` never exited on success, so the loop always reached
+// every segment; this pins that the attestation wiring did not change that:
+// the first segment attested+clean must NOT make the guard stop looking at
+// the rest of the line and let a mechanically-broken second segment through.
+func TestSecondMutatingSegmentIsStillMechanicallyValidated(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)      exit 1 ;;
+  *dry-run*)   exit 0 ;;
+  *"-o json"*) echo "not json at all"; exit 0 ;;
+  *)           exit 0 ;;
+esac`)
+	// Segment 1 (apply) mechanically validates cleanly. Segment 2 (delete)
+	// fails resolve_target's fail-closed JSON parse — if the guard stopped
+	// checking after segment 1, this whole line would proceed and delete an
+	// unvalidated resource.
+	command := "kubectl apply -f app.yaml -n demo && kubectl delete pod x -n demo"
+	in := bashInput(command, "k8s_editor")
+	subject := hookstate.HashArgs(in["tool_input"].(map[string]any))
+	in["attestations"] = map[string]any{subject: map[string]any{"verdict": "APPROVED"}}
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("a compound command's mechanically-broken SECOND segment decision = %q, want deny (%s)",
+			got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "could not be read") {
+		t.Fatalf("reason = %q, want it to explain the second segment's target could not be read", reasonOf(t, out))
+	}
+}
+
+// The positive half of the same property: two mutating segments that BOTH
+// mechanically validate, under ONE attestation covering the whole line
+// (record_validation's caller reviews the whole tool_input, not one
+// segment), both get previewed and the combined diff reaches the user.
+func TestTwoMutatingSegmentsBothPreviewUnderOneAttestation(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*)      echo "~ segment one"; exit 1 ;;
+  *dry-run*)   echo "segment one applied (dry run)"; exit 0 ;;
+  *"-o json"*) echo '{"metadata":{"name":"x","labels":{}}}'; exit 0 ;;
+  *)           exit 0 ;;
+esac`)
+	command := "kubectl apply -f app.yaml -n demo && kubectl delete pod x -n demo"
+	in := bashInput(command, "k8s_editor")
+	in["attestations"] = approvedFor(t, in)
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got == "deny" || got == "ask" {
+		t.Fatalf("two mechanically-clean, attested segments were not allowed to proceed: %q", out)
+	}
+	if !strings.Contains(out, "apply") || !strings.Contains(out, "delete") {
+		t.Fatalf("the combined diff must mention BOTH validated segments: %q", out)
 	}
 }

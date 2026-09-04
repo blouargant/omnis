@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${OMNIS_SYSTEM_CONFIG_DIR:-/etc/omnis}/hooks/k8s-validate.py\"",
+            "timeout": 60,
+            "fail_closed": true
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -18,6 +18,10 @@
     <StageDir>\data\agents.json, ...      -> C:\ProgramData\Omnis
     <StageDir>\data\server.yaml
     <StageDir>\data\filters\...
+    <StageDir>\data\hooks\k8s-validate.py -- the k8s-validate PreToolUse hook;
+      data\hooks.json (from the *.json glob) points at it via
+      OMNIS_SYSTEM_CONFIG_DIR, so this directory must ship alongside it or a
+      fail_closed hooks.json blocks every Bash call on this channel.
     <StageDir>\data\registry\agents\...
     <StageDir>\data\registry\skills\...
 

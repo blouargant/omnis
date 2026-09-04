@@ -169,6 +169,19 @@ nfpms:
         type: "config|noreplace"
         file_info:
           mode: 0644
+      - src: config/hooks.json
+        dst: /etc/omnis/hooks.json
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      # The hook script is executable code, not user configuration: it must
+      # be REPLACED on upgrade (no "config|noreplace") so a validation bug
+      # fix actually reaches an installed machine instead of freezing at
+      # whatever version was first installed.
+      - src: config/hooks/k8s-validate.py
+        dst: /etc/omnis/hooks/k8s-validate.py
+        file_info:
+          mode: 0755
 
       # Login-shell env default (OMNIS_WEB_DIR). Deliberately does NOT export
       # OMNIS_CONFIG_PATH — see packaging/profile.d/omnis.sh for why.
@@ -254,6 +267,12 @@ brews:
       pkgshare.install Dir["config/*.json"]
       pkgshare.install "config/server.yaml"
       (pkgshare/"filters").install Dir["config/filters/*.json"]
+      # The k8s-validate hook is executable code, not JSON, so it needs its
+      # own install line (config/hooks.json itself is already covered by the
+      # Dir["config/*.json"] glob above) — and its own chmod, since a source
+      # checkout's own file mode is not guaranteed executable.
+      (pkgshare/"hooks").install "config/hooks/k8s-validate.py"
+      (pkgshare/"hooks/k8s-validate.py").chmod 0755
     caveats: |
       Bundled agents, skills and the Web UI install under
         #{HOMEBREW_PREFIX}/share/omnis
