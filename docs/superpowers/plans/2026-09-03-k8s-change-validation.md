@@ -2278,50 +2278,6 @@ def segments(command):
 
 
 def _strip_wrappers(argv):
-    """Drop leading process wrappers, their own flags, and env assignments.
-
-    Basenames each token so /usr/bin/sudo is recognised (classify basenames too),
-    and drops a stripped wrapper's flags so `sudo -n kubectl delete` does not
-    leave `-n` as the apparent binary.
-    """
-    while argv:
-        head = argv[0]
-        base = head.split("/")[-1]
-        if base in WRAPPERS:
-            argv = argv[1:]
-            while argv and argv[0].startswith("-"):
-                argv = argv[1:]
-            continue
-        if "=" in head and not head.startswith("-"):
-            argv = argv[1:]
-            continue
-        break
-    return argv
-
-
-def _verb_from(argv, start):
-    """Walk global flags from index `start`, returning (verb, verb_index).
-
-    Only flags known to take a SEPARATE value consume the following token; every
-    other flag is boolean, so a bare global like -A or --debug cannot swallow the
-    verb.
-    """
-    i = start + 1
-    while i < len(argv):
-        tok = argv[i]
-        if not tok.startswith("-"):
-            return tok, i
-        if "=" in tok:
-            i += 1
-            continue
-        if tok in VALUE_FLAGS and i + 1 < len(argv):
-            i += 2
-            continue
-        i += 1
-    return None, -1
-
-
-def _strip_wrappers(argv):
     """Drop leading process wrappers using WRAPPER_SPEC, returning the remainder.
 
     Each wrapper is stripped by its explicit spec — its own value-taking flags and
