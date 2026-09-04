@@ -44,8 +44,12 @@ VALIDATE_TIMEOUT = 45     # seconds; below the hook's own timeout so we can expl
 KUBECTL_READ_VERBS = {
     "get", "describe", "logs", "top", "explain", "events", "api-resources",
     "api-versions", "cluster-info", "version", "diff", "wait", "port-forward",
-    "proxy", "options", "help",
+    "options", "help",
 }
+# `proxy` is deliberately NOT above. The process changes nothing, but it serves
+# the whole API on localhost with the operator's credentials injected, and the
+# follow-up `curl -X DELETE http://127.0.0.1:8001/…` names neither tool, so the
+# guard never sees it. port-forward is materially weaker: no credential injection.
 
 # kubectl verbs that touch nothing outside this machine. `kustomize` renders,
 # `completion` prints a shell script. Same doctrine as helm's local verbs: this
@@ -83,6 +87,20 @@ HELM_LOCAL_VERBS = {
 # Global flags that take a SEPARATE value, so the token after them is not the
 # verb. Every other flag is treated as boolean: inferring this from "the next
 # token is not a flag" made a bare -A swallow the verb.
+# Boolean global flags: recognised, consume nothing. Anything in neither this set
+# nor VALUE_FLAGS makes the verb unprovable (see _verb_after).
+BOOLEAN_FLAGS = {
+    "-A", "--all-namespaces", "--insecure-skip-tls-verify", "--debug",
+    "--warnings-as-errors", "--disable-compression", "--no-headers",
+    "-h", "--help", "--version",
+}
+
+# A verb exists but could not be identified — distinct from None, which means no
+# verb is present at all. Conflating the two turned an unrecognised flag into
+# "nothing to validate" and let `kubectl --totally-unknown-flag zzz get pods`
+# proceed: `kubectl --help` really is a read, but an unreadable verb is not.
+UNPROVABLE = object()
+
 VALUE_FLAGS = {
     "-n", "--namespace", "--context", "--kube-context", "--kubeconfig",
     "--cluster", "--user", "--as", "--as-group", "--as-uid", "--token",
@@ -94,6 +112,17 @@ VALUE_FLAGS = {
     "--kube-apiserver", "--kube-token", "--kube-ca-file", "--kube-as-user",
     "--kube-as-group", "--kube-tls-server-name", "--qps", "--burst-limit",
 }
+
+# Leading shell syntax that precedes a command inside a segment. `segments` splits
+# on ; and |, so `for ns in a b; do kubectl get pods -n $ns; done` yields a segment
+# whose head is `do`. Refusing those denied five distinct shapes of an ordinary
+# read — the investigator's normal register, not an exotic spelling — which is how
+# a guard gets removed from hooks.json. Stripping them only helps FIND the
+# invocation; the read-or-mutation decision afterwards is unchanged, so
+# `if kubectl delete pod x; then` still reaches validate.
+SHELL_KEYWORDS = {"for", "while", "until", "if", "then", "elif", "else", "do",
+                  "done", "fi", "case", "esac", "in", "select", "function",
+                  "(", ")", "{", "}", "!", "[[", "]]", "&&", "||", "time"}
 
 # Process wrappers, each with an explicit spec, because guessing a wrapper's
 # argument arity is what previously denied `timeout 30 kubectl get pods`: the
@@ -115,14 +144,27 @@ WRAPPER_SPEC = {
     "command": (set(), 0),
 }
 
-# Commands that do not execute their arguments, so a kubectl command line quoted
-# or echoed as TEXT is not an invocation. Bounded on purpose: anything not listed
-# is refused rather than assumed inert.
-INERT_COMMANDS = {"echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "sed",
-                  "awk", "head", "tail", "wc", "tee", "less", "more", "comm",
-                  "diff", "git", "true", "false", "test"}
+# Commands that EXECUTE a string handed to them. A kubectl command line quoted
+# inside one of these is a real invocation the guard cannot read, so it is refused.
+# This replaced an "inert commands" list, which was the wrong property to
+# enumerate: `awk`, `sed` and `git` were on it, and all three execute their
+# arguments (`awk 'BEGIN{system(…)}'`, GNU `sed '1e …'`, `git -c alias.x='!…'`),
+# so listing them as inert made three proven bypasses.
+LAUNCHERS = {
+    "bash", "sh", "zsh", "dash", "ksh", "csh", "fish", "eval", "source",
+    "ssh", "su", "nsenter", "chroot", "docker", "podman", "nerdctl",
+    "python", "python3", "perl", "ruby", "node", "php",
+    "awk", "gawk", "sed", "make", "watch", "parallel", "flock",
+}
+# NOTE: `xargs` is a WRAPPER, not a launcher — after stripping it, kubectl is at
+# the head, so `xargs kubectl delete pod x` reaches validate with the real verb
+# instead of a generic refusal. `xargs sh -c '…'` still refuses, because the
+# stripped head is then `sh`. `watch` is the opposite case and IS a launcher: it
+# joins its argv and runs it through sh, so treating it as a wrapper would let
+# `watch "kubectl delete pod x"` past. That costs friction on `watch -n 2 kubectl
+# get pods`, which is one line to move if it proves too expensive.
 
-# Mirrors compoundOps# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
+# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
 # not read as two `&`. The parity test in core/permissions pins the two lists.
 COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 
@@ -135,7 +177,12 @@ COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 # hides nothing runnable — every bash ${x:-…} form that does run something also
 # contains $( or a backtick, both matched here — so including it only denied the
 # commonest idiom in agent-written shell.
-MENTIONS_K8S = re.compile(r"\b(kubectl|helm)\b")
+# A suffixed binary name is an ordinary side-by-side install (`helm3`,
+# `kubectl.real`, `kubectl1.29`), and a trailing \b made the whole guard exit on
+# it. Widening the tail keeps the reason the \b was added — there is no word
+# boundary before the "helm" inside "overwhelming", so that still does not match.
+MENTIONS_K8S = re.compile(r"\b(kubectl|helm)[\w.-]*")
+K8S_BINARY = re.compile(r"^(kubectl|helm)[\w.-]*$")
 
 COMMAND_SUBSTITUTION = re.compile(r"\$\(|`|<\(|\$\{[^}]*\$\(")
 REDIRECT = re.compile(r"<<|>>|[<>]")
@@ -253,6 +300,15 @@ def _strip_wrappers(argv):
     """
     while argv:
         base = argv[0].split("/")[-1]
+        # Leading shell keywords and env assignments come before any wrapper.
+        if base in SHELL_KEYWORDS:
+            argv = argv[1:]
+            continue
+        if "=" in argv[0] and not argv[0].startswith("-") and not K8S_BINARY.match(base):
+            # VAR=value kubectl … — round 2 stripped these and the inversion
+            # dropped the branch, silently denying `KUBECONFIG=/tmp/kc kubectl get`.
+            argv = argv[1:]
+            continue
         if base not in WRAPPER_SPEC:
             break
         value_flags, operand_count = WRAPPER_SPEC[base]
@@ -286,10 +342,18 @@ def _verb_after(argv, start):
         if "=" in tok:
             i += 1
             continue
-        if tok in VALUE_FLAGS and i + 1 < len(argv):
+        if tok in VALUE_FLAGS:
             i += 2
             continue
-        i += 1
+        if tok in BOOLEAN_FLAGS:
+            i += 1
+            continue
+        # An unrecognised flag: we cannot know whether it consumes the next
+        # token, so we cannot know which token is the verb. Under the inversion
+        # that is a failure to prove, not a licence to guess — guessing here let
+        # `kubectl rollout --field-manager status restart deploy/x` resolve its
+        # sub-verb to "status" and restart a Deployment unvalidated.
+        return UNPROVABLE, -1
     return None, -1
 
 
@@ -310,9 +374,10 @@ def classify(argv):
     """
     if not argv:
         return None, None, -1
-    tool = argv[0].split("/")[-1]
-    if tool not in ("kubectl", "helm"):
+    base = argv[0].split("/")[-1]
+    if not K8S_BINARY.match(base):
         return None, None, -1
+    tool = "helm" if base.startswith("helm") else "kubectl"
     verb, verb_idx = _verb_after(argv, 0)
     return tool, verb, verb_idx
 
@@ -341,24 +406,39 @@ def provably_read_only(tool, verb, argv, verb_idx):
     function's sets are enumerable, whereas the set of ways to spell a mutation is
     not.
     """
-    if verb is None:
+    if verb is UNPROVABLE:
         return False
+    if verb is None:
+        # No verb at all: `kubectl`, `kubectl --help`, `helm --help`. There is
+        # nothing to validate, and refusing it produced the nonsense diagnostic
+        # "Validation for `kubectl None` is not implemented yet".
+        return True
     if tool == "helm":
         return verb in HELM_READ_VERBS or verb in HELM_LOCAL_VERBS
     if verb in READ_ONLY_SUBVERBS:
-        return subverb_of(argv, verb_idx) in READ_ONLY_SUBVERBS[verb]
+        sub = subverb_of(argv, verb_idx)
+        if sub is UNPROVABLE or sub is None:
+            return False
+        return sub in READ_ONLY_SUBVERBS[verb]
     return verb in KUBECTL_READ_VERBS or verb in KUBECTL_LOCAL_VERBS
 
 
-def is_inert(argv):
-    """True when argv's head is a command that does not execute its arguments, so
-    a kubectl command line appearing in it is text rather than an invocation.
+def is_launcher(argv):
+    """True when argv's head executes a command line handed to it as a string.
 
-    Takes an already-stripped argv, like classify.
+    Takes an already-stripped argv, like classify. This is the inverse of the
+    "inert commands" list it replaced, and the inversion matters: enumerating what
+    is SAFE to ignore put `awk`, `sed` and `git` on the safe list, and all three
+    execute their arguments. Enumerating what LAUNCHES is the bounded direction,
+    but it is not free: an UNLISTED launcher is treated as an ordinary program, so
+    the kubectl token in it reads as an argument and the segment proceeds. That is
+    the residual this direction accepts, in exchange for not refusing every
+    `gh pr create --title "…kubectl…"`. `git -c alias.x='!cmd'` is the known
+    instance, and it takes deliberate obfuscation to reach.
     """
     if not argv:
         return False
-    return argv[0].split("/")[-1] in INERT_COMMANDS
+    return argv[0].split("/")[-1] in LAUNCHERS
 
 
 def names_k8s(tokens):
@@ -373,7 +453,7 @@ def names_k8s(tokens):
     basename is the whole string.
     """
     for t in tokens:
-        if t.split("/")[-1] in ("kubectl", "helm"):
+        if K8S_BINARY.match(t.split("/")[-1]):
             return True
         if (" " in t or "\t" in t or "\n" in t) and MENTIONS_K8S.search(t):
             return True
@@ -389,7 +469,16 @@ def main():
         sys.stderr.write("k8s-validate: unreadable hook input\n")
         sys.exit(1)
 
-    command = (data.get("tool_input") or {}).get("command") or ""
+    tool_input = data.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        # A non-string command cannot be inspected. The engine turns a non-zero
+        # exit into a block for a fail_closed hook, which is the right direction,
+        # but a traceback is not an acceptable way to say so.
+        sys.stderr.write("k8s-validate: tool_input.command is not a string\n")
+        sys.exit(1)
 
     # Fast path. This hook fires on EVERY Bash call in the fleet, so anything
     # not mentioning kubectl or helm must cost only interpreter startup. This is
@@ -444,19 +533,38 @@ def main():
         # Strip wrappers exactly ONCE, so every index below refers to this argv.
         argv = _strip_wrappers(tokens)
 
-        if is_inert(argv):
-            # echo/grep/git and friends do not execute their arguments.
-            continue
+        if is_launcher(argv):
+            refuse(
+                "This command hands a command line to another program to execute — a shell, an "
+                "interpreter, or a remote call — so what it would actually run cannot be read. "
+                "Express it as a direct kubectl/helm command.",
+                attempt, consecutive,
+            )
 
         tool, verb, verb_idx = classify(argv)
         if tool is None:
-            # Names kubectl or helm but is not a direct invocation of either:
-            # a quoted payload (bash -c "…"), an eval, an ssh, an unknown
-            # launcher. Unprovable, therefore refused.
+            # The head is neither a launcher nor kubectl/helm, so this segment
+            # runs some other program that merely takes the word as an argument:
+            # `grep -rn kubectl deploy.sh`, `echo kubectl delete pod x`,
+            # `gh pr create --title "fix the kubectl guard"`, `ls -l …/kubectl`.
+            # Refusing these was the friction that gets a guard disabled, and the
+            # dangerous direction is already covered: anything that EXECUTES a
+            # string it is handed is in LAUNCHERS and was refused above.
+            continue
+
+        # The sentinel must cover the SUB-verb too, not only the top-level verb:
+        # `kubectl rollout --field-manager status restart` is exactly the shape
+        # round 5 targeted, and checking only the head let it deny via the
+        # Task-9 stub with a diagnostic that named the wrong problem.
+        unprovable = verb is UNPROVABLE or (
+            verb in READ_ONLY_SUBVERBS and subverb_of(argv, verb_idx) is UNPROVABLE
+        )
+        if unprovable:
             refuse(
-                "This command names kubectl or helm but does not invoke it directly, so what "
-                "it would run cannot be proven safe. Express it as a direct kubectl/helm "
-                "command instead of wrapping it in a shell, an eval, or a remote call.",
+                "This looks like a kubectl/helm command but it carries a flag this guard does "
+                "not recognise, so which token is the verb cannot be determined. Re-run it "
+                "with the verb immediately after the binary, or with only well-known global "
+                "flags before it.",
                 attempt, consecutive,
             )
 
