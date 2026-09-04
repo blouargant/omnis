@@ -1504,7 +1504,8 @@ be clicked through either.
 An earlier version of the script tried to *recognise* mutations and let
 everything else past; several review rounds each found a further way to spell
 one the previous fix had missed (`bash -c "kubectl delete …"`, `$(kubectl
-delete …)`, and more — the design spec records the full sequence). The ways to
+delete …)`, and more — the full list is in the script's own module docstring,
+[config/hooks/k8s-validate.py](config/hooks/k8s-validate.py)). The ways to
 spell a mutation are not enumerable; the read-only commands are, so the rule
 inverted: strip wrappers, split compound commands the same way
 [core/permissions/match_bash.go](core/permissions/match_bash.go)'s
