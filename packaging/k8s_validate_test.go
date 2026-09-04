@@ -1574,18 +1574,47 @@ func TestURLManifestTargetIsRefused(t *testing.T) {
 	}
 }
 
-// The same content-binding property TestAttestationDoesNotCrossDifferentChanges
-// proves for a -f FILE also holds for a -k kustomize DIRECTORY target: an
-// attestation is bound to what the whole tree currently contains, not to the
-// directory's path. Same discipline — one fixed command string, one
-// attestations map, only the target's on-disk bytes change between runs.
-func TestKustomizeDirectoryTargetContentBinds(t *testing.T) {
-	dir := stubBin(t, "kubectl", `
+// kustomizeAwareKubectlStub is a kubectl stub whose "kustomize" subcommand
+// delegates to the REAL kubectl binary (kustomize renders locally with no
+// cluster contact at all — KUBECTL_LOCAL_VERBS already treats it that way
+// in the guard itself) while every OTHER invocation (diff, --dry-run=server,
+// …) follows `mechanicalBody`, a /bin/sh case block in the same shape every
+// other stubBin caller in this file writes. Round 1's version of this test
+// stubbed "kustomize" as a bare `exit 0` (empty stdout) — which made the
+// render-based digest hash the SAME empty string before and after an edit,
+// so the test could not see the exact bug it was meant to pin. Real
+// kustomize is deterministic and network-free, so delegating to it keeps
+// the mechanical (diff/dry-run) half hermetic while making the render half
+// genuine.
+func kustomizeAwareKubectlStub(t *testing.T, mechanicalBody string) string {
+	t.Helper()
+	real, err := exec.LookPath("kubectl")
+	if err != nil {
+		t.Skip("kubectl not available")
+	}
+	dir := t.TempDir()
+	body := "#!/bin/sh\nif [ \"$1\" = \"kustomize\" ]; then\n  exec " + real + " \"$@\"\nfi\n" + mechanicalBody + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	return dir
+}
+
+const kustomizeMechanicalBody = `
 case "$*" in
   *diff*)    exit 1 ;;
   *dry-run*) exit 0 ;;
   *)         exit 0 ;;
-esac`)
+esac`
+
+// The same content-binding property TestAttestationDoesNotCrossDifferentChanges
+// proves for a -f FILE also holds for a -k kustomize DIRECTORY target when the
+// edited file lives DIRECTLY inside the overlay: an attestation is bound to
+// what the rendered tree currently contains, not to the directory's path.
+// Same discipline — one fixed command string, one attestations map, only the
+// target's on-disk bytes change between runs.
+func TestKustomizeDirectoryTargetContentBinds(t *testing.T) {
+	dir := kustomizeAwareKubectlStub(t, kustomizeMechanicalBody)
 	overlay := t.TempDir()
 	writeFile := func(name, contents string) {
 		t.Helper()
@@ -1594,7 +1623,7 @@ esac`)
 		}
 	}
 	writeFile("kustomization.yaml", "resources:\n- deploy.yaml\n")
-	writeFile("deploy.yaml", "replicas: 1\n")
+	writeFile("deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n")
 
 	in := bashInput("kubectl apply -k "+overlay+" -n demo", "k8s_editor")
 	in["attestations"] = approveOneSegment(t, in, dir)
@@ -1605,11 +1634,112 @@ esac`)
 	}
 
 	// Vary exactly ONE thing: a file INSIDE the same overlay directory.
-	writeFile("deploy.yaml", "replicas: 99\n")
+	writeFile("deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 99\n")
 
 	out2, _ := runHook(t, in, dir)
 	if got := decisionOf(t, out2); got != "deny" {
 		t.Fatalf("the SAME command, overlay directory now holding DIFFERENT content, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// I1 (review round 2): a walk over the overlay directory ALONE is blind to a
+// base referenced via `resources: [../base]` — the dominant kustomize idiom
+// — so editing the base manifest left the round-1 (walk-based) digest
+// unchanged; reproduced live before the fix (see the fix commit's message
+// for the exact before/after digest). Rendering via `kubectl kustomize`
+// (this round's fix) sees straight through the reference.
+func TestKustomizeBaseReferenceContentBinds(t *testing.T) {
+	dir := kustomizeAwareKubectlStub(t, kustomizeMechanicalBody)
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	overlay := filepath.Join(root, "overlay")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.MkdirAll(overlay, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	write := func(path, contents string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write(filepath.Join(base, "kustomization.yaml"), "resources:\n- deploy.yaml\n")
+	write(filepath.Join(base, "deploy.yaml"),
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n")
+	write(filepath.Join(overlay, "kustomization.yaml"), "resources:\n- ../base\n")
+
+	in := bashInput("kubectl apply -k "+overlay+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the overlay, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: the BASE manifest, referenced but never named
+	// on the command line and OUTSIDE the overlay directory the command names.
+	write(filepath.Join(base, "deploy.yaml"),
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 99\n")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME overlay command, its BASE now holding DIFFERENT content, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// I1 (review round 2), the other half: a resource reached through a
+// SYMLINKED subdirectory. os.walk does not follow directory symlinks by
+// default, so the round-1 walk-based digest was blind to this too;
+// `kubectl kustomize` resolves it correctly since kustomize itself follows
+// the reference (verified live before writing this test).
+func TestKustomizeSymlinkedResourceContentBinds(t *testing.T) {
+	dir := kustomizeAwareKubectlStub(t, kustomizeMechanicalBody)
+	root := t.TempDir()
+	overlay := filepath.Join(root, "overlay")
+	real := filepath.Join(root, "real-subdir")
+	if err := os.MkdirAll(overlay, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("mkdir real-subdir: %v", err)
+	}
+	write := func(path, contents string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write(filepath.Join(real, "kustomization.yaml"), "resources:\n- extra.yaml\n")
+	write(filepath.Join(real, "extra.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: extra\ndata:\n  k: v1\n")
+	if err := os.Symlink(real, filepath.Join(overlay, "symlinked")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	write(filepath.Join(overlay, "kustomization.yaml"), "resources:\n- symlinked\n")
+
+	in := bashInput("kubectl apply -k "+overlay+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the overlay, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: the file reached only THROUGH the symlink.
+	write(filepath.Join(real, "extra.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: extra\ndata:\n  k: v2\n")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME overlay command, its symlinked resource now holding DIFFERENT content, decision = %q, want deny (%s)",
 			got, out2)
 	}
 	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
@@ -1657,5 +1787,210 @@ print("truncated" in note)
 	// 4000-per-segment cap) must not survive intact into one systemMessage.
 	if noteLen == "30000" {
 		t.Fatal("the joined note was not capped at all")
+	}
+}
+
+// --- I1 (review round 2): Helm chart/values content binding ---
+
+// helmAwareStub is a helm stub whose "template" subcommand delegates to the
+// REAL helm binary (rendering is local and network-free, just like
+// kustomize — see kustomizeAwareKubectlStub's doc comment for why this is
+// safe and necessary to see the actual bug these tests pin) while every
+// OTHER invocation ("plugin list", "diff upgrade", "--dry-run=server", …)
+// follows `mechanicalBody`.
+func helmAwareStub(t *testing.T, mechanicalBody string) string {
+	t.Helper()
+	real, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not available")
+	}
+	dir := t.TempDir()
+	body := "#!/bin/sh\nif [ \"$1\" = \"template\" ]; then\n  exec " + real + " \"$@\"\nfi\n" + mechanicalBody + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "helm"), []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	return dir
+}
+
+// No diff plugin listed, so validate_helm falls to its --dry-run=server
+// path, which this body accepts unconditionally.
+const helmMechanicalBody = `
+case "$*" in
+  "plugin list") echo "NAME VERSION"; exit 0 ;;
+  *)             exit 0 ;;
+esac`
+
+// writeChart writes a minimal, real Helm chart (Chart.yaml + one templated
+// Deployment) under a fresh temp dir and returns the chart directory.
+func writeChart(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(rel, contents string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	write("Chart.yaml", "apiVersion: v2\nname: demo\nversion: 0.1.0\n")
+	write("templates/deploy.yaml",
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: {{ .Values.replicas }}\n")
+	return dir
+}
+
+// Reproduced live before helm_content_digest existed: round 1's design hashed
+// only whatever -f/-k NAMED, so `helm upgrade myrel ./chart -f values.yaml`
+// bound values.yaml's bytes but never the CHART DIRECTORY's own content —
+// editing a template file inside ./chart proceeded unchanged. Same
+// discipline throughout this file: one fixed command string, one
+// attestations map, only the chart's on-disk bytes change between runs.
+func TestHelmChartDirectoryContentBinds(t *testing.T) {
+	dir := helmAwareStub(t, helmMechanicalBody)
+	chart := writeChart(t)
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	if err := os.WriteFile(values, []byte("replicas: 1\n"), 0o644); err != nil {
+		t.Fatalf("write values: %v", err)
+	}
+
+	in := bashInput("helm upgrade myrel "+chart+" -f "+values+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the chart, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: a TEMPLATE file inside the chart directory —
+	// never itself named by -f/-k on the command line.
+	tmpl := filepath.Join(chart, "templates", "deploy.yaml")
+	data, err := os.ReadFile(tmpl)
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	edited := strings.ReplaceAll(string(data), "replicas }}", "replicas }}  # edited")
+	if err := os.WriteFile(tmpl, []byte(edited), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME command, chart TEMPLATE now holding DIFFERENT content, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// The flag-name asymmetry: Helm's "-f" and "--values" are exact synonyms,
+// but round 1's MANIFEST_TARGET_FLAGS (kubectl-oriented: "-f"/"--filename"/
+// "-k"/"--kustomize") only matched the SHORT spelling by accident (it shares
+// "-f" with kubectl), so a values file named via "--values" was never
+// content-bound by EITHER spelling under that design — the render-based fix
+// must cover both identically. One table, one values file, two flag
+// spellings, same discipline (fixed command, fixed attestation, only the
+// values file's bytes change between the two runs each spelling gets).
+func TestHelmValuesFlagSynonymsBothContentBind(t *testing.T) {
+	for _, flag := range []string{"-f", "--values"} {
+		t.Run(flag, func(t *testing.T) {
+			dir := helmAwareStub(t, helmMechanicalBody)
+			chart := writeChart(t)
+			values := filepath.Join(t.TempDir(), "values.yaml")
+			if err := os.WriteFile(values, []byte("replicas: 1\n"), 0o644); err != nil {
+				t.Fatalf("write values: %v", err)
+			}
+
+			in := bashInput("helm upgrade myrel "+chart+" "+flag+" "+values+" -n demo", "k8s_editor")
+			in["attestations"] = approveOneSegment(t, in, dir)
+
+			out1, _ := runHook(t, in, dir)
+			if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+				t.Fatalf("%s: attested for its own content, was not allowed to proceed: %q", flag, out1)
+			}
+
+			if err := os.WriteFile(values, []byte("replicas: 99\n"), 0o644); err != nil {
+				t.Fatalf("rewrite values: %v", err)
+			}
+
+			out2, _ := runHook(t, in, dir)
+			if got := decisionOf(t, out2); got != "deny" {
+				t.Fatalf("%s: SAME command, values file now DIFFERENT content, decision = %q, want deny (%s)",
+					flag, got, out2)
+			}
+			if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+				t.Fatalf("%s: refusal reason = %q, want \"not reviewed\"", flag, reasonOf(t, out2))
+			}
+		})
+	}
+}
+
+// --- M2 (review round 2, raised from Minor): content-binding refusals must
+// never escalate ---
+
+// A URL/remote target, an empty -f=/-k= value, and a missing target are all
+// "cannot bind content" states — the guard could never even identify what
+// would be applied. check_attested's own docstring explains why THAT class
+// of refusal must be terminal: escalating to `ask` after MAX_ATTEMPTS would
+// let one user click substitute for a review of content that was never
+// identified, which is precisely the state a click is least safe in. These
+// three new (round 2) refusal paths get the same property, exercised at
+// attempt=consecutive=3 — the exact threshold that would turn any ordinary
+// refuse() into "ask".
+func TestContentBindingRefusalsNeverEscalate(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, wantReason string
+	}{
+		{"URL target", "kubectl apply -f https://example.com/manifest.yaml -n demo", "remote target"},
+		{"empty target", "kubectl apply -f= -n demo", "empty target"},
+		{"missing target", "kubectl apply -f /does/not/exist-" + t.Name() + ".yaml -n demo", "could not be found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stubBin(t, "kubectl", "exit 0")
+			in := bashInput(tc.command, "k8s_editor")
+			in["attempt"] = 3
+			in["consecutive"] = 3
+			out, _ := runHook(t, in, dir)
+			if got := decisionOf(t, out); got != "deny" {
+				t.Fatalf("%s at attempt=consecutive=3, decision = %q, want deny (never ask): %s", tc.name, got, out)
+			}
+			if !strings.Contains(reasonOf(t, out), tc.wantReason) {
+				t.Fatalf("%s: reason = %q, want it to mention %q", tc.name, reasonOf(t, out), tc.wantReason)
+			}
+		})
+	}
+}
+
+// M1: an unreadable target (permission denied, a dangling symlink, …) must
+// report a clean diagnostic — TERMINALLY, same reasoning as
+// TestContentBindingRefusalsNeverEscalate — not an uncaught OSError
+// traceback, which the file's own doctrine on tracebacks (see
+// TestMalformedToolInputDoesNotTraceback) rejects everywhere else.
+func TestUnreadableManifestTargetIsRefusedNotATraceback(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission bits do not block root's own reads")
+	}
+	dir := stubBin(t, "kubectl", "exit 0")
+	manifestDir := t.TempDir()
+	path := filepath.Join(manifestDir, "secret.yaml")
+	if err := os.WriteFile(path, []byte("apiVersion: v1\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	defer os.Chmod(path, 0o644) // let t.TempDir() clean up afterward
+
+	in := bashInput("kubectl apply -f "+path+" -n demo", "k8s_editor")
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("unreadable target at attempt=3, decision = %q, want deny (never ask): %s", got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "could not be read") {
+		t.Fatalf("reason = %q, want it to explain the target could not be read", reasonOf(t, out))
 	}
 }

@@ -334,6 +334,21 @@ def refuse(reason, attempt, consecutive):
 # than once (`-f a.yaml -f b.yaml`), so every occurrence is folded in.
 MANIFEST_TARGET_FLAGS = ("-f", "--filename", "-k", "--kustomize")
 
+# Helm's own spelling for a values file. Shares kubectl's "-f" short flag but
+# NOT its long name ("--values", not "--filename") — MANIFEST_TARGET_FLAGS
+# (kubectl-oriented) does not recognise --values at all, which used to be a
+# real asymmetry: `-f values.yaml` was content-bound (as raw bytes) while the
+# exact synonym `--values values.yaml` was not bound at all. helm_content_digest
+# below closes this by deriving Helm's digest from `helm template` instead —
+# see its own docstring — so this constant only needs to name --values so
+# _helm_template_argv's flag walk doesn't mistake it for an unrecognised flag.
+HELM_VALUES_FLAGS = ("-f", "--values")
+
+# The three names kustomize itself recognises for a kustomization file,
+# checked directly in a candidate directory (never recursively — that is
+# kustomize's own rule, not this guard's).
+KUSTOMIZATION_MARKERS = ("kustomization.yaml", "kustomization.yml", "Kustomization")
+
 # A remote scheme this guard cannot read bytes from before apply time. This is
 # not the only remote shape (kustomize also treats a bare VCS-style reference
 # like `github.com/org/repo` as remote, with no "://" at all) — that shape is
@@ -358,8 +373,25 @@ def flag_values(argv, *names):
 
 
 def _file_digest(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    """sha256 of one file's bytes. An unreadable target (permission denied, a
+    dangling symlink, …) TERMINALLY refuses with a diagnostic rather than
+    raising: an uncaught OSError here would surface to the agent as an opaque
+    "hook did not complete" instead of one of this guard's own explanations —
+    exactly the failure mode the file's own doctrine on tracebacks (see
+    main()'s input-parsing comments) rejects everywhere else. Terminal
+    (emit("deny", …) directly, like check_attested/resolve_target_digest — see
+    resolve_target_digest's docstring for why) because an unreadable target is
+    the same "cannot bind content" state as a missing or remote one: a click
+    past three failed attempts must not substitute for the review this file
+    could never even identify.
+    """
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError as e:
+        emit("deny",
+             "The manifest target %r could not be read (%s), so its content "
+             "cannot be verified." % (path, e))
 
 
 def _dir_digest(path):
@@ -367,7 +399,18 @@ def _dir_digest(path):
     only: sorted RELATIVE paths, each paired with its own file digest, so the
     result depends on the tree's bytes — never os.walk's traversal order
     (unspecified), never mtimes or permissions, which can change with the
-    content untouched."""
+    content untouched.
+
+    Reserved for an ORDINARY directory of flat manifests (no kustomization
+    marker — see _is_kustomization_dir): those reference no other files, so a
+    walk already sees everything `kubectl apply -f <dir>` would apply, and a
+    false positive here only ever makes the guard bind MORE than it has to,
+    never less. A kustomization directory is rendered instead — see
+    resolve_target_digest and _kustomize_render_digest — because a
+    kustomization's `resources:`/`bases:`/`components:`/`patches:` can each
+    point anywhere, including outside `path`, which a walk over `path` alone
+    cannot see (reproduced live: TestKustomizeBaseReferenceContentBinds).
+    """
     entries = []
     for root, dirs, files in os.walk(path):
         dirs.sort()
@@ -380,12 +423,69 @@ def _dir_digest(path):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def resolve_target_digest(cwd, path, attempt, consecutive):
+def _is_kustomization_dir(path):
+    return any(os.path.isfile(os.path.join(path, name)) for name in KUSTOMIZATION_MARKERS)
+
+
+def _kustomize_render_digest(path, cwd):
+    """Digest of `kubectl kustomize <path>`'s RENDERED output — the actual
+    resources that would be applied — rather than a walk of `path`'s own
+    files.
+
+    A kustomization's `resources:`/`bases:`/`components:`/`patches:` (each
+    itself recursive) can each point anywhere, including outside `path` via
+    the dominant kustomize idiom (an overlay's `resources: [../../base]`),
+    and can reach a target through a SYMLINKED subdirectory — os.walk does
+    not follow directory symlinks by default. A walk over the overlay
+    directory alone is blind to both: reproduced live (before this function
+    existed) by rewriting a BASE manifest referenced via `../base` — the walk
+    digest was byte-identical before and after — and again through a
+    symlinked subdirectory. Enumerating that reference graph correctly would
+    mean re-implementing kustomize's own resolution rules, unboundedly;
+    rendering sidesteps that entirely by asking kustomize itself what it
+    would apply. `kubectl kustomize` is a read-only, no-cluster-contact
+    render (KUBECTL_LOCAL_VERBS already treats it as such elsewhere in this
+    file), so this costs nothing beyond the render itself.
+
+    A render FAILURE is treated as "cannot bind content" too (TERMINAL,
+    emit("deny", …) directly) rather than an escalatable mechanical failure:
+    by the time this runs, the per-verb validator has ALREADY previewed this
+    exact target successfully (kubectl diff / a dry run, which for `-k`
+    requires a successful local kustomize build first), so a render failure
+    here is either a race (content changed between the two calls — itself
+    grounds for suspicion) or an environment inconsistency, not a normal
+    "fix the manifest and retry" situation an ask-then-click should ever
+    paper over.
+    """
+    code, out, err = run_argv(["kubectl", "kustomize", path], cwd)
+    if code != 0:
+        emit("deny",
+             "`kubectl kustomize` could not render %r, so its content cannot "
+             "be verified:\n\n%s" % (path, (err or out).strip()))
+    return hashlib.sha256(out.encode("utf-8")).hexdigest()
+
+
+def resolve_target_digest(cwd, path):
     """Content digest of one -f/-k target, resolved against cwd exactly as
     kubectl itself resolves it (never argv[0]'s cwd — see run_argv's callers'
-    own comment on that trap). REFUSES rather than returning a placeholder for
-    anything whose bytes the guard cannot pin down right now:
+    own comment on that trap).
 
+    TERMINALLY refuses — emit("deny", …) directly, like check_attested (see
+    its own docstring for why, and note this function, like check_attested,
+    takes no attempt/consecutive: there is nothing in scope here for a future
+    edit to reach for and accidentally pass to refuse()) — for anything whose
+    bytes cannot be pinned down right now. Escalating any of these to `ask`
+    would let one user click substitute for a review of content the guard
+    could never even identify, which is precisely the state a click is least
+    safe in:
+
+    - an EMPTY target (a malformed `-f=`/`-k=` with nothing after the `=`):
+      resolves to cwd itself via os.path.join, which — if cwd happens to be a
+      real directory, usually true — silently hashed the ENTIRE working tree
+      instead of refusing an unusable target (measured: 3.39s / 7958 files on
+      this repo — comfortably able to exceed the hook's own 60s timeout, and
+      therefore the block-the-call outcome that timeout exists to avoid, on a
+      larger one).
     - a URL, or a reference that merely LOOKS remote (caught below as "does
       not exist locally" rather than enumerated by scheme): the API server
       would fetch its content independently at apply time, so an attestation
@@ -394,54 +494,158 @@ def resolve_target_digest(cwd, path, attempt, consecutive):
     - a path that resolves to neither a file nor a directory: nothing to
       bind, and proceeding as if there were nothing to check would silently
       drop the guarantee for a typo'd path.
+
+    A DIRECTORY target that carries a kustomization is rendered via
+    `kubectl kustomize` (_kustomize_render_digest) rather than walked; an
+    ordinary directory of flat manifests is still walked (_dir_digest) — see
+    both functions' own docstrings for why the split.
     """
-    if URL_SCHEME_RE.match(path or ""):
-        refuse(
-            "%r is a remote target; the API server would fetch its content "
-            "independently at apply time, so it cannot be bound to a "
-            "reviewed change. Fetch it to a local file first (e.g. `curl -Lo "
-            "change.yaml %s`) and apply that file instead." % (path, path),
-            attempt, consecutive,
-        )
+    if not path:
+        emit("deny", "A -f/-k flag was given an empty target, so nothing can be verified.")
+    if URL_SCHEME_RE.match(path):
+        emit("deny",
+             "%r is a remote target; the API server would fetch its content "
+             "independently at apply time, so it cannot be bound to a "
+             "reviewed change. Fetch it to a local file first (e.g. `curl -Lo "
+             "change.yaml %s`) and apply that file instead." % (path, path))
     full = os.path.join(cwd or ".", path)
     if os.path.isdir(full):
+        if _is_kustomization_dir(full):
+            return _kustomize_render_digest(full, cwd)
         return _dir_digest(full)
     if os.path.isfile(full):
         return _file_digest(full)
-    refuse(
-        "The manifest target %r could not be found (resolved to %r), so its "
-        "content cannot be verified. A remote target cannot be validated "
-        "either — fetch it to a local file first." % (path, full),
-        attempt, consecutive,
-    )
+    emit("deny",
+         "The manifest target %r could not be found (resolved to %r), so its "
+         "content cannot be verified. A remote target cannot be validated "
+         "either — fetch it to a local file first." % (path, full))
 
 
-def local_target_digest(argv, cwd, attempt, consecutive):
-    """The content half of this segment's subject: "" when the verb carries
-    no local manifest/kustomization target at all (delete-by-name, patch,
-    rollout, a helm release name, …) — the normalised argv alone already
-    identifies those changes. Otherwise, a digest that changes when and only
-    when the target's own bytes change, so an attestation of "this manifest"
-    can never be replayed against a DIFFERENTLY-CONTENTED file or directory
-    reachable via the identical command line — the property
-    TestAttestationDoesNotCrossDifferentChanges demonstrates end to end.
+def local_target_digest(argv, cwd):
+    """The content half of a kubectl segment's subject: "" when the verb
+    carries no local manifest/kustomization target at all (delete-by-name,
+    patch, rollout, …) — the normalised argv alone already identifies those
+    changes. Otherwise, a digest that changes when and only when the
+    target's own bytes (or, for a kustomization, its RENDERED output — see
+    resolve_target_digest) change, so an attestation of "this manifest" can
+    never be replayed against a DIFFERENTLY-CONTENTED file, directory, or
+    kustomization reachable via the identical command line — the property
+    TestAttestationDoesNotCrossDifferentChanges (a file) and
+    TestKustomizeBaseReferenceContentBinds /
+    TestKustomizeSymlinkedResourceContentBinds (a rendered overlay,
+    transitively through a base reference and through a symlink)
+    demonstrate end to end.
+
+    Helm is NOT handled here — see helm_content_digest, which derives its
+    digest from `helm template` (chart + values rendered together) instead
+    of hashing -f/--values targets independently, for the identical
+    "enumerate the render, not the input graph" reason kustomize needed.
     """
     targets = flag_values(argv, *MANIFEST_TARGET_FLAGS)
     if not targets:
         return ""
-    digests = [[path, resolve_target_digest(cwd, path, attempt, consecutive)]
-               for path in targets]
+    digests = [[path, resolve_target_digest(cwd, path)] for path in targets]
     canonical = json.dumps(sorted(digests), separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _helm_template_argv(argv, verb_idx):
+    """(release, chart_path, template_flags) for a Helm install/upgrade-shaped
+    verb: Helm's own [RELEASE] [CHART] positional order (the release name is
+    the FIRST bare token after the verb, the chart is the second) and every
+    flag from the original command, MINUS those two positionals, replayed
+    verbatim — so `helm template` renders under the SAME -f/--values/--set/
+    -n/… overrides the real command would apply, just against its own
+    [NAME] [CHART] pair rather than the original one (a duplicate positional
+    would otherwise error, or template the wrong release name).
+
+    TERMINALLY refuses (emit("deny", …), like resolve_target_digest — see its
+    docstring for why, and note this function likewise takes no attempt/
+    consecutive) rather than guessing when either positional is missing or
+    empty, or a flag this guard does not recognise appears: unlike
+    bare_operands (used only for a coarse blast-radius COUNT, where erring
+    toward "not a flag's value" is always safe), the result here decides
+    WHICH bytes get rendered and hashed, so mis-parsing past an unknown flag
+    could silently bind the subject to different content than what the real
+    command would apply.
+    """
+    value_flags = VALUE_FLAGS | set(HELM_VALUES_FLAGS)
+    bare, flags = [], []
+    i = verb_idx + 1
+    while i < len(argv):
+        tok = argv[i]
+        if not tok.startswith("-"):
+            bare.append(tok)
+            i += 1
+            continue
+        if "=" in tok:
+            flags.append(tok)
+            i += 1
+            continue
+        if tok in value_flags:
+            flags.append(tok)
+            if i + 1 < len(argv):
+                flags.append(argv[i + 1])
+            i += 2
+            continue
+        if tok in BOOLEAN_FLAGS:
+            flags.append(tok)
+            i += 1
+            continue
+        emit("deny",
+             "This Helm command carries a flag (%r) this guard does not "
+             "recognise, so its chart and values cannot be reliably "
+             "re-rendered to verify content. Re-run it with only well-known "
+             "flags." % tok)
+    if len(bare) < 2 or not bare[0] or not bare[1]:
+        emit("deny",
+             "The Helm release/chart arguments could not be determined from "
+             "this command, so its content cannot be bound to a reviewed "
+             "change.")
+    return bare[0], bare[1], flags
+
+
+def helm_content_digest(verb, argv, verb_idx, cwd):
+    """The content half of a Helm change's subject, derived from `helm
+    template` — the chart's OWN render, not a walk of its directory or a
+    hash of just the values file. A chart is a template engine over
+    arbitrary files (Chart.yaml, templates/, a dependency graph via
+    Chart.yaml's own `dependencies:`, values.yaml, subchart values) PLUS
+    whatever -f/--values/--set overrides the command supplies; enumerating
+    that graph is exactly the unbounded-inputs mistake a directory walk made
+    for kustomize (see _kustomize_render_digest). Rendering binds exactly
+    what would be applied, wherever its pieces live.
+
+    Reproduced live before this function existed: with the round-1 design
+    (hashing whatever -f/-k names, by flag NAME), `-f values.yaml` was
+    content-bound as raw bytes while the exact synonym `--values values.yaml`
+    was not bound at all (MANIFEST_TARGET_FLAGS never recognised the long
+    name), and the chart DIRECTORY's own content was never bound by either
+    spelling — `helm upgrade myrel ./chart -f values.yaml` proceeded
+    unchanged after editing a template file inside ./chart.
+
+    "" for a Helm verb with no chart argument at all (uninstall, rollback —
+    release-name-only mutations already identified by argv alone).
+    """
+    if verb in HELM_DESTRUCTIVE_VERBS:
+        return ""
+    release, chart, flags = _helm_template_argv(argv, verb_idx)
+    code, out, err = run_argv(["helm", "template", release, chart] + flags, cwd)
+    if code != 0:
+        emit("deny",
+             "`helm template` could not render this change, so its content "
+             "cannot be verified:\n\n%s" % (err or out).strip())
+    return hashlib.sha256(out.encode("utf-8")).hexdigest()
 
 
 def subject_hash(tool, verb, argv, content_digest):
     """The change identifier for ONE mutating segment: canonicalised,
     normalised argv (tool, verb, and every token, in order — the design
-    spec's "normalised argv") PLUS content_digest, the manifest target's own
-    bytes when the verb names one (see local_target_digest). Folding content
-    in is what makes "validate v1, apply v2" refuse even though the command
-    line naming the target is byte-identical in both cases.
+    spec's "normalised argv") PLUS content_digest, the manifest/chart
+    target's own rendered/raw content when the verb names one (see
+    local_target_digest / helm_content_digest). Folding content in is what
+    makes "validate v1, apply v2" refuse even though the command line naming
+    the target is byte-identical in both cases.
 
     Deliberately UNRELATED to hookstate.HashArgs in Go: HashArgs hashes only
     the raw tool_input and exists solely to key the attempt/consecutive
@@ -1171,14 +1375,19 @@ def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attes
         refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
                "rather than applied unchecked." % (tool, verb), attempt, consecutive)
     # Mechanical validation passed for THIS segment. Bind ITS OWN subject to
-    # the manifest target's actual CONTENT now (see local_target_digest) —
-    # deliberately AFTER the per-verb branch above, not before: that branch
-    # already proved (via kubectl diff / a dry run) that the target is
-    # readable, so by the time we independently re-read it here it is
-    # expected to exist; a URL target still refuses here even though kubectl
-    # itself could "successfully" preview it (kubectl fetches it; the guard
-    # then refuses to bind an attestation to bytes it cannot re-verify).
-    content_digest = local_target_digest(argv, cwd, attempt, consecutive)
+    # the manifest/chart target's actual content now (see local_target_digest /
+    # helm_content_digest) — deliberately AFTER the per-verb branch above, not
+    # before: that branch already proved (via kubectl diff / a dry run, or
+    # helm's own diff/dry-run) that the target is renderable, so by the time
+    # we independently re-render/re-read it here it is expected to succeed; a
+    # URL target, or a render failure, still TERMINALLY refuses here even
+    # though the mechanical step just "successfully" previewed it (it fetched
+    # or rendered it; this guard refuses to bind an attestation to content it
+    # cannot pin down for a future re-check).
+    if tool == "helm":
+        content_digest = helm_content_digest(verb, argv, verb_idx, cwd)
+    else:
+        content_digest = local_target_digest(argv, cwd)
     subject = subject_hash(tool, verb, argv, content_digest)
     # Now require the reviewer's verdict for THIS segment's own subject.
     # Checked here (not once after the loop) so a missing/rejected
