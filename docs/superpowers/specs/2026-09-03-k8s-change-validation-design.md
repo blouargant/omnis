@@ -289,17 +289,59 @@ comes from the hook input's own `cwd` field, not from the tool args.
 First test is a trivial "does this text mention kubectl or helm", then exit 0. Everything
 else in the fleet must pay only interpreter startup.
 
-### 7.3 Parsing and the fail-closed rule
+### 7.3 Parsing: prove read-only, or refuse
 
-Strip wrappers (`env`, `sudo`, `time`), split compound commands (`&&`, `||`, `;`, `|`)
-and classify **each segment independently** — `kubectl get x && kubectl delete y` must be
-caught.
+> **This section was rewritten during implementation.** The original rule was
+> "recognise a mutation and validate it", and it did not converge: three fix rounds,
+> and each round's fix left a *new* spelling of a mutation unrecognised. The ways to
+> spell a mutation are not enumerable; the read-only commands are. So the rule is
+> inverted, and the §7.4 table below is unchanged — it is what a segment reaches once
+> it has failed to prove itself a read.
 
-The script *executes* commands, so it must never risk executing the mutation itself. It
-validates a segment only if it could **fully re-tokenise it and replay it as argv,
-without a shell**. Anything carrying a redirection, a heredoc (`apply -f -`), a
-substitution or an interpolation is refused with "use a manifest file". That refusal is
-not a burden: it is the declarative path `k8s-modification` phase 3 already prefers.
+Strip wrappers, split compound commands (`&&`, `||`, `|&`, `;`, `|`, `&`, newline) and
+classify **each segment independently** — `kubectl get x && kubectl delete y` must be
+caught. Splitting mirrors `compoundOps` in `core/permissions/match_bash.go`, pinned by a
+shared-corpus parity test.
+
+Then, per segment: **a segment proceeds only if it is provably read-only. Everything
+else is refused or validated.** There is no "unrecognised, therefore harmless" branch —
+that branch is what every proven bypass went through.
+
+Proving a read means clearing every one of these, each an enumerable set that **fails
+closed** when it does not match:
+
+| Must be established | Fails closed when |
+|---|---|
+| The segment hides no nested command | it contains `$(`, a backtick, `<(`, `>(`, or `${…$(}` |
+| It can be tokenised | quotes are unbalanced |
+| After stripping wrappers, a bare program name is at the head | the head is empty, a flag, or a quoted payload — i.e. a wrapper ate the binary or `flock -c` handed a string to `sh` |
+| The head does not execute a string handed to it | it is a shell, interpreter, `ssh`, `awk`/`sed`, `make`, `watch`, `busybox`, … |
+| The verb position is determinable | an unrecognised flag sits before the verb, so which token is the verb cannot be known |
+| The verb is a known read | it is anything else — including a verb whose *sub*-verb decides (`auth`, `config`, `rollout`, `plugin`) |
+
+A wrapper is stripped by an **explicit spec** — its own value-taking flags and its count
+of bare operands — never by guessing, because guessing is what left `30` looking like the
+binary in `timeout 30 kubectl get pods`. A wrapper missing from the spec is not a
+loophole: whatever it leaves at the head fails the bare-program-name rule.
+
+The cost of this direction is **friction**, and friction is the acceptable failure: it is
+visible, it names its cause, and the agent can act on it. The cost of the old direction
+was a **silent bypass**. A guard that refuses honest work does get disabled, though, so
+the friction is bounded deliberately — ordinary control flow, env assignments, wrappers,
+brace expansion, and naming the binary without running it all proceed.
+
+**The script must never execute the mutation it is inspecting.** It runs only preview
+forms (`diff`, `--dry-run=server`, `helm diff`/`template`), and a provably read-only
+segment causes it to execute nothing at all.
+
+**Verification is by execution, not by reading.** Every safety property asserted about
+this parser in a comment or a review has to be run: three separate comments in review
+claimed properties the code did not have, and each cost a round. The durable gate is
+`TestProceedsAreInertUnderBash`, which runs every command the guard waves through under
+a real shell whose only reachable binaries are stubs and fails if a kubectl/helm stub is
+invoked with a mutating verb. A decision-only table cannot see the defect that matters
+most — a command that proceeds and then mutates — and four families of exactly that
+defect were invisible to one.
 
 ### 7.4 Per-verb semantics
 
@@ -486,3 +528,12 @@ the permission card now carries the diff.
   operator — which is the correct boundary, but worth stating.
 - **Attestations are lost on process restart** (not on hot-reload). A change validated
   before a restart must be re-validated — the correct direction, but worth knowing.
+- **Parked parser residuals** (§7.3), each refusing safely rather than leaking:
+  a heredoc body under a non-kubectl head is refused (structural, shared with
+  `splitCompound`); `git -c alias.x='!cmd'` bypasses the guard, because listing `git`
+  as a string-launcher would refuse `git commit -m "…kubectl…"` on every coder turn;
+  and `watch -n 2 kubectl get pods`, `kubectl auth whoami` and `kubectl cp` are each
+  refused pending one set entry. The open-ended case — an arbitrary unlisted wrapper
+  that `exec`s its argv — is undecidable from argv alone (`setsid kubectl delete` is
+  shape-identical to `echo kubectl delete`); the common members are listed and the
+  bare-program-name rule catches what a wrapper leaves behind.
