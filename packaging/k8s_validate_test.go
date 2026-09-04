@@ -2484,3 +2484,192 @@ func TestHelmReleaseNameIsNeverTheChartCandidate(t *testing.T) {
 		t.Fatalf("`helm upgrade --install RELEASE CHART` must reach a change identifier, got: %q", reason2)
 	}
 }
+
+// --- k8s_validator must never be able to mutate what it reviews ---
+//
+// k8s_validator holds Bash (for read-only kubectl — re-deriving facts from
+// the live cluster IS its job) and the attest tools (to record its verdict).
+// Nothing about its Go-side wiring stops it from also running a MUTATING
+// kubectl/helm command: the tool-list shape that keeps every other agent off
+// record_validation (TestOnlyTheValidatorCanAttest) says nothing about
+// keeping the reviewer off Bash. So this half of the "the signer is never
+// the actor" guarantee has to be policy, enforced here on the already-plumbed
+// agent_name field — the same shape as the CLEANUP_AGENTS branch below it.
+//
+// Two things make an unguarded reviewer worse than an ordinary forged
+// signature: (1) check_attested only fires AFTER mechanical validation
+// reaches it, and mechanical validation is what computes and discloses the
+// change's subject — so a validator with no guard would learn the
+// identifier for its OWN attempted mutation for free, then only need an
+// attestation (its own tool!) to complete the loop; (2) CLEANUP_AGENTS
+// (validate_destructive's ephemeral-label gate) names only k8s_cleaner, so a
+// deletion the cleaner is refused for lacking the label was — before this
+// guard — not refused for the validator at all: routing a deletion through
+// the reviewer was a privilege escalation, not merely a forged signature.
+
+// A validator-issued mutating kubectl is refused, and refused with NO change
+// identifier in the message — the identifier is the one thing that makes the
+// check_attested chain reachable at all (see its own docstring), so its
+// absence here is the property under test, not an incidental detail.
+func TestValidatorCannotMutate(t *testing.T) {
+	dir := stubFor(t, stubDefaultDeny)
+	manifest := writeManifest(t, "app: validator-cannot-mutate\n")
+	out, _ := runHook(t, bashInput("kubectl apply -f "+manifest+" -n demo", "k8s_validator"), dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("validator-issued apply decision = %q, want deny", got)
+	}
+	reason := reasonOf(t, out)
+	if !strings.Contains(reason, "may not make changes") {
+		t.Fatalf("reason = %q, want the reviewer-may-not-mutate refusal", reason)
+	}
+	if changeIDRe.MatchString(reason) {
+		t.Fatalf("the refusal must not disclose a change identifier: %q", reason)
+	}
+}
+
+// Terminal, never an escalation to "ask" — exactly the property
+// TestMissingAttestationNeverEscalates pins for check_attested, and for the
+// identical reason: an escalation would let the reviewer ask the USER for
+// permission to sign its own work, which is precisely the hole this guard
+// exists to close. attempt/consecutive are AT the escalation threshold.
+func TestValidatorCannotMutateNeverEscalates(t *testing.T) {
+	dir := stubFor(t, stubDefaultDeny)
+	in := bashInput("kubectl delete pod x -n demo", "k8s_validator")
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("validator-issued delete at attempt=3/consecutive=3 decision = %q, want deny (never ask)", got)
+	}
+}
+
+// The full chain is dead, not merely its first hop. subject_hash is a pure
+// function of tool/verb/argv/content — independent of agent_name (see its
+// own doc comment) — so the byte-identical command run as k8s_editor reveals
+// exactly what THIS command would hash to: the best case available to an
+// adversarial reviewer, a real APPROVED verdict for the exact subject.
+// Even armed with that, the validator's own attempt is refused, and refused
+// for BEING the validator — never reaching check_attested at all, so the
+// reason names the reviewer-may-not-mutate rule, not an attestation outcome.
+// A second, byte-identical re-run confirms nothing about having tried it
+// once opens a path.
+func TestValidatorMutationChainIsFullyDead(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*) exit 1 ;;
+  *)      exit 0 ;;
+esac`)
+	manifest := writeManifest(t, "app: validator-chain-dead\n")
+	command := "kubectl apply -f " + manifest + " -n demo"
+
+	// Step 1: attempt the mutation as the reviewer. Denied, with no
+	// identifier disclosed — this is TestValidatorCannotMutate's property,
+	// re-checked here as the starting point of the sequence below.
+	in := bashInput(command, "k8s_validator")
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("step 1 (attempt mutation): decision = %q, want deny", got)
+	}
+	if changeIDRe.MatchString(reasonOf(t, out)) {
+		t.Fatalf("step 1: the refusal disclosed a change identifier: %q", reasonOf(t, out))
+	}
+
+	// Step 2: attempt record_validation anyway, for whatever subject can be
+	// obtained by OTHER means — here, the byte-identical command discovered
+	// via k8s_editor (see the doc comment above for why that is the exact
+	// subject this command would hash to). attestations now holds a real
+	// APPROVED verdict for it.
+	editorIn := bashInput(command, "k8s_editor")
+	in["attestations"] = approveOneSegment(t, editorIn, dir)
+
+	// Step 3: re-run the identical mutating command as the reviewer, now
+	// armed with that attestation. Still refused, and for the SAME reason as
+	// step 1 — proving check_attested was never reached, not merely that
+	// something else also happened to deny.
+	out, _ = runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("step 3 (retry with an approved attestation): decision = %q, want deny", got)
+	}
+	if !strings.Contains(reasonOf(t, out), "may not make changes") {
+		t.Fatalf("step 3: reason = %q, want the reviewer-may-not-mutate refusal, not a check_attested outcome",
+			reasonOf(t, out))
+	}
+
+	// Re-run once more, identical in every respect: still refused.
+	out, _ = runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("final re-run: decision = %q, want deny", got)
+	}
+}
+
+// The reviewer's entire job — re-deriving facts from the live cluster — is
+// read-only kubectl, and it must keep proceeding completely silently, exactly
+// like any other agent's read: the guard above must fire only for a command
+// that reaches validate(), never at the top of main() where it would also
+// catch reads.
+func TestValidatorReadOnlyStillProceeds(t *testing.T) {
+	out, code := runHook(t, bashInput("kubectl get pods -n demo", "k8s_validator"), "")
+	if code != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("validator read: exit=%d stdout=%q, want exit 0 and no output", code, out)
+	}
+}
+
+// The actual review loop must still work for the agents that are SUPPOSED to
+// reach it: this guard must not have broken k8s_editor's or k8s_cleaner's own
+// mutating commands, which must still reach a change identifier.
+func TestEditorAndCleanerStillReachAnIdentifier(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *diff*) exit 1 ;;
+  *)      exit 0 ;;
+esac`)
+	for _, agent := range []string{"k8s_editor", "k8s_cleaner"} {
+		manifest := writeManifest(t, "app: "+agent+"\n")
+		in := bashInput("kubectl apply -f "+manifest+" -n demo", agent)
+		out, _ := runHook(t, in, dir)
+		if got := decisionOf(t, out); got != "deny" {
+			t.Fatalf("%s: decision = %q, want deny (not reviewed)", agent, got)
+		}
+		if !changeIDRe.MatchString(reasonOf(t, out)) {
+			t.Fatalf("%s: reason has no change identifier: %q", agent, reasonOf(t, out))
+		}
+	}
+}
+
+// Closes the escalation IMPORTANT A found: CLEANUP_AGENTS (the
+// ephemeral-label gate inside validate_destructive) names only k8s_cleaner,
+// so before this guard, a deletion the CLEANER is refused for lacking
+// omnis.dev/ephemeral=true was NOT refused for the VALIDATOR — routing a
+// real, unlabelled resource's deletion through the reviewer would have been
+// a way around a check the cleanup agent itself cannot get past. Proven the
+// same way as TestValidatorMutationChainIsFullyDead: even with a real
+// APPROVED attestation for this exact deletion (obtained via k8s_editor —
+// who, like the reviewer, is not ephemeral-label-gated either, so this is
+// a genuinely obtainable attestation), the validator's own attempt is
+// refused for being the reviewer, never reaching validate_destructive (and
+// its ephemeral-label check) at all.
+func TestValidatorCannotDeleteAnUnlabelledResourceEither(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$*" in
+  *"-o json"*) echo '{"metadata":{"name":"real-app","labels":{}}}' ;;
+  *)           exit 0 ;;
+esac`)
+	command := "kubectl delete pod real-app -n demo"
+	editorIn := bashInput(command, "k8s_editor")
+	attestations := approveOneSegment(t, editorIn, dir)
+
+	in := bashInput(command, "k8s_validator")
+	in["attestations"] = attestations
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("validator delete of an unlabelled resource, with an approved attestation, decision = %q, want deny", got)
+	}
+	reason := reasonOf(t, out)
+	if !strings.Contains(reason, "may not make changes") {
+		t.Fatalf("reason = %q, want the reviewer-may-not-mutate refusal — a different reason means "+
+			"validate_destructive ran and the ephemeral-label escape may be open again", reason)
+	}
+	if changeIDRe.MatchString(reason) {
+		t.Fatalf("the refusal must not disclose a change identifier: %q", reason)
+	}
+}

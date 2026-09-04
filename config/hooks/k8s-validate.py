@@ -1203,6 +1203,19 @@ PROD_PATTERN = re.compile(r"prod|prd|production", re.IGNORECASE)
 EPHEMERAL_LABEL = "omnis.dev/ephemeral"
 CLEANUP_AGENTS = {"k8s_cleaner"}
 
+# The reviewer's only legitimate write is record_validation — never a cluster
+# mutation. agent/agent.go's attest-group comment states the invariant this
+# enforces: "Mount ONLY on a reviewer agent. An agent holding this can approve
+# its own changes, which is exactly the hole internal/attest exists to close."
+# That Go-side rule (see TestOnlyTheValidatorCanAttest) keeps every OTHER
+# agent off the attest tools; it says nothing about keeping k8s_validator off
+# Bash, which it legitimately needs for READ-ONLY kubectl (re-deriving facts
+# from the live cluster is its entire job — see its instruction.md). So the
+# other half of the invariant — the reviewer may never MUTATE — has to be
+# policy, enforced here, on the already-plumbed agent parameter, the same
+# shape as the CLEANUP_AGENTS branch above.
+VALIDATOR_AGENTS = {"k8s_validator"}
+
 
 def run_argv(argv, cwd):
     """Run argv with no shell and return (exit_code, stdout, stderr)."""
@@ -1490,6 +1503,24 @@ def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
 
 
 def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attestations):
+    # The reviewer may never reach here for a command it can sign off on
+    # itself. This is checked FIRST — before check_production, before any
+    # mechanical kubectl/helm call, before subject_hash — so nothing about
+    # THIS change (least of all its subject, the one thing that makes the
+    # check_attested chain reachable at all) is ever computed or disclosed to
+    # the reviewer. It only ever fires here, never at the top of main(): a
+    # command main() already proved provably_read_only() `continue`s before
+    # reaching validate() at all, so the reviewer's read-only kubectl (its
+    # entire job) is untouched. Terminal — emit("deny", …), never refuse():
+    # refuse() escalates to "ask" after MAX_ATTEMPTS, which would let the
+    # reviewer ask the USER for permission to sign its own work, exactly the
+    # hole check_attested's own identical rule closes for a missing
+    # attestation.
+    if agent in VALIDATOR_AGENTS:
+        emit("deny",
+             "The reviewer agent may not make changes to the cluster, only review "
+             "them. Run this command as the agent that requested the review, not "
+             "as k8s_validator.")
     check_production(argv, attempt, consecutive)
     if tool == "helm":
         preview = validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive)
