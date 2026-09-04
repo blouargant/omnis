@@ -1913,15 +1913,20 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		{"read then an unrelated sudo", "kubectl rollout status deploy/x -n demo && sudo -u root systemctl restart nginx", "linux_admin", "", ""},
 		{"read then a build", "kubectl get pods -n demo && timeout 30 make build", "coder", "", ""},
 		// ---- mutations: these reach validate, which refuses in the skeleton ----
-		{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny", ""},
-		{"helm boolean global before upgrade", "helm --debug upgrade myrel ./chart -n demo", "k8s_editor", "deny", ""},
-		{"helm boolean global before uninstall", "helm --debug uninstall myrel -n demo", "k8s_editor", "deny", ""},
-		{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
-		{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
-		{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
+		// These must reach the Task-9 stub, not merely deny. Asserting the
+		// reason turns a decision check into a PATH check: if wrapper stripping
+		// regressed, `sudo -u root kubectl delete` would deny as "does not
+		// invoke it directly", the table would stay green, and Task 9's
+		// validation would silently never run on any wrapped command.
+		{"boolean global before apply", "kubectl --insecure-skip-tls-verify apply -f app.yaml", "k8s_editor", "deny", "is not implemented yet"},
+		{"helm boolean global before upgrade", "helm --debug upgrade myrel ./chart -n demo", "k8s_editor", "deny", "is not implemented yet"},
+		{"helm boolean global before uninstall", "helm --debug uninstall myrel -n demo", "k8s_editor", "deny", "is not implemented yet"},
+		{"sudo with its own flag", "sudo -n kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
+		{"absolute-path wrapper", "/usr/bin/sudo kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
+		{"wrapper flag with a value", "sudo -u root kubectl delete pod x -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
 		{"newline-separated", "kubectl get pods\nkubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
 		{"ampersand-separated", "kubectl get pods & kubectl delete pod x -n demo", "k8s_cleaner", "deny", ""},
-		{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny", ""},
+		{"xargs kubectl delete", "kubectl get pods -o name | xargs kubectl delete pod -n demo", "k8s_cleaner", "deny", "is not implemented yet"},
 		{"auth reconcile writes RBAC", "kubectl auth reconcile -f rbac.yaml", "k8s_editor", "deny", ""},
 		{"config use-context rewrites kubeconfig", "kubectl config use-context prod", "k8s_editor", "deny", ""},
 		{"rollout undo writes", "kubectl rollout undo deploy/x -n demo", "k8s_editor", "deny", ""},
@@ -1929,9 +1934,9 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		{"helm test creates Pods", "helm test prod-app -n prod", "k8s_editor", "deny", ""},
 		// helm's canonical destructive verb under each of its live aliases. All
 		// three previously proceeded behind a wrapper and uninstalled unvalidated.
-		{"helm delete alias behind sudo", "sudo helm delete myrel -n prod", "k8s_editor", "deny", ""},
-		{"helm del alias behind sudo", "sudo helm del myrel -n prod", "k8s_editor", "deny", ""},
-		{"helm un alias behind sudo", "sudo helm un myrel -n prod", "k8s_editor", "deny", ""},
+		{"helm delete alias behind sudo", "sudo helm delete myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+		{"helm del alias behind sudo", "sudo helm del myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+		{"helm un alias behind sudo", "sudo helm un myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
 		{"helm delete behind timeout", "timeout 60 helm delete myrel -n prod", "k8s_editor", "deny", ""},
 		// A value flag shifting the sub-verb in the OPEN direction: these ran a
 		// rollback and an RBAC write unvalidated.
@@ -1958,6 +1963,67 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		// cluster and attested on that basis.
 		{"ssh remote delete", "ssh prod-host kubectl delete pod x -n demo", "k8s_editor", "deny", "does not invoke it directly"},
 		{"heredoc apply", "kubectl apply -f - <<EOF\nkind: Pod\nEOF", "k8s_editor", "deny", "redirection or heredoc"},
+
+		// ---- a verb-scoped value flag must not shift the sub-verb ----
+		// Verified against the real binary: cobra's stripFlags consumes
+		// `--field-manager status` as an unknown-long-flag-with-value, so this
+		// resolves to `restart` and restarts a named Deployment. It proceeded
+		// while the sub-verb walk only knew GLOBAL value flags.
+		{"field-manager hides rollout restart", "kubectl rollout --field-manager status restart deploy/x -n demo", "k8s_editor", "deny", "does not recognise"},
+		{"selector hides rollout restart", "kubectl rollout -l status restart deployment -n demo", "k8s_editor", "deny", "does not recognise"},
+		{"selector hides rollout undo", "kubectl rollout -l status undo deployment -n demo", "k8s_editor", "deny", "does not recognise"},
+		{"unknown flag fails closed", "kubectl --totally-unknown-flag zzz get pods", "k8s_investigator", "deny", "does not recognise"},
+
+		// ---- a command that EXECUTES a string it is handed ----
+		// awk's system(), GNU sed's `e`, and every shell wrapper. All three were
+		// on an "inert commands" list and proceeded; the reviewer proved each one
+		// executes. Enumerating what launches is the bounded direction.
+		{"awk system()", `awk 'BEGIN{system("kubectl delete pod x -n demo")}'`, "k8s_editor", "deny", "another interpreter"},
+		{"sed e command", `sed '1e kubectl delete pod x -n demo' /etc/hostname`, "k8s_editor", "deny", "another interpreter"},
+		{"python -c", `python3 -c "import os; os.system('kubectl delete pod x')"`, "k8s_editor", "deny", "another interpreter"},
+		{"watch with a quoted mutation", `watch "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "another interpreter"},
+		{"xargs into a shell", `xargs sh -c 'kubectl delete pod x -n demo'`, "k8s_cleaner", "deny", "another interpreter"},
+
+		// ---- a suffixed binary name is a real install, not an evasion ----
+		// A trailing \b made the whole guard exit on these.
+		{"helm3 uninstall", "helm3 uninstall myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+		{"helm2 delete", "helm2 delete myrel", "k8s_editor", "deny", "is not implemented yet"},
+		{"suffixed kubectl path", "/usr/local/bin/kubectl.real delete pod x -n demo", "k8s_editor", "deny", "is not implemented yet"},
+		{"read then a suffixed mutation", "kubectl get pods; helm3 uninstall myrel -n prod", "k8s_editor", "deny", "is not implemented yet"},
+
+		// ---- proxy hands out a credentialed API endpoint ----
+		// The process changes nothing; what it enables is a full read-write API
+		// on localhost, and the follow-up curl names neither tool.
+		{"proxy is not a read", "kubectl proxy --port=8001", "k8s_investigator", "deny", "is not implemented yet"},
+
+		// ---- shell control flow around an ordinary READ ----
+		// Five shapes, all reads. Refusing these is the investigator's normal
+		// register and is how a guard gets removed from hooks.json.
+		{"for/do loop", "for ns in demo prod; do kubectl get pods -n $ns; done", "k8s_investigator", "", ""},
+		{"if condition", "if kubectl get pod x -n demo >/dev/null; then echo present; fi", "k8s_investigator", "", ""},
+		{"while negation", "while ! kubectl get pod x -n demo; do sleep 2; done", "k8s_investigator", "", ""},
+		{"subshell", "( kubectl get pods -n demo )", "k8s_investigator", "", ""},
+		{"pipeline into a while loop", "kubectl get ns -o name | while read n; do kubectl get pods -n $n; done", "k8s_investigator", "", ""},
+		{"time builtin", "time kubectl get pods -n demo", "k8s_investigator", "", ""},
+		{"exec builtin", "exec kubectl get pods", "k8s_investigator", "", ""},
+
+		// ---- env assignments, a silent regression from an earlier round ----
+		{"env with an assignment", "env KUBECONFIG=/tmp/kc kubectl get pods -n demo", "k8s_investigator", "", ""},
+		{"bare assignment prefix", "KUBECONFIG=/tmp/kc kubectl get pods -n demo", "k8s_investigator", "", ""},
+
+		// ---- no verb at all is nothing to validate ----
+		{"bare kubectl", "kubectl", "coder", "", ""},
+		{"kubectl help", "kubectl --help", "coder", "", ""},
+		{"helm help", "helm --help", "coder", "", ""},
+		{"version", "kubectl --version", "coder", "", ""},
+
+		// ---- naming the word without executing it ----
+		// The mitigation for these used to be an inert list with no natural end.
+		{"gh pr title quoting it", `gh pr create --title "fix the kubectl guard" --body x`, "coder", "", ""},
+		{"git commit quoting it", `git commit -m "add kubectl delete step"`, "coder", "", ""},
+		{"ls the binary", "ls -l /usr/local/bin/kubectl", "coder", "", ""},
+		{"which the binary", "which kubectl", "coder", "", ""},
+		{"command -v", "command -v kubectl", "coder", "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1998,6 +2064,76 @@ func TestGuardExecutesNoSubprocess(t *testing.T) {
 	}
 	if b, err := os.ReadFile(marker); err == nil {
 		t.Fatalf("the guard executed kubectl/helm while only deciding:\n%s", b)
+	}
+}
+
+// The launcher list is now an execution surface of its own: every command on it
+// is one the guard refuses BECAUSE it executes a string. Nothing tested that
+// property, and an "inert commands" list carrying awk, sed and git was how three
+// proven bypasses shipped. This applies TestGuardExecutesNoSubprocess's trick to
+// the launcher list: shadow each launcher with a stub that records itself, and
+// assert the guard refused rather than letting the launcher run.
+func TestLaunchersAreRefusedNotExecuted(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "invoked.log")
+	launchers := []string{"bash", "sh", "eval", "awk", "sed", "python3", "ssh", "watch"}
+	for _, bin := range launchers {
+		body := "#!/bin/sh\necho \"$0 $*\" >> " + marker + "\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(dir, bin), []byte(body), 0o755); err != nil {
+			t.Fatalf("write stub %s: %v", bin, err)
+		}
+	}
+	for _, cmd := range []string{
+		`bash -c "kubectl delete pod x -n demo"`,
+		`sh -c 'kubectl delete pod x -n demo'`,
+		`awk 'BEGIN{system("kubectl delete pod x -n demo")}'`,
+		`sed '1e kubectl delete pod x -n demo' /etc/hostname`,
+		`python3 -c "import os; os.system('kubectl delete pod x')"`,
+		"ssh prod-host kubectl delete pod x -n demo",
+		`watch "kubectl delete pod x -n demo"`,
+	} {
+		out, _ := runHook(t, bashInput(cmd, "k8s_editor"), dir)
+		if got := decisionOf(t, out); got != "deny" {
+			t.Fatalf("%s: decision = %q, want deny", cmd, got)
+		}
+	}
+	if b, err := os.ReadFile(marker); err == nil {
+		t.Fatalf("the guard executed a launcher while deciding:\n%s", b)
+	}
+}
+
+// A malformed tool_input must not produce a traceback. The engine turns a
+// non-zero exit into a block for a fail_closed hook, which is the right
+// direction, but runHook fatals on any stderr and this file's own comment calls a
+// traceback the worst possible failure for a guard.
+func TestMalformedToolInputDoesNotTraceback(t *testing.T) {
+	for _, in := range []map[string]any{
+		{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": []string{"kubectl", "delete"}}},
+		{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": "kubectl delete pod x"},
+		{"hook_event_name": "PreToolUse", "tool_name": "Bash"},
+	} {
+		cmd := exec.Command("python3", "-B", script(t))
+		data, _ := json.Marshal(in)
+		cmd.Stdin = bytes.NewReader(data)
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		_ = cmd.Run()
+		if strings.Contains(errb.String(), "Traceback") {
+			t.Fatalf("malformed input produced a traceback: %s", errb.String())
+		}
+	}
+}
+
+// Authoring a runbook that CONTAINS a kubectl line is refused, because `segments`
+// splits on newline and cannot tell a heredoc body from a command — a limit it
+// shares with core/permissions/match_bash.go's splitCompound. Pinned as a KNOWN
+// limitation so that fixing it is a deliberate change rather than a surprise, and
+// so the diagnostic's wrongness is on the record: it tells the agent its file
+// write changes the cluster.
+func TestHeredocBodyIsRefusedKnownLimitation(t *testing.T) {
+	out, _ := runHook(t, bashInput("cat > /tmp/runbook.sh <<'SH'\nkubectl delete pod x -n demo\nSH", "coder"), "")
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("decision = %q, want deny — if this now proceeds, the heredoc limitation was fixed and this test should be replaced", got)
 	}
 }
 
@@ -2078,8 +2214,12 @@ VALIDATE_TIMEOUT = 45     # seconds; below the hook's own timeout so we can expl
 KUBECTL_READ_VERBS = {
     "get", "describe", "logs", "top", "explain", "events", "api-resources",
     "api-versions", "cluster-info", "version", "diff", "wait", "port-forward",
-    "proxy", "options", "help",
+    "options", "help",
 }
+# `proxy` is deliberately NOT above. The process changes nothing, but it serves
+# the whole API on localhost with the operator's credentials injected, and the
+# follow-up `curl -X DELETE http://127.0.0.1:8001/…` names neither tool, so the
+# guard never sees it. port-forward is materially weaker: no credential injection.
 
 # kubectl verbs that touch nothing outside this machine. `kustomize` renders,
 # `completion` prints a shell script. Same doctrine as helm's local verbs: this
@@ -2117,6 +2257,20 @@ HELM_LOCAL_VERBS = {
 # Global flags that take a SEPARATE value, so the token after them is not the
 # verb. Every other flag is treated as boolean: inferring this from "the next
 # token is not a flag" made a bare -A swallow the verb.
+# Boolean global flags: recognised, consume nothing. Anything in neither this set
+# nor VALUE_FLAGS makes the verb unprovable (see _verb_after).
+BOOLEAN_FLAGS = {
+    "-A", "--all-namespaces", "--insecure-skip-tls-verify", "--debug",
+    "--warnings-as-errors", "--disable-compression", "--no-headers",
+    "-h", "--help", "--version",
+}
+
+# A verb exists but could not be identified — distinct from None, which means no
+# verb is present at all. Conflating the two turned an unrecognised flag into
+# "nothing to validate" and let `kubectl --totally-unknown-flag zzz get pods`
+# proceed: `kubectl --help` really is a read, but an unreadable verb is not.
+UNPROVABLE = object()
+
 VALUE_FLAGS = {
     "-n", "--namespace", "--context", "--kube-context", "--kubeconfig",
     "--cluster", "--user", "--as", "--as-group", "--as-uid", "--token",
@@ -2128,6 +2282,17 @@ VALUE_FLAGS = {
     "--kube-apiserver", "--kube-token", "--kube-ca-file", "--kube-as-user",
     "--kube-as-group", "--kube-tls-server-name", "--qps", "--burst-limit",
 }
+
+# Leading shell syntax that precedes a command inside a segment. `segments` splits
+# on ; and |, so `for ns in a b; do kubectl get pods -n $ns; done` yields a segment
+# whose head is `do`. Refusing those denied five distinct shapes of an ordinary
+# read — the investigator's normal register, not an exotic spelling — which is how
+# a guard gets removed from hooks.json. Stripping them only helps FIND the
+# invocation; the read-or-mutation decision afterwards is unchanged, so
+# `if kubectl delete pod x; then` still reaches validate.
+SHELL_KEYWORDS = {"for", "while", "until", "if", "then", "elif", "else", "do",
+                  "done", "fi", "case", "esac", "in", "select", "function",
+                  "(", ")", "{", "}", "!", "[[", "]]", "&&", "||", "time"}
 
 # Process wrappers, each with an explicit spec, because guessing a wrapper's
 # argument arity is what previously denied `timeout 30 kubectl get pods`: the
@@ -2149,14 +2314,27 @@ WRAPPER_SPEC = {
     "command": (set(), 0),
 }
 
-# Commands that do not execute their arguments, so a kubectl command line quoted
-# or echoed as TEXT is not an invocation. Bounded on purpose: anything not listed
-# is refused rather than assumed inert.
-INERT_COMMANDS = {"echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "sed",
-                  "awk", "head", "tail", "wc", "tee", "less", "more", "comm",
-                  "diff", "git", "true", "false", "test"}
+# Commands that EXECUTE a string handed to them. A kubectl command line quoted
+# inside one of these is a real invocation the guard cannot read, so it is refused.
+# This replaced an "inert commands" list, which was the wrong property to
+# enumerate: `awk`, `sed` and `git` were on it, and all three execute their
+# arguments (`awk 'BEGIN{system(…)}'`, GNU `sed '1e …'`, `git -c alias.x='!…'`),
+# so listing them as inert made three proven bypasses.
+LAUNCHERS = {
+    "bash", "sh", "zsh", "dash", "ksh", "csh", "fish", "eval", "source",
+    "ssh", "su", "nsenter", "chroot", "docker", "podman", "nerdctl",
+    "python", "python3", "perl", "ruby", "node", "php",
+    "awk", "gawk", "sed", "make", "watch", "parallel", "flock",
+}
+# NOTE: `xargs` is a WRAPPER, not a launcher — after stripping it, kubectl is at
+# the head, so `xargs kubectl delete pod x` reaches validate with the real verb
+# instead of a generic refusal. `xargs sh -c '…'` still refuses, because the
+# stripped head is then `sh`. `watch` is the opposite case and IS a launcher: it
+# joins its argv and runs it through sh, so treating it as a wrapper would let
+# `watch "kubectl delete pod x"` past. That costs friction on `watch -n 2 kubectl
+# get pods`, which is one line to move if it proves too expensive.
 
-# Mirrors compoundOps# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
+# Mirrors compoundOps in core/permissions/match_bash.go, longest-first so `&&` is
 # not read as two `&`. The parity test in core/permissions pins the two lists.
 COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 
@@ -2169,7 +2347,12 @@ COMPOUND_OPS = ("&&", "||", "|&", ";", "\n", "|", "&")
 # hides nothing runnable — every bash ${x:-…} form that does run something also
 # contains $( or a backtick, both matched here — so including it only denied the
 # commonest idiom in agent-written shell.
-MENTIONS_K8S = re.compile(r"\b(kubectl|helm)\b")
+# A suffixed binary name is an ordinary side-by-side install (`helm3`,
+# `kubectl.real`, `kubectl1.29`), and a trailing \b made the whole guard exit on
+# it. Widening the tail keeps the reason the \b was added — there is no word
+# boundary before the "helm" inside "overwhelming", so that still does not match.
+MENTIONS_K8S = re.compile(r"\b(kubectl|helm)[\w.-]*")
+K8S_BINARY = re.compile(r"^(kubectl|helm)[\w.-]*$")
 
 COMMAND_SUBSTITUTION = re.compile(r"\$\(|`|<\(|\$\{[^}]*\$\(")
 REDIRECT = re.compile(r"<<|>>|[<>]")
@@ -2287,6 +2470,15 @@ def _strip_wrappers(argv):
     """
     while argv:
         base = argv[0].split("/")[-1]
+        # Leading shell keywords and env assignments come before any wrapper.
+        if base in SHELL_KEYWORDS:
+            argv = argv[1:]
+            continue
+        if "=" in argv[0] and not argv[0].startswith("-") and not K8S_BINARY.match(base):
+            # VAR=value kubectl … — round 2 stripped these and the inversion
+            # dropped the branch, silently denying `KUBECONFIG=/tmp/kc kubectl get`.
+            argv = argv[1:]
+            continue
         if base not in WRAPPER_SPEC:
             break
         value_flags, operand_count = WRAPPER_SPEC[base]
@@ -2320,10 +2512,18 @@ def _verb_after(argv, start):
         if "=" in tok:
             i += 1
             continue
-        if tok in VALUE_FLAGS and i + 1 < len(argv):
+        if tok in VALUE_FLAGS:
             i += 2
             continue
-        i += 1
+        if tok in BOOLEAN_FLAGS:
+            i += 1
+            continue
+        # An unrecognised flag: we cannot know whether it consumes the next
+        # token, so we cannot know which token is the verb. Under the inversion
+        # that is a failure to prove, not a licence to guess — guessing here let
+        # `kubectl rollout --field-manager status restart deploy/x` resolve its
+        # sub-verb to "status" and restart a Deployment unvalidated.
+        return UNPROVABLE, -1
     return None, -1
 
 
@@ -2344,9 +2544,10 @@ def classify(argv):
     """
     if not argv:
         return None, None, -1
-    tool = argv[0].split("/")[-1]
-    if tool not in ("kubectl", "helm"):
+    base = argv[0].split("/")[-1]
+    if not K8S_BINARY.match(base):
         return None, None, -1
+    tool = "helm" if base.startswith("helm") else "kubectl"
     verb, verb_idx = _verb_after(argv, 0)
     return tool, verb, verb_idx
 
@@ -2375,8 +2576,13 @@ def provably_read_only(tool, verb, argv, verb_idx):
     function's sets are enumerable, whereas the set of ways to spell a mutation is
     not.
     """
-    if verb is None:
+    if verb is UNPROVABLE:
         return False
+    if verb is None:
+        # No verb at all: `kubectl`, `kubectl --help`, `helm --help`. There is
+        # nothing to validate, and refusing it produced the nonsense diagnostic
+        # "Validation for `kubectl None` is not implemented yet".
+        return True
     if tool == "helm":
         return verb in HELM_READ_VERBS or verb in HELM_LOCAL_VERBS
     if verb in READ_ONLY_SUBVERBS:
@@ -2384,15 +2590,19 @@ def provably_read_only(tool, verb, argv, verb_idx):
     return verb in KUBECTL_READ_VERBS or verb in KUBECTL_LOCAL_VERBS
 
 
-def is_inert(argv):
-    """True when argv's head is a command that does not execute its arguments, so
-    a kubectl command line appearing in it is text rather than an invocation.
+def is_launcher(argv):
+    """True when argv's head executes a command line handed to it as a string.
 
-    Takes an already-stripped argv, like classify.
+    Takes an already-stripped argv, like classify. This is the inverse of the
+    "inert commands" list it replaced, and the inversion matters: enumerating what
+    is SAFE to ignore put `awk`, `sed` and `git` on the safe list, and all three
+    execute their arguments. Enumerating what LAUNCHES is the bounded direction —
+    an unlisted launcher falls through to the "does not invoke it directly"
+    refusal rather than being waved past.
     """
     if not argv:
         return False
-    return argv[0].split("/")[-1] in INERT_COMMANDS
+    return argv[0].split("/")[-1] in LAUNCHERS
 
 
 def names_k8s(tokens):
@@ -2407,7 +2617,7 @@ def names_k8s(tokens):
     basename is the whole string.
     """
     for t in tokens:
-        if t.split("/")[-1] in ("kubectl", "helm"):
+        if K8S_BINARY.match(t.split("/")[-1]):
             return True
         if (" " in t or "\t" in t or "\n" in t) and MENTIONS_K8S.search(t):
             return True
@@ -2423,7 +2633,16 @@ def main():
         sys.stderr.write("k8s-validate: unreadable hook input\n")
         sys.exit(1)
 
-    command = (data.get("tool_input") or {}).get("command") or ""
+    tool_input = data.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        # A non-string command cannot be inspected. The engine turns a non-zero
+        # exit into a block for a fail_closed hook, which is the right direction,
+        # but a traceback is not an acceptable way to say so.
+        sys.stderr.write("k8s-validate: tool_input.command is not a string\n")
+        sys.exit(1)
 
     # Fast path. This hook fires on EVERY Bash call in the fleet, so anything
     # not mentioning kubectl or helm must cost only interpreter startup. This is
@@ -2478,19 +2697,30 @@ def main():
         # Strip wrappers exactly ONCE, so every index below refers to this argv.
         argv = _strip_wrappers(tokens)
 
-        if is_inert(argv):
-            # echo/grep/git and friends do not execute their arguments.
-            continue
+        if is_launcher(argv):
+            refuse(
+                "This command hands a command line to another interpreter, so what it would "
+                "actually run cannot be read. Express it as a direct kubectl/helm command.",
+                attempt, consecutive,
+            )
 
         tool, verb, verb_idx = classify(argv)
         if tool is None:
-            # Names kubectl or helm but is not a direct invocation of either:
-            # a quoted payload (bash -c "…"), an eval, an ssh, an unknown
-            # launcher. Unprovable, therefore refused.
+            # The head is neither a launcher nor kubectl/helm, so this segment
+            # runs some other program that merely takes the word as an argument:
+            # `grep -rn kubectl deploy.sh`, `echo kubectl delete pod x`,
+            # `gh pr create --title "fix the kubectl guard"`, `ls -l …/kubectl`.
+            # Refusing these was the friction that gets a guard disabled, and the
+            # dangerous direction is already covered: anything that EXECUTES a
+            # string it is handed is in LAUNCHERS and was refused above.
+            continue
+
+        if verb is UNPROVABLE:
             refuse(
-                "This command names kubectl or helm but does not invoke it directly, so what "
-                "it would run cannot be proven safe. Express it as a direct kubectl/helm "
-                "command instead of wrapping it in a shell, an eval, or a remote call.",
+                "This looks like a kubectl/helm command but it carries a flag this guard does "
+                "not recognise, so which token is the verb cannot be determined. Re-run it "
+                "with the verb immediately after the binary, or with only well-known global "
+                "flags before it.",
                 attempt, consecutive,
             )
 
