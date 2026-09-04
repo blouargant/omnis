@@ -1,0 +1,13 @@
+{
+  "allow_file_attachments": false,
+  "builtin": false,
+  "description": "Kubernetes change validator. Given a proposed change and its change identifier, performs an independent read-only review of what the change would actually do — resource ownership (Helm / GitOps / manual), field-ownership impact, selector breadth, namespace and context correctness, label preservation — and records an APPROVED or REJECTED verdict with cited field evidence. Does not trust the caller's description of the change: it re-derives the facts from the live cluster. Never mutates anything.",
+  "enabled": true,
+  "leader": false,
+  "max_instances": 1,
+  "model_ref": "high",
+  "name": "k8s_validator",
+  "skills": ["k8s-modification", "k8s-investigation"],
+  "softskills_dir": "",
+  "tools": ["Bash", "Read", "Grep", "Glob", "Skill", "mime", "calc", "attest"]
+}

@@ -17,6 +17,7 @@
     "k8s_editor",
     "k8s_cleaner",
     "k8s_auditor",
+    "k8s_validator",
     "knowledge_leader",
     "doc_agent",
     "research_critic",

@@ -43,14 +43,48 @@ func TestAttestGroupMountsOnlyWhereDeclared(t *testing.T) {
 	}
 }
 
-// The shipped fleet must not let either mutating agent sign its own work.
-func TestShippedMutatingAgentsCannotAttest(t *testing.T) {
-	for _, name := range []string{"k8s_editor", "k8s_cleaner"} {
+// The shipped fleet must let exactly ONE agent sign a verdict: k8s_validator.
+//
+// This is a WHITELIST, not a blacklist. An earlier version of this test only
+// asserted that k8s_editor and k8s_cleaner (the two agents known to mutate the
+// cluster at the time) don't declare the attest group — a blacklist of two
+// names. That can never catch a THIRD mutating agent added later (a
+// k8s_patcher, say) that nobody remembered to add to the list: the whole point
+// of the attestation is that the signer is never the actor, so the set of
+// signers must be enumerated and pinned down directly, not inferred from the
+// set of known actors. The whitelist strictly subsumes the blacklist it
+// replaces.
+func TestOnlyTheValidatorCanAttest(t *testing.T) {
+	var attesters []string
+	for _, name := range shippedAgentNames(t) {
 		data := readShippedAgentJSON(t, name)
 		if strings.Contains(data, `"attest"`) {
-			t.Fatalf("%s declares the attest tool group — it could approve its own changes", name)
+			attesters = append(attesters, name)
 		}
 	}
+	if len(attesters) != 1 || attesters[0] != "k8s_validator" {
+		t.Fatalf("agents declaring the attest tool group = %v, want exactly [k8s_validator]", attesters)
+	}
+}
+
+// shippedAgentNames lists every agent directory under registry/agents in the
+// shipped registry (each holding an agent.json), relative to the package
+// directory — the same tree readShippedAgentJSON reads from.
+func shippedAgentNames(t *testing.T) []string {
+	t.Helper()
+	dir := filepath.Join("..", "registry", "agents")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	return names
 }
 
 // readShippedAgentJSON reads the shipped registry/agents/<name>/agent.json
