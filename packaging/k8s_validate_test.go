@@ -2444,3 +2444,43 @@ func TestHelmFlagBeforeChartRefusedWithPositionalAdvice(t *testing.T) {
 		t.Fatalf("moving the chart after the release name should reach a change identifier, got: %q", reason2)
 	}
 }
+
+// The RELEASE NAME slot is never the chart. This is the hole the positional rule
+// opened and then had to close: excluding tokens that follow a flag is necessary
+// but not sufficient, because `helm upgrade <release> --atomic <chart>` excludes
+// the real chart (the accepted cost) and, if the release name happens to name a
+// local chart directory, left it as the SOLE candidate. The digest then bound the
+// release-name directory and the real chart was never bound at all — attested
+// once, the real chart could be rewritten forever and still proceed. Reproduced
+// live before the fix; this pins both halves.
+func TestHelmReleaseNameIsNeverTheChartCandidate(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	real := writeChart(t)
+	decoy := writeChart(t) // a second, unrelated local chart directory
+
+	// The release name is spelled as the decoy chart's path, and the real chart
+	// follows a flag. Nothing may be bound here, so no identifier may be issued:
+	// an identifier is what made the bypass reachable.
+	command := "helm upgrade " + decoy + " --atomic " + real + " -n demo"
+	out, _ := runHook(t, bashInput(command, "k8s_editor"), dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("decision = %q, want deny: %s", got, out)
+	}
+	if reason := reasonOf(t, out); changeIDRe.MatchString(reason) {
+		t.Fatalf("a change identifier was issued for a release-name directory, so it was "+
+			"bound as the chart while the real chart went unbound: %q", reason)
+	}
+
+	// And the canonical `--install` idiom must still bind the REAL chart. This is
+	// the regression the first attempt at this fix caused: counting positional
+	// slots and dropping the first one deleted the chart from
+	// `helm upgrade --install <release> <chart>`, because the flag rule had
+	// already removed the release name and shifted every later slot. An adjacency
+	// rule ("the chart follows a bare token") does not shift.
+	install := "helm upgrade --install myrel " + real + " -n demo"
+	out2, _ := runHook(t, bashInput(install, "k8s_editor"), dir)
+	reason2 := reasonOf(t, out2)
+	if !changeIDRe.MatchString(reason2) {
+		t.Fatalf("`helm upgrade --install RELEASE CHART` must reach a change identifier, got: %q", reason2)
+	}
+}

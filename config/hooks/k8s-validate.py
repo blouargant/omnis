@@ -653,11 +653,40 @@ def _local_chart_candidates(argv, verb_idx, cwd):
     the chart never touches this rule; verified directly).
     """
     tokens = argv[verb_idx + 1:]
+
+    # A chart candidate must sit in the CHART SLOT, and Helm's grammar fixes that
+    # slot without any knowledge of individual flags: the chart follows the release
+    # name. So a candidate must be a bare token whose immediate predecessor is also
+    # a bare token — never a flag, and never the first token.
+    #
+    # That last clause is the one that matters. Excluding tokens that follow a flag
+    # is necessary but not sufficient: `helm upgrade decoy --atomic ./chart`
+    # excludes the real chart (it follows a flag — the accepted cost), and if the
+    # RELEASE NAME happens to name a local chart directory it was then the SOLE
+    # candidate, so the digest bound `decoy` and the real chart was never bound at
+    # all. Attested once, `./chart` could be rewritten forever and still proceed —
+    # "validate v1, apply v2", reproduced live.
+    #
+    # Requiring a bare predecessor is also why this cannot be done by COUNTING
+    # positional slots: the flag rule removes tokens, which shifts every later
+    # slot, so "drop the first positional" deleted the chart from
+    # `helm upgrade --install myrel ./chart` — the canonical idiom. A relationship
+    # between two adjacent tokens does not shift.
+    #
+    # One exception, and it is a positional-arity modifier rather than an entry in
+    # a flag-arity table: `--generate-name` removes the release operand entirely
+    # (`helm install ./chart --generate-name`), so the first token is the chart.
+    generate_name = any(t == "--generate-name" or t.startswith("--generate-name=")
+                        for t in tokens)
+
     candidates = []
     for i, tok in enumerate(tokens):
         if tok.startswith("-"):
             continue
-        if i > 0 and tokens[i - 1].startswith("-"):
+        if i == 0:
+            if not generate_name:
+                continue  # the release-name slot is never the chart
+        elif tokens[i - 1].startswith("-"):
             continue  # follows a flag positionally — never a candidate, known or not
         full = os.path.join(cwd or ".", tok)
         if os.path.isfile(os.path.join(full, "Chart.yaml")):
