@@ -17,7 +17,7 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
-## 1.9 (in development) — Collection memory management & a Linux admin agent
+## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation
 
 - **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.
 - **Automatic memory updates** — opt a collection into keeping its memory current from recent chats, with one-click revert.

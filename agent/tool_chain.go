@@ -16,9 +16,10 @@ import "google.golang.org/adk/agent/llmagent"
 // It does NOT make hooks' documented permissionDecision:"allow" bypass
 // (internal/hooks/run.go:76) work. That is still dead: nothing in agent/
 // consumes hooks.DecisionAllow — hookToolCallbacks returns non-nil only on
-// out.Blocked(), and returning nil merely means "proceed", which is not a
-// signal the gate can act on. Honouring "allow" would additionally require the
-// hook callback to tell the gate to skip (e.g. by seeding the approval cache).
+// out.Blocked(), or on out.Asks() when the user declines the escalation, and
+// returning nil (proceed, or an out.Asks() the user approved) is not a signal
+// the gate can act on. Honouring "allow" would additionally require the hook
+// callback to tell the gate to skip (e.g. by seeding the approval cache).
 // This order is a precondition for that, not the feature.
 //
 // budget LAST: a call already refused by a hook or by the user must not be

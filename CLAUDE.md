@@ -268,8 +268,9 @@ needs a `PYPI_API_TOKEN` secret); rc/beta tags become PEP 440 pre-releases.
 This needed **no Go changes** — seeding into `~/.omnis` reuses the existing
 per-user config layer (`paths.Home()`).
 
-**`config/hooks/` (the Kubernetes validation hook) must ship on every channel
-except the Windows ones, and `packaging/hooks_assets_test.go` is the guard.**
+**`config/hooks/k8s-validate.py` must ship on EVERY channel, Windows included;
+`config/hooks.json` (the declaration that invokes it) ships on the POSIX
+channels only — and `packaging/hooks_assets_test.go` is the guard on both.**
 Because `internal/hooks`' `fail_closed` turns "the script is missing" into "every
 `Bash` call in the fleet is blocked" (see "Lifecycle hooks" and "Kubernetes squad
 (change validation)"), a packaging omission is not a degraded feature, it is an
@@ -965,7 +966,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/scheduler/` | Timer that runs prompts on a schedule, backing `/loop` (in-memory, session-bound) and `/schedule` (durable cron/interval/one-shot routines, persisted to `schedules.json`): `Job`, `Scheduler` (process-wide, one `Run` goroutine + `fire` callback), `ParseSpec` (interval/`in`/`at`/cron via `robfig/cron/v3`). Surface-agnostic — each surface supplies the `fire` callback (see "Scheduled prompts") |
 | `internal/goal/` | Per-session **completion goals** backing `/goal`: `Store` (process-wide, one `Goal` per session — condition/turns/last-reason/achieved), `MaxTurns` (hard turn cap, `OMNIS_GOAL_MAX_TURNS`), `Directive` (the not-yet-met continuation prompt), `IsClearAlias`, `CleanCondition`. Surface-agnostic; the LLM judge is `Manager.EvaluateGoal` ([agent/goal_eval.go](agent/goal_eval.go)). See "Goals (`/goal`)" |
 | `internal/budget/` | Per-turn **spend ceiling** (tool calls + tokens): `Limits`, `Store` (`StartTurn`/`AddTokens`/`Gate`/`Usage`/`Forget`), `Verdict` (Proceed/Halted), `Outcome` (Stop/Continue/Unlimited). `Gate` single-flights the user prompt across a parallel fan-out. See "Per-turn spend budget" |
-| `internal/hookstate/` | Per-session **hook attempt counters** a `PreToolUse` hook script reads to decide when to stop refusing and ask the user instead: `Store.Attempt(sid,tool,args)` → `(attempt, consecutive)` — an exact-args count (knowable before the hook runs) and a consecutive-blocked count (only knowable after, via `RecordOutcome`); `Forget` on session end. Domain-free — the engine only reports the numbers, a hook script decides what they mean. Process-wide on `Infrastructure.HookState`, **threaded into both the per-squad hooks plugin and every sub-agent's hook callback** so a leader and a sub-agent share ONE counter for the same command rather than counting it twice. Degrades to `(1, 0)` with no store/session id, which only ever widens "refuse" into "ask" — never "refuse" into "allow". See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
+| `internal/hookstate/` | Per-session **hook attempt counters** a `PreToolUse` hook script reads to decide when to stop refusing and ask the user instead: `Store.Attempt(sid,tool,args)` → `(attempt, consecutive)` — an exact-args count (knowable before the hook runs) and a consecutive-blocked count (only knowable after, via `RecordOutcome`); `Forget` on session end. Domain-free — the engine only reports the numbers, a hook script decides what they mean. Process-wide on `Infrastructure.HookState`, **threaded into both the per-squad hooks plugin and every sub-agent's hook callback** so a leader and a sub-agent share ONE counter for the same command rather than counting it twice. Degrades to `(1, 0)` with no store/session id — a hook script's escalation threshold is then never reached, so a refusal stays a refusal **indefinitely** rather than ever escalating to "ask"; it degrades the escalation, never the blocking, so an unwired store can only make a guard MORE conservative, never less. See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `internal/attest/` | Per-session **reviewer verdicts** a `PreToolUse` hook can require before letting an action through: `Store.Record(sid,subject,verdict,reasons)` / `.For(sid)` (30-min TTL) / `Forget`. Deliberately **process memory, not a file** — an agent holding `Write` could author its own on-disk approval, which is why this exists. The `attest` tool group exposes exactly one tool, `record_validation`, and the shipped fleet mounts it on exactly **one** agent (`k8s_validator`, pinned by the whitelist test `TestOnlyTheValidatorCanAttest` — a blacklist of known mutators could not catch a mutating agent added later). Process-wide on `Infrastructure.Attest`. See "Kubernetes squad (change validation)" |
 | `internal/teammates/` | Inter-agent mailbox FSM: `teammate_ask/tell/check/list`. The leader's `teammate_check` is suppressed when the host drains the inbox in the background (see "Background mailbox delivery") |
 | `internal/skills/` | Skill loader: `load_skill`, `list_skills` (reads `registry/skills/<name>/SKILL.md`). `load_skill` is wrapped by a process-wide dependency gate (`SetDepGate`/`RequiresFor`, [internal/skills/deps_gate.go](internal/skills/deps_gate.go)) — see "Tool dependency enforcement" |
@@ -1450,6 +1451,15 @@ necessary but not sufficient:
    never catch a third mutating agent added later (a hypothetical
    `k8s_patcher`) that nobody remembered to exclude; the whitelist enumerates
    the signer set directly instead of inferring it from the actor set.
+   **This test has a precondition it cannot see past**: it reads
+   `registry/agents/*/agent.json` from the repo tree
+   (`shippedAgentNames`/`readShippedAgentJSON`, both `filepath.Join("..",
+   "registry", "agents", …)`), so it guards the *shipped* config only — an
+   operator who adds `"attest"` to `k8s_editor`'s `tools` through the Settings
+   UI (which forks the agent into `$HOME/.omnis/registry/agents/…`) would let
+   that mutating agent sign its own changes, and no test in this repo would
+   ever see it happen. Same class as disabling the validator (below): the
+   guarantee holds against the *model*, not against a determined operator.
 2. **The guard also refuses any mutation whose CALLER is the validator itself**
    (`VALIDATOR_AGENTS = {"k8s_validator"}` in `config/hooks/k8s-validate.py`,
    checked first in `validate()` — before `check_production`, before any
@@ -1460,10 +1470,17 @@ necessary but not sufficient:
    mutation itself, read the change identifier out of the guard's own `deny`
    text ("delegate it with the change identifier `<hash>`"), call
    `record_validation` on that identifier as if it were reviewing someone
-   else's change, and replay the mutation — **silently**, because hooks now run
-   *before* permissions (see "Before-tool chain order" under "Permission
-   nomenclature"), so the first attempt never even reaches a permission card
-   for a human to notice. The check is terminal (`emit("deny", …)`, never
+   else's change, and replay the mutation on the strength of its own verdict —
+   with the failed first attempt no longer visible as a permission card at
+   all, since hooks now run *before* permissions (see "Before-tool chain
+   order" under "Permission nomenclature"). The replay itself still reaches
+   the permission gate and raises a real `ask` card (`config/permissions.json`'s
+   `kubectl … delete …` rule) — this is not a silent bypass of the whole
+   permission layer — but **the guarantee must not depend on a human reading a
+   card correctly**: nothing about that card distinguishes a legitimate
+   editor's request from the validator's own replay, so the only thing that
+   actually closes the hole is refusing the validator as a caller before it
+   ever gets that far. The check is terminal (`emit("deny", …)`, never
    `refuse()`) for the same reason `check_attested` is: letting the reviewer
    ask the user for permission to sign its own work reopens the identical
    hole. It also incidentally closes a second gap: `k8s_cleaner`'s
@@ -1485,30 +1502,34 @@ be clicked through either.
 
 **Parsing rule: prove read-only, or refuse — an inversion, not an oversight.**
 An earlier version of the script tried to *recognise* mutations and let
-everything else past; three review rounds each found a new way to spell one
-that the previous round's fix had not covered (`bash -c "kubectl delete …"`,
-`$(kubectl delete …)`, `ssh host kubectl delete …`, …) — the ways to spell a
-mutation are not enumerable. The read-only commands are, so the rule inverted:
-strip wrappers, split compound commands the same way
+everything else past; several review rounds each found a further way to spell
+one the previous fix had missed (`bash -c "kubectl delete …"`, `$(kubectl
+delete …)`, and more — the design spec records the full sequence). The ways to
+spell a mutation are not enumerable; the read-only commands are, so the rule
+inverted: strip wrappers, split compound commands the same way
 [core/permissions/match_bash.go](core/permissions/match_bash.go)'s
 `splitCompound` does (pinned by a shared-corpus parity test,
 [core/permissions/bash_split_parity_test.go](core/permissions/bash_split_parity_test.go)),
 and classify **each segment independently** so `kubectl get x && kubectl delete
-y` is caught. A segment proceeds only after clearing every one of six checks —
-no command substitution, tokenises cleanly, a bare program name survives
+y` is caught. A segment that never even names kubectl/helm (`names_k8s`) is
+exempt and simply `continue`s; one that does must clear all six checks — no
+command substitution, tokenises cleanly, a bare program name survives
 wrapper-stripping, the head does not execute a string handed to it, the verb
-position is determinable, and the verb is a known read — and **fails closed**
-the instant any one of them cannot be established. A wrapper (`sudo`, `timeout`,
-`xargs`, `flock -w N`, …) is stripped only by an **explicit arity spec**
-(`WRAPPER_SPEC`), never by guessing, because guessing is exactly what once
-denied `timeout 30 kubectl get pods` (the bare operand `30` looked like the
-binary). **Verification is by execution, not by reading a decision table**:
+position is determinable, and the verb is a known read — **failing closed**
+the instant any one cannot be established, with one further exemption: after
+wrapper-stripping, a head that is neither kubectl/helm nor a launcher is
+deliberately SPARED rather than failed (`tool is None` → `continue`), which is
+what lets a command that merely mentions the word (`grep -rn kubectl
+deploy.sh`) proceed instead of being refused for it. A wrapper (`sudo`,
+`timeout`, `xargs`, `flock -w N`, …) is stripped only by an **explicit arity
+spec** (`WRAPPER_SPEC`), never by guessing — guessing once produced a real
+false refusal (see the spec for the case). **Verification is by execution, not
+by reading a decision table**:
 `TestProceedsAreInertUnderBash` ([packaging/k8s_validate_test.go](packaging/k8s_validate_test.go))
 runs every command the guard waves through under a real shell whose only
 reachable binaries are stubs, and fails if a kubectl/helm stub is ever invoked
 with a mutating verb — a decision table cannot see the defect that matters
-most, a command that proceeds and then mutates, and four families of exactly
-that defect were invisible to one during review. `TestGuardOnlyEverPreviews`
+most, a command that proceeds and then mutates. `TestGuardOnlyEverPreviews`
 is the complementary guard on the mutation side: any recorded kubectl/helm
 invocation whose verb is a **mutating** one must contain a `dry-run` marker —
 a safe read (`get`, `diff`, `history`, `plugin list`, …) is exempt from that
@@ -1524,8 +1545,10 @@ plugin that does not exist and hard-block) else `--dry-run=server`;
 `delete`/`helm uninstall`/`helm rollback`/`drain` get **no dry-run** (it proves
 nothing — `delete --dry-run=client` only lists names) and instead a
 blast-radius check: refuse an unbounded delete (`--all` or no named resource),
-resolve the target with `kubectl get -o json`, report `ownerReferences`, and
-for `k8s_cleaner` specifically, require `omnis.dev/ephemeral=true`.
+resolve the target with `kubectl get -o json`, refuse a target that carries
+`ownerReferences` (deleting an owned resource is futile — its controller
+recreates it — so this blocks, it does not merely report), and for
+`k8s_cleaner` specifically, require `omnis.dev/ephemeral=true`.
 
 **The attestation subject binds the change's CONTENT, and the mechanism
 differs by target kind** — one rule cannot bind all three shapes soundly:
@@ -1542,13 +1565,13 @@ A non-local target (`bitnami/nginx`, an OCI ref, a `.tgz` URL, `-f https://…`)
 is **terminally refused** — content that can change server-side is not
 pinnable, and `--version` does not pin it either. The Helm chart operand is
 located **positionally** (the token immediately after a bare, non-flag
-predecessor — never by scanning for "a bare token that resolves to a chart
-dir"), because a content-search rule reads a *flag's value* as the chart: with
-`--post-renderer ./decoy`, the decoy was bound while Helm installed a remote
-chart, so an approval covered content unrelated to the actual change. Every
-content-binding failure is terminal, never an `ask` — "I cannot bind this
-content" is precisely the state where a user's click must not substitute for a
-review.
+predecessor), never by scanning for "a bare token that resolves to a chart
+dir" — a content-search rule can instead read a *flag's value* as the chart,
+silently binding an unrelated local path while Helm installs the real,
+non-local one (reproduced live during implementation; see the design spec for
+the exact case). Every content-binding failure is terminal, never an `ask` —
+"I cannot bind this content" is precisely the state where a user's click must
+not substitute for a review.
 
 **Two traps worth remembering:**
 
@@ -1567,20 +1590,42 @@ review.
 
 **Known limitations (verified against the shipped script, not asserted):**
 
+- **The interpreter starts on EVERY `Bash` call, fleet-wide — not only
+  Kubernetes ones.** `config/hooks.json`'s matcher is `"Bash"` and
+  `Config.Match` ([internal/hooks/hooks.go](internal/hooks/hooks.go)) matches
+  a `PreToolUse` matcher against the **tool name only** (`t.Name()`), never
+  against the command text — there is no way to scope a matcher by argument
+  content. So `coder`, `linux_admin`, `investigator`, and every other agent
+  that ever calls `Bash` pays one Python interpreter startup (~40ms) on a
+  command that has nothing to do with Kubernetes, before the script's own
+  fast-path ("does this text mention kubectl or helm") exits. Accepted;
+  revisit if it shows up in latency measurements. (Distinct from the
+  `fail_closed` **outage** case elsewhere in this section — this is the
+  routine, always-paid tax, not the missing-script failure mode.)
 - A heredoc body under a non-kubectl head (`cat > f.sh <<'SH'` … `kubectl
   delete …` … `SH`) is refused (`TestHeredocBodyIsRefusedKnownLimitation`) —
-  friction, not a leak, but the segment is not specially recognised as a
-  heredoc.
+  friction, not a leak, since the newline inside the heredoc is split like any
+  other compound-command separator and the inner line reaches
+  `validate_destructive` directly. But the diagnostic the agent gets back is
+  actively wrong, not merely unhelpful: it reads as if a real deletion failed
+  to validate, when the command in front of the agent is just a `cat > file`
+  writing text that happens to contain the words "kubectl delete" — the guard
+  cannot tell "this line will run" from "this line is a string being written
+  to a file". The test's own comment records this deliberately, so the wrong
+  framing is on the record rather than presumed harmless.
 - `git -c alias.x='!cmd'` bypasses the guard — and it is one instance of a
   broader, structural residual, not a special case: `is_launcher` enumerates
   known launchers (`bash`, `sh`, `ssh`, `docker`, `awk`, `sed`, `watch`, …)
   rather than known-safe commands (the inverse list put `awk`/`sed`/`git` on
   it and all three execute their arguments), so **any unlisted program that
   execs its own argv directly reaches this hole with no obfuscation needed at
-  all** — `setsid kubectl delete pod x` is shape-identical to `echo kubectl
-  delete pod x` from argv alone, and the guard cannot tell them apart. Listing
-  `git` itself as a launcher was rejected because it would refuse `git commit
-  -m "…kubectl…"` on every coder turn.
+  all** — `setsid` was exactly this case before it was added to
+  `WRAPPER_SPEC`: an unlisted `setsid kubectl delete pod x` was shape-identical
+  to `echo kubectl delete pod x` from argv alone, and the guard could not tell
+  them apart. It is now a known wrapper (stripped, classified, and validated
+  like any other), but the residual is the same shape for whatever binary is
+  not yet on either list. Listing `git` itself as a launcher was rejected
+  because it would refuse `git commit -m "…kubectl…"` on every coder turn.
 - `watch -n 2 kubectl get pods`, `kubectl auth whoami`, and `kubectl cp` are
   each refused today, pending one set entry apiece (`watch` execs its argv
   through `sh` so it is classed as a launcher rather than a wrapper; `auth`'s
@@ -1630,6 +1675,16 @@ review.
   hooks" above) — it is preserved on save (the form mutates objects in place)
   but invisible, so a user editing this hook cannot currently see, from the
   UI, why it blocks.
+- **Attestations survive a hot-reload (they live on `Infrastructure`) but are
+  lost on a full process restart** — a change validated before a restart must
+  be re-validated afterward. The correct fail-closed direction, but worth
+  knowing if a restart happens mid-review.
+- **GitOps ownership is detection-only.** `k8s_validator`'s instruction
+  (`registry/agents/k8s_validator/instruction.md`) has it read Flux/Argo
+  ownership labels (`kustomize.toolkit.fluxcd.io/*`,
+  `argocd.argoproj.io/instance`, …) and flag drift risk, but nothing writes
+  back to Git — recommending a source-controlled change instead stays
+  advisory, same as the pre-existing k8s-modification skill's guidance.
 
 **Testing**: the genuinely safety-critical part is
 [packaging/k8s_validate_test.go](packaging/k8s_validate_test.go) — a table-driven
@@ -2343,8 +2398,10 @@ predates this work. Budget stays last, unchanged, so a call a hook or the user
 refuses is still never charged. **This does NOT revive `hookSpecificOutput.
 permissionDecision: "allow"`** — that value is still dead code: nothing in
 `agent/` consumes `hooks.DecisionAllow` (`hookToolCallbacks` returns non-nil
-only on `out.Blocked()`, and a `nil` return means "proceed", which the
-permission gate has no way to read as "skip me"). Honouring `"allow"` would
+only on `out.Blocked()`, or on `out.Asks()` when the user declines the
+escalation, and a `nil` return — proceed, or an `Asks()` the user approved —
+is not a signal the permission gate has any way to read as "skip me").
+Honouring `"allow"` would
 need the hook callback to also tell the gate to skip — e.g. by seeding its
 approval cache — which nothing does. The reorder is a *precondition* for that
 feature, not the feature itself; it stays a known remaining gap. A validation
