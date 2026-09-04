@@ -222,13 +222,25 @@ jobs:
           Copy-Item "$ex\omnis.exe","$ex\omnis-server.exe" "$stage\install\"
           Copy-Item "$ex\web\*" "$stage\install\web\" -Recurse
           # System config layer -> ProgramData\Omnis (flatten config\, keep filters\ + hooks\ + registry\)
-          Copy-Item "$ex\config\*.json" "$stage\data\"
+          #
+          # hooks.json is DELIBERATELY EXCLUDED from the *.json copy below. Its
+          # PreToolUse command is POSIX shell (`${VAR:-default}` parameter
+          # expansion, a python3 invocation meant for /bin/sh); the Bash tool's
+          # own commands run via `cmd.exe /C` on native Windows (see the NOTE in
+          # core/tools/bash_windows.go), which does not understand that syntax
+          # and would pass it through literally. python3 would then fail to
+          # open a file whose name is the literal, unexpanded token and exit
+          # non-zero, which internal/hooks/run.go maps straight to
+          # DecisionBlock BEFORE any fail_closed branch runs — every Bash call,
+          # every squad, would be refused on every Windows install. A guarantee
+          # this packaging cannot deliver on this platform must be absent, not
+          # half-working; see packaging/README.md.
+          Get-ChildItem "$ex\config\*.json" -Exclude "hooks.json" | Copy-Item -Destination "$stage\data\"
           Copy-Item "$ex\config\server.yaml" "$stage\data\"
           Copy-Item "$ex\config\filters" "$stage\data\filters" -Recurse
-          # The k8s-validate hook script: config\hooks.json (already copied by
-          # the *.json glob above) points at it via OMNIS_SYSTEM_CONFIG_DIR, so
-          # omitting this copy would ship a fail_closed guard whose script is
-          # missing — a silent, total Bash block on every Windows install.
+          # The hook SCRIPT still ships (harmless on its own, and useful to a
+          # WSL/Git-Bash host that wires its own POSIX-shell hooks.json), even
+          # though the declaration above does not.
           Copy-Item "$ex\config\hooks" "$stage\data\hooks" -Recurse
           Copy-Item "$ex\registry" "$stage\data\registry" -Recurse
           "STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append

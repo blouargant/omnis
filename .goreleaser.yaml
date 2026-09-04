@@ -83,6 +83,15 @@ archives:
         dst: config/server.yaml
       - src: config/filters/*.json
         dst: config/filters
+      # The k8s-validate hook script — not caught by config/*.json above (it's
+      # not JSON, and it lives one directory deeper). Its absence from this
+      # list was a real bug: the Windows MSI pipeline stages from THIS archive
+      # (see the "msi" job in .github/workflows/release.yml), so without this
+      # entry that job's `Copy-Item "$ex\config\hooks" ...` had no source
+      # directory to copy at all — verified by building this archive locally
+      # and inspecting it (`unzip -l`) before this line was added.
+      - src: config/hooks/k8s-validate.py
+        dst: config/hooks/k8s-validate.py
       - src: registry/skills
         dst: registry/skills
       - src: registry/agents
@@ -118,6 +127,19 @@ nfpms:
     priority: optional
     rpm:
       group: Applications/System
+
+    # python3 runs the shipped k8s-validate PreToolUse hook
+    # (config/hooks/k8s-validate.py, invoked by hooks.json's command). Without
+    # it declared here, an install missing python3 would have EVERY Bash call
+    # blocked fleet-wide the instant hooks.json is present: the hook's own
+    # fast path (a cheap "does this mention kubectl/helm" substring check)
+    # cannot run at all if the interpreter itself never starts — exit 127,
+    # which internal/hooks maps to fail_closed's block. Declaring it here
+    # makes apt/dnf install it as part of `omnis`, the same as any other
+    # library dependency, rather than leaving it as an undocumented
+    # precondition a package manager could otherwise silently violate.
+    dependencies:
+      - python3
 
     contents:
       # Editable configuration (preserved on upgrade).
@@ -222,12 +244,20 @@ nfpms:
         dst: /usr/share/doc/omnis/docs
         type: tree
 
+    # nfpms' per-format `overrides.<format>.dependencies` REPLACES the
+    # top-level `dependencies:` above rather than merging with it — an empty
+    # list here would silently make BOTH deb and rpm ship with no declared
+    # dependency at all, defeating the python3 requirement just added.
+    # python3 is the correct package name on both apt and dnf/yum for every
+    # currently-supported distro release, so both overrides restate it.
     overrides:
       rpm:
-        dependencies: []
+        dependencies:
+          - python3
         recommends: []
       deb:
-        dependencies: []
+        dependencies:
+          - python3
         recommends: []
 
 brews:
@@ -245,6 +275,11 @@ brews:
     homepage: "https://github.com/blouargant/omnis"
     description: "Multi-agent harness: CLI/TUI (omnis) + HTTP API & Web UI server (omnis-server)"
     license: "MIT"
+    # python3 runs the shipped k8s-validate PreToolUse hook — see the matching
+    # nfpms `dependencies:` comment above for why an absent interpreter is a
+    # fleet-wide Bash block, not just a missing feature.
+    dependencies:
+      - name: python@3
     # Never publish a formula from rc/beta pre-release tags.
     skip_upload: auto
     install: |

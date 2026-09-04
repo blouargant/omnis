@@ -31,6 +31,23 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
 /usr/share/doc/omnis/           LICENSE + README.md
 ```
 
+**Runtime dependency: `python3`.** The shipped `hooks.json` declares a
+`fail_closed` PreToolUse hook (`hooks/k8s-validate.py`) whose `command` is a
+`python3` invocation. Because `internal/hooks`' engine maps `fail_closed` +
+any non-zero exit (including "interpreter not found", exit 127) to an
+unconditional block, an install with `hooks.json` present but no `python3` on
+`PATH` would refuse **every** `Bash` call in every squad, silently and
+fleet-wide — the guard's own cheap fast path cannot even run without the
+interpreter starting first. So `python3` is declared as a real package
+dependency, not left as an undocumented precondition:
+- **deb/rpm**: `dependencies: [python3]` in the nfpms block — `apt`/`dnf`
+  install it automatically as part of `omnis`.
+- **Homebrew**: `depends_on "python@3"` in the `brews:` block.
+- **pip (`omnis-agent`)**: implicit — the distribution IS a Python package,
+  so `pip`/`pipx` already guarantee an interpreter is present.
+- **Windows MSI**: moot — see the Windows section below, `hooks.json` is not
+  shipped/declared on that channel at all.
+
 Windows is built. The Unix-only process-group syscalls (`Setpgid`, `Kill`)
 that used to block it now live behind build tags in
 [core/tools/bash_unix.go](../core/tools/bash_unix.go); the Windows binary
@@ -119,10 +136,13 @@ static UI read-only, config under the system data dir):
 C:\Program Files\Omnis\omnis.exe          CLI / REPL binary
 C:\Program Files\Omnis\omnis-server.exe   HTTP API + Web UI binary
 C:\Program Files\Omnis\web\              static Web UI assets
-C:\ProgramData\Omnis\*.json             bundled config defaults (agents.json, …)
+C:\ProgramData\Omnis\*.json             bundled config defaults (agents.json, …) —
+                                         EXCEPT hooks.json, see the caveat below
 C:\ProgramData\Omnis\server.yaml        server listen address, token, A2A settings
 C:\ProgramData\Omnis\filters\           bash output filter patterns
-C:\ProgramData\Omnis\hooks\              the k8s-validate hook script
+C:\ProgramData\Omnis\hooks\             the k8s-validate hook SCRIPT only — no
+                                         hooks.json ships here, so it is inert
+                                         by default (see the caveat below)
 C:\ProgramData\Omnis\registry\          bundled agents + skills
 ```
 
@@ -148,6 +168,25 @@ upgrade — same model as the Homebrew `share/omnis` tree above.
 >   a WiX `ServiceInstall` is the natural next step.
 > - **Bash tool** runs under `cmd.exe` on native Windows (see the build-tag
 >   note above) — run under WSL for full POSIX-shell semantics.
+> - **The k8s-validate guard (`hooks.json`) is POSIX-only and is deliberately
+>   NOT declared on this channel.** Its shipped `command` uses POSIX parameter
+>   expansion (`${OMNIS_SYSTEM_CONFIG_DIR:-/etc/omnis}`) and invokes a script
+>   whose parser (`shlex`, a shell-command splitter parity-tested against
+>   `core/permissions/match_bash.go`) assumes POSIX-shell semantics throughout
+>   — both are unsound against a `cmd.exe` command string, in both directions
+>   (false refusals and false proceeds). Worse, `cmd.exe` does not expand
+>   `${VAR:-default}` at all and passes it through literally, so `python3`
+>   fails to open a file by that literal name and exits non-zero — which
+>   `internal/hooks`' engine maps straight to a block **before any
+>   `fail_closed` branch runs**, so every `Bash` call in every squad would be
+>   refused fleet-wide, unconditionally. The MSI staging step
+>   (`.github/workflows/release.yml`, `msi` job) therefore copies
+>   `hooks\k8s-validate.py` but explicitly excludes `hooks.json` from the
+>   config it stages, so the guard's script is present but its declaration is
+>   absent — the guard is silent, not broken, on a fresh MSI install. A host
+>   running Bash under WSL or Git-Bash (full POSIX semantics) can still use it
+>   by hand-authoring `%USERPROFILE%\.omnis\hooks.json` pointing at the staged
+>   script.
 > - **Code signing**: the MSI is unsigned, so SmartScreen will warn. An
 >   Authenticode certificate + `signtool` removes the warning (not wired up).
 
