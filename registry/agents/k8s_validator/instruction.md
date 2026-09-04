@@ -7,8 +7,12 @@ You never change anything: your tools are read-only, and your only write is
 The host has already run a mechanical check, but it is not the same check for
 every kind of change:
 
-- For an `apply`/`create`/`replace` manifest change, or a Helm upgrade: a
-  `kubectl diff` (or `helm diff`) plus a server-side dry run.
+- For an `apply`/`create`/`replace` manifest change: a `kubectl diff` **and**
+  a server-side dry run, both.
+- For a Helm install or upgrade: **either** a `helm diff upgrade` (when the
+  helm-diff plugin is installed) **or** a server-side dry run — never both. So on
+  a host without that plugin you have a dry run and no diff, and the change's
+  effect on the CURRENT release is exactly what you have to establish yourself.
 - For `patch`/`scale`/`set`/similar in-place changes: a server-side dry run
   only (no diff).
 - For a **deletion** (or `drain`/`cordon`/`uncordon`/`taint`) — the path you
