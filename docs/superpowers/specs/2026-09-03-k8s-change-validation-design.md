@@ -225,9 +225,23 @@ order.
 
 **We do not use `allow` at all.** A green validation returns `Proceed`, so
 the permission card still appears: removing the user's confirmation on a cluster
-mutation is not acceptable. Instead the card gets *better* — the hook returns the diff
-via `systemMessage`, which is surfaced to the user. Today they approve
-`kubectl apply -f x.yaml` blind; after this they approve it with the diff in hand.
+mutation is not acceptable.
+
+**Claim withdrawn after Task 12 — the card does NOT get the diff, and nothing here
+made it.** This section held that the hook "returns the diff via `systemMessage`,
+which is surfaced to the user", so a user would approve `kubectl apply` with the diff
+in hand instead of blind. The first half is true and the second is not. The guard does
+compute the preview and return it (`build_proceed_note`), and `internal/hooks` does
+carry it as `Outcome.SystemMessage` — whose own comment reads "surfaced to the user".
+But **nothing in `agent/`, `core/permissions/` or `server/` ever reads that field**
+(verified by grep; the only hits outside `internal/hooks` are its own tests). On the
+Proceed path `hookToolCallbacks` returns `nil`, and a nil return carries no payload,
+so the diff is computed and silently discarded. The user still approves blind.
+
+Surfacing it needs cross-layer wiring that this design never specified — the hook's
+message has to reach either the permission prompt's reason or the tool result — so it
+is a follow-up (§13), not a thing this work delivers. The chain reorder remains
+justified on its own: it stops the double-ask that trains reflexive approval.
 
 The budget stays **last**, unchanged, so a call refused by a hook or by the user is
 still not charged.
@@ -557,8 +571,11 @@ Three things this turned out to require, each of which shipped broken at least o
 
 **`CLAUDE.md`** per its own self-maintenance rule: a new agent, a new tool group, a new
 config file (`hooks.json`), hooks-engine changes, and a before-tool chain order change all
-require updates. **`internal/features/FEATURES.md`** gets a bullet — this is user-facing:
-the permission card now carries the diff.
+require updates. **`internal/features/FEATURES.md`** gets a bullet — this is user-facing, but **not**
+"the permission card now carries the diff", which an earlier draft of this section
+claimed and §5.7 now withdraws. What a user actually gets is that a Kubernetes change
+is independently reviewed and dry-run before it can touch the cluster, and that an
+unvalidated one is refused.
 
 ## 13. Known limitations and follow-ups
 
@@ -582,6 +599,13 @@ the permission card now carries the diff.
   operator — which is the correct boundary, but worth stating.
 - **Attestations are lost on process restart** (not on hot-reload). A change validated
   before a restart must be re-validated — the correct direction, but worth knowing.
+- **The diff is computed and thrown away** (§5.7). `Outcome.SystemMessage` is populated
+  and its comment says "surfaced to the user", but no consumer reads it, so a validated
+  change's preview never reaches the permission card or the transcript. Follow-up:
+  thread it into the permission prompt's reason (or append it to the tool result, as
+  the coding-efficiency plugin does for edit-fused diagnostics). Found by Task 12 while
+  documenting the feature — the documentation pass is what caught a claim the code did
+  not honour.
 - **Parked parser residuals** (§7.3), each refusing safely rather than leaking:
   a heredoc body under a non-kubectl head is refused (structural, shared with
   `splitCompound`); `git -c alias.x='!cmd'` bypasses the guard, because listing `git`
