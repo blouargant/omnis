@@ -247,10 +247,43 @@ it is the kind of hole that looks like it works in testing.
 input (§5.4). Process memory is unreachable from `Write`, and the tool is not mounted on
 the mutating agents, so the verdict cannot be forged.
 
-**Subject hash.** The same value both sides compute independently: canonicalised
-manifest content plus normalised argv. Because it binds the *content*, having v1
-validated and then applying v2 is refused automatically — one cannot get a verdict on
-one manifest and apply another.
+**Subject hash.** A digest of the change's **content** plus its argv. Because it binds
+the content, having v1 validated and then applying v2 is refused automatically — one
+cannot get a verdict on one manifest and apply another.
+
+Two corrections to what this section originally said, both learned in implementation:
+
+*Only the hook computes the subject.* The idea that "both sides compute it
+independently" is wrong and was never built: the hook computes the subject, names it in
+its refusal ("delegate it with the change identifier `<hash>`"), and the validator
+echoes that value back through `record_validation`. Independent computation would need
+the agent to reproduce the digest byte-for-byte, which buys nothing and adds a second
+place to get it wrong.
+
+*The mechanism differs by target kind, because one rule cannot bind all three.* This
+took several attempts, and the failures are the useful part:
+
+| Target | Digest | Why not something simpler |
+|---|---|---|
+| `-f <file>` | the file's bytes | — |
+| `-f <dir>` of plain manifests | a walk (name, type, bytes per entry) | manifests reference no other files, so a walk is complete |
+| `-k <dir>` (kustomize) | **`kubectl kustomize` render** | a walk is UNSOUND: `resources: - ../../base` escapes the target, and `os.walk` does not follow directory symlinks. Enumerating a kustomization's reference graph (`resources`/`bases`/`components`/`patches`, each recursive) is unbounded; rendering is bounded and binds exactly what is applied |
+| helm chart | a **walk of the chart directory** + each `-f`/`--values` file's bytes | `helm template` is UNSOUND here: it omits `crds/` (which `helm install` applies), renders with `.Release.IsInstall=true`, stubs `lookup`, and yields `sha256("")` for an all-disabled chart. It also forces reconstructing a `helm template` argv, which needs Helm's flag-arity table — unbounded. A walk needs none of that: a chart never references files outside itself, because `dependencies` land in `charts/` **inside** it |
+| `--set k=v` | already bound, via argv | it is literally in the command line |
+| non-local (`bitnami/nginx`, OCI, a `.tgz` URL, `-f https://…`) | **terminal refusal** | content that can change server-side is not pinnable; `--version` does not pin it either |
+
+*The chart operand is located positionally, never by content search.* A scan for "a bare
+token that is a chart directory" reads a **flag's value** as the chart: with
+`--post-renderer ./decoy`, the decoy was bound while Helm installed a remote chart, so an
+approval covered content that had nothing to do with the change. The rule is therefore to
+skip every token following any `-`-prefixed token and require **exactly one** candidate —
+zero or several is a terminal refusal. This costs friction on `helm upgrade myrel --atomic
+./chart` (a flag before the chart), taken deliberately: guessing an operand's position is
+how each of these bypasses was built, and re-ordering a flag is a trivial fix.
+
+*Every content-binding failure is terminal, never an `ask`.* "I cannot bind this content"
+is precisely the state where a user's click must not substitute for a review — the same
+reasoning as §7.6.
 
 **Freshness.** Session-scoped with a TTL, dropped by `Forget(session)`. It survives a
 hot-reload (the store is on `Infrastructure`) and is lost on a process restart, in which
@@ -500,6 +533,27 @@ engineered for it.
 formula, `packaging/windows/omnis.wxs`, and the wheel's `sysconf/` package data in
 `scripts/build_wheels.py`. §5.5 makes an omission fail closed; §10 makes it fail the
 build.
+
+Three things this turned out to require, each of which shipped broken at least once:
+
+- **The script is executable code, not configuration.** `hooks.json` installs as
+  `config|noreplace` (an operator edits it); the script installs at **mode 0755 and
+  deliberately NOT `noreplace`**, so a later fix to the guard actually reaches an
+  installed machine instead of freezing at whatever version was installed first.
+- **`python3` is a runtime dependency of the package**, declared in the nfpms
+  `dependencies:` (and restated in both format overrides, which *replace* rather than
+  merge) and as `depends_on "python@3"` for Homebrew. Without it the hook cannot run,
+  and §5.5's fail-closed then blocks **every** `Bash` call — not just Kubernetes ones.
+- **The guard is POSIX-only, so no Windows channel ships `hooks.json`** — not the MSI,
+  not the `win_amd64`/`win_arm64` wheels. Its command is POSIX shell and native Windows
+  runs hook commands through `cmd.exe`, which passes `${VAR:-default}` through literally;
+  the failed interpreter exits non-zero and `internal/hooks` blocks every `Bash` call.
+  Making the command portable would be worse than absent: the parser mirrors bash
+  (`segments` is parity-tested against `splitCompound`, `LAUNCHERS` is a POSIX shell
+  list, quoting is `shlex`), so against a `cmd.exe` command line it is unsound in both
+  directions. The *script* still ships, so a WSL or Git-Bash host can point its own
+  `hooks.json` at it. This follows `core/tools/bash_windows.go`'s existing note rather
+  than inventing a platform policy.
 
 **`CLAUDE.md`** per its own self-maintenance rule: a new agent, a new tool group, a new
 config file (`hooks.json`), hooks-engine changes, and a before-tool chain order change all
