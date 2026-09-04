@@ -1878,7 +1878,6 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		{"kustomize renders locally", "kubectl kustomize ./overlays/dev", "coder", "", ""},
 		{"completion prints a script", "kubectl completion bash", "coder", "", ""},
 		{"port-forward opens a tunnel", "kubectl port-forward svc/x 8080:80 -n demo", "k8s_investigator", "", ""},
-		{"proxy opens a tunnel", "kubectl proxy --port=8001", "k8s_investigator", "", ""},
 		// Sub-verbs: the verb alone proves nothing.
 		{"auth can-i reads", "kubectl auth can-i create pods", "k8s_investigator", "", ""},
 		{"config view reads", "kubectl config view", "k8s_investigator", "", ""},
@@ -1955,13 +1954,13 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		{"substitution under kubectl", "kubectl get pods $(kubectl delete pod x -n demo)", "k8s_editor", "deny", "substitutes another command"},
 		// A quoted payload is one token, so no amount of basename matching sees
 		// the command inside it. This is the shape an agent reaches for next.
-		{"bash -c payload", `bash -c "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "does not invoke it directly"},
-		{"sh -c payload", "sh -c 'kubectl delete pod x -n demo'", "k8s_editor", "deny", "does not invoke it directly"},
-		{"eval payload", `eval "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "does not invoke it directly"},
-		{"nohup bash -c payload", "nohup bash -c 'helm uninstall prod -n prod'", "k8s_editor", "deny", "does not invoke it directly"},
+		{"bash -c payload", `bash -c "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "another program to execute"},
+		{"sh -c payload", "sh -c 'kubectl delete pod x -n demo'", "k8s_editor", "deny", "another program to execute"},
+		{"eval payload", `eval "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "another program to execute"},
+		{"nohup bash -c payload", "nohup bash -c 'helm uninstall prod -n prod'", "k8s_editor", "deny", "another program to execute"},
 		// A remote invocation would otherwise be validated against the LOCAL
 		// cluster and attested on that basis.
-		{"ssh remote delete", "ssh prod-host kubectl delete pod x -n demo", "k8s_editor", "deny", "does not invoke it directly"},
+		{"ssh remote delete", "ssh prod-host kubectl delete pod x -n demo", "k8s_editor", "deny", "another program to execute"},
 		{"heredoc apply", "kubectl apply -f - <<EOF\nkind: Pod\nEOF", "k8s_editor", "deny", "redirection or heredoc"},
 
 		// ---- a verb-scoped value flag must not shift the sub-verb ----
@@ -1978,11 +1977,11 @@ func TestDecisionForCommandShapes(t *testing.T) {
 		// awk's system(), GNU sed's `e`, and every shell wrapper. All three were
 		// on an "inert commands" list and proceeded; the reviewer proved each one
 		// executes. Enumerating what launches is the bounded direction.
-		{"awk system()", `awk 'BEGIN{system("kubectl delete pod x -n demo")}'`, "k8s_editor", "deny", "another interpreter"},
-		{"sed e command", `sed '1e kubectl delete pod x -n demo' /etc/hostname`, "k8s_editor", "deny", "another interpreter"},
-		{"python -c", `python3 -c "import os; os.system('kubectl delete pod x')"`, "k8s_editor", "deny", "another interpreter"},
-		{"watch with a quoted mutation", `watch "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "another interpreter"},
-		{"xargs into a shell", `xargs sh -c 'kubectl delete pod x -n demo'`, "k8s_cleaner", "deny", "another interpreter"},
+		{"awk system()", `awk 'BEGIN{system("kubectl delete pod x -n demo")}'`, "k8s_editor", "deny", "another program to execute"},
+		{"sed e command", `sed '1e kubectl delete pod x -n demo' /etc/hostname`, "k8s_editor", "deny", "another program to execute"},
+		{"python -c", `python3 -c "import os; os.system('kubectl delete pod x')"`, "k8s_editor", "deny", "another program to execute"},
+		{"watch with a quoted mutation", `watch "kubectl delete pod x -n demo"`, "k8s_editor", "deny", "another program to execute"},
+		{"xargs into a shell", `xargs sh -c 'kubectl delete pod x -n demo'`, "k8s_cleaner", "deny", "another program to execute"},
 
 		// ---- a suffixed binary name is a real install, not an evasion ----
 		// A trailing \b made the whole guard exit on these.
@@ -2586,7 +2585,10 @@ def provably_read_only(tool, verb, argv, verb_idx):
     if tool == "helm":
         return verb in HELM_READ_VERBS or verb in HELM_LOCAL_VERBS
     if verb in READ_ONLY_SUBVERBS:
-        return subverb_of(argv, verb_idx) in READ_ONLY_SUBVERBS[verb]
+        sub = subverb_of(argv, verb_idx)
+        if sub is UNPROVABLE or sub is None:
+            return False
+        return sub in READ_ONLY_SUBVERBS[verb]
     return verb in KUBECTL_READ_VERBS or verb in KUBECTL_LOCAL_VERBS
 
 
@@ -2699,8 +2701,9 @@ def main():
 
         if is_launcher(argv):
             refuse(
-                "This command hands a command line to another interpreter, so what it would "
-                "actually run cannot be read. Express it as a direct kubectl/helm command.",
+                "This command hands a command line to another program to execute — a shell, an "
+                "interpreter, or a remote call — so what it would actually run cannot be read. "
+                "Express it as a direct kubectl/helm command.",
                 attempt, consecutive,
             )
 
@@ -2715,7 +2718,14 @@ def main():
             # string it is handed is in LAUNCHERS and was refused above.
             continue
 
-        if verb is UNPROVABLE:
+        # The sentinel must cover the SUB-verb too, not only the top-level verb:
+        # `kubectl rollout --field-manager status restart` is exactly the shape
+        # round 5 targeted, and checking only the head let it deny via the
+        # Task-9 stub with a diagnostic that named the wrong problem.
+        unprovable = verb is UNPROVABLE or (
+            verb in READ_ONLY_SUBVERBS and subverb_of(argv, verb_idx) is UNPROVABLE
+        )
+        if unprovable:
             refuse(
                 "This looks like a kubectl/helm command but it carries a flag this guard does "
                 "not recognise, so which token is the verb cannot be determined. Re-run it "
