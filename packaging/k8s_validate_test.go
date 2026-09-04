@@ -1086,9 +1086,19 @@ case "$*" in
     echo "NAME VERSION DESCRIPTION"
     `+pluginLine+`
     exit 0 ;;
-  "diff upgrade myrel ./chart -n demo") exit 7 ;;
+  *"diff upgrade"*) exit 7 ;;
   *) exit 0 ;;
 esac`)
+			// I1 (review round 3): content-binding now walks the chart
+			// DIRECTORY (see helm_content_digest), which must resolve to a
+			// real Chart.yaml — "./chart" was only ever a placeholder string
+			// for the stub, never a real directory, so it would now
+			// terminally refuse "not a local directory" before ever
+			// reaching check_attested. A real chart is required for this
+			// test to exercise what it is actually about (which preview
+			// command validate_helm chose), matched by the stub via a
+			// wildcard since the real path is a dynamic temp dir.
+			chart := writeChart(t)
 			// A mechanically-clean change now also needs an APPROVED
 			// attestation to PROCEED. Only the "no plugins installed" case
 			// reaches that far — "diff plugin installed" already denies
@@ -1097,7 +1107,7 @@ esac`)
 			// reviewed" deny) would fail there for the wrong reason; the
 			// mechanical deny alone already gives that branch its correct
 			// `usedDiffCmd == true` signal.
-			in := bashInput("helm upgrade myrel ./chart -n demo", "k8s_editor")
+			in := bashInput("helm upgrade myrel "+chart+" -n demo", "k8s_editor")
 			if !tc.pluginListed {
 				in["attestations"] = approveOneSegment(t, in, dir)
 			}
@@ -1790,27 +1800,13 @@ print("truncated" in note)
 	}
 }
 
-// --- I1 (review round 2): Helm chart/values content binding ---
-
-// helmAwareStub is a helm stub whose "template" subcommand delegates to the
-// REAL helm binary (rendering is local and network-free, just like
-// kustomize — see kustomizeAwareKubectlStub's doc comment for why this is
-// safe and necessary to see the actual bug these tests pin) while every
-// OTHER invocation ("plugin list", "diff upgrade", "--dry-run=server", …)
-// follows `mechanicalBody`.
-func helmAwareStub(t *testing.T, mechanicalBody string) string {
-	t.Helper()
-	real, err := exec.LookPath("helm")
-	if err != nil {
-		t.Skip("helm not available")
-	}
-	dir := t.TempDir()
-	body := "#!/bin/sh\nif [ \"$1\" = \"template\" ]; then\n  exec " + real + " \"$@\"\nfi\n" + mechanicalBody + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "helm"), []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	return dir
-}
+// --- I1 (review round 3): Helm chart/values content binding, via a WALK
+// of the chart directory rather than a `helm template` render (round 2's
+// design, retired — see helm_content_digest's own docstring for why). No
+// real helm binary is needed for these tests any more: content-binding no
+// longer shells out to helm at all, only validate_helm's OWN mechanical
+// diff/dry-run does, which the plain stubBin(t, "helm", …) below already
+// covers.
 
 // No diff plugin listed, so validate_helm falls to its --dry-run=server
 // path, which this body accepts unconditionally.
@@ -1848,7 +1844,7 @@ func writeChart(t *testing.T) string {
 // discipline throughout this file: one fixed command string, one
 // attestations map, only the chart's on-disk bytes change between runs.
 func TestHelmChartDirectoryContentBinds(t *testing.T) {
-	dir := helmAwareStub(t, helmMechanicalBody)
+	dir := stubBin(t, "helm", helmMechanicalBody)
 	chart := writeChart(t)
 	values := filepath.Join(t.TempDir(), "values.yaml")
 	if err := os.WriteFile(values, []byte("replicas: 1\n"), 0o644); err != nil {
@@ -1896,7 +1892,7 @@ func TestHelmChartDirectoryContentBinds(t *testing.T) {
 func TestHelmValuesFlagSynonymsBothContentBind(t *testing.T) {
 	for _, flag := range []string{"-f", "--values"} {
 		t.Run(flag, func(t *testing.T) {
-			dir := helmAwareStub(t, helmMechanicalBody)
+			dir := stubBin(t, "helm", helmMechanicalBody)
 			chart := writeChart(t)
 			values := filepath.Join(t.TempDir(), "values.yaml")
 			if err := os.WriteFile(values, []byte("replicas: 1\n"), 0o644); err != nil {
@@ -1992,5 +1988,196 @@ func TestUnreadableManifestTargetIsRefusedNotATraceback(t *testing.T) {
 	}
 	if !strings.Contains(reasonOf(t, out), "could not be read") {
 		t.Fatalf("reason = %q, want it to explain the target could not be read", reasonOf(t, out))
+	}
+}
+
+// --- I1 (review round 3): the render was retired; cover the canonical
+// shapes whose absence from earlier coverage let the flag-table version
+// ship in the first place ---
+
+// THE critical proof: every canonical helm upgrade/install flag must reach
+// a change identifier ("has not been reviewed"), never a flag refusal. The
+// retired `helm template`-replay design terminally denied each of these —
+// none of --install/--set/--wait/--atomic/--timeout/--version/
+// --create-namespace/--generate-name is in any kubectl-oriented flag set —
+// even though a bare `helm upgrade myrel <chart>` was fine, making
+// `helm upgrade --install` (the canonical idiom) and `--set` (the single
+// most common override) both unusable.
+func TestHelmCanonicalFlagsReachAChangeIdentifier(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	chart := writeChart(t)
+	for _, tc := range []struct{ name, command string }{
+		{"--install", "helm upgrade myrel " + chart + " --install -n demo"},
+		{"--set", "helm upgrade myrel " + chart + " --set replicas=2 -n demo"},
+		{"--atomic", "helm upgrade myrel " + chart + " --atomic -n demo"},
+		{"--wait", "helm upgrade myrel " + chart + " --wait -n demo"},
+		{"--timeout", "helm upgrade myrel " + chart + " --timeout 5m -n demo"},
+		{"--version", "helm upgrade myrel " + chart + " --version 1.2.3 -n demo"},
+		{"--create-namespace", "helm upgrade myrel " + chart + " --install --create-namespace -n demo"},
+		{"--generate-name", "helm install " + chart + " --generate-name -n demo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _ := runHook(t, bashInput(tc.command, "k8s_editor"), dir)
+			if got := decisionOf(t, out); got != "deny" {
+				t.Fatalf("expected an unattested run to deny, got %q: %s", got, out)
+			}
+			if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+				t.Fatalf("%s: expected a change identifier (\"has not been reviewed\"), "+
+					"got a DIFFERENT refusal — a flag-table version would deny here instead: %q",
+					tc.name, reasonOf(t, out))
+			}
+		})
+	}
+}
+
+// Helm stores a chart's dependencies INSIDE the chart directory (charts/) —
+// unlike a kustomization's `resources: [../../base]`, nothing in a chart
+// references outside itself, which is exactly why a walk suffices here and
+// never did for kustomize. crds/ is part of that same walk: `helm template`
+// (the retired design) excludes crds/ unless --include-crds, while a real
+// install/upgrade applies them — reproduced live before this fix (see the
+// commit message) by rewriting a CRD's own scope with the render-based
+// subject left UNCHANGED. Same discipline as every other content-binding
+// test: one fixed command, one attestation, only the CRD's bytes change.
+func TestHelmChartCRDsContentBind(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	chart := writeChart(t)
+	crd := filepath.Join(chart, "crds", "crd.yaml")
+	if err := os.MkdirAll(filepath.Dir(crd), 0o755); err != nil {
+		t.Fatalf("mkdir crds: %v", err)
+	}
+	write := func(scope string) {
+		t.Helper()
+		body := "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+			"metadata:\n  name: widgets.example.com\nspec:\n  scope: " + scope + "\n"
+		if err := os.WriteFile(crd, []byte(body), 0o644); err != nil {
+			t.Fatalf("write crd: %v", err)
+		}
+	}
+	write("Cluster")
+
+	in := bashInput("helm upgrade myrel "+chart+" -n demo", "k8s_editor")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out1, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out1); got == "deny" || got == "ask" {
+		t.Fatalf("the chart, attested for its own content, was not allowed to proceed: %q", out1)
+	}
+
+	// Vary exactly ONE thing: the CRD's scope — a file `helm template`
+	// would never even have rendered.
+	write("Namespaced")
+
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME command, CRD scope now DIFFERENT, decision = %q, want deny (%s)", got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("the refusal reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
+// A chart reference that is not a LOCAL DIRECTORY (a repo alias, an OCI
+// reference, a packaged .tgz, a URL) has nothing on this machine to bind —
+// the same "cannot verify, so cannot attest" state a remote -f manifest is
+// in, and TERMINAL for the identical reason (see
+// TestContentBindingRefusalsNeverEscalate): a click past three attempts
+// must not substitute for a review of content that was never identified.
+func TestHelmNonLocalChartReferenceIsRefusedTerminally(t *testing.T) {
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	in := bashInput("helm upgrade myrel bitnami/nginx -n demo", "k8s_editor")
+	in["attempt"] = 3
+	in["consecutive"] = 3
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("a non-local chart reference at attempt=3, decision = %q, want deny (never ask): %s", got, out)
+	}
+	if !strings.Contains(reasonOf(t, out), "local directory") {
+		t.Fatalf("reason = %q, want it to explain the chart is not a local directory", reasonOf(t, out))
+	}
+}
+
+// A stray unreadable entry INSIDE the walked chart directory — unrelated to
+// the actual change — must not dead-end the whole apply the way an
+// unreadable DIRECTLY-NAMED target still correctly does
+// (TestUnreadableManifestTargetIsRefusedNotATraceback): _walk_entry_digest
+// binds its presence/type via a sentinel instead of refusing. This is the
+// same property TestUnreadableManifestTargetIsRefusedNotATraceback pins for
+// kubectl, exercised here for a Helm chart directory specifically.
+func TestHelmChartStrayUnreadableFileDoesNotBlockTheApply(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission bits do not block root's own reads")
+	}
+	dir := stubBin(t, "helm", helmMechanicalBody)
+	chart := writeChart(t)
+	stray := filepath.Join(chart, "stray.bin")
+	if err := os.WriteFile(stray, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write stray: %v", err)
+	}
+	if err := os.Chmod(stray, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	defer os.Chmod(stray, 0o644)
+
+	out, _ := runHook(t, bashInput("helm upgrade myrel "+chart+" -n demo", "k8s_editor"), dir)
+	if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+		t.Fatalf("an unrelated unreadable stray file inside the chart must not dead-end "+
+			"the whole apply — expected a change identifier, got: %q", reasonOf(t, out))
+	}
+}
+
+// Per-run memoisation: a compound command naming the SAME -k target twice
+// must render it only once. Exercised directly against
+// resolve_kustomize_target_digest (loaded as a module) by instrumenting
+// _kustomize_render_digest to count its own invocations — narrower and
+// faster than driving the whole guard through a compound command, and
+// avoids relying on timing (which would be flaky).
+func TestKustomizeRenderIsMemoizedByTargetPath(t *testing.T) {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not available")
+	}
+	overlay := t.TempDir()
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(overlay, name), []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("kustomization.yaml", "resources:\n- deploy.yaml\n")
+	write("deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n")
+
+	py := `
+import importlib.util
+spec = importlib.util.spec_from_file_location("k8s_validate", ` + strconv.Quote(script(t)) + `)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+calls = []
+orig = mod._kustomize_render_digest
+def counted(path, cwd):
+    calls.append(path)
+    return orig(path, cwd)
+mod._kustomize_render_digest = counted
+
+d1 = mod.resolve_kustomize_target_digest(None, ` + strconv.Quote(overlay) + `)
+d2 = mod.resolve_kustomize_target_digest(None, ` + strconv.Quote(overlay) + `)
+print(d1 == d2)
+print(len(calls))
+`
+	cmd := exec.Command("python3", "-B", "-c", py)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v\nstderr: %s", err, errb.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+	if lines[0] != "True" {
+		t.Fatalf("the two digests for the SAME target must be identical, got equal=%s", lines[0])
+	}
+	if lines[1] != "1" {
+		t.Fatalf("kubectl kustomize invoked %s time(s) for the same target resolved twice, want 1 (memoised)", lines[1])
 	}
 }

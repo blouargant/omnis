@@ -329,25 +329,22 @@ def refuse(reason, attempt, consecutive):
     emit("deny", reason)
 
 
-# Flags that name a local manifest/kustomization target whose CONTENT the
-# subject must bind, not just the flag's own text — kubectl accepts each more
-# than once (`-f a.yaml -f b.yaml`), so every occurrence is folded in.
-MANIFEST_TARGET_FLAGS = ("-f", "--filename", "-k", "--kustomize")
+# kubectl's -f/--filename target flags. -k/--kustomize are handled
+# separately (KUSTOMIZE_FLAGS below): kubectl treats them completely
+# differently — -f <dir> applies whatever manifest files are directly in
+# that directory; -k <dir> builds it as a kustomization, which can reference
+# files ANYWHERE. Conflating the two (round 2's design) meant a -f directory
+# that happened to contain a kustomization.yaml got rendered as if -k had
+# named it, which is not what kubectl actually does with -f.
+FILENAME_FLAGS = ("-f", "--filename")
+KUSTOMIZE_FLAGS = ("-k", "--kustomize")
 
 # Helm's own spelling for a values file. Shares kubectl's "-f" short flag but
-# NOT its long name ("--values", not "--filename") — MANIFEST_TARGET_FLAGS
-# (kubectl-oriented) does not recognise --values at all, which used to be a
-# real asymmetry: `-f values.yaml` was content-bound (as raw bytes) while the
-# exact synonym `--values values.yaml` was not bound at all. helm_content_digest
-# below closes this by deriving Helm's digest from `helm template` instead —
-# see its own docstring — so this constant only needs to name --values so
-# _helm_template_argv's flag walk doesn't mistake it for an unrecognised flag.
+# NOT its long name ("--values", not "--filename") — a real asymmetry once:
+# `-f values.yaml` was content-bound while the exact synonym `--values
+# values.yaml` was not bound at all. Both are hashed identically now (see
+# helm_content_digest).
 HELM_VALUES_FLAGS = ("-f", "--values")
-
-# The three names kustomize itself recognises for a kustomization file,
-# checked directly in a candidate directory (never recursively — that is
-# kustomize's own rule, not this guard's).
-KUSTOMIZATION_MARKERS = ("kustomization.yaml", "kustomization.yml", "Kustomization")
 
 # A remote scheme this guard cannot read bytes from before apply time. This is
 # not the only remote shape (kustomize also treats a bare VCS-style reference
@@ -355,6 +352,22 @@ KUSTOMIZATION_MARKERS = ("kustomization.yaml", "kustomization.yml", "Kustomizati
 # caught separately, by resolve_target_digest failing to find it as a local
 # path, rather than by trying to enumerate every non-URL remote syntax.
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+# Per-RUN memoisation of an already-computed digest, keyed by (kind,
+# resolved path) — this script is a fresh `python3` process per hook call,
+# so a bare module dict is already scoped correctly; there is no cross-call
+# state to leak or invalidate. Without this, a compound command naming the
+# SAME target twice (two segments, or a repeated -f) would render or walk it
+# twice — real cost for a kustomize render (a subprocess call) and, at the
+# extreme measured live for an unrelated bug (an empty -f= target hashing an
+# entire working tree), enough to approach the hook's own 60s timeout.
+_target_digest_cache = {}
+
+
+def _memoized(key, compute):
+    if key not in _target_digest_cache:
+        _target_digest_cache[key] = compute()
+    return _target_digest_cache[key]
 
 
 def flag_values(argv, *names):
@@ -372,44 +385,70 @@ def flag_values(argv, *names):
     return out
 
 
+def _file_bytes_digest(path):
+    """sha256 of one file's bytes. Raises OSError on failure — callers
+    decide what that means: a TERMINAL refusal for the target the command
+    directly names (_file_digest), or a bindable "unreadable" sentinel for
+    an incidental entry found while walking a directory (_walk_entry_digest)
+    — see both functions' own docstrings for why they differ."""
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
 def _file_digest(path):
-    """sha256 of one file's bytes. An unreadable target (permission denied, a
-    dangling symlink, …) TERMINALLY refuses with a diagnostic rather than
-    raising: an uncaught OSError here would surface to the agent as an opaque
-    "hook did not complete" instead of one of this guard's own explanations —
-    exactly the failure mode the file's own doctrine on tracebacks (see
-    main()'s input-parsing comments) rejects everywhere else. Terminal
-    (emit("deny", …) directly, like check_attested/resolve_target_digest — see
-    resolve_target_digest's docstring for why) because an unreadable target is
-    the same "cannot bind content" state as a missing or remote one: a click
-    past three failed attempts must not substitute for the review this file
+    """sha256 of the DIRECTLY-NAMED target's bytes — the exact -f/-k
+    argument, or a Helm values file. TERMINALLY refuses (emit("deny", …)
+    directly, like check_attested/resolve_target_digest — see
+    resolve_target_digest's docstring for why) on OSError: this file IS
+    what the command names, so an unreadable target here is the same
+    "cannot bind content" state as a missing or remote one — a click past
+    three failed attempts must not substitute for the review this file
     could never even identify.
     """
     try:
-        with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+        return _file_bytes_digest(path)
     except OSError as e:
         emit("deny",
              "The manifest target %r could not be read (%s), so its content "
              "cannot be verified." % (path, e))
 
 
+def _walk_entry_digest(full_path):
+    """Digest contribution for ONE file found INSIDE a directory WALK
+    (_dir_digest) — as opposed to the directly-named target (_file_digest,
+    which still terminally refuses on the SAME kind of error). A stray
+    unreadable entry anywhere under an ordinary directory target — a
+    dangling symlink, a FIFO, a permission-denied leftover unrelated to the
+    actual change — must not dead-end the whole apply with no escalation
+    path at all: that was _file_digest's terminal refusal applied one level
+    too broadly, catching M1's own fix in its blast radius. Its PRESENCE and
+    TYPE are still bound (so the digest changes if the entry appears,
+    disappears, or its bytes become readable again), via a sentinel string
+    in place of its content — only the DIRECTLY-NAMED target's own
+    unreadability is treated as fatal.
+    """
+    try:
+        return "file:" + _file_bytes_digest(full_path)
+    except OSError as e:
+        return "unreadable:" + type(e).__name__
+
+
 def _dir_digest(path):
-    """A digest of every regular file under `path`, sensitive to CONTENT
-    only: sorted RELATIVE paths, each paired with its own file digest, so the
+    """A digest of every entry under `path`, sensitive to CONTENT (or, for
+    an unreadable stray entry, its presence/type — see _walk_entry_digest)
+    only: sorted RELATIVE paths, each paired with its own digest, so the
     result depends on the tree's bytes — never os.walk's traversal order
     (unspecified), never mtimes or permissions, which can change with the
     content untouched.
 
-    Reserved for an ORDINARY directory of flat manifests (no kustomization
-    marker — see _is_kustomization_dir): those reference no other files, so a
-    walk already sees everything `kubectl apply -f <dir>` would apply, and a
-    false positive here only ever makes the guard bind MORE than it has to,
-    never less. A kustomization directory is rendered instead — see
-    resolve_target_digest and _kustomize_render_digest — because a
-    kustomization's `resources:`/`bases:`/`components:`/`patches:` can each
-    point anywhere, including outside `path`, which a walk over `path` alone
-    cannot see (reproduced live: TestKustomizeBaseReferenceContentBinds).
+    Used for an ORDINARY directory target: a kubectl -f <dir> (which applies
+    whatever manifest files are directly there — kubectl does not invoke
+    kustomize for -f even when the directory happens to contain a
+    kustomization.yaml, so this never renders one), a Helm values file that
+    happens to be a directory, or a Helm CHART directory (see
+    helm_content_digest) — none of these reference files OUTSIDE `path`,
+    unlike a kustomization (see _kustomize_render_digest's docstring for why
+    THAT needs a render instead of a walk).
     """
     entries = []
     for root, dirs, files in os.walk(path):
@@ -417,14 +456,10 @@ def _dir_digest(path):
         for name in sorted(files):
             full = os.path.join(root, name)
             rel = os.path.relpath(full, path).replace(os.sep, "/")
-            entries.append([rel, _file_digest(full)])
+            entries.append([rel, _walk_entry_digest(full)])
     entries.sort(key=lambda e: e[0])
     canonical = json.dumps(entries, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _is_kustomization_dir(path):
-    return any(os.path.isfile(os.path.join(path, name)) for name in KUSTOMIZATION_MARKERS)
 
 
 def _kustomize_render_digest(path, cwd):
@@ -440,12 +475,9 @@ def _kustomize_render_digest(path, cwd):
     directory alone is blind to both: reproduced live (before this function
     existed) by rewriting a BASE manifest referenced via `../base` — the walk
     digest was byte-identical before and after — and again through a
-    symlinked subdirectory. Enumerating that reference graph correctly would
-    mean re-implementing kustomize's own resolution rules, unboundedly;
-    rendering sidesteps that entirely by asking kustomize itself what it
-    would apply. `kubectl kustomize` is a read-only, no-cluster-contact
-    render (KUBECTL_LOCAL_VERBS already treats it as such elsewhere in this
-    file), so this costs nothing beyond the render itself.
+    symlinked subdirectory. This is why -k (unconditionally) renders while
+    an ordinary -f directory (never referencing anything outside itself) is
+    walked instead — see _dir_digest's docstring for that half.
 
     A render FAILURE is treated as "cannot bind content" too (TERMINAL,
     emit("deny", …) directly) rather than an escalatable mechanical failure:
@@ -455,7 +487,9 @@ def _kustomize_render_digest(path, cwd):
     here is either a race (content changed between the two calls — itself
     grounds for suspicion) or an environment inconsistency, not a normal
     "fix the manifest and retry" situation an ask-then-click should ever
-    paper over.
+    paper over. `kubectl kustomize` is a read-only, no-cluster-contact
+    render (KUBECTL_LOCAL_VERBS already treats it as such elsewhere in this
+    file), so this costs nothing beyond the render itself.
     """
     code, out, err = run_argv(["kubectl", "kustomize", path], cwd)
     if code != 0:
@@ -465,40 +499,36 @@ def _kustomize_render_digest(path, cwd):
     return hashlib.sha256(out.encode("utf-8")).hexdigest()
 
 
-def resolve_target_digest(cwd, path):
-    """Content digest of one -f/-k target, resolved against cwd exactly as
-    kubectl itself resolves it (never argv[0]'s cwd — see run_argv's callers'
-    own comment on that trap).
-
+def _resolve_local_path(cwd, path):
+    """Common prelude for any -f/-k/Helm-values target: resolves `path`
+    against `cwd` exactly as kubectl/helm themselves resolve it (never
+    argv[0]'s cwd — see run_argv's callers' own comment on that trap), and
     TERMINALLY refuses — emit("deny", …) directly, like check_attested (see
     its own docstring for why, and note this function, like check_attested,
-    takes no attempt/consecutive: there is nothing in scope here for a future
-    edit to reach for and accidentally pass to refuse()) — for anything whose
-    bytes cannot be pinned down right now. Escalating any of these to `ask`
-    would let one user click substitute for a review of content the guard
-    could never even identify, which is precisely the state a click is least
-    safe in:
+    takes no attempt/consecutive: there is nothing in scope here for a
+    future edit to reach for and accidentally pass to refuse()) — for
+    anything whose bytes cannot be pinned down right now. Escalating any of
+    these to `ask` would let one user click substitute for a review of
+    content the guard could never even identify, which is precisely the
+    state a click is least safe in:
 
     - an EMPTY target (a malformed `-f=`/`-k=` with nothing after the `=`):
-      resolves to cwd itself via os.path.join, which — if cwd happens to be a
-      real directory, usually true — silently hashed the ENTIRE working tree
-      instead of refusing an unusable target (measured: 3.39s / 7958 files on
-      this repo — comfortably able to exceed the hook's own 60s timeout, and
-      therefore the block-the-call outcome that timeout exists to avoid, on a
-      larger one).
+      resolves to cwd itself via os.path.join, which — if cwd happens to be
+      a real directory, usually true — silently hashed the ENTIRE working
+      tree instead of refusing an unusable target (measured: 3.39s / 7958
+      files on this repo — comfortably able to exceed the hook's own 60s
+      timeout, and therefore the block-the-call outcome that timeout exists
+      to avoid, on a larger one).
     - a URL, or a reference that merely LOOKS remote (caught below as "does
       not exist locally" rather than enumerated by scheme): the API server
-      would fetch its content independently at apply time, so an attestation
-      of "these bytes" could never be re-verified — the exact hole a v1/v2
-      manifest swap exploited before this function existed.
+      (or Helm) would fetch its content independently at apply time, so an
+      attestation of "these bytes" could never be re-verified.
     - a path that resolves to neither a file nor a directory: nothing to
       bind, and proceeding as if there were nothing to check would silently
       drop the guarantee for a typo'd path.
 
-    A DIRECTORY target that carries a kustomization is rendered via
-    `kubectl kustomize` (_kustomize_render_digest) rather than walked; an
-    ordinary directory of flat manifests is still walked (_dir_digest) — see
-    both functions' own docstrings for why the split.
+    Returns (full_path, is_dir) once resolution proves the target actually
+    exists locally as one or the other.
     """
     if not path:
         emit("deny", "A -f/-k flag was given an empty target, so nothing can be verified.")
@@ -510,15 +540,48 @@ def resolve_target_digest(cwd, path):
              "change.yaml %s`) and apply that file instead." % (path, path))
     full = os.path.join(cwd or ".", path)
     if os.path.isdir(full):
-        if _is_kustomization_dir(full):
-            return _kustomize_render_digest(full, cwd)
-        return _dir_digest(full)
+        return full, True
     if os.path.isfile(full):
-        return _file_digest(full)
+        return full, False
     emit("deny",
          "The manifest target %r could not be found (resolved to %r), so its "
          "content cannot be verified. A remote target cannot be validated "
          "either — fetch it to a local file first." % (path, full))
+
+
+def _local_target_digest(cwd, path):
+    """Content digest of a plain -f-style local target (kubectl's
+    -f/--filename, or a Helm -f/--values file): a file's bytes, or a
+    memoised WALK of a directory's files. Never a kustomize render — that
+    is resolve_kustomize_target_digest's job, reached only via -k/--kustomize
+    (see _dir_digest / _kustomize_render_digest for why the two targets need
+    different treatment).
+    """
+    full, is_dir = _resolve_local_path(cwd, path)
+    if is_dir:
+        return _memoized(("walk", full), lambda: _dir_digest(full))
+    return _memoized(("file", full), lambda: _file_digest(full))
+
+
+def resolve_target_digest(cwd, path):
+    """-f/--filename target digest — see _local_target_digest."""
+    return _local_target_digest(cwd, path)
+
+
+def resolve_kustomize_target_digest(cwd, path):
+    """-k/--kustomize target digest: always rendered via `kubectl kustomize`
+    (_kustomize_render_digest) — kubectl itself requires a -k target to
+    already be a valid kustomization directory (or a remote reference,
+    refused above like any other -f/-k remote target), so reaching here
+    with something that is not a directory would already have failed
+    mechanical validation before this point; refused defensively rather
+    than falling back to a file hash that would not match what `kubectl
+    kustomize` — or a real apply -k — would actually see.
+    """
+    full, is_dir = _resolve_local_path(cwd, path)
+    if not is_dir:
+        emit("deny", "%r is not a directory, so it cannot be built as a kustomization." % path)
+    return _memoized(("kustomize", full), lambda: _kustomize_render_digest(full, cwd))
 
 
 def local_target_digest(argv, cwd):
@@ -526,116 +589,122 @@ def local_target_digest(argv, cwd):
     carries no local manifest/kustomization target at all (delete-by-name,
     patch, rollout, …) — the normalised argv alone already identifies those
     changes. Otherwise, a digest that changes when and only when the
-    target's own bytes (or, for a kustomization, its RENDERED output — see
-    resolve_target_digest) change, so an attestation of "this manifest" can
-    never be replayed against a DIFFERENTLY-CONTENTED file, directory, or
-    kustomization reachable via the identical command line — the property
-    TestAttestationDoesNotCrossDifferentChanges (a file) and
-    TestKustomizeBaseReferenceContentBinds /
-    TestKustomizeSymlinkedResourceContentBinds (a rendered overlay,
-    transitively through a base reference and through a symlink)
-    demonstrate end to end.
+    target's own bytes (a file), walked contents (an ordinary directory), or
+    RENDERED output (a kustomization — see resolve_kustomize_target_digest)
+    change.
 
-    Helm is NOT handled here — see helm_content_digest, which derives its
-    digest from `helm template` (chart + values rendered together) instead
-    of hashing -f/--values targets independently, for the identical
-    "enumerate the render, not the input graph" reason kustomize needed.
+    -f/--filename and -k/--kustomize are resolved by DIFFERENT functions
+    (_local_target_digest vs resolve_kustomize_target_digest) — see their
+    own docstrings for why a -f directory is walked while a -k directory is
+    always rendered, never the other way around based on what happens to be
+    inside it.
+
+    Helm is NOT handled here — see helm_content_digest, which walks the
+    chart directory (Helm vendors its own dependencies inside the chart, so
+    nothing there references outside it) plus hashes -f/--values targets,
+    rather than rendering.
     """
-    targets = flag_values(argv, *MANIFEST_TARGET_FLAGS)
-    if not targets:
+    manifest_targets = flag_values(argv, *FILENAME_FLAGS)
+    kustomize_targets = flag_values(argv, *KUSTOMIZE_FLAGS)
+    if not manifest_targets and not kustomize_targets:
         return ""
-    digests = [[path, resolve_target_digest(cwd, path)] for path in targets]
+    digests = [["f", path, resolve_target_digest(cwd, path)] for path in manifest_targets]
+    digests += [["k", path, resolve_kustomize_target_digest(cwd, path)] for path in kustomize_targets]
     canonical = json.dumps(sorted(digests), separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _helm_template_argv(argv, verb_idx):
-    """(release, chart_path, template_flags) for a Helm install/upgrade-shaped
-    verb: Helm's own [RELEASE] [CHART] positional order (the release name is
-    the FIRST bare token after the verb, the chart is the second) and every
-    flag from the original command, MINUS those two positionals, replayed
-    verbatim — so `helm template` renders under the SAME -f/--values/--set/
-    -n/… overrides the real command would apply, just against its own
-    [NAME] [CHART] pair rather than the original one (a duplicate positional
-    would otherwise error, or template the wrong release name).
+def _local_chart_dir(argv, verb_idx, cwd):
+    """The Helm chart argument, IF it names a local directory — one
+    containing Chart.yaml, Helm's own chart marker (Helm requires exactly
+    this name; it does not accept "Chart.yml"). Scans every BARE (non-flag)
+    token after the verb rather than trying to identify Helm's [RELEASE]
+    [CHART] positional pair by position: Helm's install/upgrade flags are
+    extensive and many take a separate-token value (`--timeout 5m`, `--set
+    k=v`, …), so knowing which token is a flag's VALUE — as opposed to a
+    genuine positional — would need Helm's own flag-arity table, which is
+    exactly the unbounded enumeration this guard rejects everywhere else (a
+    previous version of this function built one, and it terminally denied
+    ordinary commands carrying any flag outside a small kubectl-oriented
+    set: `--install`, `--set`, `--wait`, `--atomic`, `--timeout`, and others
+    were all refused as "a flag this guard does not recognise", even though
+    a bare `helm upgrade myrel ./chart` was fine).
 
-    TERMINALLY refuses (emit("deny", …), like resolve_target_digest — see its
-    docstring for why, and note this function likewise takes no attempt/
-    consecutive) rather than guessing when either positional is missing or
-    empty, or a flag this guard does not recognise appears: unlike
-    bare_operands (used only for a coarse blast-radius COUNT, where erring
-    toward "not a flag's value" is always safe), the result here decides
-    WHICH bytes get rendered and hashed, so mis-parsing past an unknown flag
-    could silently bind the subject to different content than what the real
-    command would apply.
+    Scanning for "does this token happen to be a real chart directory"
+    instead needs no such table: a flag's VALUE (a duration like "5m", a
+    boolean-ish string, a namespace) essentially never also happens to be a
+    path containing a Chart.yaml, so a false match is not a realistic risk,
+    and a token starting with "-" is never even considered — verified
+    directly against `--timeout 5m --set replicas=2 -n demo --atomic`
+    interspersed around the real chart path, which the scan still finds
+    correctly.
+
+    Returns (raw_token, resolved_path), or (None, None) when no bare token
+    resolves to a chart directory — either this command has no local chart
+    argument at all (should not happen for install/upgrade: mechanical
+    validation would already have failed) or the chart is a NON-local
+    reference (a repo alias like bitnami/nginx, an OCI reference, a packaged
+    .tgz, a URL) — see helm_content_digest for why that refuses rather than
+    falling back to anything.
     """
-    value_flags = VALUE_FLAGS | set(HELM_VALUES_FLAGS)
-    bare, flags = [], []
-    i = verb_idx + 1
-    while i < len(argv):
-        tok = argv[i]
-        if not tok.startswith("-"):
-            bare.append(tok)
-            i += 1
+    for tok in argv[verb_idx + 1:]:
+        if tok.startswith("-"):
             continue
-        if "=" in tok:
-            flags.append(tok)
-            i += 1
-            continue
-        if tok in value_flags:
-            flags.append(tok)
-            if i + 1 < len(argv):
-                flags.append(argv[i + 1])
-            i += 2
-            continue
-        if tok in BOOLEAN_FLAGS:
-            flags.append(tok)
-            i += 1
-            continue
-        emit("deny",
-             "This Helm command carries a flag (%r) this guard does not "
-             "recognise, so its chart and values cannot be reliably "
-             "re-rendered to verify content. Re-run it with only well-known "
-             "flags." % tok)
-    if len(bare) < 2 or not bare[0] or not bare[1]:
-        emit("deny",
-             "The Helm release/chart arguments could not be determined from "
-             "this command, so its content cannot be bound to a reviewed "
-             "change.")
-    return bare[0], bare[1], flags
+        full = os.path.join(cwd or ".", tok)
+        if os.path.isfile(os.path.join(full, "Chart.yaml")):
+            return tok, full
+    return None, None
 
 
 def helm_content_digest(verb, argv, verb_idx, cwd):
-    """The content half of a Helm change's subject, derived from `helm
-    template` — the chart's OWN render, not a walk of its directory or a
-    hash of just the values file. A chart is a template engine over
-    arbitrary files (Chart.yaml, templates/, a dependency graph via
-    Chart.yaml's own `dependencies:`, values.yaml, subchart values) PLUS
-    whatever -f/--values/--set overrides the command supplies; enumerating
-    that graph is exactly the unbounded-inputs mistake a directory walk made
-    for kustomize (see _kustomize_render_digest). Rendering binds exactly
-    what would be applied, wherever its pieces live.
-
-    Reproduced live before this function existed: with the round-1 design
-    (hashing whatever -f/-k names, by flag NAME), `-f values.yaml` was
-    content-bound as raw bytes while the exact synonym `--values values.yaml`
-    was not bound at all (MANIFEST_TARGET_FLAGS never recognised the long
-    name), and the chart DIRECTORY's own content was never bound by either
-    spelling — `helm upgrade myrel ./chart -f values.yaml` proceeded
-    unchanged after editing a template file inside ./chart.
+    """The content half of a Helm change's subject: a memoised WALK of the
+    chart DIRECTORY (_dir_digest — the same treatment an ordinary kubectl -f
+    <dir> gets: templates/, values.yaml, crds/, and any vendored charts/
+    subchart dependency, since Helm stores a chart's dependencies INSIDE the
+    chart directory rather than by reference — the property a kustomization
+    lacks, via `resources: [../../base]`, which is why kustomize genuinely
+    needs a render and Helm never did) PLUS the bytes of every -f/--values
+    target (_local_target_digest — identical treatment for both spellings).
 
     "" for a Helm verb with no chart argument at all (uninstall, rollback —
-    release-name-only mutations already identified by argv alone).
+    release-name-only mutations already identified by argv alone). `--set
+    k=v` needs no special handling: its value is literally a token in argv,
+    and argv is already part of the subject (see subject_hash) — nothing
+    here parses Helm's flags at all (see _local_chart_dir's docstring for
+    why that is deliberate).
+
+    TERMINALLY refuses (like _resolve_local_path — see its docstring) when
+    the chart argument does not resolve to a LOCAL DIRECTORY: a repo alias,
+    an OCI reference, a packaged .tgz, or a URL can each change server-side,
+    or simply cannot be walked, so there is nothing on this machine to bind
+    — the same "cannot verify, so cannot attest" state a remote -f manifest
+    is in. Told to `helm pull` it locally first, the same shape
+    _resolve_local_path gives for a remote kubectl manifest.
+
+    A previous version of this function rendered via `helm template`
+    instead, replaying the command's own flags into it. Retired: proven live
+    that the render EXCLUDES crds/ unless --include-crds — while a real
+    install/upgrade DOES apply them — so rewriting a CRD's own content left
+    the render-based subject unchanged; separately, building the replay
+    argv correctly needed Helm's own flag-arity table (see
+    _local_chart_dir's docstring), which is exactly the unbounded
+    enumeration this guard rejects everywhere else. The walk needs neither a
+    subprocess nor a flag table, and binds crds/ that the render dropped.
     """
     if verb in HELM_DESTRUCTIVE_VERBS:
         return ""
-    release, chart, flags = _helm_template_argv(argv, verb_idx)
-    code, out, err = run_argv(["helm", "template", release, chart] + flags, cwd)
-    if code != 0:
+    _, chart_dir = _local_chart_dir(argv, verb_idx, cwd)
+    if chart_dir is None:
         emit("deny",
-             "`helm template` could not render this change, so its content "
-             "cannot be verified:\n\n%s" % (err or out).strip())
-    return hashlib.sha256(out.encode("utf-8")).hexdigest()
+             "This Helm command's chart argument does not name a local "
+             "directory (containing Chart.yaml), so its content cannot be "
+             "verified. `helm pull` it locally and point at that directory "
+             "instead.")
+    entries = [["chart", _memoized(("walk", chart_dir), lambda: _dir_digest(chart_dir))]]
+    for path in flag_values(argv, *HELM_VALUES_FLAGS):
+        entries.append([path, _local_target_digest(cwd, path)])
+    canonical = json.dumps(sorted(entries), separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def subject_hash(tool, verb, argv, content_digest):
