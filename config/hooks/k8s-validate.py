@@ -67,12 +67,77 @@ KUBECTL_LOCAL_VERBS = {"kustomize", "completion"}
 # `rollout undo` rolls a Deployment back. The read lists mirror what the shipped
 # config/permissions.json already declares in its own allow rule, rather than
 # inventing a second source of truth.
+#
+# Each list below is COMPLETE against the real binary, which is what makes the
+# refusal of everything else honest rather than merely untested: `auth` has
+# exactly can-i / reconcile / whoami (only `reconcile` writes, and it writes
+# RBAC); `config`'s other ten subcommands all rewrite the shared kubeconfig;
+# `rollout` is status/history/pause/restart/resume/undo. `whoami` was missing
+# purely by omission — it prints the caller's own identity and reaches no
+# cluster state at all — and its absence denied an ordinary read.
 READ_ONLY_SUBVERBS = {
-    "auth": {"can-i"},
+    "auth": {"can-i", "whoami"},
     "config": {"view", "current-context", "get-contexts", "get-clusters", "get-users"},
     "rollout": {"status", "history"},
     "plugin": {"list"},
 }
+
+# `exec` is the same "the verb alone proves nothing" shape as auth/config/
+# rollout, except the discriminator is not one sub-verb token but the WHOLE
+# container command after `--`. Nothing looked at it, so every `kubectl exec`
+# — including `-- cat /etc/nginx/nginx.conf`, the way half of an
+# investigation starts — hit validate()'s catch-all and was denied as a
+# change "with no validation rule", which was also simply untrue of a read.
+#
+# Same inversion as everywhere else in this file: enumerate the commands that
+# are PROVABLY read-only and refuse the rest, rather than trying to recognise
+# the mutating ones. The bar for membership here is deliberately higher than
+# "usually harmless" — a member must write nothing and execute nothing FOR
+# ANY ARGV, STDIN OR TTY:
+#   - `sort -o F`, `tee`, `dd`, `curl -o F` write, so none are here.
+#   - `less`, `more`, `top`, `vi` have shell escapes or kill keys, so an
+#     interactive session (`exec -it`) turns them into arbitrary execution.
+#     Excluding them is what makes -i/-t irrelevant, and therefore what lets
+#     an honest `exec -it pod -- cat x` proceed instead of being refused for
+#     a flag that carries no risk once the command itself is proven.
+#   - `ip`, `ss`, `ifconfig`, `arp`, `mount` all have mutating forms
+#     (`ip link set`, `ss -K`, `arp -d`), and gating those would mean
+#     enumerating a command's mutating FLAGS — the enumerate-the-bad-side
+#     direction this whole guard exists to avoid. `find` is out for the same
+#     reason (`-exec`, `-delete`, `-fprintf`).
+#   - `awk`, `sed`, `python`, `busybox` and every shell execute their
+#     arguments, and are already named in LAUNCHERS, which the caller reports
+#     with its own diagnostic.
+# The cost of the strictness is friction on a handful of real reads; each is
+# one line to add here once it is shown to be needed, which is a far cheaper
+# mistake than the reverse.
+EXEC_READ_ONLY_CMDS = {
+    # read a file / describe it
+    "cat", "zcat", "head", "tail", "wc", "strings", "file", "cksum",
+    "md5sum", "sha1sum", "sha256sum", "sha512sum", "diff", "cmp",
+    "readlink", "realpath", "basename", "dirname",
+    # list / measure the filesystem
+    "ls", "stat", "du", "df", "pwd",
+    # search text
+    "grep", "egrep", "fgrep", "zgrep",
+    # report on the process table and the machine
+    "ps", "free", "uptime", "uname", "arch", "nproc", "hostname", "id",
+    "groups", "whoami", "date", "printenv", "lsof", "lsb_release",
+    # resolve names and probe reachability — the DNS/connectivity half of
+    # nearly every "why can't this pod reach that service" task
+    "getent", "nslookup", "dig", "host", "ping", "ping6", "traceroute",
+    "tracepath", "netstat",
+    # print their own arguments
+    "echo", "printf", "which", "whereis",
+}
+
+# `env` prints the environment when given nothing, and RUNS A COMMAND when
+# given anything (`env FOO=1 sh -c …`) — it is a member of WRAPPER_SPEC for
+# exactly that reason. Only the bare form is provable. It gets its own rule
+# rather than being dropped because `kubectl exec pod -- env` is idiomatic
+# enough that refusing it would push agents to `sh -c` instead, which is the
+# one thing this split exists to keep out.
+EXEC_BARE_ONLY_CMDS = {"env"}
 
 # helm verbs that contact the cluster and change nothing, INCLUDING the aliases.
 # `hist` is history's alias. `test` is deliberately NOT here: it runs the chart's
@@ -96,13 +161,50 @@ HELM_LOCAL_VERBS = {
 # server-dry-run'd; an imperative one only supports a dry run; a destructive
 # one needs the blast-radius/ownership pre-checks instead of either.
 APPLY_VERBS = {"apply", "create", "replace"}
-IMPERATIVE_VERBS = {"patch", "set", "scale", "annotate", "label", "expose", "autoscale", "rollout"}
+IMPERATIVE_VERBS = {"patch", "set", "scale", "annotate", "label", "expose", "autoscale", "rollout",
+                    "run"}
+# `run` is here, and `debug` has its own branch, because the shipped
+# k8s_investigator instruction MANDATES both: its step 6 ("EPHEMERAL
+# DIAGNOSTICS — LEAVE NO TRACE") tells the agent to create one throwaway
+# diagnostic via `kubectl run --restart=Never --rm --labels=omnis.dev/
+# ephemeral=true …` or `kubectl debug`, and the whole k8s-cleanup skill plus
+# the k8s_cleaner agent exist to sweep up after exactly those. Neither verb
+# was in any routing set, so both hit validate()'s catch-all and were denied
+# as a change "with no validation rule" — a guard refusing the workflow its
+# own fleet is instructed to follow. `run` takes --dry-run=server (verified
+# against the binary), so validate_imperative handles it unchanged; `debug`
+# takes none at all, hence validate_debug. Neither is ever waved through:
+# `run -it -- sh` is the same unreadable shell as `exec -- sh`, so both go
+# through the normal preview + attestation path, where the reviewer reads the
+# argv.
 DESTRUCTIVE_VERBS = {"delete", "drain", "cordon", "uncordon", "taint"}
 
 # helm verbs that remove or roll back a release, as opposed to installing or
 # upgrading one — `validate_helm` previews the latter and pre-checks the former
 # against the release's own history instead of a chart diff.
 HELM_DESTRUCTIVE_VERBS = {"uninstall", "rollback"}
+
+# Helm verbs that reach validate_helm but that its install/upgrade branch
+# cannot describe: neither accepts `--dry-run` (verified against the binary,
+# `helm test --help` mentions it zero times) and neither takes a chart
+# operand, so both fell through to the chart-content step and were refused
+# with "chart argument does not name a local directory" — a diagnostic about
+# an argument the command does not have. The refusal itself is right for both;
+# only the reason was fiction. Keyed by verb so each says what is actually
+# true of it, and consulted BEFORE the `helm plugin list` probe so an
+# unpreviewable verb no longer spends two subprocess calls on its way to a
+# wrong answer.
+HELM_NO_PREVIEW_REASONS = {
+    "test": "`helm test` runs the chart's own test hooks, which create Pods from specs "
+            "that live in the INSTALLED RELEASE rather than on this command line — there "
+            "is no chart argument whose content could be pinned, and helm offers no dry "
+            "run for it. Read what would run with `helm get manifest <release>`, then "
+            "apply the part you need as an explicit manifest.",
+    "push": "`helm push` publishes a chart to a registry. Helm offers no dry run for it "
+            "and it names no chart to diff against, so this guard cannot preview what "
+            "would be published. Build the artefact with `helm package` and publish it "
+            "as a deliberate, separate step.",
+}
 
 # `rollout` sub-verbs that support no --dry-run at all (verified against the
 # real binary: `error: unknown flag: --dry-run`), so validate_imperative's
@@ -116,6 +218,15 @@ ROLLOUT_SCOPE_VERBS = {"restart", "pause", "resume"}
 # Global flags that take a SEPARATE value, so the token after them is not the
 # verb. Every other flag is treated as boolean: inferring this from "the next
 # token is not a flag" made a bare -A swallow the verb.
+# `-c`/`--container` is not a GLOBAL flag, but it is the one per-verb value flag
+# the operand walk cannot do without: exactly five verbs have it (logs, attach,
+# exec, cp, debug — checked against the binary) and in all five it is
+# --container and takes a value. Without the entry, bare_operands reads the
+# CONTAINER NAME as a resource, so `kubectl debug -c app pod/x` counted two
+# targets and `kubectl cp -c app pod:/a ./b` counted three operands — both
+# refused as malformed. It never appears before a verb, so _verb_after is
+# unaffected, and for the blast-radius check the entry errs toward finding
+# FEWER named resources, which is the closed direction.
 # Boolean global flags: recognised, consume nothing. Anything in neither this set
 # nor VALUE_FLAGS makes the verb unprovable (see _verb_after).
 BOOLEAN_FLAGS = {
@@ -136,6 +247,7 @@ VALUE_FLAGS = {
     "--server", "-s", "--request-timeout", "--cache-dir", "--tls-server-name",
     "--client-certificate", "--client-key", "--certificate-authority",
     "-v", "--v", "--vmodule", "--username", "--password",
+    "-c", "--container",
     "--log-flush-frequency", "--profile", "--profile-output",
     "--registry-config", "--repository-config", "--repository-cache",
     "--kube-apiserver", "--kube-token", "--kube-ca-file", "--kube-as-user",
@@ -346,12 +458,26 @@ KUSTOMIZE_FLAGS = ("-k", "--kustomize")
 # helm_content_digest).
 HELM_VALUES_FLAGS = ("-f", "--values")
 
+# `kubectl debug --custom=<file>` is a partial container spec — the bytes that
+# decide what the ephemeral container actually is. It is NOT a -f/--filename
+# target, so local_target_digest ignored it, and an attestation would have
+# bound an argv NAMING the file while its content stayed swappable: approve
+# `--custom=probe.json`, rewrite probe.json, replay. That is precisely the
+# hole the content-binding step exists to close, so the flag is hashed like
+# any other local target. `kubectl run --overrides='<json>'` needs no entry —
+# it carries its JSON inline, so the argv already binds it.
+CONTAINER_SPEC_FLAGS = ("--custom",)
+
 # A remote scheme this guard cannot read bytes from before apply time. This is
 # not the only remote shape (kustomize also treats a bare VCS-style reference
 # like `github.com/org/repo` as remote, with no "://" at all) — that shape is
 # caught separately, by resolve_target_digest failing to find it as a local
 # path, rather than by trying to enumerate every non-URL remote syntax.
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+# A clustered short flag (`-it`), as opposed to a long flag (`--tty`), a
+# negative number, or an operand. Used to spot `-i` inside `-it`/`-ti`.
+SHORT_FLAG_CLUSTER = re.compile(r"^-[A-Za-z]+$")
 
 # Per-RUN memoisation of an already-computed digest, keyed by (kind,
 # resolved path) — this script is a fresh `python3` process per hook call,
@@ -606,10 +732,12 @@ def local_target_digest(argv, cwd):
     """
     manifest_targets = flag_values(argv, *FILENAME_FLAGS)
     kustomize_targets = flag_values(argv, *KUSTOMIZE_FLAGS)
-    if not manifest_targets and not kustomize_targets:
+    spec_targets = flag_values(argv, *CONTAINER_SPEC_FLAGS)
+    if not manifest_targets and not kustomize_targets and not spec_targets:
         return ""
     digests = [["f", path, resolve_target_digest(cwd, path)] for path in manifest_targets]
     digests += [["k", path, resolve_kustomize_target_digest(cwd, path)] for path in kustomize_targets]
+    digests += [["c", path, resolve_target_digest(cwd, path)] for path in spec_targets]
     canonical = json.dumps(sorted(digests), separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -973,6 +1101,173 @@ def subverb_of(argv, verb_idx):
     return sub
 
 
+# Verbs that reach INTO a running container instead of changing an API object.
+# None of them can be classified by its verb: each is a read or a write
+# depending on its ARGUMENTS — the command after `--` for exec, the presence of
+# stdin for attach, the direction of the copy for cp. All three were therefore
+# denied wholesale by validate()'s catch-all as changes "with no validation
+# rule", which for the read half is simply false, and which cost the
+# investigator the ordinary moves of its job: read a config file out of a pod,
+# watch a container's output, pull a log file down.
+CONTAINER_ACCESS_VERBS = ("exec", "attach", "cp")
+
+
+def container_access_reason(verb, argv, verb_idx):
+    """None when this container-reaching invocation is PROVEN to change
+    nothing, else why it is not — one entry point for the family so
+    provably_read_only and validate() can never disagree about a verb."""
+    if verb == "exec":
+        return exec_read_only_reason(argv, verb_idx)
+    if verb == "attach":
+        return attach_read_only_reason(argv, verb_idx)
+    return cp_read_only_reason(argv, verb_idx)
+
+
+def _short_flag_letters(token):
+    """The letters of a clustered short flag (`-it` -> "it"), else "".
+
+    Short flags cluster, so a membership test against "-i" misses `-it` and
+    `-ti` — the spellings anyone actually types.
+    """
+    return token[1:] if SHORT_FLAG_CLUSTER.match(token) else ""
+
+
+def attach_read_only_reason(argv, verb_idx):
+    """None when this `kubectl attach` only reads the container's output.
+
+    Without stdin, attach is `logs -f` with a different transport: it streams
+    an already-running process's stdout/stderr and sends nothing. With
+    `-i`/`--stdin` it forwards this terminal's input INTO that process — which
+    is PID 1 of a live workload, and may well be a shell or a REPL. Those bytes
+    do not exist at hook time, so an interactive attach is exactly as
+    unreadable as `exec -- sh`, and is refused for the same reason rather than
+    being previewed (there is nothing to preview) or attested (the reviewer
+    cannot read them either).
+
+    `--stdin=false` is refused too, along with `--stdin`: has_flag matches both
+    spellings, and failing closed on a form nobody writes is cheaper than
+    parsing a flag's boolean value to decide whether a write channel is open.
+    """
+    if has_flag(argv, "--stdin"):
+        return ("`kubectl attach --stdin` opens a write channel into the running "
+                "process, and what would be sent through it cannot be read here. "
+                "Attach without `-i`/`--stdin` to watch the output, or use "
+                "`kubectl logs -f`.")
+    for tok in operands(argv, verb_idx):
+        if "i" in _short_flag_letters(tok):
+            return ("`kubectl attach -%s` includes `-i`, which opens a write channel into "
+                    "the running process; what would be sent through it cannot be read "
+                    "here. Attach without `-i` to watch the output, or use "
+                    "`kubectl logs -f`." % _short_flag_letters(tok))
+    return None
+
+
+def cp_read_only_reason(argv, verb_idx):
+    """None when this `kubectl cp` copies OUT of a container.
+
+    A file spec is remote when it carries a `:` (`pod:/path`, or
+    `namespace/pod:/path`) — kubectl's own rule, and the only one available
+    from argv. Copying out reads the container's filesystem (kubectl runs
+    `tar cf -` in it) and changes nothing in the cluster; copying in writes
+    files into a running container, which no dry run can preview and which is
+    lost on the next restart anyway.
+
+    The destination of a download is a HOST path, deliberately not this
+    guard's concern: `kubectl get -o json > /etc/anything` already proceeds
+    for the same reason. Host writes belong to the permission layer and the
+    Bash safety floor.
+    """
+    ops = bare_operands(argv, verb_idx)
+    if len(ops) != 2:
+        return ("`kubectl cp` takes exactly one source and one destination; this names "
+                "%d operand(s), so which way the copy goes cannot be determined."
+                % len(ops))
+    src, dest = ops
+    src_remote, dest_remote = ":" in src, ":" in dest
+    if src_remote and not dest_remote:
+        return None
+    if dest_remote:
+        return ("`kubectl cp` into a container writes files no dry run can preview, and "
+                "a running container's filesystem is lost on its next restart. Put the "
+                "content in a ConfigMap/Secret (or the image) and apply that instead — "
+                "which is previewable and revertible. Copying OUT of a container "
+                "(`POD:/path` to a local path) is allowed.")
+    return ("Neither side of this `kubectl cp` names a pod (`POD:/path` or "
+            "`NAMESPACE/POD:/path`), so it copies nothing to or from a container.")
+
+
+def labels_listed_not_set(argv, verb_idx):
+    """True for `kubectl label/annotate --list`, which DISPLAYS a resource's
+    labels rather than setting one.
+
+    `--list` alone is not enough: a `key=value` (set) or `key-` (remove)
+    operand alongside it is still a change, so both are checked for. Neither
+    can be confused with a resource operand — a Kubernetes name is RFC 1123,
+    so it can contain no `=` and cannot end in `-`.
+
+    `--local` (edit a `-f` file's labels without contacting the API server) is
+    deliberately NOT included: it is equally provable, but nothing in the fleet
+    uses it, and every entry here is a claim to keep true.
+    """
+    if not has_flag(argv, "--list"):
+        return False
+    for tok in bare_operands(argv, verb_idx):
+        if "=" in tok or tok.endswith("-"):
+            return False
+    return True
+
+
+def exec_read_only_reason(argv, verb_idx):
+    """None when this `kubectl exec` is PROVEN to change nothing, else why not.
+
+    One function for both callers by design: provably_read_only asks only
+    whether the reason is None, and validate() refuses with the reason itself.
+    Splitting them is how a guard ends up denying with a diagnostic that
+    describes a different check than the one that actually fired.
+
+    Requiring the `--` separator is not pedantry. kubectl still accepts the
+    deprecated `kubectl exec POD cmd args`, but without the separator which
+    bare token is the pod and which begins the command cannot be settled from
+    argv alone (`-c` is a flag here and a command elsewhere), and guessing is
+    the failure this file keeps re-learning. The refusal names the fix, so it
+    costs one retry.
+    """
+    ops = operands(argv, verb_idx)
+    if "--" not in ops:
+        return ("`kubectl exec` was given no `--` separator, so where the container "
+                "command starts cannot be determined. Separate the container command "
+                "with `--`, as in `kubectl exec POD -- cat /etc/config`.")
+    inner = ops[ops.index("--") + 1:]
+    if not inner:
+        return ("`kubectl exec` names no command after `--`. Separate the container "
+                "command with `--`, as in `kubectl exec POD -- cat /etc/config`.")
+
+    # No wrapper stripping here, deliberately. kubectl execs this argv in the
+    # container directly, with no shell — so there is no redirection, no
+    # globbing and no substitution to see through, and the head IS the
+    # program. Stripping would only widen what counts as a head, for a
+    # container whose wrapper binaries we cannot even know are present.
+    head = _basename(inner[0])
+    if is_launcher(inner):
+        return ("`kubectl exec ... -- %s` hands a command line to another program to "
+                "execute inside the container, so what it would actually run cannot be "
+                "read. Run the command directly, as in `kubectl exec POD -- cat FILE`."
+                % head)
+    if head in EXEC_BARE_ONLY_CMDS:
+        if len(inner) > 1:
+            return ("`%s` runs the command that follows it, so it is provable only with "
+                    "no arguments. Run `kubectl exec POD -- %s` on its own, or name the "
+                    "command directly." % (head, head))
+        return None
+    if head not in EXEC_READ_ONLY_CMDS:
+        return ("`%s` is not one of the read-only commands this guard can prove change "
+                "nothing inside the container, so this `kubectl exec` is refused rather "
+                "than run unchecked. Read-only inspection (cat, ls, grep, ps, printenv, "
+                "df, netstat, dig, ...) is allowed; anything that writes, or that runs "
+                "another program, is not." % head)
+    return None
+
+
 def provably_read_only(tool, verb, argv, verb_idx):
     """True only when this invocation is PROVEN to change no cluster state.
 
@@ -989,6 +1284,16 @@ def provably_read_only(tool, verb, argv, verb_idx):
         return True
     if tool == "helm":
         return verb in HELM_READ_VERBS or verb in HELM_LOCAL_VERBS
+    if verb in CONTAINER_ACCESS_VERBS:
+        # Decided by the arguments — the command after `--`, the presence of
+        # stdin, the direction of the copy — not by the verb. The negative
+        # case falls through to validate(), which refuses with this same
+        # function's reason.
+        return container_access_reason(verb, argv, verb_idx) is None
+    if verb in ("label", "annotate"):
+        # `--list` displays labels; the same verb without it sets them, and
+        # that half stays in IMPERATIVE_VERBS and is dry-run as before.
+        return labels_listed_not_set(argv, verb_idx)
     if verb in READ_ONLY_SUBVERBS:
         sub = subverb_of(argv, verb_idx)
         if sub is UNPROVABLE or sub is None:
@@ -1217,6 +1522,94 @@ CLEANUP_AGENTS = {"k8s_cleaner"}
 VALIDATOR_AGENTS = {"k8s_validator"}
 
 
+# Server errors whose raw text is a dead end for the agent that has to act on
+# it, mapped to the one thing it should do next. The guard's own doctrine is
+# that the DIAGNOSTIC is the product — "one refusal, one rewrite, and a line
+# added to a set" — and a refusal an agent cannot act on spends its attempts
+# and then escalates to the user for a problem it could have fixed itself.
+# Observed live: `kubectl diff` refused with a bare "Error from server
+# (NotFound)", the model burned its retries, and only then guessed the real
+# cause aloud ("the diff hook blocks because the namespace doesn't exist yet").
+#
+# Every hint is ADDITIVE — appended after the server's own words, never
+# replacing them (see preview_failure). That is what makes the table cheap to
+# extend: a pattern that misfires costs one irrelevant sentence, and one that
+# never matches costs nothing, while the evidence an operator would need is
+# still in front of them either way.
+#
+# Both patterns are VERIFIED against a live cluster (kubeadm v1.19 API,
+# kubectl talking to a real apiserver), on both of validate_manifest's steps:
+#   kubectl diff -f …                      -> exit 2
+#   kubectl apply --server-side --dry-run  -> exit 1
+#   Error from server (NotFound): namespaces "omnis-guard-probe-nope" not found
+#
+# The kind case is worth recording, because the guessed shape was WRONG and it
+# did not matter. The real message is
+#   error: resource mapping not found for name: "probe" namespace: "default"
+#   from "…/unknown-kind.yaml": no matches for kind "NoSuchThing" in version
+#   "omnis.example.com/v1"
+#   ensure CRDs are installed first
+# — not the `unable to recognize "f.yaml":` prefix these patterns were written
+# against. Matching the distinctive SUBSTRING rather than anchoring on a
+# prefix is what absorbed that, so keep new entries the same shape. Note
+# kubectl already appends its own one-line "ensure CRDs are installed first";
+# the hint earns its place by naming THIS guard's remedy (install it as a
+# separately reviewed change) and the typo alternative, not by repeating that.
+#
+# A pod NotFound (`pods "x" not found`, seen live via validate_debug) is
+# deliberately NOT matched: it says what it means already.
+
+
+def _advise_missing_namespace(m):
+    ns = m.group(1)
+    return ("The namespace %r does not exist yet, so nothing inside it can be previewed. "
+            "Putting the Namespace in the SAME manifest does not help — a server-side dry "
+            "run still evaluates each object against the live cluster, so the namespace has "
+            "to exist first. Create it as its own separately reviewed change "
+            "(`kubectl create namespace %s`), then re-run this one." % (ns, ns))
+
+
+def _advise_unknown_kind(m):
+    return ("Nothing in this cluster serves kind %r in %r, so this manifest cannot be "
+            "previewed or applied. Its CustomResourceDefinition — or the operator that "
+            "installs it — is missing: install that first, as its own separately reviewed "
+            "change, then re-run this one. If the kind or apiVersion is a typo, fix the "
+            "manifest instead." % (m.group(1), m.group(2)))
+
+
+DIAGNOSTIC_HINTS = (
+    # `namespaces "demo" not found` — the apiserver builds this from the
+    # resource's PLURAL name, but the singular is matched too rather than
+    # betting the whole hint on which one a given path emits.
+    (re.compile(r'namespaces?\s+"([^"]+)"\s+not found'), _advise_missing_namespace),
+    # `unable to recognize "f.yaml": no matches for kind "Foo" in version "x/v1"`
+    (re.compile(r'no matches for kind "([^"]+)" in version "([^"]+)"'), _advise_unknown_kind),
+)
+
+
+def diagnostic_hint(text):
+    """The one actionable next step for a server error this guard recognises,
+    or "" when it has nothing to add. First match wins."""
+    for pattern, advise in DIAGNOSTIC_HINTS:
+        m = pattern.search(text)
+        if m:
+            return advise(m)
+    return ""
+
+
+def preview_failure(headline, err, out):
+    """A refusal carrying the server's own words AND, when recognised, what to
+    do about them.
+
+    `err.strip() or out.strip()` rather than `(err or out).strip()`: a
+    whitespace-only stderr is truthy, so the latter reported an empty error and
+    threw away a perfectly good stdout.
+    """
+    raw = err.strip() or out.strip()
+    hint = diagnostic_hint(raw)
+    return "%s:\n\n%s\n\n%s" % (headline, raw, hint) if hint else "%s:\n\n%s" % (headline, raw)
+
+
 def run_argv(argv, cwd):
     """Run argv with no shell and return (exit_code, stdout, stderr)."""
     try:
@@ -1354,8 +1747,8 @@ def validate_manifest(verb, argv, cwd, attempt, consecutive):
     code, out, err = run_argv(["kubectl", "diff", "-f", path] + scope_flags(argv), cwd)
     # exit 1 means "a diff exists" — the normal case. Only >1 is an error.
     if code > 1:
-        refuse("`kubectl diff` failed, so the change could not be previewed:\n\n%s"
-               % (err.strip() or out.strip()), attempt, consecutive)
+        refuse(preview_failure("`kubectl diff` failed, so the change could not be previewed",
+                               err, out), attempt, consecutive)
     dry_run = ["kubectl"] + list(argv[1:])
     if verb == "apply":
         # --server-side is an apply-only flag: `kubectl replace --server-side`
@@ -1366,8 +1759,8 @@ def validate_manifest(verb, argv, cwd, attempt, consecutive):
     dry_run += ["--dry-run=server"]
     code, out, err = run_argv(dry_run, cwd)
     if code != 0:
-        refuse("The API server rejected this change in a server-side dry run:\n\n%s"
-               % (err.strip() or out.strip()), attempt, consecutive)
+        refuse(preview_failure("The API server rejected this change in a server-side dry run",
+                               err, out), attempt, consecutive)
     return out.strip()
 
 
@@ -1381,16 +1774,39 @@ def scope_flags(argv):
     return flags
 
 
+def _with_dry_run(args):
+    """args plus --dry-run=server, inserted BEFORE any `--` separator.
+
+    Appending it blindly is what turns this validator into the mutation it was
+    asked to preview. `kubectl run x --image=y -- sleep 60 --dry-run=server`
+    hands the flag to the CONTAINER as one of its arguments, so kubectl never
+    sees it and the pod is created FOR REAL — the guard executing the very
+    change it is inspecting, which is the one failure mode this file exists to
+    prevent. No pre-existing imperative verb takes a `--` separator, so this
+    was latent until `run` joined them; the helper is general so the next verb
+    that does cannot reintroduce it.
+
+    A positional bug here is invisible to TestGuardOnlyEverPreviews, whose
+    oracle only asks whether a recorded invocation CONTAINS a dry-run marker —
+    which the dangerous spelling does. TestRunDryRunPrecedesTheContainerCommand
+    asserts the position itself.
+    """
+    if "--" in args:
+        i = args.index("--")
+        return args[:i] + ["--dry-run=server"] + args[i:]
+    return args + ["--dry-run=server"]
+
+
 def validate_imperative(argv, verb, cwd, attempt, consecutive):
     # kubectl, never argv[0] — see validate_manifest's comment.
-    code, out, err = run_argv(["kubectl"] + list(argv[1:]) + ["--dry-run=server"], cwd)
+    code, out, err = run_argv(["kubectl"] + _with_dry_run(list(argv[1:])), cwd)
     if code != 0:
         text = (err or out).strip()
         if "unknown flag" in text or "unknown shorthand" in text:
             refuse("`%s` does not support a server-side dry run, so this change cannot be "
                    "validated as written. Express it as a manifest and apply that file "
                    "instead." % ("%s %s" % ("kubectl", verb)), attempt, consecutive)
-        refuse("The API server rejected this change in a dry run:\n\n%s" % text,
+        refuse(preview_failure("The API server rejected this change in a dry run", err, out),
                attempt, consecutive)
     return out.strip()
 
@@ -1408,7 +1824,7 @@ def validate_rollout_action(argv, verb_idx, cwd, attempt, consecutive):
     return "%d resource(s) in scope." % len(items)
 
 
-def resolve_target(argv, verb_idx, cwd, attempt, consecutive):
+def resolve_target(argv, verb_idx, cwd, attempt, consecutive, ops=None):
     """Resolve the verb's target with a plain `get` — never the mutating verb
     itself — and fail CLOSED: a non-zero exit, unparseable output, or zero
     identifiable items is refused rather than treated as "nothing to check".
@@ -1422,24 +1838,52 @@ def resolve_target(argv, verb_idx, cwd, attempt, consecutive):
     inversion's own doctrine — "anything unproven is refused" — applied to
     the one validator that exists purely as a safety pre-check.
     """
-    ops = operands(argv, verb_idx)
+    # `ops` defaults to every operand, which is right for delete/rollout —
+    # their operands are all valid `get` flags. validate_debug must override
+    # it: `--image`, `-it` and `--copy-to` are not `get` flags, so passing
+    # them through would make the probe fail with "unknown flag" and refuse a
+    # legitimate target with a diagnostic about the wrong command entirely.
+    if ops is None:
+        ops = operands(argv, verb_idx)
     # kubectl, never argv[0] — see validate_manifest's comment. This is the
     # probe an agent-planted shim was made to answer with a forged label.
     code, out, err = run_argv(["kubectl", "get"] + ops + ["-o", "json"], cwd)
     if code != 0:
-        refuse("The target could not be resolved, so it cannot be checked:\n\n%s"
-               % (err.strip() or out.strip()), attempt, consecutive)
+        refuse(preview_failure("The target could not be resolved, so it cannot be checked",
+                               err, out), attempt, consecutive)
     try:
         doc = json.loads(out)
     except ValueError:
         doc = None
     items = doc.get("items", [doc]) if isinstance(doc, dict) else None
-    if not items or not all(
+    action = argv[verb_idx] if 0 <= verb_idx < len(argv) else "this command"
+    if items is None:
+        refuse("The target's state could not be read, so it cannot be checked. The API "
+               "server's response was not JSON:\n\n%s" % out.strip(), attempt, consecutive)
+    if not items:
+        # A well-formed List with zero items is a POSITIVE answer — the API
+        # server was read successfully and said nothing matches — so blaming
+        # the response for being unreadable named a problem that did not
+        # occur. It landed on the k8s_cleaner's ordinary happy path
+        # (`kubectl delete … -l omnis.dev/ephemeral=true` over an
+        # already-clean namespace), where the agent has no way to learn from
+        # "could not be read" except to retry, and three retries escalate to
+        # the user. The DECISION is deliberately unchanged — a selector that
+        # matches nothing now could match a resource created between this
+        # probe and the real command, and this guard's whole doctrine is that
+        # unproven means refused — but the diagnostic now says what actually
+        # happened and what to do about it, which is what ends the retry loop.
+        refuse("This matched no resources, so `%s` has nothing to act on. The API server "
+               "was read successfully and returned an empty list. If you expected matches, "
+               "check the namespace and the selector; if you did not, the target is "
+               "already gone — report that rather than retrying." % action,
+               attempt, consecutive)
+    if not all(
         isinstance(i, dict) and (i.get("metadata") or {}).get("name") for i in items
     ):
-        refuse("The target's state could not be read, so it cannot be checked. "
-               "The API server's response was not the JSON of an identifiable "
-               "resource:\n\n%s" % out.strip(), attempt, consecutive)
+        refuse("The target's state could not be read, so it cannot be checked. The API "
+               "server's response was not the JSON of an identifiable resource:\n\n%s"
+               % out.strip(), attempt, consecutive)
     return items
 
 
@@ -1456,6 +1900,8 @@ def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
             refuse("No such Helm release, so `helm %s` cannot be validated:\n\n%s"
                    % (verb, (err or out).strip()), attempt, consecutive)
         return out.strip()
+    if verb in HELM_NO_PREVIEW_REASONS:
+        refuse(HELM_NO_PREVIEW_REASONS[verb], attempt, consecutive)
     # `helm plugin list` exits 0 even with ZERO plugins installed — verified
     # against the real binary, it prints only the header row — so gating on
     # its EXIT CODE (rather than whether "diff" actually appears in its
@@ -1477,9 +1923,57 @@ def validate_helm(verb, argv, verb_idx, cwd, attempt, consecutive):
         preview = ["helm"] + list(argv[1:]) + ["--dry-run=server"]
     code, out, err = run_argv(preview, cwd)
     if code != 0:
-        refuse("The Helm change could not be previewed:\n\n%s" % ((err or out).strip()),
+        refuse(preview_failure("The Helm change could not be previewed", err, out),
                attempt, consecutive)
     return out.strip()
+
+
+def validate_debug(argv, verb_idx, cwd, attempt, consecutive):
+    """`kubectl debug` supports no --dry-run at all (verified against the
+    binary), so it is validated the way ROLLOUT_SCOPE_VERBS are: resolve the
+    target and report its scope, then let check_attested require the
+    reviewer's verdict on the argv itself — rather than dead-ending on advice
+    that cannot be followed ("express it as a manifest" is not a thing
+    `kubectl debug` can be).
+
+    The reviewer is doing the real work here, and its instruction should know
+    why: this verb is IRREVERSIBLE in a way none of the others are — the
+    k8s-cleanup skill states it outright, an ephemeral container added to a
+    pod cannot be removed, only outlived by recreating the pod. So there is no
+    preview to show and no undo to fall back on; proving the target exists is
+    the only mechanical claim available, and the attestation carries the rest.
+
+    Target resolution deliberately does NOT reuse the default operand set.
+    `kubectl debug` takes `--image`, `-it`, `--copy-to`, `--profile` and a
+    trailing `-- COMMAND`, none of which `kubectl get` accepts — passing them
+    through would fail the probe with "unknown flag" and refuse a perfectly
+    good target while blaming the wrong thing.
+    """
+    # Everything after `--` is the container command, not operands: without
+    # this, `kubectl debug -it mypod --image=busybox -- sh -c x` resolves
+    # `mypod` AND `sh` as if both were resources.
+    head = argv
+    for i in range(verb_idx + 1, len(argv)):
+        if argv[i] == "--":
+            head = argv[:i]
+            break
+    targets = bare_operands(head, verb_idx)
+    if len(targets) != 1:
+        refuse("`kubectl debug` must name exactly one target to attach to (a pod, or "
+               "TYPE/NAME such as node/worker-1); this names %d. Run it once per target."
+               % len(targets), attempt, consecutive)
+    target = targets[0]
+    if "/" not in target:
+        # Per kubectl's own synopsis — `kubectl debug (POD | TYPE/NAME)`,
+        # "Pods will be used by default if no resource is specified" — a bare
+        # operand is a pod name. `kubectl get <bare-name>` would otherwise
+        # fail with "the server doesn't have a resource type".
+        target = "pod/" + target
+    items = resolve_target(argv, verb_idx, cwd, attempt, consecutive,
+                           ops=[target] + scope_flags(argv))
+    return ("%d resource(s) in scope. `kubectl debug` supports no dry run, and the "
+            "ephemeral container it adds cannot be removed once the pod accepts it."
+            % len(items))
 
 
 def validate_destructive(argv, verb_idx, agent, cwd, attempt, consecutive):
@@ -1542,6 +2036,20 @@ def validate(tool, verb, argv, verb_idx, agent, cwd, attempt, consecutive, attes
             preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
     elif verb in IMPERATIVE_VERBS:
         preview = validate_imperative(argv, verb, cwd, attempt, consecutive)
+    elif verb == "debug":
+        preview = validate_debug(argv, verb_idx, cwd, attempt, consecutive)
+    elif verb in CONTAINER_ACCESS_VERBS:
+        # Only reachable when container_access_reason returned a reason (that
+        # is what provably_read_only consulted), so refuse with THAT reason
+        # rather than the catch-all's "no validation rule", which is both
+        # unhelpful and, for a command that merely reads, false. `refuse` and not
+        # `emit("deny", …)`: an in-container action a human decides to allow is
+        # an ordinary escalation, unlike a missing review (check_attested),
+        # which no click can substitute for. There is no preview to build and
+        # no attestation to require — the guard cannot dry-run a program inside
+        # a container, which is exactly why the unprovable case is refused.
+        refuse(container_access_reason(verb, argv, verb_idx) or
+               "`kubectl %s` is not provably read-only." % verb, attempt, consecutive)
     else:
         refuse("`%s %s` changes the cluster but has no validation rule, so it is refused "
                "rather than applied unchecked." % (tool, verb), attempt, consecutive)

@@ -190,6 +190,23 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			if reason == "" {
 				reason = "a PreToolUse hook asked for confirmation"
 			}
+			// An escalation nobody can answer is not an escalation, it is a
+			// hang: askHookPermission would block on a card no one will ever
+			// resolve (askuser.DefaultTimeout is 0 by design, and the wait
+			// ends only with the run context). Refusing is the same
+			// fail-closed direction the rest of this path takes, and the
+			// message says which of the two things happened — the old text
+			// claimed "the user declined" even when there was no user, which
+			// is the kind of lie that sends someone hunting a decision nobody
+			// made. See canEscalate for why this is declared, not inferred.
+			if !canEscalate(reg) {
+				state.RecordOutcome(sid, t.Name(), true)
+				return map[string]any{
+					"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s (this run is unattended, so "+
+						"the escalation is refused rather than left waiting for an answer)",
+						t.Name(), reason),
+				}, nil
+			}
 			if askHookPermission(tc, reg, sid, t.Name(), reason) {
 				state.RecordOutcome(sid, t.Name(), false)
 				return nil, nil

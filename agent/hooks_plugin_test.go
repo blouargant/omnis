@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/blouargant/omnis/internal/askuser"
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
@@ -252,5 +255,72 @@ func TestRecordedAttestationReachesTheHookInput(t *testing.T) {
 	}
 	if rec["verdict"] != string(attest.VerdictApproved) {
 		t.Fatalf("attestations[%q].verdict = %v, want %q", subject, rec["verdict"], attest.VerdictApproved)
+	}
+}
+
+// End to end through the callback: a PreToolUse hook that escalates, in a run
+// where nobody can answer, must come back as a refusal — and say so honestly.
+// The old text read "(the user declined)" even when there was no user, which
+// sends whoever reads the transcript hunting for a decision nobody made.
+func TestUnanswerableEscalationBlocksWithAnHonestReason(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hook exec assumes a POSIX /bin/sh")
+	}
+	t.Setenv("OMNIS_NON_INTERACTIVE", "1")
+
+	cfgPath := filepath.Join(t.TempDir(), "hooks.json")
+	body := `{"hooks":{"PreToolUse":[{"matcher":"^Bash$","hooks":[{"command":` +
+		`"echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",` +
+		`\"permissionDecisionReason\":\"a human must confirm this\"}}'"}]}]}}`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A REAL registry, which is the whole point: reg == nil already denied, but
+	// every shipped surface builds one, so this is the path a bench actually
+	// takes.
+	reg := askuser.NewRegistry()
+	state := hookstate.New()
+	before, _ := hookToolCallbacks(hooks.NewReloader(cfgPath, nil), reg, state, nil, false)
+
+	sid, toolName := "unattended-session", "Bash"
+	args := map[string]any{"command": "kubectl delete pod x -n demo"}
+
+	type result struct {
+		out map[string]any
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		o, err := before(newHookTestCtx(sid), hookTestTool{name: toolName}, args)
+		done <- result{o, err}
+	}()
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("beforeTool blocked on an escalation nobody can answer")
+	}
+	if got.err != nil {
+		t.Fatalf("beforeTool: %v", got.err)
+	}
+	output, _ := got.out["output"].(string)
+	if !strings.Contains(output, "[BLOCKED BY HOOK]") {
+		t.Fatalf("the call was not blocked: %q", output)
+	}
+	if !strings.Contains(output, "a human must confirm this") {
+		t.Fatalf("the hook's own reason was lost: %q", output)
+	}
+	if !strings.Contains(output, "unattended") {
+		t.Fatalf("the refusal does not say why it could not be escalated: %q", output)
+	}
+	if strings.Contains(output, "the user declined") {
+		t.Fatalf("the refusal claims a decision nobody made: %q", output)
+	}
+	// A block must still advance the consecutive counter — that is what lets a
+	// hook script's own escalation threshold work.
+	if _, cons := state.Attempt(sid, toolName, args); cons != 1 {
+		t.Fatalf("consecutive after an unanswerable escalation = %d, want 1", cons)
 	}
 }

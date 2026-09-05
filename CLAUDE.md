@@ -1579,6 +1579,246 @@ resolve the target with `kubectl get -o json`, refuse a target that carries
 recreates it — so this blocks, it does not merely report), and for
 `k8s_cleaner` specifically, require `omnis.dev/ephemeral=true`.
 
+**`run` and `debug` validate the ephemeral-diagnostic workflow the fleet's own
+instruction mandates.** Neither verb was in any routing set, so both hit
+validate()'s catch-all and were denied as a change "with no validation rule" —
+while the shipped `k8s_investigator` instruction's step 6 ("EPHEMERAL
+DIAGNOSTICS — LEAVE NO TRACE") tells the agent to create exactly one throwaway
+diagnostic via `kubectl run --restart=Never --rm --labels=omnis.dev/
+ephemeral=true …` or `kubectl debug`, and the whole `k8s-cleanup` skill plus
+the `k8s_cleaner` agent exist to sweep up after those. A guard refusing the
+workflow its own fleet is instructed to follow. Neither is waved through —
+`run -it -- sh` is the same unreadable shell as `exec -- sh` — they simply
+reach a real preview and then the reviewer:
+
+- **`run` joins `IMPERATIVE_VERBS`** (it takes `--dry-run=server`, verified
+  against the binary), so `validate_imperative` handles it unchanged, and its
+  `-f/--filename` target is already content-bound by `local_target_digest`.
+- **`run` also forced a latent safety fix.** `validate_imperative` APPENDED
+  `--dry-run=server`, and no pre-existing imperative verb takes a `--`
+  separator. `run` does: `kubectl run x --image=y -- sleep 60
+  --dry-run=server` hands the flag to the **container** as an argument to
+  `sleep`, kubectl never sees it, and **the guard creates the pod for real** —
+  it executing the very mutation it was asked to preview, the one failure mode
+  this file exists to prevent. `_with_dry_run` now inserts the flag before any
+  `--`. **`TestGuardOnlyEverPreviews` cannot see this class of bug**: its
+  oracle asks only whether a recorded invocation *contains* a dry-run marker,
+  and the dangerous spelling does — confirmed by reverting the fix, where only
+  the new `TestRunDryRunPrecedesTheContainerCommand` (which asserts the
+  flag's **position**) failed.
+- **`debug` gets `validate_debug`**, the `ROLLOUT_SCOPE_VERBS` treatment:
+  it accepts **no** `--dry-run` at all (verified against the binary), so there
+  is nothing to preview — resolve the target, report its scope, and let
+  `check_attested` require the reviewer's verdict on the argv itself, rather
+  than dead-ending on advice that cannot be followed ("express it as a
+  manifest" is not a thing `kubectl debug` can be). It is also the one
+  **irreversible** verb here: per the `k8s-cleanup` skill, an ephemeral
+  container added to a pod can never be removed, only outlived by recreating
+  the pod. Target resolution deliberately does NOT reuse the default operand
+  set (`resolve_target` gained an `ops` override): `--image`/`-it`/`--copy-to`
+  are not `kubectl get` flags and would fail the probe with "unknown flag",
+  blaming the wrong command; everything after `--` is truncated (else `debug
+  -it mypod -- sh` resolves `sh` as a second resource); and a bare operand is
+  prefixed `pod/` per kubectl's own synopsis, since `kubectl get <bare-name>`
+  has no resource type to look up.
+- **`--custom` is now content-bound** (`CONTAINER_SPEC_FLAGS`). `kubectl debug
+  --custom=<file>` is a partial container spec — the bytes deciding what the
+  ephemeral container *is* — and it is not a `-f/--filename` target, so
+  nothing hashed it: approve `--custom=probe.json`, rewrite the file, replay
+  the identical argv. Verified as a real hole by reverting the binding, where
+  the swapped spec proceeded on the stale attestation
+  (`TestDebugCustomSpecContentBinds`). `kubectl run --overrides='<json>'`
+  needs no entry — it carries its JSON inline, so the argv already binds it.
+
+**A refusal an agent cannot act on spends its attempts and then escalates to a
+human for a problem the agent could have fixed itself** — so a recognised
+server error now carries the one thing to do next (`DIAGNOSTIC_HINTS` /
+`diagnostic_hint` / `preview_failure`). Observed live: `validate_manifest`'s
+`kubectl diff` step refused with a bare "`kubectl diff` failed … Error from
+server (NotFound)", the model burned its retries, and only *then* guessed the
+real cause aloud — "the diff hook blocks because the namespace doesn't exist
+yet". The information was in the guard's hands the whole time. Two entries so
+far: a namespace `NotFound` ("create it as its own separately reviewed change,
+then re-run this one") and `no matches for kind "X" in version "Y"` (the CRD or
+its operator is missing). Wired at the five places a server error reaches the
+agent — both of `validate_manifest`'s steps, `validate_imperative`,
+`validate_helm`'s preview, and `resolve_target`.
+
+Three properties make the table cheap to extend, which is the point — this
+guard's own doctrine is that *the diagnostic is the product*, "one refusal, one
+rewrite, and a line added to a set":
+
+- **A hint is APPENDED, never substituted.** The server's own words survive
+  underneath it, so a pattern that misfires costs one irrelevant sentence
+  rather than hiding the evidence an operator would need, and a pattern that
+  never matches costs nothing at all. Both halves are asserted
+  (`TestServerErrorsCarryAnActionableHint`).
+- **An unrecognised error comes back verbatim with nothing invented**
+  (`TestUnrecognisedServerErrorGetsNoInventedAdvice`, verified by making a
+  pattern over-eager). A table that quietly attached advice to everything
+  would be worse than no table, because the advice would sometimes be wrong
+  *and* confident.
+- **The advice must itself be followable through this same guard**
+  (`TestAdvisedRemedyIsItselfFollowable`): the namespace hint says "create it
+  as its own separately reviewed change", so `kubectl create namespace demo`
+  has to reach the reviewer rather than being refused as unvalidatable —
+  otherwise the hint just spends the agent's remaining attempts on a second
+  dead end. It also deliberately tells the agent NOT to fold the Namespace
+  into the same manifest: a server-side dry run still evaluates each object
+  against the live cluster, so that does not work and would be a third dead
+  end.
+
+**Both patterns are verified against a live cluster** (a real kubeadm
+apiserver), on both of `validate_manifest`'s steps — `kubectl diff -f` exits 2
+and `apply --server-side --dry-run=server` exits 1, both emitting `Error from
+server (NotFound): namespaces "…" not found`. The kind case is the one worth
+recording, because **the guessed shape was wrong and it did not matter**: the
+real message is `error: resource mapping not found for name: … no matches for
+kind "X" in version "Y"` followed by kubectl's own `ensure CRDs are installed
+first` — not the `unable to recognize "f.yaml":` prefix the pattern was
+written against. Matching the distinctive **substring** rather than anchoring
+on a prefix is what absorbed that, so keep new entries the same shape. (The
+hint earns its place beside kubectl's own one-liner by naming *this guard's*
+remedy — install it as a separately reviewed change — and the typo
+alternative.) A pod `NotFound` is deliberately not matched: it already says
+what it means.
+
+**A refusal must name the problem that actually occurred.** Two diagnostics
+described something that had not happened, and in both cases the *decision*
+was right — only the explanation was fiction, which is worse than useless to
+an agent whose only way to act on a reason is to change the command and retry:
+
+- **`resolve_target` blamed an unreadable response for an EMPTY one.** A
+  well-formed `{"kind":"List","items":[]}` is a positive answer — the API
+  server was read successfully and said nothing matches — but it fell into
+  the same branch as unparseable output and reported "the response was not
+  the JSON of an identifiable resource". It lands on the `k8s_cleaner`'s
+  ordinary happy path (`kubectl delete … -l omnis.dev/ephemeral=true` over an
+  already-clean namespace), where the agent can learn nothing from that
+  message except to retry, and three retries escalate to the user for a
+  command that would delete nothing. The three cases are now distinct
+  (unparseable / empty / shape-unrecognisable) and the empty one says so and
+  tells the agent to report the namespace as already clean instead of
+  retrying. **The decision is deliberately unchanged** — a selector matching
+  nothing *now* could match a resource created between this probe and the
+  real command, and unproven means refused — so this buys the agent an exit
+  from the retry loop, not a permission.
+- **`helm test` and `helm push` were explained by a chart they do not have.**
+  Neither is in `HELM_READ_VERBS`, `HELM_LOCAL_VERBS` or
+  `HELM_DESTRUCTIVE_VERBS`, so both fell through to `validate_helm`'s
+  install/upgrade branch, which probed `helm plugin list`, attempted a
+  `--dry-run=server` neither verb accepts (verified against the binary —
+  `helm test --help` mentions dry-run zero times), and then refused with
+  "chart argument does not name a local directory". `HELM_NO_PREVIEW_REASONS`
+  keys a truthful reason per verb and is consulted **before** the plugin
+  probe, so an unpreviewable verb no longer spends two subprocess calls
+  arriving at a wrong answer (`TestUnpreviewableHelmVerbsSpendNoSubprocess`).
+  `helm test` now points at `helm get manifest` — its hook specs live in the
+  installed release, not on the command line, which is exactly why there is
+  no chart content to pin. **`helm push` was found while fixing `test`, not
+  reported before it**: it is the same defect shape, and its refusal is
+  likewise left in place rather than reclassified — it changes no cluster
+  state and arguably belongs in `HELM_LOCAL_VERBS` beside its mirror image
+  `helm pull`, but that is a permissiveness decision, not a diagnostic one.
+
+**Four verbs reach INTO a running container rather than changing an API
+object, and none can be classified by its verb** (`CONTAINER_ACCESS_VERBS`
+plus `label`/`annotate --list`). Each is a read or a write depending on its
+ARGUMENTS, so all of them hit validate()'s catch-all and were denied wholesale
+as changes "with no validation rule" — which for the read half is simply
+false, and which cost the investigator the ordinary moves of its job: read a
+config file out of a pod, watch a container's output, pull a log file down,
+list a resource's labels. `container_access_reason(verb, argv, verb_idx)` is
+the single entry point for the family, so `provably_read_only` (which asks
+whether the reason is `None`) and `validate()` (which refuses **with** that
+reason) can never disagree about a verb or describe a check that did not
+fire:
+
+- **`attach`** — without stdin it is `logs -f` with a different transport:
+  it streams an already-running process's output and sends nothing. With
+  `-i`/`--stdin` it forwards this terminal's input **into** that process,
+  which is PID 1 of a live workload and may well be a shell or a REPL. Those
+  bytes do not exist at hook time, so an interactive attach is exactly as
+  unreadable as `exec -- sh` and is refused for the same reason — not
+  previewed (there is nothing to preview) and not attested (the reviewer
+  cannot read them either). Detection covers the clustered spellings anyone
+  actually types (`-it`, `-ti`) via `SHORT_FLAG_CLUSTER`, since a membership
+  test against `-i` misses both; `--stdin=false` is refused along with
+  `--stdin`, because failing closed on a form nobody writes is cheaper than
+  parsing a flag's boolean value to decide whether a write channel is open.
+- **`cp`** — a file spec is remote when it carries a `:` (`pod:/path`,
+  `namespace/pod:/path`), kubectl's own rule and the only one available from
+  argv. Copying **out** reads the container's filesystem (kubectl runs `tar
+  cf -` in it) and changes nothing in the cluster; copying **in** writes files
+  no dry run can preview, into a filesystem that is lost on the next restart
+  anyway — so it is refused with the advice that actually works (put the
+  content in a ConfigMap/Secret or the image and apply that, which is
+  previewable and revertible). A download's destination is a HOST path,
+  deliberately not this guard's concern: `kubectl get -o json > /etc/anything`
+  already proceeds for the same reason, and host writes belong to the
+  permission layer and the Bash safety floor.
+- **`label`/`annotate --list`** display a resource's labels rather than
+  setting one. `--list` alone is not enough — a `key=value` (set) or `key-`
+  (remove) operand alongside it is still a change — and neither can be
+  confused with a resource operand, since a Kubernetes name is RFC 1123 and so
+  contains no `=` and cannot end in `-`. The setting half stays in
+  `IMPERATIVE_VERBS` and is dry-run exactly as before. (`--local` is equally
+  provable and deliberately NOT included: nothing in the fleet uses it, and
+  every entry in these sets is a claim to keep true.)
+
+**`-c`/`--container` had to join `VALUE_FLAGS`** for any of this to work. It
+is not a global flag, but it is the one per-verb value flag the operand walk
+cannot do without: exactly five verbs have it (`logs`, `attach`, `exec`, `cp`,
+`debug` — checked against the binary) and in all five it is `--container` and
+takes a value. Without the entry `bare_operands` reads the CONTAINER NAME as a
+resource, so `kubectl cp -c app pod:/a ./b` counted three operands and
+`kubectl debug -c app pod/x` counted two targets — **both refused as
+malformed, the second a false refusal introduced by the `debug` work itself
+one round earlier**. It never appears before a verb, so `_verb_after` is
+unaffected, and for the blast-radius check the entry errs toward finding
+*fewer* named resources, which is the closed direction.
+
+**`exec` is decided by the container command, not by the verb** — the same
+"the verb alone proves nothing" shape as `auth`/`config`/`rollout`
+(`READ_ONLY_SUBVERBS`), except the discriminator is the whole argv after `--`
+rather than one sub-verb token. Nothing inspected it, so **every** `kubectl
+exec` fell through to `validate()`'s catch-all and was denied as a change
+"with no validation rule" — including `-- cat /etc/nginx/nginx.conf`, which is
+how half of an investigation starts, and for which that message is also simply
+false. It broke the Kubernetes benches (`../omnis-benches`), whose
+`bench-permissions.json` bypasses the permission layer but **not** the hook.
+`exec_read_only_reason(argv, verb_idx)` now splits the argv at the first `--`
+and classifies the inner command: a member of `EXEC_READ_ONLY_CMDS` proceeds
+with no dry run and no attestation (there is nothing to preview — the guard
+cannot dry-run a program inside a container, which is exactly why the
+unprovable case is refused instead); everything else `refuse()`s — an ordinary
+escalation, unlike `check_attested`'s terminal deny, since a human allowing an
+in-container action is a real decision, where a click can never substitute for
+a review. One function serves both callers (`provably_read_only` asks whether
+the reason is `None`, `validate()` refuses with the reason itself) so the
+diagnostic can never describe a different check than the one that fired.
+**Membership in `EXEC_READ_ONLY_CMDS` requires more than "usually harmless":
+the command must write nothing and execute nothing FOR ANY ARGV, STDIN OR
+TTY.** That bar is what does the work: `sort -o F`/`tee`/`dd`/`curl -o F`
+write; `less`/`more`/`top`/`vi` have shell escapes or kill keys, so an
+interactive session would turn them into arbitrary execution — and excluding
+them is precisely why `-i`/`-t` need no rule of their own and an honest
+`exec -it POD -- cat x` proceeds rather than being refused for a flag that
+carries no risk once the command itself is proven. `ip`/`ss`/`ifconfig`/`arp`/
+`mount`/`find` are out because gating their mutating forms (`ip link set`,
+`ss -K`, `arp -d`, `find -delete`) would mean enumerating a command's mutating
+FLAGS — the enumerate-the-bad-side direction this whole guard exists to avoid.
+Shells and interpreters are already in `LAUNCHERS`, so `-- sh -c '…'` is
+refused with the launcher diagnostic, quoted string or not: a shell inside the
+container is exactly as unreadable as one outside it. `env` is the one
+narrowed case (`EXEC_BARE_ONLY_CMDS`): bare it prints the environment, with
+any argument it RUNS a command, so only the bare form is provable — kept
+rather than dropped because `kubectl exec POD -- env` is idiomatic enough that
+refusing it would push agents to `sh -c` instead. The **deprecated
+separator-less form** (`kubectl exec POD cat /x`) is refused: without `--`,
+which bare token ends the pod and begins the command cannot be settled from
+argv alone, and the refusal names the fix, so it costs one retry.
+
 **The attestation subject binds the change's CONTENT, and the mechanism
 differs by target kind** — one rule cannot bind all three shapes soundly:
 a `-f <file>`'s bytes; a walk of a `-f <dir>` (manifests reference nothing
@@ -1655,11 +1895,22 @@ not substitute for a review.
   like any other), but the residual is the same shape for whatever binary is
   not yet on either list. Listing `git` itself as a launcher was rejected
   because it would refuse `git commit -m "…kubectl…"` on every coder turn.
-- `watch -n 2 kubectl get pods`, `kubectl auth whoami`, and `kubectl cp` are
-  each refused today, pending one set entry apiece (`watch` execs its argv
-  through `sh` so it is classed as a launcher rather than a wrapper; `auth`'s
-  only recognised read sub-verb is `can-i`; `cp` is in neither
-  `KUBECTL_READ_VERBS` nor `KUBECTL_LOCAL_VERBS`) — friction, not a leak.
+- `watch -n 2 kubectl get pods` is still refused, pending one set entry
+  (`watch` execs its argv through `sh`, so it is classed as a launcher rather
+  than a wrapper) — friction, not a leak.
+  (`kubectl auth whoami` and `kubectl cp POD:/src local` used to be on this
+  list and are now reads. The `READ_ONLY_SUBVERBS` lists are complete against
+  the real binary — see the note above the set — which is what makes refusing
+  everything else honest rather than merely untested.)
+- The same shape survives on the **`exec` inner-command** side: a read the
+  allowlist does not name is refused, so `-- ip a`, `-- ss -tulpn`,
+  `-- find /var/log -name '*.log'`, `-- top -b -n1` and `-- less FILE` are all
+  friction today. Each is one line in `EXEC_READ_ONLY_CMDS` — but only for a
+  command that clears the write-nothing-and-exec-nothing-for-any-argv bar
+  above; the four named here do NOT, which is why they are limitations rather
+  than omissions. `kubectl cp` is untouched by this work and still refused
+  outright (it is exec-with-tar underneath, but its own verb reaches neither
+  set).
 - An `=`-joined flag immediately before a Helm chart path refuses
   (`helm upgrade myrel --namespace=demo ./chart`) while the equivalent
   two-token spelling proceeds (`helm upgrade myrel --namespace demo ./chart`) —
@@ -2308,6 +2559,7 @@ mistaken for a broken reference.
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
 | `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
 | `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
+| `OMNIS_NON_INTERACTIVE` | `1`/`true`/`yes`/`on` — declares that **nobody can answer a prompt in this process**, so a `PreToolUse` hook's `ask` escalation is **refused** instead of waiting on a card no one will ever resolve (`askuser.DefaultTimeout` is `0` by design, so that wait ends only with the run context). What a bench or a CI run needs. Opt-in and deliberately DECLARED, never inferred from "does this session have a listener" — see `canEscalate` in [agent/hooks_ask.go](agent/hooks_ask.go) for why that inference is unsound. Scoped to the hook escalation only: the permission layer already has `defaultMode: bypassPermissions` for the same need, and the `ask_user` tool is untouched |
 | `OMNIS_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
 | `OMNIS_HOME` | Per-user state root for all mutable files (default `$HOME/.omnis`) |
 | `OMNIS_PATH_AUGMENT` | `true`/`false` (default `true`) — at startup ([internal/binpath/](internal/binpath/) `binpath.Ensure`, called from `BuildInfrastructure`) append the standard user-local bin dirs (`~/.local/bin` from pipx/pip-user, `$GOBIN`/`$GOPATH/bin`/`~/go/bin` from `go install`, `$CARGO_HOME/bin`/`~/.cargo/bin`, `~/.deno/bin`) to the process `$PATH`. Append-only + idempotent, so it never shadows system binaries; makes a dependency-gate auto-install (skill/MCP/LSP `requires`) that drops its binary in a user dir immediately visible to `exec.LookPath` and every spawned subprocess (fixes the "installed to ~/.local/bin but not on PATH" trap for pipx, and for the existing gopls `go install`→`~/go/bin` gate). `false` disables. |
@@ -3012,6 +3264,37 @@ so an existing Claude Code config is portable.
     `false` for `Ask`, so every OTHER consumer (`PostToolUse`, `UserPromptSubmit`,
     the fire-and-forget bus listeners) ignores it with no change — `Ask` is
     meaningful only on `PreToolUse`, where there is a user to ask.
+  - **An escalation nobody can answer is refused, not awaited.**
+    `askHookPermission` ([agent/hooks_ask.go](agent/hooks_ask.go)) already
+    denied when the registry was nil — but every shipped surface builds one
+    (`Infrastructure` sets `AskUserRegistry` unconditionally), so an unattended
+    run reached `reg.Ask` and **blocked on a card nobody would ever resolve**:
+    `askuser.DefaultTimeout` is `0` by design, so the wait ends only with the
+    run context. `canEscalate(reg)` now gates the `out.Asks()` branch on
+    `reg != nil && !nonInteractive()`, and the refusal says which of the two
+    happened — the old text read "(the user declined)" even when there was no
+    user, the kind of lie that sends whoever reads the transcript hunting for a
+    decision nobody made. The block still advances the `consecutive` counter,
+    so a hook script's own escalation threshold is unaffected.
+    **Why an env var and not "does this session have a listener":** nothing in
+    omnis can answer that honestly. `askuser.Registry.SetNotify` installs ONE
+    process-wide `func(Question)` callback (set once in `BuildInfrastructure`
+    to emit a bus event, never replaced by a surface), so it carries no
+    per-session subscriber knowledge at all. The thing that does count
+    listeners — `sessionPushBroadcaster.subs` — is the wrong unit, because
+    `ask_user` reaches browsers over the **global** `/api/events` stream ("Live
+    ask_user / ask_user_cancel for any session"), so a browser displaying no
+    session can still answer this one. And `/api/events` **replays every
+    pending question on connect**, precisely so a question outlives having no
+    listener, mirroring the deliberate rule that the wait survives "a mere
+    client disconnect" (see "No ask-user / permission timeout"). Inferring
+    would therefore turn a reload, a network blip, or a user who closed the tab
+    meaning to come back into a hard block on their work. An unattended run, by
+    contrast, *knows* it is unattended — letting it say so has no false
+    positives. Tests assert the DEADLINE, not just the verdict
+    (`TestNonInteractiveDeniesInsteadOfWaiting`,
+    `TestUnanswerableEscalationBlocksWithAnHonestReason`): reverting the fix
+    makes both hang until their timers fire, which is the actual bug.
   - **`fail_closed`** (`hooks.Command.FailClosed`, checked in `Config.Run`)
     closes a real gap: by default a hook whose *script* fails leaky —
     non-zero exit, timeout, or (packaging omission) command-not-found — is

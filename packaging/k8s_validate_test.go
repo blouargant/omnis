@@ -163,6 +163,7 @@ const (
 	stubDefaultDeny       = "default-deny"       // unlisted rows: kubectl/helm fail deterministically for anything
 	stubKubectlDiffFails  = "kubectl-diff-fail"  // validate_manifest's `kubectl diff` step fails (exit 2)
 	stubKubectlGetFails   = "kubectl-get-fail"   // resolve_target's `kubectl get` fails (exit 1)
+	stubKubectlOK         = "kubectl-ok"         // every kubectl call succeeds; `get` yields one resolvable item
 	stubHelmUnpreviewable = "helm-unpreviewable" // validate_helm: no release, and no diff plugin
 )
 
@@ -174,6 +175,12 @@ case "$*" in
   *diff*) exit 2 ;;
   *)      exit 0 ;;
 esac`,
+	stubKubectlOK: `
+case "$1" in
+  get) echo '{"apiVersion":"v1","items":[{"kind":"Pod","metadata":{"name":"mypod","namespace":"demo"}}]}' ;;
+  *)   echo "dry run ok" ;;
+esac
+exit 0`,
 	stubKubectlGetFails: `
 case "$*" in
   *get*) exit 1 ;;
@@ -337,9 +344,38 @@ var commandShapeCases = []struct {
 	{"port-forward opens a tunnel", "kubectl port-forward svc/x 8080:80 -n demo", "k8s_investigator", "", ""},
 	// Sub-verbs: the verb alone proves nothing.
 	{"auth can-i reads", "kubectl auth can-i create pods", "k8s_investigator", "", ""},
+	{"auth whoami reads", "kubectl auth whoami", "k8s_investigator", "", ""},
+	{"auth reconcile writes RBAC", "kubectl auth reconcile -f rbac.yaml", "k8s_editor", "deny", ""},
 	{"config view reads", "kubectl config view", "k8s_investigator", "", ""},
 	{"rollout status reads", "kubectl rollout status deploy/x -n demo", "k8s_investigator", "", ""},
 	{"rollout history reads", "kubectl rollout history deploy/x -n demo", "k8s_investigator", "", ""},
+	// `exec` is the same "the verb alone proves nothing" shape as auth/config/
+	// rollout, except the discriminator is the whole container command after
+	// `--` rather than one sub-verb token. A read there is the investigator's
+	// ordinary register — reading a config file out of a pod is how half of
+	// these tasks start — and refusing it wholesale is the friction that gets a
+	// guard removed.
+	{"exec reads a file", "kubectl exec mypod -n demo -- cat /etc/nginx/nginx.conf", "k8s_investigator", "", ""},
+	{"exec lists a directory", "kubectl exec mypod -- ls -la /var/log", "k8s_investigator", "", ""},
+	{"exec names a container", "kubectl exec -n demo mypod -c app -- printenv", "k8s_investigator", "", ""},
+	{"exec greps in a pod", "kubectl exec mypod -- grep -i error /var/log/app.log", "k8s_investigator", "", ""},
+	// `env` alone prints the environment; `env FOO=1 sh -c …` runs a command.
+	// Only the bare form is provable, and the bare form is idiomatic enough
+	// that dropping it would send every agent to `sh -c` instead.
+	{"exec bare env prints", "kubectl exec mypod -- env", "k8s_investigator", "", ""},
+	// -i/-t are not themselves a risk: every allowlisted command writes
+	// nothing and execs nothing whatever its stdin or TTY, which is exactly
+	// why `less`/`more`/`top` (shell escapes, kill keys) are NOT allowlisted.
+	{"exec interactive read", "kubectl exec -it mypod -- cat /etc/hosts", "k8s_investigator", "", ""},
+	// attach without stdin is `logs -f` with a different transport; cp OUT of
+	// a container reads its filesystem; `label/annotate --list` displays labels
+	// rather than setting one. All three were denied wholesale.
+	{"attach watches output", "kubectl attach mypod -n demo", "k8s_investigator", "", ""},
+	{"attach names a container", "kubectl attach mypod -c app -n demo", "k8s_investigator", "", ""},
+	{"cp out of a container", "kubectl cp demo/mypod:/var/log/app.log ./app.log", "k8s_investigator", "", ""},
+	{"cp out with a container flag", "kubectl cp -c app demo/mypod:/etc/nginx/nginx.conf /tmp/nginx.conf", "k8s_investigator", "", ""},
+	{"label --list displays", "kubectl label --list pods mypod -n demo", "k8s_investigator", "", ""},
+	{"annotate --list displays", "kubectl annotate --list pods mypod -n demo", "k8s_investigator", "", ""},
 	// A value flag between the verb and its sub-verb must not shift the
 	// sub-verb. This direction denied an honest read.
 	{"value flag before a read sub-verb", "kubectl auth -n demo can-i create pods", "k8s_investigator", "", ""},
@@ -530,6 +566,49 @@ var commandShapeCases = []struct {
 	{"strace execs argv", "strace -f kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
 	{"systemd-run execs argv", "systemd-run --scope kubectl delete pod x -n demo", "k8s_editor", "deny", "could not be resolved"},
 	{"busybox launches a shell", "busybox sh -c 'kubectl delete pod x'", "k8s_editor", "deny", "another program to execute"},
+
+	// ---- run / debug: the ephemeral-diagnostic workflow the investigator's
+	// own instruction mandates. Both are real creations, so neither proceeds —
+	// they reach a preview and then the reviewer, instead of the catch-all's
+	// "no validation rule".
+	{"run reaches the reviewer", "kubectl run netshoot --image=nicolaka/netshoot --restart=Never --labels=omnis.dev/ephemeral=true -n demo", "k8s_investigator", "deny", "has not been reviewed"},
+	{"run with a container command reaches the reviewer", "kubectl run tmp --image=busybox --restart=Never -n demo -- sleep 60", "k8s_investigator", "deny", "has not been reviewed"},
+	{"debug reaches the reviewer", "kubectl debug pod/mypod -n demo --image=busybox", "k8s_investigator", "deny", "has not been reviewed"},
+	{"debug on a node reaches the reviewer", "kubectl debug node/worker-1 -n demo --image=busybox", "k8s_investigator", "deny", "has not been reviewed"},
+	{"debug naming no target", "kubectl debug -n demo --image=busybox", "k8s_investigator", "deny", "exactly one target"},
+	{"debug naming two targets", "kubectl debug pod/a pod/b -n demo --image=busybox", "k8s_investigator", "deny", "exactly one target"},
+
+	// ---- attach / cp: the write half of the same verbs ----
+	{"attach -it opens stdin", "kubectl attach -it mypod -n demo", "k8s_investigator", "deny", "write channel"},
+	{"attach -ti clusters the other way", "kubectl attach -ti mypod -n demo", "k8s_investigator", "deny", "write channel"},
+	{"attach --stdin opens stdin", "kubectl attach --stdin mypod -n demo", "k8s_investigator", "deny", "write channel"},
+	{"cp into a container", "kubectl cp ./config.yaml demo/mypod:/etc/app/config.yaml", "k8s_editor", "deny", "ConfigMap"},
+	{"cp neither side remote", "kubectl cp ./a ./b", "k8s_investigator", "deny", "names a pod"},
+	{"cp with too few operands", "kubectl cp demo/mypod:/var/log/app.log", "k8s_investigator", "deny", "exactly one source"},
+	// Refused correctly, but validate_helm's install/upgrade branch used to
+	// explain it with "chart argument does not name a local directory" — an
+	// argument neither verb takes. Neither accepts --dry-run either (verified
+	// against the binary), so there is no preview to attempt.
+	{"helm test names its real reason", "helm test myrel -n demo", "k8s_investigator", "deny", "test hooks"},
+	{"helm push names its real reason", "helm push ./chart.tgz oci://reg/x", "k8s_editor", "deny", "publishes a chart"},
+	// --list alongside a label CHANGE is still a change, and RFC 1123 means no
+	// resource name can be mistaken for one (`=` and a trailing `-` are both
+	// illegal in a Kubernetes name).
+	{"label --list with a change still sets", "kubectl label --list pods mypod tier=web -n demo", "k8s_editor", "deny", "has not been reviewed"},
+	{"label --list with a removal still removes", "kubectl label --list pods mypod tier- -n demo", "k8s_editor", "deny", "has not been reviewed"},
+
+	// ---- exec: everything not provably a read ----
+	// The whole point of the split: a shell inside the container is exactly as
+	// unreadable as a shell outside it, so the read allowlist can never reach
+	// it, however harmless the quoted string looks.
+	{"exec hands a line to sh", "kubectl exec mypod -- sh -c 'cat /etc/hosts'", "k8s_investigator", "deny", "another program to execute"},
+	{"exec hands a line to bash", "kubectl exec -it mypod -- bash -c 'rm -rf /data'", "k8s_editor", "deny", "another program to execute"},
+	{"exec runs an interactive shell", "kubectl exec -it mypod -- bash", "k8s_editor", "deny", "another program to execute"},
+	{"exec deletes in the container", "kubectl exec mypod -- rm -rf /data", "k8s_editor", "deny", "not one of the read-only commands"},
+	{"exec writes with tee", "kubectl exec mypod -- tee /etc/passwd", "k8s_editor", "deny", "not one of the read-only commands"},
+	{"exec env with operands execs", "kubectl exec mypod -- env FOO=1 printenv", "k8s_investigator", "deny", "only with no arguments"},
+	{"exec without a separator", "kubectl exec mypod cat /etc/hosts", "k8s_investigator", "deny", "Separate the container command"},
+	{"exec with an empty command", "kubectl exec mypod --", "k8s_investigator", "deny", "Separate the container command"},
 }
 
 // commandShapeStubs names, by row name, the stub kubectl/helm behaviour a row
@@ -567,6 +646,15 @@ var commandShapeStubs = map[string]string{
 	"xargs -a hides a delete":              stubKubectlGetFails,
 	"sudo --chroot hides a delete":         stubKubectlGetFails,
 	"sudo --chdir hides a delete":          stubKubectlGetFails,
+	// run/debug must get PAST their mechanical step to prove they now reach
+	// the reviewer; the default stub fails everything, which would deny them
+	// for the wrong reason and let a regression to the catch-all pass.
+	"run reaches the reviewer":                          stubKubectlOK,
+	"run with a container command reaches the reviewer": stubKubectlOK,
+	"debug reaches the reviewer":                        stubKubectlOK,
+	"debug on a node reaches the reviewer":              stubKubectlOK,
+	"label --list with a change still sets":             stubKubectlOK,
+	"label --list with a removal still removes":         stubKubectlOK,
 }
 
 func TestDecisionForCommandShapes(t *testing.T) {
@@ -653,6 +741,7 @@ func TestGuardOnlyEverPreviews(t *testing.T) {
 		"kubectl delete pod x -n demo",
 		"helm uninstall myrel -n demo",
 		"helm upgrade myrel ./chart -n demo",
+		"kubectl run tmp --image=busybox --restart=Never -n demo -- sleep 60",
 	} {
 		runHook(t, bashInput(cmd, "k8s_editor"), dir)
 	}
@@ -861,13 +950,132 @@ func TestProceedsAreInertUnderBash(t *testing.T) {
 				if len(fields) == 0 || !isK8s(fields[0]) {
 					continue
 				}
-				if mutating[verbPosition(fields[1:])] {
+				if recordedIsMutating(mutating, verbPosition(fields[1:]), fields[1:]) {
 					t.Fatalf("the guard let this proceed, and bash then ran a mutation:\n"+
 						"  command: %s\n  invoked: %s", c.command, rec)
 				}
 			}
 		})
 	}
+}
+
+// recordedIsMutating decides whether a recorded invocation would actually
+// change anything. verbPosition alone cannot, for four verbs: `exec`,
+// `attach`, `cp` and `label` are all in mutatingVerbs because each has a real
+// mutating form, but each also has a read form the guard now waves through —
+// `-- cat`, no `-i`, a copy OUT, `--list` — and the difference is in the
+// arguments, not the verb.
+//
+// It duplicates neither the guard's parser nor its allowlists. Every rule
+// below is deliberately tinier and cruder than the script's, and is owned by
+// this test: an argument shape the guard newly waves through but that is not
+// named here is still reported as a mutation, so widening the script cannot
+// silently widen this oracle too — the row has to be argued for in both
+// places. Every case errs toward calling something a mutation.
+func recordedIsMutating(mutating map[string]bool, verb string, args []string) bool {
+	if !mutating[verb] {
+		return false
+	}
+	// args still carries the verb itself (the caller strips only the binary),
+	// and an operand count that includes it is off by one — which read every
+	// `kubectl cp POD:/a ./b` as a three-operand shape it could not parse, and
+	// therefore as a mutation.
+	rest := args
+	for i, a := range args {
+		if a == verb {
+			rest = args[i+1:]
+			break
+		}
+	}
+	switch verb {
+	case "exec":
+		return execIsMutating(rest)
+	case "attach":
+		return attachIsMutating(rest)
+	case "cp":
+		return cpIsMutating(rest)
+	case "label", "annotate":
+		return labelIsMutating(rest)
+	}
+	return true
+}
+
+// execIsMutating: a read only when the command after `--` is one of a handful
+// of names spelled out here. No separator at all is treated as a mutation,
+// which is also what the guard does.
+func execIsMutating(args []string) bool {
+	inner := []string{}
+	for i, a := range args {
+		if a == "--" {
+			inner = args[i+1:]
+			break
+		}
+	}
+	if len(inner) == 0 {
+		return true
+	}
+	switch inner[0] {
+	case "cat", "ls", "grep", "printenv", "env", "head", "tail", "wc", "stat", "df", "ps":
+		return false
+	}
+	return true
+}
+
+// attachIsMutating: anything that could open stdin counts as a write, whether
+// spelled long or clustered into a short-flag group.
+func attachIsMutating(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "--stdin") {
+			return true
+		}
+		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "i") {
+			return true
+		}
+	}
+	return false
+}
+
+// cpIsMutating: a copy is a read only when the FIRST non-flag operand names a
+// pod (carries a ":") and the second does not. Anything else — an upload, a
+// shape this oracle cannot parse — counts as a mutation.
+func cpIsMutating(args []string) bool {
+	ops := []string{}
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			if args[i] == "-c" || args[i] == "--container" {
+				i++
+			}
+			continue
+		}
+		ops = append(ops, args[i])
+	}
+	if len(ops) != 2 {
+		return true
+	}
+	return !strings.Contains(ops[0], ":") || strings.Contains(ops[1], ":")
+}
+
+// labelIsMutating: `--list` displays labels, but only when nothing alongside
+// it sets (`key=value`) or removes (`key-`) one.
+func labelIsMutating(args []string) bool {
+	list := false
+	for _, a := range args {
+		if a == "--list" || strings.HasPrefix(a, "--list=") {
+			list = true
+		}
+	}
+	if !list {
+		return true
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if strings.Contains(a, "=") || strings.HasSuffix(a, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 // verbPosition names the token a kubectl/helm invocation would treat as its verb:
@@ -895,6 +1103,206 @@ func verbPosition(args []string) string {
 		}
 	}
 	return ""
+}
+
+// THE trap for `run`, and one TestGuardOnlyEverPreviews cannot see: that
+// oracle asks only whether a recorded invocation CONTAINS a dry-run marker,
+// and the dangerous spelling contains one.
+//
+// `kubectl run x --image=y -- sleep 60` takes a `--` separator, which no
+// pre-existing imperative verb does. Appending the flag the way
+// validate_imperative always had produces `kubectl run x --image=y -- sleep
+// 60 --dry-run=server`, where kubectl hands `--dry-run=server` to the
+// CONTAINER as an argument to `sleep` and never sees it itself — so the guard
+// CREATES THE POD while believing it previewed it. That is the exact failure
+// this whole file exists to prevent, and it would have passed every other
+// test here. So assert the position, not the presence.
+func TestRunDryRunPrecedesTheContainerCommand(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "invoked.log")
+	body := "#!/bin/sh\necho \"$*\" >> " + marker + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	runHook(t, bashInput("kubectl run tmp --image=busybox --restart=Never -n demo -- sleep 60",
+		"k8s_investigator"), dir)
+
+	b, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the guard never invoked kubectl at all — `run` should have been dry-run")
+	}
+	rec := strings.TrimSpace(string(b))
+	if !strings.Contains(rec, "--dry-run=server") {
+		t.Fatalf("no dry run at all: %q", rec)
+	}
+	sep := strings.Index(rec, " -- ")
+	dry := strings.Index(rec, "--dry-run=server")
+	if sep >= 0 && dry > sep {
+		t.Fatalf("--dry-run=server landed AFTER the `--` separator, so kubectl would pass it "+
+			"to the container and create the pod for real:\n  %s", rec)
+	}
+}
+
+// A well-formed List with ZERO items is a POSITIVE answer — the API server was
+// read successfully and said nothing matches — but resolve_target reported it
+// with "the response was not the JSON of an identifiable resource", blaming a
+// failure that did not occur. It lands on the k8s_cleaner's ordinary happy
+// path (sweeping an already-clean namespace), where the agent can learn
+// nothing from that message except to retry, and three retries escalate to the
+// user for a command that would delete nothing.
+//
+// Both halves are asserted, because "make the empty case say something else"
+// is trivially satisfiable by making the unreadable case say it too — which
+// would trade one wrong diagnostic for another.
+func TestEmptyMatchIsNotBlamedOnAnUnreadableResponse(t *testing.T) {
+	empty := stubBin(t, "kubectl", `
+case "$1" in
+  get) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
+  *)   echo ok ;;
+esac
+exit 0`)
+	out, _ := runHook(t, bashInput("kubectl delete pod,job -n demo -l omnis.dev/ephemeral=true",
+		"k8s_cleaner"), empty)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("an empty match must still be refused (the decision is deliberately "+
+			"unchanged); decision = %q", got)
+	}
+	reason := reasonOf(t, out)
+	if !strings.Contains(reason, "matched no resources") {
+		t.Fatalf("an empty match must say so; reason = %q", reason)
+	}
+	if strings.Contains(reason, "could not be read") {
+		t.Fatalf("an empty match must NOT be blamed on an unreadable response; reason = %q", reason)
+	}
+
+	// The other half: a response that genuinely cannot be read must still say
+	// exactly that.
+	garbage := stubBin(t, "kubectl", `
+case "$1" in
+  get) echo 'Error from server: the connection was refused' ;;
+  *)   echo ok ;;
+esac
+exit 0`)
+	out2, _ := runHook(t, bashInput("kubectl delete pod x -n demo", "k8s_cleaner"), garbage)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("an unreadable response must be refused; decision = %q", got)
+	}
+	if !strings.Contains(reasonOf(t, out2), "could not be read") {
+		t.Fatalf("an unreadable response must say so; reason = %q", reasonOf(t, out2))
+	}
+}
+
+// An unpreviewable helm verb must reach its refusal WITHOUT spending
+// subprocess calls on a preview that cannot exist — the old path ran
+// `helm plugin list` and then a `--dry-run=server` helm never accepts, purely
+// to arrive at a wrong explanation.
+func TestUnpreviewableHelmVerbsSpendNoSubprocess(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "invoked.log")
+	body := "#!/bin/sh\necho \"$*\" >> " + marker + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "helm"), []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	for _, cmd := range []string{"helm test myrel -n demo", "helm push ./chart.tgz oci://reg/x"} {
+		out, _ := runHook(t, bashInput(cmd, "k8s_editor"), dir)
+		if got := decisionOf(t, out); got != "deny" {
+			t.Fatalf("%s: decision = %q, want deny", cmd, got)
+		}
+	}
+	if b, err := os.ReadFile(marker); err == nil {
+		t.Fatalf("an unpreviewable helm verb invoked helm anyway:\n%s", b)
+	}
+}
+
+// A refusal an agent cannot act on spends its attempts and then escalates to
+// the user for a problem it could have fixed itself. Observed live: `kubectl
+// diff` refused with a bare "Error from server (NotFound)", the model burned
+// its retries, and only then guessed the real cause aloud ("the diff hook
+// blocks because the namespace doesn't exist yet").
+//
+// Each case asserts BOTH halves: the advice appears, and the server's own
+// words survive alongside it. A hint that replaced the evidence would trade
+// one dead end for a prettier one.
+func TestServerErrorsCarryAnActionableHint(t *testing.T) {
+	for _, c := range []struct {
+		name, stub, wantAdvice, wantRaw string
+	}{
+		{
+			name: "namespace not found on the diff step",
+			stub: `
+case "$1" in
+  diff) echo 'Error from server (NotFound): namespaces "demo" not found' >&2; exit 2 ;;
+  *) exit 0 ;;
+esac`,
+			wantAdvice: "kubectl create namespace demo",
+			wantRaw:    `namespaces "demo" not found`,
+		},
+		{
+			name: "unknown kind on the dry-run step",
+			stub: `
+case "$1" in
+  diff) exit 1 ;;
+  *) echo 'error: unable to recognize "app.yaml": no matches for kind "Certificate" in version "cert-manager.io/v1"' >&2; exit 1 ;;
+esac`,
+			wantAdvice: "CustomResourceDefinition",
+			wantRaw:    `no matches for kind "Certificate"`,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := stubBin(t, "kubectl", c.stub)
+			out, _ := runHook(t, bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor"), dir)
+			if got := decisionOf(t, out); got != "deny" {
+				t.Fatalf("decision = %q, want deny", got)
+			}
+			reason := reasonOf(t, out)
+			if !strings.Contains(reason, c.wantAdvice) {
+				t.Fatalf("reason carries no actionable advice (%q missing):\n%s", c.wantAdvice, reason)
+			}
+			if !strings.Contains(reason, c.wantRaw) {
+				t.Fatalf("the hint replaced the server's own words (%q missing):\n%s", c.wantRaw, reason)
+			}
+		})
+	}
+}
+
+// The complementary half, and the reason the hint table can be extended
+// cheaply: an error it does not recognise must come back verbatim, with
+// nothing invented. A table that quietly attached advice to everything would
+// be worse than no table, because the advice would sometimes be wrong AND
+// confident.
+func TestUnrecognisedServerErrorGetsNoInventedAdvice(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$1" in
+  diff) echo 'Error from server: etcdserver: request timed out' >&2; exit 2 ;;
+  *) exit 0 ;;
+esac`)
+	out, _ := runHook(t, bashInput("kubectl apply -f app.yaml -n demo", "k8s_editor"), dir)
+	reason := reasonOf(t, out)
+	if !strings.Contains(reason, "etcdserver: request timed out") {
+		t.Fatalf("the server's own words were lost:\n%s", reason)
+	}
+	for _, invented := range []string{"does not exist yet", "CustomResourceDefinition", "create namespace"} {
+		if strings.Contains(reason, invented) {
+			t.Fatalf("advice %q was attached to an unrelated error:\n%s", invented, reason)
+		}
+	}
+}
+
+// Advice the guard itself blocks is worse than no advice: it spends the
+// agent's remaining attempts on a second dead end. The namespace hint says
+// "create it as its own separately reviewed change", so that command must
+// actually reach the reviewer rather than being refused as unvalidatable.
+func TestAdvisedRemedyIsItselfFollowable(t *testing.T) {
+	dir := stubBin(t, "kubectl", "echo ok\nexit 0")
+	out, _ := runHook(t, bashInput("kubectl create namespace demo", "k8s_editor"), dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("decision = %q, want deny-pending-review", got)
+	}
+	if !strings.Contains(reasonOf(t, out), "has not been reviewed") {
+		t.Fatalf("the advised remedy does not reach the reviewer, so the advice dead-ends:\n%s",
+			reasonOf(t, out))
+	}
 }
 
 // THE trap: `kubectl diff` exits 1 when a diff EXISTS. That is the normal case
@@ -1432,6 +1840,47 @@ esac`)
 // commands get different subjects — a property that was already true before
 // this fix, and true independently of content-binding. When a proof's setup
 // varies two things at once, it establishes neither.
+// `kubectl debug --custom=<file>` is a partial container spec — the bytes
+// that decide what the ephemeral container actually IS. It is not a
+// -f/--filename target, so nothing bound it, and an attestation would have
+// covered an argv merely NAMING the file: approve `--custom=probe.json`,
+// rewrite probe.json, replay the identical command. Same shape as the manifest
+// case below, on the flag that shape had not reached.
+func TestDebugCustomSpecContentBinds(t *testing.T) {
+	dir := stubBin(t, "kubectl", `
+case "$1" in
+  get) echo '{"apiVersion":"v1","items":[{"kind":"Pod","metadata":{"name":"mypod","namespace":"demo"}}]}' ;;
+  *)   echo ok ;;
+esac
+exit 0`)
+	spec := filepath.Join(t.TempDir(), "probe.json")
+	if err := os.WriteFile(spec, []byte(`{"image":"busybox"}`), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	in := bashInput("kubectl debug pod/mypod -n demo --custom="+spec, "k8s_investigator")
+	in["attestations"] = approveOneSegment(t, in, dir)
+
+	out, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out); got == "deny" || got == "ask" {
+		t.Fatalf("the debug, attested for its own spec content, was refused: %q", out)
+	}
+
+	// Vary exactly one thing: the spec file's bytes. The command string and
+	// the attestations map are untouched.
+	if err := os.WriteFile(spec, []byte(`{"image":"attacker/tools","securityContext":{"privileged":true}}`), 0o644); err != nil {
+		t.Fatalf("rewrite spec: %v", err)
+	}
+	out2, _ := runHook(t, in, dir)
+	if got := decisionOf(t, out2); got != "deny" {
+		t.Fatalf("the SAME debug command, now naming a DIFFERENT container spec, decision = %q, want deny (%s)",
+			got, out2)
+	}
+	if !strings.Contains(reasonOf(t, out2), "has not been reviewed") {
+		t.Fatalf("reason = %q, want it to say the change was not reviewed", reasonOf(t, out2))
+	}
+}
+
 func TestAttestationDoesNotCrossDifferentChanges(t *testing.T) {
 	dir := stubBin(t, "kubectl", `
 case "$*" in

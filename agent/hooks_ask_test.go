@@ -51,3 +51,52 @@ func awaitPending(t *testing.T, reg *askuser.Registry, sid string) askuser.Quest
 	t.Fatal("no pending question appeared within 2s")
 	return askuser.Question{}
 }
+
+// The gap this closes: askHookPermission already denied with no registry, but
+// every shipped surface HAS one, so an unattended run (a bench, CI) reached
+// reg.Ask and blocked on a card nobody would ever resolve —
+// askuser.DefaultTimeout is 0 by design, so the wait ends only with the run
+// context. The assertion that matters is therefore the DEADLINE: without the
+// flag this same call blocks (TestAskHookPermissionAllowsOnlyOnTheAllowChoice
+// has to poll for the pending card and resolve it by hand).
+func TestNonInteractiveDeniesInsteadOfWaiting(t *testing.T) {
+	t.Setenv("OMNIS_NON_INTERACTIVE", "1")
+	reg := askuser.NewRegistry()
+
+	done := make(chan bool, 1)
+	go func() { done <- askHookPermission(context.Background(), reg, "sess", "Bash", "why") }()
+
+	select {
+	case allowed := <-done:
+		if allowed {
+			t.Fatal("an unanswerable escalation must deny, not allow")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("askHookPermission blocked on a question nobody can answer")
+	}
+
+	// And it must not have left a card behind for a client that reconnects
+	// later to find and be confused by.
+	if qs := reg.Pending("sess"); len(qs) != 0 {
+		t.Fatalf("a refused escalation registered %d pending question(s)", len(qs))
+	}
+}
+
+// The flag is opt-in: an unset or unrecognised value must leave the waiting
+// behaviour exactly as it was, because waiting is the correct default — a
+// backgrounded tab, a reload or a network blip must not turn into a hard block
+// on the user's work.
+func TestNonInteractiveIsOptIn(t *testing.T) {
+	for _, v := range []string{"", "0", "false", "no", "maybe"} {
+		t.Setenv("OMNIS_NON_INTERACTIVE", v)
+		if nonInteractive() {
+			t.Fatalf("OMNIS_NON_INTERACTIVE=%q must not disable escalation", v)
+		}
+	}
+	for _, v := range []string{"1", "true", "YES", " on "} {
+		t.Setenv("OMNIS_NON_INTERACTIVE", v)
+		if !nonInteractive() {
+			t.Fatalf("OMNIS_NON_INTERACTIVE=%q must disable escalation", v)
+		}
+	}
+}
