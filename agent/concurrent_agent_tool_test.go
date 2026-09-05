@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -184,17 +185,6 @@ func TestConcurrentAgentToolProcessRequestPacksItself(t *testing.T) {
 	}
 }
 
-// cancelCtx is an adk.ToolContext that is only ever asked whether it is done. The
-// embedded interface is nil: any other method would panic, which is the point —
-// the wrapper must not touch the context for anything but cancellation.
-type cancelCtx struct {
-	adk.ToolContext
-	ctx context.Context
-}
-
-func (c cancelCtx) Done() <-chan struct{} { return c.ctx.Done() }
-func (c cancelCtx) Err() error            { return c.ctx.Err() }
-
 // A queued sibling waits on the semaphore. If that wait ignored the context, a
 // cancelled turn (Stop button, session end, shutdown) would strand the goroutine
 // for the life of the process behind an in-flight call nobody is waiting for.
@@ -206,14 +196,14 @@ func TestConcurrentAgentToolCancelledWaitDoesNotStrand(t *testing.T) {
 	busy := make(chan struct{})
 	go func() {
 		defer close(busy)
-		_, _ = wrapped.Run(nil, map[string]any{"request": "first"})
+		_, _ = wrapped.Run(toolCtxForSession("same-session"), map[string]any{"request": "first"})
 	}()
 	waitFor(t, func() bool { return inner.inFlight.Load() == 1 }, "first call to start")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := wrapped.Run(cancelCtx{ctx: ctx}, map[string]any{"request": "queued"})
+		_, err := wrapped.Run(toolCtxFor(ctx, "same-session"), map[string]any{"request": "queued"})
 		done <- err
 	}()
 
@@ -242,4 +232,132 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// sessionToolCtx is an adk.ToolContext carrying a real user-facing session id the
+// way the surfaces plant it (WithSteerSession), which is how it reaches a
+// sub-agent at all. SessionID() deliberately returns "" — for a sub-agent that
+// method yields agenttool's EPHEMERAL per-call session, so a wrapper that keyed on
+// it would mint a fresh semaphore per invocation and the limit would never bind.
+type sessionToolCtx struct {
+	adk.ToolContext
+	ctx context.Context
+}
+
+func toolCtxForSession(sid string) sessionToolCtx { return toolCtxFor(context.Background(), sid) }
+
+func toolCtxFor(ctx context.Context, sid string) sessionToolCtx {
+	return sessionToolCtx{ctx: WithSteerSession(ctx, sid)}
+}
+
+func (s sessionToolCtx) Deadline() (time.Time, bool) { return s.ctx.Deadline() }
+func (s sessionToolCtx) Done() <-chan struct{}       { return s.ctx.Done() }
+func (s sessionToolCtx) Err() error                  { return s.ctx.Err() }
+func (s sessionToolCtx) Value(k any) any             { return s.ctx.Value(k) }
+func (s sessionToolCtx) SessionID() string           { return "" }
+
+// wedgeableRunnableTool blocks the one call whose request equals wedgeOn until
+// release is closed; every other call runs normally. It stands in for a sub-agent
+// invocation that never returns — a k8s_validator parked on an unanswered
+// permission card, which has NO timeout: askuser.DefaultTimeout is 0 and the run
+// context survives a client disconnect, so only Stop/session-end ever ends it.
+type wedgeableRunnableTool struct {
+	countingRunnableTool
+	wedgeOn string
+	release chan struct{}
+}
+
+func (w *wedgeableRunnableTool) Run(ctx adk.ToolContext, args any) (map[string]any, error) {
+	req, _ := args.(map[string]any)
+	if s, _ := req["request"].(string); s == w.wedgeOn {
+		w.inFlight.Add(1)
+		defer w.inFlight.Add(-1)
+		<-w.release
+		return map[string]any{"echo": s}, nil
+	}
+	return w.countingRunnableTool.Run(ctx, args)
+}
+
+// A hung sub-agent invocation must not be able to wedge every OTHER session.
+//
+// The semaphore lives on the wrapper, and wrapSubAgentTool mints one wrapper per
+// MOUNT POINT — built by BuildInstance, i.e. once per config generation and never
+// per session. So at max_instances 1 (k8s_validator) one invocation that never
+// returned held the only token for the whole server: every later session's
+// Kubernetes mutation queued behind a validation belonging to somebody else's
+// chat. Nothing bounded the wait — there is no deadline on inner.Run, and the
+// realistic wedge (an unanswered permission card inside the validator) blocks
+// until that other user's session ends.
+func TestConcurrentAgentToolSemaphoreIsPerSession(t *testing.T) {
+	inner := &wedgeableRunnableTool{wedgeOn: "wedged", release: make(chan struct{})}
+	defer close(inner.release)
+	wrapped := newConcurrentAgentTool(inner, 1).(runnableTool)
+
+	// Session A occupies its slot and never gives it back.
+	go func() {
+		_, _ = wrapped.Run(toolCtxForSession("session-A"), map[string]any{"request": "wedged"})
+	}()
+	waitFor(t, func() bool { return inner.inFlight.Load() == 1 }, "session A's call to start")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := wrapped.Run(toolCtxForSession("session-B"), map[string]any{"request": "other session"})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("session B returned %v, want a clean run", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("session B blocked behind session A's in-flight call: one session's wedged " +
+			"sub-agent freezes the same delegation for every other session on the server")
+	}
+}
+
+// Within ONE session the width must still bind — otherwise the per-session fix
+// would have quietly removed the limit instead of scoping it.
+func TestConcurrentAgentToolStillBoundsConcurrencyWithinOneSession(t *testing.T) {
+	inner := &countingRunnableTool{hold: 30 * time.Millisecond}
+	wrapped := newConcurrentAgentTool(inner, 2).(runnableTool)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := wrapped.Run(toolCtxForSession("one-session"), map[string]any{"request": "q"}); err != nil {
+				t.Errorf("call failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if calls := inner.calls.Load(); calls != 5 {
+		t.Fatalf("sub-agent ran %d times, want 5 (queued siblings must still run)", calls)
+	}
+	if peak := inner.peak.Load(); peak > 2 {
+		t.Fatalf("peak concurrency within one session = %d, want <= 2 — the width no longer binds", peak)
+	}
+}
+
+// A generation lives until the next hot-reload, so a per-session map that is never
+// pruned leaks one entry for every session the server ever serves.
+func TestConcurrentAgentToolForgetsIdleSessions(t *testing.T) {
+	inner := &countingRunnableTool{}
+	wrapped := newConcurrentAgentTool(inner, 1).(*concurrentAgentTool)
+
+	for i := 0; i < 5; i++ {
+		if _, err := wrapped.Run(toolCtxForSession(fmt.Sprintf("session-%d", i)), map[string]any{"request": "q"}); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+
+	wrapped.mu.Lock()
+	n := len(wrapped.sems)
+	wrapped.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d per-session semaphores retained after every call finished, want 0", n)
+	}
 }

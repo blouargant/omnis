@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sync"
 
 	"google.golang.org/genai"
 
@@ -54,17 +55,39 @@ type runnableTool interface {
 // therefore a POLICY limit — how much parallel work one caller may provoke — not a
 // correctness lock. It is per MOUNT POINT (wrapSubAgentTool mints a fresh wrapper
 // per caller), so a gatherer shared by two specialists gives each its own width.
+//
+// The semaphore is keyed BY SESSION, not held as one channel on the wrapper.
+// wrapSubAgentTool mints one wrapper per mount point, and mount points are built by
+// BuildInstance — once per config generation, never per session. A single shared
+// channel therefore made max_instances a SERVER-WIDE serialisation rather than the
+// per-caller policy limit it is documented to be: at width 1 (k8s_validator) one
+// invocation that never returned held the only token for every session on the box,
+// so an unrelated chat's Kubernetes mutation queued behind somebody else's stuck
+// validation. Nothing bounded that wait — there is no deadline on inner.Run, and
+// the realistic wedge is an unanswered permission card inside the sub-agent, which
+// has no timeout at all (askuser.DefaultTimeout is 0) and survives a client
+// disconnect. Per-session keying restores the intended meaning: how much parallel
+// work ONE caller may provoke.
 type concurrentAgentTool struct {
 	inner runnableTool
-	sem   chan struct{}
 	max   int
+
+	mu   sync.Mutex
+	sems map[string]*sessionSem
+}
+
+// sessionSem is one session's slots. refs counts holders AND waiters so the entry
+// can be forgotten the moment nobody is using it (see drop).
+type sessionSem struct {
+	ch   chan struct{}
+	refs int
 }
 
 func newConcurrentAgentTool(inner runnableTool, max int) tool.Tool {
 	if max < 1 {
 		max = 1
 	}
-	return &concurrentAgentTool{inner: inner, sem: make(chan struct{}, max), max: max}
+	return &concurrentAgentTool{inner: inner, max: max, sems: map[string]*sessionSem{}}
 }
 
 func (t *concurrentAgentTool) Name() string { return t.inner.Name() }
@@ -100,11 +123,27 @@ func (t *concurrentAgentTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRe
 }
 
 func (t *concurrentAgentTool) Run(ctx adk.ToolContext, args any) (map[string]any, error) {
-	if err := t.acquire(ctx); err != nil {
+	release, err := t.acquire(ctx)
+	if err != nil {
 		return nil, err
 	}
-	defer func() { <-t.sem }()
+	defer release()
 	return t.inner.Run(ctx, args)
+}
+
+// semKey is the session whose budget this call spends. It must be the USER-FACING
+// session id, not ctx.SessionID(): a sub-agent runs under agenttool's ephemeral
+// per-call session, so keying on that would mint a fresh semaphore for every
+// invocation and the limit would never bind at all. realSessionID recovers the id
+// the surface planted on the run context, which propagates into sub-agents.
+//
+// An absent id (CLI examples, tests) collapses to one shared bucket — the
+// single-session case, where sharing is exactly right.
+func (t *concurrentAgentTool) semKey(ctx adk.ToolContext) string {
+	if ctx == nil {
+		return ""
+	}
+	return realSessionID(ctx)
 }
 
 // acquire takes a slot, waiting while the sub-agent is at its concurrency limit.
@@ -117,17 +156,50 @@ func (t *concurrentAgentTool) Run(ctx adk.ToolContext, args any) (map[string]any
 // blocking send. That keeps ONE code path — a separate nil branch would be a path
 // production never takes and tests always would, which is how a regression test
 // ends up passing against the very bug it exists to catch.
-func (t *concurrentAgentTool) acquire(ctx adk.ToolContext) error {
+func (t *concurrentAgentTool) acquire(ctx adk.ToolContext) (func(), error) {
+	key := t.semKey(ctx)
+
+	t.mu.Lock()
+	s := t.sems[key]
+	if s == nil {
+		s = &sessionSem{ch: make(chan struct{}, t.max)}
+		t.sems[key] = s
+	}
+	s.refs++
+	t.mu.Unlock()
+
 	var done <-chan struct{}
 	if ctx != nil {
 		done = ctx.Done()
 	}
 	select {
-	case t.sem <- struct{}{}:
-		return nil
+	case s.ch <- struct{}{}:
+		return func() {
+			<-s.ch
+			t.drop(key)
+		}, nil
 	case <-done:
-		return fmt.Errorf("sub-agent %q: cancelled while waiting for a free slot (max_instances=%d): %w",
+		t.drop(key)
+		return nil, fmt.Errorf("sub-agent %q: cancelled while waiting for a free slot (max_instances=%d): %w",
 			t.Name(), t.max, ctx.Err())
+	}
+}
+
+// drop releases this call's reference and forgets the session's semaphore once
+// nobody holds or awaits it. A generation lives until the next hot-reload, so an
+// unpruned map would retain one entry per session the server ever serves.
+//
+// refs counts holders AND waiters, so refs == 0 means the channel is idle and
+// empty: a later arrival minting a fresh one is equivalent, never a lost slot.
+func (t *concurrentAgentTool) drop(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s := t.sems[key]
+	if s == nil {
+		return
+	}
+	if s.refs--; s.refs <= 0 {
+		delete(t.sems, key)
 	}
 }
 

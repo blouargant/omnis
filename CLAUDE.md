@@ -854,8 +854,36 @@ Concurrency is safe at the agent level because `agenttool.Run` builds its **own
 runner + session service + session per call**; the resumable wrapper keys durable
 state by **per-call handle**, so durability and fan-out compose. The semaphore is a
 *policy* limit (how much parallel work one caller may provoke), not a correctness
-lock, and it is **per mount point** — a gatherer shared by two specialists gives each
-its own width rather than making them contend.
+lock, and it is scoped **per mount point AND per session** — a gatherer shared by two
+specialists gives each its own width rather than making them contend, and one chat
+can never spend another chat's slots.
+
+**GOTCHA — the per-SESSION half is load-bearing, and its absence was a cross-session
+outage.** The semaphore used to be a single `chan struct{}` field on the wrapper.
+But a wrapper is minted by `wrapSubAgentTool` per mount point, and mount points are
+built by `BuildInstance` — **once per config generation, never per session**. So
+`max_instances` was in practice a **server-wide serialisation**, not the per-caller
+policy limit it is documented to be. At width 1 (`k8s_validator`) one invocation
+that never returned held the only token for **every session on the box**: an
+unrelated chat's Kubernetes mutation queued behind somebody else's stuck validation,
+showing only as a turn that hung with no explanation. **Nothing bounded that wait** —
+there is no deadline anywhere around `inner.Run` (the LLM HTTP/stall timeouts bound
+one *model call*, not a run, and the ADK flow loop has no iteration cap), and the
+realistic wedge is not an exotic hang but an **unanswered `ask_user`**: the prompt has
+no timeout at all (`askuser.DefaultTimeout` is `0`, see "No ask-user / permission
+timeout") and the run context deliberately survives a client disconnect — and
+`record_validation` is permission-gated, so *every* validation raises a card inside
+the validator's run. A user closing their tab on that card wedged the fleet until
+their session ended or the next hot-reload minted a fresh generation. The semaphore is
+now keyed by the **user-facing** session id (`realSessionID`, **not** `ctx.SessionID()`
+— a sub-agent's own session is agenttool's ephemeral per-call one, so keying on that
+would mint a fresh semaphore per invocation and the limit would never bind at all),
+with the per-session entry refcounted and dropped when idle (a generation lives until
+the next hot-reload, so an unpruned map would retain one entry per session served).
+Locked in by `TestConcurrentAgentToolSemaphoreIsPerSession`,
+`TestConcurrentAgentToolStillBoundsConcurrencyWithinOneSession` and
+`TestConcurrentAgentToolForgetsIdleSessions`
+([agent/concurrent_agent_tool_test.go](agent/concurrent_agent_tool_test.go)).
 
 An agent may also declare **`max_tool_calls`** (per-turn tool-call cap for that
 agent; 0/absent = uncapped) — see "Per-agent cap" under "Per-turn spend budget".
