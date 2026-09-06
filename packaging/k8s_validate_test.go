@@ -3122,3 +3122,86 @@ esac`)
 		t.Fatalf("the refusal must not disclose a change identifier: %q", reason)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The reviewer needs a preview, and a dry run is one.
+//
+// Measured on a 24-task k8s-ai-bench tier: the validator issues
+// `apply --dry-run=server`, `apply --dry-run=client` and `create --dry-run`
+// early in almost every review, is refused for all three, and then re-derives
+// the same facts through a series of `kubectl get -o jsonpath` calls. That is
+// most of the ~9 model calls each delegation costs, and 40% of the tier's bill
+// went to the validator.
+//
+// A dry run persists nothing, so the "may not make changes" refusal is both
+// wrong on the facts and expensive. The security property is NOT that the
+// reviewer runs no kubectl — it already runs reads freely
+// (TestValidatorReadOnlyStillProceeds) — it is that the reviewer never reaches
+// a change identifier. So a dry run must be admitted on a path that computes
+// no subject, which is what these tests pin.
+
+func TestValidatorMayDryRunServerSide(t *testing.T) {
+	dir := stubFor(t, stubKubectlOK)
+	manifest := writeManifest(t, "app: reviewer-dry-run-server\n")
+	out, code := runHook(t, bashInput("kubectl apply --server-side --dry-run=server -f "+manifest+" -n demo", "k8s_validator"), dir)
+	if code != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("reviewer server-side dry run: exit=%d stdout=%q, want exit 0 and no output", code, out)
+	}
+}
+
+func TestValidatorMayDryRunClientSide(t *testing.T) {
+	dir := stubFor(t, stubKubectlOK)
+	manifest := writeManifest(t, "app: reviewer-dry-run-client\n")
+	out, code := runHook(t, bashInput("kubectl apply --dry-run=client -f "+manifest+" -n demo", "k8s_validator"), dir)
+	if code != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("reviewer client dry run: exit=%d stdout=%q, want exit 0 and no output", code, out)
+	}
+}
+
+func TestValidatorMayDryRunCreate(t *testing.T) {
+	dir := stubFor(t, stubKubectlOK)
+	manifest := writeManifest(t, "app: reviewer-dry-run-create\n")
+	out, code := runHook(t, bashInput("kubectl create --dry-run=server -f "+manifest+" -o name", "k8s_validator"), dir)
+	if code != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("reviewer create dry run: exit=%d stdout=%q, want exit 0 and no output", code, out)
+	}
+}
+
+// `--dry-run=none` is a real apply wearing the flag. It must stay refused, and
+// refused the same way as any other reviewer-issued mutation: no change
+// identifier, so the check_attested chain stays unreachable.
+func TestValidatorDryRunNoneIsStillRefused(t *testing.T) {
+	dir := stubFor(t, stubDefaultDeny)
+	manifest := writeManifest(t, "app: reviewer-dry-run-none\n")
+	out, _ := runHook(t, bashInput("kubectl apply --dry-run=none -f "+manifest+" -n demo", "k8s_validator"), dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("reviewer --dry-run=none decision = %q, want deny", got)
+	}
+	if reason := reasonOf(t, out); changeIDRe.MatchString(reason) {
+		t.Fatalf("the refusal must not disclose a change identifier: %q", reason)
+	}
+}
+
+// A bare `--dry-run` is kubectl's deprecated boolean spelling: unprovable
+// here, because its meaning depends on the client version. Refuse rather than
+// guess — the guard's own doctrine.
+func TestValidatorBareDryRunIsRefused(t *testing.T) {
+	dir := stubFor(t, stubDefaultDeny)
+	manifest := writeManifest(t, "app: reviewer-bare-dry-run\n")
+	out, _ := runHook(t, bashInput("kubectl apply --dry-run -f "+manifest+" -n demo", "k8s_validator"), dir)
+	if got := decisionOf(t, out); got != "deny" {
+		t.Fatalf("reviewer bare --dry-run decision = %q, want deny", got)
+	}
+}
+
+// The dry-run admission is for the REVIEWER only. Any other agent's dry run
+// must keep going through the ordinary chain, because for them it is a step
+// toward a real apply that a verdict has to cover.
+func TestEditorDryRunIsNotAdmittedByThisRule(t *testing.T) {
+	dir := stubFor(t, stubDefaultDeny)
+	manifest := writeManifest(t, "app: editor-dry-run\n")
+	out, _ := runHook(t, bashInput("kubectl apply --dry-run=server -f "+manifest+" -n demo", "k8s_editor"), dir)
+	if got := decisionOf(t, out); got == "" {
+		t.Fatalf("editor dry run was admitted silently; it must reach the ordinary chain")
+	}
+}

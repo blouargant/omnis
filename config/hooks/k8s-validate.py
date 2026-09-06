@@ -1485,6 +1485,9 @@ def main():
         if provably_read_only(tool, verb, argv, verb_idx):
             continue
 
+        if agent in VALIDATOR_AGENTS and reviewer_preview_ok(tool, verb, argv):
+            continue
+
         if REDIRECT.search(segment):
             # Not provably a read, and not replayable as argv either.
             refuse(
@@ -1502,6 +1505,35 @@ def main():
         proceed()
     else:
         proceed(build_proceed_note(validated))
+
+
+# Dry-run values that persist nothing. kubectl's bare `--dry-run` is the
+# deprecated boolean spelling whose meaning depends on the client version, and
+# `--dry-run=none` is a real apply wearing the flag — neither is provable here,
+# so both stay refused. The guard's own doctrine: prove it or refuse.
+INERT_DRY_RUN_VALUES = {"client", "server"}
+
+
+def reviewer_preview_ok(tool, verb, argv):
+    """True when this is the REVIEWER asking to preview a manifest.
+
+    The reviewer's job is to re-derive a change's effect from the live cluster,
+    and a dry run is the tool for it: it renders the manifest, runs admission,
+    and persists nothing. Refusing it did not make the reviewer safer — it
+    already runs reads freely — it only made it re-derive the same facts
+    through a series of `get -o jsonpath` calls, which is most of what a review
+    costs.
+
+    Called from main()'s segment loop, BEFORE validate(), so an admitted dry
+    run never reaches subject_hash. That ordering is the security property, not
+    an optimisation: the reviewer must never learn the change identifier that
+    makes the check_attested chain reachable (see validate's own comment). A
+    real mutation from the reviewer therefore still falls through to that
+    refusal, identifier-free.
+    """
+    if tool != "kubectl" or verb not in APPLY_VERBS:
+        return False
+    return flag_value(argv, "--dry-run") in INERT_DRY_RUN_VALUES
 
 
 PROD_PATTERN = re.compile(r"prod|prd|production", re.IGNORECASE)
