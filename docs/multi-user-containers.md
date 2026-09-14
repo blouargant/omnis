@@ -123,3 +123,41 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer t' http://127
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer t' -H 'X-Forwarded-User: bob' http://127.0.0.1:18080/api/whoami    # 403
 curl -s -H 'Authorization: Bearer t' -H 'X-Forwarded-User: alice' http://127.0.0.1:18080/api/whoami     # {"identity_enforced":true,"user_id":"alice"}
 ```
+
+### Verified on 2026-09-14
+
+Ran the milestone-1 smoke test end-to-end on this host (`make build-server`,
+port `127.0.0.1:18080`, `env -u OMNIS_CONFIG_PATH` in every invocation to keep
+the shell's config-path bypass out of the test process). All five checks
+matched the expected behavior:
+
+1. **Server as alice, identity enforced** — log carried both expected lines
+   verbatim:
+   ```
+   server: serving user "alice" — identity header "X-Forwarded-User" enforced on /api/*
+   server: listening on 127.0.0.1:18080 (web dir: …/web)
+   ```
+2. **Four outcomes** — matched exactly:
+   ```
+   health         200
+   no token       401
+   token no login 401
+   token bob      403
+   {"identity_enforced":true,"user_id":"alice"}
+   ```
+3. **Session attribution** — `POST /api/sessions` returns the id under the key
+   `session_id` (not `id`, as the original one-liner assumed — adapted the
+   extraction accordingly); the created session was `wealthy-stork`. The
+   subsequent `GET /api/sessions` listing keys sessions by `id` and confirmed
+   `{'wealthy-stork': 'alice', 'complete-cricket': 'alice'}` — the
+   gateway-created session is attributed to alice.
+4. **Unsafe combination refused** — `OMNIS_IDENTITY_HEADER` set with no
+   `OMNIS_USER_ID` exited non-zero (`exit=1`) immediately, with:
+   ```
+   fatal: server: OMNIS_IDENTITY_HEADER (identity_header) is set but OMNIS_USER_ID (user_id) is not — an identity check needs the explicit login to compare against; the "web-user" default would accept any misrouted request
+   ```
+5. **No-op contract** — with nothing configured, `GET /api/whoami` returned
+   `{"identity_enforced":false,"user_id":"web-user"}` with no token/header, and
+   `grep -c "serving user"` on the log was `0`.
+
+No discrepancies observed; no code changes were made.
