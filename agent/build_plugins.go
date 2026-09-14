@@ -131,15 +131,18 @@ func buildPlugins(
 		plugins = append(plugins, amd)
 	}
 	// Collection context: inject the session's collection instructions + memory
-	// into the answering root's system instruction per turn (no-op when the
-	// session has no collection or the collection has no prose). Gated to
-	// answering roots — unlike AGENT.md the router stays neutral so a workstream's
-	// guidance never colours a routing decision. Prepended after AGENT.md so the
-	// broad workstream framing sits outermost, project specifics next.
-	if !isRouterSquad {
-		if col, err := collectionCtxPlugin("collection_ctx"); err == nil {
-			plugins = append(plugins, col)
-		}
+	// into the root's system instruction per turn (no-op when the session has no
+	// collection or the collection has no prose). Mounted on EVERY root, the
+	// router included — a workstream's context is exactly what disambiguates a
+	// request whose subject is only named in that context, and routing without it
+	// mis-routes (a chat filed under a collection about a product asked a question
+	// that never names the product, and the router sent it to an unrelated squad).
+	// isRouterSquad switches the FRAMING, not the content: the router is told to
+	// read it as subject matter for the routing decision, never as instructions to
+	// act on (routerCollectionCtxNote). Prepended after AGENT.md so the broad
+	// workstream framing sits outermost, project specifics next.
+	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad); err == nil {
+		plugins = append(plugins, col)
 	}
 	if cmp, _, _, err := compress.PluginWithTools("compress", compress.Config{
 		// Per-session audit file so concurrent users / sessions

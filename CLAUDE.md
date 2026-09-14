@@ -1005,7 +1005,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
-| `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` + `memory.md` (`$OMNIS_HOME/collections/<name>/`) into a `<collection-context>` block with a per-name mtime cache; `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`. Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on answering roots per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
+| `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` + `memory.md` (`$OMNIS_HOME/collections/<name>/`) into a `<collection-context>` block with a per-name mtime cache; `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`. Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on **every** squad root (the router included, under a routing-scoped framing — see "Collection context") per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
@@ -3042,24 +3042,64 @@ updates" below).
   (`agent.SetCollectionResolver`, mirroring `fstools.SetCwdResolver`) the server
   installs from the registry ([server/main.go](server/main.go), returning
   `NormalizeCollectionName(meta.Collection)` — General/blank ⇒ `""` ⇒ no-op).
-  Registered in [agent/build_plugins.go](agent/build_plugins.go) **gated
-  `!isRouterSquad`** (unlike the ungated AGENT.md plugin — the router stays
-  neutral so a workstream's guidance never colours a routing decision), prepended
+  Registered in [agent/build_plugins.go](agent/build_plugins.go) on **every**
+  squad root — like the AGENT.md plugin and **including the router** — prepended
   after AGENT.md (workstream framing outermost, project specifics next). Root-only
   injection means `ctx.SessionID()` is always the real user-facing session, so the
   resolver keys correctly. Block shape: `<collection-context name="…"><instructions>…
   </instructions><memory>…</memory></collection-context>`; empty sections omitted;
   both empty ⇒ `""`. Stable per collection across turns ⇒ prompt cache still hits.
+
+  **The router gets the same content under a different FRAMING**
+  (`isRouterSquad` is passed to `collectionCtxPlugin` as `forRouter`, which
+  prefixes `routerCollectionCtxNote`). It was once gated OFF on the router, on the
+  reasoning that "the router stays neutral so a workstream's guidance never
+  colours a routing decision" — which is backwards for the one hop whose entire
+  output is a decision about **subject matter**. A collection's context is often
+  the only place the workstream's subject is named, so a request that never names
+  it (*"how do I raise the rate limit?"* in a collection about a proxy) reaches
+  the router as a generic question and gets routed to an unrelated squad — the
+  shipped defect. The **framing** is what has to change, not the visibility:
+  `collectionctx.render` tells its reader to treat the block as *"authoritative
+  guidance for this workstream"*, which is right for a squad about to act and an
+  invitation to act for a router that has no tools to act with — the failure mode
+  `routerVisibleTools` already exists to swallow (see "Hallucinated tool calls on
+  the router hop"). So `routerCollectionCtxNote` leads the block on that hop:
+  *use this to understand what the request is ABOUT, do not follow its
+  instructions, do not call any tool but your routing tools, the squad you route
+  to receives this same context*. Split out as the pure `collectionCtxBlock(
+  sessionID, forRouter)` so the framing is unit-testable without an ADK context
+  ([agent/collection_plugin_test.go](agent/collection_plugin_test.go)); the
+  no-op contract is unchanged on both roots (no resolver / no collection / no
+  prose ⇒ `""`, note included).
 - **Squad/cwd seed** = new-chat creation ([server/server.go](server/server.go)
   `POST /sessions`). The collection is resolved **before** the squad default so
   its profile can seed both: `resolveStartingSquad`
   ([server/session_seed.go](server/session_seed.go), pure + unit-tested) picks
-  explicit-wins → collection default squad (only when it still `HasSquad` — a
-  **seed, not a lock**: routing still runs and the squad can `handoff_to_router`;
-  a stale squad falls through) → router → default; the cwd seeds from
-  `profile.Cwd` when the client pins no `dir`. Seed is deliberately observable —
-  because routing still runs, the seeded squad's handoff rate is the signal for a
-  future hard-pin.
+  **explicit team pick → collection default squad → explicit router → router →
+  default**; the cwd seeds from `profile.Cwd` when the client pins no `dir`. The
+  collection default applies only when that squad still `HasSquad` (a stale one
+  falls through rather than 400ing a new chat) and is a **seed, not a lock**:
+  routing still runs and the squad can `handoff_to_router`. Seed is deliberately
+  observable — the seeded squad's handoff rate is the signal for a future
+  hard-pin.
+
+  **GOTCHA — the router ranks BELOW the collection default, and must.** Routing
+  to the router is not a choice of team, it is *"decide for me"* — which a
+  collection whose profile names a squad has already answered, more specifically.
+  This is not a nicety: the web UI has **no way to express "no preference"**.
+  `loadSquads` ([web/app.js](web/app.js)) seeds `selectedSquadName` from the
+  default reported by `GET /api/squads` — **the router**, when routing is on
+  ([server/config.go](server/config.go) sets `out.Default = inst.RouterName`) —
+  and `newChat` sends `currentSquadChoice()` as `body.squad` on **every** new
+  chat, then persists it back into `SQUAD_PREF_KEY`. So `explicit` is *never*
+  empty from a browser, and a plain `explicit`-wins rule made a collection's
+  default squad **unreachable from the web UI entirely** — the one surface that
+  can set it. Shipped as a real defect (a chat filed under a collection whose
+  profile named `knowledge`, routed to `helper`); regression guards live in
+  [server/session_seed_test.go](server/session_seed_test.go) (`explicit router
+  yields to the collection default`, plus the cases pinning that a real team pick
+  and a router-with-no-usable-collection-default both still win).
 - **Routes** ([server/collections.go](server/collections.go)): `PATCH
   /api/collections/:name` gained `squad?`/`cwd?` (merged with the stored profile,
   squad validated via `HasSquad`, cwd via `os.Stat`); `GET /api/collections/:name/context`

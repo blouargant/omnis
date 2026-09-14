@@ -23,6 +23,18 @@ func TestResolveStartingSquad(t *testing.T) {
 		want              string
 	}{
 		{"explicit wins over profile", "Coding", "kubernetes", hasSquadSet("coding", "kubernetes"), "omnis", "coding"},
+		// The web UI's squad picker has no "unset" state: loadSquads() falls back
+		// to the default reported by /api/squads — the router — and newChat() sends
+		// that as body.squad on EVERY new chat. So an explicit router must not
+		// count as a team pick, or a collection's default squad is unreachable
+		// from the browser (the reported bug: a new chat in a collection whose
+		// profile names "knowledge" started on the router, which then mis-routed
+		// it — the router being the one root the collection-context plugin is
+		// deliberately not mounted on).
+		{"explicit router yields to the collection default", "Omnis", "Knowledge", hasSquadSet("knowledge", "omnis"), "omnis", "knowledge"},
+		{"explicit router with no collection default stays on the router", "omnis", "", hasSquadSet("omnis"), "omnis", "omnis"},
+		{"explicit router with a stale collection default stays on the router", "omnis", "Ghost", hasSquadSet("omnis"), "omnis", "omnis"},
+		{"routing disabled: explicit still wins over the collection default", "Coding", "kubernetes", hasSquadSet("coding", "kubernetes"), "", "coding"},
 		{"seed from collection profile", "", "Kubernetes", hasSquadSet("kubernetes"), "omnis", "kubernetes"},
 		{"stale profile squad falls through to router", "", "Ghost", hasSquadSet("kubernetes"), "omnis", "omnis"},
 		{"no profile → router", "", "", hasSquadSet("kubernetes"), "omnis", "omnis"},
