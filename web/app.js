@@ -344,6 +344,9 @@ function setFocusedPanel(pid) {
   activeSessionId = p ? p.sessionId : null;
   if (AgentDebug.enabled) { AgentDebug.activeSession = activeSessionId; AgentDebug._paint(); }
   refreshSidebarActive();
+  // The rail + middle list name the chat we just focused (fire-and-forget; a
+  // draft/editor/terminal tab has no session, so the helper no-ops).
+  syncCollectionToSession(activeSessionId);
   refreshFoldersPanel();
   saveLayout();
 }
@@ -1441,6 +1444,9 @@ let collectionsData  = [];                 // [{name,count,general}] from GET /a
 // picker, and sessionMetaById still resolve a session we've already seen without
 // holding the entire list in memory.
 const sessionMeta = new Map();
+// Ids the server could not resolve to a row (hidden, deleted). Remembered so an
+// unresolvable session costs one lookup, not one per focus change.
+const sessionMetaMisses = new Set();
 let sessionDrag      = null;               // sessionId currently being dragged onto the rail
 
 // ─── Session-pane pagination (server-side windowing) ─────────────────────────
@@ -6275,6 +6281,54 @@ function selectCollection(name) {
     row.classList.toggle("active", row.dataset.name.toLowerCase() === name.toLowerCase());
   }
   resetSessionViews();
+}
+
+// syncCollectionToSession follows the focused chat into its own collection, so
+// the two left columns keep naming where the user actually is. Focusing a chat
+// filed elsewhere — a tab click, a sidebar click on an already-open session, or
+// clicking into another pane — used to leave the rail highlight and the middle
+// list on the previous collection: the chat changed under you and neither column
+// said where you had landed. Driven from setFocusedPanel, the one place that
+// already decides "this is the chat the user is in".
+//
+// Callers do NOT await it: a session already in the cache resolves without ever
+// reaching an `await`, so the common case stays synchronous and focus changes
+// stay instant; only a session the cache has never seen defers behind a lookup.
+async function syncCollectionToSession(id) {
+  if (!id) return;
+  let meta = sessionMetaById(id);
+  if (!meta) {
+    meta = await fetchSessionMeta(id);
+    // That was a round-trip and focus moves on a click — only the chat that is
+    // STILL focused may move the rail, or a slow lookup would yank the columns
+    // to a session the user has already left.
+    if (activeSessionId !== id) return;
+  }
+  if (!meta) return; // unresolvable — leave the columns alone rather than guess
+  selectCollection(effectiveCollection(meta));
+}
+
+// fetchSessionMeta resolves one session's row when the cache has never seen it —
+// a tab restored at boot commonly lives in a collection the middle list never
+// fetched, so no page ever carried its meta. The query is deliberately
+// collection-less (a blank `collection` means "no filter" server-side) and tries
+// the active list then the archived one. `q` matches title OR id, so the id is
+// re-checked before the row is trusted.
+async function fetchSessionMeta(id) {
+  if (sessionMetaMisses.has(id)) return null;
+  for (const archived of [false, true]) {
+    const p = new URLSearchParams({ q: id, limit: "20", offset: "0", sort: "recent" });
+    if (archived) p.set("archived", "true");
+    try {
+      const res = await apiFetch("/api/sessions?" + p.toString(), { cache: "no-store" });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const hit = (data.sessions || []).find(s => s.id === id);
+      if (hit) { rememberSessionMeta(hit); return hit; }
+    } catch (e) { return null; } // offline/transient — retry on the next activation
+  }
+  sessionMetaMisses.add(id);
+  return null;
 }
 
 // openCollectionCtxMenu offers Rename / Change colour / Delete for a user
@@ -12392,6 +12446,11 @@ async function restoreLayout(rec, liveIds) {
     await activateTab(panel, active);
     bound = true;
   }
+  // Every activateTab above focused its own pane, so the LAST one restored held
+  // the focus rather than the one the user left focused. Re-assert the persisted
+  // choice now that all panes are mounted, so activeSessionId, the sidebar
+  // highlight and the collection rail all name the pane that was actually saved.
+  setFocusedPanel((panels[focusIdx] || panels[0]).id);
   return bound;
 }
 

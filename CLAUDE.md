@@ -2938,6 +2938,36 @@ exactly one** ("move" semantics, flat — no nesting).
   `collectionColorByName` / `sessionCollectionColor` map a collection/session to
   its `--col-accent`. New chats pass `activeCollection`. i18n keys under
   `collections.*` (en/fr/es/de).
+- **The rail follows the focused chat.** `syncCollectionToSession(id)`
+  ([web/app.js](web/app.js)) resolves the session's `effectiveCollection` and
+  `selectCollection`s it, so the rail highlight **and** the filtered middle list
+  name the conversation the user is now in; without it both left columns stayed on
+  the previous collection while the chat changed underneath them. It is called
+  **from `setFocusedPanel`** — the one place that already decides "this is the chat
+  the user is in", so a tab click, a sidebar click on an already-open session, a
+  search/picker hit, **clicking into another pane** (which routes through
+  `setFocusedPanel`, never `activateTab`), and the boot layout restore are all
+  covered by one call site rather than each needing its own. A draft/editor/
+  terminal tab has a null `sessionId` ⇒ no-op, and `selectCollection` early-returns
+  when the collection is unchanged, so the common case costs nothing.
+- **A session the cache has never seen** — the boot-restore case, where
+  `loadSessions` only fetched General but a restored tab lives elsewhere — is
+  resolved by `fetchSessionMeta`, one **collection-less** `GET /api/sessions?q=<id>`
+  (blank `collection` ⇒ no filter server-side; `q` matches title **or** id, so the
+  id is re-checked before the row is trusted), active list then archived, with
+  unresolvable ids remembered in `sessionMetaMisses` so a hidden/deleted session
+  costs one lookup rather than one per focus change. Because that is a round-trip
+  and focus moves on a click, the result is applied **only if the session is still
+  focused** (`activeSessionId === id`) — otherwise a slow lookup would yank the
+  columns to a chat the user has already left. `newChat` deliberately does **not**
+  go through `activateTab`/the picker (it inlines the mount), so creating a chat
+  fires no lookup — it is already filed under `activeCollection`.
+- **`restoreLayout` re-asserts the persisted focus after mounting.** Each
+  `activateTab` in its loop focuses its own pane, so the **last** pane restored
+  ended up focused rather than the one the user left focused — `activeSessionId`,
+  the sidebar `.active-focused` highlight and (now) the collection rail all named
+  the wrong pane. A final `setFocusedPanel(panels[focusIdx])` after the loop fixes
+  all three at once.
 - **"Folders" panel renamed to "Files"** — the existing filesystem/cwd browser is
   **relabeled "Files" in the UI only** (`folders.label`/`folders.toggle` i18n,
   [web/docs/03-sessions.md](web/docs/03-sessions.md)); its internal identifiers
