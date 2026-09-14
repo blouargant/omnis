@@ -4932,9 +4932,13 @@ What omnis itself contributes (milestone 1):
   container's secret never learns the expected login): 401 missing / 403
   mismatch; a no-op when `OMNIS_IDENTITY_HEADER` is empty. `resolveIdentity`
   applies env > `server.yaml` (`user_id`, `identity_header`) and **fails boot**
-  on a header without an explicit user id. The terminal WebSocket is covered
-  transitively (its short-lived token is minted over the checked
-  `POST /api/terminal/token`).
+  on a header without an explicit user id. The terminal WebSocket
+  (`GET /api/terminal/ws`) sits outside the token-checking group (browsers
+  can't set headers on a WS handshake) but carries the same
+  `identityMiddleware` directly, on top of its short-lived token minted over
+  the checked `POST /api/terminal/token` — so a wrong/missing login is
+  refused before any upgrade is attempted even with no token configured
+  (empty `OMNIS_SERVER_TOKEN` fallback mode).
 - **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI shows
   "Signed in as <login>" in the sidebar footer (`loadWhoami`, hidden for
   `web-user` and in the collapsed rail).

@@ -146,7 +146,8 @@ program to the user's login. Empty ⇒ falls back to today's `"web-user"`, so ev
 existing deployment is byte-identical — **except** when an identity header is
 enforced (§6.3), where an explicit value is mandatory and the fallback never applies.
 
-At startup the server logs the effective user id and the identity mode.
+At startup the server logs the effective user id and identity mode **when either
+is configured**; an unconfigured install logs nothing (no-op contract).
 
 ### 6.3 Identity header check
 
@@ -230,9 +231,24 @@ rendered by the platform's container entrypoint):
 ;   HOME                the user's NFS-mounted home
 ;   OMNIS_SERVER_TOKEN  the per-container secret the SSO gateway injects as
 ;                       "Authorization: Bearer <token>" on every proxied request
+;   OMNIS_LISTEN_ADDR   the listen address inside the container. Two topologies:
+;                         "127.0.0.1:8080" — the gateway proxies from a sidecar
+;                           inside THIS pod; the NetworkPolicy example is then
+;                           moot (nothing outside the pod can reach the port).
+;                         "0.0.0.0:8080"   — the gateway reaches this pod over
+;                           the cluster network; the NetworkPolicy example
+;                           (packaging/container/networkpolicy.example.yaml) is
+;                           what keeps every OTHER pod out, and its port must
+;                           match this value.
 ;   OMNIS_BASE_PATH     URL prefix when the gateway routes by path; empty when
 ;                       it routes by host
 ;   LITELLM_API_KEY     the user's LiteLLM virtual key (per-user cost attribution)
+;
+; NOTE: supervisord applies Python %(...)s interpolation to every value in this
+; file, and envsubst passes " through unescaped — so a token, LiteLLM key, or
+; base path containing % or " will make the rendered program unparseable.
+; Constrain OMNIS_SERVER_TOKEN and LITELLM_API_KEY to [A-Za-z0-9._-] (hex or
+; base64url), or have the entrypoint escape % as %% before envsubst.
 ;
 ; Deliberately NOT set: OMNIS_CONFIG_PATH (bypasses the 3-layer config merge)
 ; and OMNIS_SYSTEM_CONFIG_DIR (the .deb already installs the system layer at
@@ -252,11 +268,17 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=HOME="${HOME}",OMNIS_HOME="${HOME}/.omnis",OMNIS_USER_ID="${OMNIS_LOGIN}",OMNIS_SERVER_TOKEN="${OMNIS_SERVER_TOKEN}",OMNIS_SERVER_ADDR="127.0.0.1:8080",OMNIS_SERVER_BASE_PATH="${OMNIS_BASE_PATH}",OMNIS_WEB_DIR="/usr/share/omnis/web",LITELLM_API_KEY="${LITELLM_API_KEY}"
+environment=HOME="${HOME}",OMNIS_HOME="${HOME}/.omnis",OMNIS_USER_ID="${OMNIS_LOGIN}",OMNIS_SERVER_TOKEN="${OMNIS_SERVER_TOKEN}",OMNIS_SERVER_ADDR="${OMNIS_LISTEN_ADDR}",OMNIS_SERVER_BASE_PATH="${OMNIS_BASE_PATH}",OMNIS_WEB_DIR="/usr/share/omnis/web",LITELLM_API_KEY="${LITELLM_API_KEY}"
 ```
 
 `supervisord` does not expand `%(ENV_…)s` in its `user=` option, so the template
 uses `${VAR}` placeholders rendered by `envsubst` in the container entrypoint.
+`OMNIS_SERVER_ADDR` is itself one such placeholder (`${OMNIS_LISTEN_ADDR}`),
+never a value hard-coded in the template: a loopback default would either make
+omnis unreachable behind a cluster-network gateway or render the
+NetworkPolicy example moot, so the platform must pick the bind for its own
+topology (see the `OMNIS_LISTEN_ADDR` comment above and
+`docs/multi-user-containers.md`).
 
 Rules the template must satisfy (guard-tested, §9):
 
@@ -265,7 +287,10 @@ Rules the template must satisfy (guard-tested, §9):
 - sets `OMNIS_USER_ID` to `${OMNIS_LOGIN}`;
 - **never** sets `OMNIS_CONFIG_PATH` (it would bypass the 3-layer merge and freeze
   every per-user override — the exact defect `packaging/profile_test.go` guards);
-- does not set `OMNIS_SYSTEM_CONFIG_DIR` (the `.deb` layout is already the default).
+- does not set `OMNIS_SYSTEM_CONFIG_DIR` (the `.deb` layout is already the default);
+- `OMNIS_SERVER_ADDR` is the rendered `${OMNIS_LISTEN_ADDR}`, never a hard-coded
+  bind (a loopback default would contradict the NetworkPolicy example and the
+  §5 threat model of one container reaching another's omnis port).
 
 The `omnis-server start|stop|status` daemon subcommands are **not** used: supervisord
 is the process manager and runs the foreground form.
@@ -298,6 +323,13 @@ the embedder key. A shared key works too, without attribution.
 
 ### 7.5 Gateway prerequisites (operator doc)
 
+- **Topology assumption**: the platform picks `OMNIS_LISTEN_ADDR` (§7.2) to match
+  where its gateway actually runs. A gateway that is an in-pod sidecar proxies over
+  loopback (`127.0.0.1:8080`) and the NetworkPolicy example below is moot (nothing
+  outside the pod can reach the port regardless); a gateway that reaches the pod
+  over the cluster network needs a non-loopback bind (`0.0.0.0:8080`) — otherwise
+  omnis is simply unreachable — and the NetworkPolicy example is then what keeps
+  every *other* pod out.
 - Set (not append) `Authorization: Bearer <container token>` and the identity header.
 - WebSocket upgrade on `/api/terminal/ws`.
 - No response buffering and long idle timeouts on `GET /api/events` and the turn
@@ -306,8 +338,9 @@ the embedder key. A shared key works too, without attribution.
 - If routing by path, set `OMNIS_SERVER_BASE_PATH` to the exact prefix the gateway
   forwards (it must forward the prefix, not strip it — `serveIndex` injects
   `window.BASE_PATH`).
-- Optional: NetworkPolicy example (`packaging/container/networkpolicy.example.yaml`)
-  allowing ingress on the omnis port only from the gateway's namespace/labels.
+- Optional (recommended when the bind is non-loopback): NetworkPolicy example
+  (`packaging/container/networkpolicy.example.yaml`) allowing ingress on the
+  omnis port only from the gateway's namespace/labels.
 
 ## 8. Code changes
 
@@ -385,9 +418,16 @@ All in `internal/sessions`, `server/`, `web/`, `packaging/`. Nothing in `agent/`
 - **`packaging/container_test.go`** (same precedent as `profile_test.go` and
   `hooks_assets_test.go`): the supervisord template runs as `${OMNIS_LOGIN}`,
   sets `OMNIS_HOME` under `HOME` and `OMNIS_USER_ID`, never mentions
-  `OMNIS_CONFIG_PATH` or `OMNIS_SYSTEM_CONFIG_DIR`; the container `server.yaml`
+  `OMNIS_CONFIG_PATH` or `OMNIS_SYSTEM_CONFIG_DIR`, and binds
+  `OMNIS_SERVER_ADDR` to the rendered `${OMNIS_LISTEN_ADDR}` rather than a
+  hard-coded loopback address; the container `server.yaml`
   has `update_check: false`, `open_browser: false`, `a2a_enabled: false`, empty
   `token`.
+- **`server/identity_test.go`**: `GET /api/terminal/ws` is covered by the same
+  identity middleware as the rest of `/api/*` (401 with no login, 403 with the
+  wrong one) even though it sits outside the token-checking `auth` group; a
+  request carrying the identity header twice is rejected as a mismatch even
+  when the first value is correct.
 - **Manual smoke** (documented in the operator guide): run two omnis-server processes
   as two Unix users on one host with different `OMNIS_USER_ID`, front them with a
   header-injecting proxy, verify `/api/whoami`, verify a forged header is refused,
