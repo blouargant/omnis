@@ -383,7 +383,7 @@ All in `internal/sessions`, `server/`, `web/`, `packaging/`. Nothing in `agent/`
 - **`server/`** round-trip: `POST /api/sessions` → registry `UserID` = configured →
   conversation file carries it → `LoadPersistedSessions` restores it.
 - **`packaging/container_test.go`** (same precedent as `profile_test.go` and
-  `hooks_assets_test.go`): the supervisord template runs as `%(ENV_OMNIS_LOGIN)s`,
+  `hooks_assets_test.go`): the supervisord template runs as `${OMNIS_LOGIN}`,
   sets `OMNIS_HOME` under `HOME` and `OMNIS_USER_ID`, never mentions
   `OMNIS_CONFIG_PATH` or `OMNIS_SYSTEM_CONFIG_DIR`; the container `server.yaml`
   has `update_check: false`, `open_browser: false`, `a2a_enabled: false`, empty
