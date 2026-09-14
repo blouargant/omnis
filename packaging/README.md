@@ -31,6 +31,20 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
 /usr/share/doc/omnis/           LICENSE + README.md
 ```
 
+## Per-user container assets (multi-user deployments)
+
+Not installed by the `.deb`/`.rpm`; copied into the platform's per-user image
+(see `docs/multi-user-containers.md`):
+
+```
+packaging/supervisord/omnis-server.conf          supervisord program template (envsubst ${VAR} placeholders)
+packaging/container/Dockerfile                   reference layer on top of the .deb
+packaging/container/server.yaml                  image-side /etc/omnis/server.yaml
+packaging/container/networkpolicy.example.yaml   restrict the omnis port to the gateway
+```
+
+Guarded by `packaging/container_test.go`.
+
 **Runtime dependency: `python3`.** The shipped `hooks.json` declares a
 `fail_closed` PreToolUse hook (`hooks/k8s-validate.py`) whose `command` is a
 `python3` invocation. Because `internal/hooks`' engine maps `fail_closed` +

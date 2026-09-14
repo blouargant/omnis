@@ -2556,6 +2556,8 @@ mistaken for a broken reference.
 | `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables). The sweep ([server/gc.go](server/gc.go) `sweepLogsDir`) also **reaps orphaned atomic-write temp files** (`conversation_*.json.tmp` left behind when a fire-and-forget persistence goroutine is killed by a shutdown/restart between `os.CreateTemp` and `os.Rename` in `SaveConversationFile`), age-gated by `tmpReapAge` (1 min) so it never races a genuinely in-flight write |
 | `OMNIS_SERVER_DAEMONIZED` | Set to `1` by `omnis-server start` on the detached child it spawns; marks the foreground process as a background daemon (informational) |
 | `OMNIS_SERVER_BASE_PATH` | Base path prefix the HTTP server + web UI are mounted under (overrides `server.yaml` `base_path`); normalised to a leading `/` with no trailing slash ([server/main.go](server/main.go) `normalizeBasePath`) |
+| `OMNIS_USER_ID` | The login this omnis-server instance serves (multi-user deployments run **one process per user** — see "Multi-user deployment (per-user containers)"). Overrides `server.yaml` `user_id`. Sets `sessions.UserID()`, the owner stamped on every session (`user_id` in the conversation file); unset ⇒ the single-user default `web-user` |
+| `OMNIS_IDENTITY_HEADER` | Names the request header the SSO gateway fills with the authenticated login (e.g. `X-Forwarded-User`). When set, `identityMiddleware` ([server/identity.go](server/identity.go)) runs **after** the token check on every `/api/*` route: 401 when the header is missing, 403 when it differs from `OMNIS_USER_ID`. Requires an explicit `OMNIS_USER_ID` (startup error otherwise — the default would match any misrouted request). Overrides `server.yaml` `identity_header` |
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
 | `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
 | `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
@@ -4901,6 +4903,63 @@ primitives (`detachSysProcAttr`, `pidAlive`, `signalTerminate`, and the
 returns `errDaemonUnsupported` so cross-platform builds stay green). Stale PID
 files are always reconciled via the liveness probe, so a crash/self-exit never
 wedges `start`/`status`.
+
+### Multi-user deployment (per-user containers)
+
+omnis-server is **single-user by construction**, and its bearer token grants the
+rights of the Unix account it runs as (Bash, `!`, terminal, MCP stdio, LSP, hooks
+and the file routes all run on the host under that account — the permission
+layer and the Bash safety floor guard against the *model*, not against a
+*user*). A secure multi-user deployment therefore runs **one omnis-server per
+user, as that user, inside that user's container**, behind the platform's SSO
+gateway; the container + UID is the security boundary. Design:
+[docs/superpowers/specs/2026-09-14-multi-user-container-isolation-design.md](docs/superpowers/specs/2026-09-14-multi-user-container-isolation-design.md);
+operator guide: [docs/multi-user-containers.md](docs/multi-user-containers.md).
+
+What omnis itself contributes (milestone 1):
+
+- **A configured session owner.** `sessions.UserID()` / `SetUserID()`
+  ([internal/sessions/sessions.go](internal/sessions/sessions.go)) replace the
+  hard-coded `"web-user"` (still the default). Set once at boot from
+  `OMNIS_USER_ID` **before** `sessions.NewRegistry()`; every runtime fallback in
+  `server/` reads `sessions.UserID()`. `ConversationFile.UserID` (`user_id`) is
+  **stamped by `SaveConversationFile` only when empty** — a file naming another
+  login is never re-attributed — and read back by `LoadPersistedSessions`
+  (legacy files ⇒ the configured user).
+- **An identity check.** `identityMiddleware(header, expected)`
+  ([server/identity.go](server/identity.go)) is composed **after**
+  `authMiddleware` on the `/api/*` group (token first, so a caller without the
+  container's secret never learns the expected login): 401 missing / 403
+  mismatch; a no-op when `OMNIS_IDENTITY_HEADER` is empty. `resolveIdentity`
+  applies env > `server.yaml` (`user_id`, `identity_header`) and **fails boot**
+  on a header without an explicit user id. The terminal WebSocket is covered
+  transitively (its short-lived token is minted over the checked
+  `POST /api/terminal/token`).
+- **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI shows
+  "Signed in as <login>" in the sidebar footer (`loadWhoami`, hidden for
+  `web-user` and in the collapsed rail).
+- **Packaging assets** under `packaging/supervisord/` (program template with
+  `${VAR}` placeholders — supervisord does not expand `%(ENV_…)s` in `user=`,
+  so the entrypoint renders it with `envsubst`) and `packaging/container/`
+  (image-side `server.yaml`, reference `Dockerfile`, NetworkPolicy example),
+  pinned by [packaging/container_test.go](packaging/container_test.go): runs
+  as the user, state under the user's home, **never** `OMNIS_CONFIG_PATH` /
+  `OMNIS_SYSTEM_CONFIG_DIR`; `open_browser`/`update_check`/`a2a_enabled` false,
+  empty `token`, non-empty `identity_header`, no `addr`.
+
+**Two defence layers, not one.** The identity header is a *belt* against the
+gateway misrouting; the per-container token is the *braces* against a user
+reaching another container's omnis port from their own pod. A NetworkPolicy
+restricting that port to the gateway is the recommended third measure. The
+documented fallback for a gateway that cannot inject `Authorization` (empty
+token + identity header + strict NetworkPolicy) is weaker and says so.
+
+**No-op contract:** with `OMNIS_USER_ID` and `OMNIS_IDENTITY_HEADER` unset,
+sessions carry `web-user`, no middleware is installed, the footer shows nothing
+— byte-identical to before. **Not in scope (milestones 2–3):** the shared hub
+(directory, team collections, shared sessions) and user-to-user messaging;
+milestone 1 only lays their two prerequisites — a real `user_id` on every
+persisted session and a verified request identity.
 
 ### Event audit log (`agent_events_<buildTimestamp>.log`)
 

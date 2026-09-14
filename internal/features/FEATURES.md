@@ -25,6 +25,7 @@
 - **Foldable question card** — a pending agent question can be collapsed to its title line so you can read the conversation behind it, then reopened to answer; a half-typed answer survives the fold.
 - **Linux admin agent** — the System squad can now make careful, preview-first changes to your Linux workstation (packages, systemd services, config files, users, networking), with every change permission-gated.
 - **Validated Kubernetes changes** — every cluster change is now previewed and checked before it can be applied: manifests are diffed and dry-run against the API server, deletions are checked for blast radius and ownership, and an independent reviewer agent must approve the change before it can proceed.
+- **Per-user identity** — omnis-server can run as one instance per user behind your SSO gateway: it knows which user it serves, refuses requests for anyone else, and shows "Signed in as <login>" in the sidebar.
 
 ## 1.8 — Collection context & session search
 
