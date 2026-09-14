@@ -175,7 +175,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			if title != "" {
 				name = title
 			}
-			_ = d.RegisterSession(sessions.DefaultUserID, newMeta.ID, name)
+			_ = d.RegisterSession(sessions.UserID(), newMeta.ID, name)
 		}
 		if d.Manager != nil {
 			d.Manager.Pin(newMeta.ID)
@@ -184,7 +184,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			cancel()
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.DefaultUserID)
+			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.UserID())
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("session_created", newMeta.ID)
@@ -211,5 +211,5 @@ func sessionUserID(m *sessions.SessionMeta) string {
 	if m != nil && m.UserID != "" {
 		return m.UserID
 	}
-	return sessions.DefaultUserID
+	return sessions.UserID()
 }

@@ -395,7 +395,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			if meta.Title != "" {
 				name = meta.Title
 			}
-			_ = d.RegisterSession(sessions.DefaultUserID, meta.ID, name)
+			_ = d.RegisterSession(sessions.UserID(), meta.ID, name)
 		}
 		// Pin the new session to the current agent generation so it stays
 		// on that generation even if a reload happens mid-conversation.
@@ -403,7 +403,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			d.Manager.Pin(meta.ID)
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.DefaultUserID)
+			d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.UserID())
 		}
 		// Tell other open browsers a session appeared so their sidebars refresh.
 		if d.PushEvents != nil {
@@ -684,7 +684,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		userID := sessions.DefaultUserID
+		userID := sessions.UserID()
 		if meta, ok := d.Registry.Get(id); ok && meta.UserID != "" {
 			userID = meta.UserID
 		}

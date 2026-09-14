@@ -795,7 +795,7 @@ func (s *a2aServer) resolveRouting(meta map[string]any, taskID string) (*session
 		}
 		return &sessionRouting{
 			Squad:     squad,
-			UserID:    sessions.DefaultUserID,
+			UserID:    sessions.UserID(),
 			SessionID: taskID,
 		}, nil
 	}

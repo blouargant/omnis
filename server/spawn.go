@@ -33,7 +33,7 @@ type spawnOptions struct {
 	DefaultSquad string // used when Squad is empty (may be empty ⇒ DefaultSquadName)
 	Title        string // friendly session title (empty ⇒ keep the petname id)
 	Dir          string // working directory to inherit (empty ⇒ default root)
-	UserID       string // owning user (empty ⇒ DefaultUserID)
+	UserID       string // owning user (empty ⇒ sessions.UserID())
 }
 
 // materializeSession creates a fresh, first-class session (fresh context) wired
@@ -212,7 +212,7 @@ func deleteSession(d serverDeps, id string) bool {
 	// Capture metadata before deleting: display name for the teammate registry
 	// and userID for log file paths.
 	var displayName string
-	userID := sessions.DefaultUserID
+	userID := sessions.UserID()
 	if meta, ok := d.Registry.Get(id); ok {
 		userID = meta.UserID
 		if meta.Title != "" {

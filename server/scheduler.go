@@ -50,7 +50,7 @@ func scheduleFire(d serverDeps) func(context.Context, scheduler.Job) {
 				d.Scheduler.RecordRun(job.ID, scheduler.RunRecord{At: time.Now(), Status: "error", Note: "could not create session"})
 				return
 			}
-			d.PushMgr.injectTurn(ctx, d, sid, sessions.DefaultUserID, job.Prompt, "schedule_run")
+			d.PushMgr.injectTurn(ctx, d, sid, sessions.UserID(), job.Prompt, "schedule_run")
 			archiveScheduledSession(d, sid)
 			d.Scheduler.RecordRun(job.ID, scheduler.RunRecord{At: time.Now(), SessionID: sid, Status: "ok"})
 		}
@@ -59,7 +59,7 @@ func scheduleFire(d serverDeps) func(context.Context, scheduler.Job) {
 
 func userOrDefault(u string) string {
 	if u == "" {
-		return sessions.DefaultUserID
+		return sessions.UserID()
 	}
 	return u
 }
@@ -89,13 +89,13 @@ func createScheduledSession(d serverDeps, squad, prompt string) string {
 	d.Registry.SetTitle(meta.ID, title)
 	_ = sessions.SetConversationTitle(meta.ID, title)
 	if d.RegisterSession != nil {
-		_ = d.RegisterSession(sessions.DefaultUserID, meta.ID, title)
+		_ = d.RegisterSession(sessions.UserID(), meta.ID, title)
 	}
 	if d.Manager != nil {
 		d.Manager.Pin(meta.ID)
 	}
 	if d.PushMgr != nil {
-		d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.DefaultUserID)
+		d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.UserID())
 	}
 	if d.PushEvents != nil {
 		d.PushEvents.broadcast("session_created", meta.ID)
@@ -194,7 +194,7 @@ func handleCreateSchedule(d serverDeps) gin.HandlerFunc {
 			Cron:      spec.Cron,
 			At:        spec.At,
 			SessionID: req.SessionID,
-			UserID:    sessions.DefaultUserID,
+			UserID:    sessions.UserID(),
 			Squad:     strings.TrimSpace(req.Squad),
 			MaxRuns:   req.MaxRuns,
 		})

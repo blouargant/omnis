@@ -205,7 +205,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 
 		// Mirror the POST /sessions wiring so the import is a first-class session.
 		if d.RegisterSession != nil {
-			_ = d.RegisterSession(sessions.DefaultUserID, newMeta.ID, title)
+			_ = d.RegisterSession(sessions.UserID(), newMeta.ID, title)
 		}
 		if d.Manager != nil {
 			d.Manager.Pin(newMeta.ID)
@@ -214,7 +214,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 			cancel()
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.DefaultUserID)
+			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.UserID())
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("session_created", newMeta.ID)
