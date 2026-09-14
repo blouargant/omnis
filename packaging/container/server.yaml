@@ -1,0 +1,24 @@
+# omnis-server configuration baked into the per-user container image.
+# Installed at /etc/omnis/server.yaml (the default system layer). Per-user
+# overrides still land in $OMNIS_HOME (the user's NFS home) as usual.
+
+# addr is NOT set here: the listen address is OMNIS_SERVER_ADDR in the
+# supervisord program, so the platform owns it in one place.
+
+# Comes from OMNIS_SERVER_TOKEN (a per-container secret the gateway injects);
+# never store it in the image.
+token: ""
+
+# The container is the user's environment; there is no display to open.
+open_browser: false
+
+# The image is the update channel — no GitHub polling from inside a pod.
+update_check: false
+
+# Cross-container A2A is out of scope for milestone 1.
+a2a_enabled: false
+
+# The request header the SSO gateway fills with the authenticated login. Every
+# /api/* request must carry it with exactly OMNIS_USER_ID's value (401 when
+# missing, 403 on a mismatch). Adjust to the gateway's actual header name.
+identity_header: X-Forwarded-User

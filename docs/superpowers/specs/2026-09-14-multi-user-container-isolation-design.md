@@ -213,40 +213,56 @@ identity_header: X-Forwarded-User   # platform's actual header name
 
 ### 7.2 Program definition
 
-`packaging/supervisord/omnis-server.conf` (template; `%(ENV_…)s` placeholders are
-supervisord's, filled by the platform):
+`packaging/supervisord/omnis-server.conf` (template; `${VAR}` placeholders are
+rendered by the platform's container entrypoint):
 
 ```ini
+; omnis-server as a supervisord program inside a per-user container.
+;
+; TEMPLATE — rendered with envsubst by the platform's container entrypoint
+; before supervisord starts (supervisord itself does not expand its `user=`
+; option, so the login has to be substituted into the file):
+;
+;   envsubst < omnis-server.conf > /etc/supervisor/conf.d/omnis-server.conf
+;
+; Variables the platform provides per container:
+;   OMNIS_LOGIN         the user's login (also their Unix account in the image)
+;   HOME                the user's NFS-mounted home
+;   OMNIS_SERVER_TOKEN  the per-container secret the SSO gateway injects as
+;                       "Authorization: Bearer <token>" on every proxied request
+;   OMNIS_BASE_PATH     URL prefix when the gateway routes by path; empty when
+;                       it routes by host
+;   LITELLM_API_KEY     the user's LiteLLM virtual key (per-user cost attribution)
+;
+; Deliberately NOT set: OMNIS_CONFIG_PATH (bypasses the 3-layer config merge)
+; and OMNIS_SYSTEM_CONFIG_DIR (the .deb already installs the system layer at
+; /etc/omnis, which is the default). See docs/multi-user-containers.md.
+
 [program:omnis-server]
 command=/usr/bin/omnis-server
-user=%(ENV_OMNIS_LOGIN)s
-priority=900                     ; after the home-init service
+user=${OMNIS_LOGIN}
+directory=${HOME}
+priority=900
 autostart=true
 autorestart=true
 startsecs=3
 stopsignal=TERM
-stopwaitsecs=30                  ; graceful: lets in-flight turns persist
-directory=%(ENV_HOME)s
-environment=
-    HOME="%(ENV_HOME)s",
-    OMNIS_HOME="%(ENV_HOME)s/.omnis",
-    OMNIS_USER_ID="%(ENV_OMNIS_LOGIN)s",
-    OMNIS_SERVER_TOKEN="%(ENV_OMNIS_SERVER_TOKEN)s",
-    OMNIS_SERVER_ADDR="127.0.0.1:8080",
-    OMNIS_SERVER_BASE_PATH="%(ENV_OMNIS_BASE_PATH)s",   ; empty when routing by host
-    OMNIS_WEB_DIR="/usr/share/omnis/web",
-    LITELLM_API_KEY="%(ENV_LITELLM_API_KEY)s"           ; per-user virtual key
+stopwaitsecs=30
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
+environment=HOME="${HOME}",OMNIS_HOME="${HOME}/.omnis",OMNIS_USER_ID="${OMNIS_LOGIN}",OMNIS_SERVER_TOKEN="${OMNIS_SERVER_TOKEN}",OMNIS_SERVER_ADDR="127.0.0.1:8080",OMNIS_SERVER_BASE_PATH="${OMNIS_BASE_PATH}",OMNIS_WEB_DIR="/usr/share/omnis/web",LITELLM_API_KEY="${LITELLM_API_KEY}"
 ```
+
+`supervisord` does not expand `%(ENV_…)s` in its `user=` option, so the template
+uses `${VAR}` placeholders rendered by `envsubst` in the container entrypoint.
 
 Rules the template must satisfy (guard-tested, §9):
 
-- runs as the user (`user=`), never as root;
-- `OMNIS_HOME` is under `HOME`;
-- sets `OMNIS_USER_ID`;
+- runs as the user (`user=${OMNIS_LOGIN}`), never as root;
+- `OMNIS_HOME` is under `${HOME}`;
+- sets `OMNIS_USER_ID` to `${OMNIS_LOGIN}`;
 - **never** sets `OMNIS_CONFIG_PATH` (it would bypass the 3-layer merge and freeze
   every per-user override — the exact defect `packaging/profile_test.go` guards);
 - does not set `OMNIS_SYSTEM_CONFIG_DIR` (the `.deb` layout is already the default).

@@ -1,0 +1,26 @@
+# EXAMPLE — allow the omnis port of a per-user pod to be reached ONLY from the
+# SSO gateway. This is the second layer of spec §5 (the per-container bearer
+# token is the first): without it, a user could reach another user's omnis
+# port from their own pod and forge the identity header.
+# Adapt namespace/labels to the platform; the port must match OMNIS_SERVER_ADDR.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: omnis-server-from-gateway-only
+  namespace: user-workspaces
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: user-workspace
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sso-gateway
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oidc-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
