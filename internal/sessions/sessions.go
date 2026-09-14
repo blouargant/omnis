@@ -8,16 +8,46 @@ package sessions
 import (
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
 )
 
-// DefaultUserID is the user ID used when a caller (web UI, TUI, A2A)
-// does not supply one. The value is part of the on-disk session naming
-// scheme, so do not change it without a migration.
+// DefaultUserID is the user ID every session is attributed to when no owner
+// is configured (a single-user install: web UI, TUI, A2A). The value is part
+// of the on-disk session naming scheme (agent.SessionSuffix), so do not change
+// it without a migration. A multi-user deployment runs one omnis-server per
+// user and configures the real login with SetUserID (OMNIS_USER_ID) — see
+// docs/multi-user-containers.md.
 const DefaultUserID = "web-user"
+
+var (
+	userIDMu sync.RWMutex
+	userID   = DefaultUserID
+)
+
+// UserID returns the login every session created by this process is
+// attributed to: the value given to SetUserID, or DefaultUserID when none was.
+func UserID() string {
+	userIDMu.RLock()
+	defer userIDMu.RUnlock()
+	return userID
+}
+
+// SetUserID configures the process-wide session owner. The server calls it
+// once at boot, before the registry is built, from OMNIS_USER_ID. Whitespace
+// is trimmed; an empty id restores DefaultUserID.
+func SetUserID(id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id = DefaultUserID
+	}
+	userIDMu.Lock()
+	userID = id
+	userIDMu.Unlock()
+}
 
 // SessionMeta is what we know about a chat session at the
 // orchestrator layer. The actual conversation history lives in the
@@ -131,7 +161,7 @@ func (r *Registry) NewWithName(name, squad string) (*SessionMeta, bool) {
 	}
 	m := &SessionMeta{
 		ID:         name,
-		UserID:     DefaultUserID,
+		UserID:     UserID(),
 		CreatedAt:  now,
 		LastUsedAt: now,
 		Squad:      squad,
@@ -167,7 +197,7 @@ func (r *Registry) New(squad string) *SessionMeta {
 	r.mu.Lock()
 	m := &SessionMeta{
 		ID:         r.uniqueName(),
-		UserID:     DefaultUserID,
+		UserID:     UserID(),
 		CreatedAt:  now,
 		LastUsedAt: now,
 		Squad:      squad,

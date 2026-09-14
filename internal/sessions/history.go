@@ -117,7 +117,14 @@ type ConversationTurn struct {
 // ConversationFile is the on-disk format for a session's history.
 // Legacy files used a plain JSON array; those are read transparently.
 type ConversationFile struct {
-	Title     string `json:"title,omitempty"`
+	Title string `json:"title,omitempty"`
+	// UserID is the login this session is attributed to (sessions.UserID()).
+	// Stamped by SaveConversationFile when empty, so every write path (turns,
+	// forks, imports) records the owner. Absent in files written before
+	// multi-user support; LoadPersistedSessions attributes those to the
+	// process's configured user (one container, one user). Never overwritten
+	// once set — a file that names another login keeps it.
+	UserID    string `json:"user_id,omitempty"`
 	Squad     string `json:"squad,omitempty"`
 	Harvested bool   `json:"harvested,omitempty"`
 	Archived  bool   `json:"archived,omitempty"`
@@ -186,6 +193,9 @@ func LoadConversationFile(sessionID string) (*ConversationFile, error) {
 // what used to make the next load fail and silently reset the whole history to
 // a single turn.
 func SaveConversationFile(sessionID string, f *ConversationFile) error {
+	if f.UserID == "" {
+		f.UserID = UserID()
+	}
 	dir := logsDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -484,6 +494,10 @@ func LoadPersistedSessions() []*SessionMeta {
 		if err != nil || f == nil || len(f.Turns) == 0 {
 			continue
 		}
+		uid := f.UserID
+		if uid == "" {
+			uid = UserID()
+		}
 		out = append(out, &SessionMeta{
 			ID:         id,
 			Title:      f.Title,
@@ -494,7 +508,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Goal:       f.Goal,
 			Cwd:        f.Cwd,
 			Collection: f.Collection,
-			UserID:     DefaultUserID,
+			UserID:     uid,
 			CreatedAt:  f.Turns[0].At,
 			LastUsedAt: f.Turns[len(f.Turns)-1].At,
 			Turns:      len(f.Turns),
