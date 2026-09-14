@@ -38,6 +38,11 @@ type renameRequest struct {
 
 type serverDeps struct {
 	Token string
+	// IdentityHeader names the request header the SSO gateway fills with the
+	// authenticated login. Non-empty ⇒ identityMiddleware enforces it on every
+	// /api/* route against sessions.UserID(), after the token check. Empty in a
+	// single-user install. See docs/multi-user-containers.md.
+	IdentityHeader string
 	// Manager owns the live agent generations. Look up the runner per
 	// session via Manager.Lookup(sessionID).Runner so each session uses
 	// the agent build it was pinned to.
@@ -241,7 +246,12 @@ func newEngine(d serverDeps) *gin.Engine {
 	// query param itself (see its doc comment).
 	api.GET("/terminal/ws", handleTerminal(d))
 
-	auth := api.Group("", authMiddleware(d.Token))
+	// Token first, identity second: a caller without the container's secret
+	// never learns which login the identity check expects (spec §6.3).
+	auth := api.Group("", authMiddleware(d.Token), identityMiddleware(d.IdentityHeader, sessions.UserID()))
+	// GET /api/whoami — the user this instance serves + whether the identity
+	// header is enforced. Shown in the web UI sidebar footer.
+	auth.GET("/whoami", handleWhoami(d.IdentityHeader))
 	// POST /api/terminal/token — mint a short-lived, single-use token for the
 	// terminal WebSocket. Behind authMiddleware (needs the master bearer token in
 	// the Authorization header), so only an already-authenticated client can get

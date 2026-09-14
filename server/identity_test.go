@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -136,5 +137,66 @@ func TestHandleWhoami(t *testing.T) {
 		if body.UserID != "alice" || body.Enforced != tc.wantEnforced {
 			t.Fatalf("header=%q: got %+v, want user alice enforced=%v", tc.header, body, tc.wantEnforced)
 		}
+	}
+}
+
+// TestIdentityEnforcedOnAPIGroup drives the real router: the token is checked
+// first (a caller without the secret never learns the expected login), then the
+// identity header, on every protected route; /api/health stays open.
+func TestIdentityEnforcedOnAPIGroup(t *testing.T) {
+	t.Cleanup(func() { sessions.SetUserID("") })
+	sessions.SetUserID("alice")
+	engine := newEngine(serverDeps{
+		Token:          "s3cret",
+		IdentityHeader: "X-Forwarded-User",
+		Registry:       sessions.NewEmptyRegistry(),
+		rootCtx:        context.Background(),
+	})
+
+	call := func(path, auth, login string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if login != "" {
+			req.Header.Set("X-Forwarded-User", login)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := call("/api/health", "", ""); w.Code != http.StatusOK {
+		t.Fatalf("/api/health must stay open: %d", w.Code)
+	}
+	if w := call("/api/whoami", "", "alice"); w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "bearer") {
+		t.Fatalf("no token: got %d %s, want 401 about the bearer token (token is checked first)", w.Code, w.Body.String())
+	}
+	if w := call("/api/whoami", "Bearer wrong", "alice"); w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "invalid token") {
+		t.Fatalf("wrong token + right login: got %d %s, want 401 invalid token", w.Code, w.Body.String())
+	}
+	if w := call("/api/whoami", "Bearer s3cret", ""); w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "identity header") {
+		t.Fatalf("token, no login: got %d %s, want 401 missing identity header", w.Code, w.Body.String())
+	}
+	if w := call("/api/whoami", "Bearer s3cret", "bob"); w.Code != http.StatusForbidden {
+		t.Fatalf("token, other login: got %d %s, want 403", w.Code, w.Body.String())
+	}
+	w := call("/api/whoami", "Bearer s3cret", "alice")
+	if w.Code != http.StatusOK {
+		t.Fatalf("token + right login: got %d %s, want 200", w.Code, w.Body.String())
+	}
+	var body struct {
+		UserID   string `json:"user_id"`
+		Enforced bool   `json:"identity_enforced"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.UserID != "alice" || !body.Enforced {
+		t.Fatalf("whoami body %+v, want alice / enforced", body)
+	}
+	// Another protected route is covered by the same group.
+	if w := call("/api/sessions", "Bearer s3cret", "bob"); w.Code != http.StatusForbidden {
+		t.Fatalf("/api/sessions with other login: got %d, want 403", w.Code)
 	}
 }

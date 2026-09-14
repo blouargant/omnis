@@ -148,6 +148,22 @@ func run() error {
 		log.Println("server: OMNIS_SERVER_TOKEN not set — running without authentication")
 	}
 
+	// Per-user identity (multi-user deployments run one omnis-server per user
+	// behind an SSO gateway — docs/multi-user-containers.md). Must run before
+	// sessions.NewRegistry(): the registry attributes legacy conversation files
+	// to sessions.UserID().
+	ident, err := resolveIdentity(serverCfg)
+	if err != nil {
+		return err
+	}
+	sessions.SetUserID(ident.UserID)
+	switch {
+	case ident.Header != "":
+		log.Printf("server: serving user %q — identity header %q enforced on /api/*", sessions.UserID(), ident.Header)
+	case ident.UserID != "":
+		log.Printf("server: serving user %q (no identity header check)", sessions.UserID())
+	}
+
 	var addr string
 	var addrFromEnv bool
 	if v := os.Getenv("OMNIS_SERVER_ADDR"); v != "" {
@@ -408,6 +424,7 @@ func run() error {
 
 	deps := serverDeps{
 		Token:               token,
+		IdentityHeader:      ident.Header,
 		Manager:             manager,
 		Registry:            registry,
 		WebDir:              webDir,
