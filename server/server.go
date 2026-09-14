@@ -239,12 +239,18 @@ func newEngine(d serverDeps) *gin.Engine {
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	// Interactive terminal WebSocket. Registered on the unauthenticated group
-	// because a browser cannot set an Authorization header on a WebSocket
-	// handshake; handleTerminal verifies a short-lived, single-use terminal token
-	// (minted below via the authenticated POST /terminal/token) from the `token`
-	// query param itself (see its doc comment).
-	api.GET("/terminal/ws", handleTerminal(d))
+	// Interactive terminal WebSocket. Registered outside the token-checking
+	// `auth` group because a browser cannot set an Authorization header on a
+	// WebSocket handshake; handleTerminal verifies a short-lived, single-use
+	// terminal token (minted below via the authenticated POST /terminal/token)
+	// from the `token` query param itself (see its doc comment). The identity
+	// check still applies, though: a gateway sets its identity header on the
+	// upgrade request exactly like on any other proxied request, so this stays
+	// covered by the same belt-and-braces check as every other /api/* route
+	// (spec §6; docs/multi-user-containers.md). With no identity header
+	// configured, identityMiddleware is the same no-op pass-through closure —
+	// single-user installs are unaffected.
+	api.GET("/terminal/ws", identityMiddleware(d.IdentityHeader, sessions.UserID()), handleTerminal(d))
 
 	// Token first, identity second: a caller without the container's secret
 	// never learns which login the identity check expects (spec §6.3).

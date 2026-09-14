@@ -72,6 +72,34 @@ func TestSupervisordProgramRunsAsTheUserInsideTheirHome(t *testing.T) {
 	}
 }
 
+// TestSupervisordProgramAddrIsRenderedNotHardcoded pins the fix for a spec
+// defect that was copied faithfully into the template: a hard-coded loopback
+// bind (OMNIS_SERVER_ADDR="127.0.0.1:8080") contradicts
+// packaging/container/networkpolicy.example.yaml (which allows pod-to-pod
+// ingress on 8080) and the §5 threat model (a user reaching *another*
+// container's omnis port) — either the gateway is an in-pod sidecar (making
+// the NetworkPolicy moot) or omnis is simply unreachable. The bind must
+// instead be a platform-rendered variable so the operator picks the topology.
+func TestSupervisordProgramAddrIsRenderedNotHardcoded(t *testing.T) {
+	path := assetPath(t, "supervisord", "omnis-server.conf")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	content := string(data)
+
+	line := findIniAssign(content, "OMNIS_SERVER_ADDR")
+	if line == "" {
+		t.Fatalf("%s: no OMNIS_SERVER_ADDR assignment found", path)
+	}
+	if !strings.Contains(line, `OMNIS_SERVER_ADDR="${OMNIS_LISTEN_ADDR}"`) {
+		t.Errorf("%s: OMNIS_SERVER_ADDR must be the rendered ${OMNIS_LISTEN_ADDR}, never a hard-coded bind, got: %q", path, line)
+	}
+	if strings.Contains(line, `OMNIS_SERVER_ADDR="127.0.0.1`) {
+		t.Errorf("%s: OMNIS_SERVER_ADDR must not hard-code a loopback bind (contradicts the NetworkPolicy example + threat model), got: %q", path, line)
+	}
+}
+
 // TestContainerServerYAMLDisablesWhatTheImageOwns pins spec §7.1: the image is
 // the update channel, has no display, exposes no A2A listener yet, gets its
 // token from the environment, enforces an identity header, and leaves the

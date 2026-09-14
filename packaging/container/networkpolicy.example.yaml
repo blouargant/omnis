@@ -2,7 +2,12 @@
 # SSO gateway. This is the second layer of spec §5 (the per-container bearer
 # token is the first): without it, a user could reach another user's omnis
 # port from their own pod and forge the identity header.
-# Adapt namespace/labels to the platform; the port must match OMNIS_SERVER_ADDR.
+# Adapt namespace/labels to the platform; the port must match the rendered
+# OMNIS_LISTEN_ADDR (packaging/supervisord/omnis-server.conf). This policy only
+# has teeth when that address is a non-loopback bind (e.g. "0.0.0.0:8080") —
+# reachable from other pods in the first place; a loopback bind
+# ("127.0.0.1:8080") means the gateway is an in-pod sidecar and this policy is
+# moot (nothing outside the pod could reach the port either way).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

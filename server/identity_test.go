@@ -40,22 +40,27 @@ func TestIdentityMiddleware(t *testing.T) {
 		name       string
 		value      string
 		set        bool
+		extra      string // when non-empty, added as a SECOND value for the header (duplicate-header case)
 		wantStatus int
 		wantErr    string
 	}{
-		{"missing header", "", false, http.StatusUnauthorized, "missing identity header"},
-		{"blank header", "   ", true, http.StatusUnauthorized, "missing identity header"},
-		{"other login", "bob", true, http.StatusForbidden, "identity mismatch"},
-		{"case differs", "Alice", true, http.StatusForbidden, "identity mismatch"},
-		{"exact login", "alice", true, http.StatusOK, ""},
-		{"surrounding whitespace is trimmed", "  alice ", true, http.StatusOK, ""},
+		{"missing header", "", false, "", http.StatusUnauthorized, "missing identity header"},
+		{"blank header", "   ", true, "", http.StatusUnauthorized, "missing identity header"},
+		{"other login", "bob", true, "", http.StatusForbidden, "identity mismatch"},
+		{"case differs", "Alice", true, "", http.StatusForbidden, "identity mismatch"},
+		{"exact login", "alice", true, "", http.StatusOK, ""},
+		{"surrounding whitespace is trimmed", "  alice ", true, "", http.StatusOK, ""},
+		{"duplicate header rejected even when the first value matches", "alice", true, "bob", http.StatusForbidden, "identity mismatch"},
 	}
 	r := newIdentityRouter("X-Forwarded-User", "alice")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 			if tc.set {
-				req.Header.Set("X-Forwarded-User", tc.value)
+				req.Header.Add("X-Forwarded-User", tc.value)
+			}
+			if tc.extra != "" {
+				req.Header.Add("X-Forwarded-User", tc.extra)
 			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
@@ -198,5 +203,84 @@ func TestIdentityEnforcedOnAPIGroup(t *testing.T) {
 	// Another protected route is covered by the same group.
 	if w := call("/api/sessions", "Bearer s3cret", "bob"); w.Code != http.StatusForbidden {
 		t.Fatalf("/api/sessions with other login: got %d, want 403", w.Code)
+	}
+	// The terminal WebSocket route sits outside the token-checking `auth` group
+	// (browsers can't set an Authorization header on a WS handshake), but the
+	// identity check must still apply — it aborts before any upgrade attempt is
+	// made, so neither of these cases needs a valid bearer token or a terminal
+	// token.
+	if w := call("/api/terminal/ws", "", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("terminal ws, no login: got %d %s, want 401 missing identity header", w.Code, w.Body.String())
+	}
+	if w := call("/api/terminal/ws", "", "bob"); w.Code != http.StatusForbidden {
+		t.Fatalf("terminal ws, other login: got %d %s, want 403", w.Code, w.Body.String())
+	}
+}
+
+// TestSessionCreateAttributesToConfiguredUser drives the real POST
+// /api/sessions handler (no token/identity configured, so the route is open)
+// and checks that a session created while sessions.UserID() is "alice" is
+// attributed to "alice" everywhere the owner is recorded: the in-memory
+// registry entry, the persisted conversation file, and the on-disk session
+// scan used to rebuild the registry after a restart. Spec §9 bullet 4.
+func TestSessionCreateAttributesToConfiguredUser(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	sessions.SetUserID("alice")
+	t.Cleanup(func() { sessions.SetUserID("") })
+
+	reg := sessions.NewEmptyRegistry()
+	engine := newEngine(serverDeps{
+		Registry: reg,
+		rootCtx:  context.Background(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/sessions: got %d, want 201 (body=%s)", w.Code, w.Body.String())
+	}
+	var created struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.SessionID == "" {
+		t.Fatal("response carried no session_id")
+	}
+
+	meta, ok := reg.Get(created.SessionID)
+	if !ok {
+		t.Fatalf("session %q not found in registry", created.SessionID)
+	}
+	if meta.UserID != "alice" {
+		t.Fatalf("registry entry UserID = %q, want alice", meta.UserID)
+	}
+
+	if err := sessions.AppendConversationTurn(created.SessionID, "q", "a"); err != nil {
+		t.Fatalf("AppendConversationTurn: %v", err)
+	}
+
+	cf, err := sessions.LoadConversationFile(created.SessionID)
+	if err != nil {
+		t.Fatalf("LoadConversationFile: %v", err)
+	}
+	if cf.UserID != "alice" {
+		t.Fatalf("conversation file UserID = %q, want alice", cf.UserID)
+	}
+
+	found := false
+	for _, m := range sessions.LoadPersistedSessions() {
+		if m.ID == created.SessionID {
+			found = true
+			if m.UserID != "alice" {
+				t.Fatalf("LoadPersistedSessions entry UserID = %q, want alice", m.UserID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("LoadPersistedSessions did not include %q", created.SessionID)
 	}
 }

@@ -49,6 +49,13 @@ func identityMiddleware(header, expected string) gin.HandlerFunc {
 		return func(c *gin.Context) { c.Next() }
 	}
 	return func(c *gin.Context) {
+		// A request carrying the identity header twice is refused outright: with
+		// only the first value checked, a smuggled second value would ride along
+		// unexamined behind a matching first one.
+		if len(c.Request.Header.Values(header)) > 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "identity mismatch"})
+			return
+		}
 		got := strings.TrimSpace(c.GetHeader(header))
 		if got == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing identity header"})
