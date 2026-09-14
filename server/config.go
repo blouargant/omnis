@@ -34,6 +34,17 @@ type ServerConfig struct {
 	// Token is the Bearer token required on every /api/* call.
 	// Leave empty to run without authentication.
 	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+	// UserID is the login this server instance serves. A multi-user deployment
+	// runs one omnis-server per user (docs/multi-user-containers.md) and sets
+	// it to that user's login; empty keeps the single-user default ("web-user").
+	// Overridden by OMNIS_USER_ID.
+	UserID string `yaml:"user_id,omitempty" json:"user_id,omitempty"`
+	// IdentityHeader names the request header the SSO gateway fills with the
+	// authenticated login (e.g. "X-Forwarded-User"). When set, every /api/*
+	// request must carry it with exactly UserID's value: 401 when missing, 403
+	// on a mismatch. Requires UserID — the default would match any misrouted
+	// request. Overridden by OMNIS_IDENTITY_HEADER.
+	IdentityHeader string `yaml:"identity_header,omitempty" json:"identity_header,omitempty"`
 	// A2AEnabled controls whether the A2A protocol server starts alongside the web server.
 	A2AEnabled bool `yaml:"a2a_enabled,omitempty" json:"a2a_enabled,omitempty"`
 	// A2APort is the port the A2A server listens on (default 8081).
