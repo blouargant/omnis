@@ -174,7 +174,12 @@ nothing about the expected login.
 (browsers cannot set headers on a WS handshake) and is protected by its own
 short-lived single-use token, minted over the *authenticated* `POST
 /api/terminal/token` — which the identity middleware now covers. So the terminal is
-protected transitively; no change. Static assets are not identity-checked.
+protected transitively; no change. The WS route itself also runs
+`identityMiddleware` directly — it is registered on the unauthenticated group with
+the middleware in front of `handleTerminal`, so the login header is checked on the
+upgrade request too. This is what keeps the terminal covered in fallback mode
+(`OMNIS_SERVER_TOKEN` empty), where `handleTerminal`'s own terminal-token check is
+skipped entirely. Static assets are not identity-checked.
 
 **Fallback mode.** If the platform's gateway cannot inject an `Authorization`
 header, the deployment runs with `OMNIS_SERVER_TOKEN` empty, `OMNIS_IDENTITY_HEADER`
