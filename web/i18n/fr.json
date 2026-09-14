@@ -176,6 +176,7 @@
   "app.update.installFailed": "Échec de l'installation.",
   "app.update.showManual": "Afficher les étapes manuelles",
   "app.whatsnew.title": "Nouveautés d'Omnis",
+  "app.whoami.label": "Connecté en tant que",
   "app.whatsnew.subtitle": "Vous êtes maintenant en v{version}. Voici les nouveautés.",
   "app.whatsnew.gotIt": "J'ai compris",
   "app.whatsnew.more.one": "+{count} autre amélioration",

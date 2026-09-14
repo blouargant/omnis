@@ -176,6 +176,7 @@
   "app.update.installFailed": "Installation fehlgeschlagen.",
   "app.update.showManual": "Manuelle Schritte anzeigen",
   "app.whatsnew.title": "Neu in Omnis",
+  "app.whoami.label": "Angemeldet als",
   "app.whatsnew.subtitle": "Du bist jetzt auf v{version}. Das ist neu.",
   "app.whatsnew.gotIt": "Verstanden",
   "app.whatsnew.more.one": "+{count} weitere Verbesserung",

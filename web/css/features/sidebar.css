@@ -646,6 +646,29 @@ body.resizing #sidebar { transition: none; }
 /* Drop the buttons' top margin (meant for in-column flow) — the footer's own
    gap handles the spacing between the stacked buttons. */
 #sidebar-footer button { margin-top: 0; }
+/* "Signed in as <login>" — shown only when this omnis-server serves a real
+   user (multi-user deployments run one server per user); hidden on a
+   single-user install and in the collapsed rail. */
+#sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+#sidebar-user-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The id selector above outranks the UA `[hidden]{display:none}` rule (same
+ * gotcha as #folder-ctx-menu), so this explicit rule is required for the
+ * no-op contract: box.hidden must actually hide the label. */
+#sidebar-user[hidden] { display: none; }
+#sidebar.collapsed #sidebar-user { display: none; }
 #set-token {
   width: 100%;
   background: transparent;

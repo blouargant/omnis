@@ -118,6 +118,10 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         <span data-i18n="settings.menu.documentation">Documentation</span>
       </button>
+      <div id="sidebar-user" hidden>
+        <span data-i18n="app.whoami.label">Signed in as</span>
+        <span id="sidebar-user-name"></span>
+      </div>
     </div>
   </aside>
   <div id="sidebar-resize" aria-hidden="true"></div>
@@ -470,9 +474,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=62" defer></script>
+  <script src="assets/i18n/locales.js?v=63" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=91" defer></script>
+  <script src="assets/app.js?v=92" defer></script>
   <script src="assets/settings.js?v=61" defer></script>
 </body>
 </html>

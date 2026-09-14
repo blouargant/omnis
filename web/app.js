@@ -8198,6 +8198,25 @@ async function maybePromptNotifications() {
   } catch (e) { console.error("notification opt-in failed:", e); }
 }
 
+// loadWhoami shows the login this omnis-server serves in the sidebar footer.
+// A multi-user deployment runs one server per user behind an SSO gateway
+// (docs/multi-user-containers.md); a single-user install reports the default
+// id and shows nothing, so the footer is unchanged there.
+async function loadWhoami() {
+  const box = document.getElementById("sidebar-user");
+  const name = document.getElementById("sidebar-user-name");
+  if (!box || !name) return;
+  try {
+    const res = await apiFetch("/api/whoami");
+    if (!res.ok) return;
+    const payload = await res.json();
+    const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
+    if (!user || user === "web-user") return;
+    name.textContent = user;
+    box.hidden = false;
+  } catch (e) { console.error("whoami failed:", e); }
+}
+
 // maybePromptWhatsNew runs once per upgrade. It asks the server for the feature
 // feed between the version last seen (recorded in preferences.json — assumed
 // 1.0.0 when none is recorded) and the running build; when the minor version
@@ -12530,6 +12549,7 @@ async function restoreLayout(rec, liveIds) {
   // recorded). The language offer runs first and may reload (switching language),
   // so chain the notification opt-in after it to avoid two stacked modals.
   (async () => {
+    loadWhoami(); // sidebar "Signed in as" — no-op on a single-user install
     await maybePromptLocale(); // may location.reload() when the user switches
     await maybePromptNotifications();
     maybePromptWhatsNew(); // once per upgrade; no-op on dev builds / when caught up
