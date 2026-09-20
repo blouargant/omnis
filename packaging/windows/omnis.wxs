@@ -18,7 +18,7 @@
     <StageDir>\data\agents.json, ...      -> C:\ProgramData\Omnis
     <StageDir>\data\server.yaml
     <StageDir>\data\filters\...
-    <StageDir>\data\hooks\k8s-validate.py -- the k8s-validate hook SCRIPT
+    <StageDir>\data\hooks\k8s-validate.py — the k8s-validate hook SCRIPT
       only. The DECLARATION (data\hooks.json) is deliberately EXCLUDED from
       staging on this channel — its command is POSIX shell, native Windows
       Bash calls run via cmd.exe (which does not expand it), and shipping the
