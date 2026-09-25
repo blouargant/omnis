@@ -94,9 +94,11 @@ var ErrAlreadyResolved = errors.New("askuser: question already resolved")
 type Persister interface {
 	// Save is called once a durable question is pending.
 	Save(q Question)
-	// Remove is called when a live durable question is resolved: answered is
-	// true for a real answer, false for a cancellation or timeout.
-	Remove(q Question, answered bool)
+	// Remove is called when a live durable question is resolved with its
+	// answer: ans.Cancelled is false for a real answer, true for a
+	// cancellation or timeout. The answer lets an implementation keep it when
+	// the waiting turn can no longer use it (e.g. during shutdown).
+	Remove(q Question, ans Answer)
 }
 
 // DefaultTimeout is the registry's default per-question wait when a question
@@ -192,6 +194,16 @@ func (r *Registry) Ask(ctx context.Context, sessionID string, q Question) (Answe
 		q:  q,
 		ch: make(chan Answer, 1),
 	}
+	// Store a durable question before publishing it: a Resolve or
+	// CancelSession landing right after publication calls Remove, which must
+	// find the entry. Saving afterwards could leave a stale entry — or, for a
+	// session deleted in that window, recreate its file with a ghost question.
+	// Outside r.mu: Save does disk IO.
+	if q.Durable {
+		if pr := r.getPersister(); pr != nil {
+			pr.Save(q)
+		}
+	}
 	r.mu.Lock()
 	if r.sessions[sessionID] == nil {
 		r.sessions[sessionID] = map[string]*pending{}
@@ -201,12 +213,6 @@ func (r *Registry) Ask(ctx context.Context, sessionID string, q Question) (Answe
 
 	if r.notifyFn != nil {
 		r.notifyFn(q)
-	}
-
-	if q.Durable {
-		if pr := r.getPersister(); pr != nil {
-			pr.Save(q)
-		}
 	}
 
 	timeout := r.defaultTimeout
@@ -289,7 +295,7 @@ func (r *Registry) resolveInternal(sessionID, questionID string, ans Answer, p *
 				onAnswer(p.q, ans)
 			}
 		case p.q.Durable && persister != nil:
-			persister.Remove(p.q, !ans.Cancelled)
+			persister.Remove(p.q, ans)
 		}
 	})
 	if !resolved {

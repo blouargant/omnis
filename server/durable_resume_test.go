@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -165,5 +166,55 @@ func TestSkipInjected(t *testing.T) {
 	}
 	if !skipInjected(sreg, "unknown", injectOpts{}) {
 		t.Fatal("an unknown session never runs")
+	}
+}
+
+// A resume that returns before running must still end the web UI's processing
+// state (turn_started was already broadcast). Other injected turns stay silent.
+func TestResumeEarlyExitSignalsCompletion(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	sreg := sessions.NewRegistry()
+	meta := sreg.New("")
+	sreg.SetArchived(meta.ID, true)
+
+	recv := func(ch chan pushMsg) (pushMsg, bool) {
+		select {
+		case m := <-ch:
+			return m, true
+		case <-time.After(200 * time.Millisecond):
+			return pushMsg{}, false
+		}
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	cases := []struct {
+		name string
+		ctx  context.Context
+		sid  string
+	}{
+		{"archived", context.Background(), meta.ID},
+		{"deleted", context.Background(), "gone"},
+		{"shutdown", cancelled, meta.ID},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bc := newSessionPushBroadcaster()
+			pm := newPushManager(newSessionRunGuard(), bc, nil, nil, true)
+			d := serverDeps{Registry: sreg}
+			ch := bc.subscribeAll()
+			defer bc.unsubscribeAll(ch)
+
+			pm.injectTurnOpts(c.ctx, d, c.sid, "u", injectOpts{SSEEvent: "mailbox_push", SkipIfArchived: true})
+			if m, ok := recv(ch); !ok || m.Event != "mailbox_push" || m.SID != c.sid {
+				t.Fatalf("resume early exit must broadcast mailbox_push, got %+v ok=%v", m, ok)
+			}
+			if c.name == "archived" {
+				return // without the opt an archived session runs: not an early exit
+			}
+			pm.injectTurnOpts(c.ctx, d, c.sid, "u", injectOpts{SSEEvent: "mailbox_push"})
+			if m, ok := recv(ch); ok {
+				t.Fatalf("a non-resume early exit must stay silent, got %+v", m)
+			}
+		})
 	}
 }

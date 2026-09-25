@@ -23,10 +23,10 @@ func (p *recPersister) Save(q askuser.Question) {
 	p.saved = append(p.saved, q.ID)
 }
 
-func (p *recPersister) Remove(q askuser.Question, answered bool) {
+func (p *recPersister) Remove(q askuser.Question, ans askuser.Answer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.removed[q.ID] = answered
+	p.removed[q.ID] = !ans.Cancelled
 }
 
 func (p *recPersister) snapshot() ([]string, map[string]bool) {
@@ -184,5 +184,50 @@ func TestPayloadCarriesResumed(t *testing.T) {
 	}
 	if _, ok := askuser.QuestionToPayload(askuser.Question{ID: "y"})["resumed"]; ok {
 		t.Fatal("resumed must be omitted when false")
+	}
+}
+
+// orderPersister checks, at Save time, that the question is not yet published.
+type orderPersister struct {
+	recPersister
+	r         *askuser.Registry
+	notified  *bool
+	earlyPend int
+	earlyNote bool
+}
+
+func (p *orderPersister) Save(q askuser.Question) {
+	p.mu.Lock()
+	p.earlyPend = len(p.r.Pending(q.SessionID))
+	p.earlyNote = *p.notified
+	p.mu.Unlock()
+	p.recPersister.Save(q)
+}
+
+// A durable question is stored before it is published, so a Resolve racing
+// the publication always finds the entry to remove.
+func TestAskSavesBeforePublishing(t *testing.T) {
+	notified := false
+	var nmu sync.Mutex
+	r := askuser.NewRegistry(askuser.WithNotify(func(askuser.Question) { nmu.Lock(); notified = true; nmu.Unlock() }))
+	p := &orderPersister{recPersister: *newRec(), r: r, notified: &notified}
+	r.SetPersister(p)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = r.Ask(context.Background(), "s1", askuser.Question{ID: "q", Kind: askuser.KindText, Prompt: "p", Durable: true})
+		close(done)
+	}()
+	waitPending(t, r, "s1", 1)
+	_ = r.Resolve("s1", "q", askuser.Answer{Text: "x"})
+	<-done
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.earlyPend != 0 || p.earlyNote {
+		t.Fatalf("Save must run before the question is published: pending=%d notified=%v", p.earlyPend, p.earlyNote)
+	}
+	if len(p.saved) != 1 || !p.removed["q"] {
+		t.Fatalf("expected one save and an answered removal, saved=%v removed=%v", p.saved, p.removed)
 	}
 }

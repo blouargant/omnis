@@ -436,8 +436,40 @@ type injectOpts struct {
 // unknown, or it is archived and the caller opted into SkipIfArchived. Called
 // with the run guard held, before any re-pin.
 func skipInjected(reg *sessions.Registry, sessionID string, o injectOpts) bool {
+	return injectSkipReason(reg, sessionID, o) != ""
+}
+
+// injectSkipReason is skipInjected with the reason, "" when the turn may run.
+func injectSkipReason(reg *sessions.Registry, sessionID string, o injectOpts) string {
 	archived, ok := reg.IsArchived(sessionID)
-	return !ok || (o.SkipIfArchived && archived)
+	switch {
+	case !ok:
+		return "session no longer exists"
+	case o.SkipIfArchived && archived:
+		return "session is archived"
+	}
+	return ""
+}
+
+// abortInjected ends an injected turn that returns before running. For a
+// durable-question resume (SkipIfArchived) the stored questions are already
+// gone and the web UI was told the turn started, so the failure is logged
+// (spec §7) and the completion event is sent anyway: the open tab clears its
+// processing state (endRemoteBusy) instead of spinning until reloaded. Other
+// callers keep their silent early return.
+func (pm *pushManager) abortInjected(sessionID string, o injectOpts, reason string) {
+	if !o.SkipIfArchived {
+		return
+	}
+	log.Printf("durable ask: resume for session %s did not run: %s", sessionID, reason)
+	if pm.bcast == nil {
+		return
+	}
+	if o.SSEEvent == "mailbox_push" {
+		pm.bcast.notify(sessionID)
+	} else if o.SSEEvent != "" {
+		pm.bcast.broadcast(o.SSEEvent, sessionID)
+	}
 }
 
 // injectTurnOpts is the body of injectTurnRouted, taking its inputs as an
@@ -448,6 +480,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 		o.PersistPrompt = o.RouterPrompt
 	}
 	if ctx.Err() != nil {
+		pm.abortInjected(sessionID, o, "server shutting down")
 		return ""
 	}
 
@@ -459,6 +492,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("server: recovered panic in injected turn for session %s: %v\n%s", sessionID, r, debug.Stack())
+			pm.abortInjected(sessionID, o, "the turn panicked")
 			reply = ""
 		}
 	}()
@@ -469,12 +503,17 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	// of waiting for that turn to finish only to no-op on the ctx check.
 	release, ok := pm.guard.acquireCtx(ctx, sessionID)
 	if !ok {
+		pm.abortInjected(sessionID, o, "cancelled while waiting for the session (shutdown or session ended)")
 		return ""
 	}
 	defer release()
 
 	meta, ok := d.Registry.Get(sessionID)
-	if !ok || skipInjected(d.Registry, sessionID, o) {
+	if reason := injectSkipReason(d.Registry, sessionID, o); !ok || reason != "" {
+		if reason == "" {
+			reason = "session no longer exists"
+		}
+		pm.abortInjected(sessionID, o, reason)
 		return ""
 	}
 	// We hold the run-guard for this session, so any hot-reload that happened
@@ -482,6 +521,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	// before the dispatch loop resolves squads.
 	d.Manager.MigrateToCurrent(sessionID)
 	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
+		pm.abortInjected(sessionID, o, fmt.Sprintf("squad %q no longer exists", meta.Squad))
 		return "" // no runnable squad (e.g. session dropped mid-flight)
 	}
 	// First injected turn after a restart: rebuild the model's context from

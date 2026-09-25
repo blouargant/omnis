@@ -2778,7 +2778,7 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 - `agent_memory_<u>_<ts>.md` — compressed session memory
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
-- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` (server only)
+- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` + durable `pending_questions` (unanswered `AskUserQuestion` prompts that survive a restart) (server only)
 
 **Context restore after a restart.** The web UI persists turn *history* to
 `conversation_<id>.json`, but the model's working memory is the ADK runner's

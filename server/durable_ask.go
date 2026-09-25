@@ -43,10 +43,18 @@ func (p *askPersister) Save(q askuser.Question) {
 	}
 }
 
-// Remove drops the stored question, except for a cancellation while the
-// server is shutting down: that is exactly the question that must survive.
-func (p *askPersister) Remove(q askuser.Question, answered bool) {
-	if !answered && p.root.Err() != nil {
+// Remove drops the stored question, except while the server is shutting
+// down: the waiting run is already cancelled, so the question must survive. A
+// cancellation keeps the entry as is; a real answer given during the shutdown
+// drain is recorded on it, so the boot "all answered → resume" path resumes
+// the task after the restart instead of losing the answer.
+func (p *askPersister) Remove(q askuser.Question, ans askuser.Answer) {
+	if p.root.Err() != nil {
+		if !ans.Cancelled {
+			if err := sessions.SetPendingAnswer(q.SessionID, q.ID, ans); err != nil {
+				log.Printf("durable ask: record answer %s/%s during shutdown: %v", q.SessionID, q.ID, err)
+			}
+		}
 		return
 	}
 	if err := sessions.RemovePendingQuestion(q.SessionID, q.ID); err != nil {

@@ -51,7 +51,7 @@ func TestAskPersisterKeepsEntryOnShutdown(t *testing.T) {
 	p.Save(q)
 
 	stop() // server shutting down
-	p.Remove(q, false)
+	p.Remove(q, askuser.Answer{Cancelled: true})
 	if got, _ := sessions.LoadPendingQuestions(meta.ID); len(got) != 1 {
 		t.Fatal("a cancellation during shutdown must keep the stored question")
 	}
@@ -65,9 +65,31 @@ func TestAskPersisterRemovesOnAnswerOrStop(t *testing.T) {
 	for _, answered := range []bool{true, false} {
 		q := askuser.Question{ID: "q", SessionID: meta.ID, Prompt: "?", Durable: true}
 		p.Save(q)
-		p.Remove(q, answered)
+		p.Remove(q, askuser.Answer{Text: "x", Cancelled: !answered})
 		if got, _ := sessions.LoadPendingQuestions(meta.ID); len(got) != 0 {
 			t.Fatalf("answered=%v with the server running must remove the entry", answered)
 		}
+	}
+}
+
+// An answer given during the shutdown drain reaches a run that is already
+// cancelled: the entry is kept with the answer, so the boot path resumes it.
+func TestAskPersisterRecordsAnswerDuringShutdown(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	reg := sessions.NewRegistry()
+	meta := reg.New("")
+	root, stop := context.WithCancel(context.Background())
+	p := newAskPersister(root, newLiveTurnRegistry(), reg)
+	q := askuser.Question{ID: "q1", SessionID: meta.ID, Prompt: "?", Durable: true}
+	p.Save(q)
+
+	stop()
+	p.Remove(q, askuser.Answer{Text: "prod"})
+	got, _ := sessions.LoadPendingQuestions(meta.ID)
+	if len(got) != 1 {
+		t.Fatalf("an answer during shutdown must keep the entry, got %+v", got)
+	}
+	if got[0].Answer == nil || got[0].Answer.Text != "prod" {
+		t.Fatalf("the answer must be recorded on the entry, got %+v", got[0])
 	}
 }
