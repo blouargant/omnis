@@ -55,6 +55,15 @@ type Question struct {
 	// (e.g. what is about to be installed), so a grouped widget can show a
 	// tidy "what will be installed" list instead of raw JSON args. Optional.
 	Item *QuestionItem `json:"item,omitempty"`
+	// Durable marks a question that must survive a server restart (see
+	// Persister). Only AskUserQuestion sets it; permission and other technical
+	// cards gate one tool call that does not exist after a restart.
+	Durable bool `json:"durable,omitempty"`
+	// Agent is the agent that asked the question (used to resume after a restart).
+	Agent string `json:"agent,omitempty"`
+	// Resumed is set by Restore: this question was asked before a server
+	// restart and its answer resumes the task in a new turn.
+	Resumed bool `json:"resumed,omitempty"`
 }
 
 // QuestionItem describes the subject of a question (typically an install
@@ -79,6 +88,17 @@ var ErrUnknownQuestion = errors.New("askuser: unknown question_id")
 // ErrAlreadyResolved is returned by Resolve when the question was already answered.
 var ErrAlreadyResolved = errors.New("askuser: question already resolved")
 
+// Persister stores durable questions so they survive a restart. Only
+// questions with Durable=true are passed to it. Implementations must be safe
+// for concurrent use and must not block for long.
+type Persister interface {
+	// Save is called once a durable question is pending.
+	Save(q Question)
+	// Remove is called when a live durable question is resolved: answered is
+	// true for a real answer, false for a cancellation or timeout.
+	Remove(q Question, answered bool)
+}
+
 // DefaultTimeout is the registry's default per-question wait when a question
 // sets no TimeoutSecs. It is 0 — an unanswered ask-user / permission card waits
 // indefinitely rather than being auto-denied on a timer: denying an action the
@@ -93,6 +113,13 @@ type pending struct {
 	q    Question
 	ch   chan Answer // buffer 1; closed on resolution
 	once sync.Once   // ensures ch is closed exactly once
+	// orphan marks a question restored after a restart: no tool call waits on
+	// ch, and its storage is owned by the caller of Restore, so the persister
+	// is never called for it. onAnswer (read/written under Registry.mu) is its
+	// completion callback; CancelSession clears it so an ending session is
+	// never resumed.
+	orphan   bool
+	onAnswer func(Question, Answer)
 }
 
 // Registry is a per-session-scoped concurrent map from questionID → pending.
@@ -109,6 +136,10 @@ type Registry struct {
 	// cancelFn is called when a question is resolved (by Resolve or timeout)
 	// so the surface can dismiss the widget. Receives the resolved Question.
 	cancelFn func(q Question)
+
+	// persister stores durable questions so they survive a restart. Set via
+	// SetPersister; nil by default, in which case durability is a no-op.
+	persister Persister
 
 	defaultTimeout time.Duration
 }
@@ -172,6 +203,12 @@ func (r *Registry) Ask(ctx context.Context, sessionID string, q Question) (Answe
 		r.notifyFn(q)
 	}
 
+	if q.Durable {
+		if pr := r.getPersister(); pr != nil {
+			pr.Save(q)
+		}
+	}
+
 	timeout := r.defaultTimeout
 	if q.TimeoutSecs > 0 {
 		timeout = time.Duration(q.TimeoutSecs) * time.Second
@@ -230,20 +267,32 @@ func (r *Registry) Resolve(sessionID, questionID string, ans Answer) error {
 }
 
 func (r *Registry) resolveInternal(sessionID, questionID string, ans Answer, p *pending) error {
-	var alreadyDone bool
+	resolved := false
 	p.once.Do(func() {
+		resolved = true
 		p.ch <- ans
 		close(p.ch)
 		r.mu.Lock()
 		if r.sessions[sessionID] != nil {
 			delete(r.sessions[sessionID], questionID)
 		}
+		cancelFn := r.cancelFn
+		persister := r.persister
+		onAnswer := p.onAnswer
 		r.mu.Unlock()
-		if r.cancelFn != nil {
-			r.cancelFn(p.q)
+		if cancelFn != nil {
+			cancelFn(p.q)
+		}
+		switch {
+		case p.orphan:
+			if onAnswer != nil {
+				onAnswer(p.q, ans)
+			}
+		case p.q.Durable && persister != nil:
+			persister.Remove(p.q, !ans.Cancelled)
 		}
 	})
-	if alreadyDone {
+	if !resolved {
 		return ErrAlreadyResolved
 	}
 	return nil
@@ -281,6 +330,54 @@ func (r *Registry) SetCancel(fn func(q Question)) {
 	r.cancelFn = fn
 }
 
+// SetPersister installs the durable-question store. Thread-safe.
+func (r *Registry) SetPersister(p Persister) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.persister = p
+}
+
+func (r *Registry) getPersister() Persister {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.persister
+}
+
+// Restore re-registers a question persisted before a restart. No tool call
+// waits for it: when it is answered, onAnswer runs instead, and the persister
+// is not called (the caller owns the stored entry). The question is marked
+// Resumed and announced through notifyFn like a new question.
+func (r *Registry) Restore(q Question, onAnswer func(Question, Answer)) {
+	q.Resumed = true
+	p := &pending{q: q, ch: make(chan Answer, 1), orphan: true, onAnswer: onAnswer}
+	r.mu.Lock()
+	if r.sessions[q.SessionID] == nil {
+		r.sessions[q.SessionID] = map[string]*pending{}
+	}
+	r.sessions[q.SessionID][q.ID] = p
+	notify := r.notifyFn
+	r.mu.Unlock()
+	if notify != nil {
+		notify(q)
+	}
+}
+
+// CancelSession ends every pending question of a session (archive, delete).
+// A live question is resolved as cancelled; a restored orphan is dropped
+// without calling its onAnswer, since the session is going away.
+func (r *Registry) CancelSession(sessionID string) {
+	r.mu.Lock()
+	var ps []*pending
+	for _, p := range r.sessions[sessionID] {
+		p.onAnswer = nil // never resume a session that is ending
+		ps = append(ps, p)
+	}
+	r.mu.Unlock()
+	for _, p := range ps {
+		_ = r.resolveInternal(sessionID, p.q.ID, Answer{Cancelled: true}, p)
+	}
+}
+
 // QuestionToPayload converts a Question to a map[string]any suitable for
 // use as an event bus payload (e.g. events.EventAskUser).
 func QuestionToPayload(q Question) map[string]any {
@@ -304,6 +401,9 @@ func QuestionToPayload(q Question) map[string]any {
 	}
 	if q.Password {
 		p["password"] = true
+	}
+	if q.Resumed {
+		p["resumed"] = true
 	}
 	if q.Group != "" {
 		p["group"] = q.Group
