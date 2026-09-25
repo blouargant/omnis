@@ -31,8 +31,6 @@ Per-agent details live in `registry/agents/<name>/` — see
   "skills_dir": "skills",
   "softskills_dir": "softskills",
   "app_name": "omnis",
-  "token_optimization": false,
-  "bash_output_filters_dir": ".agents/filters",
   "mcp_config_path": ".agents/mcp_config.json",
   "permissions_config_path": ".agents/permissions.json",
   "hooks_config_path": ".agents/hooks.json",
@@ -257,18 +255,6 @@ can still specify `provider` / `model` inline.
 
 If a non-leader agent omits model connection fields, they inherit from
 the leader.
-
-### Bash output filtering
-
-The `bash` tool can optionally post-process command output using declarative
-JSON pipelines imported from the snip filter format.
-
-- `token_optimization` (bool): global opt-in toggle.
-- `bash_output_filters_dir` (string): directory containing `.json`
-  filter rules.
-
-When disabled (default), `bash` output is unchanged. When enabled, matching
-commands are filtered before the tool's normal truncation step.
 
 For `base_url` and `api_key`, the values can be either:
 

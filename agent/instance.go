@@ -120,14 +120,8 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 	// ResolveRuntimeSettings) so config-only tests see an unmodified squad list.
 	ensureRouterSquad(&runtime)
 
-	// Bash filter / timeout are process-globals; reapply on each build so a
-	// config reload picks up changes.
-	if err := fstools.ConfigureBashOutputFilter(fstools.BashOutputFilterConfig{
-		Enabled:    runtime.BashOutputFilterEnabled,
-		FiltersDir: runtime.BashOutputFiltersDir,
-	}); err != nil {
-		return nil, fmt.Errorf("bootstrap bash output filter: %w", err)
-	}
+	// The bash timeout is a process-global; reapply on each build so a config
+	// reload picks up changes.
 	fstools.SetBashDefaultTimeout(time.Duration(runtime.BashTimeoutSeconds) * time.Second)
 
 	if _, ok := runtime.LeaderConfig(); !ok {

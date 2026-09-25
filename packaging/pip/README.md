@@ -32,7 +32,6 @@ your per-user config home so they are yours to edit:
 ~/.omnis/
 ├── agents.json  models.json  mcp_config.json  permissions.json
 ├── preferences.json  remote_registries.json  a2a_config.json  server.yaml
-├── filters/                 # bash output filter patterns
 └── registry/
     ├── agents/              # built-in agent definitions
     └── skills/              # bundled skill playbooks

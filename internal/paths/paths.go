@@ -75,8 +75,8 @@ const (
 
 // SystemConfigDir is the lowest-precedence base directory used for system-wide
 // configuration AND the lowest-precedence layer of the default config search
-// chain. Config files (agents.json, permissions.json, server.yaml, …) and the
-// filters/ directory live directly under SystemConfigDir; the agent and skill
+// chain. Config files (agents.json, permissions.json, server.yaml, …) live
+// directly under SystemConfigDir; the agent and skill
 // registries live under SystemConfigDir/registry/agents and
 // SystemConfigDir/registry/skills respectively. It's a package-level variable
 // so distribution packagers can override it at build time via -ldflags for
@@ -287,19 +287,6 @@ func ConfigLayerCandidates(name string) []string {
 		out = append(out, filepath.Join(dirs[i], name))
 	}
 	return out
-}
-
-// FindConfigDir resolves a subdirectory name against the config search chain
-// and returns the first existing directory. Falls back to the
-// write-target path under ConfigWriteDir() when no layer has it.
-func FindConfigDir(name string) string {
-	for _, dir := range ConfigSearchDirs() {
-		p := filepath.Join(dir, name)
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			return p
-		}
-	}
-	return filepath.Join(ConfigWriteDir(), name)
 }
 
 // LogsDir returns Home()/logs — per-session task graph, todo list, audit,

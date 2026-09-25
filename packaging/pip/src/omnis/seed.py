@@ -16,7 +16,7 @@ import sys
 # Subdirectories under the bundled sysconf/ that are copied wholesale (kept in
 # sync with scripts/build_wheels.py staging and the OMNIS_SYSTEM_CONFIG_DIR
 # contract in internal/paths/paths.go).
-SEED_TREES = ("filters", "registry")
+SEED_TREES = ("registry",)
 
 
 def home_dir(explicit=None):
@@ -59,7 +59,7 @@ def ensure_home_seeded(src_sysconf, home=None, force=False):
             if _copy_file(src, os.path.join(home, name), force):
                 written += 1
 
-    # Whole subtrees (filters/, registry/agents, registry/skills).
+    # Whole subtrees (registry/agents, registry/skills).
     for tree in SEED_TREES:
         src_tree = os.path.join(src_sysconf, tree)
         if not os.path.isdir(src_tree):

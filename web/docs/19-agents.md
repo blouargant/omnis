@@ -259,7 +259,6 @@ top level of `agents.json`.
 
 | Toggle | Description |
 |---|---|
-| `token_optimization` | Enable bash-output filtering to reduce token usage. Filter patterns are read from `.agents/filters/`. |
 
 ### EXTERNAL API KEYS
 
@@ -282,7 +281,6 @@ minimal search (the key is checked on the server, never in the browser), reporti
 
 | Field | Description |
 |---|---|
-| `bash_output_filters_dir` | Override the directory containing bash output filter patterns. Default: `.agents/filters/`. |
 | `bash_timeout_seconds` | Maximum time in seconds a bash command may run before it is killed. |
 | `mcp_config_path` | Override the default `mcp_config.json` path for all agents. |
 | `permissions_config_path` | Override the default `permissions.json` path for all agents. |

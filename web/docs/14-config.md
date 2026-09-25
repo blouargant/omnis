@@ -14,7 +14,6 @@ single root).
 | `hooks.json`                                  | [Lifecycle hooks](22-hooks.md) — shell commands fired on tool/prompt/session/compaction events. |
 | `mcp_config.json`                             | MCP server definitions. |
 | `a2a_config.json`                             | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
-| `filters/`                                    | Bash output filter patterns (token optimization). |
 | `registry/skills/<name>/SKILL.md`             | Authored skill playbooks. |
 | `softskills/`                                 | Curator-distilled procedures + the `wrap-session` built-in. |
 | `softskills/_stats.json`                      | Sidecar: per-skill `loaded_count` + `helpful` / `harmful` / `neutral` counters. Maintained by the reflection pipeline. |
