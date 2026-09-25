@@ -79,7 +79,8 @@ func (r *Registry) SetPersister(p Persister)
 - `Restore(q Question, onAnswer func(Question, Answer))` re-registers a
   question with no waiting tool call (an **orphan**). It appears in
   `Pending` like any other question. When `Resolve` reaches it, the registry
-  calls `Remove` and then `onAnswer`.
+  calls **only** `onAnswer`, not `Remove`: the owner of the orphan decides what
+  happens to the stored entry (section 5).
 - `CancelSession(sessionID)` resolves every pending question of a session as
   cancelled. It is used when a session is archived.
 
@@ -101,8 +102,18 @@ type PendingQuestion struct {
     Squad     string           `json:"squad"`      // squad answering at ask time
     TurnCount int              `json:"turn_count"` // persisted turns when asked
     AskedAt   time.Time        `json:"asked_at"`
+    Answer    *askuser.Answer  `json:"answer,omitempty"` // set once a restored orphan is answered
 }
 ```
+
+`LoadPersistedSessions` currently skips a conversation file with no turns. It
+must also load a file that has no turns but has pending questions — the first
+turn of a new session can be the one interrupted — using the oldest
+`AskedAt` as the session's created/last-used time. Otherwise the session is
+not restored and the GC deletes its file.
+
+Removing an entry must **not recreate a deleted conversation file**: when the
+file is gone (session deleted), removal is a no-op.
 
 - `Prompt` and `TurnID` come from the session's live turn
   (`LiveTurns.get(sessionID)`). `liveTurn` gains an `id` field, a UUID set in
@@ -134,12 +145,19 @@ change to the replay code.
 
 ### 5. Resume on answer
 
-`onAnswer` receives each answered orphan.
+`onAnswer` receives each answered orphan and **records the answer on its
+stored entry** (`PendingQuestion.Answer`, persisted), rather than deleting it.
+That way a restart between two answers of the same turn loses nothing.
 
-- A **cancelled** answer (the user dismissed the card) removes the entry and
-  starts nothing.
-- A **real answer** is recorded against its `TurnID`. When **every** orphan of
-  that turn has an answer, one resume turn starts. Until then, nothing starts.
+- When **every** entry of a `TurnID` has an answer, one resume turn starts.
+  Its entries are removed from disk just before it runs (at most once: a crash
+  during the resume turn does not replay it).
+- A **dismissed** card (cancelled answer) counts as answered, and the resume
+  prompt says the user dismissed that question. If **every** question of the
+  turn was dismissed, the entries are removed and nothing starts.
+- **At boot**, a turn whose entries are all already answered (the server died
+  after the last answer but before the resume ran) starts its resume right
+  away instead of being restored as questions.
 
 The resume turn goes through `pushManager.injectTurnRouted`, in a goroutine on
 the server root context. It broadcasts `turn_started` first, then emits
