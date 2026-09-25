@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 
 	"google.golang.org/adk/v2/tool"
@@ -53,32 +52,36 @@ func NewAskUserTool(reg *askuser.Registry) tool.Tool {
 			"`allow_text` (bool) — also accept free text alongside choices (single/multi only). "+
 			"`default` (string) — pre-suggested value. "+
 			"`timeout_seconds` (int) — override default timeout (0 = use default).",
-		func(tc adk.ToolContext, in askUserIn) (askUserOut, error) {
-			if err := validateAskUserIn(in); err != nil {
-				return askUserOut{}, err
-			}
-
-			q := askuser.Question{
-				Kind:        askuser.Kind(in.Kind),
-				Prompt:      in.Prompt,
-				Choices:     in.Choices,
-				AllowText:   in.AllowText,
-				Default:     in.Default,
-				TimeoutSecs: in.TimeoutSeconds,
-			}
-
-			sessionID := tc.SessionID()
-			ans, err := reg.Ask(context.Background(), sessionID, q)
-			if err != nil {
-				return askUserOut{}, fmt.Errorf("ask_user: %w", err)
-			}
-			return askUserOut{
-				Selected:  ans.Selected,
-				Text:      ans.Text,
-				Cancelled: ans.Cancelled,
-			}, nil
-		},
+		askUserHandler(reg),
 	)
+}
+
+// askUserHandler is AskUserQuestion's body. The question is Durable: it
+// survives a server restart and resumes the task in a new turn. It waits on
+// the tool context (the run context), so Stop, session end and shutdown
+// release it; a client disconnect does not cancel the run context, so the
+// question still waits for the user to come back.
+func askUserHandler(reg *askuser.Registry) func(adk.ToolContext, askUserIn) (askUserOut, error) {
+	return func(tc adk.ToolContext, in askUserIn) (askUserOut, error) {
+		if err := validateAskUserIn(in); err != nil {
+			return askUserOut{}, err
+		}
+		q := askuser.Question{
+			Kind:        askuser.Kind(in.Kind),
+			Prompt:      in.Prompt,
+			Choices:     in.Choices,
+			AllowText:   in.AllowText,
+			Default:     in.Default,
+			TimeoutSecs: in.TimeoutSeconds,
+			Durable:     true,
+			Agent:       tc.AgentName(),
+		}
+		ans, err := reg.Ask(tc, tc.SessionID(), q)
+		if err != nil {
+			return askUserOut{}, fmt.Errorf("ask_user: %w", err)
+		}
+		return askUserOut{Selected: ans.Selected, Text: ans.Text, Cancelled: ans.Cancelled}, nil
+	}
 }
 
 func validateAskUserIn(in askUserIn) error {
