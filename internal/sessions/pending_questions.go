@@ -30,11 +30,44 @@ type PendingQuestion struct {
 
 // mutateExisting applies fn only when the conversation file exists, so a
 // removal racing a session delete never recreates the deleted file.
+//
+// The existence check, the load, the mutation, and the save all happen while
+// holding the session's conversation lock in ONE critical section — the same
+// lock DeleteConversationFile takes around its os.Remove. That is what makes
+// this safe: if the check ran under the lock but the load+save ran after
+// releasing it (or via a second, separate lock acquisition through
+// mutateConversation), a delete could still land in the gap and this function
+// would recreate the file it just confirmed was gone. Do not reintroduce that
+// gap — e.g. by splitting this back into an os.Stat followed by a call to
+// mutateConversation (which acquires convLock a second time; sync.Mutex is
+// not reentrant, so doing that under our own lock would deadlock rather than
+// merely race).
 func mutateExisting(sessionID string, fn func(*ConversationFile)) error {
-	if _, err := os.Stat(ConversationPath(sessionID)); os.IsNotExist(err) {
-		return nil
+	mu := convLock(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, err := os.Stat(ConversationPath(sessionID)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	return mutateConversation(sessionID, fn)
+	if mutateExistingTestHook != nil {
+		// Test-only synchronization point (nil in production, so this costs a
+		// single nil check). Lets a test pause here — file confirmed to exist,
+		// conversation lock still held — to prove a concurrent
+		// DeleteConversationFile for the same session blocks on that lock
+		// instead of racing in and having its removal undone by the save
+		// below. See TestMutateExistingBlocksConcurrentDelete.
+		mutateExistingTestHook()
+	}
+	f, err := loadForWrite(sessionID)
+	if err != nil {
+		return err
+	}
+	fn(f)
+	return SaveConversationFile(sessionID, f)
 }
 
 // AddPendingQuestion stores a durable question, replacing one with the same id.
@@ -89,6 +122,10 @@ func LoadPendingQuestions(sessionID string) ([]PendingQuestion, error) {
 	}
 	return f.PendingQuestions, nil
 }
+
+// mutateExistingTestHook is nil in production. Tests set it to pause
+// mutateExisting mid-critical-section (see the call site above).
+var mutateExistingTestHook func()
 
 func dropQuestion(in []PendingQuestion, id string) []PendingQuestion {
 	out := in[:0]

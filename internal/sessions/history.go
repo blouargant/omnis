@@ -451,8 +451,15 @@ func SetConversationCwd(sessionID, dir string) error {
 }
 
 // DeleteConversationFile removes the on-disk file for a session.
-// A missing file is not an error.
+// A missing file is not an error. Takes the session's conversation lock (the
+// same one mutateConversation/mutateExisting use) around the removal, so a
+// concurrent pending-question mutation can never race between its own
+// existence check and this delete — see mutateExisting in
+// pending_questions.go, which is what this closes the race with.
 func DeleteConversationFile(sessionID string) {
+	mu := convLock(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
 	if err := os.Remove(ConversationPath(sessionID)); err != nil && !os.IsNotExist(err) {
 		log.Printf("history: failed to delete conversation %s: %v", sessionID, err)
 	}
