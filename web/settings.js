@@ -2534,31 +2534,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
     el.innerHTML = "";
 
-    // Section order (per product): token optimization first, then external API
-    // keys, then the rest (core directories, runtime config).
-
-    // OPTIMIZATION
-    el.appendChild(envSection(tr("set.env.optimization"), null, body => {
-      const isOn = !!d.token_optimization;
-      const chip = document.createElement("div");
-      chip.className = "agent-tool-card env-opt-chip" + (isOn ? " tool-on" : "");
-      chip.innerHTML = `
-        <div class="agent-tool-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <div class="agent-tool-info">
-          <span class="agent-tool-name">token_optimization</span>
-          <span class="agent-tool-desc">${escHtml(tr("set.env.reduceTokens"))}</span>
-        </div>
-        <div class="agent-tool-toggle-pill ${isOn ? "pill-on" : "pill-off"}"></div>
-      `;
-      chip.addEventListener("click", () => {
-        d.token_optimization = !d.token_optimization;
-        const on = !!d.token_optimization;
-        chip.classList.toggle("tool-on", on);
-        chip.querySelector(".agent-tool-toggle-pill").className = "agent-tool-toggle-pill " + (on ? "pill-on" : "pill-off");
-        onChange();
-      });
-      body.appendChild(chip);
-    }));
+    // Section order (per product): external API keys first, then the rest
+    // (core directories, runtime config).
 
     // EXTERNAL API KEYS
     el.appendChild(envSection(tr("set.env.externalApiKeys"), null, body => {
@@ -2641,7 +2618,6 @@ const BASE_PATH = window.BASE_PATH || "";
     el.appendChild(envSection(tr("set.env.runtimeConfig"), null, body => {
       const g = document.createElement("div");
       g.className = "env-grid-2";
-      g.appendChild(envText("bash_output_filters_dir"));
       g.appendChild(envNum("bash_timeout_seconds"));
       g.appendChild(envText("mcp_config_path"));
       g.appendChild(envText("permissions_config_path"));

@@ -401,12 +401,6 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if got := runtime.AppName; got != "omnis" {
 		t.Fatalf("AppName = %q, want omnis", got)
 	}
-	if runtime.BashOutputFilterEnabled {
-		t.Fatal("BashOutputFilterEnabled = true, want false")
-	}
-	if got, want := runtime.BashOutputFiltersDir, filepath.Join(home, "filters"); got != want {
-		t.Fatalf("BashOutputFiltersDir = %q, want %q", got, want)
-	}
 	if _, ok := runtime.AgentConfig("leader"); !ok {
 		t.Fatal("default leader config missing")
 	}
@@ -492,7 +486,10 @@ func TestResolveRuntimeSettingsModelOverride(t *testing.T) {
 	})
 }
 
-func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
+// token_optimization / bash_output_filters_dir were removed (the bash output
+// filters cost accuracy and saved nothing measurable). Configs written before
+// the removal still carry the keys; they must keep resolving, the keys ignored.
+func TestResolveRuntimeSettingsIgnoresRemovedTokenOptimizationKeys(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
 		{Name: "leader"},
@@ -502,6 +499,7 @@ func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
 	mustWrite(t, path, []byte(`{
   "token_optimization": true,
   "bash_output_filters_dir": "config/custom-filters",
+  "bash_timeout_seconds": 42,
   "agents": ["leader"]
 }`))
 
@@ -509,11 +507,8 @@ func TestResolveRuntimeSettingsBashOutputFilterFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
-	if !runtime.BashOutputFilterEnabled {
-		t.Fatal("BashOutputFilterEnabled = false, want true")
-	}
-	if got := runtime.BashOutputFiltersDir; got != "config/custom-filters" {
-		t.Fatalf("BashOutputFiltersDir = %q, want config/custom-filters", got)
+	if got := runtime.BashTimeoutSeconds; got != 42 {
+		t.Fatalf("BashTimeoutSeconds = %d, want 42 (sibling keys must still apply)", got)
 	}
 }
 

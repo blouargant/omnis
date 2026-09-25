@@ -193,8 +193,6 @@ type modelsConfigFile struct {
 type runtimeConfigFile struct {
 	SoftSkillsDir         string `json:"softskills_dir"`
 	AppName               string `json:"app_name"`
-	TokenOptimization     bool   `json:"token_optimization"`
-	BashOutputFiltersDir  string `json:"bash_output_filters_dir"`
 	BashTimeoutSeconds    int    `json:"bash_timeout_seconds"`
 	MCPConfigPath         string `json:"mcp_config_path"`
 	PermissionsConfigPath string `json:"permissions_config_path"`
@@ -331,16 +329,14 @@ const DefaultSquadName = "system"
 // RuntimeSettings is the merged runtime configuration after precedence
 // resolution: defaults -> JSON -> ENV -> Options.
 type RuntimeSettings struct {
-	ConfigPath              string
-	ModelsConfigPath        string
-	Providers               map[string]RuntimeProviderConfig
-	SoftSkillsDir           string
-	AppName                 string
-	BashOutputFilterEnabled bool
-	BashOutputFiltersDir    string
-	BashTimeoutSeconds      int
-	MCPConfigPath           string
-	PermissionsConfigPath   string
+	ConfigPath            string
+	ModelsConfigPath      string
+	Providers             map[string]RuntimeProviderConfig
+	SoftSkillsDir         string
+	AppName               string
+	BashTimeoutSeconds    int
+	MCPConfigPath         string
+	PermissionsConfigPath string
 	// HooksConfigPath is the resolved path to hooks.json, defining Claude
 	// Code-style lifecycle hooks (shell commands fired before/after tools, on
 	// prompt submit, on stop, etc.). Empty/missing means no hooks.
@@ -996,20 +992,18 @@ func applyInstructionFrontmatter(e *AgentEntry, fm InstructionFrontmatter) {
 // defaults -> JSON -> ENV -> Options.
 func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out := RuntimeSettings{
-		ConfigPath:              paths.FindConfig("agents.json"),
-		ModelsConfigPath:        paths.FindConfig("models.json"),
-		SoftSkillsDir:           paths.SoftSkillsDir(),
-		AppName:                 "omnis",
-		BashOutputFilterEnabled: false,
-		BashOutputFiltersDir:    paths.FindConfigDir("filters"),
-		BashTimeoutSeconds:      120,
-		MCPConfigPath:           paths.FindConfig("mcp_config.json"),
-		PermissionsConfigPath:   paths.FindConfig("permissions.json"),
-		HooksConfigPath:         paths.FindConfig("hooks.json"),
-		A2AConfigPath:           paths.FindConfig("a2a_config.json"),
-		Providers:               map[string]RuntimeProviderConfig{},
-		Models:                  map[string]RuntimeModelConfig{},
-		Agents:                  defaultAgents(),
+		ConfigPath:            paths.FindConfig("agents.json"),
+		ModelsConfigPath:      paths.FindConfig("models.json"),
+		SoftSkillsDir:         paths.SoftSkillsDir(),
+		AppName:               "omnis",
+		BashTimeoutSeconds:    120,
+		MCPConfigPath:         paths.FindConfig("mcp_config.json"),
+		PermissionsConfigPath: paths.FindConfig("permissions.json"),
+		HooksConfigPath:       paths.FindConfig("hooks.json"),
+		A2AConfigPath:         paths.FindConfig("a2a_config.json"),
+		Providers:             map[string]RuntimeProviderConfig{},
+		Models:                map[string]RuntimeModelConfig{},
+		Agents:                defaultAgents(),
 		TurnBudget: budget.Limits{
 			MaxToolCalls: budget.DefaultMaxToolCalls,
 			MaxTokens:    budget.DefaultMaxTokens,
@@ -1068,10 +1062,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(cfg.AppName) != "" {
 		out.AppName = strings.TrimSpace(cfg.AppName)
-	}
-	out.BashOutputFilterEnabled = cfg.TokenOptimization
-	if strings.TrimSpace(cfg.BashOutputFiltersDir) != "" {
-		out.BashOutputFiltersDir = strings.TrimSpace(cfg.BashOutputFiltersDir)
 	}
 	if cfg.BashTimeoutSeconds > 0 {
 		out.BashTimeoutSeconds = cfg.BashTimeoutSeconds

@@ -152,7 +152,6 @@ omnis/
 | `mcp_config.json` | MCP server definitions (spawned as child processes) |
 | `server.yaml` | Server listen address/port and bearer token |
 | `a2a_config.json` | Remote A2A agent endpoints |
-| `filters/` | Bash output filter patterns for token optimization |
 
 ---
 

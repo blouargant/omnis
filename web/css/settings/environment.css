@@ -44,9 +44,6 @@
 
 .env-section-keys .env-field { max-width: 480px; }
 
-.env-opt-chip { width: fit-content; }
-.env-opt-chip .agent-tool-toggle-pill { margin-left: 0.6rem; }
-
 .env-grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

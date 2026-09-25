@@ -221,7 +221,7 @@ jobs:
           # Binaries + static web UI -> Program Files\Omnis
           Copy-Item "$ex\omnis.exe","$ex\omnis-server.exe" "$stage\install\"
           Copy-Item "$ex\web\*" "$stage\install\web\" -Recurse
-          # System config layer -> ProgramData\Omnis (flatten config\, keep filters\ + hooks\ + registry\)
+          # System config layer -> ProgramData\Omnis (flatten config\, keep hooks\ + registry\)
           #
           # hooks.json is DELIBERATELY EXCLUDED from the *.json copy below. Its
           # PreToolUse command is POSIX shell (`${VAR:-default}` parameter
@@ -237,7 +237,6 @@ jobs:
           # half-working; see packaging/README.md.
           Get-ChildItem "$ex\config\*.json" -Exclude "hooks.json" | Copy-Item -Destination "$stage\data\"
           Copy-Item "$ex\config\server.yaml" "$stage\data\"
-          Copy-Item "$ex\config\filters" "$stage\data\filters" -Recurse
           # The hook SCRIPT still ships (harmless on its own, and useful to a
           # WSL/Git-Bash host that wires its own POSIX-shell hooks.json), even
           # though the declaration above does not.

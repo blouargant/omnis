@@ -247,7 +247,7 @@ until they're restarted (or the machine rebooted / profile re-sourced).
 **pip — `omnis-agent`** ([packaging/pip/](packaging/pip/), built by
 [scripts/build_wheels.py](scripts/build_wheels.py)): per-platform binary wheels
 (`py3-none-<plat>`) that bundle the two static Go binaries + a `sysconf/`
-(config JSONs + `filters/` + `registry/`) + `web/` as package data. Because the
+(config JSONs + `hooks/` + `registry/`) + `web/` as package data. Because the
 binaries are `CGO_ENABLED=0` static builds, **all six platform wheels
 cross-compile on one Linux host** (no per-OS CI matrix); platform tags are
 `manylinux2014_{x86_64,aarch64}`, `macosx_{10_13_x86_64,11_0_arm64}`,
@@ -2156,8 +2156,20 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
-| `filters/` | Bash output filter patterns (token optimization, JSON files) |
 | `softskills/` | Curator-distilled procedures from past sessions |
+
+**Removed: `token_optimization` / `bash_output_filters_dir` / `filters/`.** The
+Bash output filters (a snip-format port that rewrote/condensed `Bash` output)
+were deleted after two live A/B campaigns with squad-bench (2026-09-25): the
+shipped set cut answer accuracy (21/27 vs 26/27 — `npm ls`/`pip list` became
+"ok", `go test` failures became "5 passed, 1 failed", `kubectl` anything was
+cut to 30 lines) and agents burned extra tool calls trying to escape it, while
+a lossless rewrite kept accuracy but saved nothing measurable — per-turn context
+is dominated by the system prompt + tool catalogue, not Bash output, which the
+32 KB output shaper already caps. Old configs still carrying the keys load
+unchanged (the keys are ignored — `TestResolveRuntimeSettingsIgnoresRemovedTokenOptimizationKeys`).
+Do not reintroduce output rewriting without re-running that campaign
+(`tasks-tokopt.json` / `variants-tokopt.json` in `omnis-benches/squad-bench`).
 
 Agent definitions live in `registry/agents/<name>/` directories — mirroring
 the skills layout. `agents.json` no longer contains inline agent
@@ -3507,7 +3519,7 @@ blocks. Output is rendered live and is **not** added to the conversation /
 LLM history (a convenience, like the todo widget).
 
 - **Execution**: [core/tools/bash.go](core/tools/bash.go) `RunBashInteractive(ctx, command, cwd, timeoutSec)`
-  reuses RunBash's safety floor, timeout, output filtering, and truncation, but
+  reuses RunBash's safety floor, timeout, and truncation, but
   takes a working directory and returns the directory **after** the command ran.
   The platform `wrapCaptureCwd` (bash_unix.go / bash_windows.go) appends a
   `__OMNIS_CWD__:` sentinel line carrying `pwd`; `extractCapturedCwd` strips it

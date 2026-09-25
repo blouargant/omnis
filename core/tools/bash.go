@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blouargant/omnis/internal/filter"
 )
 
 // alwaysBlock contains representative catastrophic command substrings refused
@@ -311,10 +310,6 @@ func containsToken(args []string, tok string) bool {
 const cwdSentinel = "__OMNIS_CWD__:"
 
 var (
-	bashFilterMu       sync.RWMutex
-	bashFilterEnabled  bool
-	bashFilterRegistry *filter.Registry
-
 	bashDefaultTimeout   time.Duration = 120 * time.Second
 	bashDefaultTimeoutMu sync.RWMutex
 )
@@ -328,115 +323,6 @@ func SetBashDefaultTimeout(d time.Duration) {
 	bashDefaultTimeoutMu.Lock()
 	bashDefaultTimeout = d
 	bashDefaultTimeoutMu.Unlock()
-}
-
-// BashOutputFilterConfig controls optional output filtering for RunBash.
-type BashOutputFilterConfig struct {
-	Enabled    bool
-	FiltersDir string
-}
-
-// ConfigureBashOutputFilter loads and enables/disables bash output filtering.
-func ConfigureBashOutputFilter(cfg BashOutputFilterConfig) error {
-	bashFilterMu.Lock()
-	defer bashFilterMu.Unlock()
-
-	bashFilterEnabled = false
-	bashFilterRegistry = nil
-
-	if !cfg.Enabled {
-		return nil
-	}
-	rulesDir := strings.TrimSpace(cfg.FiltersDir)
-	if rulesDir == "" {
-		rulesDir = filter.DefaultRulesDir()
-	}
-	filters, err := filter.LoadDir(rulesDir)
-	if err != nil {
-		return fmt.Errorf("bash output filter: load rules from %q: %w", rulesDir, err)
-	}
-	bashFilterRegistry = filter.NewRegistry(filters)
-	bashFilterEnabled = true
-	return nil
-}
-
-func maybeApplyBashOutputFilter(command, output string) string {
-	bashFilterMu.RLock()
-	enabled := bashFilterEnabled
-	reg := bashFilterRegistry
-	bashFilterMu.RUnlock()
-
-	if !enabled || reg == nil || strings.TrimSpace(output) == "" {
-		return output
-	}
-	filtered, applied, err := filter.ApplyForCommand(reg, command, output)
-	if err != nil || !applied {
-		return output
-	}
-	return strings.TrimRight(filtered, "\n")
-}
-
-func maybeInjectBashFilterArgs(command string) string {
-	bashFilterMu.RLock()
-	enabled := bashFilterEnabled
-	reg := bashFilterRegistry
-	bashFilterMu.RUnlock()
-
-	if !enabled || reg == nil || strings.TrimSpace(command) == "" {
-		return command
-	}
-	// Keep shell behavior unchanged for complex expressions.
-	if strings.ContainsAny(command, "|;&<>()`$") {
-		return command
-	}
-
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return command
-	}
-
-	binary := parts[0]
-	allArgs := []string{}
-	if len(parts) > 1 {
-		allArgs = parts[1:]
-	}
-
-	subcommand := ""
-	args := allArgs
-	if len(allArgs) > 0 {
-		subcommand = allArgs[0]
-		args = allArgs[1:]
-	}
-
-	f := reg.Match(filepath.Base(binary), subcommand, args)
-	if f == nil || f.Inject == nil {
-		return command
-	}
-
-	injectedArgs, changed := reg.ShouldInject(f, allArgs)
-	if !changed {
-		return command
-	}
-
-	tokens := append([]string{binary}, injectedArgs...)
-	quoted := make([]string, 0, len(tokens))
-	for _, tok := range tokens {
-		quoted = append(quoted, shellQuote(tok))
-	}
-	return strings.Join(quoted, " ")
-}
-
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if strings.IndexFunc(s, func(r rune) bool {
-		return !(r == '_' || r == '-' || r == '.' || r == '/' || r == ':' || r == '=' || r == '+' ||
-			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
-	}) == -1 {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 type BashIn struct {
@@ -465,12 +351,11 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	execCommand := maybeInjectBashFilterArgs(in.Command)
 	// newShellCommand wires up the platform's shell plus a Cancel hook that
 	// kills the whole process tree when the context deadline fires, so
 	// orphaned children can't keep the stdout/stderr pipes open and hang
 	// CombinedOutput past the timeout. See bash_unix.go / bash_windows.go.
-	cmd := newShellCommand(cctx, execCommand)
+	cmd := newShellCommand(cctx, in.Command)
 	if in.Cwd != "" {
 		cmd.Dir = in.Cwd
 	}
@@ -483,7 +368,6 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	if err != nil && s == "" {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
-	s = maybeApplyBashOutputFilter(in.Command, s)
 	if s == "" {
 		return "(no output)", nil
 	}
@@ -493,7 +377,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 // RunBashInteractive runs command through the platform shell with cwd as the
 // working directory and reports the working directory after the command ran,
 // so an embedded `cd` persists to the caller's next invocation. It shares
-// RunBash's safety floor, timeout, output filtering, and truncation.
+// RunBash's safety floor, timeout, and truncation.
 //
 // This backs the interactive "!" shell-escape in the TUI and web UI. By
 // design it bypasses the agent permission layer (the user typed the command
@@ -512,8 +396,7 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	execCommand := maybeInjectBashFilterArgs(command)
-	cmd := newShellCommand(cctx, wrapCaptureCwd(execCommand))
+	cmd := newShellCommand(cctx, wrapCaptureCwd(command))
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -527,7 +410,6 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 	if runErr != nil && s == "" {
 		return fmt.Sprintf("Error: %v", runErr), resultCwd, nil
 	}
-	s = maybeApplyBashOutputFilter(command, s)
 	if s == "" {
 		s = "(no output)"
 	}
@@ -548,7 +430,7 @@ type CapturedRun struct {
 // process-group-isolated shell + kill-on-timeout as RunBash) with cwd as the
 // working directory, feeding stdin to the process and capturing stdout and
 // stderr separately along with the exit code. Unlike RunBash/RunBashInteractive
-// it does not combine the streams, apply the output filter, or truncate — its
+// it does not combine the streams or truncate — its
 // caller needs the raw stdout/stderr/exit-code triple to implement a control
 // protocol (the hooks engine, which speaks Claude Code's hook output schema).
 //

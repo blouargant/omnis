@@ -29,7 +29,7 @@ def bin_dir():
 def sysconf_dir():
     """Bundled system-config layer (matches the OMNIS_SYSTEM_CONFIG_DIR contract).
 
-    Holds the default config JSONs (``filters/`` and ``registry/`` get seeded
+    Holds the default config JSONs (``registry/`` gets seeded
     into ``~/.omnis`` on first run — see :data:`omnis.seed.SEED_TREES`) plus
     ``hooks/``, which does NOT get seeded: ``hooks.json``'s command always
     names the hook script via ``${OMNIS_SYSTEM_CONFIG_DIR}``, never a layered

@@ -16,7 +16,6 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     remote_registries.json     remote skill/agent registry endpoints
     a2a_config.json            remote A2A agent endpoints (empty by default)
     server.yaml                server listen address, token, A2A settings
-    filters/                   bash output filter patterns
     hooks.json                 lifecycle hooks (the k8s-validate PreToolUse guard)
     hooks/k8s-validate.py      the guard script (executable — replaced on
                                 upgrade, unlike everything else above)
@@ -96,7 +95,7 @@ pipeline will unpack to source the binaries + `web/` assets.
   needed, and setting `OMNIS_CONFIG_PATH` here would bypass the 3-layer merge
   and silently disable every per-user override in `$HOME/.omnis/agents.json`.
 
-The `config/filters/` directory and the `skills/`, `web/`, `LICENSE`, and
+The `skills/`, `web/`, `LICENSE`, and
 `README.md` files are pulled directly from the source tree by goreleaser —
 we don't duplicate them here.
 
@@ -119,7 +118,6 @@ $(brew --prefix)/bin/omnis-server       env-injecting wrapper → libexec/omnis-
 $(brew --prefix)/share/omnis/web/       static Web UI assets
 $(brew --prefix)/share/omnis/registry/  bundled agents + skills
 $(brew --prefix)/share/omnis/*.json     bundled config defaults (agents.json, …)
-$(brew --prefix)/share/omnis/filters/   bash output filter patterns
 $(brew --prefix)/share/omnis/hooks/     the k8s-validate hook script (chmod 0755)
 ```
 
@@ -162,7 +160,6 @@ C:\Program Files\Omnis\web\              static Web UI assets
 C:\ProgramData\Omnis\*.json             bundled config defaults (agents.json, …) —
                                          EXCEPT hooks.json, see the caveat below
 C:\ProgramData\Omnis\server.yaml        server listen address, token, A2A settings
-C:\ProgramData\Omnis\filters\           bash output filter patterns
 C:\ProgramData\Omnis\hooks\             the k8s-validate hook SCRIPT only — no
                                          hooks.json ships here, so it is inert
                                          by default (see the caveat below)
@@ -240,8 +237,8 @@ pip/
     ├── seed.py               # `omnis-seed`: ~/.omnis materialisation
     └── _dist/                # staged at build time (git-ignored)
         ├── bin/{omnis,omnis-server}[.exe]
-        ├── sysconf/          # config JSONs + filters/ + hooks/ + registry/
-        │                     #   (filters/ + registry/ seed into ~/.omnis; hooks/
+        ├── sysconf/          # config JSONs + hooks/ + registry/
+        │                     #   (registry/ seeds into ~/.omnis; hooks/
         │                     #   deliberately does not — see sysconf_dir()'s docstring)
         └── web/              # static Web UI → OMNIS_WEB_DIR
 ```

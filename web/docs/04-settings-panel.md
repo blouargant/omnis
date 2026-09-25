@@ -52,10 +52,9 @@ Key points:
   repositories. Switch between Agents and Squads registry views.
 - **Models** — model profiles (provider, model ID, base URL, API key,
   context length, pricing) referenced by each agent's `model_ref`.
-- **Global configuration** — fleet-wide settings, in order: token optimization
-  (`token_optimization`), the web-search API keys (`serper_key`, `serpapi_key`,
-  each with a **Test** button), then `softskills_dir`, `bash_timeout_seconds`,
-  and path overrides.
+- **Global configuration** — fleet-wide settings, in order: the web-search API
+  keys (`serper_key`, `serpapi_key`, each with a **Test** button), then
+  `softskills_dir`, `bash_timeout_seconds`, and path overrides.
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.

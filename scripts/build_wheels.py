@@ -142,10 +142,6 @@ def stage_assets(goos):
             continue
         shutil.copy2(os.path.join(REPO_ROOT, "config", name), os.path.join(sysconf, name))
 
-    shutil.copytree(
-        os.path.join(REPO_ROOT, "config", "filters"),
-        os.path.join(sysconf, "filters"),
-    )
     # The k8s-validate hook script. copytree's default copy_function (copy2)
     # preserves the source file's mode bits, including the executable bit
     # config/hooks/k8s-validate.py already carries in git (100755) — required
