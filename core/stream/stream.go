@@ -8,7 +8,7 @@ import (
 	"io"
 	"iter"
 
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/session"
 )
 
 // Print drains an event iterator returned by runner.Run and writes each

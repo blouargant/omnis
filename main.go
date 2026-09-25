@@ -28,7 +28,7 @@ import (
 	"strconv"
 	"strings"
 
-	"google.golang.org/adk/runner"
+	"google.golang.org/adk/v2/runner"
 
 	"github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"

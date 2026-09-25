@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/agentkit"
 	"github.com/blouargant/omnis/core/stream"

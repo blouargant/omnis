@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 )
 
 // webSearchTools filters a tool slice down to the ones named "WebSearch" —
@@ -25,7 +25,7 @@ func webSearchTools(tools []tool.Tool) []tool.Tool {
 // "serper" and "ddg" tool groups: ["Skill","serper","ddg","web","softskills"]).
 // core/tools/serper.go and core/tools/ddg.go both register a tool named
 // "WebSearch"; ADK rejects two tools sharing a name
-// (internal/toolinternal/toolutils/toolutils.go: "duplicate tool: %q"). Today
+// (tool/toolutils/toolutils.go: "duplicate tool: %q"). Today
 // this only "works" because NewSerperTools returns nil on an empty key — the
 // moment a serper_key is configured, web_agent's tool list carries two
 // "WebSearch" entries. An agent declaring both providers means "prefer Serper

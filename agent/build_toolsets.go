@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/embed"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"

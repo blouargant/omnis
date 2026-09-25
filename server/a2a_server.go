@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	adkagent "google.golang.org/adk/agent"
-	adksession "google.golang.org/adk/session"
+	adkagent "google.golang.org/adk/v2/agent"
+	adksession "google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/omnis/agent"

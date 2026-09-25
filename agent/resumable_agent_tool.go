@@ -12,12 +12,12 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 
-	adkagent "google.golang.org/adk/agent"
-	"google.golang.org/adk/artifact"
-	"google.golang.org/adk/memory"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool/agenttool"
+	adkagent "google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/artifact"
+	"google.golang.org/adk/v2/memory"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool/agenttool"
 )
 
 // Durable sub-agent session bounds. Sessions are kept in-memory for the lifetime

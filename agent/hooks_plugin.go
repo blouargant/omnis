@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/plugin"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/plugin"
+	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"sync"
 
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/functiontool"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/functiontool"
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/embed"

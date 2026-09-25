@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/askuser"

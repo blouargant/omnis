@@ -13,7 +13,7 @@ import (
 	"github.com/blouargant/omnis/core/stream"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/askuser"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 )
 
 func main() {

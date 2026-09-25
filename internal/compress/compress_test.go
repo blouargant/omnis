@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 )
 
 // --- existing v1 invariants preserved ---

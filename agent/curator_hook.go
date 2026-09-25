@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/paths"

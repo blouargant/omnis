@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	serpapi "github.com/serpapi/serpapi-golang"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/adk"
 )

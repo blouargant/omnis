@@ -14,8 +14,8 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/mcptoolset"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/mcptoolset"
 )
 
 // Handle is a refcounted reference to a pooled MCP toolset. Callers receive

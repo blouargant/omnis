@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/plugin"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/plugin"
 
 	"github.com/blouargant/omnis/core/adk"
 )

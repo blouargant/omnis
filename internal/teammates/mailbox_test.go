@@ -11,7 +11,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"google.golang.org/genai"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 )
 
 func TestJSONLBackendSendAndReceive(t *testing.T) {

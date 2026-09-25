@@ -1,9 +1,9 @@
 package agent
 
 import (
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/plugin"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"

@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
 

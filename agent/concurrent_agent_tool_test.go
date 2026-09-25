@@ -13,8 +13,8 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
 )
 
 // countingRunnableTool stands in for a sub-agent's agenttool: it records peak

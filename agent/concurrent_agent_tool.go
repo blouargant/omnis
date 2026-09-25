@@ -8,8 +8,9 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/toolutils"
 )
 
 // runnableTool is a tool that can be invoked and packed into a model request —
@@ -119,7 +120,7 @@ func (t *concurrentAgentTool) Description() string {
 // semaphore — the concurrency limit would silently not exist. The declaration is
 // the inner's either way (Declaration delegates), so the model sees no difference.
 func (t *concurrentAgentTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
-	return packToolDecl(req, t)
+	return toolutils.PackTool(req, t)
 }
 
 func (t *concurrentAgentTool) Run(ctx adk.ToolContext, args any) (map[string]any, error) {
@@ -208,41 +209,4 @@ func (t *concurrentAgentTool) drop(key string) {
 type declaredTool interface {
 	tool.Tool
 	Declaration() *genai.FunctionDeclaration
-}
-
-// packToolDecl replicates google.golang.org/adk/internal/toolinternal/toolutils.PackTool
-// (unexported) for a single tool: it registers the tool for dispatch under its name
-// in req.Tools and appends its function declaration to req.Config.Tools.
-func packToolDecl(req *model.LLMRequest, t declaredTool) error {
-	if req.Tools == nil {
-		req.Tools = make(map[string]any)
-	}
-	name := t.Name()
-	if _, ok := req.Tools[name]; ok {
-		return fmt.Errorf("duplicate tool: %q", name)
-	}
-	req.Tools[name] = t
-
-	decl := t.Declaration()
-	if decl == nil {
-		return nil
-	}
-	if req.Config == nil {
-		req.Config = &genai.GenerateContentConfig{}
-	}
-	var funcTool *genai.Tool
-	for _, ft := range req.Config.Tools {
-		if ft != nil && ft.FunctionDeclarations != nil {
-			funcTool = ft
-			break
-		}
-	}
-	if funcTool == nil {
-		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
-			FunctionDeclarations: []*genai.FunctionDeclaration{decl},
-		})
-	} else {
-		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
-	}
-	return nil
 }
