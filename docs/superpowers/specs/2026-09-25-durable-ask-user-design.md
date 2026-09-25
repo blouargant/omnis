@@ -127,9 +127,8 @@ file is gone (session deleted), removal is a no-op.
 - Writes go through the existing conversation lock, like
   `SetConversationGoal`.
 
-To avoid an import cycle, `internal/sessions` stores the question as its own
-struct mirroring the fields of `askuser.Question`; it does not import
-`internal/askuser`.
+`internal/sessions` imports `internal/askuser` directly; `askuser` imports
+only stdlib + uuid, so this cannot form a cycle.
 
 `Remove(q, answered=false)` **does nothing when the server's root context is
 done.** That is the shutdown case: the question must stay on disk. In every
