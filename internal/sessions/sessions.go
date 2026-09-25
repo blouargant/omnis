@@ -106,6 +106,9 @@ type SessionMeta struct {
 	// keeps evolving gets re-indexed; it is deliberately not persisted, so a
 	// server restart re-indexes idle sessions once (an idempotent upsert).
 	Indexed bool `json:"-"`
+	// PendingQuestions are durable questions loaded from disk at boot, restored
+	// into the ask-user registry by the server. Not part of the session list.
+	PendingQuestions []PendingQuestion `json:"-"`
 }
 
 // Registry is the in-memory session index. It is safe for concurrent

@@ -145,8 +145,11 @@ type ConversationFile struct {
 	// Collection is the thematic folder ("Collection") the session is filed
 	// under. Empty means the virtual "General" collection. Persisted so the
 	// filing survives a server restart (see SessionMeta.Collection).
-	Collection string             `json:"collection,omitempty"`
-	Turns      []ConversationTurn `json:"turns"`
+	Collection string `json:"collection,omitempty"`
+	// PendingQuestions are durable AskUserQuestion prompts still waiting for an
+	// answer (see pending_questions.go). Never exported, forked or imported.
+	PendingQuestions []PendingQuestion  `json:"pending_questions,omitempty"`
+	Turns            []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -491,28 +494,44 @@ func LoadPersistedSessions() []*SessionMeta {
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, "conversation_"), ".json")
 		f, err := LoadConversationFile(id)
-		if err != nil || f == nil || len(f.Turns) == 0 {
+		if err != nil || f == nil || (len(f.Turns) == 0 && len(f.PendingQuestions) == 0) {
 			continue
 		}
+		created, lastUsed := sessionTimes(f)
 		uid := f.UserID
 		if uid == "" {
 			uid = UserID()
 		}
 		out = append(out, &SessionMeta{
-			ID:         id,
-			Title:      f.Title,
-			Squad:      f.Squad,
-			Harvested:  f.Harvested,
-			Archived:   f.Archived,
-			Hidden:     f.Hidden,
-			Goal:       f.Goal,
-			Cwd:        f.Cwd,
-			Collection: f.Collection,
-			UserID:     uid,
-			CreatedAt:  f.Turns[0].At,
-			LastUsedAt: f.Turns[len(f.Turns)-1].At,
-			Turns:      len(f.Turns),
+			ID:               id,
+			Title:            f.Title,
+			Squad:            f.Squad,
+			Harvested:        f.Harvested,
+			Archived:         f.Archived,
+			Hidden:           f.Hidden,
+			Goal:             f.Goal,
+			Cwd:              f.Cwd,
+			Collection:       f.Collection,
+			PendingQuestions: f.PendingQuestions,
+			UserID:           uid,
+			CreatedAt:        created,
+			LastUsedAt:       lastUsed,
+			Turns:            len(f.Turns),
 		})
 	}
 	return out
+}
+
+// sessionTimes derives a session's created/last-used times from its turns, or
+// from its oldest pending question when the first turn was interrupted.
+func sessionTimes(f *ConversationFile) (created, lastUsed time.Time) {
+	if len(f.Turns) > 0 {
+		return f.Turns[0].At, f.Turns[len(f.Turns)-1].At
+	}
+	for _, p := range f.PendingQuestions {
+		if created.IsZero() || p.AskedAt.Before(created) {
+			created = p.AskedAt
+		}
+	}
+	return created, created
 }
