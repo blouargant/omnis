@@ -1,6 +1,6 @@
 package agent
 
-import "google.golang.org/adk/agent/llmagent"
+import "google.golang.org/adk/v2/agent/llmagent"
 
 // beforeToolChain assembles a sub-agent's BeforeToolCallback chain, and is the
 // single place that order is written down. The first non-nil return

@@ -12,8 +12,8 @@ import (
 
 	"google.golang.org/genai"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/runner"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/runner"
 
 	"github.com/blouargant/omnis/core/agentkit"
 	"github.com/blouargant/omnis/core/events"

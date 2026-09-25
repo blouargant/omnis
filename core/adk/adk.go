@@ -18,24 +18,23 @@ package adk
 import (
 	"context"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/session"
 )
 
-// Context aliases. In ADK v1 these are three distinct interfaces; ADK v2 merges
-// them into a single agent.Context. TO MIGRATE: change every right-hand side
-// below to agent.Context (they all become the same type). Call sites, which use
-// only the alias names on the left, do not change.
+// Context aliases. ADK v2 merged v1's tool.Context and agent.CallbackContext
+// into a single agent.Context; agent.ReadonlyContext (toolsets) and
+// agent.InvocationContext (run-level plugin callbacks) are still distinct
+// types. Call sites use only the alias names on the left.
 type (
 	// ToolContext is the context a tool handler receives.
-	ToolContext = tool.Context // v2: = agent.Context
+	ToolContext = agent.Context
 	// CallbackContext is the context a before/after model-or-tool callback receives.
-	CallbackContext = agent.CallbackContext // v2: = agent.Context
-	// ReadonlyContext is the read-only context some callbacks receive.
-	ReadonlyContext = agent.ReadonlyContext // v2: = agent.Context
+	CallbackContext = agent.Context
+	// ReadonlyContext is the read-only context a toolset's Tools method receives.
+	ReadonlyContext = agent.ReadonlyContext
 	// InvocationContext is the context a run-level (before/after-run, user-message) callback receives.
-	InvocationContext = agent.InvocationContext // v2: = agent.Context
+	InvocationContext = agent.InvocationContext
 )
 
 // EndTurnAfterToolCall marks the current function-response event as final, so
@@ -53,10 +52,8 @@ func EndTurnAfterToolCall(ctx ToolContext) {
 	ctx.Actions().SkipSummarization = true
 }
 
-// NewEvent builds a session.Event, threading ctx as ADK v2 requires. It wraps
-// session.NewEventWithContext, which already exists in v1.5 and is the v2-shaped
-// constructor, so call sites are v2-ready today. TO MIGRATE: swap the body to
-// session.NewEvent(ctx, invocationID).
+// NewEvent builds a session.Event, threading ctx as ADK v2 requires (the event
+// ID and timestamp come from providers installed on ctx).
 func NewEvent(ctx context.Context, invocationID string) *session.Event {
-	return session.NewEventWithContext(ctx, invocationID)
+	return session.NewEvent(ctx, invocationID)
 }

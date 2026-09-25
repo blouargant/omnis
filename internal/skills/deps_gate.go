@@ -8,9 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/skilltoolset"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/skilltoolset"
+	"google.golang.org/adk/v2/tool/toolutils"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
@@ -179,32 +180,7 @@ func (g *gatedLoadTool) Run(ctx adk.ToolContext, args any) (map[string]any, erro
 // instead — what the inherited ProcessRequest would do — keys req.Tools to the
 // inner tool and bypasses the gate. Mirrors softskills' renamedTool.
 func (g *gatedLoadTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
-	if req.Tools == nil {
-		req.Tools = make(map[string]any)
-	}
-	name := g.Name()
-	if _, ok := req.Tools[name]; ok {
-		return fmt.Errorf("duplicate tool: %q", name)
-	}
-	req.Tools[name] = g
-	if req.Config == nil {
-		req.Config = &genai.GenerateContentConfig{}
-	}
-	var funcTool *genai.Tool
-	for _, t := range req.Config.Tools {
-		if t != nil && t.FunctionDeclarations != nil {
-			funcTool = t
-			break
-		}
-	}
-	if funcTool == nil {
-		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
-			FunctionDeclarations: []*genai.FunctionDeclaration{g.decl},
-		})
-	} else {
-		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, g.decl)
-	}
-	return nil
+	return toolutils.PackTool(req, g)
 }
 
 func skillNameFromArgs(args any) string {

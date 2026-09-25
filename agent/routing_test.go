@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/adk/runner"
+	"google.golang.org/adk/v2/runner"
 	"google.golang.org/genai"
 )
 

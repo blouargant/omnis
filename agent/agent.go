@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	adkagent "google.golang.org/adk/agent"
-	"google.golang.org/adk/plugin"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/tool"
+	adkagent "google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/plugin"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/tool"
 	"gopkg.in/yaml.v3"
 
 	"github.com/blouargant/omnis/core/embed"
@@ -1027,7 +1027,7 @@ func buildNamedToolMap(serpAPIKey, serperKey string) map[string]tool.Tool {
 // which resolves the same precedence for individually-named tools listed
 // directly in an agent's "tools"). Each provider — core/tools/serper.go,
 // serpapi.go, ddg.go — registers a tool literally named "WebSearch"; ADK
-// rejects two tools sharing a name (internal/toolinternal/toolutils:
+// rejects two tools sharing a name (tool/toolutils:
 // "duplicate tool: %q"). An agent is free to declare more than one of these
 // groups (the shipped web_agent declares both "serper" and "ddg", meaning
 // "prefer Serper when configured, otherwise fall back to DuckDuckGo"), so at

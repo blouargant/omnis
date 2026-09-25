@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 )
 
 // shaperTestTool is a minimal tool.Tool whose only interesting property is its

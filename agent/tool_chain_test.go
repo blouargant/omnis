@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/adk"
 )
@@ -70,8 +70,8 @@ func TestBeforeToolChainSkipsNilLayers(t *testing.T) {
 }
 
 // The root's plugin order is a list literal inside buildPlugins, which needs a
-// whole Infrastructure to build — so it is guarded at the source level, like
-// internal/adkguard guards raw ADK forms. This asserts the ordering only; the
+// whole Infrastructure to build — so it is guarded at the source level. This
+// asserts the ordering only; the
 // behavioural guarantee is TestBeforeToolChainRunsHooksBeforePermissions.
 func TestRootPluginOrderMountsHooksBeforePermissions(t *testing.T) {
 	src, err := os.ReadFile("build_plugins.go")

@@ -15,10 +15,11 @@ import (
 	"fmt"
 	"os"
 
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/skilltoolset"
-	"google.golang.org/adk/tool/skilltoolset/skill"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/skilltoolset"
+	"google.golang.org/adk/v2/tool/skilltoolset/skill"
+	"google.golang.org/adk/v2/tool/toolutils"
 	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
@@ -192,31 +193,7 @@ func (rt *renamedTool) Declaration() *genai.FunctionDeclaration { return rt.decl
 // invocations back through us — and we forward Run() to the embedded
 // tool transparently.
 func (rt *renamedTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
-	if req.Tools == nil {
-		req.Tools = make(map[string]any)
-	}
-	if _, ok := req.Tools[rt.name]; ok {
-		return fmt.Errorf("duplicate tool: %q", rt.name)
-	}
-	req.Tools[rt.name] = rt
-	if req.Config == nil {
-		req.Config = &genai.GenerateContentConfig{}
-	}
-	var funcTool *genai.Tool
-	for _, t := range req.Config.Tools {
-		if t != nil && t.FunctionDeclarations != nil {
-			funcTool = t
-			break
-		}
-	}
-	if funcTool == nil {
-		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
-			FunctionDeclarations: []*genai.FunctionDeclaration{rt.decl},
-		})
-	} else {
-		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, rt.decl)
-	}
-	return nil
+	return toolutils.PackTool(req, rt)
 }
 
 func wrap(t tool.Tool, newName string) (tool.Tool, error) {

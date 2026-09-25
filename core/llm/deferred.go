@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 )
 
 // NewDeferredWithSelection builds an LLM eagerly when it can, but never fails:

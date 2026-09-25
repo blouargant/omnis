@@ -33,8 +33,8 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	adkagent "google.golang.org/adk/agent"
-	"google.golang.org/adk/model"
+	adkagent "google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
 	toolkitagent "github.com/blouargant/omnis/agent"

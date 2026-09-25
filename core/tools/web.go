@@ -9,7 +9,7 @@ import (
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/PuerkitoBio/goquery"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/tool"
 
 	"github.com/blouargant/omnis/core/adk"
 )

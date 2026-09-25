@@ -13,39 +13,34 @@ After every major change (new agent, new squad, new tool, new skill, new config 
 - Keep this file as the single source of truth for AI sessions working on this project.
 - **When you ship a user-facing feature, add a bullet to `internal/features/FEATURES.md`** under the current minor version (see "What's-new feature tracking (FEATURES.md)" below).
 
-## ⚠️ ADK v2 transition (TEMPORARY — delete this whole section once migrated)
+## ADK v2 (`google.golang.org/adk/v2`)
 
-> This section is scaffolding for the pending **ADK v1→v2 migration**. **Delete
-> it (heading included) once `go.mod` is on `google.golang.org/adk/v2` and
-> [docs/adk-v2-readiness.md](docs/adk-v2-readiness.md) reports "migrated".** It
-> exists so the migration stays a one-file change instead of a ~55-file sweep.
+omnis runs on **ADK Go v2** (v2.4.0; requires Go ≥ 1.26.6, which `go.mod`
+pins and CI reads via `go-version-file`). Two rules outlive the migration:
 
-While omnis is on ADK v1 but preparing for v2, **never name a churny ADK symbol
-directly** — reach it through the `core/adk` façade so the v2 change lands in one
-place:
+- **`core/adk` stays the single place for the churny seams.** Reach contexts
+  through `adk.ToolContext` / `adk.CallbackContext` (both = v2's unified
+  `agent.Context`), `adk.ReadonlyContext` (= `agent.ReadonlyContext`, toolsets'
+  `Tools`) and `adk.InvocationContext` (= `agent.InvocationContext`, run-level
+  plugin callbacks) — note v2 only merged the first two. End a turn with
+  `adk.EndTurnAfterToolCall(ctx)` and build events with `adk.NewEvent(ctx, id)`.
+  `core/adk`'s `TestSkipSummarizationImpliesFinalResponse` is the canary for the
+  termination mechanism the router tools, the per-agent cap and
+  `report_sessions` rely on — if a future ADK bump fails it, redesign
+  termination there before anything else.
+- **Pack a tool with `toolutils.PackTool`** (`google.golang.org/adk/v2/tool/toolutils`,
+  public since v2.1). A wrapper that must be dispatched instead of the tool it
+  embeds packs **itself** with it — never re-implement the packing.
 
-- Context types → `adk.ToolContext` / `adk.CallbackContext` / `adk.ReadonlyContext`
-  / `adk.InvocationContext` — **not** `tool.Context` / `agent.*Context`.
-- Turn termination → `adk.EndTurnAfterToolCall(ctx)` — **not**
-  `ctx.Actions().SkipSummarization = true`.
-- Event construction → `adk.NewEvent(ctx, id)` — **not** `session.NewEvent(...)`.
-
-The guard test `internal/adkguard` fails `make test` if a raw form reappears —
-**fix the call site, never weaken the guard.** The **stable** ADK types
-(`model.LLM`, `agent.Agent`, `tool.Tool`, `session.Event`, `functiontool.New`)
-are **not** fenced — import them directly as before.
-
-**Do not add new bespoke orchestration that ADK v2 already provides natively**
-(graph workflow routing/fan-out/fan-in/loops, agent Chat/Task/SingleTurn modes,
-durable HITL pause/resume) without recording the decision in
-[docs/adk-v2-readiness.md](docs/adk-v2-readiness.md). The v1-only mechanisms —
-the `RunWithRouting` dispatch loop, the concurrent/resumable agenttool wrappers,
-and `ask_user`'s in-memory HITL — are **frozen (bug-fix only)** to keep the v2
-gap from widening.
-
-Run `make adk-v2-status` to see the migration surface; keep
-`docs/adk-v2-readiness.md` current (same self-maintenance discipline as
-FEATURES.md).
+**Prefer v2's native orchestration over new bespoke code.** v2 ships graph
+workflows (conditional routing, fan-out/fan-in, per-node retries/timeouts),
+LlmAgent `chat`/`task`/`single_turn` collaboration modes, durable
+human-in-the-loop pause/resume, a `platform.WithTaskRunner` seam for tool
+fan-out, and native context compaction. omnis's hand-built equivalents — the
+`RunWithRouting` dispatch loop, the concurrent/resumable agenttool wrappers,
+`ask_user`'s in-memory HITL, `internal/compress` — still work unchanged on v2
+and are the candidates to port onto those primitives; do not grow them further
+without first checking whether the native piece fits.
 
 ## What's-new feature tracking (FEATURES.md)
 
@@ -396,7 +391,7 @@ and driven over HTTP; **nothing imports omnis**, so they evolve independently.
 
 **Design contract**: the same binary becomes a code reviewer, Kubernetes triage assistant, or DBA helper purely by mounting different tools, skills, and MCP servers. No code changes required to retarget the agent.
 
-Built on [google.golang.org/adk](https://pkg.go.dev/google.golang.org/adk) for the agent loop, session, plugins, and runner.
+Built on [google.golang.org/adk/v2](https://pkg.go.dev/google.golang.org/adk/v2) for the agent loop, session, plugins, and runner.
 
 ### Agent topology
 
@@ -576,7 +571,7 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   `ctx.Actions().SkipSummarization = true`, which makes their function-response
   event `IsFinalResponse()` (ADK `session.Event`) — terminating the agent flow
   loop immediately. This is a **host-side guarantee**, not an instruction the
-  router may ignore: the ADK LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/go/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go)
+  router may ignore: the ADK LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk/v2@v2.4.0/internal/llminternal/base_flow.go)
   `Flow.Run`) has **no iteration cap** and only stops when the model returns a
   tool-call-free response, and the directive is consumed by the dispatch loop
   only *after* `Runner.Run` returns — so without this, an unlucky router sample
@@ -796,7 +791,7 @@ width of its semaphore. The wrapper **always advertises the sub-agent's own
 single-task schema, unchanged** — one call = one job.
 
 **The fan-out is ADK's, not ours.** `Flow.handleFunctionCalls`
-([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go))
+([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk/v2@v2.4.0/internal/llminternal/base_flow.go))
 dispatches **every function call in one model response concurrently** (a
 `sync.WaitGroup` + a goroutine each) against the single shared tool object from
 `toolsDict`. So a caller that wants three lookups just emits three calls and they
@@ -844,7 +839,7 @@ was the sub-agent's model not emitting its tool call at all; this rule bounds th
 *leader's* reaction to it, which is the half that is instructable.)
 
 **Dispatch contract (do not break):** the wrapper's `ProcessRequest` packs **itself**
-(via the local `packToolDecl`, a copy of ADK's unexported `toolutils.PackTool`), not
+(via `toolutils.PackTool`), not
 the inner agenttool. ADK dispatches function calls by the object stored in
 `req.Tools[name]`, so registering the inner there would call the inner's `Run`
 directly and **the semaphore would silently not exist**. The declaration is the
@@ -2650,7 +2645,7 @@ a sub-agent runs in `agenttool`'s **private, plugin-less runner**, so the
 runner-level Plugin never sees its tool calls — without the attached callback a
 sub-agent's `Edit`/`Write`/`Bash`/MCP calls would run **ungated** even though
 most sub-agents (`investigator`, `k8s_investigator`, `refactorer`, …) carry those
-tools. ADK's `Flow.callTool` ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go))
+tools. ADK's `Flow.callTool` ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk/v2@v2.4.0/internal/llminternal/base_flow.go))
 runs the agent-level `BeforeToolCallback`s when there is no plugin manager and
 **skips `tool.Run` the instant one returns non-nil**, so the gate's deny/ask
 short-circuit works identically for a sub-agent. Because the Plugin and the
@@ -4113,7 +4108,7 @@ silently uses the leader model.
 A turn cannot run away. Every turn spends against a **ceiling** (tool calls and
 tokens); when it runs out, the **user** — not the model — decides whether to keep
 going. This exists because **nothing else in the stack can stop a turn**: the ADK
-LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk@v1.5.0/internal/llminternal/base_flow.go)
+LLM flow loop ([internal/llminternal/base_flow.go](file:///home/bertrand/.local/gopath/pkg/mod/google.golang.org/adk/v2@v2.4.0/internal/llminternal/base_flow.go)
 `Flow.Run`) has **no iteration cap** — it ends only when the model returns a
 tool-call-free response — and a sub-agent runs inside agenttool's **private,
 plugin-less runner**, invisible to the surface that started the turn. So a squad
@@ -5210,7 +5205,7 @@ back web search — `"serper"` (Serper.dev, [core/tools/serper.go](core/tools/se
 `"serpapi"` (SerpAPI, [core/tools/serpapi.go](core/tools/serpapi.go)), and
 `"ddg"` (DuckDuckGo scrape, [core/tools/ddg.go](core/tools/ddg.go), needs no
 key) — and **all three register a tool literally named `WebSearch`**. ADK
-rejects two tools sharing a name (`internal/toolinternal/toolutils`:
+rejects two tools sharing a name (`tool/toolutils`:
 `"duplicate tool: %q"`), so **at most one of the three may ever be mounted on
 one agent**, chosen by **`resolveWebSearchTools`** ([agent/agent.go](agent/agent.go)),
 called once before the tool-group loop (the loop's own `"ddg"`/`"serpapi"`/

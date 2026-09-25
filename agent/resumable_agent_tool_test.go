@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/session"
 )
 
 func newTestResumable(cap int, ttl time.Duration) *resumableAgentTool {
