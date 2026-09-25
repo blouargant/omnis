@@ -106,6 +106,9 @@ type SessionMeta struct {
 	// keeps evolving gets re-indexed; it is deliberately not persisted, so a
 	// server restart re-indexes idle sessions once (an idempotent upsert).
 	Indexed bool `json:"-"`
+	// PendingQuestions are durable questions loaded from disk at boot, restored
+	// into the ask-user registry by the server. Not part of the session list.
+	PendingQuestions []PendingQuestion `json:"-"`
 }
 
 // Registry is the in-memory session index. It is safe for concurrent
@@ -224,6 +227,19 @@ func (r *Registry) Get(id string) (*SessionMeta, bool) {
 	defer r.mu.RUnlock()
 	m, ok := r.items[id]
 	return m, ok
+}
+
+// IsArchived reports a session's archived flag, read under the registry lock
+// (SetArchived writes it under the same lock, so reading meta.Archived through
+// the pointer Get returns would race). ok is false for an unknown session.
+func (r *Registry) IsArchived(id string) (archived, ok bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.items[id]
+	if !ok {
+		return false, false
+	}
+	return m.Archived, true
 }
 
 // Touch marks a session as used and increments the turn counter.

@@ -2739,6 +2739,25 @@ re-armed per-question (`Question.TimeoutSecs`) or per-registry
 `Options.DisableAskUserTimeout` flag — the no-timeout behaviour is now the global
 default on every surface.)
 
+**Durable agent questions (survive a restart).** `AskUserQuestion` marks its
+question `Durable`; the server installs an `askuser.Persister`
+([server/durable_ask.go](server/durable_ask.go)) that stores it in the
+session's `conversation_<id>.json` (`pending_questions`) with the running
+turn's request, squad and persisted-turn count. A cancellation while the root
+context is done (shutdown) keeps the entry; Stop, an answer, archive or delete
+remove it. At boot, [server/durable_resume.go](server/durable_resume.go)
+re-registers them as orphans (`Registry.Restore`, shown with a "resumed" label);
+each answer is recorded on disk, and once every question of an interrupted turn
+is answered one resume turn is injected (`injectTurnOpts`) with the original
+request and the Q/A pairs — opted into `SkipIfArchived` so a resume never runs
+on a session archived in the meantime. Only `AskUserQuestion` is durable:
+permission, hook, budget, settings, dependency and MCP-input cards gate one
+tool call that does not exist after a restart. `AskUserQuestion` now waits on
+the run context, so Stop releases it (it used to wait on
+`context.Background()`). CLI/TUI install no persister. `LoadPersistedSessions`
+also loads a turnless conversation that has pending questions (an interrupted
+first turn), or the GC would delete it.
+
 **Persisted-rule breadth** ([core/permissions/persist.go](core/permissions/persist.go)
 `buildApprovalRule`) differs by tool: file tools (`Read`/`Write`/`Edit`/`revert`)
 broaden to a bare class spec (`Edit`, `Read`, `Write`) so approving the first of
@@ -2759,7 +2778,7 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 - `agent_memory_<u>_<ts>.md` — compressed session memory
 - `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
 - `agent_events_<ts>.log` — event audit log (global per build)
-- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` (server only)
+- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` + durable `pending_questions` (unanswered `AskUserQuestion` prompts that survive a restart) (server only)
 
 **Context restore after a restart.** The web UI persists turn *history* to
 `conversation_<id>.json`, but the model's working memory is the ADK runner's
@@ -2776,10 +2795,12 @@ skips brand-new sessions), it loads `conversation_<id>.json` and calls the same
 `Manager.ReseedSessionContext` the fork/rewind path uses (text-only fidelity —
 tool calls/attachments not replayed). Only the session's **persisted/active**
 squad is seeded; routing to a *different* squad post-restart starts that squad
-fresh, the same per-squad-context boundary as within a single process. **Known
-gap:** the inbound A2A turn path ([server/a2a_server.go](server/a2a_server.go),
-now `runRouted` → `RunWithRouting`) is **not** reseeded on restart — only the
-web-UI `handleMessages` path lazily reseeds.
+fresh, the same per-squad-context boundary as within a single process. Injected
+turns (`injectTurnOpts` — mailbox delivery, background tasks, scheduled
+routines, spawned tasks, and durable-question resumes) now reseed the same way
+before running. **Known gap:** the inbound A2A turn path
+([server/a2a_server.go](server/a2a_server.go), `runRouted` → `RunWithRouting`)
+is **not** reseeded on restart — it is the only path left un-reseeded.
 
 ### Session states (active / archived / deleted)
 

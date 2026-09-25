@@ -58,6 +58,8 @@ func handleExportSession(d serverDeps) gin.HandlerFunc {
 		if f == nil {
 			f = &sessions.ConversationFile{}
 		}
+		// A pending question belongs to this instance's run; never export it.
+		f.PendingQuestions = nil
 		// The registry may hold a fresher title than the file (e.g. an in-memory
 		// rename not yet flushed); prefer it so the export carries the name the
 		// user sees.

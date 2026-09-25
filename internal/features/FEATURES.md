@@ -17,6 +17,10 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
+## 1.10 (in development) — Durable agent questions
+
+- **Questions survive a restart** — a question an agent asked you is kept across a server restart or crash; answering it afterwards resumes the task.
+
 ## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation
 
 - **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.

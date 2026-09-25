@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // liveTurn buffers one in-flight agent turn's SSE frames so the run can outlive
@@ -44,6 +46,10 @@ type liveTurn struct {
 	// the turn is already running, so the question can be rendered instead of the
 	// session looking idle. Immutable after start.
 	prompt string
+
+	// id identifies this turn for durable questions asked during it; immutable
+	// after start.
+	id string
 }
 
 type bufFrame struct {
@@ -73,8 +79,12 @@ func newLiveTurn(cancel context.CancelFunc, seedSeq int, prompt string) *liveTur
 		notify:   make(chan struct{}),
 		cancel:   cancel,
 		prompt:   prompt,
+		id:       uuid.NewString(),
 	}
 }
+
+// turnID identifies the turn; immutable after start, so no lock is needed.
+func (lt *liveTurn) turnID() string { return lt.id }
 
 // active reports whether the turn is still running, along with the prompt it is
 // answering. A finished-but-retained turn (kept ~60s for tail replay) reports

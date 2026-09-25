@@ -199,6 +199,10 @@ func forgetSessionState(d serverDeps, id string) {
 			infra.Attest.Forget(id)
 		}
 	}
+	if d.AskUserRegistry != nil {
+		d.AskUserRegistry.CancelSession(id)
+	}
+	_ = sessions.ClearPendingQuestions(id) // no-op once the file is deleted
 }
 
 // deleteSession permanently removes a session and all its state: the registry

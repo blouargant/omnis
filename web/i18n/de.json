@@ -134,6 +134,7 @@
   "app.askwizard.collapse": "Einklappen",
   "app.askwizard.expand": "Zum Antworten ausklappen",
   "app.askwizard.question": "Frage",
+  "app.askwizard.resumed": "Vor einem Serverneustart gestellt – deine Antwort setzt die Aufgabe fort.",
   "app.askuser.notesPlaceholder": "Zusätzliche Notizen (optional)…",
   "app.askuser.answerPlaceholder": "Ihre Antwort…",
   "app.askuser.installItems.one": "{count} Element installieren?",

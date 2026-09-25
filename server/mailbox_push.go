@@ -415,8 +415,72 @@ func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, outp
 // turn's reply to that sender exactly once (see sendMailboxBackstop), so a
 // workflow-critical reply is never dropped just because the model forgot to send
 // it. A squad that did reply/interact suppresses the backstop (no double reply).
-func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) (reply string) {
+func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) string {
+	return pm.injectTurnOpts(ctx, d, sessionID, userID, injectOpts{
+		AnswerPrompt: answerPrompt, RouterPrompt: routerPrompt, SSEEvent: sseEvent, ReplyTo: replyTo,
+	})
+}
+
+// injectOpts describes one injected turn. PersistPrompt is the user text saved
+// in the transcript; it defaults to RouterPrompt.
+type injectOpts struct {
+	AnswerPrompt, RouterPrompt, PersistPrompt, SSEEvent, ReplyTo string
+	// SkipIfArchived drops the turn (without running or re-pinning) when the
+	// session is archived by the time the run guard is held. Only the
+	// durable-question resume sets it: a session archived between the last
+	// answer and the resume must never run an agent turn.
+	SkipIfArchived bool
+}
+
+// skipInjected reports whether an injected turn must not run: the session is
+// unknown, or it is archived and the caller opted into SkipIfArchived. Called
+// with the run guard held, before any re-pin.
+func skipInjected(reg *sessions.Registry, sessionID string, o injectOpts) bool {
+	return injectSkipReason(reg, sessionID, o) != ""
+}
+
+// injectSkipReason is skipInjected with the reason, "" when the turn may run.
+func injectSkipReason(reg *sessions.Registry, sessionID string, o injectOpts) string {
+	archived, ok := reg.IsArchived(sessionID)
+	switch {
+	case !ok:
+		return "session no longer exists"
+	case o.SkipIfArchived && archived:
+		return "session is archived"
+	}
+	return ""
+}
+
+// abortInjected ends an injected turn that returns before running. For a
+// durable-question resume (SkipIfArchived) the stored questions are already
+// gone and the web UI was told the turn started, so the failure is logged
+// (spec §7) and the completion event is sent anyway: the open tab clears its
+// processing state (endRemoteBusy) instead of spinning until reloaded. Other
+// callers keep their silent early return.
+func (pm *pushManager) abortInjected(sessionID string, o injectOpts, reason string) {
+	if !o.SkipIfArchived {
+		return
+	}
+	log.Printf("durable ask: resume for session %s did not run: %s", sessionID, reason)
+	if pm.bcast == nil {
+		return
+	}
+	if o.SSEEvent == "mailbox_push" {
+		pm.bcast.notify(sessionID)
+	} else if o.SSEEvent != "" {
+		pm.bcast.broadcast(o.SSEEvent, sessionID)
+	}
+}
+
+// injectTurnOpts is the body of injectTurnRouted, taking its inputs as an
+// options struct so a caller (the durable-question resume) can persist a user
+// text that differs from the model prompt.
+func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, sessionID, userID string, o injectOpts) (reply string) {
+	if o.PersistPrompt == "" {
+		o.PersistPrompt = o.RouterPrompt
+	}
 	if ctx.Err() != nil {
+		pm.abortInjected(sessionID, o, "server shutting down")
 		return ""
 	}
 
@@ -428,6 +492,7 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("server: recovered panic in injected turn for session %s: %v\n%s", sessionID, r, debug.Stack())
+			pm.abortInjected(sessionID, o, "the turn panicked")
 			reply = ""
 		}
 	}()
@@ -438,12 +503,17 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// of waiting for that turn to finish only to no-op on the ctx check.
 	release, ok := pm.guard.acquireCtx(ctx, sessionID)
 	if !ok {
+		pm.abortInjected(sessionID, o, "cancelled while waiting for the session (shutdown or session ended)")
 		return ""
 	}
 	defer release()
 
 	meta, ok := d.Registry.Get(sessionID)
-	if !ok {
+	if reason := injectSkipReason(d.Registry, sessionID, o); !ok || reason != "" {
+		if reason == "" {
+			reason = "session no longer exists"
+		}
+		pm.abortInjected(sessionID, o, reason)
 		return ""
 	}
 	// We hold the run-guard for this session, so any hot-reload that happened
@@ -451,7 +521,13 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// before the dispatch loop resolves squads.
 	d.Manager.MigrateToCurrent(sessionID)
 	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
+		pm.abortInjected(sessionID, o, fmt.Sprintf("squad %q no longer exists", meta.Squad))
 		return "" // no runnable squad (e.g. session dropped mid-flight)
+	}
+	// First injected turn after a restart: rebuild the model's context from
+	// the transcript (mailbox, schedules, spawn and durable-question resumes).
+	if meta.Turns > 0 {
+		reseedIfCold(ctx, d.Manager, userID, sessionID, meta.Squad)
 	}
 
 	// Tag this run's bus events with the real session id so a concurrent
@@ -531,7 +607,7 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 				}
 				// A mailbox send by the answering squad disarms the backstop.
 				if p.FunctionCall != nil {
-					if replyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
+					if o.ReplyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
 						repliedToSender = true
 					}
 					continue
@@ -557,8 +633,8 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 		pm.bcast.broadcast("routing", sessionID)
 	}
 
-	initialParts := []*genai.Part{{Text: answerPrompt}}
-	routerParts := []*genai.Part{{Text: routerPrompt}}
+	initialParts := []*genai.Part{{Text: o.AnswerPrompt}}
+	routerParts := []*genai.Part{{Text: o.RouterPrompt}}
 	_, reply, err := d.Manager.RunWithRouting(
 		ctx, userID, sessionID, meta.Squad, initialParts, routerParts, run, notify)
 	if err != nil {
@@ -567,9 +643,9 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 
 	reply = strings.TrimSpace(reply)
 	if reply != "" {
-		// Persist the clean message (routerPrompt), not the answer-only reply
-		// directive, so the transcript reads as the received message.
-		if perr := sessions.AppendConversationTurnFull(sessionID, routerPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
+		// Persist the clean message (PersistPrompt, default routerPrompt), not the
+		// answer-only reply directive, so the transcript reads as the received message.
+		if perr := sessions.AppendConversationTurnFull(sessionID, o.PersistPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
 			log.Printf("mailbox push: persist failed for %s: %v", sessionID, perr)
 		}
 		d.Registry.Touch(sessionID)
@@ -579,15 +655,15 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// back to the waiting sender. If the answering squad already did so
 	// (repliedToSender) we stand down to avoid a duplicate; otherwise the host
 	// forwards the reply once so the sender's workflow is never stranded.
-	if replyTo != "" && !repliedToSender && reply != "" {
-		pm.sendMailboxBackstop(d, userID, sessionID, replyTo, reply)
+	if o.ReplyTo != "" && !repliedToSender && reply != "" {
+		pm.sendMailboxBackstop(d, userID, sessionID, o.ReplyTo, reply)
 	}
 
 	// Signal any open /events SSE connections so the UI can refresh.
-	if sseEvent == "mailbox_push" {
+	if o.SSEEvent == "mailbox_push" {
 		pm.bcast.notify(sessionID)
 	} else {
-		pm.bcast.broadcast(sseEvent, sessionID)
+		pm.bcast.broadcast(o.SSEEvent, sessionID)
 	}
 	return reply
 }

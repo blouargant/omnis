@@ -870,6 +870,12 @@
   opacity: 0.75;
 }
 
+.ask-user-resumed {
+  font-size: 0.85em;
+  color: var(--text-muted, #888);
+  margin-bottom: 6px;
+}
+
 .ask-user-prompt {
   color: var(--text);
   margin-bottom: 10px;
