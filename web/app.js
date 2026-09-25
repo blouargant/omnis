@@ -5054,6 +5054,12 @@ function renderSingleStepBody(wiz, step) {
   } else {
     promptEl.textContent = q.prompt;
   }
+  if (q.resumed) {
+    const note = document.createElement("div");
+    note.className = "ask-user-resumed";
+    note.textContent = tr("app.askwizard.resumed");
+    card.appendChild(note);
+  }
   card.appendChild(promptEl);
 
   if (step.resolved) {

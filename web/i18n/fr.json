@@ -134,6 +134,7 @@
   "app.askwizard.collapse": "Réduire",
   "app.askwizard.expand": "Développer pour répondre",
   "app.askwizard.question": "Question",
+  "app.askwizard.resumed": "Question posée avant un redémarrage du serveur — votre réponse relancera la tâche.",
   "app.askuser.notesPlaceholder": "Notes supplémentaires (facultatif)…",
   "app.askuser.answerPlaceholder": "Votre réponse…",
   "app.askuser.installItems.one": "Installer {count} élément ?",

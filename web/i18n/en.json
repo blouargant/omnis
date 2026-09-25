@@ -134,6 +134,7 @@
   "app.askwizard.collapse": "Collapse",
   "app.askwizard.expand": "Expand to answer",
   "app.askwizard.question": "Question",
+  "app.askwizard.resumed": "Asked before a server restart — your answer will resume the task.",
   "app.askuser.notesPlaceholder": "Additional notes (optional)…",
   "app.askuser.answerPlaceholder": "Your answer…",
   "app.askuser.installItems.one": "Install {count} item?",
