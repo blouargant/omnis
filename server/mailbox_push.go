@@ -415,7 +415,25 @@ func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, outp
 // turn's reply to that sender exactly once (see sendMailboxBackstop), so a
 // workflow-critical reply is never dropped just because the model forgot to send
 // it. A squad that did reply/interact suppresses the backstop (no double reply).
-func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) (reply string) {
+func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessionID, userID, answerPrompt, routerPrompt, sseEvent, replyTo string) string {
+	return pm.injectTurnOpts(ctx, d, sessionID, userID, injectOpts{
+		AnswerPrompt: answerPrompt, RouterPrompt: routerPrompt, SSEEvent: sseEvent, ReplyTo: replyTo,
+	})
+}
+
+// injectOpts describes one injected turn. PersistPrompt is the user text saved
+// in the transcript; it defaults to RouterPrompt.
+type injectOpts struct {
+	AnswerPrompt, RouterPrompt, PersistPrompt, SSEEvent, ReplyTo string
+}
+
+// injectTurnOpts is the body of injectTurnRouted, taking its inputs as an
+// options struct so a caller (the durable-question resume) can persist a user
+// text that differs from the model prompt.
+func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, sessionID, userID string, o injectOpts) (reply string) {
+	if o.PersistPrompt == "" {
+		o.PersistPrompt = o.RouterPrompt
+	}
 	if ctx.Err() != nil {
 		return ""
 	}
@@ -452,6 +470,11 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	d.Manager.MigrateToCurrent(sessionID)
 	if d.Manager.LookupSquad(sessionID, meta.Squad) == nil {
 		return "" // no runnable squad (e.g. session dropped mid-flight)
+	}
+	// First injected turn after a restart: rebuild the model's context from
+	// the transcript (mailbox, schedules, spawn and durable-question resumes).
+	if meta.Turns > 0 {
+		reseedIfCold(ctx, d.Manager, userID, sessionID, meta.Squad)
 	}
 
 	// Tag this run's bus events with the real session id so a concurrent
@@ -531,7 +554,7 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 				}
 				// A mailbox send by the answering squad disarms the backstop.
 				if p.FunctionCall != nil {
-					if replyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
+					if o.ReplyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
 						repliedToSender = true
 					}
 					continue
@@ -557,8 +580,8 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 		pm.bcast.broadcast("routing", sessionID)
 	}
 
-	initialParts := []*genai.Part{{Text: answerPrompt}}
-	routerParts := []*genai.Part{{Text: routerPrompt}}
+	initialParts := []*genai.Part{{Text: o.AnswerPrompt}}
+	routerParts := []*genai.Part{{Text: o.RouterPrompt}}
 	_, reply, err := d.Manager.RunWithRouting(
 		ctx, userID, sessionID, meta.Squad, initialParts, routerParts, run, notify)
 	if err != nil {
@@ -567,9 +590,9 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 
 	reply = strings.TrimSpace(reply)
 	if reply != "" {
-		// Persist the clean message (routerPrompt), not the answer-only reply
-		// directive, so the transcript reads as the received message.
-		if perr := sessions.AppendConversationTurnFull(sessionID, routerPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
+		// Persist the clean message (PersistPrompt, default routerPrompt), not the
+		// answer-only reply directive, so the transcript reads as the received message.
+		if perr := sessions.AppendConversationTurnFull(sessionID, o.PersistPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
 			log.Printf("mailbox push: persist failed for %s: %v", sessionID, perr)
 		}
 		d.Registry.Touch(sessionID)
@@ -579,15 +602,15 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 	// back to the waiting sender. If the answering squad already did so
 	// (repliedToSender) we stand down to avoid a duplicate; otherwise the host
 	// forwards the reply once so the sender's workflow is never stranded.
-	if replyTo != "" && !repliedToSender && reply != "" {
-		pm.sendMailboxBackstop(d, userID, sessionID, replyTo, reply)
+	if o.ReplyTo != "" && !repliedToSender && reply != "" {
+		pm.sendMailboxBackstop(d, userID, sessionID, o.ReplyTo, reply)
 	}
 
 	// Signal any open /events SSE connections so the UI can refresh.
-	if sseEvent == "mailbox_push" {
+	if o.SSEEvent == "mailbox_push" {
 		pm.bcast.notify(sessionID)
 	} else {
-		pm.bcast.broadcast(sseEvent, sessionID)
+		pm.bcast.broadcast(o.SSEEvent, sessionID)
 	}
 	return reply
 }

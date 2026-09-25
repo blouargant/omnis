@@ -375,12 +375,8 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 			// session once it has run), and meta.Turns==0 skips it for a brand-new
 			// session, so there is no steady-state per-turn cost. Best-effort: a
 			// failure is logged inside the helper and the turn still runs.
-			if meta.Turns > 0 && !d.Manager.HasSessionContext(runCtx, meta.UserID, meta.ID, startSquad) {
-				if f, err := sessions.LoadConversationFile(meta.ID); err == nil && len(f.Turns) > 0 {
-					rctx, rcancel := context.WithTimeout(d.rootCtx, reseedTimeout)
-					_ = d.Manager.ReseedSessionContext(rctx, meta.UserID, meta.ID, startSquad, toExchanges(f.Turns))
-					rcancel()
-				}
+			if meta.Turns > 0 {
+				reseedIfCold(d.rootCtx, d.Manager, meta.UserID, meta.ID, startSquad)
 			}
 
 			// Drive the user's turn — plus any mid-turn steering they add — to

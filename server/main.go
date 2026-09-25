@@ -454,6 +454,24 @@ func run() error {
 		Version:             version,
 		SessionIndex:        sessionIndex,
 	}
+	// Durable agent questions: store AskUserQuestion prompts in the conversation
+	// file so they survive a restart, and restore the ones a previous run left.
+	if infra.AskUserRegistry != nil {
+		infra.AskUserRegistry.SetPersister(newAskPersister(rootCtx, deps.LiveTurns, registry))
+		resume := newResumeCoordinator(infra.AskUserRegistry, registry,
+			func(sessionID, userID, modelPrompt, display string) {
+				go func() {
+					if deps.PushEvents != nil {
+						deps.PushEvents.broadcastWithText("turn_started", sessionID, display)
+					}
+					deps.PushMgr.injectTurnOpts(rootCtx, deps, sessionID, userID, injectOpts{
+						AnswerPrompt: modelPrompt, RouterPrompt: modelPrompt,
+						PersistPrompt: display, SSEEvent: "mailbox_push",
+					})
+				}()
+			})
+		resume.restore(registry.List())
+	}
 	startCollectionAutoUpdate(rootCtx, deps, autoUpdateMinInterval())
 	engine := newEngine(deps)
 
