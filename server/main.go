@@ -467,6 +467,7 @@ func run() error {
 					deps.PushMgr.injectTurnOpts(rootCtx, deps, sessionID, userID, injectOpts{
 						AnswerPrompt: modelPrompt, RouterPrompt: modelPrompt,
 						PersistPrompt: display, SSEEvent: "mailbox_push",
+						SkipIfArchived: true,
 					})
 				}()
 			})

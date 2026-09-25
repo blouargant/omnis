@@ -425,6 +425,19 @@ func (pm *pushManager) injectTurnRouted(ctx context.Context, d serverDeps, sessi
 // in the transcript; it defaults to RouterPrompt.
 type injectOpts struct {
 	AnswerPrompt, RouterPrompt, PersistPrompt, SSEEvent, ReplyTo string
+	// SkipIfArchived drops the turn (without running or re-pinning) when the
+	// session is archived by the time the run guard is held. Only the
+	// durable-question resume sets it: a session archived between the last
+	// answer and the resume must never run an agent turn.
+	SkipIfArchived bool
+}
+
+// skipInjected reports whether an injected turn must not run: the session is
+// unknown, or it is archived and the caller opted into SkipIfArchived. Called
+// with the run guard held, before any re-pin.
+func skipInjected(reg *sessions.Registry, sessionID string, o injectOpts) bool {
+	archived, ok := reg.IsArchived(sessionID)
+	return !ok || (o.SkipIfArchived && archived)
 }
 
 // injectTurnOpts is the body of injectTurnRouted, taking its inputs as an
@@ -461,7 +474,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	defer release()
 
 	meta, ok := d.Registry.Get(sessionID)
-	if !ok {
+	if !ok || skipInjected(d.Registry, sessionID, o) {
 		return ""
 	}
 	// We hold the run-guard for this session, so any hot-reload that happened

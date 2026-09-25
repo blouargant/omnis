@@ -133,3 +133,37 @@ func TestArchivedSessionIsNotResumed(t *testing.T) {
 		t.Fatal("an archived session's questions must not be restored")
 	}
 }
+
+// Archived after the questions were restored, then answered: no resume.
+func TestArchivedAfterRestoreIsNotResumed(t *testing.T) {
+	areg, sreg, meta := setupTurn(t)
+	l := &launched{}
+	newResumeCoordinator(areg, sreg, l.fn).restore([]*sessions.SessionMeta{meta})
+	sreg.SetArchived(meta.ID, true)
+	_ = areg.Resolve(meta.ID, "a", askuser.Answer{Text: "prod"})
+	_ = areg.Resolve(meta.ID, "b", askuser.Answer{Text: "v2"})
+	if l.count() != 0 {
+		t.Fatal("a session archived before its last answer must not be resumed")
+	}
+}
+
+// The resume launch opts into SkipIfArchived; every other injected turn does not.
+func TestSkipInjected(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	sreg := sessions.NewRegistry()
+	meta := sreg.New("")
+	resume := injectOpts{SkipIfArchived: true}
+	if skipInjected(sreg, meta.ID, resume) || skipInjected(sreg, meta.ID, injectOpts{}) {
+		t.Fatal("an active session must run")
+	}
+	sreg.SetArchived(meta.ID, true)
+	if !skipInjected(sreg, meta.ID, resume) {
+		t.Fatal("a resume must not run on an archived session")
+	}
+	if skipInjected(sreg, meta.ID, injectOpts{}) {
+		t.Fatal("callers that did not opt in keep today's behaviour")
+	}
+	if !skipInjected(sreg, "unknown", injectOpts{}) {
+		t.Fatal("an unknown session never runs")
+	}
+}

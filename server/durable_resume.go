@@ -57,7 +57,7 @@ func (c *resumeCoordinator) restore(metas []*sessions.SessionMeta) {
 func (c *resumeCoordinator) onAnswer(q askuser.Question, ans askuser.Answer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if meta, ok := c.sreg.Get(q.SessionID); !ok || meta.Archived {
+	if archived, ok := c.sreg.IsArchived(q.SessionID); !ok || archived {
 		return
 	}
 	if err := sessions.SetPendingAnswer(q.SessionID, q.ID, ans); err != nil {

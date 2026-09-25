@@ -229,6 +229,19 @@ func (r *Registry) Get(id string) (*SessionMeta, bool) {
 	return m, ok
 }
 
+// IsArchived reports a session's archived flag, read under the registry lock
+// (SetArchived writes it under the same lock, so reading meta.Archived through
+// the pointer Get returns would race). ok is false for an unknown session.
+func (r *Registry) IsArchived(id string) (archived, ok bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.items[id]
+	if !ok {
+		return false, false
+	}
+	return m.Archived, true
+}
+
 // Touch marks a session as used and increments the turn counter.
 // It also clears the Harvested flag so the idle harvester will re-evaluate
 // the session after enough new activity accumulates. The on-disk flag is
