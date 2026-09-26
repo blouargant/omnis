@@ -210,3 +210,35 @@ func TestSuggestStoreForget(t *testing.T) {
 	var nilStore *suggestStore
 	nilStore.forget("s1") // must not panic
 }
+
+// TestSuggestStoreRecoversPanickingGenerator guards against an orphaned
+// in-flight call entry: if gen panics and the store didn't clean up, every
+// later get for the same (sid, turns) would hang on <-c.done until its ctx
+// times out. Each call is bounded by its own short timeout so a regression
+// fails fast instead of hanging the test.
+func TestSuggestStoreRecoversPanickingGenerator(t *testing.T) {
+	s := newSuggestStore()
+	calls := 0
+	gen := func() (string, bool) {
+		calls++
+		if calls == 1 {
+			panic("boom")
+		}
+		return "x", true
+	}
+
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel1()
+	if got := s.get(ctx1, "s1", 1, gen); got != "" {
+		t.Fatalf("first get (panicking generator) = %q, want \"\"", got)
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	if got := s.get(ctx2, "s1", 1, gen); got != "x" {
+		t.Fatalf("second get after a panic = %q, want \"x\" (must not hang)", got)
+	}
+	if calls != 2 {
+		t.Fatalf("want 2 generator calls, got %d", calls)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -52,7 +53,14 @@ func newSuggestStore() *suggestStore {
 // get returns the cached suggestion for (sid, turns), or runs gen once for all
 // concurrent callers. A waiter gives up when ctx ends (the generation carries on
 // and still warms the cache). Only a successful generation is cached.
-func (s *suggestStore) get(ctx context.Context, sid string, turns int, gen func() (string, bool)) string {
+//
+// Cleanup (dropping the in-flight call entry, caching on success, and waking
+// waiters) runs in a defer so it always happens — including when gen panics.
+// A panic is recovered and turned into an ordinary uncached failure ("",
+// false): without this, an orphaned entry in s.calls would wedge every later
+// request for the same (session, turns) on <-c.done until ctx ends, i.e.
+// suggestions silently dead for that session until its turn count changes.
+func (s *suggestStore) get(ctx context.Context, sid string, turns int, gen func() (string, bool)) (result string) {
 	s.mu.Lock()
 	if e, ok := s.entries[sid]; ok && e.turns == turns {
 		s.mu.Unlock()
@@ -72,16 +80,23 @@ func (s *suggestStore) get(ctx context.Context, sid string, turns int, gen func(
 	s.calls[key] = c
 	s.mu.Unlock()
 
-	text, ok := gen()
-	c.text = text
-	s.mu.Lock()
-	delete(s.calls, key)
-	if ok {
-		s.entries[sid] = suggestEntry{turns: turns, text: text}
-	}
-	s.mu.Unlock()
-	close(c.done)
-	return text
+	var ok bool
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("prompt suggestion: generator panicked for session %s: %v", sid, r)
+			result, ok = "", false
+		}
+		c.text = result
+		s.mu.Lock()
+		delete(s.calls, key)
+		if ok {
+			s.entries[sid] = suggestEntry{turns: turns, text: result}
+		}
+		s.mu.Unlock()
+		close(c.done)
+	}()
+	result, ok = gen()
+	return result
 }
 
 // forget drops a session's cached suggestion (session deleted). Nil-safe.
