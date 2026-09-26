@@ -27,6 +27,8 @@ func TestIaparcTestManifest(t *testing.T) {
 		"iapregistrykey",
 		"nginx.ingress.kubernetes.io/auth-url",
 		"path: /omnis",
+		"allowPrivilegeEscalation: false",
+		"drop: [ALL]",
 	} {
 		if !strings.Contains(m, want) {
 			t.Errorf("manifest missing %q", want)

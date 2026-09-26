@@ -39,12 +39,23 @@ func TestBangEscapeSeesOwnToken(t *testing.T) {
 // with 404 before handleBash ever runs), and — belt and braces — alice's
 // token must never appear in the response body.
 func TestBangEscapeRefusesOtherUsersSession(t *testing.T) {
-	r, _, aliceSID, _ := newCookieTestEngine(t)
+	r, d, aliceSID, _ := newCookieTestEngine(t)
+	// A distinctive token (the shared "ta" is a substring of too many bodies to
+	// make the leak assertion meaningful). Alice logs in with it first, so it
+	// is live in the token store when bob tries her session.
+	const aliceSecret = "alice-secret-7f3a9c"
+	d.Cookie.validator.(fakeValidator)[aliceSecret] = "alice"
+	if w := doAs(r, aliceSecret, "GET", "/api/whoami"); w.Code != http.StatusOK {
+		t.Fatalf("alice login: %d %s", w.Code, w.Body)
+	}
+	if tok, ok := d.Cookie.tokens.Get("alice"); !ok || tok != aliceSecret {
+		t.Fatalf("alice's token must be live: %q %v", tok, ok)
+	}
 	w := doWithBody(r, "tb", "POST", "/api/sessions/"+aliceSID+"/bash", `{"command":"echo tok=$PLAT_TOKEN"}`)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("bob must not reach alice's session: got %d %s", w.Code, w.Body)
 	}
-	if strings.Contains(w.Body.String(), "ta") {
+	if strings.Contains(w.Body.String(), aliceSecret) {
 		t.Fatalf("response must not leak alice's token: %s", w.Body)
 	}
 }

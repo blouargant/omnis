@@ -66,6 +66,10 @@ spec:
       containers:
         - name: omnis
           image: IMAGE_PLACEHOLDER
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           ports:
             - containerPort: 8080
           envFrom:
