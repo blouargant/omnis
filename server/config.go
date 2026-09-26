@@ -45,6 +45,20 @@ type ServerConfig struct {
 	// on a mismatch. Requires UserID — the default would match any misrouted
 	// request. Overridden by OMNIS_IDENTITY_HEADER.
 	IdentityHeader string `yaml:"identity_header,omitempty" json:"identity_header,omitempty"`
+	// IdentityMode selects how requests are identified. "" = single-user /
+	// milestone-1 behaviour; "cookie" = a SHARED server identifying each
+	// request by a platform session cookie validated with AuthValidateCmd.
+	// See docs/superpowers/specs/2026-09-26-shared-cookie-identity-design.md.
+	// Overridden by OMNIS_IDENTITY_MODE.
+	IdentityMode    string `yaml:"identity_mode,omitempty" json:"identity_mode,omitempty"`
+	AuthCookies     string `yaml:"auth_cookies,omitempty" json:"auth_cookies,omitempty"`           // OMNIS_AUTH_COOKIES (comma list)
+	AuthValidateCmd string `yaml:"auth_validate_cmd,omitempty" json:"auth_validate_cmd,omitempty"` // OMNIS_AUTH_VALIDATE_CMD
+	AuthTokenEnv    string `yaml:"auth_token_env,omitempty" json:"auth_token_env,omitempty"`       // OMNIS_AUTH_TOKEN_ENV
+	AuthLoginField  string `yaml:"auth_login_field,omitempty" json:"auth_login_field,omitempty"`   // OMNIS_AUTH_LOGIN_FIELD
+	AuthRolesField  string `yaml:"auth_roles_field,omitempty" json:"auth_roles_field,omitempty"`   // OMNIS_AUTH_ROLES_FIELD
+	AuthAdminRoles  string `yaml:"auth_admin_roles,omitempty" json:"auth_admin_roles,omitempty"`   // OMNIS_AUTH_ADMIN_ROLES (comma list)
+	AuthLoginURL    string `yaml:"auth_login_url,omitempty" json:"auth_login_url,omitempty"`       // OMNIS_AUTH_LOGIN_URL
+	AuthCacheTTL    string `yaml:"auth_cache_ttl,omitempty" json:"auth_cache_ttl,omitempty"`       // OMNIS_AUTH_CACHE_TTL (Go duration)
 	// A2AEnabled controls whether the A2A protocol server starts alongside the web server.
 	A2AEnabled bool `yaml:"a2a_enabled,omitempty" json:"a2a_enabled,omitempty"`
 	// A2APort is the port the A2A server listens on (default 8081).

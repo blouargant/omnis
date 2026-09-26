@@ -72,11 +72,15 @@ func identityMiddleware(header, expected string) gin.HandlerFunc {
 // handleWhoami reports the user this process serves and whether the identity
 // header is enforced. The web UI shows the login in the sidebar footer so a
 // user landing on someone else's instance sees it before doing anything.
-func handleWhoami(identityHeader string) gin.HandlerFunc {
+func handleWhoami(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if d.Cookie != nil {
+			c.JSON(http.StatusOK, gin.H{"user_id": requestLogin(c), "identity_mode": "cookie", "identity_enforced": true})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"user_id":           sessions.UserID(),
-			"identity_enforced": strings.TrimSpace(identityHeader) != "",
+			"identity_enforced": strings.TrimSpace(d.IdentityHeader) != "",
 		})
 	}
 }

@@ -51,6 +51,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -157,6 +158,13 @@ func run() error {
 		return err
 	}
 	sessions.SetUserID(ident.UserID)
+	cookie, err := resolveCookieIdentity(serverCfg, exec.LookPath)
+	if err != nil {
+		return err
+	}
+	if cookie != nil {
+		log.Printf("server: SHARED mode — requests identified by cookie %v, validated by %q; trusted users only (no OS isolation between users)", cookie.cfg.Cookies, cookie.cfg.ValidateCmd[0])
+	}
 	switch {
 	case ident.Header != "":
 		log.Printf("server: serving user %q — identity header %q enforced on /api/*", sessions.UserID(), ident.Header)
@@ -425,6 +433,7 @@ func run() error {
 	deps := serverDeps{
 		Token:               token,
 		IdentityHeader:      ident.Header,
+		Cookie:              cookie,
 		Manager:             manager,
 		Registry:            registry,
 		WebDir:              webDir,
@@ -510,7 +519,9 @@ func run() error {
 		}
 	}
 
-	if serverCfg.A2AEnabled {
+	// Belt: cookie mode already refused a2a_enabled at config time —
+	// inbound A2A carries no user identity.
+	if serverCfg.A2AEnabled && cookie == nil {
 		a2aPort := serverCfg.A2APort
 		if a2aPort <= 0 {
 			a2aPort = 8081

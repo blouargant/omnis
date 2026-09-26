@@ -1,0 +1,139 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/blouargant/omnis/internal/identity"
+	"github.com/blouargant/omnis/internal/sessions"
+)
+
+// cookieAuth is the shared-server ("cookie") identity mode. nil ⇒ mode off.
+type cookieAuth struct {
+	cfg       identity.Config
+	validator identity.Validator
+	tokens    *identity.TokenStore
+}
+
+func commaList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// resolveCookieIdentity applies env > server.yaml and the fatal combinations
+// of spec §3.1/§4. lookPath is exec.LookPath in production.
+func resolveCookieIdentity(cfg ServerConfig, lookPath func(string) (string, error)) (*cookieAuth, error) {
+	mode := strings.ToLower(strings.TrimSpace(envOr("OMNIS_IDENTITY_MODE", cfg.IdentityMode)))
+	switch mode {
+	case "":
+		return nil, nil
+	case "cookie":
+	default:
+		return nil, fmt.Errorf("server: unknown identity_mode %q (want \"\" or \"cookie\")", mode)
+	}
+	if strings.TrimSpace(envOr("OMNIS_USER_ID", cfg.UserID)) != "" || strings.TrimSpace(envOr("OMNIS_IDENTITY_HEADER", cfg.IdentityHeader)) != "" {
+		return nil, errors.New("server: identity_mode cookie (one server, many users) cannot be combined with user_id/identity_header (one server per user)")
+	}
+	if cfg.A2AEnabled {
+		return nil, errors.New("server: identity_mode cookie requires a2a_enabled: false — inbound A2A carries no user identity")
+	}
+	c := identity.Config{
+		Cookies:    commaList(envOr("OMNIS_AUTH_COOKIES", cfg.AuthCookies)),
+		TokenEnv:   strings.TrimSpace(envOr("OMNIS_AUTH_TOKEN_ENV", cfg.AuthTokenEnv)),
+		LoginField: strings.TrimSpace(envOr("OMNIS_AUTH_LOGIN_FIELD", cfg.AuthLoginField)),
+		RolesField: strings.TrimSpace(envOr("OMNIS_AUTH_ROLES_FIELD", cfg.AuthRolesField)),
+		AdminRoles: commaList(envOr("OMNIS_AUTH_ADMIN_ROLES", cfg.AuthAdminRoles)),
+		LoginURL:   strings.TrimSpace(envOr("OMNIS_AUTH_LOGIN_URL", cfg.AuthLoginURL)),
+		CacheTTL:   15 * time.Minute,
+	}
+	argv, err := identity.SplitArgs(envOr("OMNIS_AUTH_VALIDATE_CMD", cfg.AuthValidateCmd))
+	if err != nil {
+		return nil, fmt.Errorf("server: auth_validate_cmd: %w", err)
+	}
+	c.ValidateCmd = argv
+	if ttl := strings.TrimSpace(envOr("OMNIS_AUTH_CACHE_TTL", cfg.AuthCacheTTL)); ttl != "" {
+		d, err := time.ParseDuration(ttl)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("server: auth_cache_ttl %q: want a positive Go duration", ttl)
+		}
+		c.CacheTTL = d
+	}
+	var missing []string
+	if len(c.Cookies) == 0 {
+		missing = append(missing, "auth_cookies")
+	}
+	if len(c.ValidateCmd) == 0 {
+		missing = append(missing, "auth_validate_cmd")
+	}
+	if c.TokenEnv == "" {
+		missing = append(missing, "auth_token_env")
+	}
+	if c.LoginField == "" {
+		missing = append(missing, "auth_login_field")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("server: identity_mode cookie needs %s", strings.Join(missing, ", "))
+	}
+	if _, err := lookPath(c.ValidateCmd[0]); err != nil {
+		return nil, fmt.Errorf("server: auth_validate_cmd %q not found on PATH", c.ValidateCmd[0])
+	}
+	inner := identity.CommandValidator{Argv: c.ValidateCmd, TokenEnv: c.TokenEnv, LoginField: c.LoginField, RolesField: c.RolesField, Timeout: 10 * time.Second}
+	return &cookieAuth{cfg: c, validator: identity.NewCachingValidator(inner, c.CacheTTL), tokens: identity.NewTokenStore()}, nil
+}
+
+// cookieIdentityMiddleware authenticates every request from the platform
+// cookie (spec §3.4). It replaces the bearer-token check in cookie mode.
+func cookieIdentityMiddleware(a *cookieAuth) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tok := identity.TokenFromRequest(c.Request, a.cfg.Cookies)
+		if tok == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "login_url": a.cfg.LoginURL})
+			return
+		}
+		id, err := a.validator.Validate(c.Request.Context(), tok)
+		if err != nil {
+			if errors.Is(err, identity.ErrUnavailable) {
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "identity provider unavailable"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "login_url": a.cfg.LoginURL})
+			return
+		}
+		if strings.TrimSpace(id.Login) == "" {
+			// A validator that "succeeds" without a login must never let the
+			// request through: ownerFor would fall back to the process owner.
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "login_url": a.cfg.LoginURL})
+			return
+		}
+		exp, _ := identity.JWTExp(tok)
+		a.tokens.Put(id.Login, tok, exp)
+		c.Request = c.Request.WithContext(identity.WithIdentity(c.Request.Context(), id))
+		c.Next()
+	}
+}
+
+// requestLogin is the cookie-mode caller's login, "" in any other mode.
+func requestLogin(c *gin.Context) string {
+	if id, ok := identity.From(c.Request.Context()); ok {
+		return id.Login
+	}
+	return ""
+}
+
+// ownerFor is the owner to stamp on a session created by this request.
+func ownerFor(c *gin.Context) string {
+	if l := requestLogin(c); l != "" {
+		return l
+	}
+	return sessions.UserID()
+}

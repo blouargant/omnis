@@ -181,9 +181,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 			title = "Imported session"
 		}
 
-		// owner is a placeholder for the single-user default; a later task
-		// (request-based ownerFor(c)) replaces this with the caller's identity.
-		owner := sessions.UserID()
+		owner := ownerFor(c)
 		newMeta := d.Registry.NewFor(owner, squad)
 		dst := &sessions.ConversationFile{
 			Title:      title,

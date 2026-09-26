@@ -125,7 +125,7 @@ func TestHandleWhoami(t *testing.T) {
 		wantEnforced bool
 	}{{"", false}, {"X-Forwarded-User", true}} {
 		r := gin.New()
-		r.GET("/api/whoami", handleWhoami(tc.header))
+		r.GET("/api/whoami", handleWhoami(serverDeps{IdentityHeader: tc.header}))
 		req := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

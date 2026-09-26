@@ -150,7 +150,7 @@ var terminalUpgrader = websocket.Upgrader{
 // global "no session" browse directory.
 func handleTerminal(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if d.Token != "" && !termTokens.consume(c.Query("token")) {
+		if d.Cookie == nil && d.Token != "" && !termTokens.consume(c.Query("token")) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired terminal token"})
 			return
 		}

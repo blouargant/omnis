@@ -43,6 +43,10 @@ type serverDeps struct {
 	// /api/* route against sessions.UserID(), after the token check. Empty in a
 	// single-user install. See docs/multi-user-containers.md.
 	IdentityHeader string
+	// Cookie non-nil ⇒ shared cookie-identity mode (spec 2026-09-26): every
+	// /api/* request is authenticated from the platform session cookie and
+	// the bearer-token + identity-header checks are replaced.
+	Cookie *cookieAuth
 	// Manager owns the live agent generations. Look up the runner per
 	// session via Manager.Lookup(sessionID).Runner so each session uses
 	// the agent build it was pinned to.
@@ -264,14 +268,24 @@ func newEngine(d serverDeps) *gin.Engine {
 	// (spec §6; docs/multi-user-containers.md). With no identity header
 	// configured, identityMiddleware is the same no-op pass-through closure —
 	// single-user installs are unaffected.
-	api.GET("/terminal/ws", identityMiddleware(d.IdentityHeader, sessions.UserID()), handleTerminal(d))
-
+	//
 	// Token first, identity second: a caller without the container's secret
-	// never learns which login the identity check expects (spec §6.3).
-	auth := api.Group("", authMiddleware(d.Token), identityMiddleware(d.IdentityHeader, sessions.UserID()))
+	// never learns which login the identity check expects (spec §6.3). In
+	// cookie mode the single cookie check replaces both, and it ALSO guards
+	// the terminal WebSocket (browsers send cookies on the upgrade request).
+	var authChain []gin.HandlerFunc
+	if d.Cookie != nil {
+		authChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie)}
+	} else {
+		authChain = []gin.HandlerFunc{authMiddleware(d.Token), identityMiddleware(d.IdentityHeader, sessions.UserID())}
+	}
+	// cookie mode: the cookie check; otherwise the identity-header check.
+	wsChain := append([]gin.HandlerFunc{}, authChain[len(authChain)-1:]...)
+	api.GET("/terminal/ws", append(wsChain, handleTerminal(d))...)
+	auth := api.Group("", authChain...)
 	// GET /api/whoami — the user this instance serves + whether the identity
 	// header is enforced. Shown in the web UI sidebar footer.
-	auth.GET("/whoami", handleWhoami(d.IdentityHeader))
+	auth.GET("/whoami", handleWhoami(d))
 	// POST /api/terminal/token — mint a short-lived, single-use token for the
 	// terminal WebSocket. Behind authMiddleware (needs the master bearer token in
 	// the Authorization header), so only an already-authenticated client can get
@@ -379,9 +393,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			})
 			return
 		}
-		// owner is a placeholder for the single-user default; a later task
-		// (request-based ownerFor(c)) replaces this with the caller's identity.
-		owner := sessions.UserID()
+		owner := ownerFor(c)
 		meta := d.Registry.NewFor(owner, squad)
 		// Record the session's starting working directory durably. A new chat
 		// otherwise resolves its cwd via bashCwd.get's fallback to the fixed
