@@ -84,7 +84,7 @@ func buildSuggestRequest(turns []Exchange) *model.LLMRequest {
 // cleanSuggestion reduces the model output to one sendable line, or "" when there
 // is no usable suggestion. A result starting with "/", "!" or "#" is rejected: the
 // composer would treat it as a slash command, a host shell escape or an AGENT.md
-// write when sent.
+// write when sent. One starting with "<" or "[" is model scaffolding, not a message.
 func cleanSuggestion(raw string) string {
 	s := ""
 	for _, line := range strings.Split(raw, "\n") {
@@ -101,6 +101,10 @@ func cleanSuggestion(raw string) string {
 	}
 	switch s[0] {
 	case '/', '!', '#':
+		return ""
+	case '<', '[':
+		// Model scaffolding leaking into the output ("<thinking>", "[no A
+		// message yet]"), observed on the premium model — never a real message.
 		return ""
 	}
 	if utf8.RuneCountInString(s) > suggestMaxLen {

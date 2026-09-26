@@ -3327,6 +3327,18 @@ in `suggestStore` keyed **per session on the turn count**, single-flighted per
   ([core/llm/openai.go](core/llm/openai.go) `buildRequest`; any other budget, or
   none, leaves the request byte-identical). `chat_template_kwargs.enable_thinking`
   was rejected: the Scaleway-backed `Simple` answers it with HTTP 500.
+- **`cleanSuggestion` also rejects a leading `<` or `[`** — model scaffolding such as
+  `<thinking>` or `[no A message yet]` (seen on `premium`) would otherwise be shown
+  verbatim as the placeholder.
+- **Model/prompt evaluation (2026-09-26, 10 real conversations × 3 samples, blind
+  0–5 scoring):** `high` 4.23, `simple` 4.07, `hosted`+reasoning 4.03, `hosted`
+  3.93, `balanced` 3.60 — the top four are within noise (±0.25); reasoning buys
+  nothing at 50× the latency. `premium` 1.63: it answers `NONE` more than half the
+  time and leaks scaffolding — keep it off this role. **Adding an anti-fabrication
+  rule to the prompt made things worse** (3.70 with a long rule, 3.47 with a short
+  one) without fixing the target case (inventing a version the user had already
+  stated) and introduced new errors ("translate into French" on a French reply).
+  Do not retry a prompt tweak without re-running that comparison.
 - **`cleanSuggestion` rejects a leading `/`, `!` or `#`** — the composer would run
   it as a slash command, a host shell escape or an AGENT.md write on send.
 - **`SuggestNextPrompt` uses `Manager.Peek`, not `Lookup`, to resolve the

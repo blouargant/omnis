@@ -26,6 +26,10 @@ func TestCleanSuggestion(t *testing.T) {
 		{"shell escape", "!rm -rf build", ""},
 		{"memory write", "# remember this", ""},
 		{"too long", strings.Repeat("word ", 40), ""},
+		{"thinking tag", "<thinking>", ""},
+		{"xml-ish tag with text", "<answer>Show me the diff</answer>", ""},
+		{"bracket placeholder", "[no A message yet]", ""},
+		{"bracketed note", "[Sent while working] check it", ""},
 	}
 	for _, c := range cases {
 		if got := cleanSuggestion(c.in); got != c.want {
