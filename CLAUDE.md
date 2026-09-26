@@ -3281,9 +3281,16 @@ After a reply, the empty composer shows a predicted next user message; **Tab**
 copies it in (never sends). **Pull, not push**: the client calls
 `GET /api/sessions/:id/suggestion` → `{suggestion, turns, busy}`
 ([server/prompt_suggest.go](server/prompt_suggest.go)) when a turn ends in a
-visible pane (send `finally`, `endRemoteBusy`), on `activateTab`, and after a
-`session_rewound`. The server generates on demand via
-`Manager.SuggestNextPrompt` ([agent/prompt_suggest.go](agent/prompt_suggest.go)) —
+visible pane (send `finally`, `endRemoteBusy`), on `activateTab`, after a
+`session_rewound`, and from the `subscribeGlobalEvents`
+(`mailbox_push`/`task_notification`/`schedule_run`) handlers — mailbox delivery,
+background-task active wake, and `/loop` all inject a turn into an
+already-viewed session with **no** `turn_started` broadcast, so `remoteBusy` is
+never armed for it and `endRemoteBusy`'s own `fetchSuggestion` call returns
+early (`if (!remoteBusy.has(sid)) return;`); those three handlers therefore
+`clearSuggestion(sid); fetchSuggestion(sid);` explicitly so the composer never
+keeps offering the previous reply's suggestion. The server generates on demand
+via `Manager.SuggestNextPrompt` ([agent/prompt_suggest.go](agent/prompt_suggest.go)) —
 the same isolated one-off-LLM pattern as `EvaluateGoal`, on `evalModel`
 (`eval_model_ref` → leader), last 3 exchanges, 6000-rune tail cap — and caches it
 in `suggestStore` keyed **per session on the turn count**, single-flighted per
@@ -3296,11 +3303,23 @@ in `suggestStore` keyed **per session on the turn count**, single-flighted per
   so a generation mid-turn would cache a suggestion for the old state under the
   new key. The client's `done` can arrive before the run guard is released, so
   `fetchSuggestion` retries (3 × 1 s) on `busy`.
+- **A rewind forgets the cached entry.** The cache is keyed only on turn count,
+  so rewinding from N turns back to N-1 and then resending (bringing the count
+  back to N) could otherwise replay the discarded reply's suggestion. `handleRewind`
+  ([server/fork_rewind.go](server/fork_rewind.go)) calls `d.Suggest.forget(id)`
+  (nil-safe) right after `SetTurns`, before reseeding the model context.
 - **`suggestStore.get` recovers a panicking generator** — a panic is logged and
   treated as an uncached failure, so an in-flight call can never wedge a
   session's key.
 - **`cleanSuggestion` rejects a leading `/`, `!` or `#`** — the composer would run
   it as a slash command, a host shell escape or an AGENT.md write on send.
+- **`SuggestNextPrompt` uses `Manager.Peek`, not `Lookup`, to resolve the
+  session's instance.** `Lookup` auto-pins an unpinned session to the current
+  generation, and this read-only path has no matching `Release` — pinning here
+  would leak the generation's refcount forever (reachable when a session is
+  archived/deleted between the route's registry `Snapshot` and this call).
+  `Peek` returns the pinned instance without ever creating a pin, falling back
+  to `Current()` exactly as before.
 - **Session fields are read through `Registry.Snapshot(id)`** — a race-free copy,
   so concurrent turns never see torn reads.
 - **Display = the textarea's native `placeholder`** (the text itself is transparent

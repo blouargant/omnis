@@ -102,8 +102,19 @@ Otherwise:
   cached as `""`.
 - The generator is an injectable field (`serverDeps.suggestFn`, defaulting to
   `d.Manager.SuggestNextPrompt`) so the route is testable without a model.
-- Cache entries are dropped in `deleteSession`. Rewind needs nothing: it changes
-  the turn count, which invalidates the key. A fork is a new session id.
+- Cache entries are dropped in `deleteSession`, and explicitly by
+  `handleRewind` (`d.Suggest.forget(id)`, right after `SetTurns`): the cache is
+  keyed only on turn count, so relying on "the turn count changes" is not
+  enough — rewinding from N turns back to N-1 and then resending (bringing the
+  count back to N) could otherwise replay the discarded reply's cached
+  suggestion. A fork is a new session id, so it needs nothing.
+- `SuggestNextPrompt` resolves the session's instance via `Manager.Peek`, a
+  non-pinning counterpart to `Lookup` added for this path: `Lookup` auto-pins
+  an unpinned session to the current generation, and this read-only path has
+  no matching `Release`, so pinning here would leak the generation's refcount
+  forever (reachable when a session is archived/deleted between the route's
+  `Snapshot` and this call). `Peek` returns the pinned instance or `nil` with
+  no side effect; the existing `Current()` fallback is unchanged.
 
 ### 3.3 Preference
 
@@ -128,7 +139,18 @@ stale tab or a direct call cannot spend model calls while the user has it off.
   1. at the end of a local turn (send-path `finally`, outcome `done` or `reload`);
   2. at the end of an observed remote/injected turn (`endRemoteBusy`);
   3. on session open / tab reactivation (`activateTab`) — always; the server
-     cache makes a repeat free, so the client keeps no turn-count bookkeeping.
+     cache makes a repeat free, so the client keeps no turn-count bookkeeping;
+  4. explicitly from the `subscribeGlobalEvents` `mailbox_push` /
+     `task_notification` / `schedule_run` handlers. Mailbox delivery,
+     background-task active wake, and `/loop` all inject a turn into an
+     already-viewed session with no `turn_started` broadcast, so `remoteBusy`
+     is never armed for it and `endRemoteBusy`'s own `fetchSuggestion` call
+     (item 2) returns early (`if (!remoteBusy.has(sid)) return;`) — these three
+     handlers call `clearSuggestion`/`fetchSuggestion` themselves so the
+     composer doesn't keep offering the previous reply's suggestion. A
+     redundant fetch alongside `endRemoteBusy`'s (when `remoteBusy` happened to
+     be armed) is harmless: `fetchSuggestion`'s sequence guard and the server
+     cache/single-flight make the extra call a no-op.
 - Cleared (and panes repainted) the moment a send or steer starts
   (`sendMessage`, `steerMessage`), and on the `session_rewound` event.
 
