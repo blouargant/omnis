@@ -124,6 +124,32 @@ func cookieIdentityMiddleware(a *cookieAuth) gin.HandlerFunc {
 	}
 }
 
+// shellEnvFor returns the shell env entry carrying owner's current platform
+// token, or nil (single-user mode, or no live token for owner — never another
+// user's).
+func (d serverDeps) shellEnvFor(owner string) []string {
+	if d.Cookie == nil || owner == "" {
+		return nil
+	}
+	tok, ok := d.Cookie.tokens.Get(owner)
+	if !ok {
+		return nil
+	}
+	return []string{d.Cookie.cfg.TokenEnv + "=" + tok}
+}
+
+// ownerOfSession is the UserID that owns session id, or "" when the session is
+// unknown. Used to look up the shell-env token for a session-scoped route
+// (e.g. the "!" shell-escape) whose caller identity is the session's owner,
+// not necessarily the requester (single-user mode has no requester login at
+// all, so the session's stamped owner is the only source of truth).
+func ownerOfSession(d serverDeps, id string) string {
+	if m, ok := d.Registry.Snapshot(id); ok {
+		return m.UserID
+	}
+	return ""
+}
+
 // requestLogin is the cookie-mode caller's login, "" in any other mode.
 func requestLogin(c *gin.Context) string {
 	if id, ok := identity.From(c.Request.Context()); ok {

@@ -18,8 +18,10 @@ type unixPTY struct {
 
 // startPTYSession launches the user's login shell ($SHELL, falling back to
 // /bin/bash then /bin/sh) attached to a fresh PTY, rooted at dir, with a
-// TERM=xterm-256color environment so colour/cursor handling works.
-func startPTYSession(dir string) (ptySession, error) {
+// TERM=xterm-256color environment so colour/cursor handling works. env carries
+// extra "NAME=value" entries appended after TERM (e.g. the session owner's
+// platform token in cookie mode) — nil in single-user mode.
+func startPTYSession(dir string, env []string) (ptySession, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
@@ -31,7 +33,7 @@ func startPTYSession(dir string) (ptySession, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(append(os.Environ(), "TERM=xterm-256color"), env...)
 	f, err := pty.Start(cmd)
 	if err != nil {
 		return nil, err

@@ -143,7 +143,8 @@ func handleBash(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "command is required"})
 			return
 		}
-		out, newCwd, _ := tools.RunBashInteractive(c.Request.Context(), cmd, bashCwd.get(id), 0)
+		ctx := tools.WithShellEnv(c.Request.Context(), d.shellEnvFor(ownerOfSession(d, id)))
+		out, newCwd, _ := tools.RunBashInteractive(ctx, cmd, bashCwd.get(id), 0)
 		bashCwd.set(id, newCwd)
 		d.Registry.Touch(id)
 		c.JSON(http.StatusOK, gin.H{"output": out, "dir": newCwd})

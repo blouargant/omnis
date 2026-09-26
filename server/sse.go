@@ -219,6 +219,10 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// reconnecting client can replay whatever it missed.
 		runCtx, cancel := context.WithCancel(d.rootCtx)
 		runCtx = fstools.WithCwd(runCtx, cwd)
+		// Hand the session owner's live platform token to shell tools (the Bash
+		// tool, the "!" escape when invoked from an agent run, etc.) — nil in
+		// single-user mode or cookie mode with no live token for this owner.
+		runCtx = fstools.WithShellEnv(runCtx, d.shellEnvFor(meta.UserID))
 		// Tag the run with the real session id so mid-turn steering reaches
 		// sub-agents (which run under an ephemeral agenttool session id).
 		runCtx = toolkitagent.WithSteerSession(runCtx, meta.ID)

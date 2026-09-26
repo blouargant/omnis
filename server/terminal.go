@@ -170,7 +170,10 @@ func handleTerminal(d serverDeps) gin.HandlerFunc {
 			return // Upgrade has already written the error response.
 		}
 		defer ws.Close()
-		runTerminalSession(ws, dir)
+		// Hand the caller's live platform token to the shell — nil in
+		// single-user mode (requestLogin returns "" there).
+		env := d.shellEnvFor(requestLogin(c))
+		runTerminalSession(ws, dir, env)
 	}
 }
 
@@ -179,8 +182,8 @@ func handleTerminal(d serverDeps) gin.HandlerFunc {
 //   - client → server: BinaryMessage = raw stdin bytes; TextMessage = a
 //     `{"cols":N,"rows":N}` resize control.
 //   - server → client: BinaryMessage = raw PTY output bytes.
-func runTerminalSession(ws *websocket.Conn, dir string) {
-	pty, err := startPTYSession(dir)
+func runTerminalSession(ws *websocket.Conn, dir string, env []string) {
+	pty, err := startPTYSession(dir, env)
 	if err != nil {
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[terminal unavailable: "+err.Error()+"]\r\n"))
 		return

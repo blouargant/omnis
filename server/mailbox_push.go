@@ -16,6 +16,7 @@ import (
 	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/llm"
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/bg"
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/sessions"
@@ -589,6 +590,9 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	// process-wide). This path reads its OWN usage from the session-scoped ADK
 	// stream, not the bus, so the tag is purely to protect other sessions' streams.
 	ctx = events.WithRootSession(ctx, sessionID)
+	// Hand the session owner's live platform token to shell tools — nil in
+	// single-user mode or cookie mode with no live token for this owner.
+	ctx = fstools.WithShellEnv(ctx, d.shellEnvFor(userID))
 
 	// Arm the per-turn spend ceiling for this injected turn too. A spawned task or
 	// a scheduled routine runs unattended, so an unbounded one is worse here than
