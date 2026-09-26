@@ -30,6 +30,9 @@ const suggestSystemPrompt = "You predict the user's next message in a chat with 
 	"Write the single most likely next message the USER would send: one sentence, first person, " +
 	"in the same language the user writes in, at most about 15 words. It must move the conversation " +
 	"forward (a follow-up question, a next step, a request to apply or refine). " +
+	"The message is a single question or request, written as the user addressing the assistant — " +
+	"nothing else. Be factual and concise: no thanks, greeting, praise, acknowledgement of the previous " +
+	"answer or filler anywhere in it (no \"Thanks\", \"Great\", \"Merci\", \"Super\", \"C'est clair\" or similar). " +
 	"Output only the message — no quotes, no preamble. " +
 	"If there is no natural follow-up, output exactly NONE."
 
