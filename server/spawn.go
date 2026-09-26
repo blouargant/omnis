@@ -52,11 +52,11 @@ func materializeSession(d serverDeps, o spawnOptions) *sessions.SessionMeta {
 	if d.Manager != nil && !d.Manager.HasSquad(squad) {
 		squad = toolkitagent.DefaultSquadName
 	}
-	meta := d.Registry.New(squad)
+	userID := userOrDefault(o.UserID)
+	meta := d.Registry.NewFor(userID, squad)
 	if meta == nil {
 		return nil
 	}
-	userID := userOrDefault(o.UserID)
 
 	// Inherit the parent's working directory so the fresh session's tools / `!cd`
 	// / Folders panel start in the same place (like handleFork). The persist hook
@@ -69,6 +69,7 @@ func materializeSession(d serverDeps, o spawnOptions) *sessions.SessionMeta {
 
 	title := strings.TrimSpace(o.Title)
 	_ = sessions.SetConversationSquad(meta.ID, squad)
+	_ = sessions.SetConversationOwner(meta.ID, userID)
 	if title != "" {
 		d.Registry.SetTitle(meta.ID, title)
 		_ = sessions.SetConversationTitle(meta.ID, title)

@@ -154,7 +154,8 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			title = "Fork of " + base
 		}
 
-		newMeta := d.Registry.New(srcSquad)
+		owner := sessionUserID(meta)
+		newMeta := d.Registry.NewFor(owner, srcSquad)
 		kept, err := sessions.ForkConversation(id, newMeta.ID, title, keep)
 		release()
 		if err != nil {
@@ -163,6 +164,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		_ = sessions.SetConversationOwner(newMeta.ID, owner)
 		d.Registry.SetTurns(newMeta.ID, len(kept))
 		d.Registry.SetTitle(newMeta.ID, title) // in-memory; ForkConversation wrote it to disk
 		// Keep the fork in the source's collection (ForkConversation wrote it to
@@ -181,16 +183,16 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 			if title != "" {
 				name = title
 			}
-			_ = d.RegisterSession(sessions.UserID(), newMeta.ID, name)
+			_ = d.RegisterSession(owner, newMeta.ID, name)
 		}
 		if d.Manager != nil {
 			d.Manager.Pin(newMeta.ID)
 			ctx, cancel := context.WithTimeout(d.rootCtx, reseedTimeout)
-			_ = d.Manager.ReseedSessionContext(ctx, sessionUserID(newMeta), newMeta.ID, srcSquad, toExchanges(kept))
+			_ = d.Manager.ReseedSessionContext(ctx, owner, newMeta.ID, srcSquad, toExchanges(kept))
 			cancel()
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.UserID())
+			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, owner)
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("session_created", newMeta.ID)

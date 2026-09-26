@@ -45,12 +45,13 @@ func scheduleFire(d serverDeps) func(context.Context, scheduler.Job) {
 					return
 				}
 			}
-			sid := createScheduledSession(d, job.Squad, job.Prompt)
+			owner := userOrDefault(job.UserID)
+			sid := createScheduledSession(d, owner, job.Squad, job.Prompt)
 			if sid == "" {
 				d.Scheduler.RecordRun(job.ID, scheduler.RunRecord{At: time.Now(), Status: "error", Note: "could not create session"})
 				return
 			}
-			d.PushMgr.injectTurn(ctx, d, sid, sessions.UserID(), job.Prompt, "schedule_run")
+			d.PushMgr.injectTurn(ctx, d, sid, owner, job.Prompt, "schedule_run")
 			archiveScheduledSession(d, sid)
 			d.Scheduler.RecordRun(job.ID, scheduler.RunRecord{At: time.Now(), SessionID: sid, Status: "ok"})
 		}
@@ -67,7 +68,7 @@ func userOrDefault(u string) string {
 // createScheduledSession materialises a fresh session for one scheduled run,
 // mirroring the POST /sessions wiring (register + pin + watch + broadcast).
 // Returns the new session id, or "" on failure.
-func createScheduledSession(d serverDeps, squad, prompt string) string {
+func createScheduledSession(d serverDeps, owner, squad, prompt string) string {
 	squad = strings.ToLower(strings.TrimSpace(squad))
 	if squad == "" {
 		squad = toolkitagent.DefaultSquadName
@@ -80,22 +81,23 @@ func createScheduledSession(d serverDeps, squad, prompt string) string {
 	if d.Manager != nil && !d.Manager.HasSquad(squad) {
 		squad = toolkitagent.DefaultSquadName
 	}
-	meta := d.Registry.New(squad)
+	meta := d.Registry.NewFor(owner, squad)
 	if meta == nil {
 		return ""
 	}
 	title := scheduledTitle(prompt)
 	_ = sessions.SetConversationSquad(meta.ID, squad)
+	_ = sessions.SetConversationOwner(meta.ID, meta.UserID)
 	d.Registry.SetTitle(meta.ID, title)
 	_ = sessions.SetConversationTitle(meta.ID, title)
 	if d.RegisterSession != nil {
-		_ = d.RegisterSession(sessions.UserID(), meta.ID, title)
+		_ = d.RegisterSession(meta.UserID, meta.ID, title)
 	}
 	if d.Manager != nil {
 		d.Manager.Pin(meta.ID)
 	}
 	if d.PushMgr != nil {
-		d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.UserID())
+		d.PushMgr.Watch(d.rootCtx, d, meta.ID, meta.UserID)
 	}
 	if d.PushEvents != nil {
 		d.PushEvents.broadcast("session_created", meta.ID)

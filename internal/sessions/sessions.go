@@ -194,13 +194,21 @@ func ValidName(name string) bool {
 	return true
 }
 
-// New creates a session with an auto-generated petname ID.
-func (r *Registry) New(squad string) *SessionMeta {
+// New creates a session with an auto-generated petname ID, owned by UserID().
+func (r *Registry) New(squad string) *SessionMeta { return r.NewFor("", squad) }
+
+// NewFor creates a session with an auto-generated petname ID, owned by owner
+// ("" ⇒ UserID()). In the default single-user mode every caller passes ""
+// (or UserID() directly), so behaviour is unchanged.
+func (r *Registry) NewFor(owner, squad string) *SessionMeta {
+	if owner == "" {
+		owner = UserID()
+	}
 	now := time.Now()
 	r.mu.Lock()
 	m := &SessionMeta{
 		ID:         r.uniqueName(),
-		UserID:     UserID(),
+		UserID:     owner,
 		CreatedAt:  now,
 		LastUsedAt: now,
 		Squad:      squad,
@@ -464,5 +472,21 @@ func (r *Registry) List() []*SessionMeta {
 		}
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
+	return out
+}
+
+// ListFor returns List() restricted to sessions owned by owner; an empty
+// owner returns every session (same order as List).
+func (r *Registry) ListFor(owner string) []*SessionMeta {
+	all := r.List()
+	if owner == "" {
+		return all
+	}
+	out := all[:0:0]
+	for _, m := range all {
+		if m.UserID == owner {
+			out = append(out, m)
+		}
+	}
 	return out
 }

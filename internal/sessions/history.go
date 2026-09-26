@@ -424,6 +424,13 @@ func SetConversationSquad(sessionID, squad string) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Squad = squad })
 }
 
+// SetConversationOwner force-sets the session's owning login. Unlike the
+// stamp in SaveConversationFile (only when empty), this overwrites — the
+// shared server calls it right after creating a session for a request user.
+func SetConversationOwner(sessionID, owner string) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.UserID = owner })
+}
+
 // SetConversationTitle persists the session title without touching turns.
 func SetConversationTitle(sessionID, title string) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Title = title })

@@ -181,7 +181,10 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 			title = "Imported session"
 		}
 
-		newMeta := d.Registry.New(squad)
+		// owner is a placeholder for the single-user default; a later task
+		// (request-based ownerFor(c)) replaces this with the caller's identity.
+		owner := sessions.UserID()
+		newMeta := d.Registry.NewFor(owner, squad)
 		dst := &sessions.ConversationFile{
 			Title:      title,
 			Squad:      squad,
@@ -193,6 +196,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		_ = sessions.SetConversationOwner(newMeta.ID, owner)
 		d.Registry.SetTurns(newMeta.ID, len(conv.Turns))
 		d.Registry.SetTitle(newMeta.ID, title)
 		if collection != "" {
@@ -207,16 +211,16 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 
 		// Mirror the POST /sessions wiring so the import is a first-class session.
 		if d.RegisterSession != nil {
-			_ = d.RegisterSession(sessions.UserID(), newMeta.ID, title)
+			_ = d.RegisterSession(owner, newMeta.ID, title)
 		}
 		if d.Manager != nil {
 			d.Manager.Pin(newMeta.ID)
 			ctx, cancel := context.WithTimeout(d.rootCtx, reseedTimeout)
-			_ = d.Manager.ReseedSessionContext(ctx, sessionUserID(newMeta), newMeta.ID, squad, toExchanges(conv.Turns))
+			_ = d.Manager.ReseedSessionContext(ctx, owner, newMeta.ID, squad, toExchanges(conv.Turns))
 			cancel()
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, sessions.UserID())
+			d.PushMgr.Watch(d.rootCtx, d, newMeta.ID, owner)
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcast("session_created", newMeta.ID)

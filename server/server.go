@@ -379,7 +379,10 @@ func newEngine(d serverDeps) *gin.Engine {
 			})
 			return
 		}
-		meta := d.Registry.New(squad)
+		// owner is a placeholder for the single-user default; a later task
+		// (request-based ownerFor(c)) replaces this with the caller's identity.
+		owner := sessions.UserID()
+		meta := d.Registry.NewFor(owner, squad)
 		// Record the session's starting working directory durably. A new chat
 		// otherwise resolves its cwd via bashCwd.get's fallback to the fixed
 		// initial root without ever persisting it, so a server restart in a
@@ -407,6 +410,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Persist the squad immediately so a server restart before the
 		// first turn still sees the right squad on the session.
 		_ = sessions.SetConversationSquad(meta.ID, squad)
+		_ = sessions.SetConversationOwner(meta.ID, meta.UserID)
 		// File the new chat under the resolved collection (empty ⇒ General).
 		if collection != "" {
 			d.Registry.SetCollection(meta.ID, collection)
@@ -425,7 +429,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			if meta.Title != "" {
 				name = meta.Title
 			}
-			_ = d.RegisterSession(sessions.UserID(), meta.ID, name)
+			_ = d.RegisterSession(owner, meta.ID, name)
 		}
 		// Pin the new session to the current agent generation so it stays
 		// on that generation even if a reload happens mid-conversation.
@@ -433,7 +437,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			d.Manager.Pin(meta.ID)
 		}
 		if d.PushMgr != nil {
-			d.PushMgr.Watch(d.rootCtx, d, meta.ID, sessions.UserID())
+			d.PushMgr.Watch(d.rootCtx, d, meta.ID, owner)
 		}
 		// Tell other open browsers a session appeared so their sidebars refresh.
 		if d.PushEvents != nil {
