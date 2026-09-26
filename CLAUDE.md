@@ -5136,18 +5136,30 @@ shell-less `iapcli` tool, per-user LLM keys, Settings gated to
 
 - **`internal/identity`** ([internal/identity/](internal/identity/)) is the
   platform-agnostic resolver: `TokenFromRequest` pulls the token off the first
-  present cookie (URL-decoded, a leading `Bearer ` stripped); `CommandValidator`
+  present cookie (percent-decoded with `url.PathUnescape` — a `+` stays a literal
+`+`, since cookie values are not form-encoded and base64 tokens carry it — and a
+leading `Bearer ` stripped); `CommandValidator`
   runs an operator-configured argv (no shell) with `<auth_token_env>=<token>`
   set, parses stdout as JSON then YAML, and reads the login/roles out via
   dotted-path lookup (`auth_login_field`/`auth_roles_field`); `CachingValidator`
   memoises accepted/rejected verdicts by SHA-256 of the token (accepted until
   `min(auth_cache_ttl, decoded-not-verified JWT exp)`, rejected for 30s,
-  single-flighted per token so concurrent requests share one validator run);
+  single-flighted per token so concurrent requests share one validator run —
+  the shared run executes on a context **detached** from the first caller's
+  request (`context.WithoutCancel`, bounded by the validator's own timeout), and
+  each caller waits on its own ctx via `DoChan`, so one client aborting never
+  503s every request that joined the same validation);
   `TokenStore` is a process-wide `login → {token, exp}` map, updated on every
   validated request, that request-less turns (scheduler, spawn, mailbox,
   background notifications, durable-question resume) read the **session
-  owner's** latest token from. `LoginSegment(login)` is the safe,
-  case-folded, `..`-proof path-segment form of a login used for on-disk state.
+  owner's** latest token from. `NormalizeLogin` (trim + lower-case) is applied
+  **once, in the middleware**, so every owner comparison (`ownerGuard`,
+  `ListFor`), the `TokenStore` key and `/api/whoami` all see the same form.
+  `LoginSegment(login)` is the safe, case-folded, `..`-proof path-segment form
+  of a login used for on-disk state; when sanitisation had to **alter** the
+  (lower-cased) login it appends `-` + the first 8 hex of its SHA-256, so two
+  logins differing only in replaced runes (`a+b@x` vs `a_b@x`) never share a
+  directory.
   It knows nothing about IA Parc specifically — cookie names, the validator
   command, and the field paths are all configuration.
 - **`cookieIdentityMiddleware`** ([server/identity_cookie.go](server/identity_cookie.go))
@@ -5184,8 +5196,9 @@ shell-less `iapcli` tool, per-user LLM keys, Settings gated to
   (`userRoot`/`userWorkDir`, [server/identity_cookie.go](server/identity_cookie.go)):
   `preferences.json` (per-login `prefStores`, theme/locale/notifications never
   bleed across users), `collections.json` + `collections/` (see below), and a
-  `work/` directory that is the cwd new sessions and the session-less Files
-  panel start in. Outside cookie mode (login `""`) every one of these falls
+  `work/` directory that is the cwd new sessions — including **imported**
+  sessions (`POST /api/import/session`) and **fresh scheduled-run** sessions
+  (`createScheduledSession`) — and the session-less Files panel start in. Outside cookie mode (login `""`) every one of these falls
   back to the existing shared root — byte-identical no-op. Preference/cwd
   store maps are keyed by the **case-folded** `LoginSegment`, not the raw
   login, so `"Alice"` and `"alice"` share one on-disk store rather than two.
@@ -5215,8 +5228,39 @@ shell-less `iapcli` tool, per-user LLM keys, Settings gated to
   fail-closed case — a **session-scoped** event whose owner could not be
   resolved (the session was deleted before broadcast) is withheld rather than
   shown to every subscriber. This also gates durable `ask_user` replay on
-  `/api/events` connect, so one user's pending question is never shown to
-  another.
+  `/api/events` connect **and** the live `ask_user`/`ask_user_cancel` bus
+  events, so one user's pending question is never shown to another (both
+  paths pinned by `TestEventsStreamScopesLiveAskUser` /
+  `TestEventsStreamScopesAskUserReplay`,
+  [server/identity_events_test.go](server/identity_events_test.go)). Answering
+  is scoped too: `askuser.Registry.Resolve` falls back to a cross-session
+  lookup by question id (for MCP input prompts raised under an ephemeral
+  sub-agent session), so `handleAskUserResponse` first checks
+  `Registry.SessionOf(qid)` is owned by the caller and answers **404**
+  otherwise — an unattributable question (unknown session) is refused, which
+  means an MCP `${input:}` prompt cannot be answered in cookie mode.
+- **Process-wide agent tool groups are owner-scoped via resolvers.**
+  `installOwnerScoping` ([server/main.go](server/main.go), cookie mode only)
+  installs `teammates.SetOwnerResolver(mailboxOwnerResolver(registry))`
+  (mailbox address → owner, by matching the `agent.SessionSuffix(owner,
+  session)+":"` prefix) and `sessindex.SetOwnerResolver` (session id → owner).
+  With them: `teammate_list` shows only the caller's own sessions,
+  `teammate_tell`/`teammate_ask` to another owner's session is refused with an
+  "unknown recipient" error (indistinguishable from a missing name), and the
+  mailbox watcher **drops** a cross-owner message in `pushManager.inject`
+  (`mailboxSenderAllowed`) rather than running a turn — which would execute
+  with the *recipient's* token on the sender's words. `search_sessions`,
+  `read_session` and `list_sessions` see only sessions owned by the calling
+  session's owner (caller = `events.RootSessionFromContext`, which survives
+  into sub-agents, else `tc.SessionID()`); another owner's session reads as
+  "not found"; an unattributable caller sees nothing. nil resolvers ⇒ no
+  scoping — single-user is unchanged.
+- **Boot-time watchers get the full deps.** `watchPersistedSessions`
+  ([server/main.go](server/main.go)) re-watches every persisted session with
+  the complete `serverDeps` (it once got a hand-built struct without `Cookie`,
+  so after a restart mailbox/background turns never carried the owner's
+  token even once they logged back in). Pinned by
+  `TestBootWatcherInjectsWithOwnersToken`.
 - **Token delivery to tools is `fstools.WithShellEnv`, deliberately narrow.**
   Every turn entry point that can act on the user's behalf
   (`handleMessages`/interactive, `injectTurnRouted`/scheduler-mailbox-spawn,
@@ -5241,12 +5285,13 @@ shell-less `iapcli` tool, per-user LLM keys, Settings gated to
     config; there is no per-login Settings restriction yet (`auth_admin_roles`
     is parsed into `identity.Config.AdminRoles` but not enforced anywhere in
     this tier).
-  - **The agent `sessions` tool group (`search_sessions`/`read_session`/…,
-    [internal/sessindex/tools.go](internal/sessindex/tools.go)) is not
-    owner-filtered** — only the live HTTP search box
-    (`GET /api/search/sessions`) filters by owner, and it does so **after**
-    the semantic top-k (so a user's own top-k slots can be spent on hits later
-    discarded as someone else's).
+  - **The live HTTP search box (`GET /api/search/sessions`) filters by owner
+    after the semantic top-k**, so a user's own top-k slots can be spent on
+    hits later discarded as someone else's (the agent `sessions` tools
+    over-fetch before filtering; the route does not yet).
+  - **The Helper's `set_preference` / `get_settings(preferences)` still target
+    the shared `preferences.json`**, not the caller's per-user one — Settings
+    is global in this tier anyway.
   - **The agent can print its own token** (`env`, or by echoing
     `$<auth_token_env>`) into the transcript/LLM context — it is the user's
     own token, and the target tier's shell-less `iapcli` tool exists

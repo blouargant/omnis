@@ -40,9 +40,18 @@ same process:
 - Settings edits are **global**: any user can change the shared agent/model
   config.
 - The agent can print its own token (`env`) into the chat transcript.
-- The `search_sessions`/`read_session` agent tools are not owner-filtered
-  (only the live search *box* in the UI is, and only after the semantic
-  top-k).
+- The Helper's `set_preference` / `get_settings(preferences)` still read and
+  write the **shared** preferences file, not the caller's own (Settings is
+  global in this tier).
+
+What *is* scoped per user: sessions, schedules, collections, preferences set
+from the UI, working directories (new, imported and scheduled sessions start
+in the user's own `work/` directory), `/api/events` (including pending and
+live `ask_user` questions — and answering one is refused unless you own its
+session), the teammate mailbox (an agent can neither list nor message another
+user's sessions, and a cross-user message is dropped rather than run), and the
+agent's past-session search tools (`search_sessions`/`read_session`/
+`list_sessions`). Logins are compared trimmed and lower-cased.
 
 Deploy this only for a namespace of users who are already trusted with shell
 access on the platform they're driving (IA Parc project operators), not for a
