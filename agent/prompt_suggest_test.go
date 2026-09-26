@@ -26,6 +26,14 @@ func TestCleanSuggestion(t *testing.T) {
 		{"shell escape", "!rm -rf build", ""},
 		{"memory write", "# remember this", ""},
 		{"too long", strings.Repeat("word ", 40), ""},
+		{"none translated fr", "Aucun", ""},
+		{"none translated fr punct", "Aucune.", ""},
+		{"none explained fr", "Aucune suite naturelle car la réponse se termine par un résumé.", ""},
+		{"none explained en", "No natural follow-up: the reply concludes.", ""},
+		{"nothing en", "Nothing.", ""},
+		{"none es", "Ninguno", ""},
+		{"none de", "Keine", ""},
+		{"real question starting with No kept", "No, I meant the 9B model — how do I run it?", "No, I meant the 9B model — how do I run it?"},
 		{"thinking tag", "<thinking>", ""},
 		{"xml-ish tag with text", "<answer>Show me the diff</answer>", ""},
 		{"bracket placeholder", "[no A message yet]", ""},
@@ -77,7 +85,8 @@ func TestBuildSuggestRequestCapsKeepingTail(t *testing.T) {
 	if strings.Contains(txt, "START") {
 		t.Error("head should be cut")
 	}
-	if n := len([]rune(txt)); n > suggestTranscriptCap+200 {
+	// The repeated ending section adds at most suggestEndingChars + its header.
+	if n := len([]rune(txt)); n > suggestTranscriptCap+suggestEndingChars+len([]rune(suggestEndingHeader))+200 {
 		t.Errorf("transcript not capped: %d runes", n)
 	}
 }
@@ -133,5 +142,37 @@ func TestBuildSuggestRequestDisablesThinking(t *testing.T) {
 	tc := req.Config.ThinkingConfig
 	if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 0 {
 		t.Fatalf("want ThinkingBudget 0, got %+v", tc)
+	}
+}
+
+// The suggestion must follow from how the last reply ENDS, so the tail of that
+// reply is repeated in its own section after the transcript — otherwise the
+// model picks any point from a long answer.
+func TestBuildSuggestRequestHighlightsEndOfLastReply(t *testing.T) {
+	long := strings.Repeat("middle detail. ", 400) + "FreeToken is close to vLLM."
+	txt := requestText(t, []Exchange{
+		{User: "q1", Assistant: "old answer ending"},
+		{User: "q2", Assistant: long},
+	})
+	i := strings.Index(txt, suggestEndingHeader)
+	if i < 0 {
+		t.Fatalf("missing ending section:\n%.300s", txt[len(txt)-300:])
+	}
+	ending := txt[i:]
+	if !strings.HasSuffix(strings.TrimSpace(ending), "FreeToken is close to vLLM.") {
+		t.Errorf("ending section must end with the last reply's tail:\n%s", ending)
+	}
+	if strings.Contains(ending, "old answer ending") {
+		t.Error("ending section must come from the LAST reply only")
+	}
+	if n := len([]rune(ending)); n > suggestEndingChars+len(suggestEndingHeader)+10 {
+		t.Errorf("ending section not capped: %d runes", n)
+	}
+}
+
+func TestBuildSuggestRequestNoEndingWithoutAssistantText(t *testing.T) {
+	txt := requestText(t, []Exchange{{User: "only a question"}})
+	if strings.Contains(txt, suggestEndingHeader) {
+		t.Error("no ending section when the last turn has no assistant text")
 	}
 }

@@ -3327,6 +3327,21 @@ in `suggestStore` keyed **per session on the turn count**, single-flighted per
   ([core/llm/openai.go](core/llm/openai.go) `buildRequest`; any other budget, or
   none, leaves the request byte-identical). `chat_template_kwargs.enable_thinking`
   was rejected: the Scaleway-backed `Simple` answers it with HTTP 500.
+- **The suggestion follows how the last reply ENDS.** Besides the transcript, the
+  request repeats the last reply's final ~800 runes under `suggestEndingHeader`
+  (`lastReplyEnding`), and the prompt asks to answer the question that ending asks,
+  pursue the point it raises last, or take up the step it offers — and to output
+  `NONE` when the reply ends by concluding (a conclusion, a recap, a list of
+  sources). Before this the model picked any detail from a long answer (FreeToken
+  reply ending on a vLLM comparison → a question about the KV floor from the middle
+  table). Blind score against a pre-registered expectation per conversation
+  (open ⇒ follows the ending; closed ⇒ `NONE` ideal): `hosted` 2.23 → 2.96. Closing
+  detection is partial: `NONE` on the Einstein-quote and CUDA replies, rarely on
+  replies ending with a warning + link or a recommendation table.
+- **`suggestNoneRE`**: the "no suggestion" answer arrives translated ("Aucun",
+  "Keine") or explained ("Aucune suite naturelle car…", "No natural follow-up: …")
+  as well as `NONE`; a first word meaning "none" in the UI languages is treated as
+  no suggestion (costs the rare real message opening with "Rien…").
 - **`cleanSuggestion` also rejects a leading `<` or `[`** — model scaffolding such as
   `<thinking>` or `[no A message yet]` (seen on `premium`) would otherwise be shown
   verbatim as the placeholder.
