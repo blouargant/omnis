@@ -57,3 +57,6 @@ __pycache__/
 # stray build artifact (was committed by mistake)
 yoke
 .playwright-mcp/
+
+# packaging/k8s/iaparc-test/build.sh staging dir (iapcli binary + skills)
+.build/

@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omnis-config
+  namespace: test-system
+data:
+  OMNIS_IDENTITY_MODE: "cookie"
+  OMNIS_AUTH_COOKIES: "iaparc_token,auth._token.local"
+  OMNIS_AUTH_VALIDATE_CMD: "iapcli -C /etc/iapcli/.iapcli.yaml user get"
+  OMNIS_AUTH_TOKEN_ENV: "IAPCLI_TOKEN"
+  # login field / roles field: to confirm (Task 0 spike — not yet run).
+  OMNIS_AUTH_LOGIN_FIELD: "login"
+  OMNIS_AUTH_ROLES_FIELD: "roles"
+  OMNIS_AUTH_ADMIN_ROLES: "admin"
+  OMNIS_AUTH_LOGIN_URL: "https://test.iaparc.atoutlinux.net/sso/login"
+  OMNIS_SERVER_BASE_PATH: "/omnis"
+  OMNIS_SERVER_ADDR: ":8080"
+  OMNIS_UPDATE_CHECK: "false"
+  server.yaml: |
+    open_browser: false
+    a2a_enabled: false
+    update_check: false
+  .iapcli.yaml: |
+    contexts:
+        default:
+            address: test.iaparc.atoutlinux.net
+            port: "443"
+            insecure: ""
+            auth: {token: ""}
+    current_context: default
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: omnis-data
+  namespace: test-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-provisioner
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnis
+  namespace: test-system
+  labels: {app: omnis}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: omnis}
+  template:
+    metadata:
+      labels: {app: omnis}
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: iapregistrykey
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: omnis
+          image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: {name: omnis-config}
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: omnis-llm, key: api_key}
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                secretKeyRef: {name: omnis-llm, key: base_url}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: config, mountPath: /etc/omnis/server.yaml, subPath: server.yaml, readOnly: true}
+            - {name: config, mountPath: /etc/iapcli/.iapcli.yaml, subPath: .iapcli.yaml, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /omnis/api/health, port: 8080}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 2Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: omnis-data}
+        - name: config
+          configMap: {name: omnis-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omnis
+  namespace: test-system
+spec:
+  selector: {app: omnis}
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: omnis
+  namespace: test-system
+  annotations:
+    nginx.ingress.kubernetes.io/auth-url: http://iaparc-go-api.test-system.svc.cluster.local:9080/sso/verify/
+    nginx.ingress.kubernetes.io/auth-signin: https://test.iaparc.atoutlinux.net/sso/login
+    nginx.ingress.kubernetes.io/auth-response-headers: Authorization, Set-Cookie
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - test.iaparc.atoutlinux.net
+      secretName: iaparc-system-certificate
+  rules:
+    - host: test.iaparc.atoutlinux.net
+      http:
+        paths:
+          - path: /omnis
+            pathType: Prefix
+            backend:
+              service:
+                name: omnis
+                port: {number: 8080}
