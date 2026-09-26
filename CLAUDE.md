@@ -1021,6 +1021,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/a2a/` | A2A protocol client (`client.go`) + ADK tool wiring (`tools.go`); config types in `a2a.go` |
 | `internal/tui/` | tview chat UI (trace pane + streaming chat) |
 | `internal/selfupdate/` | In-app package auto-update: `DetectMethod` (deb/rpm/brew/msi/pip/raw, runtime detection of how the running binary was installed), `CheckLatest` (GitHub `/releases/latest`, stable-only, semver-gated), `Install` (per-method, `sudo -S` for deb/rpm), `ManualInstructions` fallback. Server-only; see "Self-update" |
+| `internal/identity/` | Shared **cookie-identity** mode's resolver: `TokenFromRequest` (cookie extraction), `CommandValidator` (runs an operator command, parses JSON/YAML output), `CachingValidator` (memoises by token hash, TTL bounded by a decoded-not-verified JWT `exp`), `TokenStore` (process memory, `login → {token,exp}`, for request-less turns), `LoginSegment` (safe per-user directory name). Knows nothing about any particular platform. Server-only; see "Shared deployment (cookie identity)" |
 | `server/` | HTTP API server with Bearer token auth |
 | `server/a2a_server.go` | Receives inbound A2A `tasks/send` / `tasks/sendSubscribe` calls; routes by squad + session |
 
@@ -2570,6 +2571,15 @@ mistaken for a broken reference.
 | `OMNIS_SERVER_BASE_PATH` | Base path prefix the HTTP server + web UI are mounted under (overrides `server.yaml` `base_path`); normalised to a leading `/` with no trailing slash ([server/main.go](server/main.go) `normalizeBasePath`) |
 | `OMNIS_USER_ID` | The login this omnis-server instance serves (multi-user deployments run **one process per user** — see "Multi-user deployment (per-user containers)"). Overrides `server.yaml` `user_id`. Sets `sessions.UserID()`, the owner stamped on every session (`user_id` in the conversation file); unset ⇒ the single-user default `web-user` |
 | `OMNIS_IDENTITY_HEADER` | Names the request header the SSO gateway fills with the authenticated login (e.g. `X-Forwarded-User`). When set, `identityMiddleware` ([server/identity.go](server/identity.go)) runs **after** the token check on every `/api/*` route: 401 when the header is missing, 403 when it differs from `OMNIS_USER_ID`. Requires an explicit `OMNIS_USER_ID` (startup error otherwise — the default would match any misrouted request). Overrides `server.yaml` `identity_header` |
+| `OMNIS_IDENTITY_MODE` | Set to `cookie` to enable **shared** (multi-user, one process) mode — see "Shared deployment (cookie identity)". Overrides `server.yaml` `identity_mode`. Mutually exclusive with `OMNIS_USER_ID`/`OMNIS_IDENTITY_HEADER` (one-server-per-user) and with `a2a_enabled: true` (a fatal startup error either way) |
+| `OMNIS_AUTH_COOKIES` | Comma list of cookie names checked, in order, for the platform session token in cookie mode. Overrides `server.yaml` `auth_cookies`. Required when `identity_mode: cookie` |
+| `OMNIS_AUTH_VALIDATE_CMD` | The command (argv, no shell — parsed by `identity.SplitArgs`) that turns a token into an identity: exit 0 + JSON/YAML on stdout = accepted. Overrides `server.yaml` `auth_validate_cmd`. Required; the binary must resolve on `PATH` at startup |
+| `OMNIS_AUTH_TOKEN_ENV` | The environment variable name the validator command (and, later, shell tools — see "Token delivery to tools" below) receive the token under. Overrides `server.yaml` `auth_token_env`. Required |
+| `OMNIS_AUTH_LOGIN_FIELD` | Dotted path into the validator's parsed output naming the login (e.g. `user.login`). Overrides `server.yaml` `auth_login_field`. Required |
+| `OMNIS_AUTH_ROLES_FIELD` | Dotted path into the validator's parsed output naming the caller's roles (array or comma string). Overrides `server.yaml` `auth_roles_field`. Optional |
+| `OMNIS_AUTH_ADMIN_ROLES` | Comma list of roles that would grant admin. Parsed into `identity.Config.AdminRoles` but **not yet enforced anywhere** in this (test) tier — reserved for a future target tier that restricts Settings to these roles. Overrides `server.yaml` `auth_admin_roles` |
+| `OMNIS_AUTH_LOGIN_URL` | The platform's login URL, returned in a cookie-mode 401's `login_url` field so the web UI can redirect there (with a `{return}` placeholder replaced by the current page URL) instead of showing the bearer-token prompt. Overrides `server.yaml` `auth_login_url`. Optional — empty logs a startup warning ("the web UI cannot redirect to the platform login") but does not fail |
+| `OMNIS_AUTH_CACHE_TTL` | Go duration bounding how long an accepted token is cached before re-validating (default 15m, further capped by the token's own JWT `exp` when it decodes as one). Overrides `server.yaml` `auth_cache_ttl` |
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
 | `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
 | `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
@@ -5105,6 +5115,151 @@ sessions carry `web-user`, no middleware is installed, the footer shows nothing
 (directory, team collections, shared sessions) and user-to-user messaging;
 milestone 1 only lays their two prerequisites — a real `user_id` on every
 persisted session and a verified request identity.
+
+### Shared deployment (cookie identity)
+
+**Mutually exclusive with milestone 1 above.** Where "Multi-user deployment"
+runs **one omnis-server per user**, cookie mode runs **one omnis-server for
+several users** of a platform that already has its own web login: each
+request is identified from the browser's existing platform session cookie,
+not from a per-container secret. `resolveCookieIdentity`
+([server/identity_cookie.go](server/identity_cookie.go)) refuses to start with
+`OMNIS_USER_ID`/`OMNIS_IDENTITY_HEADER` set (one-per-user is a different
+model) or with `a2a_enabled: true` (inbound A2A carries no user identity).
+Enable with `identity_mode: cookie` in `server.yaml` or `OMNIS_IDENTITY_MODE=cookie`
+(see the env-var table for the full `OMNIS_AUTH_*` set this pulls in). This is
+the **test tier** of the design — see
+[docs/superpowers/specs/2026-09-26-shared-cookie-identity-design.md](docs/superpowers/specs/2026-09-26-shared-cookie-identity-design.md)
+for the restricted **target tier** this is scoped to only *narrow into* (a
+shell-less `iapcli` tool, per-user LLM keys, Settings gated to
+`auth_admin_roles`), not to expand past.
+
+- **`internal/identity`** ([internal/identity/](internal/identity/)) is the
+  platform-agnostic resolver: `TokenFromRequest` pulls the token off the first
+  present cookie (URL-decoded, a leading `Bearer ` stripped); `CommandValidator`
+  runs an operator-configured argv (no shell) with `<auth_token_env>=<token>`
+  set, parses stdout as JSON then YAML, and reads the login/roles out via
+  dotted-path lookup (`auth_login_field`/`auth_roles_field`); `CachingValidator`
+  memoises accepted/rejected verdicts by SHA-256 of the token (accepted until
+  `min(auth_cache_ttl, decoded-not-verified JWT exp)`, rejected for 30s,
+  single-flighted per token so concurrent requests share one validator run);
+  `TokenStore` is a process-wide `login → {token, exp}` map, updated on every
+  validated request, that request-less turns (scheduler, spawn, mailbox,
+  background notifications, durable-question resume) read the **session
+  owner's** latest token from. `LoginSegment(login)` is the safe,
+  case-folded, `..`-proof path-segment form of a login used for on-disk state.
+  It knows nothing about IA Parc specifically — cookie names, the validator
+  command, and the field paths are all configuration.
+- **`cookieIdentityMiddleware`** ([server/identity_cookie.go](server/identity_cookie.go))
+  replaces the bearer-token + `identityMiddleware` chain wholesale in this mode
+  (`newEngine`, [server/server.go](server/server.go)): it extracts the cookie
+  token, validates it, stores the token in the `TokenStore`, and plants
+  `identity.WithIdentity` on the request context. A login-less "success" from
+  the validator is treated as a hard failure (never falls through to a shared
+  identity). Paired with **`sameOriginGuard`**, a CSRF defence for every unsafe
+  method: because the platform cookie is ambient, a hostile page could fire a
+  preflight-free "simple" POST at a state-changing route (the shell escape);
+  the guard refuses when `Sec-Fetch-Site` says the request is cross-site, or
+  when `Origin` (or, absent that, `Referer`) names a different host than the
+  request's own `Host` header — which means it **requires a reverse proxy that
+  preserves the Host header** (ingress-nginx does this by default); the
+  terminal WebSocket's `CheckOrigin` carries the identical same-origin
+  assumption. `POST /api/terminal/token` is **not mounted** in cookie mode
+  (the cookie itself already guards the WS handshake — `handleTerminal` skips
+  the short-lived-token check); the terminal WS route instead runs the cookie
+  check plus `ownerGuard` directly.
+- **`ownerGuard`** ([server/identity_cookie.go](server/identity_cookie.go)) is
+  the per-request ownership check, keyed on **`c.FullPath()`** (the matched
+  route *pattern*, not the literal path) so every route under `/sessions/:id`
+  and `/schedules/:id` is covered automatically, including ones added later —
+  and a `session=` query parameter naming a session (used by a few
+  session-less-looking routes) is checked the same way. A mismatch is a
+  **404**, not 403, so another user's session/schedule id cannot even be
+  confirmed to exist. Outside cookie mode it is a pass-through. Locked in by
+  `TestOwnerGuardCoversEveryIDRoute` ([server/identity_scope_test.go](server/identity_scope_test.go)),
+  which **enumerates the live router's registered routes** rather than a
+  hand-maintained list, so a new `/sessions/:id/...` route is covered without
+  anyone remembering to add it to a test.
+- **Per-user state** lives under `$OMNIS_HOME/users/<LoginSegment(login)>/`
+  (`userRoot`/`userWorkDir`, [server/identity_cookie.go](server/identity_cookie.go)):
+  `preferences.json` (per-login `prefStores`, theme/locale/notifications never
+  bleed across users), `collections.json` + `collections/` (see below), and a
+  `work/` directory that is the cwd new sessions and the session-less Files
+  panel start in. Outside cookie mode (login `""`) every one of these falls
+  back to the existing shared root — byte-identical no-op. Preference/cwd
+  store maps are keyed by the **case-folded** `LoginSegment`, not the raw
+  login, so `"Alice"` and `"alice"` share one on-disk store rather than two.
+- **Collections are root-scoped, not global.** `internal/sessions.Collections`
+  and `internal/collectionctx.Store` now take a root directory
+  (`sessions.CollectionsIn(root)` / `collectionctx.In(root)`); the existing
+  package-level functions are thin wrappers around the shared root, so
+  single-user mode is unchanged. Server request/worker paths resolve the
+  caller's (or session owner's) store via `collectionsFor`/`ctxStoreFor`
+  ([server/identity_cookie.go](server/identity_cookie.go)); the rename/delete
+  cascade and the auto-update worker are scoped to the acting/owning user, so
+  one user editing their collections never touches another's. `agent.SetCollectionRootResolver`
+  (installed only in cookie mode, [server/main.go](server/main.go)) is what
+  lets the `collection_ctx` plugin resolve a session's collection prose from
+  the right per-user root during a turn. **Legacy data in the shared root
+  (from before cookie mode, or from single-user use) is not migrated** — it is
+  simply invisible to every cookie-mode login; sessions still stamped with the
+  single-user default owner (`"web-user"`) map to `users/web-user/`.
+- **Push events are owner-scoped.** `pushMsg` carries an `Owner` field (the
+  owning login for a session-scoped event, or an explicit owner for a
+  session-less one like `collections_changed`); **`pushVisible(login, m)`**
+  ([server/mailbox_push.go](server/mailbox_push.go)) is the single decision
+  point every `/api/events` subscriber's dispatch goes through: outside cookie
+  mode (`login == ""`) everything is visible (no-op); in cookie mode an event
+  naming an owner reaches only that owner, a session-less *and* owner-less
+  event (`update_available`, config reload) reaches everyone, and — the
+  fail-closed case — a **session-scoped** event whose owner could not be
+  resolved (the session was deleted before broadcast) is withheld rather than
+  shown to every subscriber. This also gates durable `ask_user` replay on
+  `/api/events` connect, so one user's pending question is never shown to
+  another.
+- **Token delivery to tools is `fstools.WithShellEnv`, deliberately narrow.**
+  Every turn entry point that can act on the user's behalf
+  (`handleMessages`/interactive, `injectTurnRouted`/scheduler-mailbox-spawn,
+  the `!` shell-escape route, the terminal WebSocket) calls
+  `d.shellEnvFor(owner)` and plants the result with `fstools.WithShellEnv`
+  ([core/tools/shellenv.go](core/tools/shellenv.go)) — a generic
+  "extra `NAME=value` entries" context value `core/tools` knows nothing about
+  identity to consume: the `Bash` tool copies it into `BashIn.Env`,
+  `RunBashInteractive` (the `!` escape) reads it from its context, and
+  `bash_background`/`monitor` pass it to the background queue. **Deliberately
+  NOT wired into `run_tests`** (it shares `RunShellCaptured` with the hooks
+  engine, which must never see the token), **hooks** (admin-authored shared
+  config), **MCP** stdio servers (one shared process pool), or **LSP**
+  servers. With no token planted (single-user/CLI/TUI, or no live token for
+  that login) nothing is injected — byte-identical to before.
+- **Accepted test-tier limits** (do not "fix" these without re-reading the
+  design's target-tier scope — narrowing, not widening, is the plan):
+  - **No OS-level isolation between users** — every login's agent runs as the
+    same Unix account, so the scoping above protects the *UI*, not against a
+    user's own agent reading the shared filesystem.
+  - **Settings edits are global** — any user can change the shared agent
+    config; there is no per-login Settings restriction yet (`auth_admin_roles`
+    is parsed into `identity.Config.AdminRoles` but not enforced anywhere in
+    this tier).
+  - **The agent `sessions` tool group (`search_sessions`/`read_session`/…,
+    [internal/sessindex/tools.go](internal/sessindex/tools.go)) is not
+    owner-filtered** — only the live HTTP search box
+    (`GET /api/search/sessions`) filters by owner, and it does so **after**
+    the semantic top-k (so a user's own top-k slots can be spent on hits later
+    discarded as someone else's).
+  - **The agent can print its own token** (`env`, or by echoing
+    `$<auth_token_env>`) into the transcript/LLM context — it is the user's
+    own token, and the target tier's shell-less `iapcli` tool exists
+    specifically to remove this.
+  - **Body-level `session` fields are not owner-checked** — `ownerGuard` only
+    inspects the route pattern and query parameters, so a JSON body's
+    `session` field (`POST /api/fileref/resolve`, `PUT /api/file`) is not
+    validated against the caller's own sessions.
+- **The plan's Task 0 spike — confirming the platform gateway's cookie token
+  is accepted by `iapcli` (the intended `auth_validate_cmd`) — has not been
+  run as of this writing.** Treat it as an open prerequisite before deploying
+  this mode against the real IA Parc gateway (see the operator guide,
+  [docs/iaparc-shared-deployment.md](docs/iaparc-shared-deployment.md)).
 
 ### Event audit log (`agent_events_<buildTimestamp>.log`)
 
