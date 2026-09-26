@@ -20,6 +20,7 @@
 ## 1.10 (in development) — Durable agent questions
 
 - **Questions survive a restart** — a question an agent asked you is kept across a server restart or crash; answering it afterwards resumes the task.
+- **Reply suggestions** — after each answer the composer shows a suggested next message; press Tab to use it (never sent automatically). Toggle in Settings → Appearance.
 
 ## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation
 

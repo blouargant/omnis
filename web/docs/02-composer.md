@@ -11,6 +11,18 @@ message you send to the agent.
   longer prompts.
 - The **Stop** button cancels a streaming response.
 
+## Reply suggestions
+
+After the agent answers, the empty composer shows a suggested next message in
+grey italics with a **Tab ⇥** badge. Press **Tab** to copy it into the composer,
+edit it if you like, then send it as usual — a suggestion is never sent on its
+own. Start typing and it disappears; clear the field and it comes back.
+
+Suggestions are written by the small evaluator model (the `/goal` evaluator,
+`eval_model_ref` in Settings → Models), so each one costs one cheap call, made
+only for a chat that is on screen. Turn them off in **Settings → Appearance →
+Reply suggestions**.
+
 ## Unsent drafts are kept per session
 
 Text you have typed but not yet sent is remembered **per chat tab**. Switch to

@@ -3275,6 +3275,50 @@ the existing `Registry.SetTitle` (in-memory) + `sessions.SetConversationTitle`
 persistence). CLI/TUI are untouched (titling is server-only). **No-op contract:**
 nothing changes for sessions that already have a title or have prior turns.
 
+### Prompt suggestions (Web UI)
+
+After a reply, the empty composer shows a predicted next user message; **Tab**
+copies it in (never sends). **Pull, not push**: the client calls
+`GET /api/sessions/:id/suggestion` → `{suggestion, turns, busy}`
+([server/prompt_suggest.go](server/prompt_suggest.go)) when a turn ends in a
+visible pane (send `finally`, `endRemoteBusy`), on `activateTab`, and after a
+`session_rewound`. The server generates on demand via
+`Manager.SuggestNextPrompt` ([agent/prompt_suggest.go](agent/prompt_suggest.go)) —
+the same isolated one-off-LLM pattern as `EvaluateGoal`, on `evalModel`
+(`eval_model_ref` → leader), last 3 exchanges, 6000-rune tail cap — and caches it
+in `suggestStore` keyed **per session on the turn count**, single-flighted per
+(session, turns). Failures are not cached; `NONE` is.
+
+- **No call** for: pref `prompt_suggestions: false` (`preferences.json`, absent ⇒
+  on, read server-side each request), archived/hidden sessions, 0 turns.
+- **GOTCHA — a turn in flight answers `busy:true`, never generates.** `Turns` is
+  bumped at turn START but the conversation file only gains the turn at the END,
+  so a generation mid-turn would cache a suggestion for the old state under the
+  new key. The client's `done` can arrive before the run guard is released, so
+  `fetchSuggestion` retries (3 × 1 s) on `busy`.
+- **`suggestStore.get` recovers a panicking generator** — a panic is logged and
+  treated as an uncached failure, so an in-flight call can never wedge a
+  session's key.
+- **`cleanSuggestion` rejects a leading `/`, `!` or `#`** — the composer would run
+  it as a slash command, a host shell escape or an AGENT.md write on send.
+- **Session fields are read through `Registry.Snapshot(id)`** — a race-free copy,
+  so concurrent turns never see torn reads.
+- **Display = the textarea's native `placeholder`** (the text itself is transparent
+  for the `@file` backdrop, but `::placeholder` has its own colour), so the browser
+  does hide-on-type / show-when-empty. `composerPlaceholder(panel)` is the single
+  source for the composer hint (archived message > suggestion > default).
+  `#composer-wrap.has-suggestion` + `:placeholder-shown` drive the italic style and
+  the `Tab ⇥` badge.
+- **Tab precedence**: the slash/`!`/`@` menu block in `onPromptKeydown` runs first;
+  the suggestion is accepted only with no modifier, empty composer, no IME, no turn
+  in flight. Otherwise Tab keeps its default.
+- Settings → Appearance toggle (`savePromptSuggestions`, localStorage
+  `agent_toolkit_prompt_suggestions` + `PUT /api/preferences`) calls
+  `window.setPromptSuggestionsEnabled`.
+- **No-op contract:** pref off or route never called ⇒ no model call, default
+  placeholder, Tab unchanged. The turn path is not modified. CLI/TUI and the three
+  assistant mini-chats are untouched.
+
 ### Project memory (`AGENT.md`), `/init`, and `#`
 
 Omnis's equivalent of Claude Code's `CLAUDE.md`. `AGENT.md` files are discovered,
