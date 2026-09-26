@@ -22,6 +22,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/deps"
 )
@@ -62,7 +63,10 @@ func hasInputReferences(s Server) bool {
 // generations.
 //
 // Cache key is the input id alone (not (server, id)) so the same input
-// referenced by multiple servers prompts the user exactly once.
+// referenced by multiple servers prompts the user exactly once. In the shared
+// (cookie-identity) deployment an owner resolver is installed (see
+// SetOwnerResolver) and the key becomes (owner, input id), so one user's typed
+// credential is never served to another user's prompt.
 type InputResolver struct {
 	reg *askuser.Registry
 
@@ -92,13 +96,14 @@ func (r *InputResolver) Resolve(ctx context.Context, in Input) (string, error) {
 	if in.ID == "" {
 		return "", fmt.Errorf("mcp input: missing id")
 	}
+	key := inputCacheKey(ctx, in.ID)
 
 	r.mu.Lock()
-	if v, ok := r.cache[in.ID]; ok {
+	if v, ok := r.cache[key]; ok {
 		r.mu.Unlock()
 		return v, nil
 	}
-	if wait, ok := r.inflight[in.ID]; ok {
+	if wait, ok := r.inflight[key]; ok {
 		r.mu.Unlock()
 		select {
 		case <-wait:
@@ -106,7 +111,7 @@ func (r *InputResolver) Resolve(ctx context.Context, in Input) (string, error) {
 			return "", ctx.Err()
 		}
 		r.mu.Lock()
-		v, ok := r.cache[in.ID]
+		v, ok := r.cache[key]
 		r.mu.Unlock()
 		if ok {
 			return v, nil
@@ -114,18 +119,18 @@ func (r *InputResolver) Resolve(ctx context.Context, in Input) (string, error) {
 		return "", fmt.Errorf("mcp input %q: concurrent resolution failed", in.ID)
 	}
 	done := make(chan struct{})
-	r.inflight[in.ID] = done
+	r.inflight[key] = done
 	r.mu.Unlock()
 
-	v, err := r.askAndCache(ctx, in)
+	v, err := r.askAndCache(ctx, in, key)
 	close(done)
 	r.mu.Lock()
-	delete(r.inflight, in.ID)
+	delete(r.inflight, key)
 	r.mu.Unlock()
 	return v, err
 }
 
-func (r *InputResolver) askAndCache(ctx context.Context, in Input) (string, error) {
+func (r *InputResolver) askAndCache(ctx context.Context, in Input, key string) (string, error) {
 	q := r.buildQuestion(in)
 	ans, err := r.reg.Ask(ctx, sessionIDFromContext(ctx), q)
 	if err != nil {
@@ -142,7 +147,7 @@ func (r *InputResolver) askAndCache(ctx context.Context, in Input) (string, erro
 		return "", fmt.Errorf("mcp input %q: empty answer", in.ID)
 	}
 	r.mu.Lock()
-	r.cache[in.ID] = val
+	r.cache[key] = val
 	r.mu.Unlock()
 	return val, nil
 }
@@ -190,10 +195,45 @@ func answerToValue(in Input, ans askuser.Answer) string {
 // type-asserting against the ADK ReadonlyContext interface. Plain
 // context.Background() returns "".
 func sessionIDFromContext(ctx context.Context) string {
+	// Prefer the turn's user-facing session. Under a sub-agent, ctx's own
+	// SessionID() is agenttool's ephemeral per-call session, which no pane
+	// displays and — in cookie mode — no user owns, so a question registered
+	// there could never be delivered or answered. Every turn entry point plants
+	// the real id with events.WithRootSession and it propagates into sub-agents.
+	if id := events.RootSessionFromContext(ctx); id != "" {
+		return id
+	}
 	if sc, ok := ctx.(interface{ SessionID() string }); ok {
 		return sc.SessionID()
 	}
 	return ""
+}
+
+var (
+	ownerMu       sync.RWMutex
+	ownerResolver func(sessionID string) string
+)
+
+// SetOwnerResolver installs the process-wide session → owner lookup used to
+// scope the input cache per user. Only the shared (cookie-identity) server
+// installs one; nil (the default) keeps the single-user behaviour of one
+// process-wide cache keyed by input id.
+func SetOwnerResolver(fn func(sessionID string) string) {
+	ownerMu.Lock()
+	ownerResolver = fn
+	ownerMu.Unlock()
+}
+
+// inputCacheKey returns the cache/in-flight key for input id in ctx's turn:
+// the bare id with no owner resolver, else (owner, id).
+func inputCacheKey(ctx context.Context, id string) string {
+	ownerMu.RLock()
+	fn := ownerResolver
+	ownerMu.RUnlock()
+	if fn == nil {
+		return id
+	}
+	return fn(sessionIDFromContext(ctx)) + "\x00" + id
 }
 
 // resolveServerTemplates returns a copy of s with every "${input:id}"

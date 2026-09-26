@@ -43,6 +43,14 @@ same process:
 - The Helper's `set_preference` / `get_settings(preferences)` still read and
   write the **shared** preferences file, not the caller's own (Settings is
   global in this tier).
+- **MCP servers are shared, including their `${input:…}` credentials.** A
+  prompt for an MCP input (or an MCP/skill dependency install) is shown to —
+  and answerable by — the user whose chat triggered it, even when a sub-agent
+  raised it, and a typed answer is cached per user. But the MCP server process
+  itself is one per configuration for the whole server: the first user to
+  connect an input-templated server supplies the credential it runs with, and
+  every other user's calls to that server use it. Don't use `${input:…}` for
+  per-user credentials in this tier.
 
 What *is* scoped per user: sessions, schedules, collections, preferences set
 from the UI, working directories (new, imported and scheduled sessions start

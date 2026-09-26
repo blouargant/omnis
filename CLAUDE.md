@@ -5234,11 +5234,40 @@ leading `Bearer ` stripped); `CommandValidator`
   `TestEventsStreamScopesAskUserReplay`,
   [server/identity_events_test.go](server/identity_events_test.go)). Answering
   is scoped too: `askuser.Registry.Resolve` falls back to a cross-session
-  lookup by question id (for MCP input prompts raised under an ephemeral
-  sub-agent session), so `handleAskUserResponse` first checks
+  lookup by question id, so `handleAskUserResponse` first checks
   `Registry.SessionOf(qid)` is owned by the caller and answers **404**
-  otherwise — an unattributable question (unknown session) is refused, which
-  means an MCP `${input:}` prompt cannot be answered in cookie mode.
+  otherwise — an unattributable question (unknown session) is refused.
+- **Every question raised under a sub-agent is attributed to the turn's
+  user-facing session**, so it has an owner and is deliverable + answerable.
+  A sub-agent's `SessionID()` is agenttool's ephemeral per-call id (no pane
+  shows it, no user owns it — in cookie mode such a question was withheld from
+  everyone and, with no ask timeout, hung the turn until Stop). The three
+  askers that used it now prefer the root session: MCP `${input:id}` prompts
+  and MCP `requires` install confirmations (`sessionIDFromContext` in
+  [internal/mcp/inputs.go](internal/mcp/inputs.go) → `events.RootSessionFromContext`
+  first) and the skill `requires` gate ([agent/skill_deps_gate.go](agent/skill_deps_gate.go)
+  → `realSessionID`, which now falls back to `events.RootSessionFromContext`
+  after the steer tag — the only tag injected mailbox/background/scheduled/
+  A2A turns plant; this also fixes budget/hook/permission keying for a
+  sub-agent in an injected turn). Pinned by `internal/mcp/inputs_session_test.go`,
+  `agent/skill_deps_gate_session_test.go`, and
+  `TestCookieModeMCPInputIsOwnedAndScoped` ([server/identity_mcp_input_test.go](server/identity_mcp_input_test.go)).
+- **The MCP `${input:id}` answer cache is per owner in cookie mode.**
+  `InputResolver`'s cache is process-wide and was keyed by input id alone, so
+  alice's typed credential would have satisfied bob's prompt. `installOwnerScoping`
+  now also installs `mcp.SetOwnerResolver`, and the cache/in-flight key becomes
+  `(owner, input id)`; nil resolver (single-user, identity-header) ⇒ keyed by
+  id exactly as before. **Remaining limitation — the MCP pool is not per
+  user:** `Pool.Acquire` dedups by the *unresolved* server config
+  (`configKey`), and the `lazyTransport` resolves `${input:}` templates **once**
+  (`sync.Once`) on the first connect. So the first user whose turn connects an
+  input-templated server supplies the credential that is baked into that
+  server's transport, and every other user's calls to that server run with it
+  (a sticky connect error — e.g. a declined `requires` install — is likewise
+  shared). The per-owner cache only guarantees a user is never *prompted-and-
+  served* another's answer. In cookie mode, do not rely on `${input:}` for
+  per-user credentials; true per-user MCP servers would need per-owner pool
+  entries (not done).
 - **Process-wide agent tool groups are owner-scoped via resolvers.**
   `installOwnerScoping` ([server/main.go](server/main.go), cookie mode only)
   installs `teammates.SetOwnerResolver(mailboxOwnerResolver(registry))`

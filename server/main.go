@@ -61,6 +61,7 @@ import (
 
 	"github.com/blouargant/omnis/agent"
 	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/sessions"
@@ -677,14 +678,18 @@ func watchPersistedSessions(rootCtx context.Context, d serverDeps) {
 
 // installOwnerScoping installs the cookie-mode owner resolvers of the
 // process-wide agent tool groups (teammate mailbox, past-session search) and
-// returns their removal.
+// of the MCP ${input:id} answer cache (so one user's typed credential is never
+// served to another user's prompt), and returns their removal.
 func installOwnerScoping(registry *sessions.Registry) func() {
-	teammates.SetOwnerResolver(mailboxOwnerResolver(registry))
-	sessindex.SetOwnerResolver(func(sessionID string) string {
+	owner := func(sessionID string) string {
 		return ownerOfSession(serverDeps{Registry: registry}, sessionID)
-	})
+	}
+	teammates.SetOwnerResolver(mailboxOwnerResolver(registry))
+	sessindex.SetOwnerResolver(owner)
+	mcp.SetOwnerResolver(owner)
 	return func() {
 		teammates.SetOwnerResolver(nil)
 		sessindex.SetOwnerResolver(nil)
+		mcp.SetOwnerResolver(nil)
 	}
 }

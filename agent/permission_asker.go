@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/blouargant/omnis/core/adk"
+	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/askuser"
 )
@@ -14,10 +15,15 @@ import (
 // squad root tc.SessionID() is already the real id; for a sub-agent — which
 // runs in agenttool's private runner under an ephemeral session id — the real
 // id is the one the surface planted on the run context (propagated into the
-// sub-agent the same way WithCwd is), recovered via steerSessionID. Falls back
-// to tc.SessionID() when nothing was planted (e.g. CLI examples).
+// sub-agent the same way WithCwd is), recovered via steerSessionID, else via
+// events.RootSessionFromContext — the only tag injected turns (mailbox,
+// background, scheduled, spawned, A2A) plant. Falls back to tc.SessionID()
+// when nothing was planted (e.g. CLI examples).
 func realSessionID(tc adk.ToolContext) string {
 	if id := steerSessionID(tc); id != "" {
+		return id
+	}
+	if id := events.RootSessionFromContext(tc); id != "" {
 		return id
 	}
 	return tc.SessionID()

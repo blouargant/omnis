@@ -29,7 +29,10 @@ func newSkillDepGate(reg *askuser.Registry) skills.DepGate {
 		if err != nil || len(reqs) == 0 {
 			return ""
 		}
-		outcomes := deps.Ensure(tc, tc.SessionID(), reqs, confirm, deps.BashInstaller)
+		// realSessionID, not tc.SessionID(): a skill loaded by a sub-agent runs
+		// under agenttool's ephemeral session, which no pane shows and (in
+		// cookie mode) no user owns — the question would never be answerable.
+		outcomes := deps.Ensure(tc, realSessionID(tc), reqs, confirm, deps.BashInstaller)
 		var unmet []deps.Outcome
 		for _, o := range outcomes {
 			if !o.Available {
