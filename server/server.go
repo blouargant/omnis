@@ -239,7 +239,15 @@ func newEngine(d serverDeps) *gin.Engine {
 	base.GET("/index.html", indexHandler)
 	base.StaticFile("/favicon.svg", faviconPath)
 	base.StaticFile("/favicon.ico", faviconPath)
-	base.Static("/assets", d.WebDir)
+	// Assets are revalidated on every load (no-cache ⇒ a cheap 304 via
+	// Last-Modified). Without it browsers cache them heuristically, and the CSS
+	// partials @import-ed by styles.css have no ?v= query to bust that cache —
+	// an upgrade could pair a new index.html with a stale partial.
+	assets := base.Group("/assets", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache")
+		c.Next()
+	})
+	assets.Static("/", d.WebDir)
 
 	api := base.Group("/api")
 	api.GET("/health", func(c *gin.Context) {

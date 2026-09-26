@@ -188,7 +188,12 @@ attribute, then run `make i18n` to regenerate `locales.js` and commit it with th
 JSON. The generator **warns** when a non-`en` locale is missing keys (the runtime
 falls back to English, so partial coverage is safe). Bump the `?v=` query on the
 `i18n/locales.js` + `i18n.js` (and `app.js`/`settings.js`) script tags in
-index.html when their contents change.
+index.html when their contents change. Everything under `/assets` is served with
+`Cache-Control: no-cache` ([server/server.go](server/server.go), revalidated by
+Last-Modified ⇒ cheap 304s): the CSS partials `@import`-ed by `styles.css` carry no
+`?v=`, and without that header browsers cached them heuristically — an upgrade
+once paired a new `index.html` (showing the "Tab ⇥" badge) with a stale
+`composer.css` lacking the rule that hides it.
 
 **Coverage status:** the **entire Web UI** is translated (en/fr/es/de at full key
 parity — ~610 keys/locale) — all static markup, the whole **chat surface**
@@ -3311,6 +3316,17 @@ in `suggestStore` keyed **per session on the turn count**, single-flighted per
 - **`suggestStore.get` recovers a panicking generator** — a panic is logged and
   treated as an uncached failure, so an in-flight call can never wedge a
   session's key.
+- **GOTCHA — the request disables reasoning (`ThinkingConfig{ThinkingBudget: 0}`),
+  and it is load-bearing.** The fleet's models behind LiteLLM are reasoning models:
+  for one short sentence they think for 1.5–2.8k tokens first. Measured on a real
+  transcript: `Hosted` 57 s, `Balanced` 17 s, `Simple` 10 s — past or near the 20 s
+  timeout, so every attempt failed, was not cached, and was retried (and paid for)
+  on the next display: the feature shipped showing nothing. With reasoning off:
+  0.4–2.5 s on all five catalogue models, same quality. The OpenAI-compat adapter
+  maps a zero budget to `reasoning_effort: "none"`
+  ([core/llm/openai.go](core/llm/openai.go) `buildRequest`; any other budget, or
+  none, leaves the request byte-identical). `chat_template_kwargs.enable_thinking`
+  was rejected: the Scaleway-backed `Simple` answers it with HTTP 500.
 - **`cleanSuggestion` rejects a leading `/`, `!` or `#`** — the composer would run
   it as a slash command, a host shell escape or an AGENT.md write on send.
 - **`SuggestNextPrompt` uses `Manager.Peek`, not `Lookup`, to resolve the

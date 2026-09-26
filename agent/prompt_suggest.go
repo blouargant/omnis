@@ -67,6 +67,10 @@ func buildSuggestRequest(turns []Exchange) *model.LLMRequest {
 	return &model.LLMRequest{
 		Config: &genai.GenerateContentConfig{
 			SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: suggestSystemPrompt}}},
+			// No reasoning: one short sentence does not need it, and reasoning
+			// models spend 1.5–2.8k tokens thinking first — 57 s on the hosted
+			// model for a real transcript, well past the server's 20 s timeout.
+			ThinkingConfig: &genai.ThinkingConfig{ThinkingBudget: genai.Ptr[int32](0)},
 		},
 		Contents: []*genai.Content{
 			{Role: "user", Parts: []*genai.Part{{Text: "CONVERSATION:\n" + transcript}}},

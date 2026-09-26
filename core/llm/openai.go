@@ -147,6 +147,9 @@ type oaiRequest struct {
 	MaxTokens     *int32            `json:"max_tokens,omitempty"`
 	TopP          *float32          `json:"top_p,omitempty"`
 	Stop          []string          `json:"stop,omitempty"`
+	// ReasoningEffort is set to "none" when the caller asks for a zero thinking
+	// budget (genai.ThinkingConfig) — see buildRequest. Omitted otherwise.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type oaiResponse struct {
@@ -385,6 +388,13 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 		}
 		if len(req.Config.StopSequences) > 0 {
 			r.Stop = req.Config.StopSequences
+		}
+		// A zero thinking budget means "answer directly". Reasoning models behind
+		// an OpenAI-compatible gateway otherwise think for thousands of tokens
+		// before a one-line answer; reasoning_effort "none" is the parameter
+		// LiteLLM forwards for that. Any other budget leaves the request as is.
+		if tc := req.Config.ThinkingConfig; tc != nil && tc.ThinkingBudget != nil && *tc.ThinkingBudget == 0 {
+			r.ReasoningEffort = "none"
 		}
 	}
 	return r

@@ -121,3 +121,13 @@ func TestSuggestNextPromptDoesNotPinUnpinnedSession(t *testing.T) {
 		t.Fatalf("SuggestNextPrompt must not bump the generation refcount: gens[1] = %d, want 0", gens[1])
 	}
 }
+
+// The suggestion is one short sentence: the request must ask the model not to
+// reason first (reasoning models otherwise overrun the server's 20 s timeout).
+func TestBuildSuggestRequestDisablesThinking(t *testing.T) {
+	req := buildSuggestRequest([]Exchange{{User: "q", Assistant: "a"}})
+	tc := req.Config.ThinkingConfig
+	if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 0 {
+		t.Fatalf("want ThinkingBudget 0, got %+v", tc)
+	}
+}
