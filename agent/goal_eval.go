@@ -61,29 +61,7 @@ func (m *Manager) EvaluateGoal(ctx context.Context, sessionID, condition, transc
 		return false, "", false
 	}
 
-	transcript = strings.TrimSpace(transcript)
-	if r := []rune(transcript); len(r) > goalTranscriptCap {
-		// Keep the TAIL — the most recent work is the relevant evidence.
-		transcript = "…(earlier work omitted)…\n" + string(r[len(r)-goalTranscriptCap:])
-	}
-	if transcript == "" {
-		transcript = "(no transcript text was produced this turn)"
-	}
-
-	var user strings.Builder
-	user.WriteString("COMPLETION CONDITION:\n")
-	user.WriteString(condition)
-	user.WriteString("\n\nTRANSCRIPT (the agent's most recent work):\n")
-	user.WriteString(transcript)
-
-	req := &model.LLMRequest{
-		Config: &genai.GenerateContentConfig{
-			SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: goalEvalSystemPrompt}}},
-		},
-		Contents: []*genai.Content{
-			{Role: "user", Parts: []*genai.Part{{Text: user.String()}}},
-		},
-	}
+	req := buildGoalEvalRequest(condition, transcript)
 
 	var out strings.Builder
 	for resp, gerr := range mdl.GenerateContent(ctx, req, false) {
@@ -100,6 +78,38 @@ func (m *Manager) EvaluateGoal(ctx context.Context, sessionID, condition, transc
 
 	met, reason = parseGoalVerdict(out.String())
 	return met, reason, true
+}
+
+// buildGoalEvalRequest renders the evaluator request: the condition plus the
+// transcript tail (capped at goalTranscriptCap runes). Reasoning is disabled —
+// the verdict is one token and a sentence, and reasoning models otherwise
+// overrun the evaluator timeout (measured: 22 s vs 2 s on the hosted model for a
+// 6k-char transcript, same verdicts), which stops the /goal loop.
+func buildGoalEvalRequest(condition, transcript string) *model.LLMRequest {
+	transcript = strings.TrimSpace(transcript)
+	if r := []rune(transcript); len(r) > goalTranscriptCap {
+		// Keep the TAIL — the most recent work is the relevant evidence.
+		transcript = "…(earlier work omitted)…\n" + string(r[len(r)-goalTranscriptCap:])
+	}
+	if transcript == "" {
+		transcript = "(no transcript text was produced this turn)"
+	}
+
+	var user strings.Builder
+	user.WriteString("COMPLETION CONDITION:\n")
+	user.WriteString(condition)
+	user.WriteString("\n\nTRANSCRIPT (the agent's most recent work):\n")
+	user.WriteString(transcript)
+
+	return &model.LLMRequest{
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: goalEvalSystemPrompt}}},
+			ThinkingConfig:    &genai.ThinkingConfig{ThinkingBudget: genai.Ptr[int32](0)},
+		},
+		Contents: []*genai.Content{
+			{Role: "user", Parts: []*genai.Part{{Text: user.String()}}},
+		},
+	}
 }
 
 // evalModel resolves the LLM for the goal evaluator: the catalogue model named by

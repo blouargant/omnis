@@ -4179,6 +4179,13 @@ pattern (no new runner/topology).
   (so `/goal` always works). `eval_model_ref` mirrors `embed_model_ref` exactly
   (a top-level catalogue ref for an internal, non-agent model role); the shipped
   `config/models.json` defaults it to `hosted` (the cheapest model).
+  **The request disables reasoning** (`buildGoalEvalRequest` sets
+  `ThinkingConfig{ThinkingBudget: 0}` → `reasoning_effort: "none"` on the
+  OpenAI-compat adapter): the fleet's models are reasoning models, and `hosted`
+  took 22 s on a 6k-char transcript against the 30 s evaluator timeout (the
+  transcript cap is 16k) — an overrun stops the loop with "could not evaluate the
+  goal condition". Without reasoning: 1–3.5 s, same verdicts on met, not-met and
+  half-met conditions (measured on `hosted` and `simple`).
 - **Loop integration** = the existing per-surface turn loop, *after* the steering
   follow-up branch. Server [server/sse.go](server/sse.go) `handleMessages`
   producer: after `RunWithRouting` + persist, if a goal is active and there is no
