@@ -415,7 +415,8 @@ func run() error {
 		IdleTimeout: resolveRebindIdle(),
 	})
 
-	// Start watchers for sessions that were persisted from a previous run.
+	// Register sessions that were persisted from a previous run (their
+	// watchers start once the full deps exist — see watchPersistedSessions).
 	// Each persisted session pins to the current (only) generation so it
 	// keeps using the same agent across future reloads.
 	for _, meta := range registry.List() {
@@ -438,13 +439,6 @@ func run() error {
 		if infra.GoalStore != nil && strings.TrimSpace(meta.Goal) != "" {
 			infra.GoalStore.Restore(meta.ID, meta.Goal)
 		}
-		pushMgr.Watch(rootCtx, serverDeps{
-			Manager:      manager,
-			Registry:     registry,
-			RunGuard:     runGuard,
-			PushEvents:   pushEvents,
-			WatchMailbox: infra.WatchMailbox,
-		}, meta.ID, meta.UserID)
 	}
 
 	// The restart coordinator is a one-shot signal raised by the
@@ -487,6 +481,11 @@ func run() error {
 		SessionIndex:        sessionIndex,
 		Suggest:             newSuggestStore(),
 	}
+	// Mailbox + background-task watchers for the persisted sessions. They get
+	// the FULL deps (Cookie included) so an injected turn after a restart hands
+	// the owner's token to shell tools once the owner has logged back in.
+	watchPersistedSessions(rootCtx, deps)
+
 	// Durable agent questions: store AskUserQuestion prompts in the conversation
 	// file so they survive a restart, and restore the ones a previous run left.
 	if infra.AskUserRegistry != nil {
@@ -657,4 +656,16 @@ func findFreePort(addr string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no free port in range %d-%d", basePort, basePort+99)
+}
+
+// watchPersistedSessions starts the mailbox + background-task watchers of
+// every persisted session with the full server deps, so an injected turn
+// carries everything a live one does (notably Cookie → the owner's token).
+func watchPersistedSessions(rootCtx context.Context, d serverDeps) {
+	if d.PushMgr == nil || d.Registry == nil {
+		return
+	}
+	for _, meta := range d.Registry.List() {
+		d.PushMgr.Watch(rootCtx, d, meta.ID, meta.UserID)
+	}
 }

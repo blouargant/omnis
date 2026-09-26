@@ -293,6 +293,9 @@ type pushManager struct {
 	// OMNIS_TASK_NOTIFY. The bg watcher always drains either way so the queue
 	// never wedges at its buffer limit.
 	activeWake bool
+	// injectMailbox runs a received mailbox message as a turn; pm.inject in
+	// production (a seam so tests can observe the deps a watcher was given).
+	injectMailbox func(ctx context.Context, d serverDeps, sessionID, userID, from, body string)
 }
 
 func newPushManager(
@@ -302,7 +305,7 @@ func newPushManager(
 	watchBgFn func(ctx context.Context, userID, sessionID string, onNotify func([]bg.Notification)),
 	activeWake bool,
 ) *pushManager {
-	return &pushManager{
+	pm := &pushManager{
 		guard:      guard,
 		bcast:      bcast,
 		cancels:    make(map[string]context.CancelFunc),
@@ -310,6 +313,8 @@ func newPushManager(
 		watchBgFn:  watchBgFn,
 		activeWake: activeWake,
 	}
+	pm.injectMailbox = pm.inject
+	return pm
 }
 
 // Watch starts watching the mailbox for sessionID. Subsequent calls for the
@@ -324,7 +329,7 @@ func (pm *pushManager) Watch(rootCtx context.Context, d serverDeps, sessionID, u
 	pm.cancels[sessionID] = cancel
 
 	pm.watchFn(ctx, userID, sessionID, func(from, body string) {
-		pm.inject(ctx, d, sessionID, userID, from, body)
+		pm.injectMailbox(ctx, d, sessionID, userID, from, body)
 	})
 	if pm.watchBgFn != nil {
 		pm.watchBgFn(ctx, userID, sessionID, func(batch []bg.Notification) {
@@ -527,6 +532,17 @@ func (pm *pushManager) abortInjected(sessionID string, o injectOpts, reason stri
 	}
 }
 
+// turnContext decorates an injected turn's context. It tags the run's bus
+// events with the real session id so a concurrent interactive turn on another
+// session filters them out (the event bus is process-wide; this path reads its
+// OWN usage from the session-scoped ADK stream, so the tag only protects other
+// sessions' streams), and hands the session owner's live platform token to
+// shell tools — nil in single-user mode or cookie mode with no live token.
+func turnContext(ctx context.Context, d serverDeps, sessionID, userID string) context.Context {
+	ctx = events.WithRootSession(ctx, sessionID)
+	return fstools.WithShellEnv(ctx, d.shellEnvFor(userID))
+}
+
 // injectTurnOpts is the body of injectTurnRouted, taking its inputs as an
 // options struct so a caller (the durable-question resume) can persist a user
 // text that differs from the model prompt.
@@ -585,14 +601,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 		reseedIfCold(ctx, d.Manager, userID, sessionID, meta.Squad)
 	}
 
-	// Tag this run's bus events with the real session id so a concurrent
-	// interactive turn on another session filters them out (the event bus is
-	// process-wide). This path reads its OWN usage from the session-scoped ADK
-	// stream, not the bus, so the tag is purely to protect other sessions' streams.
-	ctx = events.WithRootSession(ctx, sessionID)
-	// Hand the session owner's live platform token to shell tools — nil in
-	// single-user mode or cookie mode with no live token for this owner.
-	ctx = fstools.WithShellEnv(ctx, d.shellEnvFor(userID))
+	ctx = turnContext(ctx, d, sessionID, userID)
 
 	// Arm the per-turn spend ceiling for this injected turn too. A spawned task or
 	// a scheduled routine runs unattended, so an unbounded one is worse here than
