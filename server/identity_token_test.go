@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -30,5 +31,37 @@ func TestBangEscapeSeesOwnToken(t *testing.T) {
 	w := doWithBody(r, "ta", "POST", "/api/sessions/"+aliceSID+"/bash", `{"command":"echo tok=$PLAT_TOKEN"}`)
 	if !strings.Contains(w.Body.String(), "tok=ta") {
 		t.Fatalf("! escape did not get alice's token: %d %s", w.Code, w.Body)
+	}
+}
+
+// TestBangEscapeRefusesOtherUsersSession is the end-to-end negative case for
+// shellEnvFor: bob must never reach alice's session (ownerGuard refuses it
+// with 404 before handleBash ever runs), and — belt and braces — alice's
+// token must never appear in the response body.
+func TestBangEscapeRefusesOtherUsersSession(t *testing.T) {
+	r, _, aliceSID, _ := newCookieTestEngine(t)
+	w := doWithBody(r, "tb", "POST", "/api/sessions/"+aliceSID+"/bash", `{"command":"echo tok=$PLAT_TOKEN"}`)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("bob must not reach alice's session: got %d %s", w.Code, w.Body)
+	}
+	if strings.Contains(w.Body.String(), "ta") {
+		t.Fatalf("response must not leak alice's token: %s", w.Body)
+	}
+}
+
+// TestTerminalWSHonoursOwnerGuard is the fix for the review finding: the
+// terminal WS route reads its target session's cwd from a `?session=` query
+// param, so ownerGuard's session-query check must run in that chain too, not
+// just for the /sessions/:id path pattern. A plain (non-upgrade) GET is
+// enough to prove the guard fires before any WebSocket upgrade is attempted.
+func TestTerminalWSHonoursOwnerGuard(t *testing.T) {
+	r, _, aliceSID, _ := newCookieTestEngine(t)
+	w := doAs(r, "tb", "GET", "/api/terminal/ws?session="+aliceSID)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("bob must not resolve alice's session via the terminal route: got %d %s", w.Code, w.Body)
+	}
+	w2 := doAs(r, "ta", "GET", "/api/terminal/ws?session="+aliceSID)
+	if w2.Code == http.StatusNotFound {
+		t.Fatalf("alice must not be refused her own session: got %d %s", w2.Code, w2.Body)
 	}
 }

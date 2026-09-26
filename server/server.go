@@ -281,10 +281,18 @@ func newEngine(d serverDeps) *gin.Engine {
 	}
 	// Terminal WS: cookie mode the cookie check; otherwise the identity-header check.
 	// (CheckOrigin already restricts the WS handshake to same-origin, so the
-	// cookie-mode sameOriginGuard is not needed there.)
+	// cookie-mode sameOriginGuard is not needed there.) In cookie mode ownerGuard
+	// must also run here: the route reads its target session's cwd from a
+	// `?session=` query param (see handleTerminal), and ownerGuard's session-query
+	// check (keyed on `session`, not just the `/sessions/:id` path pattern) is
+	// what refuses another user's session id there — without it a caller could
+	// pass ?session=<another user's id> and have the terminal root itself in that
+	// other session's working directory (and, once shellEnvFor lands there, see
+	// that other user's shell env). identityMiddleware-mode has no owner concept,
+	// so it is unchanged.
 	var wsChain []gin.HandlerFunc
 	if d.Cookie != nil {
-		wsChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie)}
+		wsChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie), ownerGuard(d)}
 	} else {
 		wsChain = []gin.HandlerFunc{identityMiddleware(d.IdentityHeader, sessions.UserID())}
 	}
