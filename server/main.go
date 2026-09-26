@@ -371,6 +371,12 @@ func run() error {
 
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
+	pushEvents.ownerOf = func(sid string) string {
+		if m, ok := registry.Snapshot(sid); ok {
+			return m.UserID
+		}
+		return ""
+	}
 
 	// Self-update: cache the latest-release check and poll GitHub in the
 	// background (no-op for "dev" builds, when OMNIS_UPDATE_CHECK=false, or when

@@ -223,7 +223,7 @@ func handleCreateSchedule(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		broadcastScheduleChanged(d)
+		broadcastScheduleChanged(d, requestLogin(c))
 		c.JSON(http.StatusCreated, job)
 	}
 }
@@ -262,7 +262,7 @@ func handleUpdateSchedule(d serverDeps) gin.HandlerFunc {
 		if newSpec != nil || strings.TrimSpace(req.Prompt) != "" {
 			d.Scheduler.Update(id, strings.TrimSpace(req.Prompt), newSpec, raw)
 		}
-		broadcastScheduleChanged(d)
+		broadcastScheduleChanged(d, requestLogin(c))
 		job, _ := d.Scheduler.Get(id)
 		c.JSON(http.StatusOK, job)
 	}
@@ -307,7 +307,7 @@ func handleDeleteSchedule(d serverDeps) gin.HandlerFunc {
 		for _, sid := range sids {
 			deleteSession(d, sid)
 		}
-		broadcastScheduleChanged(d)
+		broadcastScheduleChanged(d, requestLogin(c))
 		c.Status(http.StatusNoContent)
 	}
 }
@@ -347,7 +347,7 @@ func handleClearScheduleHistory(d serverDeps) gin.HandlerFunc {
 		for _, sid := range sids {
 			deleteSession(d, sid)
 		}
-		broadcastScheduleChanged(d)
+		broadcastScheduleChanged(d, requestLogin(c))
 		c.Status(http.StatusNoContent)
 	}
 }
@@ -366,7 +366,7 @@ func handleDeleteScheduleRun(d serverDeps) gin.HandlerFunc {
 		if sid != "" {
 			deleteSession(d, sid)
 		}
-		broadcastScheduleChanged(d)
+		broadcastScheduleChanged(d, requestLogin(c))
 		c.Status(http.StatusNoContent)
 	}
 }
@@ -393,8 +393,12 @@ func perRunSessionForRun(d serverDeps, jobID, runID string) string {
 	return ""
 }
 
-func broadcastScheduleChanged(d serverDeps) {
+// broadcastScheduleChanged fires schedule_changed scoped to owner (cookie
+// identity mode): a handler passes requestLogin(c) (its caller's own login), the
+// fire path would pass job.UserID — which is "web-user" outside cookie mode, so
+// pushVisible("", …) still shows it to everyone regardless.
+func broadcastScheduleChanged(d serverDeps, owner string) {
 	if d.PushEvents != nil {
-		d.PushEvents.broadcast("schedule_changed", "")
+		d.PushEvents.broadcastOwned("schedule_changed", "", owner)
 	}
 }

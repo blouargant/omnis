@@ -104,6 +104,12 @@ type pushMsg struct {
 	// alongside session_id (e.g. the context_usage / turn_usage frames delivered
 	// for a background turn, which has no per-turn SSE stream). Nil for most events.
 	Data map[string]any
+	// Owner is the login (cookie identity mode) this event concerns: the owning
+	// session's UserID for a session-scoped event, or an explicit owner passed to
+	// broadcastOwned for a session-less event (collections_changed,
+	// schedule_changed, a post-delete session_deleted). Empty means "not cookie
+	// mode" or "no owner to scope to" — see pushVisible.
+	Owner string
 }
 
 // sessionPushBroadcaster holds per-session channels that fire whenever a
@@ -118,6 +124,10 @@ type sessionPushBroadcaster struct {
 	// exhaust the browser's ~6-per-host HTTP/1.1 connection limit and stall
 	// further requests.
 	all map[chan pushMsg]struct{}
+	// ownerOf resolves a session id to its owning login (cookie identity mode).
+	// Set once at boot (main.go, wired to Registry.Snapshot); nil outside cookie
+	// mode, in which case resolveOwner always returns "".
+	ownerOf func(sid string) string
 }
 
 func newSessionPushBroadcaster() *sessionPushBroadcaster {
@@ -197,10 +207,11 @@ func (b *sessionPushBroadcaster) broadcastWithText(event, sessionID, text string
 // the turn (see pushMsg.Client). An empty clientID means "no browser origin", so
 // every client acts on the event — which is what broadcastWithText delegates.
 func (b *sessionPushBroadcaster) broadcastFrom(event, sessionID, text, clientID string) {
+	owner := b.resolveOwner(sessionID)
 	b.mu.RLock()
 	for ch := range b.all {
 		select {
-		case ch <- pushMsg{Event: event, SID: sessionID, Text: text, Client: clientID}:
+		case ch <- pushMsg{Event: event, SID: sessionID, Text: text, Client: clientID, Owner: owner}:
 		default:
 		}
 	}
@@ -213,14 +224,57 @@ func (b *sessionPushBroadcaster) broadcastFrom(event, sessionID, text, clientID 
 // per-turn SSE stream, over the multiplexed /api/events channel so an open (or
 // remoteBusy) session's context ring + budget update live.
 func (b *sessionPushBroadcaster) broadcastData(event, sessionID string, data map[string]any) {
+	owner := b.resolveOwner(sessionID)
 	b.mu.RLock()
 	for ch := range b.all {
 		select {
-		case ch <- pushMsg{Event: event, SID: sessionID, Data: data}:
+		case ch <- pushMsg{Event: event, SID: sessionID, Data: data, Owner: owner}:
 		default:
 		}
 	}
 	b.mu.RUnlock()
+}
+
+// resolveOwner resolves sid to its owning login via ownerOf. Returns "" (no
+// scoping) when sid is empty or no ownerOf resolver is wired (not cookie mode).
+func (b *sessionPushBroadcaster) resolveOwner(sid string) string {
+	if sid == "" || b.ownerOf == nil {
+		return ""
+	}
+	return b.ownerOf(sid)
+}
+
+// broadcastOwned sends a session-less (or already-deleted-session) event to one
+// owner's browsers only. owner "" ⇒ global (every subscriber receives it — see
+// pushVisible). Used for collections_changed / schedule_changed and
+// session_deleted (sent after the registry entry, and so its normal owner
+// resolution via resolveOwner, is already gone).
+func (b *sessionPushBroadcaster) broadcastOwned(event, sid, owner string) {
+	b.mu.RLock()
+	for ch := range b.all {
+		select {
+		case ch <- pushMsg{Event: event, SID: sid, Owner: owner}:
+		default:
+		}
+	}
+	b.mu.RUnlock()
+}
+
+// pushVisible decides whether a push event reaches a subscriber. login ""
+// (not cookie mode) receives everything. In cookie mode an event naming an
+// owner goes only to that owner; a session-less, owner-less event goes to
+// everyone (update_available, config reload) — but a SESSION-scoped event
+// whose owner could not be resolved (Owner == "" but SID != "") is withheld
+// rather than shown to every subscriber, since an unknown owner must not
+// default to "visible to all".
+func pushVisible(login string, m pushMsg) bool {
+	if login == "" {
+		return true
+	}
+	if m.Owner != "" {
+		return m.Owner == login
+	}
+	return m.SID == ""
 }
 
 // pushManager starts one background goroutine per active session that polls

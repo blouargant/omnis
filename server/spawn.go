@@ -263,7 +263,10 @@ func deleteSession(d serverDeps, id string) bool {
 	// Tell other open browsers the session is gone so they drop it (and
 	// close any tab holding it).
 	if d.PushEvents != nil {
-		d.PushEvents.broadcast("session_deleted", id)
+		// broadcastOwned, not broadcast: the registry entry is already gone (Delete
+		// ran above), so resolveOwner(id) via ownerOf would find nothing — the
+		// owner captured before the delete is the only one left to scope to.
+		d.PushEvents.broadcastOwned("session_deleted", id, userID)
 	}
 	return true
 }

@@ -570,6 +570,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	// browsers stay in sync, plus a connect-time replay of every pending
 	// ask_user question.
 	auth.GET("/events", func(c *gin.Context) {
+		login := requestLogin(c)
 		h := c.Writer.Header()
 		h.Set("Content-Type", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
@@ -603,7 +604,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Replay every session's pending ask_user questions so a (re)connecting
 		// client renders widgets for questions asked before it connected.
 		if d.AskUserRegistry != nil && d.Registry != nil {
-			for _, meta := range d.Registry.List() {
+			for _, meta := range d.Registry.ListFor(login) {
 				for _, q := range d.AskUserRegistry.Pending(meta.ID) {
 					data, _ := json.Marshal(askuser.QuestionToPayload(q))
 					_, _ = fmt.Fprintf(c.Writer, "event: ask_user\ndata: %s\n\n", data)
@@ -620,6 +621,9 @@ func newEngine(d serverDeps) *gin.Engine {
 			case <-ctx.Done():
 				return
 			case msg := <-pushCh:
+				if !pushVisible(login, msg) {
+					continue
+				}
 				payload := map[string]any{"session_id": msg.SID}
 				for k, v := range msg.Data {
 					payload[k] = v
@@ -634,6 +638,12 @@ func newEngine(d serverDeps) *gin.Engine {
 				_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", msg.Event, data)
 				flush()
 			case be := <-busCh:
+				if login != "" {
+					sid, _ := be.Payload["session_id"].(string)
+					if m, ok := d.Registry.Snapshot(sid); !ok || m.UserID != login {
+						continue
+					}
+				}
 				switch be.Event {
 				case events.EventAskUser:
 					data, _ := json.Marshal(be.Payload)

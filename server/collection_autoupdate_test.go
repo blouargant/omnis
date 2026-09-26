@@ -48,7 +48,7 @@ func TestAutoUpdaterCommitsThenSkipsUnchanged(t *testing.T) {
 		lastHash:    map[string]string{},
 		lastAttempt: map[string]time.Time{},
 	}
-	au.runCollection(context.Background(), "Acme")
+	au.runCollection(context.Background(), "Acme", "")
 	if got := collectionctx.ReadMemory("Acme"); got != "new facts" {
 		t.Fatalf("memory not committed: %q", got)
 	}
@@ -58,7 +58,7 @@ func TestAutoUpdaterCommitsThenSkipsUnchanged(t *testing.T) {
 	if sessions.CollectionProfileFull("Acme").LastMemoryUpdate == 0 {
 		t.Fatal("last_memory_update not set")
 	}
-	au.runCollection(context.Background(), "Acme") // same material ⇒ hash gate skips
+	au.runCollection(context.Background(), "Acme", "") // same material ⇒ hash gate skips
 	if calls != 1 {
 		t.Fatalf("expected 1 distill call, got %d", calls)
 	}
@@ -79,7 +79,7 @@ func TestAutoUpdaterOffIsNoop(t *testing.T) {
 		lastHash:    map[string]string{},
 		lastAttempt: map[string]time.Time{},
 	}
-	au.runCollection(context.Background(), "Acme")
+	au.runCollection(context.Background(), "Acme", "")
 	if collectionctx.ReadMemory("Acme") != "old" {
 		t.Fatal("memory changed while auto_update off")
 	}
@@ -99,8 +99,8 @@ func TestAutoUpdaterThrottlesFailedDistill(t *testing.T) {
 		lastHash:    map[string]string{},
 		lastAttempt: map[string]time.Time{},
 	}
-	au.runCollection(context.Background(), "Acme")
-	au.runCollection(context.Background(), "Acme") // within the interval → must be gated out
+	au.runCollection(context.Background(), "Acme", "")
+	au.runCollection(context.Background(), "Acme", "") // within the interval → must be gated out
 	if calls != 1 {
 		t.Fatalf("expected the failed distill to be throttled to 1 call, got %d", calls)
 	}

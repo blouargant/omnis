@@ -60,7 +60,10 @@ type autoUpdater struct {
 // runCollection applies the gates and, if they pass, distils + commits the
 // collection's memory. Safe to call concurrently for different collections; a
 // per-collection in-flight guard prevents overlapping runs of the same one.
-func (au *autoUpdater) runCollection(ctx context.Context, collection string) {
+// owner scopes the resulting collections_changed broadcast (cookie identity
+// mode): the UserID of the session whose idle tick triggered this run — the
+// collection itself carries no owner, so this is the only owner available.
+func (au *autoUpdater) runCollection(ctx context.Context, collection, owner string) {
 	if collection == "" {
 		return
 	}
@@ -124,7 +127,7 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection string) {
 	}
 	_ = sessions.SetCollectionMemoryUpdate(collection, now.Unix())
 	if au.deps.PushEvents != nil {
-		au.deps.PushEvents.broadcast("collections_changed", "")
+		au.deps.PushEvents.broadcastOwned("collections_changed", "", owner)
 	}
 	log.Printf("collection auto-update: committed memory for %q", collection)
 }
@@ -160,6 +163,6 @@ func startCollectionAutoUpdate(ctx context.Context, d serverDeps, minInterval ti
 		if collection == "" {
 			return // General has no context
 		}
-		go au.runCollection(ctx, collection)
+		go au.runCollection(ctx, collection, meta.UserID)
 	})
 }

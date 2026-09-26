@@ -124,7 +124,7 @@ func handleCreateCollection(d serverDeps) gin.HandlerFunc {
 			}
 		}
 		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
+			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		c.JSON(http.StatusCreated, gin.H{"name": name, "color": color})
 	}
@@ -231,7 +231,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 		}
 
 		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
+			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		out := gin.H{"name": current}
 		if body.Color != nil {
@@ -265,7 +265,7 @@ func handleDeleteCollection(d serverDeps) gin.HandlerFunc {
 			}
 		}
 		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
+			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -355,7 +355,7 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 			_ = sessions.SetCollectionMemoryUpdate(name, 0)
 		}
 		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
+			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"name":         name,
@@ -387,7 +387,7 @@ func handleRevertCollectionMemory(d serverDeps) gin.HandlerFunc {
 		_ = collectionctx.RemovePrevMemory(name)
 		_ = sessions.SetCollectionMemoryUpdate(name, 0)
 		if d.PushEvents != nil {
-			d.PushEvents.broadcast("collections_changed", "")
+			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		c.JSON(http.StatusOK, gin.H{"name": name, "memory": collectionctx.ReadMemory(name)})
 	}
