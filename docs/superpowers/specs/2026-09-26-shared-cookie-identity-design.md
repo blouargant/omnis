@@ -176,11 +176,15 @@ latest non-expired token. Lost on restart by design.
 - Every turn entry point (interactive `handleMessages`, `injectTurnRouted`)
   plants `identity.WithToken(ctx, token)` beside `WithCwd` / `WithSteerSession`;
   it propagates into sub-agents by the same path.
-- `core/tools` reads it and appends `<auth_token_env>=<token>` to the
-  environment of `Bash`, `bash_background`, `monitor`, `run_tests` and the `!`
-  shell-escape. The rest of the environment is inherited as today. The env var
-  name comes from a process-wide setter (`fstools.SetTokenEnv`), set once at
-  server boot; unset ⇒ nothing is injected (CLI/TUI/single-user unchanged).
+- The server turns the token into a generic shell-environment entry
+  (`<auth_token_env>=<token>`) and plants it with `fstools.WithShellEnv(ctx,
+  env)`. `core/tools` knows nothing about identity: the `Bash` handler copies
+  `ShellEnvFrom(ctx)` into `BashIn.Env`, `RunBashInteractive` (the `!`
+  shell-escape) reads it from its context, and `bash_background` / `monitor`
+  pass it to the background queue. The rest of the environment is inherited as
+  today. No planted env ⇒ nothing is injected (CLI/TUI/single-user unchanged).
+- `run_tests` is deliberately **not** injected: it shares `RunShellCaptured`
+  with the hooks engine, which must never receive the token.
 - Terminal: injected into the PTY environment at spawn, with the handshake's
   token. A long-lived shell keeps that token; opening a new terminal tab picks
   up the current one.
@@ -253,8 +257,9 @@ Manifests under `packaging/k8s/iaparc-test/`.
     pending `ask_user` replay;
   - terminal WS refused without a valid cookie;
   - fatal startup combinations (§3.1, §4 A2A).
-- `core/tools`: the token env var is set on `Bash` when the context carries a
-  token, absent otherwise; never set on hooks.
+- `core/tools`: the planted env is set on `Bash`, the `!` escape and
+  background tasks when the context carries it, absent otherwise; never set on
+  hooks or `run_tests`.
 - **No-op contract:** with no `identity_mode`, the whole existing suite passes
   unmodified, including milestone 1's tests.
 
