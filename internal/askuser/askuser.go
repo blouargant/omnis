@@ -272,6 +272,18 @@ func (r *Registry) Resolve(sessionID, questionID string, ans Answer) error {
 	return fmt.Errorf("%w: %q", ErrUnknownQuestion, questionID)
 }
 
+// SessionOf returns the session a pending question is registered under.
+func (r *Registry) SessionOf(questionID string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for sid, sm := range r.sessions {
+		if _, ok := sm[questionID]; ok {
+			return sid, true
+		}
+	}
+	return "", false
+}
+
 func (r *Registry) resolveInternal(sessionID, questionID string, ans Answer, p *pending) error {
 	resolved := false
 	p.once.Do(func() {

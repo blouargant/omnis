@@ -38,6 +38,19 @@ func handleAskUserResponse(d serverDeps) gin.HandlerFunc {
 			return
 		}
 
+		// Cookie mode: Resolve's cross-session fallback (by question id) must
+		// never let one user answer another user's question. The question's
+		// registering session must be owned by the caller; a question whose
+		// session is unknown (e.g. an MCP input prompt raised under an
+		// ephemeral sub-agent session) cannot be attributed and is refused.
+		if login := requestLogin(c); login != "" {
+			qsid, ok := d.AskUserRegistry.SessionOf(questionID)
+			if !ok || ownerOfSession(d, qsid) != login {
+				c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+				return
+			}
+		}
+
 		ans := askuser.Answer{
 			Selected:  req.Selected,
 			Text:      req.Text,
