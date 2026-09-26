@@ -7827,6 +7827,13 @@ async function subscribeGlobalEvents() {
         if (sid && (sid === window.__omnisSettingsSessionId || sid === window.__omnisSearchSessionId || sid === window.__omnisCollectionAsstSessionId || sid === window.__omnisAgentInstrAsstSessionId)) continue;
         if (event === "mailbox_push" && sid) {
           endRemoteBusy(sid);
+          // Mailbox delivery injects a turn without ever broadcasting
+          // turn_started, so remoteBusy was never set and the endRemoteBusy
+          // above returned early (no fetchSuggestion). Refresh explicitly so
+          // the composer doesn't keep offering a suggestion written for the
+          // previous reply.
+          clearSuggestion(sid);
+          fetchSuggestion(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
         } else if (event === "turn_started" && sid) {
           // A server-initiated (background/spawned) turn began — show its request
@@ -7865,6 +7872,11 @@ async function subscribeGlobalEvents() {
           // active-wake mode the server injected a synthetic turn (picked up by
           // appendNewPushTurns); in passive mode the toast is the only signal.
           endRemoteBusy(sid); // drop the optimistic request bubble before re-render
+          // Background active-wake also injects a turn with no turn_started
+          // broadcast in the common (never-viewed-busy) case — refresh the
+          // suggestion the same way as the mailbox_push handler above.
+          clearSuggestion(sid);
+          fetchSuggestion(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
         } else if (event === "schedule_run" && sid) {
@@ -7872,6 +7884,11 @@ async function subscribeGlobalEvents() {
           // (a loop into the current session, or a fresh scheduled-run session).
           // Append it if the session is open, and toast like a background task.
           endRemoteBusy(sid);
+          // Same reasoning as mailbox_push/task_notification: a /loop or
+          // /schedule run never broadcasts turn_started for an already-viewed
+          // session, so the stale suggestion must be refreshed explicitly.
+          clearSuggestion(sid);
+          fetchSuggestion(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
           // A run also appends a result to the job's history — refresh the open
