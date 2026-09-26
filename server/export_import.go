@@ -205,7 +205,12 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 		// a different process cwd doesn't move the session — mirroring POST
 		// /sessions. The imported cwd is deliberately NOT used (it points at the
 		// source machine's filesystem).
-		bashCwd.set(newMeta.ID, bashCwd.get(newMeta.ID))
+		// Cookie mode: the owner's own default working directory, like POST /sessions.
+		startDir := bashCwd.get(newMeta.ID)
+		if wd := userWorkDir(requestLogin(c)); wd != "" {
+			startDir = wd
+		}
+		bashCwd.set(newMeta.ID, startDir)
 
 		// Mirror the POST /sessions wiring so the import is a first-class session.
 		if d.RegisterSession != nil {

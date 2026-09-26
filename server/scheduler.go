@@ -85,6 +85,11 @@ func createScheduledSession(d serverDeps, owner, squad, prompt string) string {
 	if meta == nil {
 		return ""
 	}
+	// Cookie mode: start in the owner's own working directory, like POST
+	// /sessions. Outside cookie mode nothing changes (the shared root).
+	if wd := userWorkDir(d.ownerRootLogin(meta.UserID)); wd != "" {
+		bashCwd.set(meta.ID, wd)
+	}
 	title := scheduledTitle(prompt)
 	_ = sessions.SetConversationSquad(meta.ID, squad)
 	_ = sessions.SetConversationOwner(meta.ID, meta.UserID)
