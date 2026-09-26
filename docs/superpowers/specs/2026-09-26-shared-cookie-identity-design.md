@@ -109,6 +109,12 @@ mode (the bearer token is not used in this mode):
 4. On success: record the token in the `TokenStore` (§5.1), store `Identity` in
    the gin context and in the request `context.Context`
    (`identity.WithIdentity` / `identity.From`).
+5. CSRF guard (`sameOriginGuard`, right after the cookie check): an unsafe
+   method (anything but GET/HEAD/OPTIONS) is refused with **403**
+   `{"error":"cross-site request refused"}` when `Sec-Fetch-Site` is present and
+   not `same-origin`/`none`, or when `Origin` (or, absent `Origin`, `Referer`)
+   names a host other than the request's — the ambient cookie would otherwise let
+   a hostile page send a preflight-free text/plain POST to state-changing routes.
 
 The terminal WebSocket (`GET /api/terminal/ws`) applies the same check on the
 handshake cookies; the short-lived terminal token mechanism is bypassed in this

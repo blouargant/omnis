@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -117,6 +118,7 @@ func cookieIdentityMiddleware(a *cookieAuth) gin.HandlerFunc {
 		}
 		exp, _ := identity.JWTExp(tok)
 		a.tokens.Put(id.Login, tok, exp)
+		c.Set("identity", id)
 		c.Request = c.Request.WithContext(identity.WithIdentity(c.Request.Context(), id))
 		c.Next()
 	}
@@ -136,4 +138,43 @@ func ownerFor(c *gin.Context) string {
 		return l
 	}
 	return sessions.UserID()
+}
+
+// sameOriginGuard is the CSRF defence of cookie mode. The platform cookie is
+// ambient, so a hostile page could send a preflight-free "simple" POST
+// (text/plain body — ShouldBindJSON ignores Content-Type) to a state-changing
+// route such as the shell escape. Unsafe methods are refused when the browser
+// says the request is cross-site (Sec-Fetch-Site), or when Origin — or, absent
+// Origin, Referer — names another host. Requests carrying none of these
+// headers (curl, scripts, tests) are not browser-initiated and pass.
+func sameOriginGuard() gin.HandlerFunc {
+	refuse := func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-site request refused"})
+	}
+	foreignHost := func(raw, host string) bool {
+		u, err := url.Parse(raw)
+		return err != nil || !strings.EqualFold(u.Host, host)
+	}
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+		h := c.Request.Header
+		if sfs := strings.ToLower(strings.TrimSpace(h.Get("Sec-Fetch-Site"))); sfs != "" && sfs != "same-origin" && sfs != "none" {
+			refuse(c)
+			return
+		}
+		if origin := h.Get("Origin"); origin != "" {
+			if foreignHost(origin, c.Request.Host) {
+				refuse(c)
+				return
+			}
+		} else if ref := h.Get("Referer"); ref != "" && foreignHost(ref, c.Request.Host) {
+			refuse(c)
+			return
+		}
+		c.Next()
+	}
 }

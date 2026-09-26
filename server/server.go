@@ -275,12 +275,19 @@ func newEngine(d serverDeps) *gin.Engine {
 	// the terminal WebSocket (browsers send cookies on the upgrade request).
 	var authChain []gin.HandlerFunc
 	if d.Cookie != nil {
-		authChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie)}
+		authChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie), sameOriginGuard()}
 	} else {
 		authChain = []gin.HandlerFunc{authMiddleware(d.Token), identityMiddleware(d.IdentityHeader, sessions.UserID())}
 	}
-	// cookie mode: the cookie check; otherwise the identity-header check.
-	wsChain := append([]gin.HandlerFunc{}, authChain[len(authChain)-1:]...)
+	// Terminal WS: cookie mode the cookie check; otherwise the identity-header check.
+	// (CheckOrigin already restricts the WS handshake to same-origin, so the
+	// cookie-mode sameOriginGuard is not needed there.)
+	var wsChain []gin.HandlerFunc
+	if d.Cookie != nil {
+		wsChain = []gin.HandlerFunc{cookieIdentityMiddleware(d.Cookie)}
+	} else {
+		wsChain = []gin.HandlerFunc{identityMiddleware(d.IdentityHeader, sessions.UserID())}
+	}
 	api.GET("/terminal/ws", append(wsChain, handleTerminal(d))...)
 	auth := api.Group("", authChain...)
 	// GET /api/whoami — the user this instance serves + whether the identity
@@ -291,7 +298,11 @@ func newEngine(d serverDeps) *gin.Engine {
 	// the Authorization header), so only an already-authenticated client can get
 	// one; the WS then rides that ephemeral token in its URL instead of the
 	// long-lived master token, which would leak via history / proxy access logs.
-	auth.POST("/terminal/token", handleTerminalToken(d))
+	// Not mounted in cookie mode: the cookie itself guards the WS handshake
+	// and handleTerminal skips the token check (the web UI tolerates a 404).
+	if d.Cookie == nil {
+		auth.POST("/terminal/token", handleTerminalToken(d))
+	}
 	// POST /api/admin/gc — trigger a one-shot garbage-collection sweep over
 	// logs/ and logs/uploads/. Returns counts per category so ops tooling
 	// can verify what was cleaned. The periodic background sweep keeps

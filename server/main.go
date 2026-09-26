@@ -163,6 +163,12 @@ func run() error {
 		return err
 	}
 	if cookie != nil {
+		if token != "" {
+			log.Println("server: WARNING — OMNIS_SERVER_TOKEN / token is ignored in cookie mode")
+		}
+		if cookie.cfg.LoginURL == "" {
+			log.Println("server: WARNING — auth_login_url is empty: the web UI cannot redirect to the platform login")
+		}
 		log.Printf("server: SHARED mode — requests identified by cookie %v, validated by %q; trusted users only (no OS isolation between users)", cookie.cfg.Cookies, cookie.cfg.ValidateCmd[0])
 	}
 	switch {

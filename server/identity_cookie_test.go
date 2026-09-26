@@ -41,7 +41,13 @@ func TestCookieMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	a := testCookieAuth()
 	r := gin.New()
-	r.GET("/x", cookieIdentityMiddleware(a), func(c *gin.Context) { c.String(200, requestLogin(c)) })
+	r.GET("/x", cookieIdentityMiddleware(a), func(c *gin.Context) {
+		if v, ok := c.Get("identity"); !ok || v.(identity.Identity).Login != requestLogin(c) {
+			c.String(500, "identity missing from gin context")
+			return
+		}
+		c.String(200, requestLogin(c))
+	})
 
 	do := func(cookie string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", "/x", nil)
@@ -174,5 +180,55 @@ func TestCookieMiddlewareRejectsEmptyLogin(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("empty login must be rejected: %d", w.Code)
+	}
+}
+
+// TestCookieModeRefusesCrossSiteWrites: the ambient cookie must not let a
+// hostile page drive state-changing routes (CSRF). Real router via newEngine.
+func TestCookieModeRefusesCrossSiteWrites(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	engine := newEngine(serverDeps{
+		Cookie:   testCookieAuth(),
+		Registry: sessions.NewEmptyRegistry(),
+		rootCtx:  context.Background(),
+	})
+	call := func(method, path string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader("{}"))
+		req.Host = "omnis.example"
+		req.AddCookie(&http.Cookie{Name: "plat_token", Value: "ta"})
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+	refused := func(w *httptest.ResponseRecorder) bool {
+		return w.Code == http.StatusForbidden && strings.Contains(w.Body.String(), "cross-site request refused")
+	}
+	for name, hdr := range map[string]map[string]string{
+		"foreign Origin":             {"Origin": "https://evil.example"},
+		"Sec-Fetch-Site cross-site":  {"Sec-Fetch-Site": "cross-site"},
+		"foreign Referer, no Origin": {"Referer": "https://evil.example/page"},
+	} {
+		if w := call(http.MethodPost, "/api/collections", hdr); !refused(w) {
+			t.Errorf("POST %s: got %d %s, want 403 cross-site", name, w.Code, w.Body)
+		}
+	}
+	for name, hdr := range map[string]map[string]string{
+		"same-host Origin":           {"Origin": "https://omnis.example"},
+		"Sec-Fetch-Site same-origin": {"Sec-Fetch-Site": "same-origin", "Referer": "https://omnis.example/"},
+		"no browser headers":         {},
+	} {
+		if w := call(http.MethodPost, "/api/collections", hdr); refused(w) || w.Code == http.StatusUnauthorized {
+			t.Errorf("POST %s: got %d %s, want it past the guard", name, w.Code, w.Body)
+		}
+	}
+	if w := call(http.MethodGet, "/api/collections", map[string]string{"Origin": "https://evil.example"}); refused(w) {
+		t.Errorf("GET with foreign Origin refused by the guard: %d", w.Code)
+	}
+	// POST /api/terminal/token is not mounted in cookie mode.
+	if w := call(http.MethodPost, "/api/terminal/token", nil); w.Code != http.StatusNotFound {
+		t.Errorf("terminal/token in cookie mode: got %d, want 404", w.Code)
 	}
 }
