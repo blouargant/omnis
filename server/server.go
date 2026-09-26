@@ -425,6 +425,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		// restart (the bashCwd hook writes it to the conversation file; boot seeds
 		// it back). Mirrors what fork and spawn already do for their inherited cwd.
 		startDir := bashCwd.get(meta.ID) // fixed initial root unless overridden below
+		if wd := userWorkDir(requestLogin(c)); wd != "" {
+			startDir = wd // cookie mode: each user's own default working directory
+		}
 		if dir := strings.TrimSpace(body.Dir); dir != "" {
 			if info, err := os.Stat(dir); err == nil && info.IsDir() {
 				startDir = dir
@@ -985,10 +988,10 @@ func newEngine(d serverDeps) *gin.Engine {
 	if d.Updates != nil {
 		registerUpdateRoutes(auth, d.Updates, d.Version)
 	}
-	prefStore := newPreferencesStore(d.ConfigFiles)
-	registerPreferencesRoutes(auth, prefStore)
-	auth.GET("/sessions/:id/suggestion", handleSuggestion(d, prefStore))
-	registerWhatsNewRoutes(auth, d.Version, prefStore)
+	prefStores := newPrefStores(d.ConfigFiles)
+	registerPreferencesRoutes(auth, prefStores)
+	auth.GET("/sessions/:id/suggestion", handleSuggestion(d, prefStores))
+	registerWhatsNewRoutes(auth, d.Version, prefStores)
 	userCmdStore := newUserCommandsStore()
 	registerUserCommandsRoutes(auth, userCmdStore)
 	registerCommandsRoutes(auth.Group("/commands"), userCmdStore)

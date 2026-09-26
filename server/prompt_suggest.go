@@ -142,9 +142,10 @@ func lastExchanges(turns []sessions.ConversationTurn, n int) []toolkitagent.Exch
 	return out
 }
 
-func handleSuggestion(d serverDeps, prefs *preferencesStore) gin.HandlerFunc {
+func handleSuggestion(d serverDeps, prefs *prefStores) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		store := prefs.forLogin(requestLogin(c))
 		meta, ok := d.Registry.Snapshot(id)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
@@ -159,7 +160,7 @@ func handleSuggestion(d serverDeps, prefs *preferencesStore) gin.HandlerFunc {
 		}
 		empty := gin.H{"suggestion": "", "turns": meta.Turns, "busy": false}
 		gen := d.suggestGenerator()
-		if d.Suggest == nil || gen == nil || meta.Archived || meta.Hidden || meta.Turns == 0 || !suggestionsEnabled(prefs) {
+		if d.Suggest == nil || gen == nil || meta.Archived || meta.Hidden || meta.Turns == 0 || !suggestionsEnabled(store) {
 			c.JSON(http.StatusOK, empty)
 			return
 		}

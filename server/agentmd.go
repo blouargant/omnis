@@ -41,7 +41,7 @@ func handleAgentMDAppend(d serverDeps) gin.HandlerFunc {
 // it targets the global "no session" working directory.
 func handleGlobalAgentMDAppend(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		appendMemory(c, bashCwd.getGlobal())
+		appendMemory(c, bashCwd.getGlobalFor(requestLogin(c)))
 	}
 }
 

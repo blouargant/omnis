@@ -13,8 +13,9 @@ import (
 // assuming 1.0.0 when none is recorded) against the running build and returns
 // the compacted feature feed to show. The client marks the feed seen with the
 // POST once it has rendered the modal, so it appears at most once per upgrade.
-func registerWhatsNewRoutes(rg *gin.RouterGroup, currentVersion string, store *preferencesStore) {
+func registerWhatsNewRoutes(rg *gin.RouterGroup, currentVersion string, stores *prefStores) {
 	rg.GET("/whatsnew", func(c *gin.Context) {
+		store := stores.forLogin(requestLogin(c))
 		lastSeen := ""
 		if p := store.load(); p.WhatsNewVersion != nil {
 			lastSeen = *p.WhatsNewVersion
@@ -25,6 +26,7 @@ func registerWhatsNewRoutes(rg *gin.RouterGroup, currentVersion string, store *p
 	// POST /api/whatsnew/seen — record that the current version's feed has been
 	// shown. Merges onto the current prefs so unrelated fields survive.
 	rg.POST("/whatsnew/seen", func(c *gin.Context) {
+		store := stores.forLogin(requestLogin(c))
 		cur := store.load()
 		v := currentVersion
 		cur.WhatsNewVersion = &v

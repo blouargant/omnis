@@ -107,7 +107,7 @@ func handleFolderUpload(d serverDeps) gin.HandlerFunc {
 // writing into the global "no session" working directory.
 func handleGlobalFolderUpload(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		writeFolderUploads(c, bashCwd.getGlobal())
+		writeFolderUploads(c, bashCwd.getGlobalFor(requestLogin(c)))
 	}
 }
 
@@ -212,7 +212,7 @@ func handleFolderCopy(d serverDeps) gin.HandlerFunc {
 // handleGlobalFolderCopy is the session-less variant of handleFolderCopy.
 func handleGlobalFolderCopy(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		doFolderCopy(c, bashCwd.getGlobal())
+		doFolderCopy(c, bashCwd.getGlobalFor(requestLogin(c)))
 	}
 }
 

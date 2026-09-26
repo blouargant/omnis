@@ -155,7 +155,7 @@ func handleTerminal(d serverDeps) gin.HandlerFunc {
 			return
 		}
 
-		dir := bashCwd.getGlobal()
+		dir := bashCwd.getGlobalFor(requestLogin(c))
 		if sid := c.Query("session"); sid != "" {
 			dir = bashCwd.get(sid)
 		}

@@ -87,11 +87,43 @@ func (s *preferencesStore) save(p preferences) error {
 	return os.WriteFile(s.path, data, 0o644)
 }
 
-func registerPreferencesRoutes(rg *gin.RouterGroup, store *preferencesStore) {
+// prefStores hands out one preferencesStore per login (cookie mode) or the
+// single shared one (login "") — so concurrent users on a shared server never
+// see or overwrite each other's theme/locale/notification choices.
+type prefStores struct {
+	mu     sync.Mutex
+	shared *preferencesStore
+	byUser map[string]*preferencesStore
+}
+
+func newPrefStores(cf configFiles) *prefStores {
+	return &prefStores{shared: newPreferencesStore(cf), byUser: map[string]*preferencesStore{}}
+}
+
+// forLogin returns the store for login, creating it (anchored under
+// userRoot(login)/preferences.json) on first use. login "" returns the
+// shared store — single-user behaviour is unchanged.
+func (p *prefStores) forLogin(login string) *preferencesStore {
+	if login == "" {
+		return p.shared
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s, ok := p.byUser[login]
+	if !ok {
+		s = &preferencesStore{path: filepath.Join(userRoot(login), "preferences.json")}
+		p.byUser[login] = s
+	}
+	return s
+}
+
+func registerPreferencesRoutes(rg *gin.RouterGroup, stores *prefStores) {
 	rg.GET("/preferences", func(c *gin.Context) {
+		store := stores.forLogin(requestLogin(c))
 		c.JSON(http.StatusOK, store.load())
 	})
 	rg.PUT("/preferences", func(c *gin.Context) {
+		store := stores.forLogin(requestLogin(c))
 		// Merge onto the current prefs (unmarshal only sets fields present in
 		// the body) so a theme-only PUT doesn't wipe notifications, and
 		// vice-versa.

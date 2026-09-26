@@ -19,7 +19,7 @@ import (
 // listing, upload, copy, and Monaco-save routes: they bypass the agent
 // permission layer and trust the authenticated user with host file access.
 // Each operation exposes a session route (cwd = bashCwd.get(id)) and a
-// session-less global route (cwd = bashCwd.getGlobal()).
+// session-less global route (cwd = bashCwd.getGlobalFor(requestLogin(c))).
 
 // sessionCwdOr404 resolves the :id session's working directory, writing a 404
 // and returning ok=false when the session is unknown.
@@ -43,7 +43,7 @@ func handleFolderDownload(d serverDeps) gin.HandlerFunc {
 }
 
 func handleGlobalFolderDownload(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) { doFolderDownload(c, bashCwd.getGlobal()) }
+	return func(c *gin.Context) { doFolderDownload(c, bashCwd.getGlobalFor(requestLogin(c))) }
 }
 
 // doFolderDownload streams a single file as an attachment, or a directory as a
@@ -153,7 +153,7 @@ func handleFolderDelete(d serverDeps) gin.HandlerFunc {
 }
 
 func handleGlobalFolderDelete(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) { doFolderDelete(c, bashCwd.getGlobal()) }
+	return func(c *gin.Context) { doFolderDelete(c, bashCwd.getGlobalFor(requestLogin(c))) }
 }
 
 func doFolderDelete(c *gin.Context, cwd string) {
@@ -196,7 +196,7 @@ func handleFolderNew(d serverDeps) gin.HandlerFunc {
 }
 
 func handleGlobalFolderNew(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) { doFolderNew(c, bashCwd.getGlobal()) }
+	return func(c *gin.Context) { doFolderNew(c, bashCwd.getGlobalFor(requestLogin(c))) }
 }
 
 func doFolderNew(c *gin.Context, cwd string) {
@@ -254,7 +254,7 @@ func handleFolderRename(d serverDeps) gin.HandlerFunc {
 }
 
 func handleGlobalFolderRename(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) { doFolderRename(c, bashCwd.getGlobal()) }
+	return func(c *gin.Context) { doFolderRename(c, bashCwd.getGlobalFor(requestLogin(c))) }
 }
 
 func doFolderRename(c *gin.Context, cwd string) {
@@ -307,7 +307,7 @@ func handleFolderMove(d serverDeps) gin.HandlerFunc {
 }
 
 func handleGlobalFolderMove(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) { doFolderMove(c, bashCwd.getGlobal()) }
+	return func(c *gin.Context) { doFolderMove(c, bashCwd.getGlobalFor(requestLogin(c))) }
 }
 
 func doFolderMove(c *gin.Context, cwd string) {

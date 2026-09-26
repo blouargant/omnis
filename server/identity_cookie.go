@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/blouargant/omnis/internal/identity"
+	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -148,6 +151,31 @@ func ownerOfSession(d serverDeps, id string) string {
 		return m.UserID
 	}
 	return ""
+}
+
+// userRoot is the per-user state root: the shared write root
+// (paths.ConfigWriteDir()) for login "" (single-user / non-cookie modes,
+// unchanged behaviour), else a sanitised per-login subdirectory under it so
+// concurrent users on one shared server never share preferences, a working
+// directory, or any other per-user state.
+func userRoot(login string) string {
+	if login == "" {
+		return paths.ConfigWriteDir()
+	}
+	return filepath.Join(paths.ConfigWriteDir(), "users", identity.LoginSegment(login))
+}
+
+// userWorkDir is the per-user default working directory — the cwd new
+// sessions start in and the session-less Files-panel browse cwd resolves to
+// in cookie mode. "" outside cookie mode (login ""), so every caller's
+// fallback-to-shared-behaviour stays intact. Created on demand.
+func userWorkDir(login string) string {
+	if login == "" {
+		return ""
+	}
+	dir := filepath.Join(userRoot(login), "work")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
 }
 
 // requestLogin is the cookie-mode caller's login, "" in any other mode.

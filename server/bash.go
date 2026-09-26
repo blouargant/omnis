@@ -27,12 +27,13 @@ type bashCwdStore struct {
 	m       map[string]string
 	root    string               // fixed initial root — where new chat sessions start
 	def     string               // global "no session" browse cwd (navigable Folders panel)
+	userDef map[string]string    // per-login browse cwd, cookie mode only (getGlobalFor/setGlobalFor)
 	persist func(id, dir string) // optional: durably record a session's cwd on change
 }
 
 func newBashCwdStore() *bashCwdStore {
 	wd, _ := os.Getwd()
-	return &bashCwdStore{m: map[string]string{}, root: wd, def: wd}
+	return &bashCwdStore{m: map[string]string{}, root: wd, def: wd, userDef: map[string]string{}}
 }
 
 // setPersist installs the durable-write hook fired by set when a session's cwd
@@ -107,6 +108,38 @@ func (s *bashCwdStore) setGlobal(dir string) {
 	}
 	s.mu.Lock()
 	s.def = dir
+	s.mu.Unlock()
+}
+
+// getGlobalFor is the session-less browse cwd for login: in cookie mode each
+// user gets their own default working directory (userWorkDir) instead of the
+// single shared `def`, so browsing "no session" never leaks another user's
+// files. login "" ⇒ the shared getGlobal() — single-user behaviour unchanged.
+func (s *bashCwdStore) getGlobalFor(login string) string {
+	if login == "" {
+		return s.getGlobal()
+	}
+	s.mu.Lock()
+	d, ok := s.userDef[login]
+	s.mu.Unlock()
+	if ok && d != "" {
+		return d
+	}
+	return userWorkDir(login)
+}
+
+// setGlobalFor navigates login's session-less browse cwd. login "" ⇒ the
+// shared setGlobal(dir).
+func (s *bashCwdStore) setGlobalFor(login, dir string) {
+	if login == "" {
+		s.setGlobal(dir)
+		return
+	}
+	if dir == "" {
+		return
+	}
+	s.mu.Lock()
+	s.userDef[login] = dir
 	s.mu.Unlock()
 }
 
@@ -195,7 +228,8 @@ func handleFolder(d serverDeps) gin.HandlerFunc {
 // so the Folders panel keeps working while a Monaco editor / draft tab is active.
 func handleGlobalFolder(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		dir := bashCwd.getGlobal()
+		login := requestLogin(c)
+		dir := bashCwd.getGlobalFor(login)
 		switch c.Request.Method {
 		case http.MethodPost:
 			target, ok := resolveFolderTarget(c, dir, true)
@@ -204,7 +238,7 @@ func handleGlobalFolder(d serverDeps) gin.HandlerFunc {
 			}
 			if target != "" {
 				dir = target
-				bashCwd.setGlobal(dir)
+				bashCwd.setGlobalFor(login, dir)
 			}
 		default:
 			if sub, ok := resolveFolderTarget(c, dir, false); ok && sub != "" {
