@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -25,8 +26,9 @@ const monitorBatchWindow = 200 * time.Millisecond
 // every line). Matched lines within monitorBatchWindow are coalesced. The
 // monitor stops on command exit, on `timeout` (when > 0), or on bg_cancel;
 // `persistent` is informational (log tailers vs bounded runs) — timeout/cancel
-// still terminate. Returns the new task id.
-func (q *Queue) StartMonitor(label, command, filter string, timeout time.Duration, persistent bool) (string, error) {
+// still terminate. Any trailing "NAME=value" entries in env are appended to
+// the child's process environment. Returns the new task id.
+func (q *Queue) StartMonitor(label, command, filter string, timeout time.Duration, persistent bool, env ...string) (string, error) {
 	re, err := regexp.Compile(filter)
 	if err != nil {
 		return "", fmt.Errorf("invalid filter regex %q: %w", filter, err)
@@ -46,12 +48,16 @@ func (q *Queue) StartMonitor(label, command, filter string, timeout time.Duratio
 	}
 	taskID := newID()
 	t := q.register(taskID, label, command, KindMonitor, cancel)
+	t.env = append([]string(nil), env...)
 	go q.runMonitor(ctx, t, re)
 	return taskID, nil
 }
 
 func (q *Queue) runMonitor(ctx context.Context, t *Task, re *regexp.Regexp) {
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", t.Command)
+	if len(t.env) > 0 {
+		cmd.Env = append(os.Environ(), t.env...)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		q.finishMonitor(t, "failed")
@@ -164,7 +170,7 @@ func monitorTool(resolve queueResolver) tool.Tool {
 			"use bg_cancel(id) to stop it and bg_output(id) to read buffered matches.",
 	}, func(ctx adk.ToolContext, in monitorIn) (monitorOut, error) {
 		id, err := resolve(ctx).StartMonitor(in.Label, in.Command, in.Filter,
-			time.Duration(in.TimeoutSec)*time.Second, in.Persistent)
+			time.Duration(in.TimeoutSec)*time.Second, in.Persistent, tools.ShellEnvFrom(ctx)...)
 		if err != nil {
 			return monitorOut{}, err
 		}

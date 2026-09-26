@@ -17,6 +17,7 @@ package bg
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -92,8 +93,10 @@ func (q *Queue) Wait(ctx context.Context) (Notification, bool) {
 // backpressure for a chatty monitor while a consumer catches up).
 func (q *Queue) push(n Notification) { q.ch <- n }
 
-// Start runs `command` in a goroutine and returns the new task's id.
-func (q *Queue) Start(label, command string, timeout time.Duration) string {
+// Start runs `command` in a goroutine and returns the new task's id. Any
+// trailing "NAME=value" entries in env are appended to the child's process
+// environment (used to hand it extra context such as a per-caller token).
+func (q *Queue) Start(label, command string, timeout time.Duration, env ...string) string {
 	if label == "" {
 		label = fmt.Sprintf("bg-%d", q.counter.Add(1))
 	}
@@ -112,6 +115,9 @@ func (q *Queue) Start(label, command string, timeout time.Duration) string {
 			return
 		}
 		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		if len(env) > 0 {
+			cmd.Env = append(os.Environ(), env...)
+		}
 		out, err := cmd.CombinedOutput()
 		status := "completed"
 		switch {
@@ -194,13 +200,13 @@ func startResult(id, label, command string) string {
 	return fmt.Sprintf("Started %q (id=%s) in the background.", label, id)
 }
 
-func newStartTool(start func(label, command string, timeout time.Duration) string) tool.Tool {
+func newStartTool(start func(ctx adk.ToolContext, label, command string, timeout time.Duration) string) tool.Tool {
 	t, _ := functiontool.New(functiontool.Config{
 		Name: "bash_background",
 		Description: "Start a shell command in the background. Returns immediately with a task id. " +
 			"You will be notified of the result in a later turn. Use for long-running operations like test suites or builds.",
-	}, func(_ adk.ToolContext, in startIn) (startOut, error) {
-		id := start(in.Label, in.Command, 0)
+	}, func(ctx adk.ToolContext, in startIn) (startOut, error) {
+		id := start(ctx, in.Label, in.Command, 0)
 		return startOut{Result: startResult(id, in.Label, in.Command)}, nil
 	})
 	return t
@@ -208,7 +214,9 @@ func newStartTool(start func(label, command string, timeout time.Duration) strin
 
 // Tool returns the bash_background tool wired to q (single-queue / CLI use).
 func (q *Queue) Tool() tool.Tool {
-	return newStartTool(q.Start)
+	return newStartTool(func(ctx adk.ToolContext, label, command string, timeout time.Duration) string {
+		return q.Start(label, command, timeout, tools.ShellEnvFrom(ctx)...)
+	})
 }
 
 // Tool returns the bash_background tool. Each call routes to the queue
@@ -220,7 +228,7 @@ func (s *SessionQueues) Tool() tool.Tool {
 		Description: "Start a shell command in the background. Returns immediately with a task id. " +
 			"You will be notified of the result in a later turn. Use for long-running operations like test suites or builds.",
 	}, func(ctx adk.ToolContext, in startIn) (startOut, error) {
-		id := s.resolveQueue(ctx).Start(in.Label, in.Command, 0)
+		id := s.resolveQueue(ctx).Start(in.Label, in.Command, 0, tools.ShellEnvFrom(ctx)...)
 		return startOut{Result: startResult(id, in.Label, in.Command)}, nil
 	})
 	return t

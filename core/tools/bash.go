@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // alwaysBlock contains representative catastrophic command substrings refused
@@ -332,6 +332,9 @@ type BashIn struct {
 	// tool handler from the session's working directory and is excluded from the
 	// LLM-facing schema (json:"-"); empty means the process working directory.
 	Cwd string `json:"-"`
+	// Env holds extra "NAME=value" entries appended to the process environment.
+	// Set internally from ShellEnvFrom(ctx); excluded from the LLM schema.
+	Env []string `json:"-"`
 }
 type BashOut struct {
 	Output string `json:"output"`
@@ -358,6 +361,9 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	cmd := newShellCommand(cctx, in.Command)
 	if in.Cwd != "" {
 		cmd.Dir = in.Cwd
+	}
+	if len(in.Env) > 0 {
+		cmd.Env = append(os.Environ(), in.Env...)
 	}
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
@@ -399,6 +405,9 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 	cmd := newShellCommand(cctx, wrapCaptureCwd(command))
 	if cwd != "" {
 		cmd.Dir = cwd
+	}
+	if env := ShellEnvFrom(ctx); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
 	}
 	cmd.WaitDelay = 5 * time.Second
 	out, runErr := cmd.CombinedOutput()

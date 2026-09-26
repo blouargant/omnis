@@ -19,6 +19,7 @@ func New() []tool.Tool {
 				"Arguments: `command` (string, required) — the full shell command line to run. Do NOT use any other field name (e.g. `cmd`, `script`, `file_path`); calls with extra or missing properties are rejected.",
 			func(ctx adk.ToolContext, in BashIn) (BashOut, error) {
 				in.Cwd = sessionCwd(ctx)
+				in.Env = ShellEnvFrom(ctx)
 				out, _ := RunBash(context.Background(), in)
 				return BashOut{Output: out}, nil
 			}),

@@ -26,6 +26,7 @@ type Task struct {
 	Kind    string
 	Command string
 	cancel  context.CancelFunc
+	env     []string // extra "NAME=value" entries for the child process; unexported, not serialised
 
 	mu      sync.Mutex
 	status  string
