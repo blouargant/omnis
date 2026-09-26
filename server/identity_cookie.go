@@ -178,3 +178,46 @@ func sameOriginGuard() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// visibleTo reports whether an item owned by owner is visible to login.
+// login "" (not cookie mode) sees everything — the no-op contract.
+func visibleTo(login, owner string) bool { return login == "" || owner == login }
+
+// ownerGuard refuses, with 404, any route addressing a session or schedule
+// the caller does not own — and a `session` query parameter naming one. It
+// keys on the MATCHED route pattern (c.FullPath()), so every route under
+// /sessions/:id and /schedules/:id is covered, including ones added later.
+// 404 (not 403) so another user's ids cannot even be confirmed to exist.
+// Outside cookie mode (requestLogin == "") it is a pass-through.
+func ownerGuard(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		login := requestLogin(c)
+		if login == "" {
+			c.Next()
+			return
+		}
+		notFound := func() { c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"}) }
+		fp := c.FullPath()
+		if strings.Contains(fp, "/sessions/:id") && d.Registry != nil {
+			if m, ok := d.Registry.Snapshot(c.Param("id")); ok && m.UserID != login {
+				notFound()
+				return
+			}
+		}
+		if sid := c.Query("session"); sid != "" && d.Registry != nil {
+			if m, ok := d.Registry.Snapshot(sid); ok && m.UserID != login {
+				notFound()
+				return
+			}
+		}
+		if strings.Contains(fp, "/schedules/:id") && d.Scheduler != nil {
+			for _, j := range d.Scheduler.List() {
+				if j.ID == c.Param("id") && j.UserID != login {
+					notFound()
+					return
+				}
+			}
+		}
+		c.Next()
+	}
+}

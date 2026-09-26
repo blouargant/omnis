@@ -141,7 +141,18 @@ func scheduledTitle(prompt string) string {
 // handleListSchedules returns every job (loops + routines). GET /api/schedules.
 func handleListSchedules(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"jobs": d.Scheduler.List()})
+		login := requestLogin(c)
+		jobs := d.Scheduler.List()
+		if login != "" {
+			kept := jobs[:0]
+			for _, j := range jobs {
+				if visibleTo(login, j.UserID) {
+					kept = append(kept, j)
+				}
+			}
+			jobs = kept
+		}
+		c.JSON(http.StatusOK, gin.H{"jobs": jobs})
 	}
 }
 
@@ -183,6 +194,14 @@ func handleCreateSchedule(d serverDeps) gin.HandlerFunc {
 				return
 			}
 		}
+		// Cookie mode: a job may only target a session the caller owns (404,
+		// like the ownerGuard, so another user's session ids stay unconfirmable).
+		if login := requestLogin(c); login != "" && req.SessionID != "" {
+			if m, ok := d.Registry.Snapshot(req.SessionID); !ok || m.UserID != login {
+				c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+				return
+			}
+		}
 		spec, err := scheduler.ParseSpec(req.Spec, time.Now())
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -196,7 +215,7 @@ func handleCreateSchedule(d serverDeps) gin.HandlerFunc {
 			Cron:      spec.Cron,
 			At:        spec.At,
 			SessionID: req.SessionID,
-			UserID:    sessions.UserID(),
+			UserID:    ownerFor(c),
 			Squad:     strings.TrimSpace(req.Squad),
 			MaxRuns:   req.MaxRuns,
 		})

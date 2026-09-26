@@ -129,6 +129,18 @@ func handleSearchSessions(d serverDeps) gin.HandlerFunc {
 			return
 		}
 
+		// Cookie mode: keep only the caller's own sessions. A hit whose session
+		// is no longer registered is dropped too — its owner is unknowable.
+		if login := requestLogin(c); login != "" {
+			kept := results[:0]
+			for _, r := range results {
+				if m, ok := d.Registry.Snapshot(r.SessionID); ok && m.UserID == login {
+					kept = append(kept, r)
+				}
+			}
+			results = kept
+		}
+
 		warning := ""
 		if mode == sessindex.ModeScan {
 			if idx == nil {

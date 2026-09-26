@@ -289,7 +289,8 @@ func newEngine(d serverDeps) *gin.Engine {
 		wsChain = []gin.HandlerFunc{identityMiddleware(d.IdentityHeader, sessions.UserID())}
 	}
 	api.GET("/terminal/ws", append(wsChain, handleTerminal(d))...)
-	auth := api.Group("", authChain...)
+	// ownerGuard is last: it needs the identity the chain above established.
+	auth := api.Group("", append(authChain, ownerGuard(d))...)
 	// GET /api/whoami — the user this instance serves + whether the identity
 	// header is enforced. Shown in the web UI sidebar footer.
 	auth.GET("/whoami", handleWhoami(d))

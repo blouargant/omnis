@@ -27,7 +27,7 @@ import (
 // See docs/superpowers/specs/2026-07-19-session-list-pagination-design.md.
 func handleListSessions(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		all := d.Registry.List() // already last_used desc, tie-break created desc
+		all := d.Registry.ListFor(requestLogin(c)) // already last_used desc, tie-break created desc
 
 		// Legacy path — no pagination requested.
 		if c.Query("limit") == "" {
@@ -129,7 +129,7 @@ func handleListSessions(d serverDeps) gin.HandlerFunc {
 // reason import lives at /api/import/session).
 func handleSessionIDs(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		all := d.Registry.List()
+		all := d.Registry.ListFor(requestLogin(c))
 		ids := make([]string, 0, len(all))
 		for _, m := range all {
 			if m.Hidden {

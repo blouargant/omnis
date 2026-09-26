@@ -34,7 +34,7 @@ type collectionInfo struct {
 // A session whose Collection field is blank — or names a collection no longer in
 // the stored list — folds into General, so the totals always reconcile with the
 // session list the sidebar shows.
-func collectionCounts(d serverDeps, known []string) map[string]int {
+func collectionCounts(d serverDeps, login string, known []string) map[string]int {
 	knownByFold := make(map[string]string, len(known))
 	for _, n := range known {
 		knownByFold[strings.ToLower(n)] = n
@@ -43,7 +43,8 @@ func collectionCounts(d serverDeps, known []string) map[string]int {
 	for _, n := range known {
 		counts[n] = 0
 	}
-	for _, m := range d.Registry.List() {
+	// Counts only the caller's sessions in cookie mode (login "" ⇒ all).
+	for _, m := range d.Registry.ListFor(login) {
 		if m.Hidden {
 			continue
 		}
@@ -76,7 +77,7 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		counts := collectionCounts(d, known)
+		counts := collectionCounts(d, requestLogin(c), known)
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
 		for _, n := range known {

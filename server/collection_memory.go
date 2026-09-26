@@ -29,8 +29,15 @@ const (
 // capped in count and total size. Returns "" when the collection has nothing to
 // learn from yet.
 func gatherCollectionMaterial(d serverDeps, collection string) string {
+	return gatherCollectionMaterialFor(d, collection, "")
+}
+
+// gatherCollectionMaterialFor is gatherCollectionMaterial restricted to the
+// sessions owned by login ("" ⇒ every owner). The request path passes the
+// cookie-mode caller so a distilled memory never quotes another user's chats.
+func gatherCollectionMaterialFor(d serverDeps, collection, login string) string {
 	var metas []*sessions.SessionMeta
-	for _, m := range d.Registry.List() {
+	for _, m := range d.Registry.ListFor(login) {
 		if m == nil || m.Hidden || m.Turns == 0 {
 			continue
 		}
@@ -91,7 +98,7 @@ func handleDistillCollectionMemory(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no agent manager available"})
 			return
 		}
-		material := gatherCollectionMaterial(d, name)
+		material := gatherCollectionMaterialFor(d, name, requestLogin(c))
 		if material == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no chats in this collection to learn from yet"})
 			return
