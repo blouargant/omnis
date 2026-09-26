@@ -111,6 +111,7 @@ const BASE_PATH = window.BASE_PATH || "";
   // durable source of truth is the server preferences.json (user home); this
   // cache is what the synchronous fire path in app.js reads.
   const NOTIFY_STORAGE_KEY = "agent_toolkit_os_notify";
+  const SUGGEST_STORAGE_KEY = "agent_toolkit_prompt_suggestions"; // shared with app.js
   const THEMES = [
     // Principal
     { id: "vscode-dark",     label: "VS Code Dark",    tier: "principal", tone: "Dark",  swatch: ["#1e1e1e", "#252526", "#0e639c", "#cccccc"] },
@@ -181,6 +182,19 @@ const BASE_PATH = window.BASE_PATH || "";
     }).catch(() => { /* offline / unauthenticated — local cache wins */ });
   }
 
+  // savePromptSuggestions records the composer-suggestion choice: the localStorage
+  // cache app.js reads, plus the server preference (which also stops the server
+  // from generating). Applies to open panes immediately.
+  function savePromptSuggestions(enabled) {
+    localStorage.setItem(SUGGEST_STORAGE_KEY, enabled ? "1" : "0");
+    if (typeof window.setPromptSuggestionsEnabled === "function") window.setPromptSuggestionsEnabled(!!enabled);
+    return fetch(BASE_PATH + "/api/preferences", {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ prompt_suggestions: !!enabled }),
+    }).catch(() => { /* offline — local cache wins */ });
+  }
+
   // notifyBlockedHelp explains how to unblock notifications in the browser when
   // the site-level permission is blocking them (a website can't grant it itself).
   // Reuses app.js's themed modal when available, falling back to a plain alert.
@@ -209,6 +223,9 @@ const BASE_PATH = window.BASE_PATH || "";
         // absent value (first run) is left untouched so the opt-in can fire.
         if (prefs && typeof prefs.notifications === "boolean") {
           localStorage.setItem(NOTIFY_STORAGE_KEY, prefs.notifications ? "1" : "0");
+        }
+        if (prefs && typeof prefs.prompt_suggestions === "boolean") {
+          localStorage.setItem(SUGGEST_STORAGE_KEY, prefs.prompt_suggestions ? "1" : "0");
         }
         // Reconcile the UI language: an explicit server choice that differs from
         // what this browser resolved adopts it and reloads once (guarded), so a
@@ -1190,6 +1207,7 @@ const BASE_PATH = window.BASE_PATH || "";
     `;
 
     const osNotify = localStorage.getItem(NOTIFY_STORAGE_KEY) === "1";
+    const suggestOn = localStorage.getItem(SUGGEST_STORAGE_KEY) !== "0";
     bodyEl.innerHTML = `
       <div class="settings-form">
         ${languageSection}
@@ -1201,6 +1219,16 @@ const BASE_PATH = window.BASE_PATH || "";
           </label>
           <p class="settings-hint" style="margin:0;">
             ${escHtml(tr("appearance.notifyHint"))}
+          </p>
+        </section>
+        <section class="form-section">
+          <h3>${escHtml(tr("appearance.suggestions"))}</h3>
+          <label class="settings-checkrow">
+            <input type="checkbox" id="prompt-suggest-toggle" ${suggestOn ? "checked" : ""} />
+            <span>${escHtml(tr("appearance.suggestionsLabel"))}</span>
+          </label>
+          <p class="settings-hint" style="margin:0;">
+            ${escHtml(tr("appearance.suggestionsHint"))}
           </p>
         </section>
         <p class="settings-hint" style="margin:0;">
@@ -1257,6 +1285,11 @@ const BASE_PATH = window.BASE_PATH || "";
         saveNotifications(true);
         notifyBlockedHelp();
       });
+    }
+
+    const suggestToggle = bodyEl.querySelector("#prompt-suggest-toggle");
+    if (suggestToggle) {
+      suggestToggle.addEventListener("change", () => savePromptSuggestions(suggestToggle.checked));
     }
   }
 
