@@ -15,6 +15,8 @@ func TestCleanSuggestion(t *testing.T) {
 		{"backticks", "`Run the tests`", "Run the tests"},
 		{"label", "Suggestion: Explain step 2", "Explain step 2"},
 		{"label user", "User: What about Windows?", "What about Windows?"},
+		{"label user hyphen spaced", "User - What about Windows?", "What about Windows?"},
+		{"hyphenated compound not a label", "User-facing bug is critical", "User-facing bug is critical"},
 		{"first line only", "Deploy it\nor maybe not", "Deploy it"},
 		{"leading blank lines", "\n\n  Next step?\n", "Next step?"},
 		{"none", "NONE", ""},

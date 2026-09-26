@@ -33,8 +33,13 @@ const suggestSystemPrompt = "You predict the user's next message in a chat with 
 	"Output only the message — no quotes, no preamble. " +
 	"If there is no natural follow-up, output exactly NONE."
 
-// suggestLabelRE strips a leading label some models add despite the instruction.
-var suggestLabelRE = regexp.MustCompile(`(?i)^(suggestion|suggested (message|reply)|next message|user|utilisateur)\s*[:：\-–]\s*`)
+// suggestLabelRE strips a leading label some models add despite the
+// instruction. The ":"/"：" separator allows optional surrounding whitespace,
+// but "-"/"–" only counts as a label separator when whitespace surrounds it
+// on BOTH sides — otherwise a hyphenated compound the model legitimately wrote
+// ("User-facing bug is critical") would be misread as a "User" label and have
+// its first word stripped ("facing bug is critical").
+var suggestLabelRE = regexp.MustCompile(`(?i)^(suggestion|suggested (message|reply)|next message|user|utilisateur)(?:\s*[:：]\s*|\s+[\-–]\s+)`)
 
 // buildSuggestRequest renders the last suggestMaxTurns exchanges as a plain
 // transcript, capped at suggestTranscriptCap runes keeping the tail.
