@@ -72,6 +72,12 @@ func handleRewind(d serverDeps) gin.HandlerFunc {
 		}
 		d.Registry.SetTurns(id, len(kept))
 
+		// The suggestion cache is keyed only on turn count, so a rewind from N
+		// turns back to N-1 followed by a resend (bringing the count back to N)
+		// could otherwise serve the discarded reply's cached suggestion. Drop it
+		// so the next /suggestion call regenerates from the truncated history.
+		d.Suggest.forget(id)
+
 		// Reseed the in-memory model context from the kept turns so the next turn
 		// continues coherently. Best-effort: a failure is logged inside the helper
 		// and never corrupts the (already-truncated) display history.

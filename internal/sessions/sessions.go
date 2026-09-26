@@ -229,6 +229,19 @@ func (r *Registry) Get(id string) (*SessionMeta, bool) {
 	return m, ok
 }
 
+// Snapshot returns a copy of a session's metadata taken under the registry lock,
+// so callers can read several fields (Turns, Archived, Hidden, …) without racing
+// the setters that write them through the shared pointer Get returns.
+func (r *Registry) Snapshot(id string) (SessionMeta, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.items[id]
+	if !ok {
+		return SessionMeta{}, false
+	}
+	return *m, true
+}
+
 // IsArchived reports a session's archived flag, read under the registry lock
 // (SetArchived writes it under the same lock, so reading meta.Archived through
 // the pointer Get returns would race). ok is false for an unknown session.

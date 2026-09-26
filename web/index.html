@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=20" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=21" />
   <link rel="stylesheet" href="assets/css/settings.css?v=15" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -323,6 +323,7 @@
           <div class="prompt-stack">
             <div class="prompt-highlight" aria-hidden="true"></div>
             <textarea id="prompt" rows="2" placeholder="Message the agent… (Enter to send)" data-i18n-placeholder="composer.placeholder"></textarea>
+            <span class="prompt-suggest-hint" aria-hidden="true" data-i18n="composer.suggestHint">Tab ⇥</span>
           </div>
           <div class="composer-actions">
             <div id="attach-wrap">
@@ -474,9 +475,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=65" defer></script>
+  <script src="assets/i18n/locales.js?v=67" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=93" defer></script>
-  <script src="assets/settings.js?v=62" defer></script>
+  <script src="assets/app.js?v=95" defer></script>
+  <script src="assets/settings.js?v=63" defer></script>
 </body>
 </html>

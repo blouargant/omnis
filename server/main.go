@@ -453,6 +453,7 @@ func run() error {
 		Updates:             updates,
 		Version:             version,
 		SessionIndex:        sessionIndex,
+		Suggest:             newSuggestStore(),
 	}
 	// Durable agent questions: store AskUserQuestion prompts in the conversation
 	// file so they survive a restart, and restore the ones a previous run left.

@@ -122,6 +122,12 @@ type serverDeps struct {
 	// not a value: the index is opened on first use and unloads itself between
 	// bursts of searching, so a server nobody searches never pays for it.
 	SessionIndex func() *sessindex.Index
+	// Suggest caches composer prompt suggestions per session (turn-count keyed).
+	// Nil ⇒ GET /sessions/:id/suggestion always answers "" (feature inert).
+	Suggest *suggestStore
+	// SuggestFn overrides the suggestion generator (tests). Nil ⇒
+	// Manager.SuggestNextPrompt.
+	SuggestFn suggestFunc
 }
 
 // sessionIndex resolves the session search index, nil-safe.
@@ -927,6 +933,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	}
 	prefStore := newPreferencesStore(d.ConfigFiles)
 	registerPreferencesRoutes(auth, prefStore)
+	auth.GET("/sessions/:id/suggestion", handleSuggestion(d, prefStore))
 	registerWhatsNewRoutes(auth, d.Version, prefStore)
 	userCmdStore := newUserCommandsStore()
 	registerUserCommandsRoutes(auth, userCmdStore)

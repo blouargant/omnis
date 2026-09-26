@@ -102,6 +102,37 @@ func TestManagerReleaseTearsDownDrainingGeneration(t *testing.T) {
 	}
 }
 
+// TestManagerPeekDoesNotPin guards the non-pinning lookup read-only callers
+// (e.g. prompt suggestions) must use instead of Lookup: Peek must never
+// create a pin/refcount for a session that isn't already pinned, and must
+// leave an existing pin's refcount unchanged.
+func TestManagerPeekDoesNotPin(t *testing.T) {
+	inst1 := newTestInstance(1)
+	m := NewManager(nil, inst1)
+
+	if got := m.Peek("unpinned"); got != nil {
+		t.Fatalf("Peek(unpinned) = %v, want nil", got)
+	}
+	if gen := m.PinnedGeneration("unpinned"); gen != 0 {
+		t.Fatalf("Peek must not pin: PinnedGeneration(unpinned) = %d, want 0", gen)
+	}
+	if gens := m.Generations(); gens[1] != 0 {
+		t.Fatalf("Peek must not bump refcount: gens[1] = %d, want 0", gens[1])
+	}
+
+	m.Pin("pinned")
+	if got := m.Peek("pinned"); got != inst1 {
+		t.Fatalf("Peek(pinned) = %v, want inst1", got)
+	}
+	if gens := m.Generations(); gens[1] != 1 {
+		t.Fatalf("Peek must not change refcount for an already-pinned session: gens[1] = %d, want 1", gens[1])
+	}
+
+	if got := m.Peek(""); got != nil {
+		t.Fatalf("Peek(\"\") = %v, want nil", got)
+	}
+}
+
 func TestManagerLookupAutoPinsToCurrent(t *testing.T) {
 	inst1 := newTestInstance(1)
 	m := NewManager(nil, inst1)

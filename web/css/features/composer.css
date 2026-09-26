@@ -202,6 +202,27 @@ body.resizing-composer #composer-resize { transition: none; }
 #prompt::selection { background: rgba(79, 193, 255, 0.35); }
 #prompt::placeholder { color: #555558; }
 
+/* Prompt suggestion: the suggested next message is the textarea's placeholder
+   (so the browser hides it on the first keystroke). Italic to set it apart from
+   the default hint, plus a "Tab ⇥" badge shown only while the placeholder is. */
+#composer-wrap.has-suggestion #prompt::placeholder { font-style: italic; }
+#composer-wrap.has-suggestion #prompt:placeholder-shown { padding-right: 64px; }
+.prompt-suggest-hint {
+  display: none;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-muted);
+  pointer-events: none;
+  user-select: none;
+}
+#composer-wrap.has-suggestion #prompt:placeholder-shown ~ .prompt-suggest-hint { display: inline-block; }
+
 #composer-wrap.drag-over::after {
   content: "Drop files to attach";
   position: absolute;
