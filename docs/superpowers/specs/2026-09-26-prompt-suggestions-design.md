@@ -59,15 +59,17 @@ model).
   > preamble. If there is no natural follow-up, output exactly NONE.
 - `cleanSuggestion(raw)` post-processes: trim; drop surrounding quotes/backticks;
   strip a leading label (`Suggestion:`, `User:`, `Next message:` …,
-  case-insensitive); keep the first non-empty line; cap at `suggestMaxLen` (160)
-  runes on a word boundary. Output `NONE` (any case) or empty ⇒ `("", false)`
-  semantically "no suggestion".
+  case-insensitive); keep the first non-empty line. Output `NONE` (any case), empty,
+  longer than `suggestMaxLen` (160) runes (dropped, not truncated — a suggestion
+  ending in "…" is not sendable), or starting with `/`, `!` or `#` (the composer
+  would run it as a slash command, a host shell escape or an AGENT.md write) ⇒
+  "no suggestion".
 - Returns `ok=false` only for **failures** (no instance, model build error, LLM
   error). A `NONE` answer is `("", true)` — a valid, cacheable "no suggestion".
 
 ### 3.2 Route — `server/prompt_suggest.go`
 
-`GET /api/sessions/:id/suggestion` → `200 {"suggestion": string, "turns": int}`
+`GET /api/sessions/:id/suggestion` → `200 {"suggestion": string, "turns": int, "busy": bool}`
 (auth group; `404` for an unknown session).
 
 Returns `suggestion: ""` **without a model call** when any of:
@@ -75,7 +77,15 @@ Returns `suggestion: ""` **without a model call** when any of:
 - preference `prompt_suggestions` is explicitly `false`;
 - the session is archived or hidden;
 - the session has no turns;
-- a turn is in flight (`RunGuard.busy(id)`) — the client asks again when it ends.
+- a turn is in flight (`RunGuard.busy(id)`) — answered with `busy: true`. `Turns`
+  is bumped at turn start but the conversation file only gains the turn at the end,
+  so generating now would cache a suggestion for the old state under the new key.
+  The client's `done` can arrive before the guard is released, so the client
+  retries (3 × 1 s) on `busy`.
+
+Session fields are read through a new `Registry.Snapshot(id)` (a copy taken under
+the registry lock) — reading `Archived`/`Hidden`/`Turns` through the pointer `Get`
+returns would race their setters.
 
 Otherwise:
 
@@ -108,7 +118,7 @@ stale tab or a direct call cannot spend model calls while the user has it off.
 
 ### 4.1 State and fetching
 
-- `sessionSuggestion`: `Map<sessionId, {text, turns}>`, cleared in
+- `sessionSuggestion`: `Map<sessionId, text>`, cleared in
   `forgetSession`. Per session, not per pane, so it survives tab switches.
 - `fetchSuggestion(sessionId)`: no-op unless the preference is on (localStorage
   read-cache) **and** some pane shows the session as its active tab
@@ -117,9 +127,8 @@ stale tab or a direct call cannot spend model calls while the user has it off.
 - Called:
   1. at the end of a local turn (send-path `finally`, outcome `done` or `reload`);
   2. at the end of an observed remote/injected turn (`endRemoteBusy`);
-  3. on session open / tab reactivation (`activateTab`) when the client cache is
-     missing or older than the session's known turn count — the server cache
-     makes this free.
+  3. on session open / tab reactivation (`activateTab`) — always; the server
+     cache makes a repeat free, so the client keeps no turn-count bookkeeping.
 - Cleared (and panes repainted) the moment a send or steer starts
   (`sendMessage`, `steerMessage`), and on the `session_rewound` event.
 
@@ -171,8 +180,8 @@ assistant (own composers), archived sessions, CLI and TUI.
 ## 5. i18n
 
 New keys (en/fr/es/de): `composer.placeholderCtrl`, `composer.archivedPlaceholder`,
-`composer.suggestHint`, `set.appearance.suggestions`,
-`set.appearance.suggestionsHint`. `make i18n`, bump the `?v=` query strings in
+`composer.suggestHint`, `appearance.suggestions`, `appearance.suggestionsLabel`,
+`appearance.suggestionsHint` (the Appearance panel's existing namespace). `make i18n`, bump the `?v=` query strings in
 `web/index.html` for `app.js`, `settings.js`, `i18n/locales.js`.
 
 ## 6. Testing
