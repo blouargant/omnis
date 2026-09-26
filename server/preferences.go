@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/blouargant/omnis/internal/configedit"
+	"github.com/blouargant/omnis/internal/identity"
 )
 
 // preferences holds user-visible UI preferences that should survive server
@@ -102,17 +103,22 @@ func newPrefStores(cf configFiles) *prefStores {
 
 // forLogin returns the store for login, creating it (anchored under
 // userRoot(login)/preferences.json) on first use. login "" returns the
-// shared store — single-user behaviour is unchanged.
+// shared store — single-user behaviour is unchanged. Keyed by
+// identity.LoginSegment(login), the same sanitisation userRoot uses for the
+// on-disk path, so "Alice" and "alice" — which resolve to the identical
+// preferences.json on disk — share one store (and one mutex) instead of two
+// stores racing on the same file.
 func (p *prefStores) forLogin(login string) *preferencesStore {
 	if login == "" {
 		return p.shared
 	}
+	key := identity.LoginSegment(login)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s, ok := p.byUser[login]
+	s, ok := p.byUser[key]
 	if !ok {
 		s = &preferencesStore{path: filepath.Join(userRoot(login), "preferences.json")}
-		p.byUser[login] = s
+		p.byUser[key] = s
 	}
 	return s
 }

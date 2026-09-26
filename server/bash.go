@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/identity"
 	"github.com/blouargant/omnis/internal/shellcomplete"
 )
 
@@ -115,12 +116,16 @@ func (s *bashCwdStore) setGlobal(dir string) {
 // user gets their own default working directory (userWorkDir) instead of the
 // single shared `def`, so browsing "no session" never leaks another user's
 // files. login "" ⇒ the shared getGlobal() — single-user behaviour unchanged.
+// Keyed by identity.LoginSegment(login), the same sanitisation userRoot uses
+// for the on-disk path, so "Alice" and "alice" share one entry instead of two
+// independently-tracked dirs for what is really one user.
 func (s *bashCwdStore) getGlobalFor(login string) string {
 	if login == "" {
 		return s.getGlobal()
 	}
+	key := identity.LoginSegment(login)
 	s.mu.Lock()
-	d, ok := s.userDef[login]
+	d, ok := s.userDef[key]
 	s.mu.Unlock()
 	if ok && d != "" {
 		return d
@@ -138,8 +143,9 @@ func (s *bashCwdStore) setGlobalFor(login, dir string) {
 	if dir == "" {
 		return
 	}
+	key := identity.LoginSegment(login)
 	s.mu.Lock()
-	s.userDef[login] = dir
+	s.userDef[key] = dir
 	s.mu.Unlock()
 }
 
