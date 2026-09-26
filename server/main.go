@@ -64,6 +64,7 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/teammates"
 )
 
 // Build metadata, populated via -ldflags at build time (Makefile / goreleaser
@@ -321,6 +322,10 @@ func run() error {
 			return ""
 		})
 		defer agent.SetCollectionRootResolver(nil)
+		// Teammate mailbox + past-session search tools are process-wide; scope
+		// them to the calling session's owner so one user's agent can neither
+		// list/message another user's sessions nor read their transcripts.
+		defer installOwnerScoping(registry)()
 	}
 
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
@@ -667,5 +672,19 @@ func watchPersistedSessions(rootCtx context.Context, d serverDeps) {
 	}
 	for _, meta := range d.Registry.List() {
 		d.PushMgr.Watch(rootCtx, d, meta.ID, meta.UserID)
+	}
+}
+
+// installOwnerScoping installs the cookie-mode owner resolvers of the
+// process-wide agent tool groups (teammate mailbox, past-session search) and
+// returns their removal.
+func installOwnerScoping(registry *sessions.Registry) func() {
+	teammates.SetOwnerResolver(mailboxOwnerResolver(registry))
+	sessindex.SetOwnerResolver(func(sessionID string) string {
+		return ownerOfSession(serverDeps{Registry: registry}, sessionID)
+	})
+	return func() {
+		teammates.SetOwnerResolver(nil)
+		sessindex.SetOwnerResolver(nil)
 	}
 }

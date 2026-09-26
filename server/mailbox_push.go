@@ -356,6 +356,12 @@ func (pm *pushManager) Stop(sessionID string) {
 // the answering squad is given a MANDATORY directive to reply via its mailbox —
 // a missing reply would strand the sender's workflow.
 func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, userID, from, body string) {
+	// Cookie mode: a message from another user's session must never run as a
+	// turn here — it would execute with THIS owner's platform token.
+	if !mailboxSenderAllowed(d, userID, from) {
+		log.Printf("server: dropped cross-user mailbox message for session %s (sender %q)", sessionID, from)
+		return
+	}
 	// The clean record of the message. This is also the view the router sees when
 	// it routes: the router has no reply duty, so it must not be shown the reply
 	// directive below (it would try to act on it).

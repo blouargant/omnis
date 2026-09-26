@@ -12,12 +12,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
 
 	"github.com/blouargant/omnis/core/adk"
+	"github.com/blouargant/omnis/core/events"
 )
 
 // Tool names.
@@ -80,6 +82,11 @@ func Enrich(hits []Hit) []Result {
 // uses: semantic when the index is usable, a direct scan otherwise. It reports
 // which path answered so the caller can warn the user about a slow scan.
 func SearchOrScan(ctx context.Context, idx *Index, query string, k int, excludeArchived bool) ([]Result, Mode, ScanStats, error) {
+	return searchOrScan(ctx, idx, query, k, excludeArchived, nil)
+}
+
+// searchOrScan is SearchOrScan restricted to sessions allow accepts (nil ⇒ all).
+func searchOrScan(ctx context.Context, idx *Index, query string, k int, excludeArchived bool, allow func(string) bool) ([]Result, Mode, ScanStats, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, ModeScan, ScanStats{}, fmt.Errorf("query is required")
@@ -90,27 +97,74 @@ func SearchOrScan(ctx context.Context, idx *Index, query string, k int, excludeA
 	// A cold index (never built, or invalidated by an embedder change) answers
 	// via scan rather than returning nothing; the caller kicks the build.
 	if idx == nil || idx.Len() == 0 {
-		hits, stats, err := Scan(ctx, query, ScanOpts{K: k, ExcludeArchived: excludeArchived})
+		hits, stats, err := Scan(ctx, query, ScanOpts{K: k, ExcludeArchived: excludeArchived, Allow: allow})
 		if err != nil {
 			return nil, ModeScan, stats, err
 		}
 		return Enrich(hits), ModeScan, stats, nil
 	}
-	hits, err := idx.Search(ctx, query, k)
+	fetch := k
+	if allow != nil {
+		fetch = k * 5 // over-fetch: other users' hits are filtered out below
+	}
+	hits, err := idx.Search(ctx, query, fetch)
 	if err != nil {
 		return nil, ModeSemantic, ScanStats{}, err
 	}
 	res := Enrich(hits)
-	if excludeArchived {
-		kept := res[:0]
-		for _, r := range res {
-			if !r.Archived {
-				kept = append(kept, r)
-			}
+	kept := res[:0]
+	for _, r := range res {
+		if excludeArchived && r.Archived {
+			continue
 		}
-		res = kept
+		if allow != nil && !allow(r.SessionID) {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	res = kept
+	if len(res) > k {
+		res = res[:k]
 	}
 	return res, ModeSemantic, ScanStats{}, nil
+}
+
+// ownerResolver maps a session id to its owning login on a shared multi-user
+// server (cookie identity mode); nil ⇒ no scoping (single-user behaviour).
+var ownerResolver atomic.Pointer[func(sessionID string) string]
+
+// SetOwnerResolver installs (nil removes) the process-wide session→owner
+// resolver. With one installed, every tool of this group only sees sessions
+// owned by the calling session's owner. Unknown sessions resolve to "".
+func SetOwnerResolver(f func(sessionID string) string) {
+	if f == nil {
+		ownerResolver.Store(nil)
+		return
+	}
+	ownerResolver.Store(&f)
+}
+
+// allowFor returns the visibility filter for a tool called from caller (the
+// user-facing session id), or nil when no scoping applies. An unattributable
+// caller sees nothing.
+func allowFor(caller string) func(string) bool {
+	p := ownerResolver.Load()
+	if p == nil {
+		return nil
+	}
+	r := *p
+	owner := r(caller)
+	return func(id string) bool { return owner != "" && r(id) == owner }
+}
+
+// callerSession is the user-facing session a tool call belongs to: the root
+// session planted on the run context (it survives into sub-agents, whose own
+// SessionID is an ephemeral agenttool one), else the tool context's session.
+func callerSession(tc adk.ToolContext) string {
+	if id := events.RootSessionFromContext(tc); id != "" {
+		return id
+	}
+	return tc.SessionID()
 }
 
 // Deps wires the tool group to the process-wide index. Index is a thunk (not a
@@ -198,11 +252,7 @@ func NewTools(d Deps) []tool.Tool {
 			"`exclude_archived` (bool, optional). Run several differently-worded queries when the first " +
 			"is inconclusive — the user's words are rarely the words used in the session.",
 	}, func(tc adk.ToolContext, in searchIn) (searchOut, error) {
-		res, mode, _, err := SearchOrScan(tc, d.index(), in.Query, in.K, in.ExcludeArchived)
-		if err != nil {
-			return searchOut{}, err
-		}
-		return searchOut{Mode: mode, Results: res}, nil
+		return searchSessions(tc, d, callerSession(tc), in)
 	}); err == nil {
 		out = append(out, search)
 	}
@@ -213,46 +263,8 @@ func NewTools(d Deps) []tool.Tool {
 			"it verbatim. Returns the user/assistant text of a slice of its turns. Arguments: `session_id` " +
 			"(string, required); `from_turn` (int, optional, default 0); `turns` (int, optional, default 6, " +
 			"max 30).",
-	}, func(_ adk.ToolContext, in readIn) (readOut, error) {
-		id := strings.TrimSpace(in.SessionID)
-		if id == "" {
-			return readOut{}, fmt.Errorf("session_id is required")
-		}
-		c, _, err := loadConv(id)
-		if err != nil {
-			return readOut{}, err
-		}
-		if !c.searchable() {
-			return readOut{}, fmt.Errorf("session %q not found", id)
-		}
-		from := in.FromTurn
-		if from < 0 {
-			from = 0
-		}
-		if from > len(c.Turns) {
-			from = len(c.Turns)
-		}
-		n := in.Turns
-		if n <= 0 {
-			n = 6
-		}
-		if n > 30 {
-			n = 30
-		}
-		end := from + n
-		if end > len(c.Turns) {
-			end = len(c.Turns)
-		}
-		turns := make([]readTurn, 0, end-from)
-		for i := from; i < end; i++ {
-			turns = append(turns, readTurn{
-				Index:     i,
-				At:        c.Turns[i].At,
-				User:      c.Turns[i].UserText,
-				Assistant: c.Turns[i].AssistantText,
-			})
-		}
-		return readOut{SessionID: id, Title: c.Title, TotalTurns: len(c.Turns), Turns: turns}, nil
+	}, func(tc adk.ToolContext, in readIn) (readOut, error) {
+		return readSession(callerSession(tc), in)
 	}); err == nil {
 		out = append(out, read)
 	}
@@ -262,34 +274,8 @@ func NewTools(d Deps) []tool.Tool {
 		Description: "List the most recently used past sessions (id, title, collection, turn count, date). " +
 			"Use it to answer questions about recent activity, or to orient yourself before searching. " +
 			"Arguments: `limit` (int, optional, default 20, max 100).",
-	}, func(_ adk.ToolContext, in listIn) (listOut, error) {
-		limit := in.Limit
-		if limit <= 0 {
-			limit = 20
-		}
-		if limit > 100 {
-			limit = 100
-		}
-		var all []listSession
-		for _, id := range listSessionIDs() {
-			c, _, err := loadConv(id)
-			if err != nil || !c.searchable() {
-				continue
-			}
-			all = append(all, listSession{
-				SessionID:  id,
-				Title:      c.Title,
-				Collection: c.Collection,
-				Archived:   c.Archived,
-				Turns:      len(c.Turns),
-				LastAt:     c.LastAt(),
-			})
-		}
-		sort.Slice(all, func(a, b int) bool { return all[a].LastAt.After(all[b].LastAt) })
-		if len(all) > limit {
-			all = all[:limit]
-		}
-		return listOut{Sessions: all}, nil
+	}, func(tc adk.ToolContext, in listIn) (listOut, error) {
+		return listSessions(callerSession(tc), in), nil
 	}); err == nil {
 		out = append(out, list)
 	}
@@ -326,4 +312,96 @@ func NewTools(d Deps) []tool.Tool {
 	}
 
 	return out
+}
+
+// searchSessions is search_sessions for caller (owner-scoped when a resolver
+// is installed).
+func searchSessions(ctx context.Context, d Deps, caller string, in searchIn) (searchOut, error) {
+	res, mode, _, err := searchOrScan(ctx, d.index(), in.Query, in.K, in.ExcludeArchived, allowFor(caller))
+	if err != nil {
+		return searchOut{}, err
+	}
+	return searchOut{Mode: mode, Results: res}, nil
+}
+
+// readSession is read_session for caller: another owner's session reads as
+// "not found", exactly like a missing one.
+func readSession(caller string, in readIn) (readOut, error) {
+	id := strings.TrimSpace(in.SessionID)
+	if id == "" {
+		return readOut{}, fmt.Errorf("session_id is required")
+	}
+	if allow := allowFor(caller); allow != nil && !allow(id) {
+		return readOut{}, fmt.Errorf("session %q not found", id)
+	}
+	c, _, err := loadConv(id)
+	if err != nil {
+		return readOut{}, err
+	}
+	if !c.searchable() {
+		return readOut{}, fmt.Errorf("session %q not found", id)
+	}
+	from := in.FromTurn
+	if from < 0 {
+		from = 0
+	}
+	if from > len(c.Turns) {
+		from = len(c.Turns)
+	}
+	n := in.Turns
+	if n <= 0 {
+		n = 6
+	}
+	if n > 30 {
+		n = 30
+	}
+	end := from + n
+	if end > len(c.Turns) {
+		end = len(c.Turns)
+	}
+	turns := make([]readTurn, 0, end-from)
+	for i := from; i < end; i++ {
+		turns = append(turns, readTurn{
+			Index:     i,
+			At:        c.Turns[i].At,
+			User:      c.Turns[i].UserText,
+			Assistant: c.Turns[i].AssistantText,
+		})
+	}
+	return readOut{SessionID: id, Title: c.Title, TotalTurns: len(c.Turns), Turns: turns}, nil
+}
+
+// listSessions is list_sessions for caller (owner-scoped).
+func listSessions(caller string, in listIn) listOut {
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	allow := allowFor(caller)
+	var all []listSession
+	for _, id := range listSessionIDs() {
+		if allow != nil && !allow(id) {
+			continue
+		}
+		c, _, err := loadConv(id)
+		if err != nil || !c.searchable() {
+			continue
+		}
+		all = append(all, listSession{
+			SessionID:  id,
+			Title:      c.Title,
+			Collection: c.Collection,
+			Archived:   c.Archived,
+			Turns:      len(c.Turns),
+			LastAt:     c.LastAt(),
+		})
+	}
+	sort.Slice(all, func(a, b int) bool { return all[a].LastAt.After(all[b].LastAt) })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return listOut{Sessions: all}
 }

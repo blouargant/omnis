@@ -250,7 +250,7 @@ func (a *Agent) Tools() []tool.Tool {
 		}
 		from := a.resolveName(ctx, a.Name)
 		to := a.resolveName(ctx, in.To)
-		reply, err := a.askWith(context.Background(), from, to, in.Question, 30*time.Second)
+		reply, err := a.askAs(context.Background(), from, to, in.Question, 30*time.Second)
 		if err != nil {
 			return askOut{Reply: "Error: " + err.Error()}, nil
 		}
@@ -268,7 +268,7 @@ func (a *Agent) Tools() []tool.Tool {
 		}
 		from := a.resolveName(ctx, a.Name)
 		to := a.resolveName(ctx, in.To)
-		if err := a.tellWith(context.Background(), from, to, in.Body); err != nil {
+		if err := a.tellAs(context.Background(), from, to, in.Body); err != nil {
 			return tellOut{Result: "Error: " + err.Error()}, nil
 		}
 		return tellOut{Result: "delivered"}, nil
@@ -305,8 +305,8 @@ func (a *Agent) Tools() []tool.Tool {
 		if a.Registry == nil {
 			return listOut{Sessions: map[string]string{}}, nil
 		}
-		sessions := a.Registry.List()
 		myAddr := a.resolveName(ctx, a.Name)
+		sessions := a.visibleSessions(myAddr)
 		var myName string
 		for name, addr := range sessions {
 			if addr == myAddr {

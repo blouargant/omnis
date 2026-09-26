@@ -31,6 +31,9 @@ type ScanOpts struct {
 	// are searched by default: the user archived them, they did not delete them,
 	// and being able to find them again is most of the point of this feature.
 	ExcludeArchived bool
+	// Allow, when set, restricts the scan to sessions it accepts (owner
+	// scoping on a shared server). nil ⇒ every searchable session.
+	Allow func(sessionID string) bool
 }
 
 // ScanStats reports what a scan cost, so the UI can be honest about it.
@@ -176,6 +179,9 @@ func Scan(ctx context.Context, query string, opts ScanOpts) ([]Hit, ScanStats, e
 		case <-ctx.Done():
 			return nil, stats, ctx.Err()
 		default:
+		}
+		if opts.Allow != nil && !opts.Allow(id) {
+			continue
 		}
 		c, _, err := loadConv(id)
 		if err != nil || !c.searchable() {

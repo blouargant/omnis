@@ -12,10 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	toolkitagent "github.com/blouargant/omnis/agent"
+
 	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/identity"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
+	"github.com/blouargant/omnis/internal/teammates"
 )
 
 // cookieAuth is the shared-server ("cookie") identity mode. nil ⇒ mode off.
@@ -298,4 +301,37 @@ func ownerGuard(d serverDeps) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// mailboxOwnerResolver maps a teammate mailbox address ("<suffix>:<agent>",
+// suffix = agent.SessionSuffix(owner, session)) to the owning login, or ""
+// when no known session's suffix prefixes it. Installed as the teammates
+// owner resolver in cookie mode so cross-session messaging never crosses users.
+func mailboxOwnerResolver(reg *sessions.Registry) func(addr string) string {
+	return func(addr string) string {
+		for _, m := range reg.List() {
+			if strings.HasPrefix(addr, toolkitagent.SessionSuffix(m.UserID, m.ID)+":") {
+				return m.UserID
+			}
+		}
+		return ""
+	}
+}
+
+// mailboxSenderAllowed reports whether a mailbox message from `from` (a
+// registered session name, or a raw address) may run as a turn in a session
+// owned by owner. Always true outside cookie mode (no resolver installed);
+// in cookie mode the sender must resolve to the same owner.
+func mailboxSenderAllowed(d serverDeps, owner, from string) bool {
+	addr := from
+	if d.ListSessionRegistry != nil {
+		if a, ok := d.ListSessionRegistry()[from]; ok {
+			addr = a
+		}
+	}
+	sender, on := teammates.AddressOwner(addr)
+	if !on {
+		return true
+	}
+	return sender != "" && sender == owner
 }
