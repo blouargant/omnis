@@ -25,11 +25,25 @@ type suggestResp struct {
 
 // suggestFixture builds a router with one session "s1" holding `turns` persisted
 // turns, and a fake generator that counts calls and returns (text, ok).
-func suggestFixture(t *testing.T, turns int, text string, ok bool) (http.Handler, *sessions.Registry, *atomic.Int32, *sessionRunGuard) {
+// Optional metaOpts mutate the SessionMeta before it is registered — used to
+// set flags like Archived/Hidden directly, instead of going through
+// Registry.SetArchived/SetHidden. Those setters persist asynchronously in a
+// goroutine with no way to wait for it; the goroutine can outlive the test
+// (and its t.Setenv-scoped OMNIS_HOME, which the test's Cleanup restores
+// before the temp dir it pointed at is removed), so it ends up resolving the
+// REAL $HOME/.omnis and writing a stray conversation_*.json.tmp there. Setting
+// the field directly is in-memory only (Registry.Add never persists) and
+// exercises the exact same read path (handleSuggestion reads through
+// Registry.Snapshot), with no such side effect.
+func suggestFixture(t *testing.T, turns int, text string, ok bool, metaOpts ...func(*sessions.SessionMeta)) (http.Handler, *sessions.Registry, *atomic.Int32, *sessionRunGuard) {
 	t.Helper()
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	reg := sessions.NewEmptyRegistry()
-	reg.Add(&sessions.SessionMeta{ID: "s1", Turns: turns})
+	meta := &sessions.SessionMeta{ID: "s1", Turns: turns}
+	for _, opt := range metaOpts {
+		opt(meta)
+	}
+	reg.Add(meta)
 	for i := 0; i < turns; i++ {
 		if err := sessions.AppendConversationTurn("s1", "question", "answer"); err != nil {
 			t.Fatal(err)
@@ -132,15 +146,13 @@ func TestSuggestionSkippedWithoutModelCall(t *testing.T) {
 		}
 	})
 	t.Run("archived", func(t *testing.T) {
-		h, reg, calls, _ := suggestFixture(t, 1, "x", true)
-		reg.SetArchived("s1", true)
+		h, _, calls, _ := suggestFixture(t, 1, "x", true, func(m *sessions.SessionMeta) { m.Archived = true })
 		if _, r := getSuggestion(t, h, "s1"); r.Suggestion != "" || calls.Load() != 0 {
 			t.Fatalf("archived: %+v, %d calls", r, calls.Load())
 		}
 	})
 	t.Run("hidden", func(t *testing.T) {
-		h, reg, calls, _ := suggestFixture(t, 1, "x", true)
-		reg.SetHidden("s1", true)
+		h, _, calls, _ := suggestFixture(t, 1, "x", true, func(m *sessions.SessionMeta) { m.Hidden = true })
 		if _, r := getSuggestion(t, h, "s1"); r.Suggestion != "" || calls.Load() != 0 {
 			t.Fatalf("hidden: %+v, %d calls", r, calls.Load())
 		}
