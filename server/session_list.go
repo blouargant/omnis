@@ -59,7 +59,7 @@ func handleListSessions(d serverDeps) gin.HandlerFunc {
 		// Known user collections (lower-cased) so a blank or dangling collection
 		// folds to General, matching the client's effectiveCollection().
 		known := map[string]bool{}
-		if names, err := sessions.ListCollections(); err == nil {
+		if names, err := collectionsFor(c).ListCollections(); err == nil {
 			for _, n := range names {
 				known[strings.ToLower(n)] = true
 			}

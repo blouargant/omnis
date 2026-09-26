@@ -40,6 +40,36 @@ func resolveCollection(sessionID string) string {
 	return f(sessionID)
 }
 
+// collectionRootResolver, when set, maps a session id to the state root its
+// collection context lives under — the owner's per-user directory in the shared
+// (cookie-identity) server. nil, or "" from it ⇒ the shared root.
+var (
+	collectionRootMu       sync.RWMutex
+	collectionRootResolver func(sessionID string) string
+)
+
+// SetCollectionRootResolver installs an optional session→state-root resolver
+// (the shared server's per-user directory). nil or "" ⇒ the shared root.
+func SetCollectionRootResolver(f func(sessionID string) string) {
+	collectionRootMu.Lock()
+	collectionRootResolver = f
+	collectionRootMu.Unlock()
+}
+
+// resolveCollectionBlock renders a collection's context from the session's
+// state root (per-user when a root resolver is installed, else shared).
+func resolveCollectionBlock(sessionID, name string) string {
+	collectionRootMu.RLock()
+	rootFn := collectionRootResolver
+	collectionRootMu.RUnlock()
+	if rootFn != nil {
+		if root := rootFn(sessionID); root != "" {
+			return collectionctx.In(root).Resolve(name)
+		}
+	}
+	return collectionctx.Resolve(name)
+}
+
 // routerCollectionCtxNote re-frames the collection block for the ROUTER hop.
 //
 // The rendered block tells its reader to treat the collection as "authoritative
@@ -68,7 +98,7 @@ func collectionCtxBlock(sessionID string, forRouter bool) string {
 	if col == "" {
 		return ""
 	}
-	block := collectionctx.Resolve(col)
+	block := resolveCollectionBlock(sessionID, col)
 	if block == "" || !forRouter {
 		return block
 	}

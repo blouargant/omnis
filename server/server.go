@@ -382,7 +382,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		// starting squad + cwd below, so it must be known before the squad default.
 		collection := ""
 		if col := sessions.NormalizeCollectionName(body.Collection); col != "" {
-			if known, err := sessions.ListCollections(); err == nil {
+			if known, err := collectionsFor(c).ListCollections(); err == nil {
 				for _, n := range known {
 					if strings.EqualFold(n, col) {
 						collection = n
@@ -393,7 +393,7 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		profSquad, profCwd := "", ""
 		if collection != "" {
-			profSquad, profCwd = sessions.CollectionProfile(collection)
+			profSquad, profCwd = collectionsFor(c).CollectionProfile(collection)
 		}
 		// Choose the starting squad: explicit body.Squad wins; else the collection's
 		// seeded default squad (a hint, not a lock — routing still runs); else the

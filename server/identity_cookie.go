@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/identity"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
@@ -163,6 +164,25 @@ func userRoot(login string) string {
 		return paths.ConfigWriteDir()
 	}
 	return filepath.Join(paths.ConfigWriteDir(), "users", identity.LoginSegment(login))
+}
+
+// collectionsFor is the caller's collections store: the per-user one in cookie
+// mode, the shared one otherwise (requestLogin "" ⇒ userRoot shared).
+func collectionsFor(c *gin.Context) *sessions.Collections {
+	return sessions.CollectionsIn(userRoot(requestLogin(c)))
+}
+
+// ctxStoreFor is login's collection-context (instructions/memory) store; login
+// "" ⇒ the shared root.
+func ctxStoreFor(login string) *collectionctx.Store { return collectionctx.In(userRoot(login)) }
+
+// ownerRootLogin maps a session owner to the login used for per-user state:
+// the owner in cookie mode, "" (shared root) otherwise.
+func (d serverDeps) ownerRootLogin(owner string) string {
+	if d.Cookie == nil {
+		return ""
+	}
+	return owner
 }
 
 // userWorkDir is the per-user default working directory — the cwd new

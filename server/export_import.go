@@ -166,7 +166,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 		// session lands in General (an unknown collection folds to General anyway).
 		collection := ""
 		if want := sessions.NormalizeCollectionName(conv.Collection); want != "" {
-			if known, kerr := sessions.ListCollections(); kerr == nil {
+			if known, kerr := collectionsFor(c).ListCollections(); kerr == nil {
 				for _, n := range known {
 					if strings.EqualFold(n, want) {
 						collection = n

@@ -27,6 +27,80 @@ const MaxCollectionNameLen = 60
 // single mutex suffices).
 var collectionsMu sync.Mutex
 
+// Collections is the collections store rooted at one state root: the shared
+// $OMNIS_HOME, or a user's directory in the shared (cookie-identity) server.
+// It owns root/collections.json and the per-collection prose under
+// root/collections/. The package-level functions operate on the shared root.
+type Collections struct{ root string }
+
+// CollectionsIn returns the collections store rooted at root.
+func CollectionsIn(root string) *Collections { return &Collections{root: root} }
+
+// sharedCollections is the store at the shared state root, resolved per call so
+// tests can redirect it via t.Setenv("OMNIS_HOME", ...).
+func sharedCollections() *Collections { return CollectionsIn(paths.ConfigWriteDir()) }
+
+// Package-level wrappers over the shared root (single-user mode, CLI/TUI, agent).
+
+// CollectionsPath returns the on-disk path of the shared collections list.
+func CollectionsPath() string { return sharedCollections().CollectionsPath() }
+
+// ListCollections lists the shared root's collections.
+func ListCollections() ([]string, error) { return sharedCollections().ListCollections() }
+
+// AddCollection adds a collection to the shared root.
+func AddCollection(name string) ([]string, bool, error) {
+	return sharedCollections().AddCollection(name)
+}
+
+// RemoveCollection removes a collection from the shared root.
+func RemoveCollection(name string) ([]string, bool, error) {
+	return sharedCollections().RemoveCollection(name)
+}
+
+// RenameCollection renames a collection in the shared root.
+func RenameCollection(old, newName string) ([]string, bool, error) {
+	return sharedCollections().RenameCollection(old, newName)
+}
+
+// CollectionColors returns the shared root's colour map.
+func CollectionColors() (map[string]string, error) { return sharedCollections().CollectionColors() }
+
+// SetCollectionColor sets a collection colour in the shared root.
+func SetCollectionColor(name, color string) error {
+	return sharedCollections().SetCollectionColor(name, color)
+}
+
+// CollectionProfile returns a shared-root collection's (squad, cwd) defaults.
+func CollectionProfile(name string) (squad, cwd string) {
+	return sharedCollections().CollectionProfile(name)
+}
+
+// SetCollectionProfile sets a shared-root collection's squad/cwd.
+func SetCollectionProfile(name, squad, cwd string) error {
+	return sharedCollections().SetCollectionProfile(name, squad, cwd)
+}
+
+// CollectionProfileFull returns a shared-root collection's full scalar bag.
+func CollectionProfileFull(name string) CollectionProfileData {
+	return sharedCollections().CollectionProfileFull(name)
+}
+
+// UpdateCollectionProfile atomically mutates a shared-root collection's profile.
+func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData)) error {
+	return sharedCollections().UpdateCollectionProfile(name, mutate)
+}
+
+// SetCollectionProfileData writes a shared-root collection's full scalar bag.
+func SetCollectionProfileData(name string, d CollectionProfileData) error {
+	return sharedCollections().SetCollectionProfileData(name, d)
+}
+
+// SetCollectionMemoryUpdate sets a shared-root collection's auto-update stamp.
+func SetCollectionMemoryUpdate(name string, ts int64) error {
+	return sharedCollections().SetCollectionMemoryUpdate(name, ts)
+}
+
 // collectionsFile is the on-disk shape of collections.json: an ordered list of
 // user-created collection names, plus an optional per-collection colour map
 // (keyed by the canonical stored name). General is virtual and never appears
@@ -75,10 +149,10 @@ type CollectionProfileData struct {
 
 // CollectionProfileFull returns the full stored per-collection scalars. A missing
 // collection or no recorded profile yields the zero value.
-func CollectionProfileFull(name string) CollectionProfileData {
+func (c *Collections) CollectionProfileFull(name string) CollectionProfileData {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return CollectionProfileData{}
 	}
@@ -99,11 +173,11 @@ func CollectionProfileFull(name string) CollectionProfileData {
 // race-safe way to change one field without clobbering a concurrent writer's
 // change to another (e.g. the PATCH route changing memory_size while the
 // background auto-updater sets last_memory_update).
-func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData)) error {
+func (c *Collections) UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData)) error {
 	name = strings.TrimSpace(name)
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return err
 	}
@@ -135,16 +209,16 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 		}
 		f.Profiles[canon] = p
 	}
-	return saveFileLocked(f)
+	return c.saveFileLocked(f)
 }
 
 // SetCollectionProfileData writes a collection's full scalar bag (all zero ⇒ the
 // profile entry is dropped). An unknown collection is an error.
-func SetCollectionProfileData(name string, d CollectionProfileData) error {
+func (c *Collections) SetCollectionProfileData(name string, d CollectionProfileData) error {
 	name = strings.TrimSpace(name)
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return err
 	}
@@ -170,20 +244,20 @@ func SetCollectionProfileData(name string, d CollectionProfileData) error {
 		}
 		f.Profiles[canon] = p
 	}
-	return saveFileLocked(f)
+	return c.saveFileLocked(f)
 }
 
 // CollectionProfile returns the stored (squad, cwd) defaults. Kept for callers
 // that only need the seed scalars.
-func CollectionProfile(name string) (squad, cwd string) {
-	p := CollectionProfileFull(name)
+func (c *Collections) CollectionProfile(name string) (squad, cwd string) {
+	p := c.CollectionProfileFull(name)
 	return p.Squad, p.Cwd
 }
 
 // SetCollectionProfile sets squad/cwd while PRESERVING memory_size/auto_update/
 // last_memory_update (a squad/cwd-only PATCH must not clobber the memory fields).
-func SetCollectionProfile(name, squad, cwd string) error {
-	return UpdateCollectionProfile(name, func(p *CollectionProfileData) {
+func (c *Collections) SetCollectionProfile(name, squad, cwd string) error {
+	return c.UpdateCollectionProfile(name, func(p *CollectionProfileData) {
 		p.Squad = squad
 		p.Cwd = cwd
 	})
@@ -191,8 +265,8 @@ func SetCollectionProfile(name, squad, cwd string) error {
 
 // SetCollectionMemoryUpdate updates only the last-automatic-memory-commit
 // timestamp (0 clears it), preserving the other scalars.
-func SetCollectionMemoryUpdate(name string, ts int64) error {
-	return UpdateCollectionProfile(name, func(p *CollectionProfileData) {
+func (c *Collections) SetCollectionMemoryUpdate(name string, ts int64) error {
+	return c.UpdateCollectionProfile(name, func(p *CollectionProfileData) {
 		p.LastMemoryUpdate = ts
 	})
 }
@@ -209,10 +283,9 @@ func ValidMemorySize(s string) bool {
 // MaxCollectionColorLen bounds a colour token so it stays a small palette key.
 const MaxCollectionColorLen = 24
 
-// CollectionsPath returns the on-disk path for the collections list. Resolved
-// at each call so tests can redirect via t.Setenv("OMNIS_HOME", ...).
-func CollectionsPath() string {
-	return filepath.Join(paths.ConfigWriteDir(), "collections.json")
+// CollectionsPath returns the on-disk path for this store's collections list.
+func (c *Collections) CollectionsPath() string {
+	return filepath.Join(c.root, "collections.json")
 }
 
 // NormalizeCollectionName trims a collection name and folds the General bucket
@@ -249,8 +322,8 @@ func ValidCollectionName(name string) bool {
 // loadFileLocked reads collections.json into its full shape (names + colours). A
 // missing/empty file yields a zero-value struct. Must be called with
 // collectionsMu held.
-func loadFileLocked() (collectionsFile, error) {
-	data, err := os.ReadFile(CollectionsPath())
+func (c *Collections) loadFileLocked() (collectionsFile, error) {
+	data, err := os.ReadFile(c.CollectionsPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return collectionsFile{}, nil
@@ -269,8 +342,8 @@ func loadFileLocked() (collectionsFile, error) {
 
 // loadCollectionsLocked reads just the ordered name list. Must be called with
 // collectionsMu held.
-func loadCollectionsLocked() ([]string, error) {
-	f, err := loadFileLocked()
+func (c *Collections) loadCollectionsLocked() ([]string, error) {
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -313,10 +386,10 @@ func pruneProfilesLocked(f *collectionsFile) {
 // saveFileLocked writes the full collections file (names + colours) atomically
 // (temp file + rename, like SaveConversationFile). Must be called with
 // collectionsMu held.
-func saveFileLocked(f collectionsFile) error {
+func (c *Collections) saveFileLocked(f collectionsFile) error {
 	pruneColorsLocked(&f)
 	pruneProfilesLocked(&f)
-	dir := paths.ConfigWriteDir()
+	dir := c.root
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -346,7 +419,7 @@ func saveFileLocked(f collectionsFile) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, CollectionsPath()); err != nil {
+	if err := os.Rename(tmpName, c.CollectionsPath()); err != nil {
 		_ = os.Remove(tmpName)
 		return err
 	}
@@ -355,10 +428,10 @@ func saveFileLocked(f collectionsFile) error {
 
 // ListCollections returns the ordered user-created collection names (excluding
 // the virtual General). A missing file yields an empty slice.
-func ListCollections() ([]string, error) {
+func (c *Collections) ListCollections() ([]string, error) {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	return loadCollectionsLocked()
+	return c.loadCollectionsLocked()
 }
 
 // indexOfFold returns the index of name in names using case-insensitive
@@ -375,14 +448,14 @@ func indexOfFold(names []string, name string) int {
 // AddCollection appends a new collection to the list if it is valid and not
 // already present (case-insensitive). Returns the updated ordered list and
 // whether a new entry was added. An invalid name is an error.
-func AddCollection(name string) ([]string, bool, error) {
+func (c *Collections) AddCollection(name string) ([]string, bool, error) {
 	name = strings.TrimSpace(name)
 	if !ValidCollectionName(name) {
 		return nil, false, fmt.Errorf("invalid collection name %q", name)
 	}
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
@@ -390,7 +463,7 @@ func AddCollection(name string) ([]string, bool, error) {
 		return f.Collections, false, nil // already present — idempotent
 	}
 	f.Collections = append(f.Collections, name)
-	if err := saveFileLocked(f); err != nil {
+	if err := c.saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
 	return f.Collections, true, nil
@@ -400,10 +473,10 @@ func AddCollection(name string) ([]string, bool, error) {
 // colour recorded for it. Returns the updated list and whether an entry was
 // removed. Cascading member sessions back to General is the caller's
 // responsibility (it owns the session registry).
-func RemoveCollection(name string) ([]string, bool, error) {
+func (c *Collections) RemoveCollection(name string) ([]string, bool, error) {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
@@ -419,12 +492,12 @@ func RemoveCollection(name string) ([]string, bool, error) {
 		delete(f.Profiles, canon)
 	}
 	f.Collections = append(f.Collections[:i:i], f.Collections[i+1:]...)
-	if err := saveFileLocked(f); err != nil {
+	if err := c.saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
 	// Best-effort: drop the collection's prose (instructions/memory) too. A
 	// failure here leaves an orphaned dir but never blocks the delete.
-	_ = collectionctx.RemoveDir(canon)
+	_ = collectionctx.In(c.root).RemoveDir(canon)
 	return f.Collections, true, nil
 }
 
@@ -433,14 +506,14 @@ func RemoveCollection(name string) ([]string, bool, error) {
 // and whether the rename happened. It errors on an invalid newName or when
 // newName collides with a different existing collection. Cascading member
 // sessions to the new name is the caller's responsibility.
-func RenameCollection(old, newName string) ([]string, bool, error) {
+func (c *Collections) RenameCollection(old, newName string) ([]string, bool, error) {
 	newName = strings.TrimSpace(newName)
 	if !ValidCollectionName(newName) {
 		return nil, false, fmt.Errorf("invalid collection name %q", newName)
 	}
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return nil, false, err
 	}
@@ -457,9 +530,9 @@ func RenameCollection(old, newName string) ([]string, bool, error) {
 	oldCanon := names[i]
 	renamed := !strings.EqualFold(oldCanon, newName)
 	if f.Colors != nil && renamed {
-		if c, ok := f.Colors[oldCanon]; ok {
+		if col, ok := f.Colors[oldCanon]; ok {
 			delete(f.Colors, oldCanon)
-			f.Colors[newName] = c
+			f.Colors[newName] = col
 		}
 	}
 	if f.Profiles != nil && renamed {
@@ -469,13 +542,13 @@ func RenameCollection(old, newName string) ([]string, bool, error) {
 		}
 	}
 	names[i] = newName
-	if err := saveFileLocked(f); err != nil {
+	if err := c.saveFileLocked(f); err != nil {
 		return nil, false, err
 	}
 	// Best-effort: migrate the prose dir so instructions/memory follow the new
 	// name. A case-only change resolves to the same dir (no-op inside RenameDir).
 	if renamed {
-		_ = collectionctx.RenameDir(oldCanon, newName)
+		_ = collectionctx.In(c.root).RenameDir(oldCanon, newName)
 	}
 	return names, true, nil
 }
@@ -502,10 +575,10 @@ func ValidCollectionColor(color string) bool {
 
 // CollectionColors returns the name→colour map (canonical stored names). A
 // missing file or no recorded colours yields an empty map.
-func CollectionColors() (map[string]string, error) {
+func (c *Collections) CollectionColors() (map[string]string, error) {
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +592,7 @@ func CollectionColors() (map[string]string, error) {
 // SetCollectionColor sets (or, with an empty color, clears) the colour of an
 // existing collection. The colour is keyed by the collection's canonical stored
 // name. An unknown collection is an error; an invalid colour token is an error.
-func SetCollectionColor(name, color string) error {
+func (c *Collections) SetCollectionColor(name, color string) error {
 	name = strings.TrimSpace(name)
 	color = strings.TrimSpace(color)
 	if !ValidCollectionColor(color) {
@@ -527,7 +600,7 @@ func SetCollectionColor(name, color string) error {
 	}
 	collectionsMu.Lock()
 	defer collectionsMu.Unlock()
-	f, err := loadFileLocked()
+	f, err := c.loadFileLocked()
 	if err != nil {
 		return err
 	}
@@ -546,5 +619,5 @@ func SetCollectionColor(name, color string) error {
 		}
 		f.Colors[canon] = color
 	}
-	return saveFileLocked(f)
+	return c.saveFileLocked(f)
 }

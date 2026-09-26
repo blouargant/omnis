@@ -21,7 +21,6 @@ import (
 
 	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
-	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -48,7 +47,7 @@ func autoUpdateMinInterval() time.Duration {
 type autoUpdater struct {
 	deps        serverDeps
 	minInterval time.Duration
-	gather      func(collection string) string
+	gather      func(collection, owner string) string
 	distill     func(ctx context.Context, current, material string, wordLimit int) (string, error)
 
 	mu          sync.Mutex
@@ -67,37 +66,44 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection, owner stri
 	if collection == "" {
 		return
 	}
-	prof := sessions.CollectionProfileFull(collection)
+	// Per-user state in cookie mode (owner's store); the shared root otherwise.
+	login := au.deps.ownerRootLogin(owner)
+	cols := sessions.CollectionsIn(userRoot(login))
+	store := ctxStoreFor(login)
+	prof := cols.CollectionProfileFull(collection)
 	if !prof.AutoUpdate {
 		return
 	}
-	material := au.gather(collection)
+	material := au.gather(collection, owner)
 	if strings.TrimSpace(material) == "" {
 		return
 	}
 	h := materialHash(material)
+	// Gate state is keyed per (owner root, collection): two users' same-named
+	// collections are distinct collections.
+	key := login + "\x00" + collection
 
 	now := time.Now()
 	au.mu.Lock()
 	gateFrom := time.Unix(prof.LastMemoryUpdate, 0)
-	if la := au.lastAttempt[collection]; la.After(gateFrom) {
+	if la := au.lastAttempt[key]; la.After(gateFrom) {
 		gateFrom = la
 	}
-	changed := au.lastHash[collection] != h
-	if !shouldAutoUpdate(prof.AutoUpdate, changed, now.Sub(gateFrom), au.minInterval) || au.inflight[collection] {
+	changed := au.lastHash[key] != h
+	if !shouldAutoUpdate(prof.AutoUpdate, changed, now.Sub(gateFrom), au.minInterval) || au.inflight[key] {
 		au.mu.Unlock()
 		return
 	}
-	au.inflight[collection] = true
-	au.lastAttempt[collection] = now // advance the throttle even if the distill below fails
+	au.inflight[key] = true
+	au.lastAttempt[key] = now // advance the throttle even if the distill below fails
 	au.mu.Unlock()
 	defer func() {
 		au.mu.Lock()
-		delete(au.inflight, collection)
+		delete(au.inflight, key)
 		au.mu.Unlock()
 	}()
 
-	cur := collectionctx.ReadMemory(collection)
+	cur := store.ReadMemory(collection)
 	proposed, err := au.distill(ctx, cur, material, toolkitagent.SizeWordLimit(prof.MemorySize))
 	if err != nil {
 		log.Printf("collection auto-update: distill %q: %v", collection, err)
@@ -106,7 +112,7 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection, owner stri
 	proposed = strings.TrimSpace(proposed)
 	// Record the hash even on a no-op so we don't re-distill identical material.
 	au.mu.Lock()
-	au.lastHash[collection] = h
+	au.lastHash[key] = h
 	au.mu.Unlock()
 	if proposed == "" || proposed == strings.TrimSpace(cur) {
 		return // nothing changed — no write, no snapshot
@@ -114,22 +120,38 @@ func (au *autoUpdater) runCollection(ctx context.Context, collection, owner stri
 	// A manual edit (or anything) may have changed memory.md during the slow
 	// distill above. Re-read and skip the auto-commit if so, rather than
 	// clobbering the user's edit (its snapshot would also be wrong).
-	if collectionctx.ReadMemory(collection) != cur {
+	if store.ReadMemory(collection) != cur {
 		log.Printf("collection auto-update: %q memory changed during distill; skipping commit", collection)
 		return
 	}
 	if strings.TrimSpace(cur) != "" {
-		_ = collectionctx.WritePrevMemory(collection, cur)
+		_ = store.WritePrevMemory(collection, cur)
 	}
-	if err := collectionctx.WriteMemory(collection, proposed); err != nil {
+	if err := store.WriteMemory(collection, proposed); err != nil {
 		log.Printf("collection auto-update: write %q: %v", collection, err)
 		return
 	}
-	_ = sessions.SetCollectionMemoryUpdate(collection, now.Unix())
+	_ = cols.SetCollectionMemoryUpdate(collection, now.Unix())
 	if au.deps.PushEvents != nil {
 		au.deps.PushEvents.broadcastOwned("collections_changed", "", owner)
 	}
 	log.Printf("collection auto-update: committed memory for %q", collection)
+}
+
+// newAutoUpdater builds the worker with the production gather: only the
+// owner's sessions in cookie mode (every session otherwise). distill is left
+// for the caller to set.
+func newAutoUpdater(d serverDeps, minInterval time.Duration) *autoUpdater {
+	return &autoUpdater{
+		deps:        d,
+		minInterval: minInterval,
+		gather: func(c, owner string) string {
+			return gatherCollectionMaterialFor(d, c, d.ownerRootLogin(owner))
+		},
+		inflight:    map[string]bool{},
+		lastHash:    map[string]string{},
+		lastAttempt: map[string]time.Time{},
+	}
 }
 
 // startCollectionAutoUpdate subscribes to the idle rail and drives runCollection
@@ -138,16 +160,9 @@ func startCollectionAutoUpdate(ctx context.Context, d serverDeps, minInterval ti
 	if d.EventBus == nil || d.Manager == nil || d.Registry == nil {
 		return
 	}
-	au := &autoUpdater{
-		deps:        d,
-		minInterval: minInterval,
-		gather:      func(c string) string { return gatherCollectionMaterial(d, c) },
-		distill: func(ctx context.Context, cur, material string, wl int) (string, error) {
-			return d.Manager.DistillCollectionMemory(ctx, cur, material, wl)
-		},
-		inflight:    map[string]bool{},
-		lastHash:    map[string]string{},
-		lastAttempt: map[string]time.Time{},
+	au := newAutoUpdater(d, minInterval)
+	au.distill = func(ctx context.Context, cur, material string, wl int) (string, error) {
+		return d.Manager.DistillCollectionMemory(ctx, cur, material, wl)
 	}
 	log.Printf("collection auto-update: enabled (min_interval=%s)", minInterval)
 	d.EventBus.Subscribe(events.EventSessionIndexNow, func(_ string, payload map[string]any) {

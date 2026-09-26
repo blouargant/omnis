@@ -41,6 +41,37 @@ func baseDir() string {
 	return filepath.Join(paths.ConfigWriteDir(), "collections")
 }
 
+// Store is the collection-context store rooted at one state root (the shared
+// $OMNIS_HOME, or a user's directory in the shared server). The package-level
+// functions operate on the shared root.
+type Store struct{ base string }
+
+// In returns the store whose collections live under root/collections.
+func In(root string) *Store { return &Store{base: filepath.Join(root, "collections")} }
+
+// shared is the store at the shared state root, resolved per call so tests can
+// redirect it via t.Setenv("OMNIS_HOME", ...).
+func shared() *Store { return &Store{base: baseDir()} }
+
+// Package-level wrappers over the shared root.
+
+func Dir(name string) string                    { return shared().Dir(name) }
+func InstructionsPath(name string) string       { return shared().InstructionsPath(name) }
+func MemoryPath(name string) string             { return shared().MemoryPath(name) }
+func PrevMemoryPath(name string) string         { return shared().PrevMemoryPath(name) }
+func ReadInstructions(name string) string       { return shared().ReadInstructions(name) }
+func ReadMemory(name string) string             { return shared().ReadMemory(name) }
+func ReadPrevMemory(name string) string         { return shared().ReadPrevMemory(name) }
+func WriteInstructions(name, text string) error { return shared().WriteInstructions(name, text) }
+func WriteMemory(name, text string) error       { return shared().WriteMemory(name, text) }
+func WritePrevMemory(name, text string) error   { return shared().WritePrevMemory(name, text) }
+func HasPrevMemory(name string) bool            { return shared().HasPrevMemory(name) }
+func RemovePrevMemory(name string) error        { return shared().RemovePrevMemory(name) }
+func RenameDir(oldName, newName string) error   { return shared().RenameDir(oldName, newName) }
+func RemoveDir(name string) error               { return shared().RemoveDir(name) }
+func HasContext(name string) bool               { return shared().HasContext(name) }
+func Resolve(name string) string                { return shared().Resolve(name) }
+
 // safeSegment returns a filesystem-safe single path segment for a collection
 // name, or "" when the name is unusable as a directory (blank, ".", "..", or
 // containing a path separator). ValidCollectionName already rejects separators
@@ -59,21 +90,21 @@ func safeSegment(name string) string {
 
 // Dir returns the directory holding a collection's prose, or "" for an unusable
 // name. The directory is not created here — the writers create it on demand.
-func Dir(name string) string {
+func (s *Store) Dir(name string) string {
 	seg := safeSegment(name)
 	if seg == "" {
 		return ""
 	}
-	return filepath.Join(baseDir(), seg)
+	return filepath.Join(s.base, seg)
 }
 
 // InstructionsPath / MemoryPath return the on-disk path of a collection's two
 // prose files, or "" for an unusable name.
-func InstructionsPath(name string) string { return filePath(name, instructionsFile) }
-func MemoryPath(name string) string       { return filePath(name, memoryFile) }
+func (s *Store) InstructionsPath(name string) string { return s.filePath(name, instructionsFile) }
+func (s *Store) MemoryPath(name string) string       { return s.filePath(name, memoryFile) }
 
-func filePath(name, leaf string) string {
-	dir := Dir(name)
+func (s *Store) filePath(name, leaf string) string {
+	dir := s.Dir(name)
 	if dir == "" {
 		return ""
 	}
@@ -82,8 +113,8 @@ func filePath(name, leaf string) string {
 
 // ReadInstructions / ReadMemory return the raw text of a collection's file, or ""
 // when it is missing/unreadable/unusable name.
-func ReadInstructions(name string) string { return readFile(InstructionsPath(name)) }
-func ReadMemory(name string) string       { return readFile(MemoryPath(name)) }
+func (s *Store) ReadInstructions(name string) string { return readFile(s.InstructionsPath(name)) }
+func (s *Store) ReadMemory(name string) string       { return readFile(s.MemoryPath(name)) }
 
 func readFile(path string) string {
 	if path == "" {
@@ -99,26 +130,32 @@ func readFile(path string) string {
 // WriteInstructions / WriteMemory replace a collection's file. An empty body
 // removes the file (so an emptied editor field leaves no stray file behind). An
 // unusable name is an error.
-func WriteInstructions(name, text string) error { return writeFile(InstructionsPath(name), text) }
-func WriteMemory(name, text string) error       { return writeFile(MemoryPath(name), text) }
+func (s *Store) WriteInstructions(name, text string) error {
+	return writeFile(s.InstructionsPath(name), text)
+}
+func (s *Store) WriteMemory(name, text string) error { return writeFile(s.MemoryPath(name), text) }
 
 // PrevMemoryPath returns the on-disk path of a collection's previous-memory
 // snapshot (used by auto-update's revert net), or "" for an unusable name.
-func PrevMemoryPath(name string) string { return filePath(name, prevMemoryFile) }
+func (s *Store) PrevMemoryPath(name string) string { return s.filePath(name, prevMemoryFile) }
 
 // ReadPrevMemory returns the previous-memory snapshot text, or "" when absent.
-func ReadPrevMemory(name string) string { return readFile(PrevMemoryPath(name)) }
+func (s *Store) ReadPrevMemory(name string) string { return readFile(s.PrevMemoryPath(name)) }
 
 // WritePrevMemory replaces the snapshot (an empty body removes it).
-func WritePrevMemory(name, text string) error { return writeFile(PrevMemoryPath(name), text) }
+func (s *Store) WritePrevMemory(name, text string) error {
+	return writeFile(s.PrevMemoryPath(name), text)
+}
 
 // HasPrevMemory reports whether a non-empty snapshot exists (so the UI only
 // offers Revert when there is prior memory to restore).
-func HasPrevMemory(name string) bool { return strings.TrimSpace(ReadPrevMemory(name)) != "" }
+func (s *Store) HasPrevMemory(name string) bool {
+	return strings.TrimSpace(s.ReadPrevMemory(name)) != ""
+}
 
 // RemovePrevMemory drops the snapshot; a missing file is a no-op.
-func RemovePrevMemory(name string) error {
-	p := PrevMemoryPath(name)
+func (s *Store) RemovePrevMemory(name string) error {
+	p := s.PrevMemoryPath(name)
 	if p == "" {
 		return nil
 	}
@@ -167,8 +204,8 @@ func writeFile(path, text string) error {
 // renamed, so its instructions/memory follow the new name. Best-effort: a
 // missing source (no prose yet) or a name change that only differs in case is a
 // no-op, and it never clobbers an existing destination.
-func RenameDir(oldName, newName string) error {
-	src, dst := Dir(oldName), Dir(newName)
+func (s *Store) RenameDir(oldName, newName string) error {
+	src, dst := s.Dir(oldName), s.Dir(newName)
 	if src == "" || dst == "" || src == dst {
 		return nil
 	}
@@ -178,7 +215,7 @@ func RenameDir(oldName, newName string) error {
 	if _, err := os.Stat(dst); err == nil {
 		return nil // don't overwrite an existing destination
 	}
-	if err := os.MkdirAll(baseDir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.base, 0o755); err != nil {
 		return err
 	}
 	return os.Rename(src, dst)
@@ -186,8 +223,8 @@ func RenameDir(oldName, newName string) error {
 
 // RemoveDir deletes a collection's prose directory when the collection is
 // deleted. A missing directory is a no-op.
-func RemoveDir(name string) error {
-	dir := Dir(name)
+func (s *Store) RemoveDir(name string) error {
+	dir := s.Dir(name)
 	if dir == "" {
 		return nil
 	}
@@ -200,9 +237,9 @@ func RemoveDir(name string) error {
 // HasContext reports whether a collection has any non-empty prose (instructions
 // or memory) — used to badge configured collections in the UI without shipping
 // the full text.
-func HasContext(name string) bool {
-	return strings.TrimSpace(ReadInstructions(name)) != "" ||
-		strings.TrimSpace(ReadMemory(name)) != ""
+func (s *Store) HasContext(name string) bool {
+	return strings.TrimSpace(s.ReadInstructions(name)) != "" ||
+		strings.TrimSpace(s.ReadMemory(name)) != ""
 }
 
 // Resolve returns the rendered context block for a collection, ready to prepend
@@ -210,18 +247,19 @@ func HasContext(name string) bool {
 // is the empty General bucket / unusable). Cached per collection and re-rendered
 // only when a contributing file's size or mtime changes, so calling it on every
 // turn is cheap.
-func Resolve(name string) string {
+func (s *Store) Resolve(name string) string {
 	if safeSegment(name) == "" {
 		return ""
 	}
-	instr := InstructionsPath(name)
-	mem := MemoryPath(name)
+	instr := s.InstructionsPath(name)
+	mem := s.MemoryPath(name)
 	sig := signature(name, instr, mem)
-	if cached, ok := cacheGet(name, sig); ok {
+	key := s.base + "\x00" + name // per-root: two users' same-named collections never share an entry
+	if cached, ok := cacheGet(key, sig); ok {
 		return cached
 	}
 	out := render(name, readFile(instr), readFile(mem))
-	cachePut(name, sig, out)
+	cachePut(key, sig, out)
 	return out
 }
 

@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -67,12 +66,14 @@ func collectionCounts(d serverDeps, login string, known []string) map[string]int
 // user-created collections in their stored order), each with a live session count.
 func handleListCollections(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		known, err := sessions.ListCollections()
+		cols := collectionsFor(c)
+		store := ctxStoreFor(requestLogin(c))
+		known, err := cols.ListCollections()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		colors, err := sessions.CollectionColors()
+		colors, err := cols.CollectionColors()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -81,14 +82,14 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
 		for _, n := range known {
-			squad, cwd := sessions.CollectionProfile(n)
+			squad, cwd := cols.CollectionProfile(n)
 			out = append(out, collectionInfo{
 				Name:       n,
 				Count:      counts[n],
 				Color:      colors[n],
 				Squad:      squad,
 				Cwd:        cwd,
-				HasContext: collectionctx.HasContext(n),
+				HasContext: store.HasContext(n),
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"collections": out})
@@ -113,12 +114,13 @@ func handleCreateCollection(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection colour"})
 			return
 		}
-		if _, _, err := sessions.AddCollection(name); err != nil {
+		cols := collectionsFor(c)
+		if _, _, err := cols.AddCollection(name); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		if color != "" {
-			if err := sessions.SetCollectionColor(name, color); err != nil {
+			if err := cols.SetCollectionColor(name, color); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -150,6 +152,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			AutoUpdate *bool   `json:"auto_update"`
 		}
 		_ = c.ShouldBindJSON(&body)
+		cols := collectionsFor(c)
 
 		// Resolve the collection's name after any rename — colour/profile edits key off it.
 		current := old
@@ -158,7 +161,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection name"})
 				return
 			}
-			_, ok, err := sessions.RenameCollection(old, newName)
+			_, ok, err := cols.RenameCollection(old, newName)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
@@ -167,8 +170,10 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 				return
 			}
-			// Cascade onto member sessions (in-memory + persisted).
-			for _, m := range d.Registry.List() {
+			// Cascade onto the caller's member sessions (in-memory + persisted).
+			// Cookie mode: only the acting user's sessions — another user's
+			// same-named collection is a different collection.
+			for _, m := range d.Registry.ListFor(requestLogin(c)) {
 				if strings.EqualFold(sessions.NormalizeCollectionName(m.Collection), old) {
 					d.Registry.SetCollection(m.ID, newName)
 				}
@@ -177,7 +182,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 		}
 
 		if body.Color != nil {
-			if err := sessions.SetCollectionColor(current, strings.TrimSpace(*body.Color)); err != nil {
+			if err := cols.SetCollectionColor(current, strings.TrimSpace(*body.Color)); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -189,7 +194,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 		// background auto-updater's concurrent last_memory_update write. Only fields
 		// present in the body change; an empty string clears that field.
 		if body.Squad != nil || body.Cwd != nil || body.MemorySize != nil || body.AutoUpdate != nil {
-			cur := sessions.CollectionProfileFull(current)
+			cur := cols.CollectionProfileFull(current)
 			sq, cw := cur.Squad, cur.Cwd
 			if body.Squad != nil {
 				sq = strings.TrimSpace(*body.Squad)
@@ -211,7 +216,7 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 					return
 				}
 			}
-			if err := sessions.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
+			if err := cols.UpdateCollectionProfile(current, func(p *sessions.CollectionProfileData) {
 				if body.Squad != nil {
 					p.Squad = sq
 				}
@@ -250,7 +255,7 @@ func handleDeleteCollection(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection cannot be deleted"})
 			return
 		}
-		_, ok, err := sessions.RemoveCollection(name)
+		_, ok, err := collectionsFor(c).RemoveCollection(name)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -259,7 +264,8 @@ func handleDeleteCollection(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 			return
 		}
-		for _, m := range d.Registry.List() {
+		// Only the acting user's sessions fall back (all sessions outside cookie mode).
+		for _, m := range d.Registry.ListFor(requestLogin(c)) {
 			if strings.EqualFold(sessions.NormalizeCollectionName(m.Collection), name) {
 				d.Registry.SetCollection(m.ID, "") // → General
 			}
@@ -280,7 +286,7 @@ func resolveKnownCollection(c *gin.Context) (string, bool) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection has no context"})
 		return "", false
 	}
-	known, err := sessions.ListCollections()
+	known, err := collectionsFor(c).ListCollections()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return "", false
@@ -304,19 +310,21 @@ func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		prof := sessions.CollectionProfileFull(name)
-		colors, _ := sessions.CollectionColors()
+		cols := collectionsFor(c)
+		store := ctxStoreFor(requestLogin(c))
+		prof := cols.CollectionProfileFull(name)
+		colors, _ := cols.CollectionColors()
 		c.JSON(http.StatusOK, gin.H{
 			"name":               name,
-			"instructions":       collectionctx.ReadInstructions(name),
-			"memory":             collectionctx.ReadMemory(name),
+			"instructions":       store.ReadInstructions(name),
+			"memory":             store.ReadMemory(name),
 			"squad":              prof.Squad,
 			"cwd":                prof.Cwd,
 			"color":              colors[name],
 			"memory_size":        prof.MemorySize,
 			"auto_update":        prof.AutoUpdate,
 			"last_memory_update": prof.LastMemoryUpdate,
-			"has_prev_memory":    collectionctx.HasPrevMemory(name),
+			"has_prev_memory":    store.HasPrevMemory(name),
 		})
 	}
 }
@@ -338,30 +346,31 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
+		store := ctxStoreFor(requestLogin(c))
 		if body.Instructions != nil {
-			if err := collectionctx.WriteInstructions(name, *body.Instructions); err != nil {
+			if err := store.WriteInstructions(name, *body.Instructions); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 		}
 		if body.Memory != nil {
-			if err := collectionctx.WriteMemory(name, *body.Memory); err != nil {
+			if err := store.WriteMemory(name, *body.Memory); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 			// A manual memory edit supersedes any unreviewed auto-commit: consume
 			// the revert snapshot + clear the auto-update marker.
-			_ = collectionctx.RemovePrevMemory(name)
-			_ = sessions.SetCollectionMemoryUpdate(name, 0)
+			_ = store.RemovePrevMemory(name)
+			_ = collectionsFor(c).SetCollectionMemoryUpdate(name, 0)
 		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"name":         name,
-			"has_context":  collectionctx.HasContext(name),
-			"instructions": collectionctx.ReadInstructions(name),
-			"memory":       collectionctx.ReadMemory(name),
+			"has_context":  store.HasContext(name),
+			"instructions": store.ReadInstructions(name),
+			"memory":       store.ReadMemory(name),
 		})
 	}
 }
@@ -375,21 +384,22 @@ func handleRevertCollectionMemory(d serverDeps) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		prev := collectionctx.ReadPrevMemory(name)
+		store := ctxStoreFor(requestLogin(c))
+		prev := store.ReadPrevMemory(name)
 		if strings.TrimSpace(prev) == "" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no previous memory to revert to"})
 			return
 		}
-		if err := collectionctx.WriteMemory(name, prev); err != nil {
+		if err := store.WriteMemory(name, prev); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		_ = collectionctx.RemovePrevMemory(name)
-		_ = sessions.SetCollectionMemoryUpdate(name, 0)
+		_ = store.RemovePrevMemory(name)
+		_ = collectionsFor(c).SetCollectionMemoryUpdate(name, 0)
 		if d.PushEvents != nil {
 			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
-		c.JSON(http.StatusOK, gin.H{"name": name, "memory": collectionctx.ReadMemory(name)})
+		c.JSON(http.StatusOK, gin.H{"name": name, "memory": store.ReadMemory(name)})
 	}
 }
 
@@ -409,7 +419,7 @@ func handleMoveSession(d serverDeps) gin.HandlerFunc {
 		_ = c.ShouldBindJSON(&body)
 		target := sessions.NormalizeCollectionName(body.Collection)
 		if target != "" {
-			known, err := sessions.ListCollections()
+			known, err := collectionsFor(c).ListCollections()
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return

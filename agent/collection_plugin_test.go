@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -85,5 +86,33 @@ func TestCollectionCtxBlock_NothingToInjectIsNoOpOnBothRoots(t *testing.T) {
 		if got := collectionCtxBlock("s1", forRouter); got != "" {
 			t.Fatalf("empty collection (forRouter=%v) should inject nothing, got %q", forRouter, got)
 		}
+	}
+}
+
+// With a root resolver installed, the block comes from the session's per-user
+// root — never from the shared one.
+func TestCollectionCtxBlock_UsesRootResolver(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OMNIS_HOME", home)
+	alice := filepath.Join(home, "users", "alice")
+	if err := collectionctx.In(alice).WriteInstructions("Infra", "alice rules"); err != nil {
+		t.Fatal(err)
+	}
+	if err := collectionctx.WriteInstructions("Infra", "shared rules"); err != nil {
+		t.Fatal(err)
+	}
+	SetCollectionResolver(func(string) string { return "Infra" })
+	SetCollectionRootResolver(func(sid string) string {
+		if sid == "a" {
+			return alice
+		}
+		return ""
+	})
+	t.Cleanup(func() { SetCollectionResolver(nil); SetCollectionRootResolver(nil) })
+	if got := collectionCtxBlock("a", false); !strings.Contains(got, "alice rules") || strings.Contains(got, "shared rules") {
+		t.Fatalf("alice block: %q", got)
+	}
+	if got := collectionCtxBlock("other", false); !strings.Contains(got, "shared rules") {
+		t.Fatalf("fallback to shared root: %q", got)
 	}
 }

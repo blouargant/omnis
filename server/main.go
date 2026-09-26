@@ -311,6 +311,17 @@ func run() error {
 		return sessions.NormalizeCollectionName(m.Collection)
 	})
 	defer agent.SetCollectionResolver(nil)
+	// Cookie mode: collections are per user, so the injected context is read
+	// from the session owner's directory rather than the shared root.
+	if cookie != nil {
+		agent.SetCollectionRootResolver(func(sessionID string) string {
+			if m, ok := registry.Snapshot(sessionID); ok {
+				return userRoot(m.UserID)
+			}
+			return ""
+		})
+		defer agent.SetCollectionRootResolver(nil)
+	}
 
 	// Periodic garbage collection of orphan files in logs/ and logs/uploads/.
 	// Runs an initial sweep synchronously so leftover files from a previous

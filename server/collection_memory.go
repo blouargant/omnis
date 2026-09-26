@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	toolkitagent "github.com/blouargant/omnis/agent"
-	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -103,8 +102,9 @@ func handleDistillCollectionMemory(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no chats in this collection to learn from yet"})
 			return
 		}
-		current := collectionctx.ReadMemory(name)
-		size := sessions.CollectionProfileFull(name).MemorySize
+		login := requestLogin(c)
+		current := ctxStoreFor(login).ReadMemory(name)
+		size := collectionsFor(c).CollectionProfileFull(name).MemorySize
 		proposed, err := d.Manager.DistillCollectionMemory(c.Request.Context(), current, material, toolkitagent.SizeWordLimit(size))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

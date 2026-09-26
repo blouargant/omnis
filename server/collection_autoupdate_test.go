@@ -36,7 +36,7 @@ func TestAutoUpdaterCommitsThenSkipsUnchanged(t *testing.T) {
 	calls := 0
 	au := &autoUpdater{
 		minInterval: 0, // isolate the content-hash gate for the second run
-		gather:      func(string) string { return "## Session: s\nUser: hi\nAssistant: yo\n" },
+		gather:      func(string, string) string { return "## Session: s\nUser: hi\nAssistant: yo\n" },
 		distill: func(_ context.Context, cur, mat string, wl int) (string, error) {
 			calls++
 			if wl != 200 {
@@ -70,7 +70,7 @@ func TestAutoUpdaterOffIsNoop(t *testing.T) {
 	collectionctx.WriteMemory("Acme", "old")
 	au := &autoUpdater{
 		minInterval: 0,
-		gather:      func(string) string { return "material" },
+		gather:      func(string, string) string { return "material" },
 		distill: func(_ context.Context, _, _ string, _ int) (string, error) {
 			t.Fatal("distill must not run")
 			return "", nil
@@ -93,7 +93,7 @@ func TestAutoUpdaterThrottlesFailedDistill(t *testing.T) {
 	calls := 0
 	au := &autoUpdater{
 		minInterval: time.Hour, // a failure must not re-fire within the interval
-		gather:      func(string) string { return "## Session: s\nUser: hi\nAssistant: yo\n" },
+		gather:      func(string, string) string { return "## Session: s\nUser: hi\nAssistant: yo\n" },
 		distill:     func(_ context.Context, _, _ string, _ int) (string, error) { calls++; return "", errFakeDistill },
 		inflight:    map[string]bool{},
 		lastHash:    map[string]string{},
