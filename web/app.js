@@ -1326,6 +1326,11 @@ function onPromptKeydown(e, panel) {
     }
     if (e.key === "Escape") { hideSlashMenu(); return; }
   }
+  // Tab copies the suggested next message into an empty composer. The menu block
+  // above keeps priority (it returns on Tab); any other case keeps Tab's default.
+  if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+    if (acceptSuggestion(panel)) { e.preventDefault(); return; }
+  }
   if (sendOnEnter) {
     if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault();
@@ -1908,9 +1913,7 @@ function setComposerReadOnly(panel, readonly) {
   if (panel.els.composerWrap) panel.els.composerWrap.classList.toggle("archived-readonly", readonly);
   if (panel.els.prompt) {
     panel.els.prompt.disabled = readonly;
-    panel.els.prompt.placeholder = readonly
-      ? "Session archived — unarchive to continue the conversation"
-      : (sendOnEnter ? "Message the agent… (Enter to send)" : "Message the agent… (Ctrl+Enter to send)");
+    applyComposerPlaceholder(panel);
   }
 }
 
@@ -7204,6 +7207,8 @@ function forgetSession(id) {
   remoteBusy.delete(id);
   remoteBusyBubble.delete(id);
   composerDrafts.delete(id);
+  sessionSuggestion.delete(id);
+  suggestSeq.delete(id);
   // Remove any pending ask_user widgets belonging to this session from every
   // pane's slot, plus the queued/ pending maps.
   for (const p of panels) {
@@ -7488,6 +7493,8 @@ async function activateTab(panel, key) {
   applySessionUI(id);
   renderAttachmentsUI(id);
   restoreComposerDraft(panel, id);
+  applyComposerPlaceholder(panel);
+  fetchSuggestion(id);
 
   // Seed ring/popup with server-side estimates for sessions that have no
   // real-time SSE data yet (cold load or page refresh).
@@ -7945,6 +7952,8 @@ async function subscribeGlobalEvents() {
           loadCollections();
           loadSessions();
         } else if (event === "session_rewound" && sid) {
+          clearSuggestion(sid);
+          fetchSuggestion(sid);
           // The session was rewound (here or in another browser) — rebuild the
           // truncated transcript from history. Idempotent on the originator,
           // which already re-rendered after its own POST. Skip while a turn is
@@ -8427,6 +8436,7 @@ function endRemoteBusy(sid) {
   remoteBusyBubble.delete(sid);
   setSessionStatus(sid, "");
   applySessionUI(sid);
+  fetchSuggestion(sid);
 }
 
 // showPushBanner inserts a temporary notice into the transcript container.
@@ -8650,6 +8660,7 @@ async function sendMessage(panel) {
   }
   if (!panel.sessionId) await newChat(panel);
   if (!panel.sessionId) return;
+  clearSuggestion(panel.sessionId);
 
   // If a turn is already in flight for this session — streamed locally OR a
   // background/spawned turn running server-side (remoteBusy) — this submission is
@@ -9130,6 +9141,7 @@ async function sendMessage(panel) {
     // or backgrounded window). "done"/"reload" mean a reply is ready; "stopped",
     // "error" and "exhausted" do not (the user was present, or there's no reply).
     if (outcome === "done" || outcome === "reload") notifyChatReply(sessionId, lastReplyText);
+    if (outcome === "done" || outcome === "reload") fetchSuggestion(sessionId);
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
@@ -10715,9 +10727,7 @@ function updateEditModeBtn() {
     p.els.editModeBtn.dataset.tip = sendOnEnter
       ? "Edit mode: switch to Enter=new line, Ctrl+Enter=send"
       : "Send mode: switch to Enter=send, Ctrl+Enter=new line";
-    p.els.prompt.placeholder = archivedSessions.has(p.sessionId)
-      ? "Session archived — unarchive to continue the conversation"
-      : (sendOnEnter ? "Message the agent… (Enter to send)" : "Message the agent… (Ctrl+Enter to send)");
+    applyComposerPlaceholder(p);
   }
 }
 // Any mousedown outside the open menu closes it — except on the slash button
@@ -10777,6 +10787,109 @@ function autoGrowPrompt(panel) {
   el.style.height = natural + "px";
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
 }
+
+// ─── Prompt suggestions ──────────────────────────────────────────────────────
+// After a reply the server predicts the user's next message
+// (GET /api/sessions/:id/suggestion, cached server-side per turn count). It is
+// shown as the composer's placeholder — the browser hides it on the first
+// keystroke — and Tab copies it into the composer. Never sent automatically.
+
+const SUGGEST_PREF_KEY = "agent_toolkit_prompt_suggestions";
+const SUGGEST_RETRIES = 3;       // attempts while the server still reports busy
+const SUGGEST_RETRY_MS = 1000;
+const sessionSuggestion = new Map(); // sessionId → suggested text
+const suggestSeq = new Map();        // sessionId → latest request sequence
+
+function suggestionsEnabled() {
+  try { return localStorage.getItem(SUGGEST_PREF_KEY) !== "0"; } catch (_) { return true; }
+}
+
+function isSessionBusy(id) {
+  return sessionSending.has(id) || remoteBusy.has(id);
+}
+
+// activeSuggestion is the suggestion a pane may show right now, or "".
+function activeSuggestion(panel) {
+  const id = panel && panel.sessionId;
+  if (!id || !suggestionsEnabled() || archivedSessions.has(id) || isSessionBusy(id)) return "";
+  return sessionSuggestion.get(id) || "";
+}
+
+function defaultComposerPlaceholder() {
+  return sendOnEnter ? tr("composer.placeholder") : tr("composer.placeholderCtrl");
+}
+
+// composerPlaceholder is the single source of truth for the composer hint.
+function composerPlaceholder(panel) {
+  const id = panel && panel.sessionId;
+  if (id && archivedSessions.has(id)) return tr("composer.archivedPlaceholder");
+  return activeSuggestion(panel) || defaultComposerPlaceholder();
+}
+
+function applyComposerPlaceholder(panel) {
+  if (!panel || !panel.els || !panel.els.prompt) return;
+  panel.els.prompt.placeholder = composerPlaceholder(panel);
+  if (panel.els.composerWrap) panel.els.composerWrap.classList.toggle("has-suggestion", !!activeSuggestion(panel));
+}
+
+function repaintSuggestion(sessionId) {
+  for (const p of panelsForSession(sessionId)) applyComposerPlaceholder(p);
+}
+
+// clearSuggestion drops a session's suggestion and invalidates any in-flight fetch.
+function clearSuggestion(sessionId) {
+  if (!sessionId) return;
+  suggestSeq.set(sessionId, (suggestSeq.get(sessionId) || 0) + 1);
+  if (sessionSuggestion.delete(sessionId)) repaintSuggestion(sessionId);
+}
+
+// fetchSuggestion asks the server for the session's suggestion when some pane
+// shows it. Retries while the server still holds the turn (busy); a newer request
+// or a clear supersedes a late answer.
+async function fetchSuggestion(sessionId) {
+  if (!sessionId || !suggestionsEnabled() || archivedSessions.has(sessionId)) return;
+  if (panelsForSession(sessionId).length === 0) return;
+  const seq = (suggestSeq.get(sessionId) || 0) + 1;
+  suggestSeq.set(sessionId, seq);
+  for (let attempt = 0; attempt < SUGGEST_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, SUGGEST_RETRY_MS));
+    if (suggestSeq.get(sessionId) !== seq) return;
+    let data;
+    try {
+      const res = await apiFetch(`/api/sessions/${sessionId}/suggestion`);
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (_) { return; }
+    if (suggestSeq.get(sessionId) !== seq) return;
+    if (data && data.busy) continue;
+    const text = (data && typeof data.suggestion === "string") ? data.suggestion.trim() : "";
+    if (text) sessionSuggestion.set(sessionId, text); else sessionSuggestion.delete(sessionId);
+    repaintSuggestion(sessionId);
+    return;
+  }
+}
+
+// acceptSuggestion copies the suggestion into an empty composer (Tab). Returns
+// true when it did, so the caller can swallow the key.
+function acceptSuggestion(panel) {
+  const s = activeSuggestion(panel);
+  const el = panel && panel.els && panel.els.prompt;
+  if (!s || !el || el.value !== "") return false;
+  el.value = s;
+  el.setSelectionRange(s.length, s.length);
+  el.dispatchEvent(new Event("input"));
+  return true;
+}
+
+// setPromptSuggestionsEnabled is called by Settings → Appearance.
+window.setPromptSuggestionsEnabled = function (on) {
+  if (!on) {
+    for (const id of [...sessionSuggestion.keys()]) clearSuggestion(id);
+    for (const p of panels) applyComposerPlaceholder(p);
+    return;
+  }
+  for (const p of panels) if (p.sessionId) fetchSuggestion(p.sessionId);
+};
 
 // ─── Composer "@file" reference highlighting ───────────────────────────────
 
