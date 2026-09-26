@@ -107,7 +107,11 @@ func (m *Manager) SuggestNextPrompt(ctx context.Context, sessionID string, turns
 	if len(turns) == 0 {
 		return "", true
 	}
-	inst := m.Lookup(sessionID)
+	// Peek, not Lookup: this is a read-only path with no matching Release, so
+	// pinning an unpinned session here would leak its generation's refcount
+	// forever (reachable when the session was archived/deleted between the
+	// HTTP handler's registry snapshot and this call).
+	inst := m.Peek(sessionID)
 	if inst == nil {
 		inst = m.Current()
 	}

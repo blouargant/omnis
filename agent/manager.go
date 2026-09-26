@@ -222,6 +222,28 @@ func (m *Manager) Lookup(sessionID string) *Instance {
 	return m.Pin(sessionID)
 }
 
+// Peek returns the Instance pinned to sessionID without pinning it — unlike
+// Lookup, an unpinned (or unknown) session yields nil rather than being
+// auto-pinned to the current generation. For read-only callers (e.g. prompt
+// suggestions) that must not create a refcounted pin for a session that may
+// have been archived/deleted between an earlier snapshot and this call: a
+// pin from a read-only path would never be released, leaking the generation
+// alive forever. Returns nil for an empty sessionID too, so callers fall
+// back to Current() themselves exactly as they would for "not pinned".
+func (m *Manager) Peek(sessionID string) *Instance {
+	if sessionID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if gen, ok := m.sessionGen[sessionID]; ok {
+		if mi := m.instances[gen]; mi != nil {
+			return mi.inst
+		}
+	}
+	return nil
+}
+
 // MigrateToCurrent re-pins sessionID to the current generation when it is
 // pinned to an older one and returns the resulting Instance. Safe to call
 // at a turn boundary (caller should hold the session's run-guard). The old

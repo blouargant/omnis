@@ -82,3 +82,40 @@ func TestSuggestNextPromptNilManager(t *testing.T) {
 		t.Errorf("nil manager: got (%q,%v), want (\"\",false)", s, ok)
 	}
 }
+
+// TestSuggestNextPromptDoesNotPinUnpinnedSession guards against a refcount
+// leak: SuggestNextPrompt is a read-only path with no matching Release, so
+// looking up the session with Manager.Lookup (which auto-pins an unpinned
+// session to the current generation) would pin forever — reachable when the
+// session was archived/deleted between the HTTP handler's registry snapshot
+// and this call. It must use the non-pinning Peek instead, falling back to
+// Current() exactly as before.
+//
+// No model provider is configured here (env cleared below), so the eval-model
+// build fails fast and synchronously — no network call — and the method
+// returns ok=false; what this test asserts is that the session was never
+// pinned as a side effect of the lookup.
+func TestSuggestNextPromptDoesNotPinUnpinnedSession(t *testing.T) {
+	t.Setenv("OMNIS_PROVIDER", "")
+	t.Setenv("OMNIS_MODEL", "")
+	t.Setenv("OMNIS_BASE_URL", "")
+	t.Setenv("OMNIS_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	inst := newTestInstance(1)
+	m := NewManager(nil, inst)
+
+	if _, ok := m.SuggestNextPrompt(context.Background(), "leaky-session", []Exchange{{User: "hi"}}); ok {
+		t.Fatalf("expected ok=false with no model provider configured")
+	}
+	if gen := m.PinnedGeneration("leaky-session"); gen != 0 {
+		t.Fatalf("SuggestNextPrompt must not pin an unpinned session: PinnedGeneration = %d, want 0 (refcount leak)", gen)
+	}
+	if gens := m.Generations(); gens[1] != 0 {
+		t.Fatalf("SuggestNextPrompt must not bump the generation refcount: gens[1] = %d, want 0", gens[1])
+	}
+}
