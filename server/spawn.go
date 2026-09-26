@@ -203,6 +203,7 @@ func forgetSessionState(d serverDeps, id string) {
 		d.AskUserRegistry.CancelSession(id)
 	}
 	_ = sessions.ClearPendingQuestions(id) // no-op once the file is deleted
+	d.Suggest.forget(id)
 }
 
 // deleteSession permanently removes a session and all its state: the registry

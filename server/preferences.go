@@ -33,6 +33,12 @@ type preferences struct {
 	// explicit choice; when unset the web UI falls back to the browser language
 	// then to English. Reconciled across devices on boot by the web UI.
 	Locale *string `json:"locale,omitempty"`
+	// PromptSuggestions records whether the composer shows a suggested next
+	// message after each reply. A pointer so absent (never chosen) reads as
+	// enabled — the feature defaults on — while an explicit false disables it.
+	// Read server-side by GET /sessions/:id/suggestion so a stale tab cannot
+	// spend model calls while the user has it off.
+	PromptSuggestions *bool `json:"prompt_suggestions,omitempty"`
 	// WhatsNewVersion records the version whose "What's new" feed the user last
 	// saw, so the modal is shown at most once per upgrade. A pointer so an absent
 	// value (never recorded) is distinguishable from an explicit one; when unset
