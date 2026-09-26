@@ -9,6 +9,8 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 )
@@ -49,11 +51,19 @@ func From(ctx context.Context) (Identity, bool) {
 	return id, ok && id.Login != ""
 }
 
+// NormalizeLogin is the canonical form of a login used for every owner
+// comparison and key: trimmed and lower-cased (the platform treats logins
+// case-insensitively, and LoginSegment folds case for directory names).
+func NormalizeLogin(login string) string { return strings.ToLower(strings.TrimSpace(login)) }
+
 // LoginSegment turns a login into a safe single path segment: lowercased,
 // every rune outside [a-z0-9._@-] replaced by '_', and "", "." and ".."
-// mapped to "_" so it can never escape its parent directory.
+// mapped to "_" so it can never escape its parent directory. When
+// sanitisation had to alter the (lower-cased) login, "-" + the first 8 hex of
+// its SHA-256 is appended, so two logins differing only in replaced runes
+// (a+b@x vs a_b@x) never share a directory.
 func LoginSegment(login string) string {
-	s := strings.ToLower(strings.TrimSpace(login))
+	s := NormalizeLogin(login)
 	var b strings.Builder
 	for _, r := range s {
 		switch {
@@ -65,7 +75,11 @@ func LoginSegment(login string) string {
 	}
 	out := b.String()
 	if out == "" || out == "." || out == ".." {
-		return "_"
+		out = "_"
+	}
+	if s != "" && out != s {
+		sum := sha256.Sum256([]byte(s))
+		out += "-" + hex.EncodeToString(sum[:])[:8]
 	}
 	return out
 }

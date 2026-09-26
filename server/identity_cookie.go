@@ -114,7 +114,11 @@ func cookieIdentityMiddleware(a *cookieAuth) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "login_url": a.cfg.LoginURL})
 			return
 		}
-		if strings.TrimSpace(id.Login) == "" {
+		// Normalise once, here: every owner comparison (ownerGuard, ListFor),
+		// the token store and the per-user directory then agree with
+		// LoginSegment's case folding.
+		id.Login = identity.NormalizeLogin(id.Login)
+		if id.Login == "" {
 			// A validator that "succeeds" without a login must never let the
 			// request through: ownerFor would fall back to the process owner.
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "login_url": a.cfg.LoginURL})

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/blouargant/omnis/internal/identity"
 )
 
 func TestPreferencesArePerUser(t *testing.T) {
@@ -25,7 +27,7 @@ func TestUserRoots(t *testing.T) {
 	if userRoot("") == userRoot("alice") {
 		t.Fatal("per-user root must differ from the shared root")
 	}
-	if filepath.Base(userRoot("A/B")) != "a_b" {
+	if filepath.Base(userRoot("A/B")) != identity.LoginSegment("a/b") || !strings.HasPrefix(filepath.Base(userRoot("A/B")), "a_b-") {
 		t.Fatalf("login must be sanitised: %s", userRoot("A/B"))
 	}
 	if userWorkDir("") != "" {

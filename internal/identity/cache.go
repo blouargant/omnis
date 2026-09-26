@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -58,8 +59,12 @@ func (c *CachingValidator) Validate(ctx context.Context, token string) (Identity
 	}
 	c.mu.Unlock()
 
-	v, err, _ := c.sf.Do(key, func() (any, error) {
-		id, err := c.inner.Validate(ctx, token)
+	// The shared validation runs on a context detached from THIS caller's
+	// request: several requests may join it, and the first one aborting must
+	// not fail the others. The inner validator bounds it with its own timeout.
+	// Each caller still stops waiting when its own ctx is done.
+	ch := c.sf.DoChan(key, func() (any, error) {
+		id, err := c.inner.Validate(context.WithoutCancel(ctx), token)
 		now := c.Now()
 		switch {
 		case err == nil:
@@ -73,6 +78,13 @@ func (c *CachingValidator) Validate(ctx context.Context, token string) (Identity
 		}
 		return id, err
 	})
+	var res singleflight.Result
+	select {
+	case res = <-ch:
+	case <-ctx.Done():
+		return Identity{}, fmt.Errorf("%w: %v", ErrUnavailable, ctx.Err())
+	}
+	v, err := res.Val, res.Err
 	if err != nil {
 		return Identity{}, err
 	}

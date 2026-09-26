@@ -116,3 +116,42 @@ func TestCachingValidatorSingleFlight(t *testing.T) {
 		t.Fatalf("concurrent validations must single-flight: got %d calls", n)
 	}
 }
+
+// ctxValidator honours ctx: it fails (unavailable) the moment ctx is done.
+type ctxValidator struct{ delay time.Duration }
+
+func (v ctxValidator) Validate(ctx context.Context, tok string) (Identity, error) {
+	select {
+	case <-time.After(v.delay):
+		return Identity{Login: "alice", Token: tok}, nil
+	case <-ctx.Done():
+		return Identity{}, fmt.Errorf("%w: %v", ErrUnavailable, ctx.Err())
+	}
+}
+
+// One client aborting its request must not fail every other request that
+// joined the same in-flight validation.
+func TestCachingValidatorAbortedLeaderDoesNotFailWaiters(t *testing.T) {
+	c := NewCachingValidator(ctxValidator{delay: 150 * time.Millisecond}, 15*time.Minute)
+	leaderCtx, cancel := context.WithCancel(context.Background())
+	leaderDone := make(chan error, 1)
+	go func() { _, err := c.Validate(leaderCtx, "tok"); leaderDone <- err }()
+	time.Sleep(20 * time.Millisecond) // leader is inside the inner call
+	waiterDone := make(chan error, 1)
+	go func() { _, err := c.Validate(context.Background(), "tok"); waiterDone <- err }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-leaderDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("aborted caller must return promptly")
+	}
+	select {
+	case err := <-waiterDone:
+		if err != nil {
+			t.Fatalf("waiter failed because the leader aborted: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter never returned")
+	}
+}

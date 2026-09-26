@@ -232,3 +232,24 @@ func TestCookieModeRefusesCrossSiteWrites(t *testing.T) {
 		t.Errorf("terminal/token in cookie mode: got %d, want 404", w.Code)
 	}
 }
+
+// The middleware normalises the validated login once (trimmed, lower-case) so
+// every owner comparison, token-store key and per-user directory agrees with
+// LoginSegment's case folding: " Alice " and "alice" are one user.
+func TestCookieMiddlewareNormalisesLogin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	a := testCookieAuth()
+	a.validator = fakeValidator{"tA": " Alice ", "ta": "alice"}
+	r := gin.New()
+	r.GET("/x", cookieIdentityMiddleware(a), func(c *gin.Context) { c.String(200, requestLogin(c)) })
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.AddCookie(&http.Cookie{Name: "plat_token", Value: "tA"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != 200 || w.Body.String() != "alice" {
+		t.Fatalf("login not normalised: %d %q", w.Code, w.Body.String())
+	}
+	if tok, ok := a.tokens.Get("alice"); !ok || tok != "tA" {
+		t.Fatalf("token must be keyed by the normalised login, got %q %v", tok, ok)
+	}
+}
