@@ -5629,7 +5629,18 @@ async function apiFetch(path, opts = {}) {
   const headers = authHeaders(opts.headers || {});
   if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
   const res = await fetch((window.BASE_PATH || "") + path, { ...opts, headers });
-  if (res.status === 401) { promptForToken(); throw new Error("unauthorized"); }
+  if (res.status === 401) {
+    let loginURL = "";
+    try { loginURL = (await res.clone().json()).login_url || ""; } catch (_) { /* not JSON */ }
+    if (loginURL) {
+      // Shared (cookie-identity) server: the platform session is missing or
+      // expired — go log in there and come back here.
+      window.top.location.href = loginURL.replace("{return}", encodeURIComponent(window.location.href));
+      throw new Error("unauthorized");
+    }
+    promptForToken();
+    throw new Error("unauthorized");
+  }
   return res;
 }
 
@@ -8243,7 +8254,8 @@ async function loadWhoami() {
     if (!res.ok) return;
     const payload = await res.json();
     const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
-    if (!user || user === "web-user") return;
+    const shared = payload && payload.identity_mode === "cookie";
+    if (!user || (user === "web-user" && !shared)) return;
     name.textContent = user;
     box.hidden = false;
   } catch (e) { console.error("whoami failed:", e); }
