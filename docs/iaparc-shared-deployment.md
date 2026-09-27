@@ -122,6 +122,12 @@ was documented. See that README for:
   `kubectl`, `helm`, `python3`, `/etc/agentskills/skills/iaparc/`, running as
   a non-root dedicated user),
 - the `omnis-config` ConfigMap and `omnis-llm` Secret,
+- the `.agents/` layer baked into the image
+  (`packaging/k8s/iaparc-test/agents/`): the `iaparc_operator` agent, the
+  leaderless "IA Parc" squad, the read-only `iapcli` permissions, and
+  `"start_squad": "IA Parc"` so new chats open on that squad rather than on the
+  Omnis router (which asked "IA Parc or omnis projects?" for "quels sont mes
+  projets"); the squad can still hand other requests back to the router,
 - the `omnis-data` PVC,
 - the `omnis` Deployment (1 replica — state is in-process plus one volume, no
   horizontal scaling; no privileged ServiceAccount token, since omnis drives

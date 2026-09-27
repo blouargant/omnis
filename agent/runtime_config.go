@@ -214,6 +214,11 @@ type runtimeConfigFile struct {
 	// A pointer so we can distinguish absent (nil → default to "omnis") from an
 	// explicit opt-out ("none"/""). Overridable by OMNIS_ROUTER_SQUAD.
 	RouterSquad *string `json:"router_squad,omitempty"`
+	// StartSquad names the squad new chats start on instead of the router — for
+	// a deployment dedicated to one domain. Routing stays enabled: the start
+	// squad can still hand an out-of-scope request back to the router.
+	// Overridable by OMNIS_START_SQUAD. Unknown/hidden names are ignored.
+	StartSquad string `json:"start_squad,omitempty"`
 	// TurnBudget caps what one turn may spend before the user is asked whether
 	// to continue. Absent → the defaults; either field set to 0 removes that
 	// axis; both 0 makes turns unbounded (the pre-budget behaviour).
@@ -373,6 +378,9 @@ type RuntimeSettings struct {
 	// router agent + leaderless squad are injected by ensureRouterSquad in the
 	// build path when missing.
 	RouterSquad string
+	// StartSquad is the resolved squad new chats start on, or "" to start on the
+	// router (or the default squad when routing is off). See Manager.StartSquad.
+	StartSquad string
 	// Curator gate thresholds (OMNIS_CURATOR_MIN_TURNS / OMNIS_CURATOR_MIN_SUB_AGENT_CALLS).
 	// Zero values fall back to the defaults in CuratorGateConfig.
 	CuratorMinTurns         int
@@ -1209,6 +1217,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// squad are injected by ensureRouterSquad in the build path, not here, so
 	// config-only tests see an unmodified squad list.
 	out.RouterSquad = resolveRouterSquadName(cfg.RouterSquad)
+	out.StartSquad = resolveStartSquadName(cfg.StartSquad, out.Squads, out.RouterSquad)
 
 	// Fold each agent's own `max_tool_calls` into the turn budget, so the per-turn
 	// gate enforces both the shared spend ceiling and the per-agent design limits

@@ -155,7 +155,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 		if squad == "" || (d.Manager != nil && !d.Manager.HasSquad(squad)) {
 			squad = toolkitagent.DefaultSquadName
 			if d.Manager != nil {
-				if rs := d.Manager.RouterSquad(); rs != "" {
+				if rs := d.Manager.StartSquad(); rs != "" {
 					squad = rs
 				}
 			}

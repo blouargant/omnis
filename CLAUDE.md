@@ -753,6 +753,27 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   runners via `Manager.LookupSquad`, never rebuilds them; the user turn is
   appended, not a reset). Retention does not survive a hot-reload (fresh
   in-memory sessions) — same boundary as a single-squad session today.
+- **Start squad (`start_squad`) — a dedicated deployment's default.** A server
+  dedicated to one domain (the IA Parc test deployment) sets `"start_squad":
+  "<squad>"` in `agents.json` (or `OMNIS_START_SQUAD`) so new chats open on that
+  squad instead of the router — on the router, "quels sont mes projets" was
+  ambiguous and it asked the user which projects were meant. Routing is NOT
+  disabled: the start squad keeps `handoff_to_router` for out-of-scope requests.
+  Resolved by `resolveStartSquadName` ([agent/routing.go](agent/routing.go)) into
+  `RuntimeSettings.StartSquad`/`Instance.StartName` (must name a visible,
+  non-router squad; anything else logs and is ignored). `Manager.StartSquad()`
+  (start squad → router → "") replaces `RouterSquad()` at **every
+  "default for a new session" site** (web `POST /sessions`, `/api/squads`
+  `default`, spawn, scheduled runs, import, CLI, TUI); `RouterSquad()` stays the
+  routing target. `/api/squads` also reports `router`, and `resolveStartingSquad`
+  treats an explicit start squad like an explicit router (the browser sends the
+  reported default on every new chat, so it must yield to a collection default).
+  **GOTCHA — the browser's saved squad pref.** `newChat` saves the squad of every
+  new chat into `localStorage`, so every browser that ever used Omnis has
+  `"omnis"` saved as if picked, and would ignore a new default forever.
+  `loadSquads` records the last default seen (`agent_toolkit_squad_default_seen`)
+  and, once per default change, drops a saved pref equal to the previous default
+  (or, on first run, to the reported `router`); a squad picked since is kept.
 - **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
   `OMNIS_ROUTER_SQUAD`) names the router squad; **absent ⇒ defaults to `omnis`**,
   `"none"` disables. `ensureRouterSquad` ([agent/routing.go](agent/routing.go)),
@@ -2174,7 +2195,7 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 
 | File | Purpose |
 |---|---|
-| `agents.json` | List of enabled agent names, squad composition, global paths, `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables), and `turn_budget` (`{max_tool_calls, max_tokens}` — the per-turn spend ceiling before the user is asked whether to continue; both `0` ⇒ unbounded. See "Per-turn spend budget") |
+| `agents.json` | List of enabled agent names, squad composition, global paths, `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables), `start_squad` (the squad new chats start on instead of the router — see "Start squad" under the Omnis router; unknown/hidden ⇒ ignored), and `turn_budget` (`{max_tool_calls, max_tokens}` — the per-turn spend ceiling before the user is asked whether to continue; both `0` ⇒ unbounded. See "Per-turn spend budget") |
 | `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"prompt_cache"` (tri-state `*bool`) adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy; **default ON for `openai_compat`, OFF for plain `openai`**, explicit `true`/`false` overrides (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model). Top-level `"override_model_ref"` + `"override_model_enabled"` implement the **single-model override** ("run the whole fleet on one model"): when enabled, `applyModelOverride` ([agent/runtime_config.go](agent/runtime_config.go)) forces **every** agent onto that one model (overwriting each agent's own `model_ref`-resolved connection + pricing) at `ResolveRuntimeSettings` time — so it's hot-reloadable; disabling restores the per-agent config. The ref is kept while disabled so the toggle flips cleanly. Scoped to **agents only** — the internal embedder + `/goal` evaluator are untouched (and an `embedding:true` ref is ignored). Web UI: Settings → Models → General card ("Use one model for all agents"). Env: `OMNIS_OVERRIDE_MODEL_REF`/`OMNIS_OVERRIDE_MODEL_ENABLED` |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
@@ -2569,6 +2590,7 @@ mistaken for a broken reference.
 | `OMNIS_BASE_URL` | API endpoint (OpenAI/compat/Anthropic) |
 | `OMNIS_API_KEY` | Provider API key (also: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) |
 | `OMNIS_ROUTER_SQUAD` | Overrides `router_squad` from `agents.json` — names the Omnis router squad; `"none"` disables routing (new chats then use the default squad) |
+| `OMNIS_START_SQUAD` | Overrides `start_squad` from `agents.json` — the squad new chats start on instead of the Omnis router (routing stays on: that squad can still `handoff_to_router`). Must name a visible squad; anything else is ignored with a log line |
 | `OMNIS_EMBED_PROVIDER` | Embedder provider for semantic recall (default: `OMNIS_PROVIDER`, else `openai_compat`). `anthropic` unsupported — use Voyage/OpenAI via `openai_compat` |
 | `OMNIS_EMBED_MODEL` | Embedding model id (default `text-embedding-3-small`) |
 | `OMNIS_EMBED_BASE_URL` | Embeddings endpoint (default `OMNIS_BASE_URL`/`OPENAI_BASE_URL`) |

@@ -399,12 +399,15 @@ func newEngine(d serverDeps) *gin.Engine {
 		// seeded default squad (a hint, not a lock — routing still runs); else the
 		// router / default. See resolveStartingSquad.
 		var hasSquad func(string) bool
-		routerSquad := ""
+		routerSquad, startSquad := "", ""
 		if d.Manager != nil {
 			hasSquad = d.Manager.HasSquad
 			routerSquad = d.Manager.RouterSquad()
+			if st := d.Manager.StartSquad(); st != routerSquad {
+				startSquad = st
+			}
 		}
-		squad := resolveStartingSquad(body.Squad, profSquad, hasSquad, routerSquad)
+		squad := resolveStartingSquad(body.Squad, profSquad, hasSquad, routerSquad, startSquad)
 		// Reject unknown squad names so the client sees the misconfiguration
 		// immediately rather than silently falling back to default later.
 		if d.Manager != nil && !d.Manager.HasSquad(squad) {

@@ -73,7 +73,7 @@ func createScheduledSession(d serverDeps, owner, squad, prompt string) string {
 	if squad == "" {
 		squad = toolkitagent.DefaultSquadName
 		if d.Manager != nil {
-			if rs := d.Manager.RouterSquad(); rs != "" {
+			if rs := d.Manager.StartSquad(); rs != "" {
 				squad = rs
 			}
 		}

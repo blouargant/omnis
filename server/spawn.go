@@ -108,7 +108,7 @@ func materializeSession(d serverDeps, o spawnOptions) *sessions.SessionMeta {
 // An explicit squad on the spawn directive still wins in materializeSession.
 func spawnDefaultSquad(d serverDeps) string {
 	if d.Manager != nil {
-		if rs := d.Manager.RouterSquad(); rs != "" {
+		if rs := d.Manager.StartSquad(); rs != "" {
 			return rs
 		}
 	}

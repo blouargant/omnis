@@ -49,8 +49,9 @@ func TestIaparcTestManifest(t *testing.T) {
 // "list my iaparc projects" and asks the user what iaparc is.
 func TestIaparcTestAgentsLayer(t *testing.T) {
 	var cfg struct {
-		Agents []string `json:"agents"`
-		Squads []struct {
+		Agents     []string `json:"agents"`
+		StartSquad string   `json:"start_squad"`
+		Squads     []struct {
 			Name    string   `json:"name"`
 			Leader  string   `json:"leader"`
 			Members []string `json:"members"`
@@ -71,6 +72,11 @@ func TestIaparcTestAgentsLayer(t *testing.T) {
 	}
 	if !found || len(cfg.Agents) == 0 || cfg.Agents[0] != "iaparc_operator" {
 		t.Fatalf("agents.json must enable iaparc_operator and a leaderless \"IA Parc\" squad: %+v", cfg)
+	}
+	// New chats start on the IA Parc squad: on the router, "quels sont mes
+	// projets" was ambiguous and the router asked which projects were meant.
+	if cfg.StartSquad != "IA Parc" {
+		t.Errorf("agents.json must set start_squad \"IA Parc\", got %q", cfg.StartSquad)
 	}
 	var agent struct {
 		Name     string   `json:"name"`

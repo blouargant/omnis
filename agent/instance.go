@@ -42,6 +42,9 @@ type Instance struct {
 	// routing is disabled. New chats default to this squad; the dispatch loop
 	// (Manager.RunWithRouting) routes handoffs back to it.
 	RouterName string
+	// StartName is the squad new chats start on when it is not the router
+	// (agents.json start_squad / OMNIS_START_SQUAD), or "".
+	StartName string
 
 	// Default-squad mirrors for legacy callers — populated after squads
 	// are built. New code should prefer Squads[name] or Squad(name).
@@ -137,6 +140,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 		Squads:             make(map[string]*SquadInstance, len(runtime.Squads)),
 		DefaultName:        DefaultSquadName,
 		RouterName:         runtime.RouterSquad,
+		StartName:          runtime.StartSquad,
 		CuratorIdleTimeout: runtime.CuratorIdleTimeout,
 	}
 

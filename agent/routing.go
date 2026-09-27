@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -659,6 +660,36 @@ func resolveRouterSquadName(fileValue *string) string {
 	}
 }
 
+// resolveStartSquadName resolves the squad new chats start on (agents.json
+// start_squad, overridden by a non-empty OMNIS_START_SQUAD). It must name a
+// visible, resolved squad; anything else — unset, "none", unknown, hidden, or the
+// router itself — yields "" so new chats keep starting on the router. A typo is
+// logged rather than failing the config: the fallback is the normal behaviour.
+func resolveStartSquadName(fileValue string, squads []RuntimeSquadConfig, router string) string {
+	name := lowerTrim(fileValue)
+	if env := strings.TrimSpace(os.Getenv("OMNIS_START_SQUAD")); env != "" {
+		name = lowerTrim(env)
+	}
+	switch name {
+	case "", "none", "off", "disabled", "false":
+		return ""
+	}
+	if name == router {
+		return ""
+	}
+	for _, sq := range squads {
+		if lowerTrim(sq.Name) == name {
+			if sq.Hidden {
+				log.Printf("start_squad %q is a hidden squad; new chats start on the router", name)
+				return ""
+			}
+			return name
+		}
+	}
+	log.Printf("start_squad %q names no squad; new chats start on the router", name)
+	return ""
+}
+
 // defaultRouterSquadName is the built-in router squad/agent name used when the
 // config does not name one and routing is not disabled.
 const defaultRouterSquadName = "omnis"
@@ -771,6 +802,27 @@ type RouteNotifyFunc func(from, to, reason string)
 
 // RouterSquad returns the router squad name for the current generation, or ""
 // when routing is disabled.
+// StartSquad is the squad a new session starts on when nothing more specific
+// was asked for: the configured start squad, else the router, else "" (the
+// caller then uses DefaultSquadName). Unlike RouterSquad it is NOT the routing
+// target — routing still hands off to and from RouterSquad.
+func (m *Manager) StartSquad() string {
+	if m == nil {
+		return ""
+	}
+	return startSquadOf(m.Current())
+}
+
+func startSquadOf(inst *Instance) string {
+	if inst == nil {
+		return ""
+	}
+	if inst.StartName != "" {
+		return inst.StartName
+	}
+	return inst.RouterName
+}
+
 func (m *Manager) RouterSquad() string {
 	if m == nil {
 		return ""

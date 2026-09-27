@@ -1,5 +1,6 @@
 {
   "agents": ["iaparc_operator"],
+  "start_squad": "IA Parc",
   "squads": [
     {
       "name": "IA Parc",

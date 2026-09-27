@@ -1014,7 +1014,7 @@ func Run(ctx context.Context, cfg Config) error {
 			// New chats default to the Omnis router squad when routing is
 			// enabled; otherwise the default squad.
 			squad = toolkitagent.DefaultSquadName
-			if rs := cfg.Manager.RouterSquad(); rs != "" {
+			if rs := cfg.Manager.StartSquad(); rs != "" {
 				squad = rs
 			}
 		}
@@ -2276,7 +2276,7 @@ func pickInitialSession(cfg Config) *sessionState {
 		return &sessionState{ID: latest.ID, Squad: squad}
 	}
 	squad := toolkitagent.DefaultSquadName
-	if rs := cfg.Manager.RouterSquad(); rs != "" {
+	if rs := cfg.Manager.StartSquad(); rs != "" {
 		squad = rs
 	}
 	meta := cfg.Sessions.New(squad)

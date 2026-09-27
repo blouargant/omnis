@@ -598,6 +598,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		}
 		out := struct {
 			Default string     `json:"default"`
+			Router  string     `json:"router,omitempty"`
 			Squads  []squadDTO `json:"squads"`
 		}{Default: agent.DefaultSquadName}
 		if manager == nil {
@@ -610,12 +611,15 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 			return
 		}
 		// The "default" reported to the UI is the squad new chats start on: the
-		// Omnis router squad when routing is enabled, else the default squad.
-		// This preselects Omnis in the new-chat picker and suppresses a
-		// redundant squad badge on router-default sessions.
+		// configured start squad (agents.json start_squad), else the Omnis router
+		// squad when routing is enabled, else the default squad. This preselects
+		// it in the new-chat picker and suppresses a redundant squad badge on
+		// default sessions. "router" lets the client recognise a preference it
+		// saved back when the router was the default (see loadSquads).
 		out.Default = inst.DefaultName
-		if inst.RouterName != "" {
-			out.Default = inst.RouterName
+		out.Router = inst.RouterName
+		if st := manager.StartSquad(); st != "" {
+			out.Default = st
 		}
 		settings := inst.Settings
 		// Build a quick name → description lookup so the UI can render the

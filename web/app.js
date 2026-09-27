@@ -7617,6 +7617,7 @@ async function syncLiveTurn(id) {
 
 const SQUAD_PREF_KEY = "agent_toolkit_squad";
 const SQUAD_MIGRATION_KEY = "agent_toolkit_squad_reset_omnis"; // one-time Omnis rollout reset
+const SQUAD_DEFAULT_SEEN_KEY = "agent_toolkit_squad_default_seen"; // last server default seen
 let availableSquads = [];          // [{name, description, leader, members, ...}]
 let defaultSquadName = "default";
 let selectedSquadName = "";
@@ -7643,6 +7644,24 @@ async function loadSquads() {
       }
       localStorage.setItem(SQUAD_MIGRATION_KEY, "1");
     }
+
+    // newChat() saves the squad of every new chat, so a browser that only ever
+    // used the default has that default saved as if it had been picked. When
+    // the server's default changes (a deployment's start_squad), such a value
+    // must follow it — otherwise every existing browser stays on the old one.
+    // Drop the saved pref once per default change when it is the previous
+    // default, or (first run of this code) the router, which is what the
+    // default was before start_squad existed. A squad picked since is kept.
+    try {
+      const seen = localStorage.getItem(SQUAD_DEFAULT_SEEN_KEY);
+      if (seen !== defaultSquadName) {
+        const saved = localStorage.getItem(SQUAD_PREF_KEY);
+        if (saved && (saved === seen || (!seen && data.router && saved === data.router))) {
+          localStorage.removeItem(SQUAD_PREF_KEY);
+        }
+        localStorage.setItem(SQUAD_DEFAULT_SEEN_KEY, defaultSquadName);
+      }
+    } catch (_) { /* storage unavailable: keep the saved pref */ }
 
     const saved = localStorage.getItem(SQUAD_PREF_KEY);
     selectedSquadName = (saved && availableSquads.some(s => s.name === saved))

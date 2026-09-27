@@ -208,10 +208,11 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		defer infra.Bus.Emit(events.EventSessionEnd, map[string]any{})
 	}
 
-	// New CLI sessions start on the Omnis router squad when routing is enabled;
+	// New CLI sessions start on the start squad (agents.json start_squad), else
+	// the Omnis router squad when routing is enabled;
 	// otherwise the default squad.
 	squad := agent.DefaultSquadName
-	if rs := manager.RouterSquad(); rs != "" {
+	if rs := manager.StartSquad(); rs != "" {
 		squad = rs
 	}
 
