@@ -554,5 +554,11 @@
   overflow: hidden;
   flex-wrap: nowrap;
 }
-/* Expanded: indent the member calls under the summary line. */
-.tool-group.expanded > .tool-group-body > .tool-row { padding-left: 36px; }
+/* Expanded: the summary and its calls read as one continuous block — the
+   rows stay flush with the summary (same left edge, no gaps or rounding
+   between them) and only each call's content is indented under the label. */
+.tool-group:not(.single) > .tool-group-summary-row > .tool-block { border-radius: 0 4px 0 0; }
+.tool-group.expanded:not(.single) > .tool-group-body > .tool-row > .tool-block { border-radius: 0; }
+.tool-group.expanded:not(.single) > .tool-group-body > .tool-row:last-child > .tool-block { border-radius: 0 0 4px 0; }
+.tool-group.expanded:not(.single) > .tool-group-body > .tool-row > .tool-block > .tool-header { padding-left: 26px; }
+.tool-group:not(.single):not(.expanded) > .tool-group-summary-row > .tool-block { border-radius: 0 4px 4px 0; }
