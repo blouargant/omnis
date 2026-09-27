@@ -505,6 +505,11 @@ func TestShippedConfigParity(t *testing.T) {
 		// research_critic's own tool list rather than a squad leader's, which is
 		// exactly why it was missed when the read-only sub-agents were allowlisted.
 		{"web_fetcher", map[string]any{"request": "does vLLM support GPTQ 4-bit?"}, DecisionAllow},
+		// Reading a skill's detail file is as read-only as load_skill: it serves
+		// only files inside the skill directory. Missing it made every IA Parc
+		// question stop on a permission card before the agent could read
+		// references/projects.md.
+		{"load_skill_resource", map[string]any{"skill_name": "iaparc", "resource_path": "references/projects.md"}, DecisionAllow},
 		// …but a sub-agent's mutating tools still prompt (fall through to ask).
 		{"Write", file("/proj/x.go"), DecisionAsk},
 		{"Edit", file("/proj/x.go"), DecisionAsk},

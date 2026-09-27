@@ -90,6 +90,7 @@
       "teammate_tell",
       "list_skills",
       "load_skill",
+      "load_skill_resource",
       "list_softskills",
       "load_softskill",
       "load_softskill_resource",
