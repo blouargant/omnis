@@ -247,6 +247,8 @@
   "menu.newFolder": "Neuer Ordner…",
   "menu.download": "Herunterladen",
   "chat.fileReady": "Datei bereit",
+  "chat.toolGroup.calls.one": "{count} Aufruf",
+  "chat.toolGroup.calls.other": "{count} Aufrufe",
   "chat.spawnChip": "Ergebnis von „{label}“",
   "chat.spawnTask": "Aufgabe",
   "chat.spawnGenericLabel": "eine erzeugte Sitzung",

@@ -248,6 +248,8 @@
   "menu.download": "Download",
   "menu.downloadFolder": "Download folder",
   "chat.fileReady": "File ready",
+  "chat.toolGroup.calls.one": "{count} call",
+  "chat.toolGroup.calls.other": "{count} calls",
   "chat.spawnChip": "Result from “{label}”",
   "chat.spawnTask": "Task",
   "chat.spawnGenericLabel": "a spawned session",

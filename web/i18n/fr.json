@@ -247,6 +247,8 @@
   "menu.newFolder": "Nouveau dossier…",
   "menu.download": "Télécharger",
   "chat.fileReady": "Fichier prêt",
+  "chat.toolGroup.calls.one": "{count} appel",
+  "chat.toolGroup.calls.other": "{count} appels",
   "chat.spawnChip": "Résultat de « {label} »",
   "chat.spawnTask": "Tâche",
   "chat.spawnGenericLabel": "une session dérivée",

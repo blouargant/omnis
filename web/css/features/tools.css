@@ -533,3 +533,26 @@
   transition: background .15s, color .15s;
 }
 .file-dl-btn:hover { background: var(--accent-strong); color: #fff; }
+
+/* ─── Tool-call groups ─────────────────────────────────────────
+   Consecutive tool calls share a .tool-group. From two calls on, the group
+   folds to one summary line; clicking it reveals every call. A lone call
+   (.single) renders with no summary, exactly like a bare tool row. */
+.tool-group { width: 100%; }
+.tool-group.single > .tool-group-summary-row { display: none; }
+.tool-group:not(.single):not(.expanded) > .tool-group-body { display: none; }
+.tool-group-summary .tool-group-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.tool-group-counts {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+/* Expanded: indent the member calls under the summary line. */
+.tool-group.expanded > .tool-group-body > .tool-row { padding-left: 36px; }

@@ -4322,6 +4322,8 @@ function setToolTime(block, ms) {
     el.textContent = formatDuration(ms);
     el.setAttribute("data-tip", "Took " + formatDuration(ms));
   }
+  block.dataset.durMs = String(ms);
+  refreshToolGroup(block.closest(".tool-group"));
 }
 
 // lastAssistantBubbleIn returns the last rendered assistant bubble in a
@@ -4460,15 +4462,92 @@ function buildToolBlock(name, args) {
   return block;
 }
 
-// appendToolCall adds a top-level tool block to the transcript.
+// appendToolCall adds a top-level tool block to the transcript. Consecutive
+// calls (nothing else rendered between them) share one .tool-group: from the
+// second call on, the group folds to a single summary line ("5 calls · Skill ×2
+// · Bash ×3") that expands to the full list, so a long run of tool calls no
+// longer floods the chat. A lone call renders exactly as before.
 function appendToolCall(name, args, container) {
+  const target = container || fpTranscript();
+  let group = target.lastElementChild;
+  if (!group || !group.classList.contains("tool-group")) {
+    group = buildToolGroup();
+    target.appendChild(group);
+  }
   const block = buildToolBlock(name, args);
   const row = document.createElement("div");
   row.className = "tool-row";
   row.appendChild(block);
-  (container || fpTranscript()).appendChild(row);
+  group.querySelector(".tool-group-body").appendChild(row);
+  refreshToolGroup(group);
   scrollBottom(paneOfNode(row));
   return block;
+}
+
+function buildToolGroup() {
+  const group = document.createElement("div");
+  group.className = "tool-group single";
+  const summaryRow = document.createElement("div");
+  summaryRow.className = "tool-row tool-group-summary-row";
+  const summary = document.createElement("div");
+  summary.className = "tool-block tool-group-summary border-slate";
+  summary.innerHTML = `
+    <div class="tool-header">
+      <span class="tool-dot pending"></span>
+      <span class="tool-group-label"></span>
+      <span class="tool-group-counts"></span>
+      <span class="tool-time"></span>
+      <span class="tool-chevron">▶</span>
+    </div>`;
+  summary.querySelector(".tool-header").addEventListener("click", () => {
+    group.classList.toggle("expanded");
+    summary.classList.toggle("expanded", group.classList.contains("expanded"));
+  });
+  summaryRow.appendChild(summary);
+  const body = document.createElement("div");
+  body.className = "tool-group-body";
+  group.appendChild(summaryRow);
+  group.appendChild(body);
+  return group;
+}
+
+// refreshToolGroup recomputes a group's summary line from its current calls.
+// Derived from the DOM each time because a resolved call can remove its own
+// row (empty teammate/soft-skill output).
+function refreshToolGroup(group) {
+  if (!group) return;
+  const blocks = group.querySelectorAll(":scope > .tool-group-body > .tool-row > .tool-block");
+  if (blocks.length === 0) { group.remove(); return; }
+  group.classList.toggle("single", blocks.length < 2);
+  if (blocks.length < 2) return;
+
+  const counts = new Map(); // label → {color, n}
+  let pending = false, error = false, total = 0;
+  for (const b of blocks) {
+    const { label, color } = toolMeta(b.dataset.toolName || "");
+    const c = counts.get(label) || { color, n: 0 };
+    c.n++;
+    counts.set(label, c);
+    const dot = b.querySelector(":scope > .tool-header > .tool-dot");
+    if (dot && dot.classList.contains("pending")) pending = true;
+    if (dot && dot.classList.contains("error")) error = true;
+    total += Number(b.dataset.durMs || 0);
+  }
+  const summary = group.querySelector(".tool-group-summary");
+  const dot = summary.querySelector(".tool-dot");
+  dot.classList.remove("pending", "done", "error");
+  dot.classList.add(pending ? "pending" : error ? "error" : "done");
+  summary.querySelector(".tool-group-label").textContent = trN("chat.toolGroup.calls", blocks.length);
+  const countsEl = summary.querySelector(".tool-group-counts");
+  countsEl.innerHTML = "";
+  for (const [label, { color, n }] of counts) {
+    const chip = document.createElement("span");
+    chip.className = `tool-badge badge-${color}`;
+    chip.textContent = n > 1 ? `${label} ×${n}` : label;
+    countsEl.appendChild(chip);
+  }
+  const time = summary.querySelector(".tool-time");
+  time.textContent = total > 0 ? formatDuration(total) : "";
 }
 
 // appendFileDownloadCard renders a compact "file ready" card in the transcript
@@ -8914,7 +8993,11 @@ async function sendMessage(panel) {
 
         case "tool_result": {
           const block = takePending(pendingTools, data.call_id);
-          if (block) resolveToolCall(block, data.response, data.duration_ms);
+          if (block) {
+            const group = block.closest(".tool-group");
+            resolveToolCall(block, data.response, data.duration_ms);
+            refreshToolGroup(group);
+          }
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
           break;
@@ -9175,9 +9258,10 @@ async function sendMessage(panel) {
     // fold, and any that ran as a follow-up were already moved out by steer_turn.
     AgentDebug.end();
     // Clean up any still-pending tool dots (e.g. on cancel).
-    for (const b of [...pendingTools, ...innerPending]) {
+    for (const { block: b } of [...pendingTools, ...innerPending]) {
       const dot = b.querySelector(".tool-dot");
       if (dot) dot.classList.remove("pending");
+      refreshToolGroup(b.closest(".tool-group"));
     }
     sessionAbortCtrls.delete(sessionId);
     sessionStopped.delete(sessionId);
