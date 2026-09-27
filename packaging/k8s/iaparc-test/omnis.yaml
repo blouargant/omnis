@@ -8,7 +8,7 @@ data:
   OMNIS_AUTH_COOKIES: "iaparc_token,auth._token.local"
   OMNIS_AUTH_VALIDATE_CMD: "iapcli -C /etc/iapcli/.iapcli.yaml user get"
   OMNIS_AUTH_TOKEN_ENV: "IAPCLI_TOKEN"
-  # login field / roles field: to confirm (Task 0 spike — not yet run).
+  # login field / roles field: validated against `iapcli user get` JSON output (iapcli >= 0.25.3).
   OMNIS_AUTH_LOGIN_FIELD: "login"
   OMNIS_AUTH_ROLES_FIELD: "roles"
   OMNIS_AUTH_ADMIN_ROLES: "admin"

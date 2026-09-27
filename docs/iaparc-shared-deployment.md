@@ -97,24 +97,16 @@ Starting the server with `identity_mode: cookie` set but `OMNIS_USER_ID` or
 `OMNIS_IDENTITY_HEADER` also set, or with `a2a_enabled: true`, is a **fatal
 startup error** — those combinations are mutually exclusive by design.
 
-## Prerequisite: the Task 0 spike has not been run yet
+## Validated: the platform cookie works with `iapcli` (2026-09-27)
 
-**Before deploying this against the real IA Parc gateway, confirm the
-platform's cookie token is actually accepted by `iapcli`.** This was called
-out as "Task 0" / spec §8 step 0 and, as of this writing, **has not been
-executed**:
-
-> The user logs in to IA Parc in the browser; check that
-> `IAPCLI_TOKEN=<cookie value> iapcli user get` succeeds, and record the shape
-> of its output (which field holds the login, which field holds the roles).
-
-Until that spike runs, `OMNIS_AUTH_LOGIN_FIELD` and `OMNIS_AUTH_LOGIN_URL`
-above are **best guesses from the design doc, not verified values** — if
-`iapcli user get`'s real output shape differs (e.g. the login lives at a
-nested path, or under a different key entirely), `OMNIS_AUTH_LOGIN_FIELD`
-must be corrected before every request starts failing with "not
-authenticated". Run the spike first; treat the values in this guide as a
-starting point to confirm, not a settled fact.
+The spike (spec §8 step 0) was run against `test.iaparc.atoutlinux.net`:
+`IAPCLI_TOKEN=<iaparc_token cookie> iapcli -C <read-only config> user get`
+exits 0 and prints the profile as **JSON**, with the login at `login` and the
+roles at `roles` (a list, e.g. `["admin","rd","prod"]`) — the values used in
+this guide. The read-only config file is left untouched and no
+`~/.iapcli.yaml` is created. This requires **`iapcli` ≥ 0.25.3**: 0.25.2 tried
+to write the token back into the config file and failed on a read-only mount.
+`OMNIS_AUTH_LOGIN_URL` is still unverified until the first deployment.
 
 ## Build, push, deploy
 

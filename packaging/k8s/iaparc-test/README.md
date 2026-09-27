@@ -3,7 +3,7 @@
 Deploys a single shared `omnis-server` into the `test-system` namespace,
 authenticated through the IA Parc portal's SSO cookie (`OMNIS_IDENTITY_MODE=cookie`)
 instead of a per-container bearer token. See `docs/multi-user-containers.md` and
-the design spec under `.superpowers/sdd/2026-09-26-shared-cookie-identity/` for
+the design spec `docs/superpowers/specs/2026-09-26-shared-cookie-identity-design.md` for
 the identity model this deployment exercises.
 
 ## Prerequisites
@@ -70,14 +70,12 @@ therefore:
   (`a2a_enabled: false`) — this deployment has no business talking to the
   Kubernetes API or accepting inbound A2A calls.
 
-## Open item — Task 0 spike not yet run
+## Validated field names (spike, 2026-09-27)
 
-`OMNIS_AUTH_LOGIN_FIELD` (`"login"`) and `OMNIS_AUTH_ROLES_FIELD` (`"roles"`)
-in `omnis.yaml`'s ConfigMap are the plan's assumed `iapcli user get` output
-field names. **The plan's Task 0 spike — confirming those field names against
-a real `iapcli user get` call with a live cookie token — has not been run.**
-Re-verify before relying on role-gated (`OMNIS_AUTH_ADMIN_ROLES`) behavior in
-this deployment; the ConfigMap carries a comment flagging this.
+`iapcli user get` (≥ 0.25.3) with a live `iaparc_token` cookie in
+`IAPCLI_TOKEN` prints JSON with the login at `login` and the roles at `roles`
+— the values in `omnis.yaml`'s ConfigMap. The read-only config is left
+untouched.
 
 ## Cluster values used (read-only `kubectl get` against `test-system`)
 
@@ -94,11 +92,9 @@ this deployment; the ConfigMap carries a comment flagging this.
 - **gRPC operator service**: `iaparc-go-operator.test-system.svc.cluster.local`
   exists with a named `grpc` port `50051` (`kubectl -n test-system get svc
   iaparc-go-operator -o yaml`), but whether that in-cluster port terminates
-  TLS with the SNI `iapcli` expects is unconfirmed (no live cookie token to
-  test with, and the plan's Task 0 spike is pending). `.iapcli.yaml` in this
+  TLS with the SNI `iapcli` expects is unconfirmed (not tested from inside the cluster). `.iapcli.yaml` in this
   manifest therefore uses the **public** endpoint —
   `address: test.iaparc.atoutlinux.net`, `port: "443"`, `insecure: ""` —
   matching the pattern in the dev machine's own `~/.iapcli.yaml` context
   (verified working there, minus its token, which was never copied here).
-  Switching to the in-cluster service address is a follow-up once Task 0
-  confirms it works.
+  Switching to the in-cluster service address is a follow-up.

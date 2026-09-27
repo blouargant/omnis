@@ -5329,11 +5329,11 @@ leading `Bearer ` stripped); `CommandValidator`
     inspects the route pattern and query parameters, so a JSON body's
     `session` field (`POST /api/fileref/resolve`, `PUT /api/file`) is not
     validated against the caller's own sessions.
-- **The plan's Task 0 spike — confirming the platform gateway's cookie token
-  is accepted by `iapcli` (the intended `auth_validate_cmd`) — has not been
-  run as of this writing.** Treat it as an open prerequisite before deploying
-  this mode against the real IA Parc gateway (see the operator guide,
-  [docs/iaparc-shared-deployment.md](docs/iaparc-shared-deployment.md)).
+- **Validated against IA Parc (2026-09-27):** the `iaparc_token` cookie is
+  accepted as `IAPCLI_TOKEN` by `iapcli user get` (≥ 0.25.3 — 0.25.2 tried to
+  write the token back into a read-only config and failed), which prints JSON
+  with `login` and `roles`. See
+  [docs/iaparc-shared-deployment.md](docs/iaparc-shared-deployment.md).
 
 ### Event audit log (`agent_events_<buildTimestamp>.log`)
 

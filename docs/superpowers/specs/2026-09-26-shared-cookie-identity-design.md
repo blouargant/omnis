@@ -56,7 +56,7 @@ Each variable has a `server.yaml` equivalent (env wins, as elsewhere).
 | `OMNIS_AUTH_COOKIES` | `auth_cookies` | comma list of cookie names, tried in order | `iaparc_token,auth._token.local` |
 | `OMNIS_AUTH_VALIDATE_CMD` | `auth_validate_cmd` | validator command, split into argv (shell-word rules, **no shell executed**); exit 0 = token accepted | `iapcli user get` |
 | `OMNIS_AUTH_TOKEN_ENV` | `auth_token_env` | env var name that carries the token — to the validator and to tools (§5) | `IAPCLI_TOKEN` |
-| `OMNIS_AUTH_LOGIN_FIELD` | `auth_login_field` | dotted path of the login in the validator's stdout (JSON, else YAML) | `login` (confirm in spike, §8) |
+| `OMNIS_AUTH_LOGIN_FIELD` | `auth_login_field` | dotted path of the login in the validator's stdout (JSON, else YAML) | `login` (validated: JSON output, iapcli ≥ 0.25.3) |
 | `OMNIS_AUTH_ROLES_FIELD` | `auth_roles_field` | dotted path of the roles list (optional) | `roles` |
 | `OMNIS_AUTH_ADMIN_ROLES` | `auth_admin_roles` | comma list of roles granting admin (used by the target tier) | `admin` |
 | `OMNIS_AUTH_LOGIN_URL` | `auth_login_url` | returned with a 401; `{return}` is replaced by the URL-encoded omnis URL | `https://test.iaparc.atoutlinux.net/sso/login` (confirm) |
