@@ -4,7 +4,7 @@
   "enabled": true,
   "leader": false,
   "builtin": false,
-  "model_ref": "balanced",
+  "model_ref": "high",
   "max_instances": 1,
   "skills": ["iaparc"],
   "tools": ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "Skill", "revert", "mime", "planning", "calc"]

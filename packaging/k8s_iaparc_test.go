@@ -73,9 +73,10 @@ func TestIaparcTestAgentsLayer(t *testing.T) {
 		t.Fatalf("agents.json must enable iaparc_operator and a leaderless \"IA Parc\" squad: %+v", cfg)
 	}
 	var agent struct {
-		Name   string   `json:"name"`
-		Skills []string `json:"skills"`
-		Tools  []string `json:"tools"`
+		Name     string   `json:"name"`
+		ModelRef string   `json:"model_ref"`
+		Skills   []string `json:"skills"`
+		Tools    []string `json:"tools"`
 	}
 	b, err = os.ReadFile("k8s/iaparc-test/agents/registry/agents/iaparc_operator/agent.json")
 	if err != nil {
@@ -86,6 +87,12 @@ func TestIaparcTestAgentsLayer(t *testing.T) {
 	}
 	if agent.Name != "iaparc_operator" || !strings.Contains(strings.Join(agent.Skills, ","), "iaparc") || !strings.Contains(strings.Join(agent.Tools, ","), "Bash") {
 		t.Fatalf("iaparc_operator must load the iaparc skill and have Bash: %+v", agent)
+	}
+	// "balanced" (Scaleway qwen3.6-35b-a3b) returned a tool call as raw Qwen
+	// XML text (<parameter=kind>…</tool_call>) on a real IA Parc question, so
+	// the turn ended with no tool call. The operator runs on "high".
+	if agent.ModelRef != "high" {
+		t.Errorf("iaparc_operator must use model_ref \"high\", got %q", agent.ModelRef)
 	}
 	d, err := os.ReadFile("k8s/iaparc-test/Dockerfile")
 	if err != nil {
