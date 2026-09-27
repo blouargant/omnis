@@ -82,7 +82,7 @@ env wins). Full descriptions are in CLAUDE.md's environment-variable table.
 | `OMNIS_AUTH_LOGIN_FIELD` | `login` (**unconfirmed** — see "Prerequisite" below) |
 | `OMNIS_AUTH_ROLES_FIELD` | `roles` |
 | `OMNIS_AUTH_ADMIN_ROLES` | `admin` (parsed today, not yet enforced by this tier) |
-| `OMNIS_AUTH_LOGIN_URL` | `https://test.iaparc.atoutlinux.net/sso/login` (**unconfirmed**) |
+| `OMNIS_AUTH_LOGIN_URL` | `https://test.iaparc.atoutlinux.net/sso/login?rd={return}` (the portal ingress's own `auth-signin` target; `rd` brings the user back to `/omnis`) |
 | `OMNIS_AUTH_CACHE_TTL` | `15m` (the default — can be omitted) |
 
 Also set for this deployment: `OMNIS_SERVER_BASE_PATH=/omnis`,
@@ -106,7 +106,7 @@ roles at `roles` (a list, e.g. `["admin","rd","prod"]`) — the values used in
 this guide. The read-only config file is left untouched and no
 `~/.iapcli.yaml` is created. This requires **`iapcli` ≥ 0.25.3**: 0.25.2 tried
 to write the token back into the config file and failed on a read-only mount.
-`OMNIS_AUTH_LOGIN_URL` is still unverified until the first deployment.
+`OMNIS_AUTH_LOGIN_URL` follows the portal ingress's `auth-signin` redirect (`/sso/login?rd=<url>`), observed on the deployed `/omnis/`.
 
 ## Build, push, deploy
 
