@@ -646,7 +646,7 @@ body.resizing #sidebar { transition: none; }
 /* Drop the buttons' top margin (meant for in-column flow) — the footer's own
    gap handles the spacing between the stacked buttons. */
 #sidebar-footer button { margin-top: 0; }
-/* "Signed in as <login>" — shown only when this omnis-server serves a real
+/* The signed-in login (just the name; "Signed in as" is its tooltip) — shown only when this omnis-server serves a real
    user (multi-user deployments run one server per user); hidden on a
    single-user install and in the collapsed rail. */
 #sidebar-user {

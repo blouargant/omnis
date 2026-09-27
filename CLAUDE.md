@@ -5091,7 +5091,7 @@ What omnis itself contributes (milestone 1):
   refused before any upgrade is attempted even with no token configured
   (empty `OMNIS_SERVER_TOKEN` fallback mode).
 - **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI shows
-  "Signed in as <login>" in the sidebar footer (`loadWhoami`, hidden for
+  the bare login in the sidebar footer ("Signed in as" is only its tooltip) (`loadWhoami`, hidden for
   `web-user` and in the collapsed rail).
 - **Packaging assets** under `packaging/supervisord/` (program template with
   `${VAR}` placeholders — supervisord does not expand `%(ENV_…)s` in `user=`,

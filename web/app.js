@@ -12697,7 +12697,7 @@ async function restoreLayout(rec, liveIds) {
   // recorded). The language offer runs first and may reload (switching language),
   // so chain the notification opt-in after it to avoid two stacked modals.
   (async () => {
-    loadWhoami(); // sidebar "Signed in as" — no-op on a single-user install
+    loadWhoami(); // sidebar login — no-op on a single-user install
     await maybePromptLocale(); // may location.reload() when the user switches
     await maybePromptNotifications();
     maybePromptWhatsNew(); // once per upgrade; no-op on dev builds / when caught up
