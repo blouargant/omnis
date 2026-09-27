@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/blouargant/omnis/core/permissions"
 )
 
 // The shared test deployment must never ship a token in the iapcli config,
@@ -96,9 +98,76 @@ func TestIaparcTestAgentsLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{"delete", "apply", "stop", "reveal", "login"} {
-		if strings.Contains(string(p), bad) {
-			t.Errorf("read-only allow list must not mention %q", bad)
+	// A "*" in the middle of a Bash rule spans several arguments, so
+	// "Bash(iapcli resources * get *)" would also allow
+	// "iapcli resources pools delete --id get". Every rule must be an explicit
+	// command prefix, optionally followed by a trailing " *".
+	var perms struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(p, &perms); err != nil {
+		t.Fatal(err)
+	}
+	if len(perms.Permissions.Allow) == 0 {
+		t.Fatal("permissions.json must allow the read-only iapcli commands")
+	}
+	for _, rule := range perms.Permissions.Allow {
+		inner, ok := strings.CutPrefix(rule, "Bash(iapcli ")
+		if !ok || !strings.HasSuffix(inner, ")") {
+			t.Errorf("rule %q must be Bash(iapcli …)", rule)
+			continue
+		}
+		inner = strings.TrimSuffix(strings.TrimSuffix(inner, ")"), " *")
+		if strings.Contains(inner, "*") {
+			t.Errorf("rule %q has a wildcard before its end: it spans arguments", rule)
+		}
+		for _, word := range strings.Fields(inner) {
+			if mutating[word] {
+				t.Errorf("read-only rule %q names the mutating/secret verb %q", rule, word)
+			}
+		}
+	}
+}
+
+// mutating lists iapcli words that change state, handle a secret, open a shell
+// in a pod, or never return (dashboards): none may appear in a read-only rule.
+var mutating = map[string]bool{
+	"delete": true, "apply": true, "stop": true, "start": true, "reveal": true,
+	"login": true, "logout": true, "add": true, "create": true, "update": true,
+	"submit": true, "cancel": true, "pause": true, "resume": true, "exec": true,
+	"jwt": true, "reset": true, "refill": true, "clear": true, "block": true,
+	"unblock": true, "regenerate": true, "push": true, "build": true, "rmi": true,
+	"migrate": true, "watch": true, "listen": true, "enable": true, "remove": true,
+	"rollack": true, "context": true, "set": true,
+}
+
+// The allow list, run through the real permission engine: reads pass without a
+// prompt, and every change, secret, pod shell or dashboard still asks —
+// including a mutation chained after a read.
+func TestIaparcTestPermissionsDecisions(t *testing.T) {
+	c, err := permissions.Load("k8s/iaparc-test/agents/permissions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for cmd, wantAllow := range map[string]bool{
+		"iapcli projects get":                                  true,
+		"iapcli resources bookings quote -f b.yaml":            true,
+		"iapcli teams budget --id x":                           true,
+		"iapcli gpus usage":                                    true,
+		"iapcli user ssh keys":                                 true,
+		"iapcli resources pools delete --id get":               false,
+		"iapcli projects delete --id x":                        false,
+		"iapcli user ssh keys add --name k --key x":            false,
+		"iapcli tokens keys reveal --id x":                     false,
+		"iapcli projects get && iapcli projects delete --id x": false,
+		"iapcli resources bookings watch":                      false,
+		"iapcli workspaces exec -i w -- sh":                    false,
+	} {
+		d, _ := c.CheckArgs("Bash", map[string]any{"command": cmd}, "/tmp")
+		if (d == permissions.DecisionAllow) != wantAllow {
+			t.Errorf("%q: decision %v, want allow=%v", cmd, d, wantAllow)
 		}
 	}
 }

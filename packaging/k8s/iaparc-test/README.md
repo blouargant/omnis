@@ -11,8 +11,8 @@ the identity model this deployment exercises.
 - `KUBECONFIG` pointing at the test cluster (`~/kubeconfig-milkyway-tests`).
 - Docker logged in to Docker Hub for the `iaparc` org (`docker login`).
 - `iapcli` installed locally (staged into the image by `build.sh`). Requires
-  **≥ 0.25.3**: earlier versions try to write the token back into the
-  (read-only) config file and fail. 0.25.3 leaves the config untouched and
+  **≥ 0.25.3** (validated with 0.26.2): earlier versions try to write the
+  token back into the (read-only) config file and fail. 0.25.3 leaves the config untouched and
   creates no `~/.iapcli.yaml` when the token comes from `IAPCLI_TOKEN`.
 - The `iaparc` skill checked out at `/etc/agentskills/skills/iaparc` (staged
   into the image's shared Agent-Skills registry layer).
@@ -110,6 +110,14 @@ cwd, so it is the highest-precedence config layer, deep-merged over
   omnis's Bash permission prompt (one command per change).
 - the leaderless **IA Parc** squad, whose description tells the router to send
   anything about IA Parc / iapcli there;
-- `permissions.json` — allow rules for read-only `iapcli` commands (`get`,
-  `info`, `template`, `help`, `gpus`, `nodes`) so reads don't prompt.
-  Anything else still asks.
+- `permissions.json` — one allow rule per read-only `iapcli` command of the
+  skill (`get`/`info`/`list`/`export` of each group, `gpus`, `nodes`,
+  `teams budget`, `jobs logs`/`catalog`, gateway spendings reports, booking
+  `availability`/`catalog`/`nodes`/`quote`, …), so reads don't prompt.
+  Every rule is an explicit command prefix with at most a **trailing** `*`:
+  a `*` in the middle spans several arguments (`Bash(iapcli resources * get *)`
+  would also allow `iapcli resources pools delete --id get`). Changes, secrets
+  (`tokens keys reveal`, `… jwt`), pod shells (`… exec`) and dashboards
+  (`watch`, `listen`) still ask. `packaging/k8s_iaparc_test.go` enforces the
+  shape and checks the decisions with the real permission engine — when the
+  skill gains a read-only command, add its rule to `agents/permissions.json`.
