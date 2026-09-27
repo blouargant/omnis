@@ -723,6 +723,29 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   live in the surface callback and the registry), so the frozen dispatch loop
   stays frozen. **GOTCHA:** the surfaces must re-check `PendingRoute` *after*
   `ResolveRouterHopText`, since a salvage records a directive out of band.
+- **Every OTHER agent is guarded too, at the model layer (`llm.GuardToolText`).**
+  The two bullets above only cover the router hop and only omnis's own call
+  syntax. Any agent can instead leak its model's **native** tool-call markup
+  into the text channel when the provider's tool-call parser fails — observed
+  live on Scaleway's `qwen3.6-35b-a3b` (`balanced`): an `AskUserQuestion` call
+  came back as the text `<parameter=kind>\ntext\n</parameter>\n</function>\n
+  </tool_call>`, ADK saw a tool-call-free response, and the turn ended with the
+  markup shown to the user (no function name even survived, so salvaging the
+  call is impossible). `modelForAgent` ([agent/squad.go](agent/squad.go)) wraps
+  **every** agent model (roots and sub-agents, deferred or not) in
+  [core/llm/tooltext.go](core/llm/tooltext.go) `GuardToolText`: while streaming
+  it holds back text from a `<` only until it knows whether it opens tool markup
+  (`<tool_call`, `<function=`, `<parameter=` and closings — anything else, like
+  `a < b` or `<div>`, is released at once), and a leak is never yielded; the
+  request is then **retried once** with `ToolTextNudge` appended as a user turn
+  (naming the failure — a vague "try again" reproduces it), and a second leak
+  ends with `ToolTextFallback`, never raw markup and never an empty turn. The
+  final response is the authoritative check (a response carrying a real
+  `FunctionCall` is never treated as a leak). **Inert for requests that declare
+  no tools** (compression/summaries, a model explaining the format). Known
+  limit: prose streamed before the markup stays on screen and the retry may
+  repeat it. A firing is logged (`llm: <model> wrote a tool call as text`)
+  without content. Pinned by [core/llm/tooltext_test.go](core/llm/tooltext_test.go).
 - **Per-squad context is retained within a session.** Because each
   `SquadInstance` owns a private `session.InMemoryService` and is stable across
   turns within a pinned generation, going squad A → B → A returns the **same** A

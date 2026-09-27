@@ -114,14 +114,20 @@ func buildSquadInstance(
 		// not abort agent build — return a deferred LLM that fails at first use
 		// instead, so the server boots and the provider-health banner reports
 		// the unreachable provider. A valid selection still builds eagerly.
+		//
+		// Every agent model is wrapped in llm.GuardToolText: a tool call the
+		// model writes as TEXT (Qwen XML markup leaking past the provider's
+		// tool-call parser) is withheld and retried once instead of ending the
+		// turn with the raw markup shown to the user. Inert for requests
+		// without tools.
 		if opts.DeferModelErrors {
-			return llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg)), nil
+			return llm.GuardToolText(llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg))), nil
 		}
 		m, err := newModelForAgent(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("squad %q: %w", squad.Name, err)
 		}
-		return m, nil
+		return llm.GuardToolText(m), nil
 	}
 
 	orchestratorLLM, err := modelForAgent(rootCfg)
