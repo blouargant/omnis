@@ -1,0 +1,11 @@
+{
+  "agents": ["iaparc_operator"],
+  "squads": [
+    {
+      "name": "IA Parc",
+      "description": "Operates the IA Parc platform with the user's own identity through the iapcli command line: projects, teams, users, resources (GPU/CPU cards, pools, bookings), GPUs and nodes, the model hub (models, processors, services, pipelines, deployments), the LLM gateway (keys, models, spendings), productions, workspaces, batch jobs and schedules, repos, OCI images, vaults, customers, tokens, notifications, events, and YAML manifests (iapcli apply). Route here for anything about IA Parc / iaparc / iapcli — e.g. 'list my iaparc projects', 'which GPUs are free', 'restart this production', 'submit a job', 'show my workspaces'. Leaderless: the IA Parc operator runs directly.",
+      "leader": "none",
+      "members": ["iaparc_operator"]
+    }
+  ]
+}

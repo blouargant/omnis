@@ -98,3 +98,18 @@ untouched.
   matching the pattern in the dev machine's own `~/.iapcli.yaml` context
   (verified working there, minus its token, which was never copied here).
   Switching to the in-cluster service address is a follow-up.
+
+## IA Parc squad (deployment-only `.agents/` layer)
+
+`agents/` is installed into the image as `/home/omnis/.agents` — the server's
+cwd, so it is the highest-precedence config layer, deep-merged over
+`/etc/omnis`. It adds, for this deployment only:
+
+- `iaparc_operator` — loads the `iaparc` skill and runs `iapcli` with the
+  signed-in user's `IAPCLI_TOKEN`; reads freely, and every change goes through
+  omnis's Bash permission prompt (one command per change).
+- the leaderless **IA Parc** squad, whose description tells the router to send
+  anything about IA Parc / iapcli there;
+- `permissions.json` — allow rules for read-only `iapcli` commands (`get`,
+  `info`, `template`, `help`, `gpus`, `nodes`) so reads don't prompt.
+  Anything else still asks.

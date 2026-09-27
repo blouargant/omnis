@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(iapcli --version)",
+      "Bash(iapcli help *)",
+      "Bash(iapcli info *)",
+      "Bash(iapcli template *)",
+      "Bash(iapcli gpus)",
+      "Bash(iapcli gpus usage *)",
+      "Bash(iapcli nodes)",
+      "Bash(iapcli nodes *)",
+      "Bash(iapcli user get)",
+      "Bash(iapcli projects get *)",
+      "Bash(iapcli projects get)",
+      "Bash(iapcli teams get *)",
+      "Bash(iapcli teams get)",
+      "Bash(iapcli resources * get *)",
+      "Bash(iapcli resources * get)",
+      "Bash(iapcli hub * get *)",
+      "Bash(iapcli hub * get)",
+      "Bash(iapcli gateway * get *)",
+      "Bash(iapcli gateway * get)",
+      "Bash(iapcli productions get *)",
+      "Bash(iapcli productions get)",
+      "Bash(iapcli workspaces get *)",
+      "Bash(iapcli workspaces get)",
+      "Bash(iapcli jobs get *)",
+      "Bash(iapcli jobs get)",
+      "Bash(iapcli repos get *)",
+      "Bash(iapcli repos get)",
+      "Bash(iapcli images get *)",
+      "Bash(iapcli images get)",
+      "Bash(iapcli vaults get *)",
+      "Bash(iapcli vaults get)"
+    ]
+  }
+}
