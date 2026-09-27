@@ -159,3 +159,19 @@ If any of these fail, re-check the `OMNIS_AUTH_*` configuration above first
 suspecting the ownership/scoping code itself — a validator that resolves the
 wrong field silently produces no login, which `cookieIdentityMiddleware`
 treats as "not authenticated" rather than falling back to a shared identity.
+
+## Validated on 2026-09-27
+
+Deployed to `test-system` as `iaparc/omnis-server:dev-v1.9.1-67-gc6c3808`
+(`local-path` PVC — this cluster's `nfs-provisioner` class is static):
+
+- without a cookie, `/omnis/` and `/omnis/api/*` redirect (302) to
+  `/sso/login?rd=…`;
+- the server logs `SHARED mode`, runs as uid 10001, and `iapcli` with no token
+  fails without writing any config file (`~/.iapcli.yaml` never created);
+- signed in as `blouargant@chapsvision.com`, a new chat asking "liste mes
+  projets iaparc" was routed to the **IA Parc** squad and listed the user's
+  projects through `iapcli` with their own token.
+
+Not yet validated: isolation between two real IA Parc accounts (it is covered
+by the server tests, but not observed on the cluster).
