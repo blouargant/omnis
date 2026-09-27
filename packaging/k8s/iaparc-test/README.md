@@ -11,8 +11,10 @@ the identity model this deployment exercises.
 - `KUBECONFIG` pointing at the test cluster (`~/kubeconfig-milkyway-tests`).
 - Docker logged in to Docker Hub for the `iaparc` org (`docker login`).
 - `iapcli` installed locally (staged into the image by `build.sh`). Requires
-  **≥ 0.25.3** (validated with 0.26.2): earlier versions try to write the
-  token back into the (read-only) config file and fail. 0.25.3 leaves the config untouched and
+  **≥ 0.26.3** (validated with 0.26.3): 0.25.2 tries to write the token back
+  into the (read-only) config file and fails; 0.26.2 prints a "Failed to write
+  config" warning on every command, which lands in the agent's Bash output.
+  0.26.3 leaves the config untouched, stays silent, and
   creates no `~/.iapcli.yaml` when the token comes from `IAPCLI_TOKEN`.
 - The `iaparc` skill checked out at `/etc/agentskills/skills/iaparc` (staged
   into the image's shared Agent-Skills registry layer).
