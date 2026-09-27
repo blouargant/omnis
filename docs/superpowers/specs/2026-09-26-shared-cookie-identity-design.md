@@ -233,7 +233,7 @@ Manifests under `packaging/k8s/iaparc-test/`.
   `/etc/iapcli/.iapcli.yaml` (context pointing at the in-cluster gRPC endpoint,
   empty token).
 - **Secret** `omnis-llm`: the shared LLM key.
-- **PVC** `omnis-data` (`nfs-provisioner`) at `/data`.
+- **PVC** `omnis-data` (`local-path` — `nfs-provisioner` in this cluster is static, not dynamic) at `/data`.
 - **Deployment** `omnis`, 1 replica (state is in-process + one volume; no
   horizontal scaling), `imagePullSecrets: iapregistrykey`, **no** privileged
   ServiceAccount token (omnis has no Kubernetes rights of its own; it drives IA

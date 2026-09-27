@@ -12,7 +12,7 @@ data:
   OMNIS_AUTH_LOGIN_FIELD: "login"
   OMNIS_AUTH_ROLES_FIELD: "roles"
   OMNIS_AUTH_ADMIN_ROLES: "admin"
-  OMNIS_AUTH_LOGIN_URL: "https://test.iaparc.atoutlinux.net/sso/login"
+  OMNIS_AUTH_LOGIN_URL: "https://test.iaparc.atoutlinux.net/sso/login?rd={return}"
   OMNIS_SERVER_BASE_PATH: "/omnis"
   OMNIS_SERVER_ADDR: ":8080"
   OMNIS_UPDATE_CHECK: "false"
@@ -36,7 +36,7 @@ metadata:
   namespace: test-system
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: nfs-provisioner
+  storageClassName: local-path
   resources:
     requests:
       storage: 10Gi
