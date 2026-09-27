@@ -10,7 +10,10 @@ the identity model this deployment exercises.
 
 - `KUBECONFIG` pointing at the test cluster (`~/kubeconfig-milkyway-tests`).
 - Docker logged in to Docker Hub for the `iaparc` org (`docker login`).
-- `iapcli` installed locally (staged into the image by `build.sh`).
+- `iapcli` installed locally (staged into the image by `build.sh`). Requires
+  **≥ 0.25.3**: earlier versions try to write the token back into the
+  (read-only) config file and fail. 0.25.3 leaves the config untouched and
+  creates no `~/.iapcli.yaml` when the token comes from `IAPCLI_TOKEN`.
 - The `iaparc` skill checked out at `/etc/agentskills/skills/iaparc` (staged
   into the image's shared Agent-Skills registry layer).
 - `OPENAI_API_KEY` / `OPENAI_BASE_URL` for the LLM gateway this deployment

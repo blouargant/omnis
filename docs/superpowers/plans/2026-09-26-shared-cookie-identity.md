@@ -2738,7 +2738,7 @@ sed "s|IMAGE_PLACEHOLDER|$IMAGE|" packaging/k8s/iaparc-test/omnis.yaml | kubectl
 kubectl -n test-system rollout status deploy/omnis
 ```
 
-- [ ] **Step 7: Run** `go test ./packaging/ -run TestIaparcTestManifest` — Expected: PASS. Then `PUSH=0 packaging/k8s/iaparc-test/build.sh` — Expected: image builds locally. Then `docker run --rm --entrypoint iapcli <image> --version` — Expected: `iapcli version 0.25.2`.
+- [ ] **Step 7: Run** `go test ./packaging/ -run TestIaparcTestManifest` — Expected: PASS. Then `PUSH=0 packaging/k8s/iaparc-test/build.sh` — Expected: image builds locally. Then `docker run --rm --entrypoint iapcli <image> --version` — Expected: `iapcli version 0.25.3` or later (0.25.2 fails on the read-only config).
 
 - [ ] **Step 8: Commit**
 
