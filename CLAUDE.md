@@ -5645,6 +5645,24 @@ silently the same way. Regression coverage:
 Hot-reload picks up changes to `agent.json` without a process restart.
 The skill files themselves are read on demand at `load_skill` call time.
 
+**A skill's detail files may live anywhere inside its directory.** ADK's
+`fileSystemSource` only serves `load_skill_resource` paths under `references/`,
+`assets/` or `scripts/` (`ErrInvalidResourcePath` otherwise), while many real
+skills — Anthropic's own, and the IA Parc `iaparc` CLI skill — keep per-topic
+files at the skill ROOT (`projects.md`, `apply/hub.md`) and point to them from
+SKILL.md. With ADK's rule the agent could read SKILL.md but none of those
+files, and guessed instead (observed: an invented `iapcli projects list -o
+json` — neither `list` nor `-o` exists). `resilientSource`
+([internal/skills/skills.go](internal/skills/skills.go)) therefore overrides
+`LoadResource`/`ListResources` to serve **any file inside the skill directory**
+(root listing excludes `SKILL.md`), keeping the one guarantee that matters:
+`cleanResourcePath` rejects empty, absolute, `\`-containing and `..`-climbing
+paths, so nothing outside the skill is reachable. The skill system instruction
+(`skillInstruction`) now tells the model to pass paths exactly as SKILL.md names
+them and to load the relevant detail file before acting rather than guess a
+command or option. Pinned by
+[internal/skills/skills_resource_test.go](internal/skills/skills_resource_test.go).
+
 ### Connecting remote A2A agents (client side)
 
 A2A peers are wired via `a2a_config.json` (resolved from the config search chain) — no Go code required.

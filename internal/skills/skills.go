@@ -6,6 +6,7 @@ package skills
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -49,7 +50,8 @@ This is very important:
 1. Use the ` + "`list_skills`" + ` tool to discover what skills are available.
 2. For EACH skill whose description is relevant to the current task, call ` + "`load_skill`" + ` with ` + "`name=\"<SKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `). Load ALL relevant skills — do not stop at the first match.
 3. Once you have read the instructions, follow them exactly as documented before replying to the user. If the instructions list multiple steps, complete all of them in order.
-4. The ` + "`load_skill_resource`" + ` tool is for viewing files within a skill's directory (e.g., ` + "`references/*`, `assets/*`, `scripts/*`" + `). Do NOT use other tools to access these files.
+4. The ` + "`load_skill_resource`" + ` tool reads any other file of a skill: pass ` + "`skill_name`" + ` and ` + "`resource_path`" + ` exactly as SKILL.md names it, relative to the skill directory (e.g. ` + "`projects.md`, `apply/hub.md`, `references/guide.md`" + `). Do NOT use other tools to access these files.
+5. When SKILL.md points to a detail file for the part of the task you are doing, load it BEFORE acting. Never guess a command, sub-command or option the skill's files do not document — if it is not written there, it does not exist.
 `
 
 // Toolset returns an ADK tool.Toolset that exposes skills merged across all
@@ -99,9 +101,10 @@ func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
 // (with a logged warning) any directory that fails to load, so one broken skill
 // in the registry is merely invisible rather than fatal.
 //
-// All methods except ListFrontmatters delegate unchanged via the embedded
-// Source. The fallback only runs when the upstream scan fails, so behaviour is
-// byte-identical when every skill is valid.
+// ListFrontmatters' fallback only runs when the upstream scan fails, so it is
+// byte-identical when every skill is valid. LoadResource/ListResources are
+// replaced (see "resource access anywhere inside the skill" below); the other
+// methods delegate unchanged via the embedded Source.
 type resilientSource struct {
 	skill.Source
 	fsys fs.FS
@@ -140,6 +143,104 @@ func (r resilientSource) ListFrontmatters(ctx context.Context) ([]*skill.Frontma
 			continue
 		}
 		out = append(out, fm)
+	}
+	return out, nil
+}
+
+// ── resource access anywhere inside the skill ────────────────────────────
+
+// ADK's fileSystemSource only serves resources under references/, assets/ and
+// scripts/. Many real skills (including Anthropic's own and the iaparc CLI
+// skill) keep their detail files at the skill ROOT or in other subfolders and
+// point to them from SKILL.md — with ADK's rule an agent can read SKILL.md but
+// none of the files it names, and ends up guessing (observed: an invented
+// `iapcli projects list -o json`). resilientSource therefore serves any file
+// inside the skill directory; the only guarantee that matters — nothing
+// OUTSIDE the skill is reachable — is kept by cleanResourcePath.
+
+// cleanResourcePath returns resourcePath cleaned and relative to the skill
+// root, or false when it is empty, absolute, the skill root itself, or climbs
+// out of it ("..").
+func cleanResourcePath(resourcePath string) (string, bool) {
+	if resourcePath == "" || strings.HasPrefix(resourcePath, "/") || strings.Contains(resourcePath, `\`) {
+		return "", false
+	}
+	c := path.Clean(resourcePath)
+	if c == "." || !fs.ValidPath(c) {
+		return "", false
+	}
+	return c, true
+}
+
+// validSkillDir reports an error unless name is a single path segment naming a
+// loadable skill.
+func (r resilientSource) validSkillDir(ctx context.Context, name string) error {
+	if name == "" || strings.ContainsAny(name, `/\`) || !fs.ValidPath(name) {
+		return fmt.Errorf("%w: %q", skill.ErrInvalidSkillName, name)
+	}
+	_, err := r.Source.LoadFrontmatter(ctx, name)
+	return err
+}
+
+// LoadResource opens any file inside the named skill's directory.
+func (r resilientSource) LoadResource(ctx context.Context, name, resourcePath string) (io.ReadCloser, error) {
+	if err := r.validSkillDir(ctx, name); err != nil {
+		return nil, err
+	}
+	rel, ok := cleanResourcePath(resourcePath)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q must be a relative path inside the skill directory", skill.ErrInvalidResourcePath, resourcePath)
+	}
+	f, err := r.fsys.Open(path.Join(name, rel))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %q", skill.ErrResourceNotFound, rel)
+		}
+		return nil, fmt.Errorf("open resource %q of skill %q: %w", rel, name, err)
+	}
+	if st, serr := f.Stat(); serr == nil && st.IsDir() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%w: %q is a directory", skill.ErrInvalidResourcePath, rel)
+	}
+	return f, nil
+}
+
+// ListResources lists every file of the skill under subpath ("" or "." = the
+// whole skill), relative to the skill root, excluding SKILL.md itself.
+func (r resilientSource) ListResources(ctx context.Context, name, subpath string) ([]string, error) {
+	if err := r.validSkillDir(ctx, name); err != nil {
+		return nil, err
+	}
+	start := "."
+	if subpath != "" && subpath != "." {
+		rel, ok := cleanResourcePath(subpath)
+		if !ok {
+			return nil, fmt.Errorf("%w: %q must be a relative path inside the skill directory", skill.ErrInvalidResourcePath, subpath)
+		}
+		start = rel
+	}
+	skillFS, err := fs.Sub(r.fsys, name)
+	if err != nil {
+		return nil, fmt.Errorf("sub-filesystem for skill %q: %w", name, err)
+	}
+	if _, err := fs.Stat(skillFS, start); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %q", skill.ErrResourceNotFound, start)
+		}
+		return nil, fmt.Errorf("stat %q: %w", start, err)
+	}
+	var out []string
+	err = fs.WalkDir(skillFS, start, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if !d.IsDir() && p != "SKILL.md" {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk %q of skill %q: %w", start, name, err)
 	}
 	return out, nil
 }
