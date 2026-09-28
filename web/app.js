@@ -1201,9 +1201,21 @@ function attachPaneHandlers(panel) {
 
   // Sticky-bottom autoscroll + pinned prompt header per pane.
   pe.transcript.addEventListener("scroll", () => {
-    panel._stick = isAtBottom(pe.transcript);
+    updateStickOnScroll(panel);
     updatePinnedForScroll(panel);
     scheduleReplyNav(panel);
+  });
+  // An upward wheel/touch/key gesture releases the pin immediately — before the
+  // resulting scroll event lands — so a token rendered in between cannot yank
+  // the view back down (see updateStickOnScroll).
+  pe.transcript.addEventListener("wheel", (e) => {
+    if (e.deltaY < 0) panel._stick = false;
+  }, { passive: true });
+  pe.transcript.addEventListener("touchmove", () => {
+    if (!isAtBottom(pe.transcript, 2)) panel._stick = false;
+  }, { passive: true });
+  pe.transcript.addEventListener("keydown", (e) => {
+    if (["ArrowUp", "PageUp", "Home"].includes(e.key)) panel._stick = false;
   });
 
   // In-reply jump button (jump between the start and end of a long reply).
@@ -2619,8 +2631,28 @@ function escHtml(s) {
 // scrollBottom(true) to re-pin unconditionally.
 const STICK_THRESHOLD_PX = 80;
 
-function isAtBottom(el) {
-  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_THRESHOLD_PX;
+function isAtBottom(el, threshold = STICK_THRESHOLD_PX) {
+  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= threshold;
+}
+
+// updateStickOnScroll decides, on every scroll event, whether the pane follows
+// new output. The direction of the move is what matters, not just the distance
+// to the bottom: a single wheel notch up (often < STICK_THRESHOLD_PX) used to
+// leave the pane "at the bottom", so the next streamed token dragged the reader
+// straight back down and the start of a long reply was unreachable mid-stream.
+//   - at the very bottom            → follow
+//   - moved up                      → stop following (the user is reading)
+//   - moved down to near the bottom → follow again
+// Programmatic pins only ever move down, and content shrinking while pinned
+// leaves the view at the very bottom, so neither is mistaken for the user.
+function updateStickOnScroll(panel) {
+  const tr = panel.els.transcript;
+  const top = tr.scrollTop;
+  const last = panel._lastScrollTop ?? top;
+  panel._lastScrollTop = top;
+  if (isAtBottom(tr, 2)) panel._stick = true;
+  else if (top < last) panel._stick = false;
+  else if (top > last && isAtBottom(tr)) panel._stick = true;
 }
 
 // scrollBottom keeps a pane pinned to the bottom while it is "stuck" (see the
@@ -2629,11 +2661,19 @@ function isAtBottom(el) {
 function scrollBottom(panel, force = false) {
   if (!panel || !panel.els.transcript) return;
   if (!force && !panel._stick) return;
+  if (force) panel._scrollForce = true;
   if (panel._scrollPending) return;
   panel._scrollPending = true;
   requestAnimationFrame(() => {
     panel._scrollPending = false;
-    panel.els.transcript.scrollTop = panel.els.transcript.scrollHeight;
+    const forced = panel._scrollForce;
+    panel._scrollForce = false;
+    // Re-check: the user may have scrolled up between the request and this
+    // frame — a queued follow-scroll must not override that.
+    if (!forced && !panel._stick) return;
+    const tr = panel.els.transcript;
+    tr.scrollTop = tr.scrollHeight;
+    panel._lastScrollTop = tr.scrollTop;
     panel._stick = true;
   });
 }
