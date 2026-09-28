@@ -246,7 +246,7 @@ type AgentCallbacks struct {
 // bus's plugin registered.
 func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 	toolTimers := sync.Map{}  // key = scopedToolKey (session, agent, call id), value = time.Time
-	modelTimers := sync.Map{} // key = (agent, callback-context ptr), value = time.Time
+	modelTimers := sync.Map{} // key = modelKey (session, invocation, agent), value = time.Time
 
 	beforeTool := func(tctx adk.ToolContext, t tool.Tool, args map[string]any) (map[string]any, error) {
 		agentName := tctx.AgentName()
@@ -429,13 +429,14 @@ func scopedToolKey(tctx adk.ToolContext, t tool.Tool, args map[string]any) strin
 	return prefix + toolKey(t, args)
 }
 
-// modelKey identifies an in-flight LLM call. ADK's CallbackContext does not
-// expose an invocation ID directly through a stable interface here, so we
-// scope by agent + identity of the callback context (its address). This is
-// safe because before/after callbacks for a given call run on the same
-// goroutine with the same context value.
+// modelKey identifies an in-flight LLM call. ADK v2 builds a fresh callback
+// context for every callback, so the before and after halves of one call see
+// different context objects and cannot be matched by address. An agent makes
+// one model call at a time within an invocation, and parallel sub-agent
+// instances each run in their own session, so (session, invocation, agent)
+// names exactly one call in flight.
 func modelKey(agentName string, cb adk.CallbackContext) string {
-	return fmt.Sprintf("%s||%p", agentName, cb)
+	return cb.SessionID() + "||" + cb.InvocationID() + "||" + agentName
 }
 
 // agentNameOf returns the running agent's name from an InvocationContext,
