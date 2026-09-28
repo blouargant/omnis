@@ -4243,7 +4243,11 @@ function appendSpawnResultBlock(text, container) {
 // shown, remembered per question in bubble._pinSpace), so hiding it — which gives that space
 // back to the transcript, content held still by withStableScroll — cannot make
 // the next tick re-show it: no flicker, and scrolling back up fades it back in.
-const PIN_FADE_PX = 80; // ≈ three lines of an answer
+// The fade starts ~ten lines out and reaches full transparency PIN_CLEAR_PX
+// (about one line) before the hand-over, so the header is already invisible when
+// it is removed, whatever the scroll step.
+const PIN_FADE_PX = 240;
+const PIN_CLEAR_PX = 24;
 function updatePinnedForScroll(panel) {
   const t = panel.els.transcript;
   const transcriptRect = t.getBoundingClientRect();
@@ -4271,7 +4275,7 @@ function updatePinnedForScroll(panel) {
       clearPinnedPrompt(panel);
       return;
     }
-    fade = Math.min(1, gap / PIN_FADE_PX);
+    fade = Math.max(0, Math.min(1, (gap - PIN_CLEAR_PX) / (PIN_FADE_PX - PIN_CLEAR_PX)));
   }
   if (activeBubble !== null) {
     // Pin the question only — steering notes show as chips on the inline bubble.
@@ -4291,6 +4295,7 @@ function updatePinnedForScroll(panel) {
       : null;
     setPinnedPrompt(panel, text, files, turn);
     panel.els.promptHeader.style.opacity = fade < 1 ? fade.toFixed(3) : "";
+    panel.els.promptHeader.style.pointerEvents = fade === 0 ? "none" : "";
   } else {
     clearPinnedPrompt(panel);
   }
@@ -4307,6 +4312,7 @@ function clearPinnedPrompt(panel) {
     ph._pinnedTurn = null;
     ph.classList.remove("visible");
     ph.style.opacity = "";
+    ph.style.pointerEvents = "";
   });
 }
 
