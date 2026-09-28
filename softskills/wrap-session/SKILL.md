@@ -22,7 +22,7 @@ NEVER load this skill on:
 
 ## Steps
 
-1. Call `AskUserQuestion` with `kind="text"` and the prompt: "Anything off, or are we good to wrap?". Set `timeout_secs` to 120 (two minutes is plenty; the user may be checking a result).
+1. Call `AskUserQuestion` with `kind="text"`, `subtle=true` and the prompt: "Anything off, or are we good to wrap?". Set `timeout_seconds` to 120 (two minutes is plenty; the user may be checking a result). `subtle` makes the web UI show a small pulsing indicator instead of a question card: the question is optional, so it must not get in the user's way.
 
 2. If the user supplies an answer with at least one non-whitespace character, immediately call `record_session_feedback` with:
    - `question`: the exact question text you asked in step 1.

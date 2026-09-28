@@ -59,6 +59,10 @@ type Question struct {
 	// Persister). Only AskUserQuestion sets it; permission and other technical
 	// cards gate one tool call that does not exist after a restart.
 	Durable bool `json:"durable,omitempty"`
+	// Subtle is a display hint for an optional question the user may ignore
+	// (the wrap-up check): the web UI shows a discreet composer indicator
+	// instead of the ask-user card. Resolution is unchanged.
+	Subtle bool `json:"subtle,omitempty"`
 	// Agent is the agent that asked the question (used to resume after a restart).
 	Agent string `json:"agent,omitempty"`
 	// Resumed is set by Restore: this question was asked before a server
@@ -422,6 +426,9 @@ func QuestionToPayload(q Question) map[string]any {
 	}
 	if q.Resumed {
 		p["resumed"] = true
+	}
+	if q.Subtle {
+		p["subtle"] = true
 	}
 	if q.Group != "" {
 		p["group"] = q.Group

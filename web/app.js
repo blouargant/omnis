@@ -1634,6 +1634,7 @@ function applySessionUI(id) {
     renderCtxRing(p);
     renderGoalChip(p);
     renderSkillsDock(p);
+    renderSubtleAsk(p);
   }
   // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
   // including background tabs whose session is streaming.
@@ -1669,6 +1670,130 @@ async function refreshGoal(sessionId) {
     sessionGoals.set(sessionId, await res.json());
   } catch (_) { return; }
   for (const p of panelsForSession(sessionId)) renderGoalChip(p);
+}
+
+// ─── Subtle ask-user indicator ───────────────────────────────────────────────
+// An optional question (AskUserQuestion with subtle=true — the wrap-session
+// check) is not shown as the ask-user card: a small "?" disc pulses in the
+// composer toolbar, and clicking it opens a popover to answer or skip. The disc
+// goes away when the question is answered, skipped, or resolved server-side
+// (its timeout, Stop, archive — all arrive as ask_user_cancel).
+
+// sessionId → the pending subtle question.
+const subtleAsks = new Map();
+// The single open popover: { el, sessionId, questionId, anchor }.
+let subtleAskPop = null;
+
+function showSubtleAsk(sessionId, q) {
+  subtleAsks.set(sessionId, q);
+  for (const p of panelsForSession(sessionId)) renderSubtleAsk(p);
+}
+
+// clearSubtleAskByQuestion drops the subtle question with this id, if any.
+// Returns false when the id is not a subtle question (so the caller handles it).
+function clearSubtleAskByQuestion(questionId) {
+  for (const [sid, q] of subtleAsks) {
+    if (q.question_id !== questionId) continue;
+    subtleAsks.delete(sid);
+    if (subtleAskPop && subtleAskPop.questionId === questionId) closeSubtleAskPop();
+    for (const p of panelsForSession(sid)) renderSubtleAsk(p);
+    return true;
+  }
+  return false;
+}
+
+function renderSubtleAsk(panel) {
+  const btn = panel && panel.root && panel.root.querySelector(".subtle-ask-btn");
+  if (!btn) return;
+  const q = panel.sessionId ? subtleAsks.get(panel.sessionId) : null;
+  btn.hidden = !q;
+  if (!q) return;
+  btn.setAttribute("data-tip", q.prompt || tr("app.subtleAsk.aria"));
+  if (!btn._wired) {
+    btn._wired = true;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const sid = panel.sessionId;
+      const cur = sid ? subtleAsks.get(sid) : null;
+      if (!cur) return;
+      if (subtleAskPop && subtleAskPop.questionId === cur.question_id) { closeSubtleAskPop(); return; }
+      openSubtleAskPop(btn, sid, cur);
+    });
+  }
+}
+
+function closeSubtleAskPop() {
+  if (!subtleAskPop) return;
+  subtleAskPop.el.remove();
+  document.removeEventListener("mousedown", onSubtleAskOutside, true);
+  window.removeEventListener("resize", positionSubtleAskPop);
+  subtleAskPop = null;
+}
+
+function onSubtleAskOutside(e) {
+  if (!subtleAskPop) return;
+  if (subtleAskPop.el.contains(e.target) || subtleAskPop.anchor.contains(e.target)) return;
+  closeSubtleAskPop();
+}
+
+// positionSubtleAskPop anchors the popover above the disc, clamped to the viewport.
+function positionSubtleAskPop() {
+  if (!subtleAskPop) return;
+  const { el, anchor } = subtleAskPop;
+  const r = anchor.getBoundingClientRect();
+  const w = el.offsetWidth;
+  const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+  el.style.left = left + "px";
+  el.style.bottom = (window.innerHeight - r.top + 10) + "px";
+}
+
+function openSubtleAskPop(anchor, sessionId, q) {
+  closeSubtleAskPop();
+  const el = document.createElement("div");
+  el.className = "subtle-ask-pop";
+  el.setAttribute("role", "dialog");
+  const prompt = document.createElement("div");
+  prompt.className = "subtle-ask-prompt";
+  prompt.textContent = q.prompt || "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "subtle-ask-input";
+  input.placeholder = tr("app.subtleAsk.placeholder");
+  const actions = document.createElement("div");
+  actions.className = "subtle-ask-actions";
+  const skip = document.createElement("button");
+  skip.type = "button";
+  skip.textContent = tr("app.subtleAsk.skip");
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "subtle-ask-send";
+  send.textContent = tr("app.subtleAsk.send");
+  actions.append(skip, send);
+  el.append(prompt, input, actions);
+  document.body.appendChild(el);
+  subtleAskPop = { el, sessionId, questionId: q.question_id, anchor };
+  positionSubtleAskPop();
+  document.addEventListener("mousedown", onSubtleAskOutside, true);
+  window.addEventListener("resize", positionSubtleAskPop);
+
+  const submit = async (answer) => {
+    send.disabled = skip.disabled = input.disabled = true;
+    const { ok, gone } = await resolveQuestion(sessionId, q.question_id, answer);
+    if (ok || gone) { clearSubtleAskByQuestion(q.question_id); return; }
+    send.disabled = skip.disabled = input.disabled = false; // transient failure — retry
+  };
+  send.addEventListener("click", () => {
+    const text = input.value.trim();
+    if (!text) { submit({ selected: [], text: "", cancelled: true }); return; }
+    submit({ selected: [], text, cancelled: false });
+  });
+  skip.addEventListener("click", () => submit({ selected: [], text: "", cancelled: true }));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); send.click(); }
+    else if (e.key === "Escape") { e.preventDefault(); closeSubtleAskPop(); anchor.focus(); }
+  });
+  input.focus();
 }
 
 // ─── Composer skills dock ────────────────────────────────────────────────────
@@ -4964,6 +5089,7 @@ const askWizards = new Map();
 // renderAskUserWidget routes a freshly-arrived question into its session's
 // wizard, creating the wizard card on first arrival.
 function renderAskUserWidget(sessionId, q) {
+  if (q && q.subtle) { showSubtleAsk(sessionId, q); return; }
   const panel = panelsForSession(sessionId)[0];
   if (!panel) {
     // No pane currently shows this session — queue it; bindSessionToPanel /
@@ -5638,6 +5764,7 @@ function finalizeWizard(wiz) {
 // cancelAskUserWidget handles a server-side ask_user_cancel: it marks the owning
 // step resolved/skipped and either re-renders or finalizes the wizard.
 function cancelAskUserWidget(questionId) {
+  if (clearSubtleAskByQuestion(questionId)) return;
   const entry = pendingAskWidgets.get(questionId);
   pendingAskWidgets.delete(questionId);
   // Resolve the owning session. pendingAskWidgets now covers both rendered and
@@ -7449,6 +7576,7 @@ function forgetSession(id) {
   sessionTodoBlock.delete(id);
   sessionGoals.delete(id);
   sessionSkills.delete(id);
+  subtleAsks.delete(id);
   sessionNotifiedAt.delete(id);
   remoteBusy.delete(id);
   remoteBusyBubble.delete(id);

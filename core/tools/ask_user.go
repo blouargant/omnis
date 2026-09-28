@@ -26,6 +26,9 @@ type askUserIn struct {
 	Default string `json:"default,omitempty"`
 	// TimeoutSeconds overrides the default per-question timeout (0 = registry default).
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Subtle marks an optional question the user may ignore (e.g. a wrap-up
+	// check): surfaces show it discreetly instead of as a blocking card.
+	Subtle bool `json:"subtle,omitempty"`
 }
 
 // askUserOut is the JSON response returned to the LLM.
@@ -51,13 +54,16 @@ func NewAskUserTool(reg *askuser.Registry) tool.Tool {
 			"`choices` ([]string) — options for single/multi/confirm (required for those kinds; 2-4 items for single/confirm). "+
 			"`allow_text` (bool) — also accept free text alongside choices (single/multi only). "+
 			"`default` (string) — pre-suggested value. "+
-			"`timeout_seconds` (int) — override default timeout (0 = use default).",
+			"`timeout_seconds` (int) — override default timeout (0 = use default). "+
+			"`subtle` (bool) — the question is optional (e.g. a wrap-up check): shown discreetly instead of as a card; "+
+			"pair it with a timeout_seconds so it goes away on its own.",
 		askUserHandler(reg),
 	)
 }
 
 // askUserHandler is AskUserQuestion's body. The question is Durable: it
-// survives a server restart and resumes the task in a new turn. It waits on
+// survives a server restart and resumes the task in a new turn — except a
+// Subtle one, which is optional and has nothing worth resuming. It waits on
 // the tool context (the run context), so Stop, session end and shutdown
 // release it; a client disconnect does not cancel the run context, so the
 // question still waits for the user to come back.
@@ -73,7 +79,8 @@ func askUserHandler(reg *askuser.Registry) func(adk.ToolContext, askUserIn) (ask
 			AllowText:   in.AllowText,
 			Default:     in.Default,
 			TimeoutSecs: in.TimeoutSeconds,
-			Durable:     true,
+			Durable:     !in.Subtle,
+			Subtle:      in.Subtle,
 			Agent:       tc.AgentName(),
 		}
 		ans, err := reg.Ask(tc, tc.SessionID(), q)

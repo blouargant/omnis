@@ -382,6 +382,7 @@
                 <button id="ctx-compact-btn" type="button" data-i18n="ctx.compressNow">Compress Now</button>
               </div>
             </span>
+            <button class="subtle-ask-btn" type="button" hidden aria-label="Optional question" data-i18n-aria-label="app.subtleAsk.aria">?</button>
             <span id="status"></span>
             <button id="cancel" type="button" disabled data-i18n="composer.stop">Stop</button>
             <button id="send" type="submit" data-i18n="composer.send">Send</button>
@@ -482,9 +483,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=69" defer></script>
+  <script src="assets/i18n/locales.js?v=70" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=103" defer></script>
+  <script src="assets/app.js?v=104" defer></script>
   <script src="assets/settings.js?v=63" defer></script>
 </body>
 </html>

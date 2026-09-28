@@ -6582,6 +6582,25 @@ Submit/Skip row — was clipped and scrolled out of reach. Subtracting the measu
 padding fixes it; padding does not depend on the card's height, so it adds no
 measurement feedback loop.
 
+### Web UI subtle ask-user indicator
+
+`AskUserQuestion` takes an optional **`subtle`** flag for an optional question
+the user may ignore — the `wrap-session` soft-skill's closing check is the one
+user. It becomes `askuser.Question.Subtle` (carried as `subtle` by
+`QuestionToPayload`) and makes the question **non-durable** (nothing worth
+resuming after a restart). The web UI ([web/app.js](web/app.js) "Subtle
+ask-user indicator") then skips the ask-user card: `renderAskUserWidget` hands
+it to `showSubtleAsk`, which shows a slowly pulsing **"?" disc**
+(`.subtle-ask-btn`, in `.composer-actions` before `#status`) in every pane
+showing the session (`subtleAsks` sid → question, repainted by
+`applySessionUI`). Clicking it opens a body-appended popover (`.subtle-ask-pop`,
+styled in [web/css/features/composer.css](web/css/features/composer.css)) with a
+one-line answer + Send/Skip; an empty Send is a skip. The disc goes away on an
+answer, a skip, or any `ask_user_cancel` (timeout, Stop, archive —
+`cancelAskUserWidget` checks `clearSubtleAskByQuestion` first). The skill sets
+`timeout_seconds: 120`; it used to write `timeout_secs`, a name the tool does not
+have, so the question waited forever. CLI/TUI ignore the flag.
+
 ### Web UI small-screen layout (phone drawer)
 
 The desktop shell is a three-column flex row — `#sidebar` (280px) | `#session-pane`

@@ -692,3 +692,77 @@ body.resizing-composer #composer-resize { transition: none; }
 #attach-menu button + button { border-top: 1px solid var(--bg-raised); }
 
 
+
+/* ─── Subtle ask-user indicator ─────────────────────────────────────────────
+   An optional question (the wrap-up check) shows as a small "?" disc in the
+   composer toolbar that pulses slowly, instead of the ask-user card. Clicking
+   it opens .subtle-ask-pop (appended to <body>, positioned by JS). */
+.subtle-ask-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: var(--accent-bg-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  animation: subtle-ask-pulse 2.6s ease-in-out infinite;
+}
+.subtle-ask-btn[hidden] { display: none; }
+.subtle-ask-btn:hover { animation: none; opacity: 1; background: var(--accent); color: #fff; }
+
+@keyframes subtle-ask-pulse {
+  0%, 100% { opacity: 0.45; box-shadow: 0 0 0 0 var(--accent-bg-soft); }
+  50%      { opacity: 1;    box-shadow: 0 0 0 5px var(--accent-bg-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .subtle-ask-btn { animation: none; opacity: 0.8; }
+}
+
+.subtle-ask-pop {
+  position: fixed;
+  z-index: 1000;
+  width: min(340px, calc(100vw - 16px));
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.subtle-ask-prompt { font-size: 13px; line-height: 1.4; }
+.subtle-ask-input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text);
+}
+.subtle-ask-input:focus { outline: none; border-color: var(--accent); }
+.subtle-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.subtle-ask-actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.subtle-ask-actions button:hover:not(:disabled) { color: var(--text); background: var(--bg-raised); }
+.subtle-ask-actions .subtle-ask-send { background: var(--accent); border-color: var(--accent); color: #fff; }
+.subtle-ask-actions .subtle-ask-send:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
+.subtle-ask-actions button:disabled { opacity: 0.5; cursor: default; }

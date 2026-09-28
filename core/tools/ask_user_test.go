@@ -68,3 +68,32 @@ func TestAskUserQuestionReleasedByRunContextCancel(t *testing.T) {
 		t.Fatal("AskUserQuestion is still blocked after the run context was cancelled")
 	}
 }
+
+// A subtle question (the wrap-up check) is optional: it is not durable — there
+// is nothing to resume after a restart — and it reaches the browser flagged so
+// the web UI renders it as a discreet composer indicator instead of the card.
+func TestAskUserQuestionSubtleIsNotDurableAndFlagged(t *testing.T) {
+	reg := askuser.NewRegistry()
+	h := askUserHandler(reg)
+	tc := &fakeToolCtx{StrictContextMock: agent.StrictContextMock{Ctx: context.Background()}, sid: "s1", agentName: "leader"}
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if qs := reg.Pending("s1"); len(qs) == 1 {
+				if qs[0].Durable || !qs[0].Subtle {
+					t.Errorf("subtle question must be non-durable and flagged, got %+v", qs[0])
+				}
+				if p := askuser.QuestionToPayload(qs[0]); p["subtle"] != true {
+					t.Errorf("payload must carry subtle=true, got %v", p)
+				}
+				_ = reg.Resolve("s1", qs[0].ID, askuser.Answer{Text: "ok"})
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	if _, err := h(tc, askUserIn{Kind: "text", Prompt: "p", Subtle: true}); err != nil {
+		t.Fatal(err)
+	}
+}
