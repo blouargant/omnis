@@ -65,7 +65,7 @@ const (
 // shaperExempt lists tools whose (small, structured) output must never be
 // truncated. Edit tools are handled separately (fusion path returns early).
 var shaperExempt = map[string]bool{
-	"ask_user": true, "route_to_squad": true, "handoff_to_router": true, "ask_squad": true,
+	"AskUserQuestion": true, "ask_user": true, "route_to_squad": true, "handoff_to_router": true, "ask_squad": true,
 	"todo_write": true, "todo_read": true, "todo_update": true,
 }
 

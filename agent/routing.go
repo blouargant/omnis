@@ -416,7 +416,7 @@ func parseCapabilityVerdict(text string) (bool, string) {
 // routerWrittenTools are the router hop's own tools — the only calls whose
 // written-out form we salvage. Kept as a list so the pattern below cannot
 // drift from it.
-var routerWrittenTools = []string{"route_to_squad", "ask_squad", "handoff_to_router", "ask_user"}
+var routerWrittenTools = []string{"route_to_squad", "ask_squad", "handoff_to_router", "AskUserQuestion", "ask_user"}
 
 // writtenToolCallRe matches call SYNTAX: a router tool name followed by an open
 // paren. Requiring the paren is deliberate — it is what separates a hallucinated
@@ -469,7 +469,7 @@ const RouterConfusedFallback = "Sorry — I could not work out which part of the
 // writtenRouteIntent is a routing call the model WROTE into its message instead
 // of emitting as a function call, recovered from the text.
 type writtenRouteIntent struct {
-	Tool   string // route_to_squad | ask_squad | handoff_to_router | ask_user
+	Tool   string // route_to_squad | ask_squad | handoff_to_router | AskUserQuestion
 	Squad  string // route_to_squad / ask_squad destination (may be empty)
 	Reason string // rationale, when the text carried one
 }
@@ -742,7 +742,7 @@ func synthesizeRouterAgentConfig(rs RuntimeSettings, name string) (RuntimeAgentC
 	cfg.Enabled = true
 	cfg.Description = "Router that hands the conversation to the best-suited squad."
 	cfg.Instruction = "" // resolved in buildSquadInstance
-	cfg.Tools = nil      // route_to_squad + ask_user/mailbox mounted as always-on
+	cfg.Tools = nil      // route_to_squad + AskUserQuestion/mailbox mounted as always-on
 	cfg.Skills = nil
 	cfg.SoftSkillsDir = ""
 	cfg.MCPConfigPath = ""
@@ -1030,7 +1030,7 @@ You are Omnis, the router. You do not answer questions or use domain tools
 yourself — your single job is to send the conversation to the squad best able
 to handle the user's request.
 
-Hard limits: you have NO tools beyond route_to_squad, ask_squad, and ask_user.
+Hard limits: you have NO tools beyond route_to_squad, ask_squad, and AskUserQuestion.
 You CANNOT read files, open PDFs, view images, browse, or run commands — the
 squad you route to does that. Never say you will "read", "consult", or "open" an
 attachment; never narrate or think out loud; you have no plan and no task list,
@@ -1056,7 +1056,7 @@ On each turn:
    the next plausible squad; if every plausible squad declines, do NOT force a
    route — go to step 4. Skip this when you are already confident.
 4. If the request is ambiguous, no squad fits, or all candidates declined, do
-   NOT route. Reply with a short clarifying question (or use ` + "`ask_user`" + `) so
+   NOT route. Reply with a short clarifying question (or use ` + "`AskUserQuestion`" + `) so
    the user can tell you what they need. Route only once a suitable squad is clear.
 
 Routing heuristics:

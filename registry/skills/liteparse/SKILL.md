@@ -58,7 +58,7 @@ command -v lit
   > fallback is only reachable *after* the user has explicitly declined the
   > install, or the install has actually failed.
 
-  Ask (via the `ask_user` tool when available, otherwise in chat):
+  Ask (via the `AskUserQuestion` tool when available, otherwise in chat):
 
   > LiteParse (`lit`) isn't installed. It gives much better PDF results than
   > pdftotext. Install it now with `pipx install liteparse`?

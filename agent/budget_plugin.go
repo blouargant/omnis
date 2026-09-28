@@ -32,11 +32,12 @@ import (
 // the user-facing session. On overrun the user, not the model, decides.
 
 // budgetExemptTools are never counted and never blocked. Gating them would be
-// self-defeating: ask_user is how the budget question itself reaches the user,
+// self-defeating: AskUserQuestion is how the budget question itself reaches the user,
 // the routing tools are the squad's only way to hand control back, and the todo
 // tools are bookkeeping the UI renders rather than work the turn is doing.
 var budgetExemptTools = map[string]bool{
-	"ask_user":          true,
+	"AskUserQuestion":   true,
+	"ask_user":          true, // legacy name
 	"route_to_squad":    true,
 	"handoff_to_router": true,
 	"ask_squad":         true,

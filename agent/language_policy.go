@@ -24,7 +24,7 @@ func languagePolicyBlock(delegates bool) string {
 		"choices. Language is sometimes only packaging, and sometimes it carries meaning — " +
 		"keep the two apart:\n\n" +
 		"- **Reply to the user in the language they wrote in.** That applies to every message " +
-		"you address to them, including questions you ask with `ask_user`. This is the only " +
+		"you address to them, including questions you ask with `AskUserQuestion`. This is the only " +
 		"place you translate.\n"
 
 	if delegates {
