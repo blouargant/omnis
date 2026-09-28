@@ -1678,10 +1678,11 @@ async function refreshGoal(sessionId) {
 // (GET /api/sessions/:id/skills) and refreshed on the `skills_changed` event.
 
 // isSkillLoadTool covers the skill tools kept out of the transcript: the loads
-// (listed in the dock) and the list_skills / list_softskills discovery calls
-// (pure bookkeeping — shown nowhere unless they fail).
+// (listed in the dock), the list_skills / list_softskills discovery calls and
+// the load_skill_resource / load_softskill_resource reads (pure bookkeeping —
+// shown nowhere unless they fail).
 function isSkillLoadTool(name) {
-  return /^(load|list)_(skill|softskill)s?$/.test((name || "").toLowerCase());
+  return /^((load|list)_(skill|softskill)s?|load_(skill|softskill)_resource)$/.test((name || "").toLowerCase());
 }
 
 // skillLoadFailed reports a skill-tool call that must still be shown in the
@@ -1689,7 +1690,9 @@ function isSkillLoadTool(name) {
 // load carrying no instructions, or any call returning an error.
 function skillLoadFailed(resp, name) {
   if (!resp || (typeof resp === "object" && resp.error)) return true;
-  if (/^list_/.test((name || "").toLowerCase())) return false;
+  const n = (name || "").toLowerCase();
+  if (/^list_/.test(n)) return false;
+  if (/_resource$/.test(n)) return typeof resp.content !== "string";
   return typeof resp.instructions !== "string" || !resp.instructions.trim();
 }
 
