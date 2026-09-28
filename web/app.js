@@ -4232,14 +4232,46 @@ function appendSpawnResultBlock(text, container) {
 // natural hysteresis (pin at the top line, unpin one header-height lower) so the
 // decision can't flicker around the threshold. withStableScroll counter-scrolls the
 // height it costs, keeping the content stationary as the bubble becomes the header.
+//
+// Fade-out before the hand-over: the header occupies the top of the pane, so once
+// the pinned question's answer is nearly scrolled away the header hides its last
+// lines and then the *next* question as it rises. So when only PIN_FADE_PX of the
+// answer remain between the header's bottom and the next question, the header
+// fades out progressively, and it is hidden outright once the next question
+// reaches that line. The gap is measured against a line that does not move with
+// the header's own visibility (the wrap's top + the space the header takes when
+// shown, remembered per question in bubble._pinSpace), so hiding it — which gives that space
+// back to the transcript, content held still by withStableScroll — cannot make
+// the next tick re-show it: no flicker, and scrolling back up fades it back in.
+const PIN_FADE_PX = 80; // ≈ three lines of an answer
 function updatePinnedForScroll(panel) {
   const t = panel.els.transcript;
   const transcriptRect = t.getBoundingClientRect();
   const userBubbles = t.querySelectorAll(".bubble-user");
   let activeBubble = null;
+  let nextBubble = null;
   for (const bubble of userBubbles) {
     const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.bottom < transcriptRect.top) activeBubble = bubble;
+    if (rowRect.bottom < transcriptRect.top) { activeBubble = bubble; nextBubble = null; }
+    else if (activeBubble && !nextBubble) nextBubble = bubble;
+  }
+  let fade = 1;
+  if (activeBubble !== null && nextBubble !== null) {
+    const ph = panel.els.promptHeader;
+    const wrapTop = ph.parentElement.getBoundingClientRect().top;
+    // Remember the space per question (header heights differ with prompt length),
+    // recorded only while the header is showing *this* question.
+    const label = pinnedPromptLabel(activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "");
+    if (ph.classList.contains("visible") && ph._pinnedLabel === label) {
+      activeBubble._pinSpace = transcriptRect.top - wrapTop;
+    }
+    const nextTop = nextBubble.parentElement.getBoundingClientRect().top;
+    const gap = nextTop - (wrapTop + (activeBubble._pinSpace || 0));
+    if (gap <= 0) {
+      clearPinnedPrompt(panel);
+      return;
+    }
+    fade = Math.min(1, gap / PIN_FADE_PX);
   }
   if (activeBubble !== null) {
     // Pin the question only — steering notes show as chips on the inline bubble.
@@ -4258,6 +4290,7 @@ function updatePinnedForScroll(panel) {
       ? { index: idx, text: activeBubble.dataset.text ?? "" }
       : null;
     setPinnedPrompt(panel, text, files, turn);
+    panel.els.promptHeader.style.opacity = fade < 1 ? fade.toFixed(3) : "";
   } else {
     clearPinnedPrompt(panel);
   }
@@ -4273,6 +4306,7 @@ function clearPinnedPrompt(panel) {
     ph._pinnedLabel = "";
     ph._pinnedTurn = null;
     ph.classList.remove("visible");
+    ph.style.opacity = "";
   });
 }
 
