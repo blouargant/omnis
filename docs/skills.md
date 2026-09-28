@@ -361,8 +361,8 @@ delete decision is auditable:
 
 On interactive surfaces the leader is instructed to load the
 **wrap-session** soft-skill once per session when the user's work is
-complete. The skill asks one closing question ("Anything off, or are
-we good to wrap?") and persists the answer via the
+complete. The skill asks one optional closing question ("did my answer give you what you needed? Tell me what was wrong, missing or could be better — or just \"all good\""),
+shown in the web UI as a small pulsing "?" in the composer, and persists the answer via the
 `record_session_feedback` tool to
 `$OMNIS_HOME/logs/agent_feedback_<key>.json`. Both reflectors treat the
 answer as the dominant verdict signal (positive keywords drive a

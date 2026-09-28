@@ -169,7 +169,8 @@ the trade-off vs. running a dedicated micro-classifier per turn.
 A built-in `wrap-session` soft-skill ships in the default
 `softskills/` library. On interactive surfaces (TUI / Web UI) the
 leader loads it once per session when the user's work is complete; it
-asks "Anything off, or are we good to wrap?" and persists the answer
+asks one optional feedback question ("did my answer give you what you needed? Tell me what was wrong, missing or could be better — or just \"all good\"")
+(shown in the web UI as a small pulsing "?" in the composer) and persists the answer
 via the `record_session_feedback` tool to
 `logs/agent_feedback_<session-suffix>.json`. Both reflectors treat the
 answer as the dominant verdict signal.

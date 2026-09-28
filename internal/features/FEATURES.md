@@ -24,7 +24,7 @@
 - **Shared server with platform login** — one omnis-server can serve several users of a platform that already has a web login: each user is recognised from their session cookie, sees only their own chats, and the agent runs platform CLI commands with their identity.
 - **Compact tool calls** — a run of consecutive tool calls folds into one line ("5 calls · Read ×2 · Bash ×3"); click it to see every call.
 - **Loaded skills bar** — skills and soft-skills an agent loads no longer clutter the conversation: a folded "⚡ N skills" bar above the composer counts them; unfold it to see each one (and read its content). Saved with the session.
-- **Discreet wrap-up question** — the optional "anything off, or are we good to wrap?" check no longer opens a card above the composer: a small "?" pulses in the composer toolbar; click it to answer, or ignore it and it goes away after two minutes.
+- **Discreet wrap-up question** — the optional end-of-session feedback question no longer opens a card above the composer: a small "?" pulses in the composer toolbar; click it to answer, or ignore it and it goes away after two minutes. It now says plainly what it asks (did the answer give you what you needed?) and is asked in your language.
 - **Choose the squad new chats start on** — `start_squad` in `agents.json` (or `OMNIS_START_SQUAD`) makes new chats open on a given squad instead of the Omnis router; it can still hand other requests back to Omnis.
 
 ## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation

@@ -204,8 +204,9 @@ re-runs until new activity occurs.
 
 On interactive surfaces the leader is told to load the built-in
 **wrap-session** soft-skill once per session, which asks one closing
-question ("Anything off, or are we good to wrap?"). The answer is
-persisted via `record_session_feedback` and becomes the dominant
+question ("did my answer give you what you needed? Tell me what was wrong, missing or could be better — or just \"all good\""). The web UI shows it discreetly, as a small pulsing
+"?" in the composer toolbar; click it to answer, or ignore it and it goes
+away after two minutes. The answer is persisted via `record_session_feedback` and becomes the dominant
 verdict signal for both reflectors.
 
 ## Hot reload

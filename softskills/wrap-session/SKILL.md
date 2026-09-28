@@ -22,7 +22,11 @@ NEVER load this skill on:
 
 ## Steps
 
-1. Call `AskUserQuestion` with `kind="text"`, `subtle=true` and the prompt: "Anything off, or are we good to wrap?". Set `timeout_seconds` to 120 (two minutes is plenty; the user may be checking a result). `subtle` makes the web UI show a small pulsing indicator instead of a question card: the question is optional, so it must not get in the user's way.
+1. Call `AskUserQuestion` with `kind="text"`, `subtle=true` and this prompt, **written in the language of the conversation** (translate it faithfully; keep its three parts):
+
+   > Quick feedback before I close this session (optional): did my answer give you what you needed? Tell me in a few words what was wrong, missing or could be better — or just "all good". It helps me learn what works for you.
+
+   The prompt must say what is being asked (a verdict on the answer), what a useful reply looks like, and why it is asked: the user sees it out of context, as a small indicator, and a bare "are we good to wrap?" gives them no idea what to answer. Set `timeout_seconds` to 120 (two minutes is plenty; the user may be checking a result). `subtle` makes the web UI show a small pulsing indicator instead of a question card: the question is optional, so it must not get in the user's way.
 
 2. If the user supplies an answer with at least one non-whitespace character, immediately call `record_session_feedback` with:
    - `question`: the exact question text you asked in step 1.
