@@ -245,12 +245,12 @@ type AgentCallbacks struct {
 // sub-agent) when its execution does not flow through a runner that has the
 // bus's plugin registered.
 func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
-	toolTimers := sync.Map{}  // key = (agent, function-call id), value = time.Time
+	toolTimers := sync.Map{}  // key = scopedToolKey (session, agent, call id), value = time.Time
 	modelTimers := sync.Map{} // key = (agent, callback-context ptr), value = time.Time
 
 	beforeTool := func(tctx adk.ToolContext, t tool.Tool, args map[string]any) (map[string]any, error) {
 		agentName := tctx.AgentName()
-		toolTimers.Store(scopedToolKey(agentName, t, args), time.Now())
+		toolTimers.Store(scopedToolKey(tctx, t, args), time.Now())
 		b.Emit(EventBeforeTool, map[string]any{
 			"agent":           agentName,
 			"tool":            t.Name(),
@@ -266,7 +266,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 	afterTool := func(tctx adk.ToolContext, t tool.Tool, args, result map[string]any, _ error) (map[string]any, error) {
 		agentName := tctx.AgentName()
 		var elapsed time.Duration
-		if v, ok := toolTimers.LoadAndDelete(scopedToolKey(agentName, t, args)); ok {
+		if v, ok := toolTimers.LoadAndDelete(scopedToolKey(tctx, t, args)); ok {
 			elapsed = time.Since(v.(time.Time))
 		}
 		b.Emit(EventAfterTool, map[string]any{
@@ -285,7 +285,7 @@ func (b *Bus) AgentCallbacks(opts PluginOptions) AgentCallbacks {
 	}
 	onToolErr := func(tctx adk.ToolContext, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 		agentName := tctx.AgentName()
-		toolTimers.Delete(scopedToolKey(agentName, t, args))
+		toolTimers.Delete(scopedToolKey(tctx, t, args))
 		b.Emit(EventToolError, map[string]any{
 			"agent":           agentName,
 			"tool":            t.Name(),
@@ -414,10 +414,19 @@ func toolKey(t tool.Tool, args map[string]any) string {
 	return fmt.Sprintf("%s::%v", t.Name(), args)
 }
 
-// scopedToolKey is toolKey() namespaced by agent so concurrent sub-agent
-// invocations of the same tool don't collide on the timer map.
-func scopedToolKey(agentName string, t tool.Tool, args map[string]any) string {
-	return agentName + "||" + toolKey(t, args)
+// scopedToolKey identifies one in-flight tool call on the timer map. The
+// function-call id is unique per call, so it is the key whenever ADK provides
+// one; session + agent are kept as a namespace. Keying on (agent, tool, args)
+// alone made two sessions issuing the same call share one timer: the second
+// call overwrote the first one's start time, so the first to finish reported
+// the other's elapsed time and the second reported 0. Without a call id (a
+// hand-built context) it falls back to the args, as before.
+func scopedToolKey(tctx adk.ToolContext, t tool.Tool, args map[string]any) string {
+	prefix := tctx.SessionID() + "||" + tctx.AgentName() + "||"
+	if id := tctx.FunctionCallID(); id != "" {
+		return prefix + t.Name() + "::" + id
+	}
+	return prefix + toolKey(t, args)
 }
 
 // modelKey identifies an in-flight LLM call. ADK's CallbackContext does not
