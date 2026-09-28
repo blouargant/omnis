@@ -34,7 +34,8 @@ full page reload starts fresh.
 
 ## Loaded skills
 
-Skills and soft-skills an agent loads are **not** shown in the conversation.
+Skills and soft-skills an agent loads are **not** shown in the conversation
+(nor are its skill-listing calls).
 Once the first one is loaded, a small **⚡ N skills** bar appears just above
 the editor. It is folded by default and only shows the count; it pulses briefly
 when a new skill arrives. Click it to unfold the list: each entry shows its type

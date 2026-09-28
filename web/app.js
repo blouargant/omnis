@@ -1677,14 +1677,20 @@ async function refreshGoal(sessionId) {
 // by default to "⚡ N skills". The list is persisted server-side
 // (GET /api/sessions/:id/skills) and refreshed on the `skills_changed` event.
 
+// isSkillLoadTool covers the skill tools kept out of the transcript: the loads
+// (listed in the dock) and the list_skills / list_softskills discovery calls
+// (pure bookkeeping — shown nowhere unless they fail).
 function isSkillLoadTool(name) {
-  return /^load_(skill|softskill)$/.test((name || "").toLowerCase());
+  return /^(load|list)_(skill|softskill)s?$/.test((name || "").toLowerCase());
 }
 
-// skillLoadFailed: a failed load carries no instructions — it is shown in the
-// transcript as a normal (error) tool block so the failure stays visible.
-function skillLoadFailed(resp) {
-  return !resp || typeof resp.instructions !== "string" || !resp.instructions.trim();
+// skillLoadFailed reports a skill-tool call that must still be shown in the
+// transcript as a normal (error) tool block so the failure stays visible: a
+// load carrying no instructions, or any call returning an error.
+function skillLoadFailed(resp, name) {
+  if (!resp || (typeof resp === "object" && resp.error)) return true;
+  if (/^list_/.test((name || "").toLowerCase())) return false;
+  return typeof resp.instructions !== "string" || !resp.instructions.trim();
 }
 
 function renderSkillsDock(panel) {
@@ -9156,7 +9162,7 @@ async function sendMessage(panel) {
           if (skillCalls.has(data.call_id || "")) {
             const sc = skillCalls.get(data.call_id || "");
             skillCalls.delete(data.call_id || "");
-            if (skillLoadFailed(data.response)) {
+            if (skillLoadFailed(data.response, sc.name)) {
               const b = appendToolCall(sc.name, sc.args, container);
               resolveToolCall(b, data.response, data.duration_ms);
               refreshToolGroup(b.closest(".tool-group"));
@@ -9207,7 +9213,7 @@ async function sendMessage(panel) {
           if (skillCalls.has(data.call_id || "")) {
             const sc = skillCalls.get(data.call_id || "");
             skillCalls.delete(data.call_id || "");
-            if (skillLoadFailed(data.response) && activeOuterBlock) {
+            if (skillLoadFailed(data.response, sc.name) && activeOuterBlock) {
               resolveToolCall(appendNestedToolCall(activeOuterBlock, sc.name, sc.args), data.response, data.duration_ms);
             }
             break;

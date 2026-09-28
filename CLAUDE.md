@@ -6481,7 +6481,9 @@ calls) and both maps are cleared on session delete.
 
 ### Web UI loaded-skills bar (composer dock)
 
-`load_skill` / `load_softskill` calls are **not** rendered in the transcript.
+`load_skill` / `load_softskill` calls are **not** rendered in the transcript,
+nor are the `list_skills` / `list_softskills` discovery calls (shown nowhere
+unless they fail; they add nothing to the dock).
 They are listed in a per-pane **skills dock** above the composer (`.skills-dock`
 in the pane template, [web/index.html](web/index.html)), folded by default to
 `⚡ N skills`; the head toggles the list (`panel._skillsOpen`, in memory, so a
