@@ -911,5 +911,10 @@
   "search.agentDone": "Done.",
   "search.agentNone": "The search agent found no past session about this.",
   "search.agentStopped": "Search stopped",
-  "search.agentFailed": "The search agent could not complete the search"
+  "search.agentFailed": "The search agent could not complete the search",
+  "skillsDock.tip": "Skills loaded in this session",
+  "skillsDock.count.one": "{count} skill",
+  "skillsDock.count.other": "{count} skills",
+  "skillsDock.skill": "skill",
+  "skillsDock.softskill": "soft-skill"
 }

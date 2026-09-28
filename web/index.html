@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=21" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=22" />
   <link rel="stylesheet" href="assets/css/settings.css?v=15" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -316,6 +316,14 @@
           <span class="goal-chip-text"></span>
           <span class="goal-chip-clear" aria-hidden="true">✕</span>
         </button>
+        <div class="skills-dock" hidden>
+          <button type="button" class="skills-dock-head" aria-expanded="false" data-tip="Skills loaded in this session" data-i18n-tip="skillsDock.tip">
+            <span class="skills-dock-icon" aria-hidden="true">⚡</span>
+            <span class="skills-dock-count"></span>
+            <span class="skills-dock-chevron" aria-hidden="true">▸</span>
+          </button>
+          <ul class="skills-dock-list" hidden></ul>
+        </div>
         <form id="composer">
           <input type="file" id="file-input" multiple hidden />
           <div id="attachments" hidden></div>
@@ -474,9 +482,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=68" defer></script>
+  <script src="assets/i18n/locales.js?v=69" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=100" defer></script>
+  <script src="assets/app.js?v=101" defer></script>
   <script src="assets/settings.js?v=63" defer></script>
 </body>
 </html>

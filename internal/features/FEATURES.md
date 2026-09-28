@@ -22,7 +22,8 @@
 - **Questions survive a restart** — a question an agent asked you is kept across a server restart or crash; answering it afterwards resumes the task.
 - **Reply suggestions** — after each answer the composer shows a suggested next message; press Tab to use it (never sent automatically). Toggle in Settings → Appearance.
 - **Shared server with platform login** — one omnis-server can serve several users of a platform that already has a web login: each user is recognised from their session cookie, sees only their own chats, and the agent runs platform CLI commands with their identity.
-- **Compact tool calls** — a run of consecutive tool calls folds into one line ("5 calls · Skill ×2 · Bash ×3"); click it to see every call.
+- **Compact tool calls** — a run of consecutive tool calls folds into one line ("5 calls · Read ×2 · Bash ×3"); click it to see every call.
+- **Loaded skills bar** — skills and soft-skills an agent loads no longer clutter the conversation: a folded "⚡ N skills" bar above the composer counts them; unfold it to see each one (and read its content). Saved with the session.
 - **Choose the squad new chats start on** — `start_squad` in `agents.json` (or `OMNIS_START_SQUAD`) makes new chats open on a given squad instead of the Omnis router; it can still hand other requests back to Omnis.
 
 ## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation

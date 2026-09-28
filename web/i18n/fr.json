@@ -911,5 +911,10 @@
   "search.agentDone": "Terminé.",
   "search.agentNone": "L'agent de recherche n'a trouvé aucune session passée à ce sujet.",
   "search.agentStopped": "Recherche arrêtée",
-  "search.agentFailed": "L'agent de recherche n'a pas pu terminer la recherche"
+  "search.agentFailed": "L'agent de recherche n'a pas pu terminer la recherche",
+  "skillsDock.tip": "Skills chargées dans cette session",
+  "skillsDock.count.one": "{count} skill",
+  "skillsDock.count.other": "{count} skills",
+  "skillsDock.skill": "skill",
+  "skillsDock.softskill": "soft-skill"
 }

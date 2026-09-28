@@ -6479,6 +6479,44 @@ click-toggle, and its `done/total` progress count stays visible while
 collapsed. State is live-only (history replay renders text turns, not tool
 calls) and both maps are cleared on session delete.
 
+### Web UI loaded-skills bar (composer dock)
+
+`load_skill` / `load_softskill` calls are **not** rendered in the transcript.
+They are listed in a per-pane **skills dock** above the composer (`.skills-dock`
+in the pane template, [web/index.html](web/index.html)), folded by default to
+`⚡ N skills`; the head toggles the list (`panel._skillsOpen`, in memory, so a
+fresh pane starts folded), a row toggles that skill's SKILL.md body rendered
+as markdown, and the head pulses when the count grows.
+
+- **Persisted server-side** as `ConversationFile.Skills`
+  ([internal/sessions/loaded_skills.go](internal/sessions/loaded_skills.go)
+  `LoadedSkill` / `RecordLoadedSkill`): deduped by (kind, name, agent) with a
+  `count`, SKILL.md body capped at 64 KB, `turn` = the number of turns already
+  persisted when first loaded. `TruncateConversationTurns` (rewind) and
+  `ForkConversation` keep only the entries with `turn < keep`; import copies
+  them.
+- **Recording** = [server/loaded_skills.go](server/loaded_skills.go)
+  `recordSkillLoad`, called on every tool result in `streamEvents` (root
+  `tool_result` and sub-agent `agent_tool_result`) and in `injectTurnRouted`
+  (root events only: injected turns have no sub-agent bus). Only a
+  **successful** load (a response with `instructions`) is recorded; it then
+  fires `skillsChangedHook` → a `skills_changed` event on `/api/events`
+  (session-scoped, so owner-filtered in cookie mode). Route
+  `GET /api/sessions/:id/skills` → `{skills}`.
+- **Client** ([web/app.js](web/app.js) "Composer skills dock"):
+  `sessionSkills` (sid → list), `refreshSkills` (on `mountInPanel`, on
+  `skills_changed`, on `session_rewound`), `renderSkillsDock` (also called from
+  `applySessionUI`). The stream handler holds skill-load calls in `skillCalls`
+  instead of creating blocks; a **failed** load (no `instructions`) is then
+  rendered as a normal error tool block, so a failure stays visible.
+- **GOTCHA — anything clickable above the editor must opt back into pointer
+  events.** `#composer-wrap` floats over the transcript with
+  `pointer-events: none` and a `::before` fade (z 0); a child control needs
+  `pointer-events: auto` + `position: relative; z-index: 1` or clicks fall
+  through to `#transcript` and the control looks washed out. The goal chip had
+  shipped without it (unclickable); both are now in that rule in
+  [web/css/features/composer.css](web/css/features/composer.css).
+
 ### Web UI ask-user wizard
 
 `ask_user` questions for a session render as a **single multi-step wizard

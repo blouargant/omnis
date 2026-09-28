@@ -911,5 +911,10 @@
   "search.agentDone": "Listo.",
   "search.agentNone": "El agente de búsqueda no encontró ninguna sesión anterior sobre esto.",
   "search.agentStopped": "Búsqueda detenida",
-  "search.agentFailed": "El agente de búsqueda no pudo completar la búsqueda"
+  "search.agentFailed": "El agente de búsqueda no pudo completar la búsqueda",
+  "skillsDock.tip": "Skills cargadas en esta sesión",
+  "skillsDock.count.one": "{count} skill",
+  "skillsDock.count.other": "{count} skills",
+  "skillsDock.skill": "skill",
+  "skillsDock.softskill": "soft-skill"
 }

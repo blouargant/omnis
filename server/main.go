@@ -388,6 +388,7 @@ func run() error {
 
 	runGuard := newSessionRunGuard()
 	pushEvents := newSessionPushBroadcaster()
+	skillsChangedHook = func(sid string) { pushEvents.broadcast("skills_changed", sid) }
 	pushEvents.ownerOf = func(sid string) string {
 		if m, ok := registry.Snapshot(sid); ok {
 			return m.UserID

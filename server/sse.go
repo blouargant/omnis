@@ -986,6 +986,7 @@ func streamEvents(
 				"call_id":     callID,
 			})
 			emitFileChanged(callID, resp)
+			recordSkillLoad(ownSession, agentName, toolName, resp)
 		case events.EventToolError:
 			errMsg, _ := p["error"].(string)
 			callID, _ := p["call_id"].(string)
@@ -1155,6 +1156,7 @@ func streamEvents(
 						}
 						emit("tool_result", result)
 						emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
+						recordSkillLoad(ownSession, rootAgent, p.FunctionResponse.Name, p.FunctionResponse.Response)
 					}
 					sawPartialText = false
 				}

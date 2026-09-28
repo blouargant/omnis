@@ -335,6 +335,7 @@ function mountInPanel(panel, sessionId) {
   // Pull the session's /goal state so the chip reflects an active goal (e.g.
   // after a restart, or when first opening the session in this browser).
   if (sessionId && !sessionGoals.has(sessionId)) refreshGoal(sessionId);
+  if (sessionId && !sessionSkills.has(sessionId)) refreshSkills(sessionId);
 }
 
 function setFocusedPanel(pid) {
@@ -1034,6 +1035,15 @@ function attachPaneHandlers(panel) {
   });
   renderGoalChip(panel);
 
+  // Skills dock — folded by default; the head toggles the list.
+  const skillsHead = panel.root.querySelector(".skills-dock-head");
+  if (skillsHead) skillsHead.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel._skillsOpen = !panel._skillsOpen;
+    renderSkillsDock(panel);
+  });
+  renderSkillsDock(panel);
+
   // Small-screen drawer trigger (hidden on desktop by responsive.css).
   if (pe.menuBtn) pe.menuBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleNav(); });
 
@@ -1500,6 +1510,7 @@ const sessionTurnCounts  = new Map(); // sessionId → number of turns rendered
 const sessionTodos       = new Map(); // sessionId → [{ task, status }] live plan view
 const sessionTodoBlock   = new Map(); // sessionId → latest .todo-block (older ones auto-collapse)
 const sessionGoals       = new Map(); // sessionId → goal status {active,achieved,condition,turns,...} for the chip
+const sessionSkills      = new Map(); // sessionId → loaded skills [{name,kind,agent,description,instructions,count,...}] for the composer skills dock
 
 // ─── Per-session file attachments ────────────────────────────────────────────
 // Pending uploads are stored per session so switching sessions preserves them.
@@ -1622,6 +1633,7 @@ function applySessionUI(id) {
     setCtxRingSpinning(p, busy);
     renderCtxRing(p);
     renderGoalChip(p);
+    renderSkillsDock(p);
   }
   // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
   // including background tabs whose session is streaming.
@@ -1657,6 +1669,100 @@ async function refreshGoal(sessionId) {
     sessionGoals.set(sessionId, await res.json());
   } catch (_) { return; }
   for (const p of panelsForSession(sessionId)) renderGoalChip(p);
+}
+
+// ─── Composer skills dock ────────────────────────────────────────────────────
+// Skill / soft-skill loads (load_skill, load_softskill) are not rendered in the
+// transcript: they are listed in a collapsible dock above the composer, folded
+// by default to "⚡ N skills". The list is persisted server-side
+// (GET /api/sessions/:id/skills) and refreshed on the `skills_changed` event.
+
+function isSkillLoadTool(name) {
+  return /^load_(skill|softskill)$/.test((name || "").toLowerCase());
+}
+
+// skillLoadFailed: a failed load carries no instructions — it is shown in the
+// transcript as a normal (error) tool block so the failure stays visible.
+function skillLoadFailed(resp) {
+  return !resp || typeof resp.instructions !== "string" || !resp.instructions.trim();
+}
+
+function renderSkillsDock(panel) {
+  if (!panel || !panel.root) return;
+  const dock = panel.root.querySelector(".skills-dock");
+  if (!dock) return;
+  const sid = panel.sessionId;
+  const skills = sid ? (sessionSkills.get(sid) || []) : [];
+  if (!skills.length) { dock.hidden = true; panel._skillsCount = 0; return; }
+  dock.hidden = false;
+  const open = !!panel._skillsOpen;
+  const head = dock.querySelector(".skills-dock-head");
+  head.setAttribute("aria-expanded", open ? "true" : "false");
+  dock.classList.toggle("is-open", open);
+  dock.querySelector(".skills-dock-count").textContent = trN("skillsDock.count", skills.length);
+  // Pulse when a new skill arrives for the session this pane already shows.
+  if (panel._skillsSid === sid && skills.length > (panel._skillsCount || 0)) {
+    head.classList.remove("pulse");
+    void head.offsetWidth; // restart the animation
+    head.classList.add("pulse");
+  }
+  panel._skillsSid = sid;
+  panel._skillsCount = skills.length;
+
+  const list = dock.querySelector(".skills-dock-list");
+  list.hidden = !open;
+  if (!open) return;
+  if (!panel._skillsExpanded) panel._skillsExpanded = new Set();
+  list.innerHTML = "";
+  for (const s of skills) {
+    const key = `${s.kind}:${s.name}:${s.agent || ""}`;
+    const li = document.createElement("li");
+    li.className = "skills-dock-item";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "skills-dock-row";
+    const kindLabel = s.kind === "softskill" ? tr("skillsDock.softskill") : tr("skillsDock.skill");
+    row.innerHTML = `<span class="skills-dock-kind kind-${escHtml(s.kind || "skill")}">${escHtml(kindLabel)}</span>
+      <span class="skills-dock-name">${escHtml(s.name)}</span>
+      ${s.count > 1 ? `<span class="skills-dock-times">×${s.count}</span>` : ""}
+      <span class="skills-dock-agent">${escHtml(s.agent || "")}</span>`;
+    if (s.description) row.setAttribute("data-tip", s.description);
+    li.appendChild(row);
+    if (s.dependency_status) {
+      const note = document.createElement("div");
+      note.className = "skills-dock-note";
+      note.textContent = s.dependency_status;
+      li.appendChild(note);
+    }
+    if (panel._skillsExpanded.has(key) && s.instructions) {
+      const md = document.createElement("div");
+      md.className = "skills-dock-body tool-md";
+      if (typeof marked !== "undefined" && typeof marked.parse === "function") md.innerHTML = marked.parse(s.instructions);
+      else md.textContent = s.instructions;
+      li.appendChild(md);
+      li.classList.add("expanded");
+    }
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (panel._skillsExpanded.has(key)) panel._skillsExpanded.delete(key);
+      else panel._skillsExpanded.add(key);
+      renderSkillsDock(panel);
+    });
+    list.appendChild(li);
+  }
+}
+
+// refreshSkills fetches the session's loaded skills and repaints the dock in
+// every pane showing it.
+async function refreshSkills(sessionId) {
+  if (!sessionId) return;
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}/skills`);
+    if (!res.ok) return;
+    const body = await res.json();
+    sessionSkills.set(sessionId, Array.isArray(body.skills) ? body.skills : []);
+  } catch (_) { return; }
+  for (const p of panelsForSession(sessionId)) renderSkillsDock(p);
 }
 
 // setSendButtonMode flips a pane's send button between its normal "Send" state
@@ -7333,6 +7439,7 @@ function forgetSession(id) {
   sessionTodos.delete(id);
   sessionTodoBlock.delete(id);
   sessionGoals.delete(id);
+  sessionSkills.delete(id);
   sessionNotifiedAt.delete(id);
   remoteBusy.delete(id);
   remoteBusyBubble.delete(id);
@@ -8084,6 +8191,9 @@ async function subscribeGlobalEvents() {
           // The self-update poller found a newer stable release — refresh the
           // sidebar button without waiting for a page reload.
           checkForUpdate();
+        } else if (event === "skills_changed" && sid) {
+          // A skill / soft-skill was loaded in this session — refresh its dock.
+          if (panelsWithTab(sid).length > 0 || sessionSkills.has(sid)) refreshSkills(sid);
         } else if ((event === "goal_set" || event === "goal_cleared") && sid) {
           // A /goal was set or cleared (here or in another browser) — resync the
           // per-pane chip from the server.
@@ -8119,6 +8229,7 @@ async function subscribeGlobalEvents() {
           loadSessions();
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
+          refreshSkills(sid);
           fetchSuggestion(sid);
           // The session was rewound (here or in another browser) — rebuild the
           // truncated transcript from history. Idempotent on the originator,
@@ -8921,6 +9032,10 @@ async function sendMessage(panel) {
   // appended inside it, plus a list for the nested blocks themselves.
   let activeOuterBlock = null;
   const innerPending = [];
+  // Skill loads are listed in the composer skills dock, not the transcript.
+  // Their calls are held here so a FAILED load can still be shown as a tool
+  // block when its result arrives. call_id → { name, args }.
+  const skillCalls = new Map();
 
   const takePending = (queue, callID) => {
     if (callID) {
@@ -9011,6 +9126,12 @@ async function sendMessage(panel) {
             setSessionStatus(sessionId, "thinking…");
             break;
           }
+          if (isSkillLoadTool(data.name)) {
+            skillCalls.set(data.call_id || "", { name: data.name, args: data.args });
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, `running ${data.name}…`);
+            break;
+          }
           // The todo_* tools render as a live, always-expanded checklist
           // instead of an opaque collapsed block. Their tool_result carries
           // no extra signal, so we don't track them in pendingTools.
@@ -9032,6 +9153,18 @@ async function sendMessage(panel) {
         }
 
         case "tool_result": {
+          if (skillCalls.has(data.call_id || "")) {
+            const sc = skillCalls.get(data.call_id || "");
+            skillCalls.delete(data.call_id || "");
+            if (skillLoadFailed(data.response)) {
+              const b = appendToolCall(sc.name, sc.args, container);
+              resolveToolCall(b, data.response, data.duration_ms);
+              refreshToolGroup(b.closest(".tool-group"));
+            }
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, "thinking…");
+            break;
+          }
           const block = takePending(pendingTools, data.call_id);
           if (block) {
             const group = block.closest(".tool-group");
@@ -9059,6 +9192,10 @@ async function sendMessage(panel) {
         }
 
         case "agent_tool_call": {
+          if (isSkillLoadTool(data.name)) {
+            skillCalls.set(data.call_id || "", { name: data.name, args: data.args });
+            break;
+          }
           if (activeOuterBlock) {
             const inner = appendNestedToolCall(activeOuterBlock, data.name, data.args);
             innerPending.push({ id: data.call_id || "", block: inner });
@@ -9067,12 +9204,26 @@ async function sendMessage(panel) {
         }
 
         case "agent_tool_result": {
+          if (skillCalls.has(data.call_id || "")) {
+            const sc = skillCalls.get(data.call_id || "");
+            skillCalls.delete(data.call_id || "");
+            if (skillLoadFailed(data.response) && activeOuterBlock) {
+              resolveToolCall(appendNestedToolCall(activeOuterBlock, sc.name, sc.args), data.response, data.duration_ms);
+            }
+            break;
+          }
           const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, data.response, data.duration_ms);
           break;
         }
 
         case "agent_tool_error": {
+          if (skillCalls.has(data.call_id || "")) {
+            const sc = skillCalls.get(data.call_id || "");
+            skillCalls.delete(data.call_id || "");
+            if (activeOuterBlock) resolveToolCall(appendNestedToolCall(activeOuterBlock, sc.name, sc.args), { error: data.error });
+            break;
+          }
           const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, { error: data.error });
           break;

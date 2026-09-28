@@ -45,6 +45,9 @@ them through two tools:
 The leader is instructed to call `list_skills` before tackling any unfamiliar
 task, then `load_skill` for the best match.
 
+In the web UI, loaded skills are listed in the **⚡ N skills** bar above the
+composer rather than in the conversation (see *The Composer → Loaded skills*).
+
 ## Managing skills from the Web UI
 
 The **Skills** section behaves like a small marketplace:

@@ -148,8 +148,11 @@ type ConversationFile struct {
 	Collection string `json:"collection,omitempty"`
 	// PendingQuestions are durable AskUserQuestion prompts still waiting for an
 	// answer (see pending_questions.go). Never exported, forked or imported.
-	PendingQuestions []PendingQuestion  `json:"pending_questions,omitempty"`
-	Turns            []ConversationTurn `json:"turns"`
+	PendingQuestions []PendingQuestion `json:"pending_questions,omitempty"`
+	// Skills are the skills / soft-skills loaded during the session (see
+	// loaded_skills.go), shown in the web UI's composer skills area.
+	Skills []LoadedSkill      `json:"skills,omitempty"`
+	Turns  []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -360,6 +363,7 @@ func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, 
 			keep = len(f.Turns)
 		}
 		f.Turns = f.Turns[:keep]
+		f.Skills = skillsBefore(f.Skills, keep)
 		f.Harvested = false
 		// Copy out so the caller never aliases the slice we just wrote.
 		kept = append([]ConversationTurn(nil), f.Turns...)
@@ -391,6 +395,7 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 		Title:      title,
 		Squad:      src.Squad,
 		Collection: src.Collection, // fork stays in the source's collection
+		Skills:     skillsBefore(src.Skills, keep),
 		Turns:      kept,
 	}
 	if err := SaveConversationFile(dstID, dst); err != nil {

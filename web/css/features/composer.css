@@ -39,7 +39,19 @@
    click-through onto the transcript behind it. */
 #composer,
 #composer-resize,
-#slash-menu { pointer-events: auto; }
+#slash-menu,
+.goal-chip,
+.skills-dock { pointer-events: auto; }
+/* The chips above the editor must sit over the wrap's fade (::before, z 0)
+   and match the centred prompt card (#composer: max-width 700px). */
+.goal-chip,
+.skills-dock {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  max-width: 700px;
+  box-sizing: border-box;
+}
 
 /* The shadow/fade that masks transcript text passing behind the floating
    composer: a transparent→bg gradient rising from the editor card up into the
@@ -470,6 +482,86 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 .goal-chip-clear { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
 .goal-chip:hover .goal-chip-clear { color: var(--danger-fg); }
+
+/* Skills dock — skills / soft-skills loaded in the session, listed above the
+   composer instead of in the transcript. Folded by default to "⚡ N skills";
+   the head toggles the list, a row toggles that skill's SKILL.md body. */
+.skills-dock {
+  width: 100%;
+  margin: 0 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised, var(--bg));
+  font-size: 12px;
+}
+.skills-dock[hidden] { display: none; }
+.skills-dock-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.skills-dock-head:hover { color: var(--text); }
+.skills-dock-icon { color: var(--accent); }
+.skills-dock-chevron { font-size: 10px; transition: transform 0.15s ease; }
+.skills-dock.is-open .skills-dock-chevron { transform: rotate(90deg); }
+.skills-dock-head.pulse { animation: skills-dock-pulse 1.2s ease-out; }
+@keyframes skills-dock-pulse {
+  0%   { background: var(--accent-bg-soft); color: var(--text); }
+  100% { background: transparent; }
+}
+.skills-dock-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 6px 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.skills-dock-list[hidden] { display: none; }
+.skills-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 4px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.skills-dock-row:hover { background: var(--bg-hover, var(--accent-bg-soft)); }
+.skills-dock-kind {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--accent-bg-soft);
+  color: var(--accent);
+}
+.skills-dock-kind.kind-softskill { background: transparent; border: 1px solid var(--accent-border-soft); }
+.skills-dock-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skills-dock-times { color: var(--text-muted); font-size: 11px; }
+.skills-dock-agent { margin-left: auto; color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+.skills-dock-note { margin: 0 4px 2px 12px; color: var(--warn-fg, var(--text)); font-size: 11px; }
+.skills-dock-body {
+  margin: 2px 4px 6px 12px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent-border-soft);
+  max-height: 30vh;
+  overflow-y: auto;
+}
 
 
 /* ─── Slash command menu ────────────────────────────────────── */

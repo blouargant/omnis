@@ -678,6 +678,9 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 				if p == nil {
 					continue
 				}
+				if p.FunctionResponse != nil {
+					recordSkillLoad(sessionID, rootAgent, p.FunctionResponse.Name, p.FunctionResponse.Response)
+				}
 				// A mailbox send by the answering squad disarms the backstop.
 				if p.FunctionCall != nil {
 					if o.ReplyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
