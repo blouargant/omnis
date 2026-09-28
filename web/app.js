@@ -1684,6 +1684,12 @@ const subtleAsks = new Map();
 // The single open popover: { el, sessionId, questionId, anchor }.
 let subtleAskPop = null;
 
+// isSubtleAskCall matches the AskUserQuestion tool call behind a subtle question.
+function isSubtleAskCall(name, args) {
+  if (name !== "AskUserQuestion" || !args) return false;
+  return args.subtle === true || args.subtle === "true";
+}
+
 function showSubtleAsk(sessionId, q) {
   subtleAsks.set(sessionId, q);
   for (const p of panelsForSession(sessionId)) renderSubtleAsk(p);
@@ -9261,6 +9267,14 @@ async function sendMessage(panel) {
           if (isRoutingTool(data.name)) {
             activeOuterBlock = null;
             setSessionStatus(sessionId, "thinking…");
+            break;
+          }
+          // An optional (subtle) question is shown only as the composer "?"
+          // disc: no tool block, and no "running AskUserQuestion…" status while
+          // it waits. Its tool_result has no pending block, so it's a no-op.
+          if (isSubtleAskCall(data.name, data.args)) {
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, "");
             break;
           }
           if (isSkillLoadTool(data.name)) {

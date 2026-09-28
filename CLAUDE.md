@@ -6595,7 +6595,9 @@ it to `showSubtleAsk`, which shows a slowly pulsing **"?" disc**
 showing the session (`subtleAsks` sid → question, repainted by
 `applySessionUI`). Clicking it opens a body-appended popover (`.subtle-ask-pop`,
 styled in [web/css/features/composer.css](web/css/features/composer.css)) with a
-one-line answer + Send/Skip; an empty Send is a skip. The disc goes away on an
+one-line answer + Send/Skip; an empty Send is a skip. The streamed `tool_call` for that question is
+swallowed too (`isSubtleAskCall`): no `AskUserQuestion` tool block and no
+"running AskUserQuestion…" status (cleared to empty) while it waits. The disc goes away on an
 answer, a skip, or any `ask_user_cancel` (timeout, Stop, archive —
 `cancelAskUserWidget` checks `clearSubtleAskByQuestion` first). The skill sets
 `timeout_seconds: 120`; it used to write `timeout_secs`, a name the tool does not
