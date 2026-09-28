@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 
 	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/softskills"
 )
 
 // Instance is one fully-wired agent generation. It owns the set of
@@ -126,6 +128,17 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 	// The bash timeout is a process-global; reapply on each build so a config
 	// reload picks up changes.
 	fstools.SetBashDefaultTimeout(time.Duration(runtime.BashTimeoutSeconds) * time.Second)
+
+	// Seed the packaged built-in soft-skills (wrap-session, …) into the
+	// soft-skill directory the leaders read. Instructions tell leaders to
+	// `load_softskill wrap-session`, so a missing copy is an error surfaced
+	// to the user. Idempotent and cheap; re-run per generation so a changed
+	// softskills_dir is seeded too.
+	if runtime.SoftSkillsDir != "" {
+		if err := softskills.SeedBuiltins(softskills.BuiltinDir(), runtime.SoftSkillsDir); err != nil {
+			log.Printf("softskills: seeding built-ins: %v", err)
+		}
+	}
 
 	if _, ok := runtime.LeaderConfig(); !ok {
 		return nil, fmt.Errorf("runtime config: missing mandatory leader agent")

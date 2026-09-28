@@ -171,6 +171,12 @@ via the `record_session_feedback` tool to
 `logs/agent_feedback_<session-suffix>.json`. Both reflectors treat the
 answer as the dominant verdict signal.
 
-Delete `softskills/wrap-session/` (or the directory under
-`$OMNIS_HOME/softskills/wrap-session/` if you forked it) to disable the
-wrap-up question globally.
+The built-in soft-skills are installed with omnis under the system
+config directory (`/etc/omnis/softskills/` on Linux packages) and copied
+into your `$OMNIS_HOME/softskills/` the first time omnis starts. Your
+copy is never overwritten: if you edit it, it stays edited; if you leave
+it untouched, a package update refreshes it.
+
+Delete `$OMNIS_HOME/softskills/wrap-session/` to disable the wrap-up
+question. Omnis remembers it seeded that soft-skill and will not put it
+back.

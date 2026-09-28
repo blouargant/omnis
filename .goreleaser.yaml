@@ -94,6 +94,10 @@ archives:
         dst: registry/skills
       - src: registry/agents
         dst: registry/agents
+      # Built-in soft-skills (wrap-session, …), seeded into each user's
+      # $OMNIS_HOME/softskills at startup (softskills.SeedBuiltins).
+      - src: softskills
+        dst: softskills
       - src: web
         dst: web
 
@@ -213,6 +217,12 @@ nfpms:
       - src: registry/skills
         dst:  /etc/omnis/registry/skills
         type: tree
+      # Built-in soft-skills (wrap-session, …). Read-only here; omnis seeds
+      # them into each user's $OMNIS_HOME/softskills at startup, where
+      # load_softskill reads them (softskills.SeedBuiltins).
+      - src: softskills
+        dst: /etc/omnis/softskills
+        type: tree
       - src: web
         dst: /usr/share/omnis/web
         type: tree
@@ -292,6 +302,7 @@ brews:
       # live in ~/.omnis (higher precedence) so upgrades never clobber them.
       pkgshare.install "web"
       pkgshare.install "registry"
+      pkgshare.install "softskills"
       pkgshare.install Dir["config/*.json"]
       pkgshare.install "config/server.yaml"
       # The k8s-validate hook is executable code, not JSON, so it needs its

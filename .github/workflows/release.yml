@@ -242,6 +242,7 @@ jobs:
           # though the declaration above does not.
           Copy-Item "$ex\config\hooks" "$stage\data\hooks" -Recurse
           Copy-Item "$ex\registry" "$stage\data\registry" -Recurse
+          Copy-Item "$ex\softskills" "$stage\data\softskills" -Recurse
           "STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX

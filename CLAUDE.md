@@ -2206,7 +2206,28 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
-| `softskills/` | Curator-distilled procedures from past sessions |
+| `softskills/` | Curator-distilled procedures from past sessions. The repo's top-level `softskills/` holds the **built-in** ones (`wrap-session`, `how-the-library-works`, `INDEX.md`) — see "Built-in soft-skills" below |
+
+**Built-in soft-skills (seeded, not read in place).** `load_softskill` reads
+only the per-user `$OMNIS_HOME/softskills` (`paths.SoftSkillsDir`) — there is no
+layered search chain for soft-skills, because the curator writes there. The
+repo's top-level `softskills/` is therefore **shipped into the system config
+layer** on every channel (nfpms `/etc/omnis/softskills`, the goreleaser archive
+→ Homebrew `pkgshare` + the MSI `data\softskills`, the pip wheel `sysconf/`) and
+**copied into the user dir** by `softskills.SeedBuiltins(softskills.BuiltinDir(),
+runtime.SoftSkillsDir)`, called at the top of `BuildInstance`
+([agent/instance.go](agent/instance.go), per generation — cheap and idempotent).
+Rules ([internal/softskills/seed.go](internal/softskills/seed.go)), driven by a
+`.builtin_seeded.json` hash marker in the destination: never seeded → copy;
+seeded then deleted → stays deleted (the documented way to disable
+`wrap-session`); present and never seeded (a user's own copy) or edited since
+seeding → never overwritten; untouched seeded copy whose shipped version changed
+→ refreshed. **GOTCHA:** before this existed nothing shipped or seeded the tree
+(nfpms only created an empty, unused `/var/lib/omnis/softskills`), so every
+leader's `load_softskill wrap-session` failed with `load frontmatter for skill
+"wrap-session": skill not found` on every install. The packaging side is pinned
+by [packaging/softskills_assets_test.go](packaging/softskills_assets_test.go),
+the build side by [agent/softskills_seed_test.go](agent/softskills_seed_test.go).
 
 **Removed: `token_optimization` / `bash_output_filters_dir` / `filters/`.** The
 Bash output filters (a snip-format port that rewrote/condensed `Bash` output)
@@ -2499,9 +2520,15 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   ├── _stats.json   # per-skill load/helpful/harmful/neutral counters
   │   │                 #   sidecar; keyed by <agent>/<name> or bare <name>
   │   │                 #   for leader. Maintained by agent/load_recorder.go.
+  │   ├── .builtin_seeded.json  # hash of each built-in soft-skill last
+  │   │                 #   seeded here (softskills.SeedBuiltins) — tells
+  │   │                 #   "never seeded" / "deleted by the user" / "untouched,
+  │   │                 #   refresh on package update" apart.
   │   └── wrap-session/ # built-in soft-skill (deletable) that asks one
   │                     #   wrap-up question on interactive surfaces and
   │                     #   persists the answer via record_session_feedback.
+  │                     #   SEEDED from <system-config-dir>/softskills (see
+  │                     #   "Built-in soft-skills" under Configuration files).
   ├── logs/
   │   └── agent_feedback_<key>.json  # Phase 5 wrap-session sidecar; one
   │                                  #   record per session: {question,

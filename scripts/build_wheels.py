@@ -157,6 +157,11 @@ def stage_assets(goos):
             os.path.join(REPO_ROOT, "registry", kind),
             os.path.join(sysconf, "registry", kind),
         )
+    # Built-in soft-skills, seeded into ~/.omnis/softskills by omnis itself.
+    shutil.copytree(
+        os.path.join(REPO_ROOT, "softskills"),
+        os.path.join(sysconf, "softskills"),
+    )
     shutil.copytree(os.path.join(REPO_ROOT, "web"), os.path.join(DIST_STAGE, "web"))
 
 
