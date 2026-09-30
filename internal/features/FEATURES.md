@@ -17,7 +17,7 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
-## 1.10 (in development) — Durable agent questions
+## 2.0 — Durable agent questions
 
 - **Questions survive a restart** — a question an agent asked you is kept across a server restart or crash; answering it afterwards resumes the task.
 - **Reply suggestions** — after each answer the composer shows a suggested next message; press Tab to use it (never sent automatically). Toggle in Settings → Appearance.
@@ -27,7 +27,7 @@
 - **Discreet wrap-up question** — the optional end-of-session feedback question no longer opens a card above the composer: a small "?" pulses in the composer toolbar; click it to answer, or ignore it and it goes away after two minutes. It now says plainly what it asks (did the answer give you what you needed?) and is asked in your language.
 - **Choose the squad new chats start on** — `start_squad` in `agents.json` (or `OMNIS_START_SQUAD`) makes new chats open on a given squad instead of the Omnis router; it can still hand other requests back to Omnis.
 
-## 1.9 (in development) — Collection memory management, a Linux admin agent & Kubernetes change validation
+## 1.9 — Collection memory management, a Linux admin agent & Kubernetes change validation
 
 - **Collection memory size** — choose a Small / Medium / Large memory budget per collection; a live word counter shows how close you are.
 - **Automatic memory updates** — opt a collection into keeping its memory current from recent chats, with one-click revert.
