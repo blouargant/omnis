@@ -3,8 +3,8 @@
 // `skills/` directory of authored procedures).
 //
 // Layout: `<dir>/<name>/SKILL.md`. The directory is flat (same shape as
-// `skills/`); the YAML frontmatter accepts only `name` and `description`
-// (the upstream skill loader rejects unknown fields). Human grouping
+// `skills/`); the YAML frontmatter accepts only the upstream skill fields
+// (`name`, `description`, `metadata`, … — the loader rejects unknown ones). Human grouping
 // lives exclusively in `softskills/INDEX.md`. The lead model
 // discovers softskills through `list_softskills` / `load_softskill` and
 // treats them as lower-trust hints distilled from past sessions.

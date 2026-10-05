@@ -47,9 +47,25 @@ func loadedSkillFromResponse(agent, tool string, resp map[string]any) (sessions.
 			s.Name, _ = fm["name"].(string)
 		}
 		s.Description, _ = fm["description"].(string)
+		if isSystemSkill(fm) {
+			return sessions.LoadedSkill{}, false
+		}
 	}
 	s.DependencyStatus, _ = resp["dependency_status"].(string)
 	return s, s.Name != ""
+}
+
+// isSystemSkill reports whether a skill's frontmatter marks it as a system
+// skill (`metadata: {system: "true"}`), e.g. the built-in wrap-session
+// soft-skill. System skills are plumbing, not something the user chose to
+// engage, so they are never listed in the composer skills dock.
+func isSystemSkill(fm map[string]any) bool {
+	md, ok := fm["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	v, _ := md["system"].(string)
+	return strings.EqualFold(strings.TrimSpace(v), "true")
 }
 
 // recordSkillLoad persists a successful skill / soft-skill load for the

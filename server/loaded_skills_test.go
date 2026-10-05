@@ -25,3 +25,21 @@ func TestLoadedSkillFromResponse(t *testing.T) {
 		t.Error("failed load recorded")
 	}
 }
+
+func TestSystemSkillIsNotRecorded(t *testing.T) {
+	resp := map[string]any{
+		"skill_name":   "wrap-session",
+		"instructions": "# Wrap Session",
+		"frontmatter": map[string]any{
+			"name":     "wrap-session",
+			"metadata": map[string]any{"system": "true"},
+		},
+	}
+	if _, ok := loadedSkillFromResponse("leader", "load_softskill", resp); ok {
+		t.Fatal("a system skill must not be recorded for the skills dock")
+	}
+	resp["frontmatter"].(map[string]any)["metadata"] = map[string]any{"system": "false"}
+	if _, ok := loadedSkillFromResponse("leader", "load_softskill", resp); !ok {
+		t.Fatal("system: false must still be recorded")
+	}
+}

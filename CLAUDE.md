@@ -6502,7 +6502,10 @@ as markdown, and the head pulses when the count grows.
   `recordSkillLoad`, called on every tool result in `streamEvents` (root
   `tool_result` and sub-agent `agent_tool_result`) and in `injectTurnRouted`
   (root events only: injected turns have no sub-agent bus). Only a
-  **successful** load (a response with `instructions`) is recorded; it then
+  **successful** load (a response with `instructions`) is recorded — except a
+  **system skill** (frontmatter `metadata: {system: "true"}`, `isSystemSkill`;
+  today only the built-in `wrap-session` soft-skill), which is plumbing and
+  never listed; it then
   fires `skillsChangedHook` → a `skills_changed` event on `/api/events`
   (session-scoped, so owner-filtered in cookie mode). Route
   `GET /api/sessions/:id/skills` → `{skills}`.

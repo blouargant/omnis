@@ -1,6 +1,8 @@
 ---
 name: wrap-session
 description: One-shot wrap-up question for explicit user feedback before the post-session reflector runs. Use only when work is complete on an interactive surface (TUI / Web UI).
+metadata:
+  system: "true"
 ---
 
 # Wrap Session
