@@ -1,0 +1,52 @@
+/* Terracotta Dark — the dark sibling of Terracotta, Claude Desktop-style.
+   Warm anthracite surfaces (the sidebar a touch deeper than the chat), light
+   warm text and the same terracotta accent. A theme to pick, not an automatic
+   follow of the OS setting. */
+[data-theme="terracotta-dark"] {
+  color-scheme: dark;
+
+  --bg: #262624;
+  --bg-panel: #1f1e1d;
+  --bg-raised: #2d2c29;
+  --bg-raised-hover: #33322f;
+  --bg-active: #393834;
+  --bg-input: #30302e;
+
+  --border: #3a3936;
+  --border-strong: #4d4b46;
+
+  --text: #e5e3dc;
+  --text-strong: #faf9f5;
+  --text-muted: #a3a199;
+  --text-faint: #75736c;
+
+  --accent: #d97757;
+  --accent-hover: #e08a6c;
+  --accent-strong: #e59a7f;
+  --accent-bg-soft: rgba(217, 119, 87, 0.16);
+  --accent-border-soft: rgba(217, 119, 87, 0.50);
+  --accent-hover-bg: #3a2c25;
+
+  --scroll-thumb: #4a4844;
+  --scroll-thumb-hover: #5c5a55;
+
+  --user-bubble-bg: #141413;
+  --user-bubble-fg: #e5e3dc;
+  --bubble-user-bg: #30302e;
+  --bubble-user-border: #3a3936;
+  --composer-bg: var(--bg-input);
+  --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --prompt-fade: rgba(0, 0, 0, 0.45);
+
+  --danger-fg: #f0907a;
+  --danger-bg: rgba(240, 144, 122, 0.10);
+  --danger-border: rgba(240, 144, 122, 0.35);
+  --danger-bg-hover: rgba(240, 144, 122, 0.18);
+  --danger-bg-soft: rgba(240, 144, 122, 0.10);
+
+  --warn-fg: #e2c08d;
+  --warn-bg: rgba(226, 192, 141, 0.10);
+  --warn-border: rgba(226, 192, 141, 0.30);
+  --warn-action-bg: rgba(226, 192, 141, 0.18);
+  --warn-action-hover: rgba(226, 192, 141, 0.28);
+}

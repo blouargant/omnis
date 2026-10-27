@@ -19,7 +19,7 @@
   margin-left: auto;
   margin-right: auto;
   border-left: 2px solid;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--bg-panel);
   overflow: hidden;
   font-size: 12.5px;

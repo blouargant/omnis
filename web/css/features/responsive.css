@@ -148,6 +148,8 @@
   .copy-msg-group { opacity: 1; }
   /* The pane toolbar dims to .55 until the pane is hovered/focused. */
   .pane-toolbar { opacity: 1; }
+  /* The New-chat row's squad chevron shows on hover only on desktop. */
+  #squad-toggle { opacity: 1; width: 34px; height: 34px; }
 
   /* The per-session ⋮ / delete actions are revealed by `li:hover`, so on touch
      they were reachable only by the sticky :hover a tap sometimes leaves behind
@@ -180,7 +182,7 @@
   .pane-toolbar button { width: 32px; height: 32px; }
 
   /* Composer icon buttons (slash menu, attach). */
-  #slash-btn, #attach-btn { width: 34px; height: 34px; }
+  #attach-btn, #send { width: 36px; height: 36px; }
 
   /* Whole-message copy split-button under an assistant reply. */
   .copy-msg-btn, .copy-msg-caret { height: 32px; }

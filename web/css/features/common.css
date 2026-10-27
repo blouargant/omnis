@@ -29,9 +29,9 @@
      as one continuous strip. The ivory sidebar-resize gradient also keys off it
      (cream above the seam, white below). */
   --topbar-h: 56px;
-  /* Chat content column width, as a % of the pane so it scales edge-to-edge
-     with the window. Leaves a margin on each side (not full-bleed). */
-  --col-w: 90%;
+  /* Chat content column width: 90% of the pane, capped at --chat-max-w so the
+     column stays a centred, Claude-style reading width on wide windows. */
+  --col-w: min(90%, var(--chat-max-w));
   /* Per-edge scrollbar gutter reserved by #transcript (scrollbar-gutter:
      both-edges reserves the transcript's ::-webkit-scrollbar width on each
      side). The floating prompt header lives outside the scroll container, so
@@ -40,6 +40,19 @@
      features/messages.css — the chat bar is deliberately wider than the 6px
      app-wide one so it is easy to find and grab. */
   --scroll-gutter: 14px;
+  /* Claude-style reading column: messages, tool blocks, the ask-user card and
+     the composer share one centred column of this max width (the phone band in
+     responsive.css lifts it to 100%). */
+  --chat-max-w: 720px;
+  /* Corner radii — small controls/blocks, cards/bubbles, the composer box. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-composer: 18px;
+  /* UI font: the system sans-serif stack, everywhere (no web font, offline). */
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Assistant answers: plain text on the page. */
+  --answer-font-size: 16px;
+  --answer-line-height: 1.6;
 
   /* Surfaces */
   --bg: #1e1e1e;
@@ -105,6 +118,10 @@
    * sidebar cards also use it, so those panels always match the editor. */
   --composer-bg: var(--bubble-user-bg);
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  /* The sent user message: a small quiet bubble (fill only, no border/shadow).
+     Defaults to the theme's bubble colour so every theme keeps a readable pair. */
+  --user-bubble-bg: var(--bubble-user-bg);
+  --user-bubble-fg: var(--text);
 
   /* Danger — destructive buttons, error states */
   --danger-fg: #f48771;
@@ -124,7 +141,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
   font-size: 17px;

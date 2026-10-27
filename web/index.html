@@ -22,8 +22,8 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=22" />
-  <link rel="stylesheet" href="assets/css/settings.css?v=16" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=26" />
+  <link rel="stylesheet" href="assets/css/settings.css?v=17" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/one-dark.css" />
@@ -31,6 +31,7 @@
   <link rel="stylesheet" href="assets/css/themes/github-light.css" />
   <link rel="stylesheet" href="assets/css/themes/ivory.css" />
   <link rel="stylesheet" href="assets/css/themes/terracotta.css" />
+  <link rel="stylesheet" href="assets/css/themes/terracotta-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/dracula.css" />
   <link rel="stylesheet" href="assets/css/themes/nord.css" />
   <link rel="stylesheet" href="assets/css/themes/tokyo-night.css" />
@@ -314,9 +315,9 @@
           </div>
           <div class="composer-actions">
             <div id="attach-wrap">
-              <button id="attach-btn" type="button" data-tip="Attach files" data-i18n-tip="composer.attach">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              <button id="attach-btn" type="button" data-tip="More actions" data-i18n-tip="composer.plus" aria-label="More actions" data-i18n-aria-label="composer.plus" aria-haspopup="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
                 </svg>
               </button>
               <div id="attach-menu" hidden>
@@ -334,16 +335,26 @@
                   </svg>
                   <span data-i18n="composer.addContext">Add context</span>
                 </button>
+                <button id="attach-editmode" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>
+                  </svg>
+                  <span class="attach-editmode-label" data-i18n="composer.enterSends">Enter sends</span>
+                </button>
+                <button id="attach-slash" type="button">
+                  <span class="attach-slash-glyph" aria-hidden="true">/</span>
+                  <span data-i18n="composer.slashItem">Slash commands</span>
+                </button>
               </div>
             </div>
-            <button id="edit-mode-btn" type="button" data-tip="Toggle Enter key: send vs new line" data-i18n-tip="composer.editMode">
+            <button id="edit-mode-btn" type="button" hidden data-tip="Toggle Enter key: send vs new line" data-i18n-tip="composer.editMode">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 7V4h16v3"/>
                 <path d="M9 20h6"/>
                 <path d="M12 4v16"/>
               </svg>
             </button>
-            <button id="slash-btn" type="button" data-tip="Slash commands (/)" data-i18n-tip="composer.slashTip">/</button>
+            <button id="slash-btn" type="button" hidden data-tip="Slash commands (/)" data-i18n-tip="composer.slashTip">/</button>
             <span id="ctx-ring-wrap">
               <svg id="ctx-ring-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
                 <circle class="ctx-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.5"/>
@@ -364,8 +375,8 @@
             </span>
             <button class="subtle-ask-btn" type="button" hidden aria-label="Optional question" data-i18n-aria-label="app.subtleAsk.aria">?</button>
             <span id="status"></span>
-            <button id="cancel" type="button" disabled data-i18n="composer.stop">Stop</button>
-            <button id="send" type="submit" data-i18n="composer.send">Send</button>
+            <button id="cancel" type="button" hidden disabled data-i18n="composer.stop">Stop</button>
+            <button id="send" type="submit" data-mode="send" aria-label="Send" data-i18n-aria-label="composer.sendAria"></button>
           </div>
         </form>
       </div>
@@ -463,9 +474,10 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=76" defer></script>
+  <script src="assets/i18n/locales.js?v=77" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=112" defer></script>
-  <script src="assets/settings.js?v=65" defer></script>
+  <script src="assets/composer-state.js?v=1" defer></script>
+  <script src="assets/app.js?v=113" defer></script>
+  <script src="assets/settings.js?v=66" defer></script>
 </body>
 </html>

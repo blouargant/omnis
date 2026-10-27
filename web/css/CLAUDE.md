@@ -43,6 +43,12 @@ session Collection (kept in sync with `COLLECTION_COLORS` in `web/app.js`); a ro
 imports it first, and `settings.css`'s partials use the same `var(--…)` tokens
 (it loads after `styles.css` in `index.html`, so the tokens are already defined).
 
+The **Claude-style layout tokens** (`--chat-max-w`, `--radius-sm`/`-md`/
+`-composer`, `--font-ui`, `--answer-font-size`/`-line-height`,
+`--user-bubble-bg`/`-fg`) all have `:root` defaults so every theme renders the
+new layout without edits; `web/tests/tokens.test.mjs` (`make web-test`) guards
+that, and that `messages.css` / `composer.css` only reference defined tokens.
+
 **If a value needs to be shared across features, add it as a token in
 `features/common.css`** and reference it with `var(--…)` — do not hard-code the
 same colour/size in multiple partials.

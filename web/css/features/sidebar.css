@@ -105,8 +105,8 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #sidebar-toggle svg { transform: rotate(180deg); }
 
 /* New-chat pill becomes a square icon button. */
-#sidebar.collapsed #new-chat-wrap { margin: 10px 8px 4px; }
-#sidebar.collapsed #new-chat { padding: 0; border-radius: 10px; }
+#sidebar.collapsed #new-chat-wrap { margin: 6px 4px 0; }
+#sidebar.collapsed #new-chat { justify-content: center; padding: 8px 0; }
 
 /* Collections: only the group headers remain, as icons — General keeps its
  * centred star, each user collection swaps its folder glyph for a colour
@@ -188,21 +188,20 @@ body.resizing #sidebar { transition: none; }
    active theme's --accent. */
 .app-logo {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--accent) var(--brand-mark) center / 18px 18px no-repeat;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent) var(--brand-mark) center / 14px 14px no-repeat;
 }
 
+/* Quiet wordmark: normal case, semibold — the brand is the logo badge. */
 .app-name {
-  font-size: 20px;
+  font-size: 17px;
   /* Pinned line-height (< the 24px toggle button beside it) keeps the header's
      content height — and thus the whole header — unchanged as the title grows. */
   line-height: 1;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--text-strong);
 }
 
@@ -215,57 +214,52 @@ body.resizing #sidebar { transition: none; }
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
 }
 #sidebar-toggle:hover { background: var(--bg-raised); color: var(--text); }
 
-/* ─── New Chat split-button (pill) ─────────────────────────────────────
- * The pill sits below the sidebar header. When the agent exposes more
- * than one squad, a trailing chevron splits the pill and opens a menu
- * to pick which squad the next session uses. */
+/* ─── New Chat row ─────────────────────────────────────────────────────
+ * A plain sidebar row ("＋ New chat"), styled like the Search / Import actions
+ * below it (Claude-style sobriety: no accent pill). When the agent exposes
+ * more than one squad, a small chevron at the row's right end opens a menu to
+ * pick which squad the next session uses — shown on hover/focus, always on
+ * touch (features/responsive.css). */
 #new-chat-wrap {
   position: relative;
   display: flex;
-  align-items: stretch;
-  gap: 8px;
-  margin: 10px 12px 4px;
+  align-items: center;
+  margin: 6px 8px 0;
+  border-radius: var(--radius-sm);
 }
+#new-chat-wrap:hover { background: var(--bg-raised-hover); }
 
-/* Solid accent "New Chat" pill — the primary call-to-action. */
 #new-chat {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--accent);
+  gap: 9px;
+  padding: 6px 10px;
+  background: transparent;
   border: none;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
   cursor: pointer;
-  /* Full pill: 20px = half the 40px height, so the ends are fully round. */
-  border-radius: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
-  transition: background 0.12s, box-shadow 0.15s, transform 0.05s;
 }
-#new-chat:hover { background: var(--accent-hover); box-shadow: 0 2px 8px var(--accent-bg-soft); }
-#new-chat:active { transform: translateY(0.5px); }
-#new-chat svg { flex-shrink: 0; }
+#new-chat svg { flex-shrink: 0; color: var(--accent); }
 #new-chat .new-chat-text {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  line-height: 1.15;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  line-height: 1.3;
 }
 #new-chat .new-chat-label,
 #new-chat .new-chat-sub {
@@ -275,36 +269,35 @@ body.resizing #sidebar { transition: none; }
   max-width: 100%;
 }
 #new-chat .new-chat-sub {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.82);
-  text-transform: lowercase;
-  letter-spacing: .04em;
-  margin-top: 1px;
+  color: var(--text-muted);
 }
 #new-chat .new-chat-sub[hidden] { display: none; }
 
-/* Squad picker — a separate round accent button beside the New Chat pill. */
+/* Squad picker — a small chevron inside the row, revealed on hover/focus. */
 #squad-toggle {
-  width: 40px;
-  height: 40px;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent);
+  background: transparent;
   border: none;
-  border-radius: 50%;
-  color: #ffffff;
+  border-radius: 6px;
+  color: var(--text-muted);
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
-  transition: background 0.12s;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
 }
-#squad-toggle:hover { background: var(--accent-hover); color: #ffffff; }
-#squad-toggle[aria-expanded="true"] {
-  background: var(--accent-strong);
-  color: #ffffff;
-}
+#new-chat-wrap:hover #squad-toggle,
+#new-chat-wrap:focus-within #squad-toggle,
+#squad-toggle[aria-expanded="true"] { opacity: 1; }
+#squad-toggle:hover { background: var(--bg-active); color: var(--text); }
+#squad-toggle[aria-expanded="true"] { background: var(--bg-active); color: var(--text); }
+#squad-toggle[hidden] { display: none; }
 #squad-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 #squad-toggle svg { transition: transform 0.15s; }
 
@@ -365,24 +358,35 @@ body.resizing #sidebar { transition: none; }
   padding: 5px 8px 5px 10px;
   border-radius: 7px;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 13px;
   margin-bottom: 1px;
   transition: background 0.1s, color 0.1s;
 }
-.collection-sessions li:hover { background: var(--bg-raised); color: var(--text); }
+.collection-sessions li:hover { background: var(--bg-raised-hover); color: var(--text); }
 .collection-sessions li.dragging { opacity: 0.45; }
 /* Open in some (non-focused) pane: just a darker label, no fill — only the
    focused/active row (below) gets a background. */
 .collection-sessions li.active { color: var(--text); }
 /* The chat in the focused pane — the one the user is working in — stands out
- * with the active background, brighter text, and an accent rail on the left
- * coloured by the session's collection (--col-accent, set in buildSessionRow),
- * falling back to the app accent for General/uncoloured. */
+ * with a soft rounded neutral fill and brighter text; a small dot in the
+ * session's collection colour (--col-accent, set in buildSessionRow, falling
+ * back to the app accent) keeps the collection recognisable. */
 .collection-sessions li.active-focused {
   background: var(--bg-active);
   color: var(--text-strong);
-  box-shadow: inset 3px 0 0 var(--col-accent, var(--accent, #4a9eff));
+}
+/* The collection colour stays recognisable as a small dot (not a rail). */
+.collection-sessions li.active-focused::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--col-accent, var(--accent));
 }
 .session-name-row {
   display: flex;
