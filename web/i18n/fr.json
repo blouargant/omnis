@@ -822,6 +822,7 @@
   "collections.newChatIn": "Nouvelle discussion dans {name}",
   "tree.showMore": "Afficher plus ({count})",
   "tree.empty": "Aucune discussion",
+  "tree.noMatch": "Aucune discussion correspondante",
   "sidebar.search": "Rechercher",
   "sidebar.import": "Importer une conversation",
   "collections.newTitle": "Nouvelle collection",

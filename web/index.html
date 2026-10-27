@@ -79,6 +79,13 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <span class="sidebar-action-label" data-i18n="sidebar.search">Search</span>
       </button>
+      <div id="sidebar-search-row" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="sidebar-search-input" type="text" autocomplete="off" placeholder="Search sessions…" data-i18n-placeholder="sessionbar.searchPlaceholder" aria-label="Search sessions" data-i18n-aria-label="sessionbar.search" />
+        <button id="sidebar-search-close" type="button" data-tip="Close search" data-i18n-tip="sessionbar.searchClose" aria-label="Close search" data-i18n-aria-label="sessionbar.searchClose">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
       <button id="sidebar-import-btn" class="sidebar-action" type="button">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <span class="sidebar-action-label" data-i18n="sidebar.import">Import a conversation</span>
@@ -93,6 +100,18 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
+    <!-- Bulk-select bar (entered from a collection's ⋯ → Select). -->
+    <div id="tree-select-bar" hidden>
+      <button id="tree-selectall-btn" type="button" data-tip="Select all" data-i18n-tip="sessionbar.selectAll" aria-label="Select all" data-i18n-aria-label="sessionbar.selectAll">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>
+      </button>
+      <span id="tree-select-count"></span>
+      <button id="tree-batch-btn" type="button" aria-haspopup="true" data-i18n="sessionbar.actions">Actions</button>
+      <button id="tree-select-cancel" type="button" data-tip="Cancel" data-i18n-tip="common.cancel" aria-label="Cancel" data-i18n-aria-label="common.cancel">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="tree-search-empty" hidden data-i18n="tree.noMatch">No matching chats</div>
     <ul id="collection-tree" aria-label="collections"></ul>
     <div id="archived-panel" class="collapsed" hidden>
       <div id="archived-header" role="button" tabindex="0" aria-expanded="false" data-tip="Toggle archived sessions" data-i18n-tip="archived.toggle">
@@ -430,9 +449,9 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=73" defer></script>
+  <script src="assets/i18n/locales.js?v=74" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
-  <script src="assets/app.js?v=110" defer></script>
+  <script src="assets/app.js?v=111" defer></script>
   <script src="assets/settings.js?v=65" defer></script>
 </body>
 </html>

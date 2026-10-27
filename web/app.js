@@ -152,6 +152,13 @@ const els = {
   collectionsSort: document.getElementById("collections-sort"),
   sidebarSearchBtn: document.getElementById("sidebar-search-btn"),
   sidebarImportBtn: document.getElementById("sidebar-import-btn"),
+  sidebarSearchRow: document.getElementById("sidebar-search-row"),
+  sidebarSearchInput: document.getElementById("sidebar-search-input"),
+  treeSelectBar:   document.getElementById("tree-select-bar"),
+  treeSelectCount: document.getElementById("tree-select-count"),
+  treeSelectAllBtn: document.getElementById("tree-selectall-btn"),
+  treeBatchBtn:    document.getElementById("tree-batch-btn"),
+  treeSearchEmpty: document.getElementById("tree-search-empty"),
   archivedPanel: document.getElementById("archived-panel"),
   archivedHeader:document.getElementById("archived-header"),
   archivedList:  document.getElementById("archived-list"),
@@ -6069,6 +6076,7 @@ async function loadSessions() {
     if (loadedBefore.includes(k) && isGroupOpen(c.name) && groupViews.has(k)) reloads.push(reloadGroupPrefix(c.name));
   }
   await Promise.all(reloads);
+  if (sessionSearch) await runTreeSearch();
   await reloadArchivedPrefix();
 }
 
@@ -6127,7 +6135,7 @@ function buildSessionRow(s, { archived }) {
 
   li.addEventListener("click", (e) => {
     // In bulk-select mode a row click toggles its checkbox instead of opening it.
-    if (selectMode) { toggleSessionSelect(s.id, li); return; }
+    if (selectMode && !archived) { toggleSessionSelect(s.id, li); return; }
     if (e.target.closest(".session-actions")) return;
     selectSession(s.id);
   });
@@ -6436,7 +6444,7 @@ function updateGroupMore(name) {
 // then GROUP_PAGE_MORE). Guarded against re-entry and stale responses.
 async function loadGroupMore(name) {
   const v = groupView(name);
-  if (v.loading || v.exhausted) return;
+  if (v.loading || v.exhausted || sessionSearch) return; // search owns the rows
   v.loading = true;
   const mySeq = v.seq;
   const first = v.loaded === 0;
@@ -6458,6 +6466,7 @@ async function loadGroupMore(name) {
 // loaded)) and re-renders them in place, preserving the tree's scroll — the
 // live-push refresh path.
 async function reloadGroupPrefix(name) {
+  if (sessionSearch) return; // search owns the rows (loadSessions re-runs it)
   const v = groupView(name);
   v.seq++;
   const mySeq = v.seq;
@@ -6587,6 +6596,7 @@ function setSessionBusy(sessionId, busy) {
 
 const ICON_STAR = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>`;
 const ICON_FOLDER = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+const ICON_CHECK_SQUARE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>`;
 const ICON_SWATCH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5.5 0 10 4.5 10 10a4 4 0 0 1-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/></svg>`;
 
 // COLLECTION_COLORS is the palette of predefined collection colours, in swatch /
@@ -6716,7 +6726,9 @@ function buildGroup(c) {
   li.querySelector(".group-empty").textContent = tr("tree.empty");
   const head = li.querySelector(".collection-row");
   const name = () => li.dataset.name;
-  const toggle = () => setGroupOpen(name(), !isGroupOpen(name()));
+  // While searching every group with a hit is shown open, so a header click
+  // does nothing then.
+  const toggle = () => { if (!sessionSearch) setGroupOpen(name(), !isGroupOpen(name())); };
   head.addEventListener("click", (e) => {
     if (e.target.closest(".group-actions")) return;
     toggle();
@@ -6733,10 +6745,10 @@ function buildGroup(c) {
     const c2 = collectionsData.find((x) => x.name.toLowerCase() === li.dataset.key);
     if (c2) openCollectionCtxMenu(e, c2);
   });
-  // Right-click → the collection menu (user collections only; General is fixed).
+  // Right-click → the collection menu (General's only offers Select).
   head.addEventListener("contextmenu", (e) => {
     const c2 = collectionsData.find((x) => x.name.toLowerCase() === li.dataset.key);
-    if (c2 && !c2.general) openCollectionCtxMenu(e, c2);
+    if (c2) openCollectionCtxMenu(e, c2);
   });
   li.querySelector(".group-more").addEventListener("click", () => loadGroupMore(name()));
   // Drop target: dragging a session row onto a group (header or rows) files it there.
@@ -6781,7 +6793,6 @@ function updateGroupHeader(li, c) {
   add.setAttribute("data-tip", tr("collections.newChatIn", { name: c.name }));
   add.setAttribute("aria-label", tr("collections.newChatIn", { name: c.name }));
   const menu = li.querySelector(".group-menu");
-  menu.hidden = !!c.general;
   menu.setAttribute("data-tip", tr("sessionbar.actions"));
   menu.setAttribute("aria-label", tr("sessionbar.actions"));
 }
@@ -6847,10 +6858,17 @@ async function fetchSessionMeta(id) {
 // collection, reusing the themed context-menu renderer shared with the
 // Folders/session menus.
 function openCollectionCtxMenu(ev, c) {
+  // "Select" enters bulk select on this group; it is unavailable while searching
+  // (search and select are mutually exclusive). General is fixed, so Select is
+  // all its menu offers.
+  const select = [tr("sessionbar.select"), () => enterSelectMode(c.name), { icon: ICON_CHECK_SQUARE, disabled: !!sessionSearch }];
+  if (c.general) { showFolderCtxMenu(ev, [select]); return; }
   showFolderCtxMenu(ev, [
     [tr("collections.editContext"), () => editCollectionContext(c), { icon: ICON_FOLDER }],
     [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
     [tr("collections.changeColor"), () => changeCollectionColor(c), { icon: ICON_SWATCH }],
+    SEP,
+    select,
     SEP,
     [tr("common.delete"), () => deleteCollection(c.name), { icon: ICON_DELETE }],
   ]);
@@ -7524,16 +7542,228 @@ async function moveSessionToCollection(sessionId, target) {
 
 // ─── Tree controls (search / sort / bulk select) ──────────────────────────────
 
+let selectScope = null;   // collection whose rows "Select all" ticks
+let treeSearchSeq = 0;    // drops a slower, superseded search response
+
+// ── Search ──
+// setTreeSearch shows every collection's matches for `query` under their group
+// headers (groups without a hit hidden), filters the Archived panel the same
+// way, and — with an empty query — leaves search mode and restores the regular
+// tree (open states come from storage, which search never touches).
+async function setTreeSearch(query) {
+  const q = String(query || "").trim();
+  if (q === sessionSearch.trim()) return;
+  sessionSearch = q;
+  if (q && selectMode) exitSelectMode();
+  els.tree.classList.toggle("searching", !!q);
+  if (!q) {
+    els.treeSearchEmpty.hidden = true;
+    for (const g of els.tree.querySelectorAll(":scope > li.collection-group")) {
+      g.classList.remove("search-hit");
+      resetGroup(g.dataset.name);
+    }
+    resetArchivedView();
+    return;
+  }
+  await runTreeSearch();
+  resetArchivedView();
+}
+
+// runTreeSearch fetches the current query's matches across all collections (one
+// collection-less request) and renders them into their groups.
+async function runTreeSearch() {
+  const mySeq = ++treeSearchSeq;
+  // Invalidate in-flight page loads: their rows must not land in a search view.
+  for (const v of groupViews.values()) { v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false; }
+  let rows = [];
+  try {
+    const res = await apiFetch(sessionsQuery(false, 0, 50), { cache: "no-store" });
+    rows = (await res.json()).sessions || [];
+  } catch (e) { console.error("runTreeSearch:", e); }
+  if (mySeq !== treeSearchSeq || !sessionSearch) return;
+  const byGroup = new Map();
+  const known = knownUserCollections();
+  for (const s of rows) {
+    rememberSessionMeta(s);
+    const k = effectiveCollection(s, known).toLowerCase();
+    if (!byGroup.has(k)) byGroup.set(k, []);
+    byGroup.get(k).push(s);
+  }
+  for (const g of els.tree.querySelectorAll(":scope > li.collection-group")) {
+    const hits = byGroup.get(g.dataset.key) || [];
+    const ul = g.querySelector(".collection-sessions");
+    ul.innerHTML = "";
+    for (const s of hits) ul.appendChild(buildSessionRow(s, { archived: false }));
+    g.classList.toggle("search-hit", hits.length > 0);
+  }
+  els.treeSearchEmpty.hidden = rows.length > 0;
+  syncPanesAfterRender();
+}
+
+function openTreeSearch() {
+  if (selectMode) exitSelectMode();
+  els.sidebarSearchBtn.hidden = true;
+  els.sidebarSearchRow.hidden = false;
+  els.sidebarSearchInput.focus();
+}
+function closeTreeSearch() {
+  els.sidebarSearchInput.value = "";
+  els.sidebarSearchRow.hidden = true;
+  els.sidebarSearchBtn.hidden = false;
+  setTreeSearch("");
+}
+
+// ── Sort ──
+// openSortMenu offers the three orderings; the active one carries a ✓.
+function openSortMenu(ev) {
+  const opt = (key, label) => [
+    (sessionSort === key ? "✓ " : "    ") + label,
+    () => setSessionSort(key),
+  ];
+  showFolderCtxMenu(ev, [
+    [tr("sessionbar.sortBy"), null, { disabled: true }],
+    opt("recent", tr("sessionbar.sortRecent")),
+    opt("created", tr("sessionbar.sortCreated")),
+    opt("az", tr("sessionbar.sortAz")),
+  ]);
+}
+// setSessionSort applies the order inside every group (sorting is server-side,
+// so each open group refetches its first page; the Archived panel stays in
+// recent order).
+function setSessionSort(key) {
+  if (sessionSort === key) return;
+  sessionSort = key;
+  localStorage.setItem(SESSION_SORT_KEY, key);
+  if (sessionSearch) { runTreeSearch(); return; }
+  for (const c of collectionsData) resetGroup(c.name);
+}
+
+// ── Bulk select ──
+// enterSelectMode shows a checkbox on every session row of the tree and the
+// selection bar; "Select all" then ticks the rows of the `scopeName` group.
+function enterSelectMode(scopeName) {
+  if (sessionSearch) return; // search and select are mutually exclusive
+  selectMode = true;
+  selectScope = scopeName;
+  selectedSessions.clear();
+  els.sidebar.classList.add("selecting");
+  els.treeSelectBar.hidden = false;
+  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = false; }
+  updateSelectBar();
+}
+function exitSelectMode() {
+  if (!selectMode) return;
+  selectMode = false;
+  selectScope = null;
+  selectedSessions.clear();
+  els.sidebar.classList.remove("selecting");
+  els.treeSelectBar.hidden = true;
+  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = true; }
+}
+
+// scopeRowIds lists the loaded row ids of the group selection was entered from.
+function scopeRowIds() {
+  const ul = selectScope ? groupList(selectScope) : null;
+  return ul ? [...ul.querySelectorAll("li[data-id]")].map((li) => li.dataset.id) : [];
+}
+
+// updateSelectBar refreshes the "n selected" label + the Select-all lit state.
+function updateSelectBar() {
+  if (!selectMode) return;
+  els.treeSelectCount.textContent = trN("sessionbar.selected", selectedSessions.size, { count: selectedSessions.size });
+  const ids = scopeRowIds();
+  els.treeSelectAllBtn.classList.toggle("is-active", ids.length > 0 && ids.every((id) => selectedSessions.has(id)));
+}
+
 // toggleSessionSelect ticks/unticks one row while selecting.
 function toggleSessionSelect(id, li) {
   if (selectedSessions.has(id)) selectedSessions.delete(id);
   else selectedSessions.add(id);
   li.classList.toggle("row-selected", selectedSessions.has(id));
+  updateSelectBar();
 }
 
-// wireTreeControls attaches the sidebar's primary actions once at boot.
+// toggleSelectAll ticks the scope group's loaded rows, or clears them when they
+// are all ticked already.
+function toggleSelectAll() {
+  const ids = scopeRowIds();
+  const allSel = ids.length > 0 && ids.every((id) => selectedSessions.has(id));
+  for (const id of ids) {
+    if (allSel) selectedSessions.delete(id);
+    else selectedSessions.add(id);
+  }
+  for (const li of els.tree.querySelectorAll("li[data-id]")) {
+    li.classList.toggle("row-selected", selectedSessions.has(li.dataset.id));
+  }
+  updateSelectBar();
+}
+
+// openBatchMenu offers the batch actions for the ticked sessions: move to a
+// collection, archive, delete. A no-op when nothing is selected.
+function openBatchMenu(ev) {
+  if (selectedSessions.size === 0) { showToast(tr("sessionbar.noneSelected"), "err"); return; }
+  const items = [[tr("collections.moveTo"), null, { disabled: true }]];
+  const targets = [GENERAL_COLLECTION, ...collectionsData.filter((c) => !c.general).map((c) => c.name)];
+  for (const name of targets) items.push([name, () => batchMove(name), { icon: ICON_FOLDER }]);
+  items.push(SEP);
+  items.push([tr("menu.archive"), () => batchArchive(), { icon: ICON_ARCHIVE }]);
+  items.push([tr("menu.delete"), () => batchDelete(), { icon: ICON_DELETE }]);
+  showFolderCtxMenu(ev, items);
+}
+
+// runBatch applies fn to every selected id, then leaves select mode and
+// refreshes. ids are snapshotted first so the set can be cleared safely.
+async function runBatch(fn) {
+  const ids = [...selectedSessions];
+  await Promise.all(ids.map((id) => fn(id).catch((e) => console.error("batch:", id, e))));
+  exitSelectMode();
+  await loadSessions();
+}
+function batchMove(target) {
+  const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
+  return runBatch((id) =>
+    apiFetch(`/api/sessions/${encodeURIComponent(id)}/collection`, { method: "POST", body: JSON.stringify({ collection }) }));
+}
+function batchArchive() {
+  return runBatch((id) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: "POST" }));
+}
+async function batchDelete() {
+  const n = selectedSessions.size;
+  const ok = await uiConfirm({
+    title: tr("sessionbar.batchDeleteTitle"),
+    message: trN("sessionbar.batchDeleteMsg", n, { count: n }),
+    confirmText: tr("common.delete"),
+    cancelText: tr("common.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+  const ids = [...selectedSessions];
+  await runBatch((id) => apiFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  for (const id of ids) forgetSession(id);
+}
+
+// wireTreeControls attaches the sidebar's search / import / sort / select
+// listeners once at boot.
 function wireTreeControls() {
-  if (els.sidebarImportBtn) els.sidebarImportBtn.addEventListener("click", () => importSessionPrompt());
+  const on = (el, ev, fn) => { if (el) el.addEventListener(ev, fn); };
+  on(els.sidebarImportBtn, "click", () => importSessionPrompt());
+  on(els.sidebarSearchBtn, "click", () => openTreeSearch());
+  on(document.getElementById("sidebar-search-close"), "click", () => closeTreeSearch());
+  if (els.sidebarSearchInput) {
+    // Search is server-side (q=), so debounce so we don't fire a request per
+    // keystroke.
+    let searchDebounce = null;
+    els.sidebarSearchInput.addEventListener("input", () => {
+      const val = els.sidebarSearchInput.value;
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => setTreeSearch(val), 150);
+    });
+    els.sidebarSearchInput.addEventListener("keydown", (e) => { if (e.key === "Escape") closeTreeSearch(); });
+  }
+  on(els.collectionsSort, "click", (e) => openSortMenu(e));
+  on(els.treeSelectAllBtn, "click", () => toggleSelectAll());
+  on(els.treeBatchBtn, "click", (e) => openBatchMenu(e));
+  on(document.getElementById("tree-select-cancel"), "click", () => exitSelectMode());
 }
 
 // closeTabEverywhere removes `id` as a tab from every pane that holds it.

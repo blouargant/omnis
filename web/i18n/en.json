@@ -822,6 +822,7 @@
   "collections.newChatIn": "New chat in {name}",
   "tree.showMore": "Show more ({count})",
   "tree.empty": "No chats yet",
+  "tree.noMatch": "No matching chats",
   "sidebar.search": "Search",
   "sidebar.import": "Import a conversation",
   "collections.newTitle": "New collection",
