@@ -2944,48 +2944,103 @@ collapse state in `localStorage`), and the TUI `archivedPane` in the left column
 the highlighted session, `u` unarchives, `d` deletes). Viewing an archived session
 disables the composer in both surfaces.
 
-### Session collections (thematic folders, Web UI three-pane layout)
+### Session collections (thematic folders, Web UI collection tree)
 
-The web UI is a **three-column, email-client layout**
-([web/index.html](web/index.html) + [web/css/features/collections.css](web/css/features/collections.css)):
-- **Left** = `#sidebar` — the app chrome (OMNIS header + New Chat), the
-  **Collections list** (`#collections-list`, below New Chat), the Archived
-  panel, the per-chat **Files** browser (`#folders-panel`), and the
-  Settings/Appearance/Documentation footer. `#sidebar` keeps all its existing
-  collapse-to-rail + resize machinery (that's why the collections list + Files
-  live *inside* it rather than the chrome being moved out).
-- **Middle** = `#session-pane` — a **top toolbar** (`#session-topbar`, matched to
-  the left header's `--topbar-h`) above the time-grouped **session list**
-  (filtered to the selected collection).
-- **Right** = `#chat-area` — chat panes + the settings body.
+The web UI is a **two-column layout** like Claude Desktop
+([web/index.html](web/index.html) + [web/css/features/collections.css](web/css/features/collections.css)
++ [web/css/features/sidebar.css](web/css/features/sidebar.css)). Design:
+[docs/superpowers/specs/2026-10-27-sidebar-tree-settings-modal-design.md](docs/superpowers/specs/2026-10-27-sidebar-tree-settings-modal-design.md).
+- **Left** = `#sidebar`, top to bottom: the OMNIS header, **New Chat** (+ squad
+  chooser), the primary actions **Search** (`#sidebar-search-btn`, which swaps
+  for the inline `#sidebar-search-row`) and **Import a conversation**
+  (`#sidebar-import-btn` → `importSessionPrompt`), the Collections header (label,
+  **sort** `#collections-sort`, **new** `#collections-new`), the bulk-select bar
+  (`#tree-select-bar`, hidden), the **collection tree** (`ul#collection-tree`, the
+  column's scroll region), the Archived panel, the **Files** browser
+  (`#folders-panel`) and the **account button** (see "Account menu"). `#sidebar`
+  keeps its collapse-to-rail + resize machinery.
+- **Right** = `#chat-area` — the chat panes. (Settings open in a modal over it;
+  see "Settings dialog".) There is **no middle column any more** — the former
+  `#session-pane` (toolbar + session list + the Settings category menu) is gone.
 
-**Session-pane toolbar** ([web/index.html](web/index.html) `#session-topbar`,
-[web/css/features/collections.css](web/css/features/collections.css),
-[web/app.js](web/app.js) "Session-pane toolbar" section) — three mutually
-exclusive rows toggled by `[hidden]`:
-- **Normal**: a `title · count` label (`activeCollection · currentViewIds.length`)
-  + four icon buttons — **search**, **sort**, **select**, **new**.
-- **Search**: an inline input driving the live `sessionSearch` title filter in
-  `renderSessions`.
-- **Select (bulk)**: `setSelectMode(true)` adds `.selecting` to `#session-pane`,
-  which reveals a per-row checkbox (`.session-check`, absolutely positioned) and
-  makes a row click **toggle selection** (`selectedSessions`) instead of opening
-  the chat. A **Select-all** button ticks every visible row (`currentViewIds`);
-  an **Actions** menu (reusing `showFolderCtxMenu`) batch-**moves** the ticked
-  sessions to a collection, **archives**, or **deletes** them (`runBatch` fans the
-  existing per-session endpoints out with `Promise.all`, then exits select mode
-  and refreshes). Selections are pruned to still-existing sessions on each render.
+**The tree** — one `li.collection-group[data-key=<lowercased name>]` per
+collection (General first, then the stored order): a header `.collection-row`
+(chevron, glyph — General's star or the tinted folder —, name, the **active**
+count from `/api/collections`, swapped on hover/focus for `.group-actions`: **＋**
+= `newChat(fp(), undefined, undefined, name)` and **⋯** =
+`openCollectionCtxMenu`), its rows `ul.collection-sessions`, a `.group-empty`
+note and a `.group-more` "Show more (N)" button. Rows are **single-line**
+(`buildSessionRow`: busy dot, title, ⋮ / delete on hover); turns, last activity
+and a non-default squad live in the title's `data-tip`.
+- **Open state** is remembered per browser (`agent_collection_open`,
+  `{lowercased name: bool}`, default **open**) via `isGroupOpen`/`setGroupOpen`;
+  rename migrates the key (`renameGroupKey`), delete drops it (`forgetGroupKey`).
+- **Per-group paging**: each group keeps its own view in `groupViews`
+  (`{loaded, total, loading, exhausted, seq, pinnedId}`) and fetches
+  `GET /api/sessions?collection=<name>&archived=false&sort=…` itself —
+  `GROUP_PAGE_INITIAL` (10) then `GROUP_PAGE_MORE` (20) per "Show more"
+  (`loadGroupMore`); a **closed group fetches nothing**. `reloadGroupPrefix`
+  re-fetches the loaded rows in place (scroll kept), `resetGroup` restarts page 1
+  (sort change). Every load is `seq`-guarded.
+- **`renderCollectionTree`** (from `loadCollections`/`renderCollections`) reuses a
+  group already in the DOM (its rows stay) and only builds + loads new ones; it
+  resolves once those first pages land, so `await loadCollections()` means "rows
+  are there".
+- **`loadSessions()` is the FULL refresh** (collections + the loaded prefix of
+  every open, already-fetched group — **including one known to be empty**, or a
+  session moved into an empty open group would never show — + Archived). Use it
+  only for broad changes (import, fork, batch actions, archive/unarchive,
+  collection create/rename/delete). **Single-session events use the targeted
+  refresh** — see "Targeted live refresh" below.
+- **Focus follows the chat**: `revealSessionInTree(id)` (called from
+  `setFocusedPanel`, the one place that decides "this is the chat the user is
+  in") opens the session's group (remembered) and, when no loaded page contains
+  the row, shows it **pinned** after the loaded rows (`view.pinnedId`, class
+  `.pinned`) until a page brings it into place; then scrolls it into view. A
+  session the cache has never seen is resolved with `fetchSessionMeta` (one
+  collection-less `GET /api/sessions?q=<id>`, active then archived, misses cached
+  in `sessionMetaMisses`), applied **only if still focused** so a slow lookup never
+  yanks the tree to a chat the user left. Archived ⇒ no-op.
+- **`restoreLayout` re-asserts the persisted focus after mounting** — each
+  `activateTab` in its loop focuses its own pane, so a final
+  `setFocusedPanel(panels[focusIdx])` keeps `activeSessionId`, the `.active-focused`
+  row and the revealed group on the pane the user left focused.
+- **Search** (`setTreeSearch`/`runTreeSearch`, debounced 150 ms): one
+  collection-less `GET /api/sessions?archived=false&q=…&limit=50`, rows grouped
+  client-side by `effectiveCollection`; groups with a hit get `.search-hit` and
+  `#collection-tree.searching` shows them open (others hidden, "Show more"
+  hidden, `#tree-search-empty` when nothing matches). The query sits in
+  `sessionSearch`, which the Archived panel's `sessionsQuery` also sends. While
+  searching, group loads/reloads are no-ops (the search owns the rows) and header
+  clicks do nothing; closing (Escape / ✕) resets every group, restoring the
+  stored open states. **Search and select are mutually exclusive**.
+- **Sort** (`sessionSort`, `agent_session_sort`: recent / created / az) applies
+  inside every group (`setSessionSort` → `resetGroup` each). No timeframe headers.
+- **Bulk select** is entered from a group's ⋯ menu → **Select**
+  (`enterSelectMode(name)`; disabled while searching; General's menu offers only
+  Select): `#sidebar.selecting` shows each tree row's `.session-check` and a row
+  click toggles it (archived rows are never selectable); **Select all** ticks the
+  loaded rows of that group (`selectScope`); **Actions** = `openBatchMenu` (move
+  to a collection / archive / delete via `runBatch`, which then
+  `exitSelectMode()` + `loadSessions()`).
+- **Drag-to-move**: a session row is a drag source; a whole group (header or
+  rows) is the drop target → `moveSessionToCollection`.
 
-Sort order (`sessionSort`: `recent` | `created` | `az`, persisted in
-`localStorage`) governs `renderSessions` — **timeframe headers show only for
-`recent`**; `created`/`az` render a flat list. The **new** button calls
-`newChat(fp())` (files into the selected collection). Search + select are mutually
-exclusive. The toolbar is wired once at boot by `wireSessionBar()`.
+Because the Files panel and the tree share the sidebar's flexible space,
+`foldersHeightCap` ([web/app.js](web/app.js)) reserves `COLLECTIONS_LIST_MIN`
+against `els.tree`.
 
-Because the Files panel and the collections list now share the left sidebar's
-flexible space, `foldersHeightCap` ([web/app.js](web/app.js)) reserves
-`COLLECTIONS_LIST_MIN` against `els.collectionsList` (not the session list, which
-is in the separate middle column).
+**Targeted live refresh** ([web/app.js](web/app.js) `refreshSessionsFor` /
+`refreshGroups` / `groupOf`). A turn ending, a routing hop, a pushed turn, a
+rename, a rewind and the `session_created/renamed/deleted` pushes refresh **only
+the session's own group** (both groups for `session_moved` and a local move), plus
+one `/api/collections` for the counts — coalesced into one pass per
+`REFRESH_COALESCE_MS` (250 ms) window (`flushRefresh`). Re-fetching every open
+group per event (what a `loadSessions()` per event would do) was a burst per
+event, per browser, while turns stream. A session never seen here (created in
+another browser) is looked up first (`fetchSessionMeta`) so its own group — not
+General — is refreshed. The Archived panel reloads only for events that can change
+it. During a search the pass re-runs the search instead.
 
 A **collection** is a thematic folder that groups sessions; **each session is in
 exactly one** ("move" semantics, flat — no nesting).
@@ -2993,7 +3048,7 @@ exactly one** ("move" semantics, flat — no nesting).
 - **"General" is a virtual default** (`sessions.GeneralCollection`,
   [internal/sessions/collections.go](internal/sessions/collections.go)): a
   session whose `Collection` field is empty — **or** names a collection no longer
-  in the list — belongs to General, which is pinned on top of the rail and
+  in the list — belongs to General, which is pinned on top of the tree and
   **cannot be renamed or deleted**. It is never stored, so nothing needs seeding.
 - **Data model** — `Collection string` on `SessionMeta`
   ([internal/sessions/sessions.go](internal/sessions/sessions.go)) + persisted on
@@ -3007,99 +3062,74 @@ exactly one** ("move" semantics, flat — no nesting).
   (`sessions.ListCollections`/`AddCollection`/`RenameCollection`/`RemoveCollection`,
   atomic write).
 - **Per-collection colour** — a collection can carry a **palette colour** so a
-  chat's collection is recognisable at a glance: it tints the **selected
-  collection's** left rail, the **selected session row's** left rail, the
-  collection's **folder glyph**, and the **active pane tab's** top border. Stored
-  as a small palette **token** (e.g. `"blue"`, not a hex) in a `colors` map
-  (name→token) alongside the names in `collections.json`, so the actual colour is
-  resolved **theme-side** from `--collection-<token>` tokens defined once in
-  [web/css/features/common.css](web/css/features/common.css) (~10 theme-independent
-  mid-tone hues; keep the CSS list in sync with `COLLECTION_COLORS` in
-  [web/app.js](web/app.js)). Backend: `sessions.CollectionColors` /
-  `SetCollectionColor` / `ValidCollectionColor` (token is a short lowercase slug;
-  the server only persists it, the UI owns the palette); `RenameCollection`
-  migrates the colour key and `RemoveCollection`/`saveFileLocked`'s prune drop
-  orphaned colours. The client applies it by setting a `--col-accent` inline
-  custom property (= `var(--collection-<token>)`) on the row/tab, consumed by the
-  three CSS accent rules; General/uncoloured leaves it unset (falls back to the
-  app accent).
+  chat's collection is recognisable at a glance: it tints the collection's
+  **folder glyph** (and its rail pastille), the **focused session row's** left
+  rail, the draft picker's collection glyph, and the **active pane tab's** top
+  border. Stored as a small palette **token** (e.g. `"blue"`, not a hex) in a
+  `colors` map (name→token) alongside the names in `collections.json`, so the
+  actual colour is resolved **theme-side** from `--collection-<token>` tokens
+  defined once in [web/css/features/common.css](web/css/features/common.css)
+  (~10 theme-independent mid-tone hues; keep the CSS list in sync with
+  `COLLECTION_COLORS` in [web/app.js](web/app.js)). Backend:
+  `sessions.CollectionColors` / `SetCollectionColor` / `ValidCollectionColor`
+  (token is a short lowercase slug; the server only persists it, the UI owns the
+  palette); `RenameCollection` migrates the colour key and
+  `RemoveCollection`/`saveFileLocked`'s prune drop orphaned colours. The client
+  applies it by setting a `--col-accent` inline custom property
+  (= `var(--collection-<token>)`) on the group/row/tab; General/uncoloured leaves
+  it unset (falls back to the app accent).
 - **Routes** ([server/collections.go](server/collections.go)): `GET
-  /api/collections` (General first + user collections, each with a live session
-  count folded the same way the sidebar filters, **plus its `color` token**),
-  `POST /api/collections` (`{name, color?}`),
+  /api/collections` (General first + user collections, each with `count` — every
+  non-hidden session, archived included —, **`active`** — the same minus archived
+  sessions, which is what a tree header shows, so it agrees with the group's
+  paginated `total`; `collectionCounts` returns both — plus its `color` token,
+  `squad`/`cwd`/`has_context`), `POST /api/collections` (`{name, color?}`),
   `PATCH /api/collections/:name` (`{name?, color?}` — rename + cascade and/or
   recolour; an empty `color` clears it), `DELETE /api/collections/:name`
   (members → General), `POST /api/sessions/:id/collection {collection}` (move;
   empty ⇒ General; an unknown target is rejected). `POST /api/sessions` accepts a
-  `collection` so a new chat is filed under the rail's current selection. The
-  `collection` field rides along in `GET /api/sessions`.
+  `collection` (a group's ＋ or the draft's Collection selector). The `collection`
+  field rides along in `GET /api/sessions`.
 - **Cross-browser sync** — two events on the multiplexed `/api/events` stream (see
   "Cross-browser session sync"): **`collections_changed`** (no sid, on
-  create/rename/delete) and **`session_moved`** (sid + `collection`), both handled
-  in [web/app.js](web/app.js) `subscribeGlobalEvents` by re-fetching collections +
-  sessions.
-- **Client** ([web/app.js](web/app.js)) — `loadCollections`/`renderCollections`/
-  `buildCollectionRow`/`selectCollection` paint the rail; `renderSessions`
-  **filters both the active and archived lists** to `activeCollection` via
-  `effectiveCollection` (folding unknown collections to General), while the
-  `archivedSessions` read-only-guard set stays **unfiltered**. `lastSessions`
-  caches the full payload so a rail click re-filters **without a refetch** — and
-  the pane picker + boot layout-validation read `lastSessions` (not the filtered
-  DOM) so they still reach sessions in any collection. **Move** = drag a session
-  row onto a rail collection (`sessionDrag` + the `dragover`/`drop` handlers) or
-  the session **⋯ → Move to** submenu; collection **create/rename/delete** use the
-  themed `uiPrompt`/`uiConfirm` + the shared `showFolderCtxMenu`. **Colour** —
-  `collectionDialog` (name + swatch grid, reused by create and the context-menu
-  **Change color…** item) proposes a default via `proposeCollectionColor` (first
-  unused palette colour) and PATCHes the choice; `collectionAccentVar` /
-  `collectionColorByName` / `sessionCollectionColor` map a collection/session to
-  its `--col-accent`. New chats pass `activeCollection`. i18n keys under
-  `collections.*` (en/fr/es/de).
-- **The rail follows the focused chat.** `syncCollectionToSession(id)`
-  ([web/app.js](web/app.js)) resolves the session's `effectiveCollection` and
-  `selectCollection`s it, so the rail highlight **and** the filtered middle list
-  name the conversation the user is now in; without it both left columns stayed on
-  the previous collection while the chat changed underneath them. It is called
-  **from `setFocusedPanel`** — the one place that already decides "this is the chat
-  the user is in", so a tab click, a sidebar click on an already-open session, a
-  search/picker hit, **clicking into another pane** (which routes through
-  `setFocusedPanel`, never `activateTab`), and the boot layout restore are all
-  covered by one call site rather than each needing its own. A draft/editor/
-  terminal tab has a null `sessionId` ⇒ no-op, and `selectCollection` early-returns
-  when the collection is unchanged, so the common case costs nothing.
-- **A session the cache has never seen** — the boot-restore case, where
-  `loadSessions` only fetched General but a restored tab lives elsewhere — is
-  resolved by `fetchSessionMeta`, one **collection-less** `GET /api/sessions?q=<id>`
-  (blank `collection` ⇒ no filter server-side; `q` matches title **or** id, so the
-  id is re-checked before the row is trusted), active list then archived, with
-  unresolvable ids remembered in `sessionMetaMisses` so a hidden/deleted session
-  costs one lookup rather than one per focus change. Because that is a round-trip
-  and focus moves on a click, the result is applied **only if the session is still
-  focused** (`activeSessionId === id`) — otherwise a slow lookup would yank the
-  columns to a chat the user has already left. `newChat` deliberately does **not**
-  go through `activateTab`/the picker (it inlines the mount), so creating a chat
-  fires no lookup — it is already filed under `activeCollection`.
-- **`restoreLayout` re-asserts the persisted focus after mounting.** Each
-  `activateTab` in its loop focuses its own pane, so the **last** pane restored
-  ended up focused rather than the one the user left focused — `activeSessionId`,
-  the sidebar `.active-focused` highlight and (now) the collection rail all named
-  the wrong pane. A final `setFocusedPanel(panels[focusIdx])` after the loop fixes
-  all three at once.
+  create/rename/delete → `loadSessions()`) and **`session_moved`** (sid +
+  `collection` → `refreshGroups([old, new])`), both handled in
+  [web/app.js](web/app.js) `subscribeGlobalEvents`.
+- **Collection CRUD** uses the themed `uiPrompt`/`uiConfirm` + the shared
+  `showFolderCtxMenu`. **Colour** — `collectionDialog` (name + swatch grid, reused
+  by create and the menu's **Change color…** item) proposes a default via
+  `proposeCollectionColor` (first unused palette colour) and PATCHes the choice;
+  `collectionAccentVar` / `collectionColorByName` / `sessionCollectionColor` map a
+  collection/session to its `--col-accent`. i18n keys under `collections.*` and
+  `tree.*` (en/fr/es/de).
+- **A new chat's collection is explicit.** A group's **＋** creates the session
+  directly in that collection. Every other path — the sidebar **New Chat** button
+  (`openNewChatDraft`), a pane's **+** tab, Files → **Open Chat here**
+  (`openNewChatDraft({dir})`, the folder kept in `draftDirs` per draft key and
+  shown as "Folder: …") — opens a **draft** whose picker (`.pane-picker`) has a
+  **Collection** selector (`renderPickerCollection`, `.pane-picker-collection-*`)
+  beside the Squad one. It starts on the collection last chosen in a draft
+  (`agent_draft_collection`; General the first time); picking a collection whose
+  profile names a default squad fills the Squad selector unless the user picked a
+  squad on this draft (`panel._pickerSquadPicked`). `newChat(panel, squad, dir,
+  collection)` resolves: explicit args → the active draft's picker choices
+  (collection, squad, pinned folder — also on the implicit first-message create)
+  → General / the global squad. A group's ＋ ignores the draft entirely.
 - **"Folders" panel renamed to "Files"** — the existing filesystem/cwd browser is
   **relabeled "Files" in the UI only** (`folders.label`/`folders.toggle` i18n,
   [web/docs/03-sessions.md](web/docs/03-sessions.md)); its internal identifiers
   (`#folders-panel`, `handleFolder`, `/api/sessions/:id/folder`, `foldersDir`)
-  are unchanged, so the new `collection` code never collides with the old
-  `folders` code.
+  are unchanged, so the `collection` code never collides with the `folders` code.
 - **No-op contract**: no `collections.json` ⇒ only General exists and every
-  session shows under it — byte-identical to the pre-collections sidebar.
+  session shows under it.
 
 ### Session list pagination (server-side windowing)
 
-The middle session list and the left Archived panel are **paginated server-side**
-— the client no longer holds every session. Both the active list (`#session-list`)
-and the archived panel (`#archived-list`) load an initial **50** rows, then **5
-more** each time the user scrolls to within ~5 rows of the end.
+The tree's groups and the Archived panel are **paginated server-side** — the
+client never holds every session. Each tree group loads **10** rows then **20**
+per "Show more" (see "Session collections"); the Archived panel (every
+collection's archived sessions) loads **50**, then **5** more each time the user
+scrolls to within ~5 rows of its end.
 
 - **Endpoint** = the extended `GET /api/sessions`
   ([server/session_list.go](server/session_list.go) `handleListSessions`). It is
@@ -3107,12 +3137,13 @@ more** each time the user scrolls to within ~5 rows of the end.
   exactly as before (`{sessions:[…]}`, no total) — protecting any other consumer +
   the existing tests. With `limit` present it filters by `collection` (effective —
   blank/unknown folds to General via the server-side `effectiveCollection`, using
-  `sessions.ListCollections()`), `archived` (`true`/`false`), and a `q` substring
-  over title/id, applies `sort` (`recent` keeps `Registry.List()`'s `last_used`
-  desc; `created`/`az` re-sort server-side so ordering is stable across pages),
-  then slices `[offset:offset+limit]` and returns `{sessions, total, offset,
-  limit}`. `total` is the filtered count **before** slicing — it drives the toolbar
-  count and the client's exhaustion check. Hidden sessions are always excluded.
+  `sessions.ListCollections()`; an **absent/blank** `collection` means no filter),
+  `archived` (`true`/`false`), and a `q` substring over title/id, applies `sort`
+  (`recent` keeps `Registry.List()`'s `last_used` desc; `created`/`az` re-sort
+  server-side so ordering is stable across pages), then slices
+  `[offset:offset+limit]` and returns `{sessions, total, offset, limit}`. `total`
+  is the filtered count **before** slicing — it drives "Show more (N)" and the
+  client's exhaustion check. Hidden sessions are always excluded.
 - **`GET /api/session-ids`** ([server/session_list.go](server/session_list.go)
   `handleSessionIDs`) is a slim id-only list of every non-hidden session, fetched
   **once at boot** to validate the persisted pane layout (drop tabs for sessions
@@ -3120,38 +3151,26 @@ more** each time the user scrolls to within ~5 rows of the end.
   `/api/sessions/ids` — a static `ids` segment under `/sessions/` would collide
   with the `/api/sessions/:id/…` wildcard in gin's route tree and panic at startup
   (same reason import lives at `/api/import/session`).
-- **Client windowing** ([web/app.js](web/app.js)): two independent view-states
-  (`activeView`, `archivedView` — each `{loaded, total, loading, exhausted,
-  lastGroupKey, seq}`). `resetActiveView()` clears + loads page 1 (collection /
-  search / sort change); `loadMoreActive()` appends the next page; a **sentinel
-  `<li class="session-sentinel">`** at the list end, watched by an
-  **`IntersectionObserver`** with `rootMargin` ≈ `0 0 300px 0` (~5 rows early),
-  fires the next `PAGE_MORE` load. `reloadActivePrefix()` re-fetches `offset 0 ..
-  max(PAGE_INITIAL, loaded)` in place, **preserving scroll** — this is what
-  **`loadSessions()`** now does (its name is kept, so every create/delete/rename/
-  move + cross-browser push refreshes without yanking the user to the top). A
-  **per-view monotonic `seq`** drops stale in-flight responses (replaces the old
-  whole-list `_loadSessionsSeq`). The archived panel mirrors this (flat, recent
-  order); its observer only fires while the panel is expanded (its list is
-  `display:none` collapsed), and it is re-armed on expand.
-- **Search + sort are server-driven.** The `#session-search-input` handler
-  (debounced ~150ms) sets `q`; the sort menu sets `sort`; both call
-  `resetSessionViews()`. Timeframe headers (recent sort) are emitted incrementally
-  across pages via `activeView.lastGroupKey`.
-- **`lastSessions` (the old full-list cache) is retired**, replaced by
-  `sessionMeta` — a lazily-grown `id → session` map populated on every fetch. It
-  backs `sessionMetaById`, `sessionCollectionColor`, the archived read-only-guard
-  set, and the **pane picker** (which lists the sessions seen so far, its own
-  search box finding the rest). Boot layout-restore uses `/api/session-ids`
-  instead of the full list (a `null` id set ⇒ keep every tab, mount drops a dead
-  one on 404).
-- **Select-all covers loaded rows** (`currentViewIds` = the ids in the DOM), not
-  "all N in the collection"; the toolbar count still shows the true `total`.
+- **Archived windowing** ([web/app.js](web/app.js)): `archivedView`
+  (`{loaded, total, loading, exhausted, seq}`), `loadMoreArchived` / `reloadArchivedPrefix`
+  / `resetArchivedView`, a **sentinel `<li class="session-sentinel">`** watched by
+  an `IntersectionObserver` (only fires while the panel is expanded), and the
+  query built by `sessionsQuery(true, …)` (no collection filter, the current
+  search `q`, recent order). A **per-view monotonic `seq`** drops stale in-flight
+  responses.
+- **`sessionMeta`** — a lazily-grown `id → session` map populated on every fetch —
+  backs `sessionMetaById`, `sessionCollectionColor`, `groupOf`, the archived
+  read-only-guard set, and the **pane picker** (which lists the sessions seen so
+  far, its own search box finding the rest). Boot layout-restore uses
+  `/api/session-ids` (a `null` id set ⇒ keep every tab, mount drops a dead one on
+  404).
 - **No-op contract:** a caller omitting `limit` gets the byte-identical legacy
   full list; CLI/TUI are untouched (server-only UI). Tests:
   [server/session_list_test.go](server/session_list_test.go)
   (`TestListSessionsPaginated`, drives the real router — also guards the
-  `/session-ids` route registration).
+  `/session-ids` route registration) and
+  [server/collections_active_test.go](server/collections_active_test.go)
+  (`TestListCollectionsActiveExcludesArchived`).
 
 ### Collection context (per-collection instructions + memory)
 
@@ -4957,9 +4976,9 @@ engine is [server/export_import.go](server/export_import.go).
   **session context-menu** item (`openSessionCtxMenu`, `menu.export`).
   `importSessionPrompt()` opens a hidden file picker, validates the JSON parses,
   POSTs it, then refreshes collections + sessions and opens the new chat; it's
-  wired to the **session-pane toolbar** import button (`#session-import-btn`,
-  `sessionbar.import`, beside New chat). Toasts on success/failure. i18n keys
-  `menu.export` / `sessionbar.import` / `app.export.failed` / `app.import.{badFile,
+  wired to the sidebar's **Import a conversation** action (`#sidebar-import-btn`,
+  `sidebar.import`, under New Chat). Toasts on success/failure. i18n keys
+  `menu.export` / `sidebar.import` / `app.export.failed` / `app.import.{badFile,
   failed,done}` (en/fr/es/de). CLI/TUI are untouched.
 
 ### Session spawning (`/spawn` + `spawn_session`)
@@ -5162,9 +5181,10 @@ What omnis itself contributes (milestone 1):
   the checked `POST /api/terminal/token` — so a wrong/missing login is
   refused before any upgrade is attempted even with no token configured
   (empty `OMNIS_SERVER_TOKEN` fallback mode).
-- **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI shows
-  the bare login in the sidebar footer ("Signed in as" is only its tooltip) (`loadWhoami`, hidden for
-  `web-user` and in the collapsed rail).
+- **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI labels
+  the sidebar's account button with the login (`loadAccountIdentity`; "Omnis"
+  for the single-user `web-user`, avatar only in the collapsed rail) and shows
+  it as the account menu's first line — see "Account menu".
 - **Packaging assets** under `packaging/supervisord/` (program template with
   `${VAR}` placeholders — supervisord does not expand `%(ENV_…)s` in `user=`,
   so the entrypoint renders it with `envsubst`) and `packaging/container/`
@@ -6394,6 +6414,68 @@ whole message** — that quadratic re-parse is what makes the UI feel slow even
 when the wire is fast; `lightStreamMd` is the bounded exception, and only the
 heavy parser produces the authoritative final HTML at block flush / finalize.
 
+### Settings dialog (modal over the chat)
+
+Settings open in a **modal dialog** over the chat, like Claude Desktop's — the chat
+panes stay mounted behind it ([web/settings.js](web/settings.js) `ensurePanel`,
+[web/css/settings/modal.css](web/css/settings/modal.css)). They used to replace the
+chat area (`#chat.chat--settings`) with their category list in the middle column;
+both are gone.
+
+- **DOM**: `#settings-modal` (backdrop, `z-index: 150` — below `.app-dialog-overlay`
+  200, context menus 1000 and `.ui-modal-overlay` 1100, so dialogs opened from a
+  section still sit on top) > `.settings-modal-dialog` (`min(1200px, 94vw) ×
+  min(860px, 90vh)`; full-screen below 820px, with the nav as a horizontal
+  scroller) > `.settings-modal-head` (title + ✕) + `.settings-modal-main` >
+  `nav.settings-modal-nav` + the existing `#settings-panel`.
+- **Nav**: `MENU_GROUPS` orders the sections into Preferences (Appearance), Agents
+  (Agents & squads, Skills, Commands, Automation), Connections (Models, MCP, A2A,
+  Registries), Security (Permissions, Hooks) and Help (Documentation);
+  `MENU_ITEMS` stays the label/kind source. `#settings-nav-search` filters items by
+  label or id (`filterNav`), hiding empty groups. The former "Raw JSON" nav entry
+  is replaced by the **Form / Raw JSON toggle** in the section toolbar (shown for
+  JSON sections, hidden for client-only ones by `.settings-panel--client-only`);
+  `syncActiveHighlight` keeps it in step with `state.activeView`.
+- **Public API**: `window.Settings = { open, close, isOpen, openSection,
+  prefsReady, saveNotifications, refreshSchedules }`. `open()` reopens the last
+  **config** section visited (`state.lastMenuFile`, default Skills —
+  `SHORTCUT_SECTIONS` Appearance/Documentation don't count);
+  `openSection(id, anchor?)` opens a given section (never toggles closed) and
+  scrolls `#anchor` into view (the account menu's Language uses
+  `openSection("appearance", "appearance-language")`). **`Ctrl+,` / `Cmd+,`**
+  opens Settings from anywhere.
+- **Closing**: ✕ or **Escape**; a backdrop click does nothing (heavy forms). The
+  capture-phase `onSettingsKeydown` leaves Escape to whatever sits on top — a
+  nested dialog (`NESTED_DIALOGS`), the Monaco editor, an open dropdown
+  (`[aria-expanded="true"]`) — closes the assistant drawer first, and clears a
+  non-empty nav search first. **Unsaved edits are kept with no prompt**: `close()`
+  leaves `state.parsed`/`state.raw` untouched, so reopening shows them and Save
+  still saves them; `beforeunload` guards a reload. This also keeps code-driven
+  closes (`selectSession`, `newChat`) synchronous.
+- **Reload/restart banner**: `placeBanner()` moves `#restart-banner` to the top of
+  `#settings-panel` while the dialog is open and back to the top of `#chat-area`
+  when it closes, so a pending reload stays visible either way.
+- The **Settings assistant** FAB + drawer live inside the panel, hence inside the
+  dialog (see "Settings Assistant").
+
+### Account menu (sidebar footer)
+
+The sidebar footer is **one account button** (`#account-btn`: avatar initial,
+label, chevron) — it replaced the Settings / Appearance / Documentation buttons and
+the `#sidebar-user` login badge ([web/app.js](web/app.js) "Account button + menu",
+styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)).
+`loadAccountIdentity` labels it with the login from `GET /api/whoami` (not shown for
+the single-user `web-user` outside cookie mode ⇒ "Omnis"); the collapsed rail shows
+the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
+(reusing the `.folder-ctx-item` / `.folder-ctx-sep` look), anchored above the
+button: the login (when shown), **Settings** (`Ctrl+,` / `⌘,` hint), **Appearance**,
+**Language**, **Documentation**, then the running version (`account.version`, from
+the cached `updateStatus`; fetched on demand if the menu opens before the boot
+check landed; omitted for `dev`) and, when an update is available, **Update to
+vX** → `openUpdateDialog()` (the header Update button stays). It closes on outside
+click, Escape, scroll, resize and item click — an item also closes the phone
+drawer (`closeNav`).
+
 ### Web UI tooltips (`data-tip`, never native `title`)
 
 All hover tooltips in the web UI go through the **in-app themed tooltip
@@ -6608,30 +6690,26 @@ have, so the question waited forever. CLI/TUI ignore the flag.
 
 ### Web UI small-screen layout (phone drawer)
 
-The desktop shell is a three-column flex row — `#sidebar` (280px) | `#session-pane`
-(280px) | `#chat-area` ([common.css](web/css/features/common.css) `body { display: flex }`).
-That is ~560px of chrome before the chat starts, so on a 390px phone the chat was
-pushed **entirely off-screen**. Below **820px** the two left columns are lifted out
-of the flow into a **single off-canvas drawer** and the chat takes the whole viewport.
+The desktop shell is a two-column flex row — `#sidebar` | `#chat-area`
+([common.css](web/css/features/common.css) `body { display: flex }`). Below
+**820px** the sidebar is lifted out of the flow into a **full-height, off-canvas
+drawer** and the chat takes the whole viewport. (Before the collection tree the
+drawer stacked two columns, sidebar over session list, with a `--m-nav-split`
+height cap; both are gone.)
 
 Nearly all of it is CSS, in one partial ([web/css/features/responsive.css](web/css/features/responsive.css),
 imported **last** in [styles.css](web/css/styles.css) so its media-query rules win):
 
-- **The drawer** — `#sidebar` + `#session-pane` become `position: fixed`, stacked
-  **vertically** (sidebar on top, capped at `--m-nav-split`; session list below),
-  both `translateX(-100%)`. `body.nav-open` slides them in; `#nav-scrim` is the
-  backdrop. Stacking them (rather than shrinking the sidebar to its icon rail) keeps
-  **both columns' labels readable** and keeps Archived/Files/Settings reachable — the
-  rail hides those (`#sidebar.collapsed #folders-panel { display: none }`).
+- **The drawer** — `#sidebar` becomes `position: fixed`, full height (`100dvh`),
+  `width: var(--m-drawer-w)` and `translateX(-100%)`. `body.nav-open` slides it in;
+  `#nav-scrim` is the backdrop. The whole sidebar (tree, Archived, Files, account
+  button) stays reachable — unlike the icon rail, which hides Archived/Files.
 - **`!important` is load-bearing.** The theme sheets are linked **after** `styles.css`
   and carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
   z-index: 1 }` (it anchors their drop-shadow onto the chat). Without `!important` on
   `position`/`z-index` the sidebar stays **in flow** and sinks under the scrim. Their
   drop-shadow is also zeroed — parked off-canvas, the sidebar's right edge sits at
   x=0 and the shadow bleeds back in as a stray strip down the chat.
-- **`#collections-list` gets `flex: 0 0 auto` + the sidebar scrolls.** On the desktop
-  the list takes `flex: 1` and absorbs the column's slack; inside the height-capped
-  drawer that same rule squeezes it to ~2 rows and **slices the third mid-height**.
 - **Single pane** — `.chat-pane` drops its `min-width: 360px`; dividers and the split
   button are hidden and only the focused pane shows (`#chat:not(.solo) .chat-pane:not(.is-focused)`).
   The multi-pane **layout/localStorage is left untouched**, so rotating back to a wide
@@ -6656,19 +6734,17 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
 - **`@media (pointer: coarse)`** is the **touch block** — keyed on input device, not
   width, so a touch laptop gets it too. It does two things. (1) **Reveals every
   hover-only control**: `.turn-action-btn`, the tab `×`, `.code-copy-btn`,
-  `.copy-msg-group`, the dimmed `.pane-toolbar`, and — the one that actually blocked
-  users — the **per-session-row ⋮ / delete stack** (`.session-actions`, revealed by
-  `#session-list li:hover`, so on touch it was reachable only via the sticky `:hover`
-  a tap sometimes leaves behind, and *that same tap opens the session*). Covers
-  `#archived-list` too (same class). Bulk-select still hides them
-  (`#session-pane.selecting … { display: none }` out-specifies the reveal).
-  (2) **Enlarges the touch targets** the mouse-sized chrome makes too small
-  (24–28px): session-row buttons 34px, session-pane toolbar 36px, pane hamburger
-  36px / tab × 24px / `+` 40px / split-close 32px, composer icon buttons 34px,
-  message-copy 32px. The session-row stack must also **turn horizontal** — two
-  enlarged buttons stacked would outgrow the ~52px row they are centred in — so the
-  row's reserved right gutter widens from 30px to 84px (name/meta ellipsis absorbs
-  it).
+  `.copy-msg-group`, the dimmed `.pane-toolbar`, the **per-session-row ⋮ / delete
+  actions** (`.session-actions`, revealed by `li:hover`, so on touch they were
+  reachable only via the sticky `:hover` a tap sometimes leaves behind, and *that same
+  tap opens the session*) for the tree and `#archived-list`, and a **collection
+  header's ＋ / ⋯** (`.group-actions`, which replace its count on hover). Bulk-select
+  still hides the row actions (`#sidebar.selecting … { display: none }` out-specifies
+  the reveal). (2) **Enlarges the touch targets** the mouse-sized chrome makes too
+  small (22–28px): session-row and collection-header buttons 34px, sort/new/search
+  close 34px, pane hamburger 36px / tab × 24px / `+` 40px / split-close 32px, composer
+  icon buttons 34px, message-copy 32px. Since the row actions are always shown there,
+  rows reserve an 84px right gutter instead of overlaying the title.
 - **Pull-to-refresh** (`wirePullToRefresh` in [web/app.js](web/app.js), `.ptr-indicator`
   in the pane template) is implemented **in-app, not by the browser**. The native gesture
   cannot work here: omnis is a fixed app shell (`body { overflow: hidden }`), so the
@@ -6688,18 +6764,20 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
 
 JS is a thin driver ([web/app.js](web/app.js) "Small-screen nav drawer"): `MOBILE_MQ`
 (**keep the 820px query in step with the media query**), `body.nav-open` toggling, and
-three behaviour hooks — `splitPanel` early-returns, `selectSession`/`newChat` call
-`closeNav()` (the drawer covers the chat it just opened), and picking a **Settings**
-section closes it too (the nav lives in the drawer's lower half but its panel renders
-in the chat area *behind* it). The `.pane-menu-btn` hamburger is the first item in each
-pane's tab bar (`display: none` on desktop).
+three behaviour hooks — `splitPanel` early-returns, `selectSession`/`newChat`/
+`openNewChatDraft` call `closeNav()` (the drawer covers the chat it just opened), and
+any **account-menu** item closes it too (the settings dialog it opens is full-screen
+on phones, so the drawer would otherwise still be open behind it once the dialog
+closes). The `.pane-menu-btn` hamburger is the first item in each pane's tab bar
+(`display: none` on desktop).
 
 **No-op contract:** every layout rule is scoped inside the media query, so the desktop
 shell is byte-identical to before. **Known gaps (follow-ups):** drag-and-drop (tab
 reorder, session→collection move) has no touch port — the ⋯ → "Move to" menu is the
-touch path; right-click context menus need a long-press synthesiser; Settings panels
-render and are navigable, but wide cards (e.g. a Models row) scroll **inside**
-`.settings-body-content` (`overflow-x: auto`) rather than wrapping.
+touch path; right-click context menus need a long-press synthesiser (a collection's
+menu is still reachable from its ⋯); the settings dialog is full-screen with its
+section nav as a horizontal scroller, and wide cards (e.g. a Models row) scroll
+**inside** `.settings-body-content` (`overflow-x: auto`) rather than wrapping.
 
 ### Web UI split panels (VS Code-style)
 
@@ -6785,9 +6863,9 @@ Layout (per-pane `tabs` + `activeId`/`activeKey` + widths + focus) persists to
 `localStorage["agent_toolkit_layout"]` as a **v2** record (`saveLayout`/
 `restoreLayout`; v1 single-`sessionId` records still load), restored on boot after
 `loadSessions`, dropping dead session ids (editor `file#…` keys survive the
-live-session filter and reopen via the editor path). The
-Settings panel still appends to `#chat`; `#chat.chat--settings > .chat-pane`
-hides panes while it's open, and `rebuildChatDOM` preserves `#settings-panel`.
+live-session filter and reopen via the editor path). Settings no longer live in
+`#chat` (they open in a modal over it — see "Settings dialog"), so `#chat` holds
+only panes and dividers.
 
 ### Web UI file editor (Monaco)
 

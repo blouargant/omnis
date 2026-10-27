@@ -1,12 +1,17 @@
 # Settings Panel
 
-Click the gear icon at the bottom of the sidebar to open Settings. The panel
-replaces the chat surface; the chat resumes when you close Settings.
+Open Settings from the **account button** at the bottom of the sidebar
+(**Settings**, or press `Ctrl+,` / `⌘,`). Settings open in a **dialog over the
+chat**, which stays as it was behind it. Close the dialog with **✕** or
+**Escape**; edits you haven't saved are kept until you save or discard them.
+The account menu's **Appearance**, **Language** and **Documentation** entries
+open the dialog directly on those sections.
 
 ## Sections
 
-The sidebar lists the available sections. Each maps either to a JSON config
-file on disk or to a client-only view:
+The dialog's left column lists the sections, grouped by theme (Preferences,
+Agents, Connections, Security, Help), with a search box that filters them by
+name. Each maps either to a JSON config file on disk or to a client-only view:
 
 | Section        | Backing file                  | Purpose |
 |---|---|---|
@@ -20,13 +25,13 @@ file on disk or to a client-only view:
 | **Appearance** | (client only)                 | Theme picker. |
 | **Documentation** | (client only)              | This page. |
 
-Below the section list a **Raw JSON** entry switches the active JSON section
-into a textarea editor. The Form ↔ Raw toggle preserves unsaved edits across
-visits within the same session.
+A JSON section shows a **Form / Raw JSON** toggle above its content; Raw JSON
+switches it to a text editor. The toggle preserves unsaved edits across visits
+within the same session.
 
 ## Save flow
 
-JSON sections show a footer with **Discard** and **Save**. Saving runs a
+JSON sections show **Discard** and **Save** at the top right. Saving runs a
 server-side validation pass; on success a non-intrusive banner offers to
 **Reload** the agent (no downtime) or **Restart server** (for env/binary
 changes).

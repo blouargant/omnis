@@ -8,7 +8,7 @@ not the code.
 This Web UI is one of three ways to drive the agent (alongside the CLI and the
 TUI). It exposes:
 
-- A chat surface (left sidebar: sessions / main pane: transcript and composer).
+- A chat surface (left sidebar: your collections and their sessions / main pane: transcript and composer).
 - A settings panel for editing every configuration file the agent reads.
 - A documentation viewer (this page).
 
@@ -28,13 +28,15 @@ commands — subject to the permission rules described later.
 
 ## Switching sessions
 
-Each chat in the **Sessions** sidebar is an isolated conversation: its
+Each chat in the sidebar is an isolated conversation: its
 transcript, task graph, todo list, memory, and mailbox namespace are all
 scoped to that session. Switching sessions never mixes state.
 
-- **+** (top of sidebar) — start a new session.
+- **New Chat** (top of sidebar) — open a draft; choose its collection, then
+  send a first message. The **+** on a collection's header starts a chat
+  directly in that collection.
 - Click a session row — open it.
-- Hover a session row — rename / delete buttons appear.
+- Hover a session row — its actions menu and delete button appear.
 
 ## How a new chat is routed (Omnis)
 
@@ -54,8 +56,8 @@ instead of guessing.
 You can still **force** a starting squad: when `agents.json` declares more
 than one squad, a compact dropdown appears next to the **+** button to pin
 the next session to a specific squad (bypassing the router for that chat).
-With a single-squad configuration the dropdown stays hidden. The sidebar
-shows a small badge next to sessions running on a non-default squad. See
+With a single-squad configuration the dropdown stays hidden. Hovering a
+session in the sidebar shows its squad when it is not the default one. See
 the **Sessions** documentation page for the full lifecycle, and
 **Architecture** for how routing works.
 

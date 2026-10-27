@@ -1,20 +1,89 @@
-/* Collections list + the middle session-pane column.
+/* Sidebar primary actions + the collection tree.
  *
- * The three-column layout is: #sidebar (left: app chrome + Collections list +
- * Archived + footer) → #session-pane (middle: session list + Files browser) →
- * #chat-area (right). The Collections list lives INSIDE #sidebar (below New
- * Chat); selecting a collection filters the session list in #session-pane.
- * "General" is pinned on top as the always-present bucket for un-filed sessions. */
+ * The layout is two columns: #sidebar (app chrome, Search / Import, the
+ * collection tree, Archived, Files, account button) → #chat-area. Every
+ * collection is a foldable group (li.collection-group) whose header
+ * (.collection-row) sits above its own session rows (ul.collection-sessions);
+ * "General" is pinned on top as the always-present bucket for un-filed
+ * sessions. Session-row look is shared with the Archived panel in
+ * features/sidebar.css. */
 
-/* ─── Collections section (inside the left #sidebar) ──────────── */
-#collections-header {
+/* ─── Primary actions (Search, Import) under New Chat ─────────── */
+#sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px 2px;
+  flex-shrink: 0;
+}
+.sidebar-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-action svg { flex-shrink: 0; color: var(--text-muted); }
+.sidebar-action:hover { background: var(--bg-raised); }
+
+/* Inline search field, shown in place of the Search action. */
+#sidebar-search-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin: 0 0 1px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+#sidebar-search-row[hidden] { display: none; }
+#sidebar-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 0;
+}
+#sidebar-search-input::placeholder { color: var(--text-faint); }
+#sidebar-search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+#sidebar-search-close:hover { background: var(--bg-raised-hover); color: var(--text); }
+.sidebar-action[hidden] { display: none; }
+
+/* ─── Collections header (label · sort · new collection) ──────── */
+#collections-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 8px 10px 4px 14px;
   flex-shrink: 0;
 }
 .collections-title { flex: 1; margin: 0; }
+#collections-sort,
 #collections-new {
   display: flex;
   align-items: center;
@@ -28,51 +97,93 @@
   cursor: pointer;
   flex-shrink: 0;
 }
+#collections-sort:hover,
 #collections-new:hover { background: var(--bg-raised-hover); color: var(--text); }
 
-/* The list grows to fill the sidebar's free space so Archived + the footer sit
- * at the bottom. It scrolls internally once collections overflow. */
-#collections-list {
+/* The tree fills the sidebar's free space (Archived, Files and the footer sit at
+ * the bottom) and scrolls internally. */
+#collection-tree {
   list-style: none;
   margin: 0;
   padding: 2px 8px 6px;
   overflow-y: auto;
   flex: 1;
   min-height: 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
+.collection-group { margin-bottom: 2px; }
 
+/* Bulk-select bar (count · select all · actions · cancel). */
+#tree-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 4px;
+  padding: 4px 4px 4px 6px;
+  border: 1px solid var(--accent-border-soft);
+  border-radius: 6px;
+  background: var(--accent-bg-soft);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+#tree-select-bar[hidden] { display: none; }
+#tree-select-count { flex: 1; color: var(--text); }
+#tree-select-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+#tree-select-bar button:hover { background: var(--bg-raised-hover); }
+#tree-selectall-btn.is-active { background: var(--accent); color: #fff; }
+
+/* Search: every group with a hit is shown open, the others hidden. */
+#tree-search-empty {
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+#tree-search-empty[hidden] { display: none; }
+#collection-tree.searching > li.collection-group:not(.search-hit) { display: none; }
+#collection-tree.searching > li.collection-group > .collection-sessions { display: block; }
+#collection-tree.searching > li.collection-group .group-chevron { transform: rotate(90deg); }
+#collection-tree.searching .group-more,
+#collection-tree.searching .group-empty { display: none; }
+
+/* ─── Group header ────────────────────────────────────────────── */
 .collection-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 8px 7px 10px;
+  gap: 7px;
+  padding: 6px 6px 6px 4px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--text);
   font-size: 13px;
+  font-weight: 600;
   user-select: none;
   position: relative;
 }
 .collection-row:hover { background: var(--bg-raised); }
-.collection-row.active { background: var(--bg-active); }
-/* The selected collection's left accent bar. --col-accent is set per-row (in JS,
- * buildCollectionRow) to var(--collection-<color>); it falls back to the app
- * accent for General / uncoloured collections. */
-.collection-row.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--col-accent, var(--accent-strong));
+.collection-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.group-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 0.12s ease;
 }
-/* Drop target while dragging a session row onto a collection. */
-.collection-row.drag-over {
+.collection-group.is-open > .collection-row .group-chevron { transform: rotate(90deg); }
+/* Drop target while dragging a session row onto a group. */
+.collection-group.drag-over > .collection-row {
   background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
   outline: 1px dashed var(--accent-strong);
   outline-offset: -2px;
@@ -83,9 +194,9 @@
   color: var(--accent-strong);
   flex-shrink: 0;
 }
-/* The folder glyph is tinted with the collection's own colour (--col-accent),
- * so every collection is recognisable in the rail even when not selected;
- * uncoloured collections keep the muted default. */
+/* The folder glyph is tinted with the collection's own colour (--col-accent, set
+ * on the group in JS), so every collection is recognisable; uncoloured
+ * collections keep the muted default. */
 .collection-icon {
   display: inline-flex;
   color: var(--col-accent, var(--text-muted));
@@ -93,10 +204,7 @@
 }
 /* Colour pastille shown IN PLACE of the folder glyph when the sidebar is
  * collapsed to a rail (show/hide in features/sidebar.css): the collection's
- * initials, in its own colour (--col-accent, mirroring the tinted glyph) on a
- * faint disc of the same hue. Colouring the letter rather than filling the disc
- * keeps every mid-tone hue legible and matches the expanded folder glyph.
- * Hidden while the sidebar is expanded. */
+ * initials, in its own colour on a faint disc of the same hue. */
 .collection-badge {
   display: none;
   align-items: center;
@@ -113,142 +221,98 @@
 }
 .collection-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .collection-count {
   font-size: 11px;
+  font-weight: 400;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
-.collection-row.active .collection-count { color: var(--text); }
-
-/* ─── Middle column: session list + Files browser ─────────────── */
-#session-pane {
-  width: var(--session-pane-w, 280px);
-  flex-shrink: 0;
-  background: var(--bg-panel);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* The column divider lives on the session list, not the pane, so it stops at the
- * toolbar — the center toolbar and the right pane tab bar then read as one
- * continuous top strip with no vertical line between them. */
-#session-pane #session-list { border-right: 1px solid var(--border); }
-/* While a session row is being dragged onto a collection, dim it. */
-#session-list li.dragging { opacity: 0.45; }
-
-/* ─── Session-pane top toolbar ─────────────────────────────────
- * A bar matching the left header height (--topbar-h). Three mutually-exclusive
- * rows share it (normal / search / select); only one is visible at a time. */
-#session-topbar {
-  min-height: var(--topbar-h);
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  padding: 8px 8px 8px 12px;
-  display: flex;
-  align-items: center;
-  position: relative;
-}
-/* A short, subtle vertical divider at the seam between this (center) top bar and
- * the right column's pane tab bar. The two bars share --bg-panel and read as one
- * continuous bar; this inset line (a little darker than the bar, not reaching its
- * top/bottom) just separates the center buttons from the tabs. */
-#session-topbar::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 1px;
-  background: color-mix(in srgb, var(--bg-panel) 94%, #000);
-}
-.session-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-.session-bar-row[hidden] { display: none; }
-.session-bar-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-bar-actions {
-  display: flex;
+/* Hover actions (＋ new chat here, ⋯ menu) take the count's place. */
+.group-actions {
+  display: none;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   flex-shrink: 0;
 }
-.session-bar-btn {
+.collection-row:hover .group-actions,
+.collection-row:focus-within .group-actions { display: inline-flex; }
+.collection-row:hover .collection-count,
+.collection-row:focus-within .collection-count { display: none; }
+.group-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  flex-shrink: 0;
 }
-.session-bar-btn:hover { background: var(--bg-raised-hover); color: var(--text); }
-.session-bar-btn.is-active { background: var(--bg-active); color: var(--text); }
-.session-bar-btn-text {
-  width: auto;
-  padding: 0 10px;
-  gap: 5px;
+.group-actions button[hidden] { display: none; }
+.group-actions button:hover { background: var(--bg-raised-hover); color: var(--text); }
+
+/* ─── Group body ─────────────────────────────────────────────── */
+.collection-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+}
+.collection-group:not(.is-open) > .collection-sessions,
+.collection-group:not(.is-open) > .group-more,
+.collection-group:not(.is-open) > .group-empty { display: none; }
+/* A focused session not yet among the loaded rows, shown after them. */
+.collection-sessions li.pinned { margin-top: 4px; }
+.collection-sessions li.pinned::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: -3px;
+  border-top: 1px dashed var(--border);
+}
+.group-empty {
+  padding: 4px 10px 6px 26px;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
+  color: var(--text-faint);
 }
-
-/* Search row: the input fills the bar between the leading icon and the ✕. */
-#session-search-row { padding-right: 2px; }
-.session-search-icon { flex-shrink: 0; color: var(--text-muted); }
-#session-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
+.group-empty[hidden] { display: none; }
+.group-more {
+  display: block;
+  margin: 0 0 4px 22px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  padding: 4px 2px;
-  outline: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
-#session-search-input::placeholder { color: var(--text-faint); }
-
-/* Select (bulk) row: the select-all checkbox lights up when everything shown is
- * already selected. */
-#session-selectall-btn.is-active { background: var(--accent); color: #fff; }
-#session-select-count { flex: 1; }
+.group-more[hidden] { display: none; }
+.group-more:hover { background: var(--bg-raised); color: var(--text); }
 
 /* ─── Select mode: per-row checkboxes ──────────────────────────
- * When #session-pane carries .selecting, each session row shows a leading
- * checkbox and a row click toggles selection instead of opening the chat. */
-#session-pane.selecting #session-list li:not(.session-group) {
+ * When #sidebar carries .selecting, each session row shows a leading checkbox
+ * and a row click toggles selection instead of opening the chat. */
+#sidebar.selecting .collection-sessions li {
   cursor: default;
-  padding-left: 34px; /* room for the absolutely-positioned checkbox */
+  padding-left: 32px; /* room for the absolutely-positioned checkbox */
 }
 .session-check {
   display: none;
   align-items: center;
   justify-content: center;
   position: absolute;
-  left: 10px;
+  left: 9px;
   top: 50%;
   transform: translateY(-50%);
   width: 16px;
@@ -257,17 +321,17 @@
   border-radius: 4px;
   color: transparent;
 }
-#session-pane.selecting #session-list li:not(.session-group) .session-check { display: inline-flex; }
-#session-pane.selecting #session-list li.row-selected .session-check {
+#sidebar.selecting .collection-sessions li .session-check { display: inline-flex; }
+#sidebar.selecting .collection-sessions li.row-selected .session-check {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
-#session-pane.selecting #session-list li.row-selected {
+#sidebar.selecting .collection-sessions li.row-selected {
   background: color-mix(in srgb, var(--accent-strong) 16%, transparent);
 }
 /* Hide the hover action buttons while selecting (row click = toggle, not open). */
-#session-pane.selecting #session-list li .session-actions { display: none; }
+#sidebar.selecting .collection-sessions li .session-actions { display: none; }
 
 /* ─── Collection colour picker (create + change-colour dialogs) ─────────
  * A grid of palette swatches rendered inside the shared ui-modal. Each swatch's

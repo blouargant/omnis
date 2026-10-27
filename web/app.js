@@ -147,16 +147,18 @@ const els = {
   newChatWrap:   document.getElementById("new-chat-wrap"),
   squadToggle:   document.getElementById("squad-toggle"),
   squadMenu:     document.getElementById("squad-menu"),
-  list:          document.getElementById("session-list"),
-  sessionPane:   document.getElementById("session-pane"),
-  sessionBarMain:   document.getElementById("session-bar-main"),
-  sessionBarTitle:  document.getElementById("session-bar-title"),
-  sessionSearchRow: document.getElementById("session-search-row"),
-  sessionSearchInput: document.getElementById("session-search-input"),
-  sessionSelectRow: document.getElementById("session-select-row"),
-  sessionSelectCount: document.getElementById("session-select-count"),
-  collectionsList: document.getElementById("collections-list"),
+  tree:          document.getElementById("collection-tree"),
   collectionsNew:  document.getElementById("collections-new"),
+  collectionsSort: document.getElementById("collections-sort"),
+  sidebarSearchBtn: document.getElementById("sidebar-search-btn"),
+  sidebarImportBtn: document.getElementById("sidebar-import-btn"),
+  sidebarSearchRow: document.getElementById("sidebar-search-row"),
+  sidebarSearchInput: document.getElementById("sidebar-search-input"),
+  treeSelectBar:   document.getElementById("tree-select-bar"),
+  treeSelectCount: document.getElementById("tree-select-count"),
+  treeSelectAllBtn: document.getElementById("tree-selectall-btn"),
+  treeBatchBtn:    document.getElementById("tree-batch-btn"),
+  treeSearchEmpty: document.getElementById("tree-search-empty"),
   archivedPanel: document.getElementById("archived-panel"),
   archivedHeader:document.getElementById("archived-header"),
   archivedList:  document.getElementById("archived-list"),
@@ -272,6 +274,12 @@ function bindPaneEls(root) {
   e.pickerSquadToggle = root.querySelector(".pane-picker-squad-toggle");
   e.pickerSquadName   = root.querySelector(".pane-picker-squad-name");
   e.pickerSquadMenu   = root.querySelector(".pane-picker-squad-menu");
+  e.pickerCollection       = root.querySelector(".pane-picker-collection");
+  e.pickerCollectionToggle = root.querySelector(".pane-picker-collection-toggle");
+  e.pickerCollectionName   = root.querySelector(".pane-picker-collection-name");
+  e.pickerCollectionGlyph  = root.querySelector(".pane-picker-collection-glyph");
+  e.pickerCollectionMenu   = root.querySelector(".pane-picker-collection-menu");
+  e.pickerDir   = root.querySelector(".pane-picker-dir");
   e.pickerList  = root.querySelector(".pane-picker-list");
   e.searchForm  = root.querySelector(".pane-search");
   e.searchInput = root.querySelector(".pane-search-input");
@@ -347,7 +355,7 @@ function setFocusedPanel(pid) {
   refreshSidebarActive();
   // The rail + middle list name the chat we just focused (fire-and-forget; a
   // draft/editor/terminal tab has no session, so the helper no-ops).
-  syncCollectionToSession(activeSessionId);
+  revealSessionInTree(activeSessionId);
   refreshFoldersPanel();
   saveLayout();
 }
@@ -357,10 +365,10 @@ function setFocusedPanel(pid) {
 // chat the user is actually working in stands out from those open in other
 // panes.
 function refreshSidebarActive() {
-  if (!els.list) return;
+  if (!els.tree) return;
   const shown = new Set(panels.flatMap(p => p.tabs));
   const focusedId = (focusedPanel() || {}).sessionId || null;
-  for (const li of els.list.children) {
+  for (const li of [...els.tree.querySelectorAll("li[data-id]"), ...els.archivedList.querySelectorAll("li[data-id]")]) {
     const id = li.dataset.id;
     li.classList.toggle("active", shown.has(id));
     li.classList.toggle("active-focused", !!focusedId && id === focusedId);
@@ -392,16 +400,13 @@ function layoutWidths() {
 }
 
 // rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
-// It removes only existing panes and dividers, preserving #settings-panel
-// (which Settings.js appends to #chat) and inserts panes before it.
 function rebuildChatDOM() {
   for (const el of [...els.chat.querySelectorAll(":scope > .chat-pane, :scope > .pane-divider")]) {
     el.remove();
   }
-  const anchor = els.chat.querySelector(":scope > #settings-panel");
   panels.forEach((p, i) => {
-    if (i > 0) els.chat.insertBefore(makeDivider(panels[i - 1], p), anchor);
-    els.chat.insertBefore(p.root, anchor);
+    if (i > 0) els.chat.appendChild(makeDivider(panels[i - 1], p));
+    els.chat.appendChild(p.root);
   });
   els.chat.classList.toggle("solo", panels.length <= 1);
   layoutWidths();
@@ -901,6 +906,13 @@ function wirePaneSearch(panel) {
 
 function renderPanePicker(panel) {
   renderPickerSquad(panel);
+  renderPickerCollection(panel);
+  // A draft opened from Files → "Open Chat here" starts in that folder.
+  const dir = isDraft(panel.activeTab) ? draftDirs.get(panel.activeTab) : "";
+  if (panel.els.pickerDir) {
+    panel.els.pickerDir.hidden = !dir;
+    panel.els.pickerDir.textContent = dir ? tr("picker.dir", { dir }) : "";
+  }
   const list = panel.els.pickerList;
   if (!list) return;
   list.innerHTML = "";
@@ -979,6 +991,7 @@ function renderPickerSquad(panel) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       panel._pickerSquad = sq.name;
+      panel._pickerSquadPicked = true; // a collection's default squad no longer overrides it
       closePickerSquadMenu(panel);
       renderPickerSquad(panel);
     });
@@ -1000,6 +1013,109 @@ function closePickerSquadMenu(panel) {
   if (!menu || !toggle) return;
   menu.hidden = true;
   toggle.setAttribute("aria-expanded", "false");
+}
+
+// ─── Draft collection selector ───────────────────────────────────────────────
+// A new chat's collection is explicit: a group's ＋ files it directly, every
+// other path (sidebar New Chat, a pane's + tab, Files → "Open Chat here") opens
+// a draft whose picker carries this selector. It starts on the collection last
+// chosen in a draft (DRAFT_COLLECTION_KEY; General the first time). Picking a
+// collection whose profile names a default squad shows that squad in the Squad
+// selector, unless the user picked a squad on this draft.
+const DRAFT_COLLECTION_KEY = "agent_draft_collection";
+const draftDirs = new Map(); // draft tab key → folder pinned by "Open Chat here"
+
+function draftDefaultCollection() {
+  let stored = "";
+  try { stored = localStorage.getItem(DRAFT_COLLECTION_KEY) || ""; } catch {}
+  const hit = collectionsData.find((c) => c.name.toLowerCase() === stored.toLowerCase());
+  return hit ? hit.name : GENERAL_COLLECTION;
+}
+
+function collectionGlyph(c) {
+  return c && c.general ? ICON_STAR : ICON_FOLDER;
+}
+
+// applyCollectionSquad shows the collection's default squad in the draft's Squad
+// selector when the user has not picked one on this draft, and puts the usual
+// squad back when the next collection has no default.
+function applyCollectionSquad(panel, c) {
+  if (panel._pickerSquadPicked) return;
+  if (c && c.squad && availableSquads.some((s) => s.name === c.squad)) {
+    panel._pickerSquad = c.squad;
+    panel._pickerSquadAuto = true; // set by the collection, not by the user
+    renderPickerSquad(panel);
+    return;
+  }
+  // Switching to a collection without a default undoes the previous one's.
+  if (panel._pickerSquadAuto) {
+    panel._pickerSquad = currentSquadChoice();
+    panel._pickerSquadAuto = false;
+    renderPickerSquad(panel);
+  }
+}
+
+function renderPickerCollection(panel) {
+  const pe = panel.els;
+  if (!pe.pickerCollection || !pe.pickerCollectionMenu) return;
+  const find = (n) => collectionsData.find((c) => c.name.toLowerCase() === String(n || "").toLowerCase());
+  if (!panel._pickerCollection || (collectionsData.length && !find(panel._pickerCollection))) {
+    panel._pickerCollection = draftDefaultCollection();
+    applyCollectionSquad(panel, find(panel._pickerCollection));
+  }
+  const current = find(panel._pickerCollection) || { name: GENERAL_COLLECTION, general: true };
+  pe.pickerCollectionMenu.innerHTML = "";
+  for (const c of (collectionsData.length ? collectionsData : [current])) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "squad-menu-item" + (c.name === current.name ? " selected" : "");
+    btn.setAttribute("role", "menuitem");
+    const accent = collectionAccentVar(c.color);
+    if (accent) btn.style.setProperty("--col-accent", accent);
+    btn.innerHTML = `<span class="pane-picker-collection-glyph">${collectionGlyph(c)}</span>`;
+    const label = document.createElement("span");
+    label.className = "squad-menu-label";
+    label.textContent = c.name;
+    btn.appendChild(label);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      panel._pickerCollection = c.name;
+      try { localStorage.setItem(DRAFT_COLLECTION_KEY, c.name); } catch {}
+      applyCollectionSquad(panel, c);
+      closePickerCollectionMenu(panel);
+      renderPickerCollection(panel);
+    });
+    pe.pickerCollectionMenu.appendChild(btn);
+  }
+  const accent = collectionAccentVar(current.color);
+  if (accent) pe.pickerCollection.style.setProperty("--col-accent", accent);
+  else pe.pickerCollection.style.removeProperty("--col-accent");
+  pe.pickerCollectionGlyph.innerHTML = collectionGlyph(current);
+  pe.pickerCollectionName.textContent = current.name;
+}
+
+function openPickerCollectionMenu(panel) {
+  const { pickerCollectionMenu: menu, pickerCollectionToggle: toggle } = panel.els;
+  if (!menu || !toggle) return;
+  menu.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+}
+function closePickerCollectionMenu(panel) {
+  const { pickerCollectionMenu: menu, pickerCollectionToggle: toggle } = panel.els;
+  if (!menu || !toggle) return;
+  menu.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+}
+
+// openNewChatDraft opens a draft tab in the focused pane (creating a pane when
+// there is none) — the sidebar New Chat button and Files → "Open Chat here".
+function openNewChatDraft(opts = {}) {
+  closeNav(); // "New Chat" lives in the drawer; dismiss it so the draft is visible.
+  let panel = fp();
+  if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
+  newDraftTab(panel, opts);
+  autoGrowPrompt(panel);
+  if (panel.els.prompt) panel.els.prompt.focus();
 }
 
 // ─── Per-pane event handlers ──────────────────────────────────────────────────
@@ -1080,11 +1196,19 @@ function attachPaneHandlers(panel) {
   if (pe.pickerSquadToggle) {
     pe.pickerSquadToggle.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (pe.pickerSquadMenu.hidden) openPickerSquadMenu(panel);
+      if (pe.pickerSquadMenu.hidden) { closePickerCollectionMenu(panel); openPickerSquadMenu(panel); }
       else closePickerSquadMenu(panel);
     });
   }
   if (pe.pickerSquadMenu) pe.pickerSquadMenu.addEventListener("click", (e) => e.stopPropagation());
+  if (pe.pickerCollectionToggle) {
+    pe.pickerCollectionToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (pe.pickerCollectionMenu.hidden) { closePickerSquadMenu(panel); openPickerCollectionMenu(panel); }
+      else closePickerCollectionMenu(panel);
+    });
+  }
+  if (pe.pickerCollectionMenu) pe.pickerCollectionMenu.addEventListener("click", (e) => e.stopPropagation());
   if (pe.pickerNew) pe.pickerNew.addEventListener("click", () => {
     const squad = (pe.pickerSquad && !pe.pickerSquad.hidden) ? panel._pickerSquad : undefined;
     newChat(panel, squad);
@@ -1463,7 +1587,6 @@ const sessionTitles     = new Map(); // sessionId → display title (for pane ta
 // longer in the list). It is pinned on top of the rail and can't be renamed or
 // deleted. Mirrors internal/sessions/collections.go GeneralCollection.
 const GENERAL_COLLECTION = "General";
-let activeCollection = GENERAL_COLLECTION; // which collection the middle list is filtered to
 let collectionsData  = [];                 // [{name,count,general}] from GET /api/collections
 // sessionMeta is a lazily-grown id → session-meta cache. GET /api/sessions is now
 // paginated, so we no longer hold the whole list; every row we fetch (a page, a
@@ -2147,8 +2270,11 @@ function moveTab(fromPanel, key, toPanel, toIndex) {
 
 // newDraftTab always appends a fresh pending "New Chat" tab and activates it —
 // even when the active tab is already a draft (so several can coexist).
-function newDraftTab(panel) {
+// newDraftTab opens a fresh draft tab; `opts.dir` pins the folder the chat will
+// start in (Files → "Open Chat here").
+function newDraftTab(panel, opts = {}) {
   const key = newDraftKey();
+  if (opts.dir) draftDirs.set(key, opts.dir);
   panel.tabs.push(key);
   activateTab(panel, key);
 }
@@ -4032,7 +4158,7 @@ async function rewindConversation(sessionId, turnIndex, userText) {
     }
     await rerenderSessionFromHistory(sessionId);
     for (const p of panelsForSession(sessionId)) prefillComposer(p, userText);
-    loadSessions(); // refresh sidebar turn counter
+    refreshSessionsFor(sessionId); // refresh the sidebar row
   } catch (e) {
     console.error("rewind failed:", e);
     showToast("Rewind failed", "err");
@@ -6061,16 +6187,87 @@ function promptForToken() {
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
-// loadSessions is the "refresh the sidebar" entry point every mutation +
-// cross-browser push calls. With the list now paginated it re-fetches the
-// *loaded prefix* of both the active and archived views (offset 0 ..
-// max(PAGE_INITIAL, loaded)) and re-renders in place, preserving scroll — so a
-// create/delete/rename/move never yanks the user back to the top. Each view's own
-// monotonic seq drops any stale in-flight page response, so overlapping refreshes
-// can't clobber each other (this replaces the old whole-list _loadSessionsSeq).
+// loadSessions is the full "refresh the sidebar" entry point: it refreshes the
+// collection list + counts, re-fetches the loaded rows of every open group in
+// place (preserving scroll) and the Archived panel. Each group's own monotonic
+// seq drops any stale in-flight page, so overlapping refreshes can't clobber
+// each other.
 async function loadSessions() {
-  await reloadActivePrefix();
+  // Groups already fetched (rows loaded, or known to be empty) get their loaded
+  // prefix re-fetched; groups the collection refresh shows for the first time
+  // load their own page 1 inside loadCollections (so they are not fetched twice).
+  const loadedBefore = [...groupViews.entries()].filter(([, v]) => v.loaded > 0 || v.exhausted).map(([k]) => k);
+  await loadCollections();
+  const reloads = [];
+  for (const c of collectionsData) {
+    const k = c.name.toLowerCase();
+    if (loadedBefore.includes(k) && isGroupOpen(c.name) && groupViews.has(k)) reloads.push(reloadGroupPrefix(c.name));
+  }
+  await Promise.all(reloads);
+  if (sessionSearch) await runTreeSearch();
   await reloadArchivedPrefix();
+}
+
+// ─── Targeted live refresh ───────────────────────────────────────────────────
+// Session events (a turn ending, a routing hop, a pushed turn, a rename, a
+// create/delete elsewhere) used to call loadSessions(), which with the tree
+// would re-fetch EVERY open group — a burst per event, per browser, while turns
+// stream. These re-fetch only the affected group(s), plus one /api/collections
+// for the counts, coalesced into one pass per REFRESH_COALESCE_MS window.
+// loadSessions() stays the full refresh for rare, broad changes (import, fork,
+// batch actions, archive/unarchive, collection create/rename/delete).
+const REFRESH_COALESCE_MS = 250;
+const pendingRefresh = { groups: new Set(), archived: false, timer: null };
+
+// groupOf names the collection group a session is listed under (General when
+// the session has never been seen here).
+function groupOf(sessionId) {
+  const meta = sessionMetaById(sessionId);
+  return meta ? effectiveCollection(meta) : GENERAL_COLLECTION;
+}
+
+// refreshGroups queues a refresh of the named groups (and of the Archived panel
+// when `archived`).
+function refreshGroups(names, { archived = false } = {}) {
+  for (const n of names) if (n) pendingRefresh.groups.add(String(n).toLowerCase());
+  if (archived) pendingRefresh.archived = true;
+  if (!pendingRefresh.timer) pendingRefresh.timer = setTimeout(flushRefresh, REFRESH_COALESCE_MS);
+}
+
+async function flushRefresh() {
+  const keys = [...pendingRefresh.groups];
+  const archived = pendingRefresh.archived;
+  pendingRefresh.groups.clear();
+  pendingRefresh.archived = false;
+  pendingRefresh.timer = null;
+  await loadCollections(); // counts (and any group created meanwhile)
+  if (sessionSearch) {
+    await runTreeSearch();
+  } else {
+    await Promise.all(keys.map((k) => {
+      const c = collectionsData.find((x) => x.name.toLowerCase() === k);
+      const v = groupViews.get(k);
+      // Only groups that are open and were already fetched: a closed group loads
+      // when opened, an unfetched open one is loading its first page already.
+      if (!c || !v || !isGroupOpen(c.name) || !(v.loaded > 0 || v.exhausted)) return null;
+      return reloadGroupPrefix(c.name);
+    }));
+  }
+  if (archived) await reloadArchivedPrefix();
+}
+
+// refreshSessionsFor refreshes the group listing `sessionId`. A session never
+// seen here (created in another browser) is looked up first, so its own group —
+// not General by default — is the one refreshed.
+function refreshSessionsFor(sessionId) {
+  const meta = sessionMetaById(sessionId);
+  if (meta) {
+    refreshGroups([effectiveCollection(meta)], { archived: !!meta.archived });
+    return;
+  }
+  fetchSessionMeta(sessionId).then((m) => {
+    refreshGroups([m ? effectiveCollection(m) : GENERAL_COLLECTION], { archived: !!(m && m.archived) });
+  });
 }
 
 // Three-dots "kebab" trigger that opens each session row's actions menu.
@@ -6085,19 +6282,6 @@ const ICON_EXPORT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 // Tick shown inside a session row's select-mode checkbox.
 const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 6"/></svg>`;
 
-// Deterministic per-squad accent hue for the sidebar squad badges, so each
-// squad reads as its own colour (consumed as the inline --sq-h custom property
-// by .session-squad-badge in features/sidebar.css, which turns it into a
-// theme-adaptive pill via color-mix). A small curated palette keeps the hues
-// pleasant and well-separated; the same squad name always maps to the same hue.
-const SQUAD_HUES = [210, 25, 150, 275, 340, 190, 45, 110, 300, 0];
-function squadHue(name) {
-  let h = 0;
-  const s = String(name || "");
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return SQUAD_HUES[h % SQUAD_HUES.length];
-}
-
 // buildSessionRow renders one session <li>. A single ⋮ "kebab" button opens a
 // menu grouping the row's actions: Copy name + Rename (active rows only), a
 // thin separator, then Archive/Unarchive + Delete. Archived rows route a click
@@ -6111,7 +6295,6 @@ function buildSessionRow(s, { archived }) {
   const accent = collectionAccentVar(collectionColorByName(effectiveCollection(s)));
   if (accent) li.style.setProperty("--col-accent", accent);
   if (panelsWithTab(s.id).length) li.classList.add("active");
-  const ts = new Date(s.last_used_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const displayName = s.title || s.id;
   // Two-letter glyph shown when the sidebar is collapsed to a rail
   // (e.g. "alive-sole" → "al"). First two alphanumerics, lowercased.
@@ -6119,37 +6302,34 @@ function buildSessionRow(s, { archived }) {
     || displayName.trim().slice(0, 2).toLowerCase();
 
   if (!archived && (sessionSending.has(s.id) || remoteBusy.has(s.id))) li.classList.add("session-busy");
-  // Show a squad badge only when the session uses a non-default squad,
-  // so single-squad / default setups stay visually quiet.
-  const showBadge = s.squad && s.squad !== defaultSquadName;
-  const badgeHtml = showBadge
-    ? `<span class="session-squad-badge" style="--sq-h:${squadHue(s.squad)}" data-tip="Squad: ${escHtml(s.squad)}">${escHtml(s.squad)}</span>`
-    : "";
+  // One line per row: the turn count, last activity and a non-default squad live
+  // in the hover tooltip instead of a second line.
+  const when = new Date(s.last_used_at);
+  const tipParts = [displayName, `${s.turns} turn${s.turns === 1 ? "" : "s"}`];
+  if (!isNaN(when.getTime())) tipParts.push(when.toLocaleString(I18N.locale, { dateStyle: "short", timeStyle: "short" }));
+  if (s.squad && s.squad !== defaultSquadName) tipParts.push(`Squad: ${s.squad}`);
+  const tip = tipParts.join(" · ");
   if (selectMode && selectedSessions.has(s.id)) li.classList.add("row-selected");
   li.innerHTML = `
     <span class="session-check" aria-hidden="true">${ICON_CHECK}</span>
     <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
       <span class="session-busy-dot"></span>
-      <div class="session-name" data-tip="${escHtml(displayName)}">${escHtml(displayName)}</div>
+      <div class="session-name" data-tip="${escHtml(tip)}">${escHtml(displayName)}</div>
       <div class="session-actions">
         <button class="session-action-btn session-menu-btn" data-tip="Actions" tabindex="-1" aria-label="Session actions">${ICON_DOTS}</button>
         <button class="session-action-btn session-delete-btn" data-tip="${escHtml(tr("menu.delete"))}" tabindex="-1" aria-label="${escHtml(tr("menu.delete"))}">${ICON_DELETE}</button>
       </div>
     </div>
-    <div class="session-bottom-row">
-      ${badgeHtml}
-      <span class="meta">${s.turns} turn${s.turns === 1 ? "" : "s"} · ${ts}</span>
-    </div>
   `;
 
   li.addEventListener("click", (e) => {
     // In bulk-select mode a row click toggles its checkbox instead of opening it.
-    if (selectMode) { toggleSessionSelect(s.id, li); return; }
+    if (selectMode && !archived) { toggleSessionSelect(s.id, li); return; }
     if (e.target.closest(".session-actions")) return;
     selectSession(s.id);
   });
-  // Drag a session row onto a collection in the rail to file it there (disabled
+  // Drag a session row onto a collection group to file it there (disabled
   // while selecting so a click-drag doesn't fight the checkbox toggle).
   li.draggable = !selectMode;
   li.addEventListener("dragstart", (e) => {
@@ -6260,45 +6440,8 @@ function importSessionPrompt() {
   input.click();
 }
 
-// sessionTimeframe buckets a session by its last-activity date relative to
-// `now`, returning a stable `key` (used to detect group changes) and a human
-// `label`. Buckets, newest → oldest: Today, Yesterday, This week, Last week,
-// This month, then one bucket per older calendar month ("May 2026", …). Because
-// the list arrives sorted by last_used_at descending, re-touching an old session
-// bumps its last_used_at to now and it re-enters the "Today" group automatically.
-function sessionTimeframe(date, now) {
-  const t = date.getTime();
-  if (isNaN(t)) return { key: "today", label: "Today" }; // guard a bad timestamp
-  const DAY = 86400000;
-  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const today0 = startOfDay(now);
-  const dow = (now.getDay() + 6) % 7;                 // 0 = Monday … 6 = Sunday
-  const weekStart0 = today0 - dow * DAY;              // Monday of the current week
-  const monthStart0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  if (t >= today0) return { key: "today", label: "Today" };
-  if (t >= today0 - DAY) return { key: "yesterday", label: "Yesterday" };
-  if (t >= weekStart0) return { key: "this-week", label: "This week" };
-  if (t >= weekStart0 - 7 * DAY) return { key: "last-week", label: "Last week" };
-  if (t >= monthStart0) return { key: "this-month", label: "This month" };
-  return {
-    key: `m-${date.getFullYear()}-${date.getMonth()}`,
-    label: date.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
-  };
-}
-
-// buildTimeframeHeader renders a non-interactive group separator <li> for the
-// session list. It carries no data-id, so the list-iteration sites that key on
-// dataset.id (refreshSidebarActive, pane picker, layout id collection) skip it.
-function buildTimeframeHeader(label) {
-  const li = document.createElement("li");
-  li.className = "session-group";
-  li.setAttribute("aria-hidden", "true");
-  li.textContent = label;
-  return li;
-}
-
 // knownUserCollections returns the lowercased set of user-created collection
-// names currently in the rail (General excluded). Used to fold a session that
+// names currently in the tree (General excluded). Used to fold a session that
 // references a deleted/unknown collection back into General.
 function knownUserCollections() {
   const set = new Set();
@@ -6328,12 +6471,12 @@ function rememberSessionMeta(s) {
   else archivedSessions.delete(s.id);
 }
 
-// sessionsQuery builds a paginated GET /api/sessions URL for the current
-// collection / search / sort. `archived` picks which list; the chosen sort only
-// applies to the active list (the archived panel is always recent order).
+// sessionsQuery builds a paginated GET /api/sessions URL across ALL collections
+// (no `collection` filter) for the Archived panel and for search, applying the
+// current search query. The chosen sort only applies to the active list (the
+// archived panel is always recent order).
 function sessionsQuery(archived, offset, limit) {
   const p = new URLSearchParams();
-  p.set("collection", activeCollection);
   p.set("archived", archived ? "true" : "false");
   const q = sessionSearch.trim();
   if (q) p.set("q", q);
@@ -6354,123 +6497,211 @@ function syncPanesAfterRender() {
   }
 }
 
-// refreshLoadedActiveIds recomputes currentViewIds from the rows currently in the
-// DOM — Select-all covers the loaded rows.
-function refreshLoadedActiveIds() {
-  currentViewIds = [];
-  for (const li of els.list.children) {
-    if (li.dataset && li.dataset.id) currentViewIds.push(li.dataset.id);
+// ─── Collection tree (sidebar) ───────────────────────────────────────────────
+// Every collection is a foldable group listing its own (non-archived) sessions
+// under its header. A group pages its rows itself — GROUP_PAGE_INITIAL first,
+// then GROUP_PAGE_MORE per "Show more" — and fetches nothing while closed. The
+// open/closed state is remembered per browser (COLLECTION_OPEN_KEY, default
+// open). See docs/superpowers/specs/2026-10-27-sidebar-tree-settings-modal-design.md.
+const GROUP_PAGE_INITIAL = 10;
+const GROUP_PAGE_MORE = 20;
+const COLLECTION_OPEN_KEY = "agent_collection_open";
+const groupViews = new Map(); // lowercased collection name → group view state
+let collectionOpenState = (() => {
+  try { return JSON.parse(localStorage.getItem(COLLECTION_OPEN_KEY) || "{}") || {}; }
+  catch { return {}; }
+})();
+
+function saveCollectionOpenState() {
+  try { localStorage.setItem(COLLECTION_OPEN_KEY, JSON.stringify(collectionOpenState)); } catch {}
+}
+
+function isGroupOpen(name) {
+  const v = collectionOpenState[String(name).toLowerCase()];
+  return v === undefined ? true : !!v;
+}
+
+// setGroupOpen opens/closes a group (persisted) and loads its first page the
+// first time it is opened.
+function setGroupOpen(name, open) {
+  collectionOpenState[String(name).toLowerCase()] = !!open;
+  saveCollectionOpenState();
+  const g = groupEl(name);
+  if (!g) return;
+  g.classList.toggle("is-open", !!open);
+  const head = g.querySelector(".collection-row");
+  if (head) head.setAttribute("aria-expanded", String(!!open));
+  if (open) {
+    const v = groupView(name);
+    if (v.loaded === 0 && !v.exhausted) return loadGroupMore(name);
   }
 }
 
-// appendActiveRows renders session rows into the middle list, emitting Today/
-// Yesterday/… headers (recent sort only) as the timeframe group changes across
-// pages. `reset` clears the list + group tracker first.
-function appendActiveRows(rows, { reset } = {}) {
-  const list = els.list;
-  if (reset) { list.innerHTML = ""; activeView.lastGroupKey = null; }
-  const headers = sessionSort === "recent";
-  const now = new Date();
+// renameGroupKey carries a group's open state over a rename, and forgetGroupKey
+// drops it when the collection is deleted.
+function renameGroupKey(oldName, newName) {
+  const k = oldName.toLowerCase();
+  if (k in collectionOpenState) {
+    collectionOpenState[newName.toLowerCase()] = collectionOpenState[k];
+    delete collectionOpenState[k];
+    saveCollectionOpenState();
+  }
+}
+function forgetGroupKey(name) {
+  delete collectionOpenState[name.toLowerCase()];
+  saveCollectionOpenState();
+  groupViews.delete(name.toLowerCase());
+}
+
+function newGroupView() {
+  // seq is a per-group monotonic token: every reset / prefix-reload bumps it so a
+  // slower in-flight page for a superseded view is dropped instead of appending
+  // stale rows. pinnedId is a focused session shown after the loaded rows until
+  // a page contains it (see revealSessionInTree).
+  return { loaded: 0, total: 0, loading: false, exhausted: false, seq: 0, pinnedId: null };
+}
+function groupView(name) {
+  const k = String(name).toLowerCase();
+  if (!groupViews.has(k)) groupViews.set(k, newGroupView());
+  return groupViews.get(k);
+}
+function groupEl(name) {
+  return els.tree.querySelector(`li.collection-group[data-key="${CSS.escape(String(name).toLowerCase())}"]`);
+}
+function groupList(name) {
+  const g = groupEl(name);
+  return g ? g.querySelector(".collection-sessions") : null;
+}
+
+// groupQuery builds the paginated GET /api/sessions URL for one group (the
+// server folds blank/unknown collections into General, like the counts).
+function groupQuery(name, offset, limit) {
+  const p = new URLSearchParams();
+  p.set("collection", name);
+  p.set("archived", "false");
+  p.set("sort", sessionSort);
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  return "/api/sessions?" + p.toString();
+}
+
+// appendGroupRows renders session rows into a group (`reset` clears it first)
+// and keeps the pinned row — a focused session not yet among the loaded rows —
+// last, dropping it once a page contains it.
+function appendGroupRows(name, rows, { reset } = {}) {
+  const ul = groupList(name);
+  if (!ul) return;
+  const v = groupView(name);
+  if (reset) ul.innerHTML = "";
+  else ul.querySelector("li.pinned")?.remove();
   for (const s of rows) {
     rememberSessionMeta(s);
-    if (headers) {
-      const tf = sessionTimeframe(new Date(s.last_used_at), now);
-      if (tf.key !== activeView.lastGroupKey) {
-        activeView.lastGroupKey = tf.key;
-        list.appendChild(buildTimeframeHeader(tf.label));
-      }
+    if (s.id === v.pinnedId) v.pinnedId = null;
+    ul.appendChild(buildSessionRow(s, { archived: false }));
+  }
+  if (v.pinnedId) {
+    let meta = sessionMetaById(v.pinnedId);
+    // A pin that was archived or moved elsewhere since no longer belongs here.
+    if (meta && (meta.archived || effectiveCollection(meta).toLowerCase() !== String(name).toLowerCase())) {
+      v.pinnedId = null;
+      meta = null;
     }
-    list.appendChild(buildSessionRow(s, { archived: false }));
+    if (meta && !ul.querySelector(`li[data-id="${CSS.escape(v.pinnedId)}"]`)) {
+      const li = buildSessionRow(meta, { archived: false });
+      li.classList.add("pinned");
+      ul.appendChild(li);
+    } else if (!meta) {
+      v.pinnedId = null;
+    }
   }
   // Prune ticks for rows no longer present (deleted elsewhere) so a batch action
   // never targets a gone session.
   if (selectMode) {
-    const present = new Set(currentViewIds);
+    const present = new Set([...els.tree.querySelectorAll("li[data-id]")].map((li) => li.dataset.id));
     for (const id of [...selectedSessions]) if (!present.has(id)) selectedSessions.delete(id);
   }
-  refreshLoadedActiveIds();
 }
 
-// ── active view: sentinel + IntersectionObserver ──
-let activeSentinel = null, activeObserver = null;
-function ensureActiveSentinel() {
-  const list = els.list;
-  if (!activeSentinel) {
-    activeSentinel = document.createElement("li");
-    activeSentinel.className = "session-sentinel";
-    activeSentinel.setAttribute("aria-hidden", "true");
-  }
-  list.appendChild(activeSentinel); // keep it last
-  activeSentinel.style.display = activeView.exhausted ? "none" : "";
-  if (!activeObserver) {
-    activeObserver = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting)) loadMoreActive();
-    }, { root: list, rootMargin: "0px 0px 300px 0px" }); // ~5 rows early
-  }
-  // Re-observe so a still-visible sentinel (a short list not filling the viewport)
-  // keeps loading until the viewport is full or the view is exhausted.
-  activeObserver.unobserve(activeSentinel);
-  if (!activeView.exhausted) activeObserver.observe(activeSentinel);
+// unpinSession drops a pinned row for `id` from every group (the session was
+// deleted, archived or moved), so a refresh can't rebuild it from stale meta.
+function unpinSession(id) {
+  for (const v of groupViews.values()) if (v.pinnedId === id) v.pinnedId = null;
+  for (const li of els.tree.querySelectorAll(`li.pinned[data-id="${CSS.escape(id)}"]`)) li.remove();
 }
 
-// loadMoreActive fetches + appends the next active page (PAGE_INITIAL first, then
-// PAGE_MORE). Guarded against re-entry and stale (superseded) responses.
-async function loadMoreActive() {
-  const v = activeView;
-  if (v.loading || v.exhausted) return;
+// updateGroupMore shows "Show more (N)" while the group has unloaded rows.
+function updateGroupMore(name) {
+  const g = groupEl(name);
+  const btn = g && g.querySelector(".group-more");
+  if (!btn) return;
+  const v = groupView(name);
+  const left = Math.max(0, v.total - v.loaded);
+  btn.hidden = v.exhausted || left === 0;
+  btn.textContent = tr("tree.showMore", { count: left });
+  const empty = g.querySelector(".group-empty");
+  if (empty) empty.hidden = !(v.exhausted && v.loaded === 0 && !v.pinnedId);
+}
+
+// loadGroupMore fetches + appends a group's next page (GROUP_PAGE_INITIAL first,
+// then GROUP_PAGE_MORE). Guarded against re-entry and stale responses.
+async function loadGroupMore(name) {
+  const v = groupView(name);
+  if (v.loading || v.exhausted || sessionSearch) return; // search owns the rows
   v.loading = true;
   const mySeq = v.seq;
   const first = v.loaded === 0;
   try {
-    const res = await apiFetch(sessionsQuery(false, v.loaded, first ? PAGE_INITIAL : PAGE_MORE), { cache: "no-store" });
+    const res = await apiFetch(groupQuery(name, v.loaded, first ? GROUP_PAGE_INITIAL : GROUP_PAGE_MORE), { cache: "no-store" });
     const data = await res.json();
     if (mySeq !== v.seq) return; // superseded by a reset / prefix reload
     const rows = data.sessions || [];
-    appendActiveRows(rows, { reset: false });
+    appendGroupRows(name, rows, { reset: first });
     v.loaded += rows.length;
     v.total = Number.isFinite(data.total) ? data.total : v.loaded;
     v.exhausted = v.loaded >= v.total || rows.length === 0;
-    updateSessionBar();
     syncPanesAfterRender();
-  } catch (e) { console.error("loadMoreActive:", e); }
-  finally { if (mySeq === v.seq) { v.loading = false; ensureActiveSentinel(); } }
+  } catch (e) { console.error("loadGroupMore:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; updateGroupMore(name); } }
 }
 
-// resetActiveView clears the middle list and loads page 1 for the current filters
-// (collection / search / sort change).
-function resetActiveView() {
-  const v = activeView;
-  v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false; v.lastGroupKey = null;
-  els.list.innerHTML = "";
-  loadMoreActive();
-}
-
-// reloadActivePrefix re-fetches offset 0 .. max(PAGE_INITIAL, loaded) and
-// re-renders in place, preserving scroll — the live-push refresh path.
-async function reloadActivePrefix() {
-  const v = activeView;
+// reloadGroupPrefix re-fetches a group's loaded rows (offset 0 .. max(initial,
+// loaded)) and re-renders them in place, preserving the tree's scroll — the
+// live-push refresh path.
+async function reloadGroupPrefix(name) {
+  if (sessionSearch) return; // search owns the rows (loadSessions re-runs it)
+  const v = groupView(name);
   v.seq++;
   const mySeq = v.seq;
   v.loading = true;
-  const want = Math.max(PAGE_INITIAL, v.loaded);
-  const scrollTop = els.list.scrollTop;
+  const want = Math.max(GROUP_PAGE_INITIAL, v.loaded);
   try {
-    const res = await apiFetch(sessionsQuery(false, 0, want), { cache: "no-store" });
+    const res = await apiFetch(groupQuery(name, 0, want), { cache: "no-store" });
     const data = await res.json();
     if (mySeq !== v.seq) return;
     const rows = data.sessions || [];
-    appendActiveRows(rows, { reset: true });
+    const scrollTop = els.tree.scrollTop;
+    appendGroupRows(name, rows, { reset: true });
+    els.tree.scrollTop = scrollTop;
     v.loaded = rows.length;
     v.total = Number.isFinite(data.total) ? data.total : rows.length;
     v.exhausted = v.loaded >= v.total;
-    els.list.scrollTop = scrollTop;
-    updateSessionBar();
     syncPanesAfterRender();
-  } catch (e) { console.error("reloadActivePrefix:", e); }
-  finally { if (mySeq === v.seq) { v.loading = false; ensureActiveSentinel(); } }
+  } catch (e) { console.error("reloadGroupPrefix:", e); }
+  finally { if (mySeq === v.seq) { v.loading = false; updateGroupMore(name); } }
 }
 
-// ── archived view (left sidebar panel): same machinery, flat + recent order ──
+// resetGroup drops a group's rows and, when it is open, loads page 1 again (a
+// sort change).
+function resetGroup(name) {
+  const v = groupView(name);
+  v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false;
+  const ul = groupList(name);
+  if (ul) ul.innerHTML = "";
+  updateGroupMore(name);
+  if (isGroupOpen(name)) return loadGroupMore(name);
+}
+
+// ─── Archived panel: sentinel + IntersectionObserver ──
 function appendArchivedRows(rows, { reset } = {}) {
   const list = els.archivedList;
   if (reset) list.innerHTML = "";
@@ -6557,18 +6788,17 @@ async function reloadArchivedPrefix() {
   finally { if (mySeq === v.seq) { v.loading = false; ensureArchivedSentinel(); } }
 }
 
-// resetSessionViews reloads page 1 of both lists (collection / search change).
-function resetSessionViews() { resetActiveView(); resetArchivedView(); }
-
 function setSessionBusy(sessionId, busy) {
-  const li = els.list.querySelector(`li[data-id="${CSS.escape(sessionId)}"]`);
-  if (li) li.classList.toggle("session-busy", busy);
+  for (const li of els.tree.querySelectorAll(`li[data-id="${CSS.escape(sessionId)}"]`)) {
+    li.classList.toggle("session-busy", busy);
+  }
 }
 
 // ─── Collections rail ────────────────────────────────────────────────────────
 
 const ICON_STAR = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>`;
 const ICON_FOLDER = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+const ICON_CHECK_SQUARE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>`;
 const ICON_SWATCH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5.5 0 10 4.5 10 10a4 4 0 0 1-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/></svg>`;
 
 // COLLECTION_COLORS is the palette of predefined collection colours, in swatch /
@@ -6629,110 +6859,197 @@ async function loadCollections() {
   try {
     const res = await apiFetch("/api/collections", { cache: "no-store" });
     const data = await res.json();
-    renderCollections(data.collections || []);
+    await renderCollections(data.collections || []);
   } catch (e) { console.error("loadCollections:", e); }
 }
 
-// renderCollections paints the rail and, since the known-collection set may have
-// changed, re-filters the session list against it (this also closes the boot
-// race where sessions render before collections are known).
+// renderCollections stores the collection list and (re)builds the tree; it
+// resolves once the first page of every newly shown open group has loaded.
 function renderCollections(list) {
   collectionsData = Array.isArray(list) ? list : [];
-  // If the selected collection vanished (deleted here or elsewhere), fall back
-  // to General so the middle list never shows an empty phantom filter.
-  if (activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()
-      && !collectionsData.some(c => c.name.toLowerCase() === activeCollection.toLowerCase())) {
-    activeCollection = GENERAL_COLLECTION;
-  }
-  els.collectionsList.innerHTML = "";
-  for (const c of collectionsData) els.collectionsList.appendChild(buildCollectionRow(c));
-  // The rail only paints itself now — the (paginated) session list is refetched
-  // by its own callers (selectCollection on a rail click, loadSessions on a
-  // collections_changed push). Effective-collection folding is server-side, so
-  // there is no boot race requiring a re-filter here.
+  // Open drafts list the collections too.
+  for (const p of panels) if (p.els.picker && !p.els.picker.hidden) renderPickerCollection(p);
+  return renderCollectionTree();
 }
 
-function buildCollectionRow(c) {
+const ICON_CHEVRON_RIGHT = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>`;
+const ICON_PLUS_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+
+// renderCollectionTree builds one group per collection, in collectionsData order.
+// A group already in the DOM is reused (its loaded rows stay put); a new one
+// starts with a fresh view and loads page 1 when open. Returns a promise for
+// those first loads.
+function renderCollectionTree() {
+  const keep = new Set(collectionsData.map((c) => c.name.toLowerCase()));
+  for (const g of [...els.tree.querySelectorAll(":scope > li.collection-group")]) {
+    if (!keep.has(g.dataset.key)) { groupViews.delete(g.dataset.key); g.remove(); }
+  }
+  const loads = [];
+  let prev = null;
+  for (const c of collectionsData) {
+    let g = groupEl(c.name);
+    if (!g) {
+      g = buildGroup(c);
+      groupViews.set(c.name.toLowerCase(), newGroupView());
+      if (isGroupOpen(c.name)) loads.push(loadGroupMore(c.name));
+    }
+    updateGroupHeader(g, c);
+    // Keep the DOM order in step with the list order (General first).
+    const want = prev ? prev.nextSibling : els.tree.firstChild;
+    if (g !== want) els.tree.insertBefore(g, want);
+    prev = g;
+    updateGroupMore(c.name);
+  }
+  return Promise.all(loads);
+}
+
+// buildGroup creates a collection's group: a header (chevron, glyph, name,
+// active count — swapped for ＋ / ⋯ on hover), its session list, an empty note
+// and the "Show more" button.
+function buildGroup(c) {
   const li = document.createElement("li");
-  li.className = "collection-row";
-  li.dataset.name = c.name;
-  // The collection's colour tints its folder glyph (always) and its selected
-  // accent bar (via CSS). General/uncoloured collections leave --col-accent unset.
-  const accent = collectionAccentVar(c.color);
-  if (accent) li.style.setProperty("--col-accent", accent);
-  if (c.name.toLowerCase() === activeCollection.toLowerCase()) li.classList.add("active");
-  // Expanded sidebar: a folder glyph (tinted with the collection colour) + name;
-  // General keeps its star. Collapsed to a rail: user collections swap the folder
-  // glyph for a colour pastille bearing the name's initials (General keeps the
-  // star — see the show/hide rules in web/css/features/sidebar.css). The full
-  // name is always a hover tooltip, so a truncated (expanded) or letters-only
-  // (collapsed) row stays identifiable.
+  li.className = "collection-group";
+  li.dataset.key = c.name.toLowerCase();
   const icon = c.general
     ? `<span class="collection-star">${ICON_STAR}</span>`
     : `<span class="collection-icon">${ICON_FOLDER}</span><span class="collection-badge" aria-hidden="true"></span>`;
-  li.innerHTML = `${icon}<span class="collection-name"></span><span class="collection-count"></span>`;
-  li.querySelector(".collection-name").textContent = c.name;
-  li.querySelector(".collection-count").textContent = c.count > 0 ? String(c.count) : "";
-  const badge = li.querySelector(".collection-badge");
-  if (badge) badge.textContent = collectionInitials(c.name);
-  li.setAttribute("data-tip", c.name);
-  li.addEventListener("click", () => selectCollection(c.name));
-  // Right-click → rename/delete (user collections only; General is fixed).
-  if (!c.general) {
-    li.addEventListener("contextmenu", (ev) => openCollectionCtxMenu(ev, c));
-  }
-  // Drop target: dragging a session row onto a collection files it there.
+  li.innerHTML = `
+    <div class="collection-row" role="button" tabindex="0">
+      <span class="group-chevron" aria-hidden="true">${ICON_CHEVRON_RIGHT}</span>
+      ${icon}
+      <span class="collection-name"></span>
+      <span class="collection-count"></span>
+      <span class="group-actions">
+        <button type="button" class="group-new">${ICON_PLUS_SMALL}</button>
+        <button type="button" class="group-menu">${ICON_DOTS}</button>
+      </span>
+    </div>
+    <ul class="collection-sessions"></ul>
+    <div class="group-empty" hidden></div>
+    <button type="button" class="group-more" hidden></button>`;
+  li.querySelector(".group-empty").textContent = tr("tree.empty");
+  const head = li.querySelector(".collection-row");
+  const name = () => li.dataset.name;
+  // While searching every group with a hit is shown open, so a header click
+  // does nothing then.
+  const toggle = () => { if (!sessionSearch) setGroupOpen(name(), !isGroupOpen(name())); };
+  head.addEventListener("click", (e) => {
+    if (e.target.closest(".group-actions")) return;
+    // Collapsed to the icon rail, a header is just a pastille: clicking it
+    // expands the sidebar on that collection, opened and scrolled into view.
+    if (els.sidebar.classList.contains("collapsed")) { revealGroupFromRail(name()); return; }
+    toggle();
+  });
+  head.addEventListener("keydown", (e) => {
+    if (e.target !== head) return; // Enter/Space on the ＋ / ⋯ buttons is theirs
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+  });
+  li.querySelector(".group-new").addEventListener("click", (e) => {
+    e.stopPropagation();
+    newChat(fp(), undefined, undefined, name());
+  });
+  li.querySelector(".group-menu").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const c2 = collectionsData.find((x) => x.name.toLowerCase() === li.dataset.key);
+    if (c2) openCollectionCtxMenu(e, c2);
+  });
+  // Right-click → the collection menu (General's only offers Select).
+  head.addEventListener("contextmenu", (e) => {
+    const c2 = collectionsData.find((x) => x.name.toLowerCase() === li.dataset.key);
+    if (c2) openCollectionCtxMenu(e, c2);
+  });
+  li.querySelector(".group-more").addEventListener("click", () => loadGroupMore(name()));
+  // Drop target: dragging a session row onto a group (header or rows) files it there.
   li.addEventListener("dragover", (ev) => {
     if (!sessionDrag) return;
     ev.preventDefault();
     ev.dataTransfer.dropEffect = "move";
     li.classList.add("drag-over");
   });
-  li.addEventListener("dragleave", () => li.classList.remove("drag-over"));
+  li.addEventListener("dragleave", (ev) => {
+    if (!li.contains(ev.relatedTarget)) li.classList.remove("drag-over");
+  });
   li.addEventListener("drop", (ev) => {
     li.classList.remove("drag-over");
     if (!sessionDrag) return;
     ev.preventDefault();
-    moveSessionToCollection(sessionDrag, c.name);
+    moveSessionToCollection(sessionDrag, name());
   });
   return li;
 }
 
-// selectCollection switches the middle list's filter. The list is paginated, so
-// this refetches page 1 for the newly selected collection (both active + archived
-// views).
-function selectCollection(name) {
-  if (activeCollection.toLowerCase() === name.toLowerCase()) return;
-  activeCollection = name;
-  for (const row of els.collectionsList.children) {
-    row.classList.toggle("active", row.dataset.name.toLowerCase() === name.toLowerCase());
-  }
-  resetSessionViews();
+// updateGroupHeader (re)applies a collection's name, colour, count and open
+// state to its group header (also after a rename/recolour on reuse).
+function updateGroupHeader(li, c) {
+  li.dataset.name = c.name;
+  const accent = collectionAccentVar(c.color);
+  if (accent) li.style.setProperty("--col-accent", accent);
+  else li.style.removeProperty("--col-accent");
+  const open = isGroupOpen(c.name);
+  li.classList.toggle("is-open", open);
+  const head = li.querySelector(".collection-row");
+  head.setAttribute("aria-expanded", String(open));
+  // The full name is always a hover tooltip, so a truncated (expanded) or
+  // initials-only (collapsed rail) header stays identifiable.
+  head.setAttribute("data-tip", c.name);
+  li.querySelector(".collection-name").textContent = c.name;
+  const active = Number.isFinite(c.active) ? c.active : c.count;
+  li.querySelector(".collection-count").textContent = active > 0 ? String(active) : "";
+  const badge = li.querySelector(".collection-badge");
+  if (badge) badge.textContent = collectionInitials(c.name);
+  const add = li.querySelector(".group-new");
+  add.setAttribute("data-tip", tr("collections.newChatIn", { name: c.name }));
+  add.setAttribute("aria-label", tr("collections.newChatIn", { name: c.name }));
+  const menu = li.querySelector(".group-menu");
+  menu.setAttribute("data-tip", tr("sessionbar.actions"));
+  menu.setAttribute("aria-label", tr("sessionbar.actions"));
 }
 
-// syncCollectionToSession follows the focused chat into its own collection, so
-// the two left columns keep naming where the user actually is. Focusing a chat
-// filed elsewhere — a tab click, a sidebar click on an already-open session, or
-// clicking into another pane — used to leave the rail highlight and the middle
-// list on the previous collection: the chat changed under you and neither column
-// said where you had landed. Driven from setFocusedPanel, the one place that
-// already decides "this is the chat the user is in".
+// revealGroupFromRail expands the collapsed sidebar on one collection: the group
+// is opened (and loaded) and scrolled into view once the expand animation ends.
+function revealGroupFromRail(name) {
+  expandSidebar();
+  setGroupOpen(name, true);
+  setTimeout(() => groupEl(name)?.scrollIntoView({ block: "start", behavior: "smooth" }), 200);
+}
+
+// revealSessionInTree follows the focused chat into its own collection: it opens
+// that group (remembered), makes sure the session's row is shown — pinned after
+// the loaded rows when no loaded page contains it yet — and scrolls it into view.
+// Driven from setFocusedPanel, the one place that already decides "this is the
+// chat the user is in".
 //
 // Callers do NOT await it: a session already in the cache resolves without ever
 // reaching an `await`, so the common case stays synchronous and focus changes
 // stay instant; only a session the cache has never seen defers behind a lookup.
-async function syncCollectionToSession(id) {
+async function revealSessionInTree(id) {
   if (!id) return;
   let meta = sessionMetaById(id);
   if (!meta) {
     meta = await fetchSessionMeta(id);
     // That was a round-trip and focus moves on a click — only the chat that is
-    // STILL focused may move the rail, or a slow lookup would yank the columns
-    // to a session the user has already left.
+    // STILL focused may move the tree, or a slow lookup would yank it to a
+    // session the user has already left.
     if (activeSessionId !== id) return;
   }
-  if (!meta) return; // unresolvable — leave the columns alone rather than guess
-  selectCollection(effectiveCollection(meta));
+  if (!meta || meta.archived) return; // unresolvable or archived — leave the tree alone
+  const name = effectiveCollection(meta);
+  const g = groupEl(name);
+  if (!g) return;
+  const v = groupView(name);
+  if (!g.querySelector(`.collection-sessions li[data-id="${CSS.escape(id)}"]`)) {
+    v.pinnedId = id;
+    if (v.loaded > 0) appendGroupRows(name, [], { reset: false });
+  }
+  if (!isGroupOpen(name)) {
+    // A group never opened has no rows yet: wait for its first page (which
+    // brings the row, or pins it) before scrolling — unless focus moved on.
+    await setGroupOpen(name, true);
+    if (activeSessionId !== id) return;
+  }
+  refreshSidebarActive();
+  const row = g.querySelector(`.collection-sessions li[data-id="${CSS.escape(id)}"]`);
+  if (row) row.scrollIntoView({ block: "nearest" });
 }
 
 // fetchSessionMeta resolves one session's row when the cache has never seen it —
@@ -6762,10 +7079,17 @@ async function fetchSessionMeta(id) {
 // collection, reusing the themed context-menu renderer shared with the
 // Folders/session menus.
 function openCollectionCtxMenu(ev, c) {
+  // "Select" enters bulk select on this group; it is unavailable while searching
+  // (search and select are mutually exclusive). General is fixed, so Select is
+  // all its menu offers.
+  const select = [tr("sessionbar.select"), () => enterSelectMode(c.name), { icon: ICON_CHECK_SQUARE, disabled: !!sessionSearch }];
+  if (c.general) { showFolderCtxMenu(ev, [select]); return; }
   showFolderCtxMenu(ev, [
     [tr("collections.editContext"), () => editCollectionContext(c), { icon: ICON_FOLDER }],
     [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
     [tr("collections.changeColor"), () => changeCollectionColor(c), { icon: ICON_SWATCH }],
+    SEP,
+    select,
     SEP,
     [tr("common.delete"), () => deleteCollection(c.name), { icon: ICON_DELETE }],
   ]);
@@ -7342,7 +7666,7 @@ async function createCollection() {
       return;
     }
     await loadCollections();
-    selectCollection(trimmed);
+    groupEl(trimmed)?.scrollIntoView({ block: "nearest" });
   } catch (e) { console.error(e); }
 }
 
@@ -7390,7 +7714,7 @@ async function renameCollection(oldName) {
       showToast(b.error || tr("collections.renameFailed"), "err");
       return;
     }
-    if (activeCollection.toLowerCase() === oldName.toLowerCase()) activeCollection = trimmed;
+    renameGroupKey(oldName, trimmed);
     await loadCollections();
     await loadSessions(); // member sessions now carry the new name
   } catch (e) { console.error(e); }
@@ -7412,7 +7736,7 @@ async function deleteCollection(name) {
       showToast(b.error || tr("collections.deleteFailed"), "err");
       return;
     }
-    if (activeCollection.toLowerCase() === name.toLowerCase()) activeCollection = GENERAL_COLLECTION;
+    forgetGroupKey(name);
     await loadCollections();
     await loadSessions(); // members fell back to General
   } catch (e) { console.error(e); }
@@ -7422,6 +7746,7 @@ async function deleteCollection(name) {
 // clear). Optimistically nothing — we just POST and refresh both lists.
 async function moveSessionToCollection(sessionId, target) {
   const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
+  const from = groupOf(sessionId);
   try {
     const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/collection`, {
       method: "POST",
@@ -7432,78 +7757,102 @@ async function moveSessionToCollection(sessionId, target) {
       showToast(b.error || tr("collections.moveFailed"), "err");
       return;
     }
-    await loadSessions();
-    await loadCollections(); // counts changed
+    unpinSession(sessionId);
+    refreshGroups([from, target]); // counts are refreshed with them
   } catch (e) { console.error(e); }
 }
 
-// ─── Session-pane toolbar (search / sort / bulk-select / new) ─────────────────
+// ─── Tree controls (search / sort / bulk select) ──────────────────────────────
 
-// updateSessionBar refreshes the title+count (normal state) and the "n selected"
-// label + Select-all lit state (select state). Called after each page load /
-// prefix reload and whenever a selection toggles.
-function updateSessionBar() {
-  if (els.sessionBarTitle) {
-    // The count is the collection's true filtered total from the server, not the
-    // number of rows currently loaded into the window.
-    els.sessionBarTitle.textContent = `${activeCollection} · ${activeView.total}`;
+let selectScope = null;   // collection whose rows "Select all" ticks
+let preSearchLoaded = null; // lowercased group → rows loaded before searching
+let treeSearchSeq = 0;    // drops a slower, superseded search response
+
+// ── Search ──
+// setTreeSearch shows every collection's matches for `query` under their group
+// headers (groups without a hit hidden), filters the Archived panel the same
+// way, and — with an empty query — leaves search mode and restores the regular
+// tree (open states come from storage, which search never touches).
+async function setTreeSearch(query) {
+  const q = String(query || "").trim();
+  if (q === sessionSearch.trim()) return;
+  // Entering search: remember how far each group was paged ("Show more"), so
+  // closing search brings back the same rows rather than page 1.
+  if (q && !sessionSearch.trim()) {
+    preSearchLoaded = new Map([...groupViews.entries()].map(([k, v]) => [k, v.loaded]));
   }
-  if (selectMode && els.sessionSelectCount) {
-    els.sessionSelectCount.textContent = trN("sessionbar.selected", selectedSessions.size, { count: selectedSessions.size });
-    const allSel = currentViewIds.length > 0 && currentViewIds.every((id) => selectedSessions.has(id));
-    const btn = document.getElementById("session-selectall-btn");
-    if (btn) btn.classList.toggle("is-active", allSel);
+  sessionSearch = q;
+  if (q && selectMode) exitSelectMode();
+  els.tree.classList.toggle("searching", !!q);
+  if (!q) {
+    els.treeSearchEmpty.hidden = true;
+    const saved = preSearchLoaded || new Map();
+    preSearchLoaded = null;
+    for (const g of els.tree.querySelectorAll(":scope > li.collection-group")) {
+      g.classList.remove("search-hit");
+      const name = g.dataset.name;
+      const loaded = saved.get(g.dataset.key) || 0;
+      if (isGroupOpen(name) && loaded > 0) {
+        // reloadGroupPrefix re-fetches max(initial, loaded) rows in one request.
+        const v = groupView(name);
+        v.loaded = loaded; v.exhausted = false;
+        reloadGroupPrefix(name);
+      } else {
+        resetGroup(name);
+      }
+    }
+    resetArchivedView();
+    return;
   }
+  await runTreeSearch();
+  resetArchivedView();
 }
 
-function toggleSessionSelect(id, li) {
-  if (selectedSessions.has(id)) selectedSessions.delete(id);
-  else selectedSessions.add(id);
-  li.classList.toggle("row-selected", selectedSessions.has(id));
-  updateSessionBar();
-}
-
-// setSearchMode shows/hides the search row. Leaving it clears the query.
-function setSearchMode(on) {
-  if (on) setSelectMode(false); // search + select are mutually exclusive
-  els.sessionSearchRow.hidden = !on;
-  els.sessionBarMain.hidden = on;
-  if (on) {
-    els.sessionSearchInput.focus();
-  } else if (sessionSearch) {
-    els.sessionSearchInput.value = "";
-    sessionSearch = "";
-    resetSessionViews();
+// runTreeSearch fetches the current query's matches across all collections (one
+// collection-less request) and renders them into their groups.
+async function runTreeSearch() {
+  const mySeq = ++treeSearchSeq;
+  // Invalidate in-flight page loads: their rows must not land in a search view.
+  for (const v of groupViews.values()) { v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false; }
+  let rows = [];
+  try {
+    const res = await apiFetch(sessionsQuery(false, 0, 50), { cache: "no-store" });
+    rows = (await res.json()).sessions || [];
+  } catch (e) { console.error("runTreeSearch:", e); }
+  if (mySeq !== treeSearchSeq || !sessionSearch) return;
+  const byGroup = new Map();
+  const known = knownUserCollections();
+  for (const s of rows) {
+    rememberSessionMeta(s);
+    const k = effectiveCollection(s, known).toLowerCase();
+    if (!byGroup.has(k)) byGroup.set(k, []);
+    byGroup.get(k).push(s);
   }
-}
-
-// setSelectMode toggles bulk-select. Entering clears any prior ticks; leaving
-// drops the selection. The checkboxes are pure CSS (#session-pane.selecting), so
-// no refetch is needed — just clear the row highlights and refresh the bar. This
-// preserves the loaded window + scroll position across entering/leaving select.
-function setSelectMode(on) {
-  if (selectMode === on) return;
-  selectMode = on;
-  selectedSessions.clear();
-  els.sessionPane.classList.toggle("selecting", on);
-  els.sessionSelectRow.hidden = !on;
-  els.sessionBarMain.hidden = on;
-  if (on) { els.sessionSearchRow.hidden = true; }
-  for (const li of els.list.children) li.classList.remove("row-selected");
-  updateSessionBar();
-}
-
-// toggleSelectAll ticks every visible row, or clears them if all are already on.
-function toggleSelectAll() {
-  const allSel = currentViewIds.length > 0 && currentViewIds.every((id) => selectedSessions.has(id));
-  if (allSel) selectedSessions.clear();
-  else for (const id of currentViewIds) selectedSessions.add(id);
-  for (const li of els.list.children) {
-    if (li.dataset.id) li.classList.toggle("row-selected", selectedSessions.has(li.dataset.id));
+  for (const g of els.tree.querySelectorAll(":scope > li.collection-group")) {
+    const hits = byGroup.get(g.dataset.key) || [];
+    const ul = g.querySelector(".collection-sessions");
+    ul.innerHTML = "";
+    for (const s of hits) ul.appendChild(buildSessionRow(s, { archived: false }));
+    g.classList.toggle("search-hit", hits.length > 0);
   }
-  updateSessionBar();
+  els.treeSearchEmpty.hidden = rows.length > 0;
+  syncPanesAfterRender();
 }
 
+function openTreeSearch() {
+  if (selectMode) exitSelectMode();
+  els.sidebarSearchBtn.hidden = true;
+  els.sidebarSearchRow.hidden = false;
+  els.sidebarSearchInput.focus();
+}
+function closeTreeSearch() {
+  els.sidebarSearchInput.value = "";
+  els.sidebarSearchRow.hidden = true;
+  els.sidebarSearchBtn.hidden = false;
+  setTreeSearch("");
+}
+
+// ── Sort ──
 // openSortMenu offers the three orderings; the active one carries a ✓.
 function openSortMenu(ev) {
   const opt = (key, label) => [
@@ -7517,13 +7866,75 @@ function openSortMenu(ev) {
     opt("az", tr("sessionbar.sortAz")),
   ]);
 }
+// setSessionSort applies the order inside every group (sorting is server-side,
+// so each open group refetches its first page; the Archived panel stays in
+// recent order).
 function setSessionSort(key) {
   if (sessionSort === key) return;
   sessionSort = key;
   localStorage.setItem(SESSION_SORT_KEY, key);
-  // Sort is applied server-side, so refetch page 1 in the new order. Only the
-  // active list is affected (the archived panel is always recent order).
-  resetActiveView();
+  if (sessionSearch) { runTreeSearch(); return; }
+  for (const c of collectionsData) resetGroup(c.name);
+}
+
+// ── Bulk select ──
+// enterSelectMode shows a checkbox on every session row of the tree and the
+// selection bar; "Select all" then ticks the rows of the `scopeName` group.
+function enterSelectMode(scopeName) {
+  if (sessionSearch) return; // search and select are mutually exclusive
+  selectMode = true;
+  selectScope = scopeName;
+  selectedSessions.clear();
+  els.sidebar.classList.add("selecting");
+  els.treeSelectBar.hidden = false;
+  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = false; }
+  updateSelectBar();
+}
+function exitSelectMode() {
+  if (!selectMode) return;
+  selectMode = false;
+  selectScope = null;
+  selectedSessions.clear();
+  els.sidebar.classList.remove("selecting");
+  els.treeSelectBar.hidden = true;
+  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = true; }
+}
+
+// scopeRowIds lists the loaded row ids of the group selection was entered from.
+function scopeRowIds() {
+  const ul = selectScope ? groupList(selectScope) : null;
+  return ul ? [...ul.querySelectorAll("li[data-id]")].map((li) => li.dataset.id) : [];
+}
+
+// updateSelectBar refreshes the "n selected" label + the Select-all lit state.
+function updateSelectBar() {
+  if (!selectMode) return;
+  els.treeSelectCount.textContent = trN("sessionbar.selected", selectedSessions.size, { count: selectedSessions.size });
+  const ids = scopeRowIds();
+  els.treeSelectAllBtn.classList.toggle("is-active", ids.length > 0 && ids.every((id) => selectedSessions.has(id)));
+}
+
+// toggleSessionSelect ticks/unticks one row while selecting.
+function toggleSessionSelect(id, li) {
+  if (selectedSessions.has(id)) selectedSessions.delete(id);
+  else selectedSessions.add(id);
+  li.classList.toggle("row-selected", selectedSessions.has(id));
+  updateSelectBar();
+}
+
+// toggleSelectAll ticks the scope group's loaded rows, or clears them when they
+// are all ticked already.
+function toggleSelectAll() {
+  const ids = scopeRowIds();
+  const allSel = ids.length > 0 && ids.every((id) => selectedSessions.has(id));
+  for (const id of ids) {
+    if (allSel) selectedSessions.delete(id);
+    else selectedSessions.add(id);
+  }
+  for (const li of els.tree.querySelectorAll("li[data-id]")) {
+    li.classList.toggle("row-selected", selectedSessions.has(li.dataset.id));
+  }
+  updateSelectBar();
 }
 
 // openBatchMenu offers the batch actions for the ticked sessions: move to a
@@ -7539,15 +7950,16 @@ function openBatchMenu(ev) {
   showFolderCtxMenu(ev, items);
 }
 
-// runBatch applies fn to every selected id (bounded concurrency via Promise.all),
-// then exits select mode and refreshes. ids are snapshotted first so the set can
-// be cleared safely.
+// runBatch applies fn to every selected id, then leaves select mode and
+// refreshes. ids are snapshotted first so the set can be cleared safely.
 async function runBatch(fn) {
   const ids = [...selectedSessions];
   await Promise.all(ids.map((id) => fn(id).catch((e) => console.error("batch:", id, e))));
-  setSelectMode(false);
+  // Every batch action (move / archive / delete) takes the session out of the
+  // group it may be pinned in.
+  for (const id of ids) unpinSession(id);
+  exitSelectMode();
   await loadSessions();
-  await loadCollections();
 }
 function batchMove(target) {
   const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
@@ -7572,33 +7984,32 @@ async function batchDelete() {
   for (const id of ids) forgetSession(id);
 }
 
-// wireSessionBar attaches the toolbar's listeners once at boot.
-function wireSessionBar() {
-  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
-  on("session-search-btn", "click", () => setSearchMode(true));
-  on("session-search-close", "click", () => setSearchMode(false));
-  if (els.sessionSearchInput) {
-    // Search is server-side now (q=), so debounce so we don't fire a request per
-    // keystroke; each committed query refetches page 1 of both lists.
+// wireTreeControls attaches the sidebar's search / import / sort / select
+// listeners once at boot.
+function wireTreeControls() {
+  const on = (el, ev, fn) => { if (el) el.addEventListener(ev, fn); };
+  on(els.sidebarImportBtn, "click", () => importSessionPrompt());
+  on(els.sidebarSearchBtn, "click", () => {
+    // From the icon rail, expand first so the search field has room.
+    if (els.sidebar.classList.contains("collapsed")) expandSidebar();
+    openTreeSearch();
+  });
+  on(document.getElementById("sidebar-search-close"), "click", () => closeTreeSearch());
+  if (els.sidebarSearchInput) {
+    // Search is server-side (q=), so debounce so we don't fire a request per
+    // keystroke.
     let searchDebounce = null;
-    els.sessionSearchInput.addEventListener("input", () => {
-      const val = els.sessionSearchInput.value;
+    els.sidebarSearchInput.addEventListener("input", () => {
+      const val = els.sidebarSearchInput.value;
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => {
-        if (val === sessionSearch) return;
-        sessionSearch = val;
-        resetSessionViews();
-      }, 150);
+      searchDebounce = setTimeout(() => setTreeSearch(val), 150);
     });
-    els.sessionSearchInput.addEventListener("keydown", (e) => { if (e.key === "Escape") setSearchMode(false); });
+    els.sidebarSearchInput.addEventListener("keydown", (e) => { if (e.key === "Escape") closeTreeSearch(); });
   }
-  on("session-sort-btn", "click", (e) => openSortMenu(e));
-  on("session-select-btn", "click", () => setSelectMode(true));
-  on("session-select-cancel", "click", () => setSelectMode(false));
-  on("session-selectall-btn", "click", () => toggleSelectAll());
-  on("session-batch-btn", "click", (e) => openBatchMenu(e));
-  on("session-new-btn", "click", () => newChat(fp()));
-  on("session-import-btn", "click", () => importSessionPrompt());
+  on(els.collectionsSort, "click", (e) => openSortMenu(e));
+  on(els.treeSelectAllBtn, "click", () => toggleSelectAll());
+  on(els.treeBatchBtn, "click", (e) => openBatchMenu(e));
+  on(document.getElementById("tree-select-cancel"), "click", () => exitSelectMode());
 }
 
 // closeTabEverywhere removes `id` as a tab from every pane that holds it.
@@ -7613,6 +8024,8 @@ function closeTabEverywhere(id) {
 // push (another browser deleted the session).
 function forgetSession(id) {
   unsubscribeSessionEvents(id);
+  unpinSession(id);
+  sessionMeta.delete(id);
   sessionTurnCounts.delete(id);
   sessionContainers.delete(id);
   sessionCtxUsage.delete(id);
@@ -7648,6 +8061,8 @@ function forgetSession(id) {
 }
 
 async function deleteSession(id, li) {
+  const group = groupOf(id);
+  const wasArchived = archivedSessions.has(id);
   try {
     await apiFetch(`/api/sessions/${id}`, { method: "DELETE" });
     forgetSession(id);
@@ -7655,10 +8070,10 @@ async function deleteSession(id, li) {
     refreshSidebarActive();
     saveLayout();
     // Reconcile against the server: removing the <li> directly gives instant
-    // feedback, but a loadSessions() still in flight from an earlier create/
+    // feedback, but a group reload still in flight from an earlier create/
     // delete burst could re-render and resurrect the deleted row. Issuing the
     // latest load (seq-guarded) makes the sidebar authoritative.
-    loadSessions();
+    refreshGroups([group], { archived: wasArchived });
   } catch (e) {
     console.error("failed to delete session:", e);
   }
@@ -7670,6 +8085,9 @@ async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
     unsubscribeSessionEvents(id);
+    const meta = sessionMeta.get(id);
+    if (meta) meta.archived = true;
+    unpinSession(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
     // clicking it in the archived panel re-mounts the read-only history.
@@ -7717,12 +8135,12 @@ function startRename(li, id, currentTitle) {
     } catch (e) {
       console.error("failed to rename session:", e);
     }
-    await loadSessions();
+    refreshSessionsFor(id);
   }
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    if (e.key === "Escape") { loadSessions(); }
+    if (e.key === "Escape") { refreshSessionsFor(id); }
   });
   input.addEventListener("blur", commit);
 }
@@ -7769,6 +8187,7 @@ function closeTab(panel, key) {
   }
   const wasActive = panel.activeTab === key;
   panel.tabs.splice(idx, 1);
+  if (isDraft(key)) draftDirs.delete(key);
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
   // Terminal tabs are pane-local and ephemeral; tear down the shell + WebSocket.
@@ -8170,8 +8589,9 @@ function currentSquadChoice() {
 // squad for this session only (used by the empty-pane picker); when omitted the
 // globally-selected squad applies. `dirOverride` roots the session at a chosen
 // folder (the Folders panel's "Open Chat here"); when omitted it starts at the
-// fixed initial root. Returns the new id.
-async function newChat(panel, squadOverride, dirOverride) {
+// fixed initial root. `collectionOverride` files the session under that
+// collection (a group's ＋); when omitted it goes to General. Returns the new id.
+async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
   if (window.Settings && window.Settings.isOpen()) window.Settings.close();
   closeNav(); // "New Chat" lives in the drawer; dismiss it so the composer is visible.
   panel = panel || fp();
@@ -8179,14 +8599,21 @@ async function newChat(panel, squadOverride, dirOverride) {
   // Preserve the outgoing tab's half-typed message (it returns when reselected);
   // the new session starts with an empty composer (restored below).
   saveComposerDraft(panel);
-  const squad = squadOverride || currentSquadChoice();
+  // A chat started from a draft takes the draft's picker choices (collection,
+  // squad, pinned folder) unless the caller passed its own; a group's ＋ passes
+  // its collection and ignores the draft entirely.
+  const draftKey = isDraft(panel.activeTab) && !collectionOverride ? panel.activeTab : null;
+  const pickerSquadShown = panel.els.pickerSquad && !panel.els.pickerSquad.hidden;
+  const squad = squadOverride || (draftKey && pickerSquadShown ? panel._pickerSquad : null) || currentSquadChoice();
+  const dir = dirOverride || (draftKey ? draftDirs.get(draftKey) : "");
   try {
     const body = { squad };
-    if (dirOverride) body.dir = dirOverride;
-    // File the new chat under the collection the rail has selected (General ⇒
-    // leave un-filed). The server ignores an unknown collection.
-    if (activeCollection && activeCollection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
-      body.collection = activeCollection;
+    if (dir) body.dir = dir;
+    // File the new chat under the requested collection (General ⇒ leave
+    // un-filed). The server ignores an unknown collection.
+    const collection = collectionOverride || (draftKey && panel._pickerCollection) || GENERAL_COLLECTION;
+    if (collection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
+      body.collection = collection;
     }
     const res = await apiFetch("/api/sessions", {
       method: "POST",
@@ -8207,6 +8634,7 @@ async function newChat(panel, squadOverride, dirOverride) {
     }
     const data = await res.json();
     const newId = data.session_id;
+    if (draftKey) { draftDirs.delete(draftKey); panel._pickerSquadPicked = false; panel._pickerSquadAuto = false; }
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
@@ -8230,7 +8658,7 @@ async function newChat(panel, squadOverride, dirOverride) {
     restoreComposerDraft(panel, newId); // fresh session → empty composer
     subscribeSessionEvents(newId);
     saveLayout();
-    await loadSessions();
+    refreshGroups([collection]);
     return newId;
   } catch (e) { console.error(e); return null; }
 }
@@ -8386,30 +8814,29 @@ async function subscribeGlobalEvents() {
         } else if (event === "ask_user_cancel" && data && data.question_id) {
           cancelAskUserWidget(data.question_id);
         } else if (event === "session_created" && sid) {
-          // Another browser (or this one) created a session — refresh the
-          // sidebar so the new row appears. We never auto-open it.
-          loadSessions();
+          // Another browser (or this one) created a session — refresh its group
+          // so the new row appears. We never auto-open it.
+          refreshSessionsFor(sid);
         } else if (event === "session_deleted" && sid) {
           // Another browser deleted a session — drop all local state, close any
           // tab holding it, and re-render the sidebar. Idempotent if this
           // browser was the deleter (its own broadcast echoes back).
+          const deletedFrom = groupOf(sid);
           forgetSession(sid);
           saveLayout();
-          loadSessions();
+          refreshGroups([deletedFrom], { archived: true });
         } else if (event === "session_renamed" && sid) {
-          // Title changed elsewhere — re-render the sidebar to pick it up.
-          loadSessions();
+          // Title changed elsewhere — refresh its group to pick it up.
+          refreshSessionsFor(sid);
         } else if (event === "collections_changed") {
           // A collection was created/renamed/deleted (here or elsewhere) —
-          // repaint the rail and re-fetch sessions (a rename/delete cascaded
-          // onto their Collection field).
-          loadCollections();
+          // rebuild the tree and re-fetch the open groups (a rename/delete
+          // cascaded onto their sessions' Collection field).
           loadSessions();
         } else if (event === "session_moved" && sid) {
           // A session was filed under a different collection (here or elsewhere)
-          // — refresh both lists so counts + filtering stay correct.
-          loadCollections();
-          loadSessions();
+          // — refresh the group it left and the one it joined (and the counts).
+          refreshGroups([groupOf(sid), (data && data.collection) || GENERAL_COLLECTION]);
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
           refreshSkills(sid);
@@ -8673,24 +9100,145 @@ async function maybePromptNotifications() {
   } catch (e) { console.error("notification opt-in failed:", e); }
 }
 
-// loadWhoami shows the login this omnis-server serves in the sidebar footer.
-// A multi-user deployment runs one server per user behind an SSO gateway
-// (docs/multi-user-containers.md); a single-user install reports the default
-// id and shows nothing, so the footer is unchanged there.
-async function loadWhoami() {
-  const box = document.getElementById("sidebar-user");
-  const name = document.getElementById("sidebar-user-name");
-  if (!box || !name) return;
+// ─── Account button + menu (sidebar footer) ──────────────────────────────────
+// loadAccountIdentity labels the footer's account button with the login this
+// omnis-server serves. A multi-user deployment runs one server per user behind
+// an SSO gateway (docs/multi-user-containers.md), and cookie mode serves several
+// logins; a single-user install reports the default id, so the button just reads
+// "Omnis" there.
+let accountLogin = ""; // shown login ("" on a single-user install)
+async function loadAccountIdentity() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
   try {
     const res = await apiFetch("/api/whoami");
     if (!res.ok) return;
     const payload = await res.json();
     const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
     const shared = payload && payload.identity_mode === "cookie";
-    if (!user || (user === "web-user" && !shared)) return;
-    name.textContent = user;
-    box.hidden = false;
+    accountLogin = (!user || (user === "web-user" && !shared)) ? "" : user;
   } catch (e) { console.error("whoami failed:", e); }
+  const label = accountLogin || "Omnis";
+  btn.querySelector(".account-name").textContent = label;
+  btn.querySelector(".account-avatar").textContent = label.charAt(0).toUpperCase();
+}
+
+const ICON_GEAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const ICON_PALETTE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`;
+const ICON_GLOBE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></svg>`;
+const ICON_BOOK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+const ICON_UPDATE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+
+function ensureAccountMenu() {
+  let m = document.getElementById("account-menu");
+  if (m) return m;
+  m = document.createElement("div");
+  m.id = "account-menu";
+  m.setAttribute("role", "menu");
+  m.hidden = true;
+  document.body.appendChild(m);
+  return m;
+}
+
+// accountMenuItem builds one menu row (icon + label [+ shortcut hint]).
+function accountMenuItem(icon, label, action, kbd) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "folder-ctx-item has-icon";
+  btn.setAttribute("role", "menuitem");
+  btn.innerHTML = `<span class="ctx-item-icon" aria-hidden="true">${icon}</span><span class="ctx-item-label"></span>`;
+  btn.querySelector(".ctx-item-label").textContent = label;
+  if (kbd) {
+    const k = document.createElement("span");
+    k.className = "account-menu-kbd";
+    k.textContent = kbd;
+    btn.appendChild(k);
+  }
+  // The account button lives in the phone drawer; dismiss the drawer too, so the
+  // settings dialog / update dialog the item opens is not left behind it.
+  btn.addEventListener("click", (e) => { e.stopPropagation(); closeAccountMenu(); closeNav(); action(); });
+  return btn;
+}
+
+// openAccountMenu shows the account menu anchored above the footer button.
+function openAccountMenu() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
+  const m = ensureAccountMenu();
+  m.innerHTML = "";
+  if (accountLogin) {
+    const id = document.createElement("div");
+    id.className = "account-menu-id";
+    id.textContent = accountLogin;
+    m.appendChild(id);
+    const sep = document.createElement("div");
+    sep.className = "folder-ctx-sep";
+    m.appendChild(sep);
+  }
+  const S = window.Settings;
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+  m.appendChild(accountMenuItem(ICON_GEAR, tr("settings.label"), () => S && S.open(), isMac ? "⌘," : "Ctrl+,"));
+  m.appendChild(accountMenuItem(ICON_PALETTE, tr("settings.menu.appearance"), () => S && S.openSection("appearance")));
+  m.appendChild(accountMenuItem(ICON_GLOBE, tr("account.language"), () => S && S.openSection("appearance", "appearance-language")));
+  m.appendChild(accountMenuItem(ICON_BOOK, tr("settings.menu.documentation"), () => S && S.openSection("documentation")));
+  const st = updateStatus;
+  // Opened before the boot status fetch landed: fetch it, then repaint the menu
+  // (only if it is still open) so the version line appears.
+  if (!st) {
+    checkForUpdate().then(() => {
+      const open = document.getElementById("account-menu");
+      if (updateStatus && open && !open.hidden) openAccountMenu();
+    });
+  }
+  const version = st && st.current && st.current !== "dev" ? st.current : "";
+  if (version || (st && st.available)) {
+    const sep = document.createElement("div");
+    sep.className = "folder-ctx-sep";
+    m.appendChild(sep);
+  }
+  if (version) {
+    const v = document.createElement("div");
+    v.className = "account-menu-version";
+    v.textContent = tr("account.version", { version });
+    m.appendChild(v);
+  }
+  if (st && st.available) {
+    m.appendChild(accountMenuItem(ICON_UPDATE, tr("account.updateTo", { version: st.latest }), () => openUpdateDialog()));
+  }
+  m.hidden = false;
+  // Anchor above the button, left-aligned with it, clamped to the viewport.
+  const r = btn.getBoundingClientRect();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)) + "px";
+  m.style.top = Math.max(4, r.top - mh - 6) + "px";
+  btn.setAttribute("aria-expanded", "true");
+}
+
+function closeAccountMenu() {
+  const m = document.getElementById("account-menu");
+  if (m) m.hidden = true;
+  document.getElementById("account-btn")?.setAttribute("aria-expanded", "false");
+}
+
+function wireAccountMenu() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const m = document.getElementById("account-menu");
+    if (m && !m.hidden) closeAccountMenu();
+    else openAccountMenu();
+  });
+  // Outside click / Escape / resize close it. A click on the button itself is
+  // left to the button's toggle (closing it here first would make the toggle
+  // reopen it). Scrolling does NOT close it: the menu is anchored to the fixed
+  // footer, and a streaming reply scrolls the transcript on its own.
+  document.addEventListener("click", (e) => {
+    const m = document.getElementById("account-menu");
+    if (m && !m.hidden && !m.contains(e.target) && !btn.contains(e.target)) closeAccountMenu();
+  }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAccountMenu(); });
+  window.addEventListener("resize", closeAccountMenu);
 }
 
 // maybePromptWhatsNew runs once per upgrade. It asks the server for the feature
@@ -8857,8 +9405,8 @@ async function appendNewPushTurns(sessionId) {
       requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
       showPushBanner(container);
     }
-    // Refresh sidebar turn counter.
-    loadSessions();
+    // Refresh the session's sidebar row.
+    refreshSessionsFor(sessionId);
   } catch (e) {
     console.error("appendNewPushTurns failed:", e);
   }
@@ -9476,7 +10024,7 @@ async function sendMessage(panel) {
           // persisted it before emitting this frame).
           finalizeSegment();
           appendRoutingChip(container, data.to, data.reason);
-          loadSessions();
+          refreshSessionsFor(sessionId);
           break;
         }
 
@@ -9659,7 +10207,7 @@ async function sendMessage(panel) {
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
-    loadSessions();
+    refreshSessionsFor(sessionId);
     // Catch any filesystem changes the turn made that didn't surface a
     // `file_changed` event (e.g. folders created/removed via the Bash tool).
     if (sessionId === activeSessionId) scheduleFoldersRefresh();
@@ -11018,7 +11566,7 @@ function closeCtxBrowser() {
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 // "New Chat" in the sidebar opens a new session in the focused pane.
-els.newChat.addEventListener("click", () => newChat());
+els.newChat.addEventListener("click", () => openNewChatDraft());
 
 // Squad picker dropdown — chevron next to the New Chat button toggles
 // a menu that picks which squad future sessions use. The menu is hidden
@@ -11031,12 +11579,12 @@ els.squadToggle.addEventListener("click", (e) => {
 els.squadMenu.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("click", () => {
   closeSquadMenu();
-  for (const p of panels) closePickerSquadMenu(p);
+  for (const p of panels) { closePickerSquadMenu(p); closePickerCollectionMenu(p); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!els.squadMenu.hidden) closeSquadMenu();
-  for (const p of panels) closePickerSquadMenu(p);
+  for (const p of panels) { closePickerSquadMenu(p); closePickerCollectionMenu(p); }
 });
 
 // ─── Hover tooltips (data-tip) ────────────────────────────────────────────────
@@ -11509,8 +12057,8 @@ async function onCompactClick(e, panel) {
 // ─── Sidebar resize & toggle ─────────────────────────────────────────────────
 
 // ─── Small-screen nav drawer ──────────────────────────────────
-// Below this width the two left columns (#sidebar + #session-pane) are lifted
-// out of the flow into a single off-canvas drawer and #chat-area takes the whole
+// Below this width the sidebar is lifted out of the flow into an off-canvas
+// drawer and #chat-area takes the whole
 // viewport — see css/features/responsive.css, which owns all the layout. This
 // module only drives `body.nav-open` (drawer in/out) and suppresses the
 // desktop-only affordances. Keep the query in step with the media query there.
@@ -11522,13 +12070,6 @@ function closeNav() { setNavOpen(false); }
 function toggleNav() { setNavOpen(!navOpen()); }
 
 els.navScrim.addEventListener("click", closeNav);
-// The Settings nav lives in the drawer's lower half but its panel renders in the
-// chat area behind it — so picking a section must dismiss the drawer, or the
-// user navigates to a page they can't see. Delegated (the list is built later by
-// settings.js) and inert on desktop, where nav-open is never set.
-document.getElementById("settings-menu")?.addEventListener("click", (e) => {
-  if (e.target.closest("li[data-file]")) closeNav();
-});
 // Crossing back to a wide viewport must not strand `nav-open` on the desktop
 // layout (where the drawer classes mean nothing but the scrim would still eat
 // clicks if it were left interactive).
@@ -11716,21 +12257,6 @@ els.sidebar.addEventListener("transitionend", (e) => {
   if (e.target === els.sidebar && e.propertyName === "width") layoutWidths();
 });
 
-// Clicking anywhere in the sidebar while Settings is showing returns to the chat
-// view: everything in it (New Chat, collections, archived, Files) acts on a chat,
-// so touching it means the user is done with Settings. Capture-phase so it still
-// fires for the handlers that stopPropagation, and it never stops the click — the
-// folder/collection/archived action still runs, now against a visible chat area.
-// Excluded: the footer buttons (they own the Settings/Appearance/Documentation
-// toggle), the collapse chevron, the update button, and the Files resize grip —
-// none of those mean "go back to chat".
-const SIDEBAR_KEEPS_SETTINGS = "#sidebar-footer, #sidebar-toggle, #update-btn, #folders-resize";
-els.sidebar.addEventListener("click", (e) => {
-  if (!window.Settings || !window.Settings.isOpen()) return;
-  if (e.target.closest && e.target.closest(SIDEBAR_KEEPS_SETTINGS)) return;
-  window.Settings.close();
-}, true);
-
 // ─── Archived sessions panel collapse ─────────────────────────────────────────
 
 const ARCHIVED_COL_KEY = "agent_archived_collapsed";
@@ -11784,20 +12310,19 @@ els.foldersHeader.addEventListener("keydown", (e) => {
 // reloads. Dragging up grows the list, down shrinks it.
 const FOLDERS_H_KEY = "agent_folders_height";
 const FOLDERS_H_MIN = 60;
-// Reserve at least this much for the collections list (~a few rows) when capping
-// how tall the Files panel may grow. Files and the collections list share the
-// left sidebar's flexible space; the session list lives in the separate middle
-// #session-pane column, so it no longer factors into this cap.
+// Reserve at least this much for the collection tree (~a few rows) when capping
+// how tall the Files panel may grow. Files and the tree share the sidebar's
+// flexible space.
 const COLLECTIONS_LIST_MIN = 96;
 // foldersHeightCap is the largest the folder listing may grow to. The folder
-// listing and the collections list share the sidebar's flexible space
+// listing and the collection tree share the sidebar's flexible space
 // (everything else is fixed chrome); we leave COLLECTIONS_LIST_MIN of it for the
-// collections. When the panel is collapsed or not yet laid out (clientHeight 0)
+// tree. When the panel is collapsed or not yet laid out (clientHeight 0)
 // that measurement is unreliable, so fall back to a viewport-based cap that still
 // reserves the collections minimum (and the footer's room).
 function foldersHeightCap() {
   const viewCap = Math.max(FOLDERS_H_MIN, window.innerHeight - 60 - COLLECTIONS_LIST_MIN);
-  const flexible = els.foldersList.clientHeight + els.collectionsList.clientHeight;
+  const flexible = els.foldersList.clientHeight + els.tree.clientHeight;
   if (flexible <= COLLECTIONS_LIST_MIN + FOLDERS_H_MIN) return viewCap; // unreliable
   return Math.max(FOLDERS_H_MIN, Math.min(viewCap, flexible - COLLECTIONS_LIST_MIN));
 }
@@ -12766,7 +13291,7 @@ function openFolderUpCtxMenu(ev) {
   const name = abs.split("/").filter(Boolean).pop() || "root";
   const D = { disabled: true };
   const items = [
-    [tr("menu.openChatHere"), () => newChat(null, undefined, cur)],
+    [tr("menu.openChatHere"), () => openNewChatDraft({ dir: cur })],
     [tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: cur })],
     [tr("menu.download"), () => folderDownload(abs, name, true)],
     SEP,
@@ -12837,7 +13362,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   const items = [];
   if (isDir) {
     // Open / download
-    items.push([tr("menu.openChatHere"), () => newChat(null, undefined, abs)]);
+    items.push([tr("menu.openChatHere"), () => openNewChatDraft({ dir: abs })]);
     items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: abs })]);
     items.push([tr("menu.download"), () => folderDownload(abs, name, true)]);
     items.push(SEP);
@@ -13142,7 +13667,7 @@ async function restoreLayout(rec, liveIds) {
   // BEFORE sessions so the very first render already knows which collection each
   // session belongs to (no fold-to-General flash for filed sessions).
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
-  wireSessionBar();
+  wireTreeControls();
   await loadCollections();
   await loadSessions();
 
@@ -13173,7 +13698,7 @@ async function restoreLayout(rec, liveIds) {
   }
   if (composerManuallyResized) for (const p of panels) p.els.composerWrap.classList.add("is-manual");
   if (!restored && !panels.some(p => p.sessionId)) {
-    const first = els.list.querySelector("li[data-id]");
+    const first = els.tree.querySelector(".collection-sessions li[data-id]");
     if (first) await bindSessionToPanel(fp(), first.dataset.id);
     else { newDraftTab(fp()); autoGrowPrompt(fp()); }
   }
@@ -13182,7 +13707,8 @@ async function restoreLayout(rec, liveIds) {
   // recorded). The language offer runs first and may reload (switching language),
   // so chain the notification opt-in after it to avoid two stacked modals.
   (async () => {
-    loadWhoami(); // sidebar login — no-op on a single-user install
+    wireAccountMenu();
+    loadAccountIdentity(); // footer account button — reads "Omnis" on a single-user install
     await maybePromptLocale(); // may location.reload() when the user switches
     await maybePromptNotifications();
     maybePromptWhatsNew(); // once per upgrade; no-op on dev builds / when caught up

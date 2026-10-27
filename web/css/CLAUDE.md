@@ -62,8 +62,8 @@ same colour/size in multiple partials.
 | File | Owns |
 |---|---|
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
-| `collections.css` | Collections list (inside the left `#sidebar`): thematic session-folder rows + counts + active/drag-over states (`.collection-row`), the per-collection **colour** accent (`--col-accent` on the active bar + folder glyph), the collapsed-rail colour pastille (`.collection-badge` — initials in the collection colour; shown/hidden by `features/sidebar.css`) and the colour-picker swatch grid (`.collection-swatch*`), **and** the middle `#session-pane` column: its top toolbar (`#session-topbar` — search/sort/select/new + bulk-select checkboxes `.session-check`) + the session list |
-| `sidebar.css` | Left sidebar (app chrome + Collections + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, session rows, archived-sessions panel, sidebar resize handle |
+| `collections.css` | Sidebar **primary actions** (Search / Import, `.sidebar-action`), the Collections header (sort + new), and the **collection tree**: one `li.collection-group` per collection — header `.collection-row` (chevron, glyph/star, name, active count swapped for the hover `.group-actions` ＋/⋯), its rows `ul.collection-sessions`, `.group-empty`, `.group-more`, the pinned-row style, drag-over state, the collapsed-rail colour pastille (`.collection-badge`), the bulk-select checkboxes (`#sidebar.selecting`) and the colour-picker swatch grid (`.collection-swatch*`) |
+| `sidebar.css` | Left sidebar (app chrome + tree + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, single-line **session rows** (tree + Archived), archived-sessions panel, the **account button + menu** (`#account-btn`, `#account-menu`), sidebar resize handle |
 | `folders.css` | Folders browser panel + its right-click context menu |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |
@@ -74,7 +74,7 @@ same colour/size in multiple partials.
 | `context.css` | Context ring, context popup, context browser modal |
 | `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card |
 | `notifications.css` | Background-task / monitor toast notifications (`#task-toast-layer`, `.task-toast`) |
-| `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` + `#session-pane` out of the flow into one off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` **touch block**: reveals every hover-only control (session-row actions, turn/copy buttons, tab ×) and enlarges the chrome buttons to tappable sizes |
+| `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` out of the flow into a full-height off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` **touch block**: reveals every hover-only control (session-row actions, collection-header ＋/⋯, turn/copy buttons, tab ×) and enlarges the chrome buttons to tappable sizes |
 
 ### `settings/` — Settings panel (barrel: `settings.css`)
 
@@ -84,7 +84,8 @@ same colour/size in multiple partials.
 | `permissions.css` | Permission-rule editor + skill-contributed (read-only) permissions |
 | `hooks.css` | Lifecycle hooks editor (Settings → Hooks): matcher cards + command rows |
 | `status.css` | Restart-required banner, reload spinner, generation pill, full-page restart overlay |
-| `sidebar.css` | Settings **sidebar chrome**: the gear button, section labels; **and** the settings category menu (`#settings-menu`, now hosted in the middle `#session-pane` column — it replaces the session list while Settings is open) plus the `#session-pane` swap/collapse rules that drive that |
+| `sidebar.css` | Settings **sidebar chrome**: section labels, the hidden in-panel category tabs, and the client-only (no Save/Discard, no Form/Raw toolbar) rules |
+| `modal.css` | The **settings dialog**: `#settings-modal` backdrop (z-index 150, below the confirm/prompt dialogs), the dialog frame + header, and the grouped, searchable section nav (`.settings-nav-*`); full-screen below 820px |
 | `theme.css` | Theme picker |
 | `skills.css` | Skills panel |
 | `registries.css` | Remote registries split-panel list + browse view + cards |

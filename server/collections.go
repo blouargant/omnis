@@ -14,6 +14,9 @@ import (
 type collectionInfo struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
+	// Active counts only the non-archived sessions — what the sidebar tree lists
+	// under the collection (Count also includes archived ones).
+	Active int `json:"active"`
 	// Color is the palette token chosen for this collection (empty for General
 	// and for uncoloured collections). The client resolves it to a theme colour.
 	Color string `json:"color,omitempty"`
@@ -32,34 +35,37 @@ type collectionInfo struct {
 // collectionCounts tallies non-hidden sessions by their effective collection.
 // A session whose Collection field is blank — or names a collection no longer in
 // the stored list — folds into General, so the totals always reconcile with the
-// session list the sidebar shows.
-func collectionCounts(d serverDeps, login string, known []string) map[string]int {
+// session list the sidebar shows. `all` includes archived sessions; `active`
+// excludes them.
+func collectionCounts(d serverDeps, login string, known []string) (all, active map[string]int) {
 	knownByFold := make(map[string]string, len(known))
 	for _, n := range known {
 		knownByFold[strings.ToLower(n)] = n
 	}
-	counts := map[string]int{sessions.GeneralCollection: 0}
+	all = map[string]int{sessions.GeneralCollection: 0}
+	active = map[string]int{sessions.GeneralCollection: 0}
 	for _, n := range known {
-		counts[n] = 0
+		all[n] = 0
+		active[n] = 0
 	}
 	// Counts only the caller's sessions in cookie mode (login "" ⇒ all).
 	for _, m := range d.Registry.ListFor(login) {
 		if m.Hidden {
 			continue
 		}
-		name := sessions.NormalizeCollectionName(m.Collection)
-		if name == "" {
-			counts[sessions.GeneralCollection]++
-			continue
+		target := sessions.GeneralCollection
+		if name := sessions.NormalizeCollectionName(m.Collection); name != "" {
+			// A session referencing a deleted/unknown collection stays in General.
+			if canon, ok := knownByFold[strings.ToLower(name)]; ok {
+				target = canon
+			}
 		}
-		if canon, ok := knownByFold[strings.ToLower(name)]; ok {
-			counts[canon]++
-		} else {
-			// Session references a deleted/unknown collection → General.
-			counts[sessions.GeneralCollection]++
+		all[target]++
+		if !m.Archived {
+			active[target]++
 		}
 	}
-	return counts
+	return all, active
 }
 
 // handleListCollections returns the ordered collection list (General first, then
@@ -78,14 +84,20 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		counts := collectionCounts(d, requestLogin(c), known)
+		counts, active := collectionCounts(d, requestLogin(c), known)
 		out := make([]collectionInfo, 0, len(known)+1)
-		out = append(out, collectionInfo{Name: sessions.GeneralCollection, Count: counts[sessions.GeneralCollection], General: true})
+		out = append(out, collectionInfo{
+			Name:    sessions.GeneralCollection,
+			Count:   counts[sessions.GeneralCollection],
+			Active:  active[sessions.GeneralCollection],
+			General: true,
+		})
 		for _, n := range known {
 			squad, cwd := cols.CollectionProfile(n)
 			out = append(out, collectionInfo{
 				Name:       n,
 				Count:      counts[n],
+				Active:     active[n],
 				Color:      colors[n],
 				Squad:      squad,
 				Cwd:        cwd,

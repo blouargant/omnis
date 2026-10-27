@@ -18,33 +18,46 @@ the file group above (subject to garbage collection).
 
 ## Collections (thematic folders)
 
-The web UI is a **three-column layout**, like an email client:
+The web UI is a **two-column layout**: a sidebar, and the conversation panes.
 
-- **Left column** — the app chrome (the **Omnis** header, **New Chat**), your
-  **Collections** (thematic folders), the **Archived** panel, the per-chat
-  **Files** browser, and the **Settings / Appearance / Documentation** buttons.
-- **Middle column** — a **toolbar** above the **session list** for the selected
-  collection (grouped by time — Today / Yesterday / This week / …).
-- **Right column** — the conversation panes (and the Settings body).
+The **sidebar** holds, top to bottom:
 
-The middle column's **toolbar** carries: the current view's name and session
-count; **Search** (filter the list by title); **Sort** (recent activity / date
-created / A–Z); **Select** (bulk mode — tick multiple sessions, then **Move to** a
-collection, **Archive**, or **Delete** them together, with a Select-all); and a
-**New chat** button that starts a chat in the current collection.
+- **New Chat** (with its squad chooser), then **Search** and **Import a
+  conversation**.
+- Your **Collections** — each one a **foldable group** listing its own chats
+  directly under it, like the project groups in Claude Desktop. Click a
+  collection's header to fold or unfold it; Omnis remembers your choice in this
+  browser. A long collection shows its 10 most recent chats, then **Show more**.
+- The **Archived** panel (every collection's archived chats) and the per-chat
+  **Files** browser.
+- Your **account button** at the very bottom — its menu opens **Settings**
+  (`Ctrl+,`), **Appearance**, **Language** and **Documentation**.
+
+The **Collections** header carries **Sort** (recent activity / date created /
+A–Z, applied inside every collection) and **+** (new collection). Hovering a
+collection's header replaces its chat count with **+** (start a chat in that
+collection) and **⋯** (its menu). **Search** turns into a field that shows the
+matching chats of every collection under their group, and filters the Archived
+panel too; press Escape to close it. To act on several chats at once, choose
+**Select** in a collection's **⋯** menu: tick chats (or **Select all**), then
+**Actions** → **Move to** a collection, **Archive** or **Delete**.
 
 A session lives in **exactly one** collection. **General** is the always-present
-default: every new chat starts there unless another collection is selected, and
-it holds any session you haven't filed elsewhere. General can't be renamed or
-deleted.
+default: it holds any session you haven't filed elsewhere, and can't be renamed
+or deleted.
 
-- **Create** a collection with the **+** button at the top of the rail.
-- **Select** a collection to filter the middle list to just its sessions. A new
-  chat you start while a collection is selected is filed under it.
-- **Move** a session by dragging its row onto a collection in the rail, or via
-  the session's **⋯ → Move to** menu.
-- **Rename / Delete** a collection from its right-click menu. Deleting a
-  collection moves its sessions back to **General** (nothing is lost).
+- **Start a chat in a collection** with the **+** on its header. The sidebar's
+  **New Chat** button (and a pane's **+** tab, and Files → **Open Chat here**)
+  opens a draft instead, where you choose the **Collection** — and the squad —
+  before sending; the draft starts on the collection you chose last time.
+- **Create** a collection with the **+** in the Collections header.
+- **Move** a session by dragging its row onto a collection, or via the session's
+  **⋯ → Move to** menu.
+- **Rename / Delete** a collection from its **⋯** (or right-click) menu.
+  Deleting a collection moves its sessions back to **General** (nothing is lost).
+- Opening a chat unfolds its collection and highlights its row, so the sidebar
+  always shows where you are. Hover a row to see its turn count, last activity
+  and squad.
 
 Collections and each session's filing are persisted (`collections.json` +
 `conversation_<id>.json`) and survive a server restart. Changes sync live across
@@ -55,7 +68,7 @@ open browsers.
 A collection can carry **persistent context** that applies to every chat filed
 under it — useful for a *thematic, cross-repo* workstream (a client, a research
 topic) that a per-directory `AGENT.md` can't cover. Open a collection's
-right-click menu → **Edit context…**:
+**⋯** (or right-click) menu → **Edit context…**:
 
 - **Instructions** — hand-authored, stable guidance prepended to every chat in
   the collection (tone, stack, do/don't). This is an `AGENT.md` scoped to the

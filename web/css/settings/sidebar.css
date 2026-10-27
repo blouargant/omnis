@@ -1,54 +1,5 @@
-/* Settings sidebar chrome: settings button, section labels, in-sidebar settings menu
+/* Settings chrome shared with the sidebar: section labels, hidden category tabs, client-only rules
    Part of web/css/settings.css — edit this partial, not the @import barrel. */
-
-/* Settings sidebar buttons: the gear plus the Appearance / Documentation
-   shortcut buttons stacked beneath it in #sidebar-footer share one look. */
-#settings-btn,
-#appearance-btn,
-#documentation-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 0.4rem;
-  /* 12px left padding puts the icon on the same column as the Archived/Folders
-     chevrons (their headers pad 12px, panels pad 0), so the whole lower sidebar
-     shares one clean left edge; the label then lines up with the section labels.
-     Paired with #sidebar-footer padding:8px 0 so the hover fill spans full width
-     like the section headers. */
-  padding: 0.45rem 12px;
-  background: transparent;
-  border: 1px solid transparent;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-  /* Match the 13px of the other interactive rows in the left column (collection
-     rows, settings-menu items, session + archived rows) so the footer buttons
-     don't read as smaller than everything above them. */
-  font-size: 13px;
-  /* Same muted tone as the ARCHIVED / FOLDERS section labels so the five lower
-     labels read as one group; brightens to --text on hover/active. */
-  color: var(--text-muted);
-}
-#settings-btn svg,
-#appearance-btn svg,
-#documentation-btn svg { flex-shrink: 0; opacity: 0.8; }
-#settings-btn:hover,
-#appearance-btn:hover,
-#documentation-btn:hover { background: var(--bg-raised); color: var(--text); }
-#settings-btn:hover svg,
-#appearance-btn:hover svg,
-#documentation-btn:hover svg { opacity: 1; }
-#settings-btn.active,
-#appearance-btn.active,
-#documentation-btn.active {
-  background: var(--accent-bg-soft);
-  border-color: var(--accent-border-soft);
-  color: var(--text);
-}
-#settings-btn.active svg,
-#appearance-btn.active svg,
-#documentation-btn.active svg { opacity: 1; }
 
 /* ─── Sidebar section labels ──────────────────────────────────────────── */
 .sidebar-section-label {
@@ -60,114 +11,12 @@
   color: var(--text-muted);
 }
 
-/* ─── Settings category menu (lives in the middle #session-pane column) ─────
- * When Settings is open it replaces the session list and fills the middle
- * column, carrying that column's right border. Its `hidden` attribute is
- * toggled by settings.js (see the #session-pane swap rules further down). */
-#settings-menu {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-right: 1px solid var(--border);
-  animation: settings-menu-expand 0.18s ease-out;
-}
-#settings-menu[hidden] { display: none; }
-
-@keyframes settings-menu-expand {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* "Settings" heading reads as the middle column's top bar (matches the session
- * toolbar height + border). */
-#settings-menu > .sidebar-section-label {
-  min-height: var(--topbar-h);
-  display: flex;
-  align-items: center;
-  margin: 0;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-#settings-menu-list {
-  list-style: none;
-  margin: 0;
-  padding: 6px;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-#settings-menu-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-bottom: 1px;
-  border: 1px solid transparent;
-  transition: background 0.1s, color 0.1s;
-}
-#settings-menu-list li:hover { background: var(--bg-raised); color: var(--text); }
-#settings-menu-list li.active {
-  background: var(--accent-bg-soft);
-  border-color: var(--accent-border-soft);
-  color: var(--text-strong);
-}
-#settings-menu-list li svg { flex-shrink: 0; opacity: 0.85; }
-#settings-menu-list li.active svg { opacity: 1; }
-
-/* The category tab bar and Form/Raw view toggle inside the settings panel
- * are replaced by the sidebar menu — hide them without removing from the DOM.
- * Also collapse the now-empty toolbar so it doesn't reserve vertical space. */
-#settings-panel .settings-tabs,
-#settings-panel .settings-view-toggle,
-#settings-panel .settings-body-toolbar { display: none; }
-
-/* Raw JSON toggle: lives at the bottom of the sidebar menu and is offset
- * with a separator so it reads as a mode switch, not a section. */
-#settings-menu-list li.settings-menu-raw {
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 4px 4px;
-}
-#settings-menu-list li.settings-menu-raw.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
+/* The category tab bar inside the settings panel is replaced by the dialog's
+ * section nav — hide it without removing it from the DOM. */
+#settings-panel .settings-tabs { display: none; }
 
 /* Client-only sections (e.g. Appearance) have nothing to save and no Form/Raw
  * toggle — hide the top-bar Save/Discard actions and the toolbar. (The Helper
  * assistant FAB lives in the body and stays available on every panel.) */
 .settings-panel--client-only .settings-body-toolbar,
 .settings-panel--client-only .settings-header-actions { display: none; }
-
-/* ─── Middle column becomes the Settings nav while Settings is open ─────────
- * #settings-menu lives in #session-pane; when Settings is open it replaces the
- * session list + toolbar. For an autonomous footer section (Appearance /
- * Documentation) settings.js hides the category menu, so the column has nothing
- * to show — collapse it and hand its width to the settings body. */
-body:has(#chat.chat--settings) #session-pane > #session-topbar,
-body:has(#chat.chat--settings) #session-pane > #session-list {
-  display: none;
-}
-body:has(#chat.chat--settings) #session-pane:has(> #settings-menu[hidden]) {
-  width: 0;
-  border: none;
-  overflow: hidden;
-}
-/* The Settings nav is icon + short-label rows — it needs far less room than the
- * session list, so narrow the middle column while the category menu is shown
- * (chat's #session-pane width is left untouched). */
-body:has(#chat.chat--settings) #session-pane:has(> #settings-menu:not([hidden])) {
-  width: 210px;
-}
-
-
