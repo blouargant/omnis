@@ -6913,6 +6913,9 @@ function buildGroup(c) {
   const toggle = () => { if (!sessionSearch) setGroupOpen(name(), !isGroupOpen(name())); };
   head.addEventListener("click", (e) => {
     if (e.target.closest(".group-actions")) return;
+    // Collapsed to the icon rail, a header is just a pastille: clicking it
+    // expands the sidebar on that collection, opened and scrolled into view.
+    if (els.sidebar.classList.contains("collapsed")) { revealGroupFromRail(name()); return; }
     toggle();
   });
   head.addEventListener("keydown", (e) => {
@@ -6977,6 +6980,14 @@ function updateGroupHeader(li, c) {
   const menu = li.querySelector(".group-menu");
   menu.setAttribute("data-tip", tr("sessionbar.actions"));
   menu.setAttribute("aria-label", tr("sessionbar.actions"));
+}
+
+// revealGroupFromRail expands the collapsed sidebar on one collection: the group
+// is opened (and loaded) and scrolled into view once the expand animation ends.
+function revealGroupFromRail(name) {
+  expandSidebar();
+  setGroupOpen(name, true);
+  setTimeout(() => groupEl(name)?.scrollIntoView({ block: "start", behavior: "smooth" }), 200);
 }
 
 // revealSessionInTree follows the focused chat into its own collection: it opens
@@ -7929,7 +7940,11 @@ async function batchDelete() {
 function wireTreeControls() {
   const on = (el, ev, fn) => { if (el) el.addEventListener(ev, fn); };
   on(els.sidebarImportBtn, "click", () => importSessionPrompt());
-  on(els.sidebarSearchBtn, "click", () => openTreeSearch());
+  on(els.sidebarSearchBtn, "click", () => {
+    // From the icon rail, expand first so the search field has room.
+    if (els.sidebar.classList.contains("collapsed")) expandSidebar();
+    openTreeSearch();
+  });
   on(document.getElementById("sidebar-search-close"), "click", () => closeTreeSearch());
   if (els.sidebarSearchInput) {
     // Search is server-side (q=), so debounce so we don't fire a request per
@@ -11984,8 +11999,8 @@ async function onCompactClick(e, panel) {
 // ─── Sidebar resize & toggle ─────────────────────────────────────────────────
 
 // ─── Small-screen nav drawer ──────────────────────────────────
-// Below this width the two left columns (#sidebar + #session-pane) are lifted
-// out of the flow into a single off-canvas drawer and #chat-area takes the whole
+// Below this width the sidebar is lifted out of the flow into an off-canvas
+// drawer and #chat-area takes the whole
 // viewport — see css/features/responsive.css, which owns all the layout. This
 // module only drives `body.nav-open` (drawer in/out) and suppresses the
 // desktop-only affordances. Keep the query in step with the media query there.
@@ -12244,15 +12259,14 @@ els.foldersHeader.addEventListener("keydown", (e) => {
 // reloads. Dragging up grows the list, down shrinks it.
 const FOLDERS_H_KEY = "agent_folders_height";
 const FOLDERS_H_MIN = 60;
-// Reserve at least this much for the collections list (~a few rows) when capping
-// how tall the Files panel may grow. Files and the collections list share the
-// left sidebar's flexible space; the session list lives in the separate middle
-// #session-pane column, so it no longer factors into this cap.
+// Reserve at least this much for the collection tree (~a few rows) when capping
+// how tall the Files panel may grow. Files and the tree share the sidebar's
+// flexible space.
 const COLLECTIONS_LIST_MIN = 96;
 // foldersHeightCap is the largest the folder listing may grow to. The folder
-// listing and the collections list share the sidebar's flexible space
+// listing and the collection tree share the sidebar's flexible space
 // (everything else is fixed chrome); we leave COLLECTIONS_LIST_MIN of it for the
-// collections. When the panel is collapsed or not yet laid out (clientHeight 0)
+// tree. When the panel is collapsed or not yet laid out (clientHeight 0)
 // that measurement is unreliable, so fall back to a viewport-based cap that still
 // reserves the collections minimum (and the footer's room).
 function foldersHeightCap() {

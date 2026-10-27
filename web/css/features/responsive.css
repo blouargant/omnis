@@ -1,28 +1,18 @@
 /* Phone / small-screen layout: off-canvas nav drawer + full-width chat.
    Part of web/css/styles.css — edit this partial, not the @import barrel.
 
-   The desktop shell is a three-column flex row: #sidebar (chrome + collections)
-   | #session-pane (session list) | #chat-area. That is ~560px of chrome before
-   the chat starts, so on a phone the chat is pushed entirely off-screen.
-
-   Below --m-bp the two left columns are lifted out of the flow into a single
-   fixed drawer, stacked vertically (sidebar on top, session list below) so both
-   keep their full width and their labels stay readable. #chat-area then takes
-   the whole viewport on its own, with no change to its internals. `body.nav-open`
-   slides the drawer in; #nav-scrim closes it.
+   The desktop shell is a two-column flex row: #sidebar (chrome, collection
+   tree, Archived, Files, account) | #chat-area. Below the breakpoint the
+   sidebar is lifted out of the flow into a full-height, off-canvas drawer and
+   #chat-area takes the whole viewport, with no change to its internals.
+   `body.nav-open` slides the drawer in; #nav-scrim closes it.
 
    Everything here is scoped inside the media query, so the desktop layout is
-   byte-identical to before. */
+   unaffected. */
 
 :root {
   /* Breakpoint is duplicated in app.js (MOBILE_MQ) — keep the two in step. */
   --m-drawer-w: min(88vw, 340px);
-  /* Height given to the sidebar half of the drawer; the session list takes the
-     rest. The sidebar's own chrome (header, New Chat, collections header,
-     Archived, Files, footer) is ~345px before a single collection row, so a
-     tighter split would scroll it from the start. Sized to fit a handful of
-     collections outright; beyond that the sidebar scrolls. */
-  --m-nav-split: min(56vh, 500px);
 }
 
 /* The drawer scrim: only ever visible in mobile mode (see the media query). */
@@ -46,49 +36,30 @@
   #chat-area { height: 100dvh; }
 
   /* ─── The nav drawer ─────────────────────────────────────── */
-  /* Both columns become one fixed, off-canvas drawer. They are siblings in the
-     DOM, so the split is done with explicit geometry rather than a wrapper. */
   /* !important throughout: the theme sheets are linked AFTER styles.css and
      carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
      z-index: 1 }` (it anchors their drop-shadow onto the chat). Without this the
      sidebar stays in flow and sinks under the scrim. `fixed` keeps their shadow
      working — it establishes a stacking context just as `relative` did. */
-  #sidebar,
-  #session-pane {
+  #sidebar {
     position: fixed !important;
+    top: 0;
+    bottom: 0;
     left: 0;
     width: var(--m-drawer-w) !important;  /* beats the inline --sidebar-w drag width */
+    height: 100dvh;
     z-index: 60 !important;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
-  }
-  #sidebar {
-    top: 0;
-    height: var(--m-nav-split);
     border-right: none;
-    border-bottom: 1px solid var(--border);
   }
   /* The themes hang a drop-shadow off the sidebar's right edge to feather it
      onto the chat. Parked off-canvas that edge sits exactly at x=0, so the
      shadow bleeds back in as a stray strip down the side of the chat. The scrim
      already supplies the drawer's depth, so drop it. */
-  #sidebar, #session-pane { box-shadow: none !important; }
-  #session-pane {
-    top: var(--m-nav-split);
-    bottom: 0;
-    border-right: none;
-  }
-  body.nav-open #sidebar,
-  body.nav-open #session-pane { transform: translateX(0); }
+  #sidebar { box-shadow: none !important; }
+  body.nav-open #sidebar { transform: translateX(0); }
   body.nav-open #nav-scrim { opacity: 1; pointer-events: auto; }
-
-  /* On the desktop the sidebar is full-height, so #collections-list takes
-     `flex: 1` and absorbs the slack. Inside the height-capped drawer that same
-     rule squeezes it to ~2 rows and slices the third mid-height. Give the list
-     its natural height instead and let the *sidebar* scroll as a whole, so
-     every collection row is either fully shown or scrolled to. */
-  #collections-list { flex: 0 0 auto; }
-  #sidebar { overflow-y: auto; }
 
   /* The drawer is never resized by dragging on touch. */
   #sidebar-resize { display: none; }
@@ -178,29 +149,29 @@
   /* The pane toolbar dims to .55 until the pane is hovered/focused. */
   .pane-toolbar { opacity: 1; }
 
-  /* The per-session ⋮ / delete stack is revealed by `#session-list li:hover`,
-     so on touch it was reachable only by the sticky :hover a tap sometimes
-     leaves behind — and that same tap opens the session. Always show it.
-     Covers the archived list too (same class, same hover rule). */
-  #session-list li .session-actions,
+  /* The per-session ⋮ / delete actions are revealed by `li:hover`, so on touch
+     they were reachable only by the sticky :hover a tap sometimes leaves behind
+     — and that same tap opens the session. Always show them (tree + archived),
+     and likewise a collection header's ＋ / ⋯ (which replace its count on hover). */
+  .collection-sessions li .session-actions,
   #archived-list li .session-actions { opacity: 1; pointer-events: auto; }
+  .collection-row .group-actions { display: inline-flex; }
+  .collection-row .collection-count { display: none; }
 
   /* ─── Touch targets ──────────────────────────────────────────
-     The chrome buttons are sized for a mouse pointer (24–28px). Enlarge the
-     ones a touch user actually taps. Sizes only — no layout/behaviour change —
-     except the session actions, which must go horizontal: two enlarged buttons
-     stacked would outgrow the ~52px row they are centred in. Widen the row's
-     reserved right gutter to match (the base rule reserves 30px for the narrow
-     stack; the name/meta ellipsis absorbs the difference). */
-  .session-actions { flex-direction: row; gap: 4px; right: 8px; }
+     The chrome buttons are sized for a mouse pointer (22–28px). Enlarge the
+     ones a touch user actually taps. Since the session actions are always
+     shown here, rows reserve their width instead of overlaying the title. */
+  .session-actions { gap: 4px; right: 6px; background: none; padding-left: 0; }
   .session-action-btn { width: 34px; height: 34px; }
-  #session-list li:not(.session-group),
-  #archived-list li { padding-right: 84px; }
+  .collection-sessions li,
+  #archived-list li { padding-top: 7px; padding-bottom: 7px; padding-right: 84px; }
 
-  /* Session-pane toolbar (search / sort / select / new / import). The text
-     variant keeps its intrinsic width — it is padded, not square. */
-  .session-bar-btn { height: 36px; }
-  .session-bar-btn:not(.session-bar-btn-text) { width: 36px; }
+  /* Collection headers (＋ / ⋯), the Collections header (sort / new) and the
+     sidebar search close button. */
+  .group-actions button { width: 34px; height: 34px; }
+  #collections-sort, #collections-new { width: 34px; height: 34px; }
+  #sidebar-search-close { width: 34px; height: 34px; }
 
   /* Pane chrome: drawer hamburger, tab close, "+" new tab, split/close. */
   .pane-menu-btn { width: 36px; height: 36px; }
