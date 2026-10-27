@@ -108,18 +108,26 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #new-chat-wrap { margin: 10px 8px 4px; }
 #sidebar.collapsed #new-chat { padding: 0; border-radius: 10px; }
 
-/* Collections: names + counts hidden. General keeps its centred star; each user
- * collection swaps its folder glyph for a colour pastille bearing the name's
- * initials (see .collection-badge in features/collections.css). The full name is
- * a hover tooltip (data-tip on the row). The session list itself lives in the
- * middle #session-pane column, which never collapses. */
-#sidebar.collapsed #collections-list { padding: 6px 4px; }
+/* Collections: only the group headers remain, as icons — General keeps its
+ * centred star, each user collection swaps its folder glyph for a colour
+ * pastille bearing the name's initials (see .collection-badge in
+ * features/collections.css). The full name is a hover tooltip (data-tip on the
+ * header). Session rows, "Show more", chevrons and hover actions are hidden. */
+#sidebar.collapsed #collection-tree { padding: 6px 4px; }
 #sidebar.collapsed .collection-row { justify-content: center; padding: 6px 0; gap: 0; }
 #sidebar.collapsed .collection-name,
 #sidebar.collapsed .collection-count,
-#sidebar.collapsed .collection-icon { display: none; }
+#sidebar.collapsed .collection-icon,
+#sidebar.collapsed .group-chevron,
+#sidebar.collapsed .group-actions,
+#sidebar.collapsed .collection-sessions,
+#sidebar.collapsed .group-more,
+#sidebar.collapsed .group-empty,
+#sidebar.collapsed .sidebar-action-label { display: none; }
 #sidebar.collapsed .collection-badge { display: inline-flex; }
-#sidebar.collapsed .collection-row.active::before { display: none; }
+#sidebar.collapsed #sidebar-actions { padding: 4px; }
+#sidebar.collapsed .sidebar-action { justify-content: center; padding: 8px 0; }
+#sidebar.collapsed #sidebar-import-btn { display: none; }
 
 /* The two-letter session glyph only exists for the (now removed) collapsed
  * session rail; keep it hidden so it never shows beside a session name. */
@@ -343,97 +351,29 @@ body.resizing #sidebar { transition: none; }
   white-space: nowrap;
 }
 
-.session-squad-badge {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 1;
-  padding: 2px 7px;
-  border-radius: 8px;
-  /* Per-squad colour. The hue (--sq-h) is set inline from the squad name in
-     app.js (squadHue); saturation/lightness stay in CSS via color-mix so the
-     pill reads in every theme — a translucent tint over the current surface,
-     with the text blended MOSTLY toward the theme's own --text (which is always
-     chosen to contrast the panel) and only tinted by the hue, so it stays
-     readable on both light and dark themes while still reading as its own
-     colour. The earlier 80%-hue text sat at a fixed low lightness and turned
-     unreadable on dark themes (dark text on a dark panel) for the deeper hues
-     (purple/red/blue). --sq-h defaults to a neutral amber when unset. */
-  background: color-mix(in srgb, hsl(var(--sq-h, 40) 65% 55%) 18%, transparent);
-  color: color-mix(in srgb, hsl(var(--sq-h, 40) 70% 60%) 45%, var(--text));
-  border: 1px solid color-mix(in srgb, hsl(var(--sq-h, 40) 60% 55%) 40%, transparent);
-  text-transform: lowercase;
-  letter-spacing: .02em;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#session-list {
-  list-style: none;
-  margin: 0;
-  padding: 6px;
-  overflow-y: auto;
-  flex: 1;
-  /* Keep at least ~two session rows (plus a timeframe header) on screen even
-     when the folders panel is grown; the list scrolls internally past that.
-     Paired with the folder-resize cap in app.js (SESSION_LIST_MIN), which stops
-     a tall folders panel from squeezing the sessions out or clipping the footer.
-     The list still engages its own overflow-y scrollbar above this floor. */
-  min-height: 130px;
-}
-#session-list li {
+/* ─── Session rows (collection tree + Archived panel) ─────────
+ * One line per row: busy dot, title, and the ⋮ / delete actions overlaid on the
+ * right edge on hover (the details live in the title's tooltip). */
+.collection-sessions li {
   position: relative;
-  /* Reserve a right gutter for the hover-revealed action stack so the floating
-     buttons never sit over the session name / meta. */
-  padding: 8px 30px 8px 12px;
-  border-radius: 10px;
+  padding: 5px 8px 5px 10px;
+  border-radius: 7px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 13px;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   transition: background 0.1s, color 0.1s;
 }
-#session-list li:hover { background: var(--bg-raised); color: var(--text); }
-/* Pagination sentinel — an invisible end-of-list marker the IntersectionObserver
-   watches to load the next page ~5 rows early (see PAGE_MORE in web/app.js). It
-   is a zero-height, non-interactive <li>, never styled as a session row. */
-#session-list li.session-sentinel,
-#archived-list li.session-sentinel {
-  padding: 0; margin: 0; height: 1px; min-height: 0;
-  list-style: none; pointer-events: none; background: none; cursor: default;
-}
-#session-list li.session-sentinel:hover,
-#archived-list li.session-sentinel:hover { background: none; }
-/* Indent the session rows so their left edge — the hover/active highlight box
-   and the focused accent rail — lines up with the timeframe group-label text
-   (list padding 6px + label padding-left 8px = 14px), rather than sticking out
-   ~8px to its left. Scoped to the expanded sidebar so the collapsed icon rail
-   keeps its centred avatars; the group labels themselves are excluded. */
-#session-pane #session-list li:not(.session-group) { margin-left: 8px; }
-/* Timeframe group header (Today / Yesterday / This week / …). Non-interactive
-   (pointer-events:none) so it never hovers, selects, or routes a click. */
-#session-list li.session-group {
-  padding: 10px 8px 3px;
-  margin-bottom: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  cursor: default;
-  pointer-events: none;
-}
-#session-list li.session-group:first-child { padding-top: 4px; }
-#sidebar.collapsed #session-list li.session-group { display: none; }
+.collection-sessions li:hover { background: var(--bg-raised); color: var(--text); }
+.collection-sessions li.dragging { opacity: 0.45; }
 /* Open in some (non-focused) pane: just a darker label, no fill — only the
    focused/active row (below) gets a background. */
-#session-list li.active { color: var(--text); }
+.collection-sessions li.active { color: var(--text); }
 /* The chat in the focused pane — the one the user is working in — stands out
- * with the active background, brighter text, and an accent rail on the left. */
-/* The accent rail is coloured by the session's collection (--col-accent, set in
- * buildSessionRow), falling back to the app accent for General/uncoloured. */
-#session-list li.active-focused {
+ * with the active background, brighter text, and an accent rail on the left
+ * coloured by the session's collection (--col-accent, set in buildSessionRow),
+ * falling back to the app accent for General/uncoloured. */
+.collection-sessions li.active-focused {
   background: var(--bg-active);
   color: var(--text-strong);
   box-shadow: inset 3px 0 0 var(--col-accent, var(--accent, #4a9eff));
@@ -461,44 +401,29 @@ body.resizing #sidebar { transition: none; }
   flex-shrink: 0;
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
-#session-list li.session-busy .session-busy-dot { display: block; }
-.session-bottom-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 2px;
-  gap: 4px;
-}
-#session-list li .meta {
-  font-size: 12px;
-  color: var(--text-faint);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Per-row action stack: the menu ("Actions") button on top, the delete button
-   just below it, pinned to the row's right edge. Absolutely positioned so the
-   two stacked buttons never grow the row height, and hidden (opacity:0) until
-   the row is hovered — not revealed for the active/open session. */
+.collection-sessions li.session-busy .session-busy-dot { display: block; }
+/* Per-row actions (⋮ menu, delete), side by side and pinned to the row's right
+   edge over the end of the title; hidden (opacity:0) until the row is hovered.
+   The fade-in background keeps the title from showing through. */
 .session-actions {
   position: absolute;
   top: 50%;
-  right: 6px;
+  right: 4px;
   transform: translateY(-50%);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
+  gap: 1px;
+  padding-left: 14px;
+  background: linear-gradient(to right, transparent, var(--bg-raised) 12px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.1s;
 }
-#session-list li:hover .session-actions {
+.collection-sessions li:hover .session-actions,
+#archived-list li:hover .session-actions {
   opacity: 1;
   pointer-events: auto;
 }
+#archived-list .session-actions { background: linear-gradient(to right, transparent, var(--bg-raised-hover) 12px); }
 .session-action-btn {
   appearance: none;
   -webkit-appearance: none;
@@ -508,8 +433,8 @@ body.resizing #sidebar { transition: none; }
   box-shadow: none;
   color: var(--text-strong);
   cursor: pointer;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border-radius: 50%;
   line-height: 1;
@@ -594,11 +519,11 @@ body.resizing #sidebar { transition: none; }
   box-shadow: var(--shadow-bubble);
   overflow: hidden;
 }
-/* Archived rows reuse the active-session row look and hover behaviour. */
+/* Archived rows reuse the tree's single-line row look. */
 #archived-list li {
   position: relative;
-  padding: 8px 30px 8px 12px;
-  border-radius: 8px;
+  padding: 5px 8px 5px 10px;
+  border-radius: 7px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 13px;
@@ -607,18 +532,9 @@ body.resizing #sidebar { transition: none; }
 }
 #archived-list li:hover { background: var(--bg-raised-hover); color: var(--text); }
 #archived-list li.active { background: var(--bg-active); color: var(--text-strong); }
-#archived-list li .meta {
-  font-size: 12px;
-  color: var(--text-faint);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#archived-list li:hover .session-actions {
-  opacity: 1;
-  pointer-events: auto;
+#archived-list li.session-sentinel {
+  padding: 0; margin: 0; height: 1px; min-height: 0;
+  list-style: none; pointer-events: none; background: none; cursor: default;
 }
 
 #sidebar-footer {
