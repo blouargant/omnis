@@ -26,8 +26,7 @@
   --bottom-bar-h: 60px;
   /* Height of the top chrome bar — the sidebar header (Omnis logo/title) and
      each pane's tab bar are pinned to this so they align edge-to-edge and read
-     as one continuous strip. The ivory sidebar-resize gradient also keys off it
-     (cream above the seam, white below). */
+     as one continuous strip. */
   --topbar-h: 56px;
   /* Chat content column width: 90% of the pane, capped at --chat-max-w so the
      column stays a centred, Claude-style reading width on wide windows. */

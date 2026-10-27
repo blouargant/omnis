@@ -658,12 +658,15 @@ body.resizing #sidebar { transition: none; }
   width: 4px;
   flex-shrink: 0;
   cursor: col-resize;
-  /* Blend with the surrounding panels at rest so the handle doesn't read as a
-   * thick dark line (transparent would let the darker body --bg show through,
-   * since the sidebar and chat both use --bg-panel). Hover/drag still highlight
-   * it with the accent below. */
-  background: var(--bg-panel);
+  /* Overlays the sidebar's right edge (negative margin) instead of taking its
+   * own 4px column, so the chat starts right at the sidebar's border — no strip
+   * between them. Transparent at rest; hover/drag highlight it with the accent
+   * below. z-index keeps it above the sidebar (some themes raise #sidebar to 1
+   * for its edge shadow). */
+  margin-left: -4px;
+  background: transparent;
   position: relative;
+  z-index: 2;
   transition: width 0.15s ease, background 0.15s;
 }
 #sidebar-resize:hover,
