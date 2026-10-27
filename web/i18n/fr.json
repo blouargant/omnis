@@ -1010,5 +1010,6 @@
   "env.defaultSquad": "Squad par défaut",
   "env.noContext": "Aucune consommation enregistrée pour l'instant.",
   "env.results": "Résultats",
-  "env.fileGone": "{path} — n'existe plus sur le disque"
+  "env.fileGone": "{path} — n'existe plus sur le disque",
+  "env.changes": "Modifications"
 }

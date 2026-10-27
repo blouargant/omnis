@@ -1010,5 +1010,6 @@
   "env.defaultSquad": "Squad predeterminado",
   "env.noContext": "Todavía no hay consumo registrado.",
   "env.results": "Resultados",
-  "env.fileGone": "{path} — ya no está en el disco"
+  "env.fileGone": "{path} — ya no está en el disco",
+  "env.changes": "Cambios"
 }

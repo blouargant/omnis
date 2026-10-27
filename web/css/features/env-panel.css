@@ -156,3 +156,7 @@ body.env-open #env-panel { display: block; }
   cursor: pointer;
 }
 .env-icon-btn:hover { color: var(--text); background: var(--bg-raised); }
+
+/* Modifications card. */
+.env-add { color: #3fa864; font-variant-numeric: tabular-nums; }
+.env-del { color: var(--danger-fg); font-variant-numeric: tabular-nums; }

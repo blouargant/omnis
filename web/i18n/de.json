@@ -1010,5 +1010,6 @@
   "env.defaultSquad": "Standard-Squad",
   "env.noContext": "Noch kein Verbrauch erfasst.",
   "env.results": "Ergebnisse",
-  "env.fileGone": "{path} — nicht mehr auf dem Datenträger"
+  "env.fileGone": "{path} — nicht mehr auf dem Datenträger",
+  "env.changes": "Änderungen"
 }

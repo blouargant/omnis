@@ -2768,6 +2768,7 @@ function updateEditorStaleUI(panel) {
 // absForRel resolves a Folders-panel entry path (relative to the panel's
 // current dir) to an absolute host path.
 function absForRel(rel) {
+  if (String(rel).startsWith("/")) return rel; // already absolute (e.g. from the Modifications card)
   const root = (foldersDir || "").replace(/\/+$/, "");
   return root ? root + "/" + rel : "/" + rel;
 }
@@ -10233,6 +10234,8 @@ async function sendMessage(panel) {
     // "error" and "exhausted" do not (the user was present, or there's no reply).
     if (outcome === "done" || outcome === "reload") notifyChatReply(sessionId, lastReplyText);
     if (outcome === "done" || outcome === "reload") fetchSuggestion(sessionId);
+    // A finished turn may have changed files, git state or produced results.
+    if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh();
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
@@ -12389,6 +12392,7 @@ els.foldersResize.addEventListener("pointerdown", (e) => {
   els.foldersResize.addEventListener("pointerup", onUp);
 });
 
+const envGit = new Map(); // sessionId → last git status (Modifications card; branch row)
 const envSkillsOpen = new Set(); // "kind:name:agent" of skills unfolded in the Skills card
 const ENV_ICON = {
   squad:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 15c3 0 6 2 6 5"/></svg>`,
@@ -12416,7 +12420,8 @@ function registerEnvCards() {
       const rows = [];
       if (meta) rows.push(envRow(ENV_ICON.squad, escHtml(meta.squad || tr("env.defaultSquad")), tr("env.squad")));
       if (foldersDir) rows.push(envRow(ENV_ICON.folder, escHtml(foldersDir.replace(/^\/home\/[^/]+/, "~")), tr("env.folder"), "env-folder"));
-      if (ctx.branch) rows.push(envRow(ENV_ICON.branch, escHtml(ctx.branch), tr("env.branch")));
+      const git = ctx.sessionId ? envGit.get(ctx.sessionId) : null;
+      if (git && git.repo && git.branch) rows.push(envRow(ENV_ICON.branch, escHtml(git.branch), tr("env.branch")));
       if (meta) {
         const col = effectiveCollection(meta) || "General";
         const accent = collectionAccentVar(sessionCollectionColor(ctx.sessionId));
@@ -12528,6 +12533,41 @@ function registerEnvCards() {
           btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
           btn.addEventListener("click", () => downloadHostFile(f.path, f.name, ctx.sessionId));
           row.appendChild(btn);
+        }
+        body.appendChild(row);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "changes",
+    title: () => tr("env.changes"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      let st = null;
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/git`);
+        if (res.ok) st = await res.json();
+      } catch (_) { /* keep null */ }
+      if (ctx.stale()) return;
+      const hadBranch = (envGit.get(ctx.sessionId) || {}).branch;
+      envGit.set(ctx.sessionId, st || { repo: false });
+      if (((st && st.branch) || undefined) !== (hadBranch || undefined)) EnvPanel.refresh("environment");
+      const files = st && st.repo ? (st.files || []) : [];
+      ctx.setVisible(files.length > 0);
+      ctx.setValue(files.length ? `<span class="env-add">+${st.added}</span> <span class="env-del">−${st.removed}</span>` : "");
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const f of files) {
+        const row = document.createElement(f.status === "D" ? "div" : "button");
+        row.className = "env-row" + (f.status === "D" ? " is-gone" : " env-row-btn");
+        row.setAttribute("data-tip", f.path);
+        const name = f.path.split("/").pop();
+        row.innerHTML = `<span class="env-row-icon">${fileIconSvg(name)}</span>` +
+          `<span class="env-row-text">${escHtml(f.path)}</span>` +
+          `<span class="env-row-meta"><span class="env-add">+${f.added}</span> <span class="env-del">−${f.removed}</span></span>`;
+        if (f.status !== "D") {
+          row.type = "button";
+          row.addEventListener("click", () => openFileInEditor(f.abs));
         }
         body.appendChild(row);
       }
