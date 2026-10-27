@@ -148,6 +148,8 @@
   .copy-msg-group { opacity: 1; }
   /* The pane toolbar dims to .55 until the pane is hovered/focused. */
   .pane-toolbar { opacity: 1; }
+  /* The New-chat row's squad chevron shows on hover only on desktop. */
+  #squad-toggle { opacity: 1; width: 34px; height: 34px; }
 
   /* The per-session ⋮ / delete actions are revealed by `li:hover`, so on touch
      they were reachable only by the sticky :hover a tap sometimes leaves behind
