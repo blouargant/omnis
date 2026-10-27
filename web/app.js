@@ -1037,12 +1037,22 @@ function collectionGlyph(c) {
 }
 
 // applyCollectionSquad shows the collection's default squad in the draft's Squad
-// selector when the user has not picked one on this draft.
+// selector when the user has not picked one on this draft, and puts the usual
+// squad back when the next collection has no default.
 function applyCollectionSquad(panel, c) {
-  if (!c || !c.squad || panel._pickerSquadPicked) return;
-  if (!availableSquads.some((s) => s.name === c.squad)) return;
-  panel._pickerSquad = c.squad;
-  renderPickerSquad(panel);
+  if (panel._pickerSquadPicked) return;
+  if (c && c.squad && availableSquads.some((s) => s.name === c.squad)) {
+    panel._pickerSquad = c.squad;
+    panel._pickerSquadAuto = true; // set by the collection, not by the user
+    renderPickerSquad(panel);
+    return;
+  }
+  // Switching to a collection without a default undoes the previous one's.
+  if (panel._pickerSquadAuto) {
+    panel._pickerSquad = currentSquadChoice();
+    panel._pickerSquadAuto = false;
+    renderPickerSquad(panel);
+  }
 }
 
 function renderPickerCollection(panel) {
@@ -6523,7 +6533,7 @@ function setGroupOpen(name, open) {
   if (head) head.setAttribute("aria-expanded", String(!!open));
   if (open) {
     const v = groupView(name);
-    if (v.loaded === 0 && !v.exhausted) loadGroupMore(name);
+    if (v.loaded === 0 && !v.exhausted) return loadGroupMore(name);
   }
 }
 
@@ -6590,7 +6600,12 @@ function appendGroupRows(name, rows, { reset } = {}) {
     ul.appendChild(buildSessionRow(s, { archived: false }));
   }
   if (v.pinnedId) {
-    const meta = sessionMetaById(v.pinnedId);
+    let meta = sessionMetaById(v.pinnedId);
+    // A pin that was archived or moved elsewhere since no longer belongs here.
+    if (meta && (meta.archived || effectiveCollection(meta).toLowerCase() !== String(name).toLowerCase())) {
+      v.pinnedId = null;
+      meta = null;
+    }
     if (meta && !ul.querySelector(`li[data-id="${CSS.escape(v.pinnedId)}"]`)) {
       const li = buildSessionRow(meta, { archived: false });
       li.classList.add("pinned");
@@ -6605,6 +6620,13 @@ function appendGroupRows(name, rows, { reset } = {}) {
     const present = new Set([...els.tree.querySelectorAll("li[data-id]")].map((li) => li.dataset.id));
     for (const id of [...selectedSessions]) if (!present.has(id)) selectedSessions.delete(id);
   }
+}
+
+// unpinSession drops a pinned row for `id` from every group (the session was
+// deleted, archived or moved), so a refresh can't rebuild it from stale meta.
+function unpinSession(id) {
+  for (const v of groupViews.values()) if (v.pinnedId === id) v.pinnedId = null;
+  for (const li of els.tree.querySelectorAll(`li.pinned[data-id="${CSS.escape(id)}"]`)) li.remove();
 }
 
 // updateGroupMore shows "Show more (N)" while the group has unloaded rows.
@@ -6899,7 +6921,7 @@ function buildGroup(c) {
       <span class="collection-count"></span>
       <span class="group-actions">
         <button type="button" class="group-new">${ICON_PLUS_SMALL}</button>
-        <button type="button" class="group-menu" hidden>${ICON_DOTS}</button>
+        <button type="button" class="group-menu">${ICON_DOTS}</button>
       </span>
     </div>
     <ul class="collection-sessions"></ul>
@@ -6919,6 +6941,7 @@ function buildGroup(c) {
     toggle();
   });
   head.addEventListener("keydown", (e) => {
+    if (e.target !== head) return; // Enter/Space on the ＋ / ⋯ buttons is theirs
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
   });
   li.querySelector(".group-new").addEventListener("click", (e) => {
@@ -7018,7 +7041,12 @@ async function revealSessionInTree(id) {
     v.pinnedId = id;
     if (v.loaded > 0) appendGroupRows(name, [], { reset: false });
   }
-  if (!isGroupOpen(name)) setGroupOpen(name, true);
+  if (!isGroupOpen(name)) {
+    // A group never opened has no rows yet: wait for its first page (which
+    // brings the row, or pins it) before scrolling — unless focus moved on.
+    await setGroupOpen(name, true);
+    if (activeSessionId !== id) return;
+  }
   refreshSidebarActive();
   const row = g.querySelector(`.collection-sessions li[data-id="${CSS.escape(id)}"]`);
   if (row) row.scrollIntoView({ block: "nearest" });
@@ -7729,6 +7757,7 @@ async function moveSessionToCollection(sessionId, target) {
       showToast(b.error || tr("collections.moveFailed"), "err");
       return;
     }
+    unpinSession(sessionId);
     refreshGroups([from, target]); // counts are refreshed with them
   } catch (e) { console.error(e); }
 }
@@ -7736,6 +7765,7 @@ async function moveSessionToCollection(sessionId, target) {
 // ─── Tree controls (search / sort / bulk select) ──────────────────────────────
 
 let selectScope = null;   // collection whose rows "Select all" ticks
+let preSearchLoaded = null; // lowercased group → rows loaded before searching
 let treeSearchSeq = 0;    // drops a slower, superseded search response
 
 // ── Search ──
@@ -7746,14 +7776,30 @@ let treeSearchSeq = 0;    // drops a slower, superseded search response
 async function setTreeSearch(query) {
   const q = String(query || "").trim();
   if (q === sessionSearch.trim()) return;
+  // Entering search: remember how far each group was paged ("Show more"), so
+  // closing search brings back the same rows rather than page 1.
+  if (q && !sessionSearch.trim()) {
+    preSearchLoaded = new Map([...groupViews.entries()].map(([k, v]) => [k, v.loaded]));
+  }
   sessionSearch = q;
   if (q && selectMode) exitSelectMode();
   els.tree.classList.toggle("searching", !!q);
   if (!q) {
     els.treeSearchEmpty.hidden = true;
+    const saved = preSearchLoaded || new Map();
+    preSearchLoaded = null;
     for (const g of els.tree.querySelectorAll(":scope > li.collection-group")) {
       g.classList.remove("search-hit");
-      resetGroup(g.dataset.name);
+      const name = g.dataset.name;
+      const loaded = saved.get(g.dataset.key) || 0;
+      if (isGroupOpen(name) && loaded > 0) {
+        // reloadGroupPrefix re-fetches max(initial, loaded) rows in one request.
+        const v = groupView(name);
+        v.loaded = loaded; v.exhausted = false;
+        reloadGroupPrefix(name);
+      } else {
+        resetGroup(name);
+      }
     }
     resetArchivedView();
     return;
@@ -7909,6 +7955,9 @@ function openBatchMenu(ev) {
 async function runBatch(fn) {
   const ids = [...selectedSessions];
   await Promise.all(ids.map((id) => fn(id).catch((e) => console.error("batch:", id, e))));
+  // Every batch action (move / archive / delete) takes the session out of the
+  // group it may be pinned in.
+  for (const id of ids) unpinSession(id);
   exitSelectMode();
   await loadSessions();
 }
@@ -7975,6 +8024,8 @@ function closeTabEverywhere(id) {
 // push (another browser deleted the session).
 function forgetSession(id) {
   unsubscribeSessionEvents(id);
+  unpinSession(id);
+  sessionMeta.delete(id);
   sessionTurnCounts.delete(id);
   sessionContainers.delete(id);
   sessionCtxUsage.delete(id);
@@ -8034,6 +8085,9 @@ async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
     unsubscribeSessionEvents(id);
+    const meta = sessionMeta.get(id);
+    if (meta) meta.archived = true;
+    unpinSession(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
     // clicking it in the archived panel re-mounts the read-only history.
@@ -8580,7 +8634,7 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     }
     const data = await res.json();
     const newId = data.session_id;
-    if (draftKey) { draftDirs.delete(draftKey); panel._pickerSquadPicked = false; }
+    if (draftKey) { draftDirs.delete(draftKey); panel._pickerSquadPicked = false; panel._pickerSquadAuto = false; }
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
@@ -9175,14 +9229,16 @@ function wireAccountMenu() {
     if (m && !m.hidden) closeAccountMenu();
     else openAccountMenu();
   });
-  // Outside click / Escape / scroll / resize close it, like the context menus.
+  // Outside click / Escape / resize close it. A click on the button itself is
+  // left to the button's toggle (closing it here first would make the toggle
+  // reopen it). Scrolling does NOT close it: the menu is anchored to the fixed
+  // footer, and a streaming reply scrolls the transcript on its own.
   document.addEventListener("click", (e) => {
     const m = document.getElementById("account-menu");
-    if (m && !m.hidden && !m.contains(e.target)) closeAccountMenu();
+    if (m && !m.hidden && !m.contains(e.target) && !btn.contains(e.target)) closeAccountMenu();
   }, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAccountMenu(); });
   window.addEventListener("resize", closeAccountMenu);
-  document.addEventListener("scroll", closeAccountMenu, true);
 }
 
 // maybePromptWhatsNew runs once per upgrade. It asks the server for the feature

@@ -128,6 +128,12 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #sidebar-actions { padding: 4px; }
 #sidebar.collapsed .sidebar-action { justify-content: center; padding: 8px 0; }
 #sidebar.collapsed #sidebar-import-btn { display: none; }
+/* Searching or selecting when the sidebar collapses: the field, the bar and the
+   no-match note don't fit the rail; the search icon stays (it expands back). */
+#sidebar.collapsed #sidebar-search-row,
+#sidebar.collapsed #tree-select-bar,
+#sidebar.collapsed #tree-search-empty { display: none; }
+#sidebar.collapsed #sidebar-search-btn { display: flex; }
 
 /* The two-letter session glyph only exists for the (now removed) collapsed
  * session rail; keep it hidden so it never shows beside a session name. */
