@@ -1,53 +1,53 @@
-/* Terracotta — a warm light skin (sibling of Ivory).
-   A near-white ivory sidebar beside a slightly deeper warm-cream reading
-   surface, with a strong terracotta accent and a peach user bubble. The scoped
-   rules at the bottom reproduce the left-panel / main-panel separation: a crisp
-   ivory→cream seam plus a whisper of depth. */
+/* Terracotta — the default light skin, Claude Desktop-style.
+   One quiet cream family for sidebar and chat (the sidebar a hair darker),
+   separated only by a 1px warm hairline — no shadow, no tonal seam. Warm
+   dark-grey text and a terracotta accent kept for the few things that must
+   stand out (active tab, send button, focus). Its dark sibling is
+   themes/terracotta-dark.css. */
 [data-theme="terracotta"] {
   color-scheme: light;
 
-  /* Surfaces — near-white ivory chrome, warm-cream content. --bg is the reading
-     surface (main chat / Settings body), a soft cream; --bg-panel is every
-     chrome surface (sidebar, pane tab bar), a lighter near-white ivory so the
-     sidebar reads as a bright panel beside the deeper cream content. --bg-input
-     stays white so the composer pops off the surfaces. */
-  --bg: #f5f0e8;
-  --bg-panel: #fbf7f1;
-  --bg-raised: #ece3d1;
-  --bg-raised-hover: #e4dac4;
-  --bg-active: #f7e6d6;
+  /* Surfaces — --bg is the reading surface, --bg-panel every chrome surface
+     (sidebar, tab bar). --bg-input stays white so the composer box lifts off
+     the cream. */
+  --bg: #faf9f5;
+  --bg-panel: #f5f4ed;
+  --bg-raised: #efede4;
+  --bg-raised-hover: #ebe9e0;
+  --bg-active: #e8e6dc;
   --bg-input: #ffffff;
 
-  /* Borders — warm hairlines (not neutral grey), so seams stay in the ivory family. */
-  --border: #e8e0d0;
-  --border-strong: #d0c7b2;
+  /* Borders — warm hairlines. */
+  --border: #e8e6dc;
+  --border-strong: #d6d3c7;
 
-  /* Text — warm near-black. */
-  --text: #2b2a25;
-  --text-strong: #14130f;
-  --text-muted: #726f5d;
-  --text-faint: #a3a08d;
+  /* Text — warm dark grey. */
+  --text: #3d3d3a;
+  --text-strong: #1f1e1b;
+  --text-muted: #73726c;
+  --text-faint: #a19f96;
 
-  /* Accent — a strong terracotta. Drives the focused-session rail, focus rings,
-     the New-chat glow and primary buttons. */
-  --accent: #be703c;
-  --accent-hover: #d3814c;
-  --accent-strong: #a85f30;
-  --accent-bg-soft: rgba(190, 112, 60, 0.13);
-  --accent-border-soft: rgba(190, 112, 60, 0.42);
-  --accent-hover-bg: #f4e7dc;
+  /* Accent — terracotta, used sparingly. */
+  --accent: #d97757;
+  --accent-hover: #c96442;
+  --accent-strong: #b85b3c;
+  --accent-bg-soft: rgba(217, 119, 87, 0.12);
+  --accent-border-soft: rgba(217, 119, 87, 0.45);
+  --accent-hover-bg: #f6ebe4;
 
-  --scroll-thumb: #d9d6c7;
-  --scroll-thumb-hover: #c4c0ae;
+  --scroll-thumb: #d9d6cb;
+  --scroll-thumb-hover: #c4c0b3;
 
-  --bubble-user-bg: #f6e7d6;
-  --bubble-user-border: #ecd8c2;
-  /* Prompt editor reads as a clean white input field (decoupled from the peach
-     bubble that still styles sent turns). The expanded Folders/Archived sidebar
-     cards share this token, so they match the editor. */
+  /* The sent user message: a small neutral bubble. The legacy --bubble-user-*
+     pair still styles a few cards (turn menu, Folders panel); keep them in the
+     same family. */
+  --user-bubble-bg: #f0eee6;
+  --user-bubble-fg: #3d3d3a;
+  --bubble-user-bg: #f0eee6;
+  --bubble-user-border: #e3e0d6;
   --composer-bg: var(--bg-input);
-  --shadow-bubble: 0 2px 10px rgba(60, 50, 35, 0.08), 0 1px 3px rgba(60, 50, 35, 0.05);
-  --prompt-fade: rgba(0, 0, 0, 0.14);
+  --shadow-bubble: 0 1px 6px rgba(60, 50, 35, 0.06);
+  --prompt-fade: rgba(60, 50, 35, 0.10);
 
   --danger-fg: #b23324;
   --danger-bg: rgba(178, 51, 36, 0.08);
@@ -60,27 +60,4 @@
   --warn-border: rgba(138, 90, 18, 0.28);
   --warn-action-bg: rgba(138, 90, 18, 0.16);
   --warn-action-hover: rgba(138, 90, 18, 0.26);
-}
-
-/* ─── Left-panel / main-panel separation ──────────────────────────────
-   The ivory sidebar vs. cream content already gives the tonal split; these two
-   rules add the crisp seam and a whisper of depth on top of it. */
-
-/* Raise the sidebar into the positioned paint layer so its soft right-edge
-   shadow lands ON the cream chat. Without z-index the chat's own background
-   (which paints later in tree order) would cover the feather. overflow:hidden
-   does not clip an element's OWN outset shadow, so the depth still shows. */
-[data-theme="terracotta"] #sidebar {
-  position: relative;
-  z-index: 1;
-  box-shadow: 4px 0 14px -6px rgba(45, 37, 28, 0.10);
-}
-
-/* Blend the 4px resize handle into whatever sits beside it so no stray strip
-   shows: ivory chrome (--bg-panel) alongside the top bar (sidebar header + pane
-   tab bar), switching to the cream surface (--bg) exactly at the top-bar seam so
-   it merges into the cream transcript below. The :not(:hover/:is-dragging) guard
-   keeps the accent drag-highlight winning. */
-[data-theme="terracotta"] #sidebar-resize:not(:hover):not(.is-dragging) {
-  background: linear-gradient(to bottom, var(--bg-panel) var(--topbar-h), var(--bg) var(--topbar-h));
 }

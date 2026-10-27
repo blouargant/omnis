@@ -46,3 +46,21 @@ test("chat partials only reference defined tokens", () => {
     }
   }
 });
+
+const PALETTE_TOKENS = ["--bg", "--bg-panel", "--text", "--text-muted", "--accent",
+  "--border", "--user-bubble-bg", "--bg-input"];
+
+for (const theme of ["terracotta", "terracotta-dark"]) {
+  test(`${theme} theme defines the Claude-style palette`, () => {
+    const css = read(`css/themes/${theme}.css`);
+    assert.match(css, /color-scheme\s*:/, `${theme}: no color-scheme`);
+    for (const name of PALETTE_TOKENS) {
+      assert.match(css, new RegExp(name + "\\s*:"), `${theme}: ${name} missing`);
+    }
+  });
+}
+
+test("terracotta-dark is registered and linked", () => {
+  assert.match(read("settings.js"), /id:\s*"terracotta-dark"/);
+  assert.match(read("index.html"), /themes\/terracotta-dark\.css/);
+});
