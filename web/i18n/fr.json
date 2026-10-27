@@ -1011,5 +1011,9 @@
   "env.noContext": "Aucune consommation enregistrée pour l'instant.",
   "env.results": "Résultats",
   "env.fileGone": "{path} — n'existe plus sur le disque",
-  "env.changes": "Modifications"
+  "env.changes": "Modifications",
+  "env.connectors": "Connecteurs",
+  "env.mcp.connected": "connecté",
+  "env.mcp.idle": "non démarré",
+  "env.mcp.error": "erreur"
 }

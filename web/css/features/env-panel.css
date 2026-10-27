@@ -160,3 +160,9 @@ body.env-open #env-panel { display: block; }
 /* Modifications card. */
 .env-add { color: #3fa864; font-variant-numeric: tabular-nums; }
 .env-del { color: var(--danger-fg); font-variant-numeric: tabular-nums; }
+
+/* Connecteurs card. */
+.env-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--text-faint); }
+.env-dot.state-connected { background: #3fa864; }
+.env-dot.state-error { background: var(--danger-fg); }
+.env-err { margin: 0 0 6px 26px; color: var(--danger-fg); font-size: 12px; word-break: break-word; }

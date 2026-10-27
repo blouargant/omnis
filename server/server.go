@@ -796,6 +796,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.GET("/sessions/:id/skills", handleSessionSkills(d))
 	auth.GET("/sessions/:id/produced", handleSessionProduced(d))
 	auth.GET("/sessions/:id/git", handleSessionGit(d))
+	auth.GET("/sessions/:id/mcp", handleSessionMCP(d))
 	auth.GET("/sessions/:id/messages", func(c *gin.Context) {
 		id := c.Param("id")
 		if _, ok := d.Registry.Get(id); !ok {

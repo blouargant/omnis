@@ -1011,5 +1011,9 @@
   "env.noContext": "Noch kein Verbrauch erfasst.",
   "env.results": "Ergebnisse",
   "env.fileGone": "{path} — nicht mehr auf dem Datenträger",
-  "env.changes": "Änderungen"
+  "env.changes": "Änderungen",
+  "env.connectors": "Konnektoren",
+  "env.mcp.connected": "verbunden",
+  "env.mcp.idle": "nicht gestartet",
+  "env.mcp.error": "Fehler"
 }

@@ -1011,5 +1011,9 @@
   "env.noContext": "Todavía no hay consumo registrado.",
   "env.results": "Resultados",
   "env.fileGone": "{path} — ya no está en el disco",
-  "env.changes": "Cambios"
+  "env.changes": "Cambios",
+  "env.connectors": "Conectores",
+  "env.mcp.connected": "conectado",
+  "env.mcp.idle": "sin iniciar",
+  "env.mcp.error": "error"
 }

@@ -12504,6 +12504,32 @@ function registerEnvCards() {
     },
   });
   EnvPanel.register({
+    id: "connectors",
+    title: () => tr("env.connectors"),
+    sessionOnly: true,
+    defaultOpen: false,
+    async render(body, ctx) {
+      let servers = [];
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/mcp`);
+        if (res.ok) servers = (await res.json()).servers || [];
+      } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      ctx.setVisible(servers.length > 0);
+      const up = servers.filter(s => s.state === "connected").length;
+      const bad = servers.filter(s => s.state === "error").length;
+      ctx.setValue(`<span class="env-dot state-connected"></span>${up}` +
+        (bad ? ` <span class="env-dot state-error"></span>${bad}` : ""));
+      if (!ctx.open) return;
+      body.innerHTML = servers.map(s =>
+        `<div class="env-row"${s.error ? ` data-tip="${escHtml(s.error)}"` : ""}>` +
+          `<span class="env-row-icon"><span class="env-dot state-${escHtml(s.state)}"></span></span>` +
+          `<span class="env-row-text">${escHtml(s.name)}</span>` +
+          `<span class="env-row-meta">${escHtml(tr("env.mcp." + s.state))}</span></div>` +
+          (s.error ? `<div class="env-err">${escHtml(s.error)}</div>` : "")).join("");
+    },
+  });
+  EnvPanel.register({
     id: "results",
     title: () => tr("env.results"),
     sessionOnly: true,

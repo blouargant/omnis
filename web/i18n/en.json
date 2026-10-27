@@ -1011,5 +1011,9 @@
   "env.noContext": "No usage recorded yet.",
   "env.results": "Results",
   "env.fileGone": "{path} — no longer on disk",
-  "env.changes": "Changes"
+  "env.changes": "Changes",
+  "env.connectors": "Connectors",
+  "env.mcp.connected": "connected",
+  "env.mcp.idle": "not started",
+  "env.mcp.error": "error"
 }

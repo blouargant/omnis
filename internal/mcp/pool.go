@@ -34,6 +34,9 @@ type Pool struct {
 	mu       sync.Mutex
 	entries  map[string]*poolEntry
 	resolver *InputResolver
+
+	statusMu sync.Mutex
+	status   map[string]ServerStatus // server name → last connect outcome (pool_status.go)
 }
 
 type poolEntry struct {
@@ -70,6 +73,7 @@ func (p *Pool) Acquire(s Server, inputs []Input) (*Handle, error) {
 	if err != nil {
 		return nil, err
 	}
+	transport = p.trackStatus(s.Name, transport)
 	ts, err := mcptoolset.New(mcptoolset.Config{Transport: transport})
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q: %w", s.Name, err)
