@@ -900,6 +900,9 @@ func streamEvents(
 		// files (Write), not edits/reverts to existing ones (which would be
 		// noisy during coding sessions); both still drive the editor refresh.
 		emit("file_changed", map[string]any{"path": fe.path, "tool": fe.tool})
+		if producedByWrite(fe.tool, resp) {
+			recordProducedFile(ownSession, fe.path)
+		}
 		// Keep any running language server's view of this file current so a
 		// follow-up lsp_definition/diagnostics reflects the edit (no-op unless a
 		// server has the doc open). fe.path is already absolute.

@@ -487,53 +487,6 @@
 .spawn-result-md { margin: 0; font-size: 14px; }
 
 
-
-/* ─── Generated-file download card ──────────────────────────────
-   Shown in the transcript when the agent's Write tool generates a file,
-   so the user can download the artifact directly from chat. */
-.file-dl-card {
-  max-width: min(var(--col-w), 100%);
-  width: 100%;
-  margin: 2px auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent-strong);
-  border-radius: 0 6px 6px 0;
-  background: var(--bg-panel);
-  font-size: 12.5px;
-}
-.file-dl-icon { display: inline-flex; flex-shrink: 0; }
-.file-dl-icon svg { display: block; }
-.file-dl-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.file-dl-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: .02em;
-}
-.file-dl-name {
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-}
-.file-dl-btn {
-  flex-shrink: 0;
-  border: 1px solid var(--accent-strong);
-  background: transparent;
-  color: var(--accent-strong);
-  border-radius: 4px;
-  padding: 4px 14px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background .15s, color .15s;
-}
-.file-dl-btn:hover { background: var(--accent-strong); color: #fff; }
-
 /* ─── Tool runs (Claude Desktop style) ─────────────────────────
    Consecutive tool calls share a .tool-group: ONE quiet grey line summarising
    the actions by kind ("Ran 1 command, used 2 tools ›"), no frame. Clicking it
@@ -601,3 +554,17 @@
 .tool-group .tool-nested { border-left-color: var(--border); }
 .tool-group .tool-nested-item { background: transparent; }
 .tool-group .tool-nested-item .tool-header { padding: 4px 8px; }
+
+/* Inside a tool run card the result reads as plain quiet text under the
+   arguments — no IN/OUT badges, no dark code panel. */
+.tool-group .tool-section-label { display: none; }
+.tool-group .tool-section { margin-top: 6px; }
+.tool-group .tool-pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  max-height: 260px;
+  padding: 8px 10px;
+}
+.tool-group .tool-pre.tool-error { color: var(--danger-fg); }

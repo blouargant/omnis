@@ -263,7 +263,6 @@
   "menu.newFolder": "New Folder…",
   "menu.download": "Download",
   "menu.downloadFolder": "Download folder",
-  "chat.fileReady": "File ready",
   "chat.toolGroup.calls.one": "{count} call",
   "chat.toolGroup.calls.other": "{count} calls",
   "chat.spawnChip": "Result from “{label}”",
@@ -1009,5 +1008,7 @@
   "env.branch": "Git branch",
   "env.collection": "Collection",
   "env.defaultSquad": "Default squad",
-  "env.noContext": "No usage recorded yet."
+  "env.noContext": "No usage recorded yet.",
+  "env.results": "Results",
+  "env.fileGone": "{path} — no longer on disk"
 }

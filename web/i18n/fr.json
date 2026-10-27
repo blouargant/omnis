@@ -262,7 +262,6 @@
   "menu.newFile": "Nouveau fichier…",
   "menu.newFolder": "Nouveau dossier…",
   "menu.download": "Télécharger",
-  "chat.fileReady": "Fichier prêt",
   "chat.toolGroup.calls.one": "{count} appel",
   "chat.toolGroup.calls.other": "{count} appels",
   "chat.spawnChip": "Résultat de « {label} »",
@@ -1009,5 +1008,7 @@
   "env.branch": "Branche git",
   "env.collection": "Collection",
   "env.defaultSquad": "Squad par défaut",
-  "env.noContext": "Aucune consommation enregistrée pour l'instant."
+  "env.noContext": "Aucune consommation enregistrée pour l'instant.",
+  "env.results": "Résultats",
+  "env.fileGone": "{path} — n'existe plus sur le disque"
 }

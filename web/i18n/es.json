@@ -262,7 +262,6 @@
   "menu.newFile": "Nuevo archivo…",
   "menu.newFolder": "Nueva carpeta…",
   "menu.download": "Descargar",
-  "chat.fileReady": "Archivo listo",
   "chat.toolGroup.calls.one": "{count} llamada",
   "chat.toolGroup.calls.other": "{count} llamadas",
   "chat.spawnChip": "Resultado de «{label}»",
@@ -1009,5 +1008,7 @@
   "env.branch": "Rama git",
   "env.collection": "Colección",
   "env.defaultSquad": "Squad predeterminado",
-  "env.noContext": "Todavía no hay consumo registrado."
+  "env.noContext": "Todavía no hay consumo registrado.",
+  "env.results": "Resultados",
+  "env.fileGone": "{path} — ya no está en el disco"
 }

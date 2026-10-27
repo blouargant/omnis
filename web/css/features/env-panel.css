@@ -137,3 +137,22 @@ body.env-open #env-panel { display: block; }
 /* The context ring and skills dock left the composer for the panel. */
 #composer-wrap .skills-dock,
 #composer #ctx-ring-wrap { display: none !important; }
+
+/* Résultats card. */
+.env-row.is-gone { color: var(--text-faint); }
+.env-row .env-row-icon svg { display: block; }
+.env-icon-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.env-icon-btn:hover { color: var(--text); background: var(--bg-raised); }

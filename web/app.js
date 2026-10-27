@@ -5028,34 +5028,6 @@ function refreshToolGroup(group) {
   group.querySelector(".tool-summary-text").textContent = text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// appendFileDownloadCard renders a compact "file ready" card in the transcript
-// with a Download button, shown when the agent's Write tool generates a file so
-// the user can download the artifact straight from chat. Live-only, like tool
-// blocks (not replayed on reload — the file stays available in the Folders
-// panel). A fresh card per Write is intentional: a regenerated file gets a new
-// card, and same-turn double-writes are rare.
-function appendFileDownloadCard(sessionId, abs, container) {
-  if (!abs) return;
-  const root = container || getContainer(sessionId);
-  if (!root) return;
-  const name = abs.split("/").filter(Boolean).pop() || abs;
-  const row = document.createElement("div");
-  row.className = "tool-row";
-  const card = document.createElement("div");
-  card.className = "file-dl-card";
-  card.innerHTML =
-    `<span class="file-dl-icon">${fileIconSvg(name)}</span>` +
-    `<span class="file-dl-meta">` +
-      `<span class="file-dl-label">${escHtml(tr("chat.fileReady"))}</span>` +
-      `<span class="file-dl-name" data-tip="${escHtml(abs)}">${escHtml(name)}</span>` +
-    `</span>` +
-    `<button type="button" class="file-dl-btn">${escHtml(tr("menu.download"))}</button>`;
-  card.querySelector(".file-dl-btn").addEventListener("click", () => downloadHostFile(abs, name, sessionId));
-  row.appendChild(card);
-  root.appendChild(row);
-  scrollBottom(paneOfNode(row));
-}
-
 // downloadHostFile downloads a host file via the folder download route and saves
 // it via an object URL. A `sessionId` (when given) targets that session's route
 // so a relative path resolves against the session's working dir (matching the
@@ -8830,6 +8802,9 @@ async function subscribeGlobalEvents() {
           // The self-update poller found a newer stable release — refresh the
           // sidebar button without waiting for a page reload.
           checkForUpdate();
+        } else if (event === "produced_changed" && sid) {
+          // An agent created a file in this session — refresh the Résultats card.
+          if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("results");
         } else if (event === "skills_changed" && sid) {
           // A skill / soft-skill was loaded in this session — refresh its dock.
           if (panelsWithTab(sid).length > 0 || sessionSkills.has(sid)) refreshSkills(sid);
@@ -9975,12 +9950,10 @@ async function sendMessage(panel) {
           // a new/changed file in the Folders panel when it's in the visible dir.
           onAgentFileChanged(data.path);
           if (pathUnderFoldersDir(data.path)) scheduleFoldersRefresh();
-          // A freshly *generated* file (the Write tool) is offered as a download
-          // card in the transcript so the user can grab the artifact (a report,
-          // PDF, markdown, …) without opening the Folders panel. Edits/reverts to
-          // existing files don't render a card (they'd be noisy mid-coding) but
-          // still refresh editors above.
-          if ((data.tool || "") === "write") appendFileDownloadCard(sessionId, data.path, container);
+          // A file the agent created is listed in the environment panel's
+          // Résultats card (server-recorded; produced_changed refreshes it).
+          // Any file change may also change the git Modifications card.
+          if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("changes");
           break;
         }
 
@@ -12522,6 +12495,41 @@ function registerEnvCards() {
           EnvPanel.refresh("skills");
         });
         body.appendChild(item);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "results",
+    title: () => tr("env.results"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      let files = [];
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/produced`);
+        if (res.ok) files = (await res.json()).files || [];
+      } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      ctx.setVisible(files.length > 0);
+      ctx.setValue(String(files.length));
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const f of files) {
+        const row = document.createElement("div");
+        row.className = "env-row" + (f.exists ? "" : " is-gone");
+        row.setAttribute("data-tip", f.exists ? f.path : tr("env.fileGone", { path: f.path }));
+        row.innerHTML = `<span class="env-row-icon">${fileIconSvg(f.name)}</span>` +
+          `<span class="env-row-text">${escHtml(f.name)}</span>`;
+        if (f.exists) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "env-icon-btn";
+          btn.setAttribute("aria-label", tr("menu.download"));
+          btn.setAttribute("data-tip", tr("menu.download"));
+          btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+          btn.addEventListener("click", () => downloadHostFile(f.path, f.name, ctx.sessionId));
+          row.appendChild(btn);
+        }
+        body.appendChild(row);
       }
     },
   });
