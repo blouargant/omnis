@@ -241,6 +241,7 @@ const PANE_EL_IDS = {
   ctxCompactBtn: "ctx-compact-btn", composerResize: "composer-resize",
   fileInput: "file-input", attachBtn: "attach-btn", attachMenu: "attach-menu",
   attachComputer: "attach-computer", attachContext: "attach-context",
+  attachEditMode: "attach-editmode", attachSlash: "attach-slash",
   attachments: "attachments",
 };
 
@@ -1216,13 +1217,23 @@ function attachPaneHandlers(panel) {
   wirePaneSearch(panel);
 
   // Composer submit.
-  pe.composer.addEventListener("submit", (e) => { e.preventDefault(); sendMessage(panel); });
+  // The round button is Send / Steer / Stop (setSendButtonMode): in Stop mode a
+  // click cancels the running turn instead of submitting.
+  pe.composer.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (e.submitter === pe.send && pe.send.dataset.mode === "stop") { pe.cancel.click(); return; }
+    sendMessage(panel);
+  });
 
   // Attach menu.
   pe.attachBtn.addEventListener("click", (e) => { e.stopPropagation(); pe.attachMenu.toggleAttribute("hidden"); });
   pe.attachMenu.addEventListener("click", (e) => e.stopPropagation());
   pe.attachComputer.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); pe.fileInput.click(); });
   pe.attachContext.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); openCtxBrowser(); });
+  // The ＋ menu also carries the Enter-mode toggle and the slash-command menu;
+  // the hidden #edit-mode-btn / #slash-btn keep the single implementation.
+  pe.attachEditMode.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); pe.editModeBtn.click(); });
+  pe.attachSlash.addEventListener("click", () => { pe.attachMenu.setAttribute("hidden", ""); pe.slashBtn.click(); });
 
   pe.fileInput.addEventListener("change", () => uploadPickedFiles(panel, Array.from(pe.fileInput.files), () => { pe.fileInput.value = ""; }));
 
@@ -1746,8 +1757,7 @@ function applySessionUI(id) {
     // While a turn is in flight the send button stays enabled but becomes a
     // "Steer" button — clicking it (or Enter) submits the composer text as a
     // mid-turn steering note (sendMessage routes to steerMessage when busy).
-    p.els.send.disabled   = archived;
-    setSendButtonMode(p, busy && !archived);
+    setSendButtonMode(p);
     // Only a locally-streamed turn can be Stopped from here (a background turn
     // has no client-side AbortController / liveTurn to cancel).
     p.els.cancel.disabled = !localActive;
@@ -2028,16 +2038,32 @@ async function refreshSkills(sessionId) {
   for (const p of panelsForSession(sessionId)) renderSkillsDock(p);
 }
 
-// setSendButtonMode flips a pane's send button between its normal "Send" state
-// and the mid-turn "Steer" state (label + tooltip + an `.is-steer` accent so the
-// different action reads at a glance).
-function setSendButtonMode(panel, steering) {
+// setSendButtonMode sets the composer's single round button from the turn state
+// (composerButtonMode, composer-state.js): Send (arrow), Steer (a mid-turn note,
+// when the composer has text) or Stop (empty composer during a turn this browser
+// streams; shown but inert for a background turn it cannot cancel).
+const ICON_SEND = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+const ICON_STOP = `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>`;
+const ICON_STEER = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19c0-7 4-11 12-11"/><path d="M13 4l4 4-4 4"/></svg>`;
+function setSendButtonMode(panel) {
   const btn = panel.els.send;
   if (!btn) return;
-  btn.classList.toggle("is-steer", steering);
-  btn.textContent = steering ? tr("composer.steer") : tr("composer.send");
-  if (steering) btn.setAttribute("data-tip", tr("composer.steerTip"));
-  else btn.removeAttribute("data-tip");
+  const id = panel.sessionId;
+  const localActive = !!id && sessionSending.has(id);
+  const busy = localActive || (!!id && remoteBusy.has(id));
+  const archived = !!id && archivedSessions.has(id);
+  const hasText = panel.els.prompt.value.trim() !== "";
+  const mode = composerButtonMode({ hasText, localActive, busy, archived });
+  if (btn.dataset.mode !== mode || !btn.firstChild) {
+    btn.dataset.mode = mode;
+    btn.innerHTML = mode === "send" ? ICON_SEND : mode === "steer" ? ICON_STEER : ICON_STOP;
+  }
+  btn.disabled = archived || mode === "stop-disabled";
+  const label = mode === "steer" ? tr("composer.steer")
+    : mode === "send" ? tr("composer.sendAria") : tr("composer.stopAria");
+  btn.setAttribute("aria-label", label);
+  if (mode === "steer") btn.setAttribute("data-tip", tr("composer.steerTip"));
+  else btn.setAttribute("data-tip", label);
 }
 
 // paneTabTitle resolves a tab's label: the session's title (falling back to id).
@@ -11789,6 +11815,8 @@ function updateEditModeBtn() {
     p.els.editModeBtn.dataset.tip = sendOnEnter
       ? "Edit mode: switch to Enter=new line, Ctrl+Enter=send"
       : "Send mode: switch to Enter=send, Ctrl+Enter=new line";
+    const lbl = p.els.attachEditMode?.querySelector(".attach-editmode-label");
+    if (lbl) lbl.textContent = sendOnEnter ? tr("composer.enterSends") : tr("composer.enterNewline");
     applyComposerPlaceholder(p);
   }
 }
@@ -11838,6 +11866,9 @@ function autoGrowPrompt(panel) {
   panel = panel || fp();
   if (!panel) return;
   renderPromptHighlight(panel);
+  // Every programmatic text change (clear after send, prefill) passes here, so
+  // the Send/Steer/Stop button follows the text without an input event.
+  setSendButtonMode(panel);
   if (composerManuallyResized) return;
   const el = panel.els.prompt;
   const cs = getComputedStyle(el);

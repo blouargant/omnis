@@ -49,7 +49,7 @@
   position: relative;
   z-index: 1;
   align-self: center;
-  max-width: 700px;
+  max-width: calc(var(--chat-max-w) - 40px);
   box-sizing: border-box;
 }
 
@@ -117,23 +117,23 @@ body.resizing-composer #composer-resize { transition: none; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 700px;
+  max-width: calc(var(--chat-max-w) - 40px);
   margin: 0 auto;
-  padding: 12px 14px;
+  padding: 12px 12px 10px 16px;
   width: 100%;
   /* Editor surface: --composer-bg defaults to the peach user bubble; ivory /
      terracotta override the token to white. The expanded Folders/Archived
      sidebar cards read the same token so those panels always match the editor. */
   background: var(--composer-bg);
-  border: 1px solid var(--bubble-user-border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-composer);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 /* Focus feedback lives on the whole card now that the textarea is borderless. */
 #composer:focus-within {
-  border-color: var(--accent-border-soft);
-  box-shadow: var(--shadow-bubble, 0 4px 14px rgba(0, 0, 0, 0.4)), 0 0 0 3px var(--accent-bg-soft);
+  border-color: var(--border-strong);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
 /* The composer is a two-layer stack: a backdrop (.prompt-highlight) that
@@ -255,13 +255,12 @@ body.resizing-composer #composer-resize { transition: none; }
   display: flex;
   align-items: center;
   gap: 8px;
-  justify-content: flex-end;
 }
 
 #status {
   font-size: 13px;
   color: var(--text-muted);
-  margin-right: auto;
+  margin-left: auto;
   font-style: italic;
   display: flex;
   align-items: center;
@@ -288,27 +287,30 @@ body.resizing-composer #composer-resize { transition: none; }
   50%       { opacity: 1;    transform: scale(1);    }
 }
 
+/* The single round button: Send (arrow) / Steer / Stop — data-mode is set by
+   setSendButtonMode (app.js). */
 #send {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   background: var(--accent);
   color: #ffffff;
   border: none;
-  border-radius: 18px;
-  padding: 7px 18px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 50%;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 0.1s, opacity 0.1s;
 }
 #send:hover { background: var(--accent-hover); }
-#send:disabled { background: var(--bg-active); color: #555558; cursor: not-allowed; }
-/* Mid-turn "Steer" state: a softer accent variant (matches the steer chips) so
-   it reads as a different action from the normal "Send". */
-#send.is-steer {
-  background: var(--accent-bg-soft);
-  color: var(--text);
-  border: 1px solid var(--accent-border-soft);
-}
-#send.is-steer:hover { background: var(--accent-bg-soft); border-color: var(--accent); }
+#send svg { display: block; }
+#send[data-mode="stop"],
+#send[data-mode="stop-disabled"] { background: var(--text); color: var(--bg-input); }
+#send[data-mode="stop"]:hover { background: var(--text-strong); }
+#send:disabled { opacity: 0.35; cursor: not-allowed; }
+#send[data-mode="send"]:disabled { background: var(--bg-active); color: var(--text-faint); opacity: 1; }
 
 #cancel {
   background: transparent;
@@ -350,12 +352,12 @@ body.resizing-composer #composer-resize { transition: none; }
 
 /* ─── Attach button ────────────────────────────────────────── */
 #attach-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border-radius: 4px;
+  border-radius: 50%;
   background: transparent;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
@@ -367,7 +369,6 @@ body.resizing-composer #composer-resize { transition: none; }
 #attach-btn:hover {
   background: var(--bg-raised);
   color: var(--text);
-  border-color: var(--accent-strong);
 }
 
 /* ─── Attachment chips in composer ────────────────────────── */
@@ -664,13 +665,14 @@ body.resizing-composer #composer-resize { transition: none; }
   position: absolute;
   bottom: calc(100% + 12px);
   left: 0;
-  background: var(--bg-panel);
+  background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  min-width: 190px;
+  min-width: 210px;
+  padding: 4px;
   z-index: 200;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
 #attach-menu[hidden] { display: none; }
 #attach-menu button {
@@ -681,7 +683,7 @@ body.resizing-composer #composer-resize { transition: none; }
   padding: 8px 14px;
   background: none;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 13px;
   cursor: pointer;
@@ -689,7 +691,12 @@ body.resizing-composer #composer-resize { transition: none; }
   transition: background 0.1s;
 }
 #attach-menu button:hover { background: var(--bg-raised); }
-#attach-menu button + button { border-top: 1px solid var(--bg-raised); }
+.attach-slash-glyph {
+  width: 14px;
+  text-align: center;
+  font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
 
 
 
@@ -766,3 +773,10 @@ body.resizing-composer #composer-resize { transition: none; }
 .subtle-ask-actions .subtle-ask-send { background: var(--accent); border-color: var(--accent); color: #fff; }
 .subtle-ask-actions .subtle-ask-send:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
 .subtle-ask-actions button:disabled { opacity: 0.5; cursor: default; }
+
+/* #edit-mode-btn / #slash-btn / #cancel stay in the DOM as the single
+   implementation behind the ＋ menu and the round button, but are never shown:
+   their own display rules would otherwise beat the UA [hidden] rule. */
+#edit-mode-btn[hidden],
+#slash-btn[hidden],
+#cancel[hidden] { display: none; }
