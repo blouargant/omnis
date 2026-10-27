@@ -78,6 +78,9 @@ i18n: ## Regenerate web/i18n/locales.js from the per-locale web/i18n/<locale>.js
 	node scripts/build_i18n.mjs
 
 .PHONY: test
+web-test: ## Run the web UI node tests (tokens, composer state)
+	node --test web/tests/*.test.mjs
+
 test: ## Run unit tests
 	$(GO) test ./...
 
