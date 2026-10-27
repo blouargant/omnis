@@ -17,6 +17,12 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
+## 2.1 (in development) — Collection tree and settings dialog
+
+- **Collection tree** — the middle column is gone: each collection is a foldable group in the sidebar listing its own chats, with ＋ to start a chat in it and its menu on hover; search, sort and bulk select live in the sidebar too.
+- **Choose the collection of a new chat** — New Chat opens a draft where you pick the collection (and squad) before sending.
+- **Account menu and settings dialog** — the sidebar footer is one account button whose menu opens Settings (Ctrl+,), Appearance, Language and Documentation in a dialog over the chat.
+
 ## 2.0 — Durable agent questions
 
 - **Questions survive a restart** — a question an agent asked you is kept across a server restart or crash; answering it afterwards resumes the task.

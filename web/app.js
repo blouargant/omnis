@@ -9100,7 +9100,9 @@ function accountMenuItem(icon, label, action, kbd) {
     k.textContent = kbd;
     btn.appendChild(k);
   }
-  btn.addEventListener("click", (e) => { e.stopPropagation(); closeAccountMenu(); action(); });
+  // The account button lives in the phone drawer; dismiss the drawer too, so the
+  // settings dialog / update dialog the item opens is not left behind it.
+  btn.addEventListener("click", (e) => { e.stopPropagation(); closeAccountMenu(); closeNav(); action(); });
   return btn;
 }
 
@@ -12012,13 +12014,6 @@ function closeNav() { setNavOpen(false); }
 function toggleNav() { setNavOpen(!navOpen()); }
 
 els.navScrim.addEventListener("click", closeNav);
-// The Settings nav lives in the drawer's lower half but its panel renders in the
-// chat area behind it — so picking a section must dismiss the drawer, or the
-// user navigates to a page they can't see. Delegated (the list is built later by
-// settings.js) and inert on desktop, where nav-open is never set.
-document.getElementById("settings-menu")?.addEventListener("click", (e) => {
-  if (e.target.closest("li[data-file]")) closeNav();
-});
 // Crossing back to a wide viewport must not strand `nav-open` on the desktop
 // layout (where the drawer classes mean nothing but the scrim would still eat
 // clicks if it were left interactive).
