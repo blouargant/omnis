@@ -274,6 +274,12 @@ function bindPaneEls(root) {
   e.pickerSquadToggle = root.querySelector(".pane-picker-squad-toggle");
   e.pickerSquadName   = root.querySelector(".pane-picker-squad-name");
   e.pickerSquadMenu   = root.querySelector(".pane-picker-squad-menu");
+  e.pickerCollection       = root.querySelector(".pane-picker-collection");
+  e.pickerCollectionToggle = root.querySelector(".pane-picker-collection-toggle");
+  e.pickerCollectionName   = root.querySelector(".pane-picker-collection-name");
+  e.pickerCollectionGlyph  = root.querySelector(".pane-picker-collection-glyph");
+  e.pickerCollectionMenu   = root.querySelector(".pane-picker-collection-menu");
+  e.pickerDir   = root.querySelector(".pane-picker-dir");
   e.pickerList  = root.querySelector(".pane-picker-list");
   e.searchForm  = root.querySelector(".pane-search");
   e.searchInput = root.querySelector(".pane-search-input");
@@ -900,6 +906,13 @@ function wirePaneSearch(panel) {
 
 function renderPanePicker(panel) {
   renderPickerSquad(panel);
+  renderPickerCollection(panel);
+  // A draft opened from Files → "Open Chat here" starts in that folder.
+  const dir = isDraft(panel.activeTab) ? draftDirs.get(panel.activeTab) : "";
+  if (panel.els.pickerDir) {
+    panel.els.pickerDir.hidden = !dir;
+    panel.els.pickerDir.textContent = dir ? tr("picker.dir", { dir }) : "";
+  }
   const list = panel.els.pickerList;
   if (!list) return;
   list.innerHTML = "";
@@ -978,6 +991,7 @@ function renderPickerSquad(panel) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       panel._pickerSquad = sq.name;
+      panel._pickerSquadPicked = true; // a collection's default squad no longer overrides it
       closePickerSquadMenu(panel);
       renderPickerSquad(panel);
     });
@@ -999,6 +1013,99 @@ function closePickerSquadMenu(panel) {
   if (!menu || !toggle) return;
   menu.hidden = true;
   toggle.setAttribute("aria-expanded", "false");
+}
+
+// ─── Draft collection selector ───────────────────────────────────────────────
+// A new chat's collection is explicit: a group's ＋ files it directly, every
+// other path (sidebar New Chat, a pane's + tab, Files → "Open Chat here") opens
+// a draft whose picker carries this selector. It starts on the collection last
+// chosen in a draft (DRAFT_COLLECTION_KEY; General the first time). Picking a
+// collection whose profile names a default squad shows that squad in the Squad
+// selector, unless the user picked a squad on this draft.
+const DRAFT_COLLECTION_KEY = "agent_draft_collection";
+const draftDirs = new Map(); // draft tab key → folder pinned by "Open Chat here"
+
+function draftDefaultCollection() {
+  let stored = "";
+  try { stored = localStorage.getItem(DRAFT_COLLECTION_KEY) || ""; } catch {}
+  const hit = collectionsData.find((c) => c.name.toLowerCase() === stored.toLowerCase());
+  return hit ? hit.name : GENERAL_COLLECTION;
+}
+
+function collectionGlyph(c) {
+  return c && c.general ? ICON_STAR : ICON_FOLDER;
+}
+
+// applyCollectionSquad shows the collection's default squad in the draft's Squad
+// selector when the user has not picked one on this draft.
+function applyCollectionSquad(panel, c) {
+  if (!c || !c.squad || panel._pickerSquadPicked) return;
+  if (!availableSquads.some((s) => s.name === c.squad)) return;
+  panel._pickerSquad = c.squad;
+  renderPickerSquad(panel);
+}
+
+function renderPickerCollection(panel) {
+  const pe = panel.els;
+  if (!pe.pickerCollection || !pe.pickerCollectionMenu) return;
+  const find = (n) => collectionsData.find((c) => c.name.toLowerCase() === String(n || "").toLowerCase());
+  if (!panel._pickerCollection || (collectionsData.length && !find(panel._pickerCollection))) {
+    panel._pickerCollection = draftDefaultCollection();
+    applyCollectionSquad(panel, find(panel._pickerCollection));
+  }
+  const current = find(panel._pickerCollection) || { name: GENERAL_COLLECTION, general: true };
+  pe.pickerCollectionMenu.innerHTML = "";
+  for (const c of (collectionsData.length ? collectionsData : [current])) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "squad-menu-item" + (c.name === current.name ? " selected" : "");
+    btn.setAttribute("role", "menuitem");
+    const accent = collectionAccentVar(c.color);
+    if (accent) btn.style.setProperty("--col-accent", accent);
+    btn.innerHTML = `<span class="pane-picker-collection-glyph">${collectionGlyph(c)}</span>`;
+    const label = document.createElement("span");
+    label.className = "squad-menu-label";
+    label.textContent = c.name;
+    btn.appendChild(label);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      panel._pickerCollection = c.name;
+      try { localStorage.setItem(DRAFT_COLLECTION_KEY, c.name); } catch {}
+      applyCollectionSquad(panel, c);
+      closePickerCollectionMenu(panel);
+      renderPickerCollection(panel);
+    });
+    pe.pickerCollectionMenu.appendChild(btn);
+  }
+  const accent = collectionAccentVar(current.color);
+  if (accent) pe.pickerCollection.style.setProperty("--col-accent", accent);
+  else pe.pickerCollection.style.removeProperty("--col-accent");
+  pe.pickerCollectionGlyph.innerHTML = collectionGlyph(current);
+  pe.pickerCollectionName.textContent = current.name;
+}
+
+function openPickerCollectionMenu(panel) {
+  const { pickerCollectionMenu: menu, pickerCollectionToggle: toggle } = panel.els;
+  if (!menu || !toggle) return;
+  menu.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+}
+function closePickerCollectionMenu(panel) {
+  const { pickerCollectionMenu: menu, pickerCollectionToggle: toggle } = panel.els;
+  if (!menu || !toggle) return;
+  menu.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+}
+
+// openNewChatDraft opens a draft tab in the focused pane (creating a pane when
+// there is none) — the sidebar New Chat button and Files → "Open Chat here".
+function openNewChatDraft(opts = {}) {
+  closeNav(); // "New Chat" lives in the drawer; dismiss it so the draft is visible.
+  let panel = fp();
+  if (!panel) { panel = createPanel(null); rebuildChatDOM(); setFocusedPanel(panel.id); }
+  newDraftTab(panel, opts);
+  autoGrowPrompt(panel);
+  if (panel.els.prompt) panel.els.prompt.focus();
 }
 
 // ─── Per-pane event handlers ──────────────────────────────────────────────────
@@ -1079,11 +1186,19 @@ function attachPaneHandlers(panel) {
   if (pe.pickerSquadToggle) {
     pe.pickerSquadToggle.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (pe.pickerSquadMenu.hidden) openPickerSquadMenu(panel);
+      if (pe.pickerSquadMenu.hidden) { closePickerCollectionMenu(panel); openPickerSquadMenu(panel); }
       else closePickerSquadMenu(panel);
     });
   }
   if (pe.pickerSquadMenu) pe.pickerSquadMenu.addEventListener("click", (e) => e.stopPropagation());
+  if (pe.pickerCollectionToggle) {
+    pe.pickerCollectionToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (pe.pickerCollectionMenu.hidden) { closePickerSquadMenu(panel); openPickerCollectionMenu(panel); }
+      else closePickerCollectionMenu(panel);
+    });
+  }
+  if (pe.pickerCollectionMenu) pe.pickerCollectionMenu.addEventListener("click", (e) => e.stopPropagation());
   if (pe.pickerNew) pe.pickerNew.addEventListener("click", () => {
     const squad = (pe.pickerSquad && !pe.pickerSquad.hidden) ? panel._pickerSquad : undefined;
     newChat(panel, squad);
@@ -2145,8 +2260,11 @@ function moveTab(fromPanel, key, toPanel, toIndex) {
 
 // newDraftTab always appends a fresh pending "New Chat" tab and activates it —
 // even when the active tab is already a draft (so several can coexist).
-function newDraftTab(panel) {
+// newDraftTab opens a fresh draft tab; `opts.dir` pins the folder the chat will
+// start in (Files → "Open Chat here").
+function newDraftTab(panel, opts = {}) {
   const key = newDraftKey();
+  if (opts.dir) draftDirs.set(key, opts.dir);
   panel.tabs.push(key);
   activateTab(panel, key);
 }
@@ -6727,6 +6845,8 @@ async function loadCollections() {
 // resolves once the first page of every newly shown open group has loaded.
 function renderCollections(list) {
   collectionsData = Array.isArray(list) ? list : [];
+  // Open drafts list the collections too.
+  for (const p of panels) if (p.els.picker && !p.els.picker.hidden) renderPickerCollection(p);
   return renderCollectionTree();
 }
 
@@ -7998,6 +8118,7 @@ function closeTab(panel, key) {
   }
   const wasActive = panel.activeTab === key;
   panel.tabs.splice(idx, 1);
+  if (isDraft(key)) draftDirs.delete(key);
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
   // Terminal tabs are pane-local and ephemeral; tear down the shell + WebSocket.
@@ -8409,13 +8530,19 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
   // Preserve the outgoing tab's half-typed message (it returns when reselected);
   // the new session starts with an empty composer (restored below).
   saveComposerDraft(panel);
-  const squad = squadOverride || currentSquadChoice();
+  // A chat started from a draft takes the draft's picker choices (collection,
+  // squad, pinned folder) unless the caller passed its own; a group's ＋ passes
+  // its collection and ignores the draft entirely.
+  const draftKey = isDraft(panel.activeTab) && !collectionOverride ? panel.activeTab : null;
+  const pickerSquadShown = panel.els.pickerSquad && !panel.els.pickerSquad.hidden;
+  const squad = squadOverride || (draftKey && pickerSquadShown ? panel._pickerSquad : null) || currentSquadChoice();
+  const dir = dirOverride || (draftKey ? draftDirs.get(draftKey) : "");
   try {
     const body = { squad };
-    if (dirOverride) body.dir = dirOverride;
+    if (dir) body.dir = dir;
     // File the new chat under the requested collection (General ⇒ leave
     // un-filed). The server ignores an unknown collection.
-    const collection = collectionOverride || GENERAL_COLLECTION;
+    const collection = collectionOverride || (draftKey && panel._pickerCollection) || GENERAL_COLLECTION;
     if (collection.toLowerCase() !== GENERAL_COLLECTION.toLowerCase()) {
       body.collection = collection;
     }
@@ -8438,6 +8565,7 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     }
     const data = await res.json();
     const newId = data.session_id;
+    if (draftKey) { draftDirs.delete(draftKey); panel._pickerSquadPicked = false; }
     // Persist the choice so the same squad is preselected next time.
     if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
 
@@ -11365,7 +11493,7 @@ function closeCtxBrowser() {
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 // "New Chat" in the sidebar opens a new session in the focused pane.
-els.newChat.addEventListener("click", () => newChat());
+els.newChat.addEventListener("click", () => openNewChatDraft());
 
 // Squad picker dropdown — chevron next to the New Chat button toggles
 // a menu that picks which squad future sessions use. The menu is hidden
@@ -11378,12 +11506,12 @@ els.squadToggle.addEventListener("click", (e) => {
 els.squadMenu.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("click", () => {
   closeSquadMenu();
-  for (const p of panels) closePickerSquadMenu(p);
+  for (const p of panels) { closePickerSquadMenu(p); closePickerCollectionMenu(p); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!els.squadMenu.hidden) closeSquadMenu();
-  for (const p of panels) closePickerSquadMenu(p);
+  for (const p of panels) { closePickerSquadMenu(p); closePickerCollectionMenu(p); }
 });
 
 // ─── Hover tooltips (data-tip) ────────────────────────────────────────────────
@@ -13098,7 +13226,7 @@ function openFolderUpCtxMenu(ev) {
   const name = abs.split("/").filter(Boolean).pop() || "root";
   const D = { disabled: true };
   const items = [
-    [tr("menu.openChatHere"), () => newChat(null, undefined, cur)],
+    [tr("menu.openChatHere"), () => openNewChatDraft({ dir: cur })],
     [tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: cur })],
     [tr("menu.download"), () => folderDownload(abs, name, true)],
     SEP,
@@ -13169,7 +13297,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   const items = [];
   if (isDir) {
     // Open / download
-    items.push([tr("menu.openChatHere"), () => newChat(null, undefined, abs)]);
+    items.push([tr("menu.openChatHere"), () => openNewChatDraft({ dir: abs })]);
     items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: abs })]);
     items.push([tr("menu.download"), () => folderDownload(abs, name, true)]);
     items.push(SEP);
