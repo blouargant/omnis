@@ -140,7 +140,7 @@
   background: transparent;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--text-muted, #888);
   font-size: 12.5px;
   cursor: pointer;
@@ -166,24 +166,23 @@
 .pane-tab.drag-over-left::before { left: -1px; }
 .pane-tab.drag-over-right::after { right: -1px; }
 .pane-tab:hover { background: var(--bg-raised, #2a2d2e); color: var(--text, #eee); }
-/* The active tab of the pane: a white "folder" filled with the content colour
- * (var(--bg)), outlined on three sides, its bottom left open. z-index:1 lifts it
- * over the .pane-tabbar::after separator so its fill bridges into the content. */
+/* The active tab of the pane: flat, Claude-style — no folder fill, just
+ * stronger text and an underline. z-index:1 lifts the underline over the
+ * .pane-tabbar::after separator. */
 .pane-tab.active {
-  background: var(--bg);
-  border-color: var(--border);
+  background: transparent;
   color: var(--text, #eee);
   z-index: 1;
-  /* Top accent line coloured by the chat's collection (--col-accent, set in
+  /* Underline coloured by the chat's collection (--col-accent, set in
    * renderPaneTabs) so an open tab's collection is recognisable at a glance.
    * Transparent for General/uncoloured sessions in a non-focused pane. */
-  box-shadow: inset 0 2px 0 var(--col-accent, transparent);
+  box-shadow: inset 0 -2px 0 var(--col-accent, transparent);
 }
-/* Focused pane's active tab: the collection accent line along the tab top +
- * stronger text; falls back to the app accent for General/uncoloured. */
+/* Focused pane's active tab: the collection-coloured underline + stronger
+ * text; falls back to the app accent for General/uncoloured. */
 .chat-pane.is-focused .pane-tab.active {
   color: var(--text-strong, #fff);
-  box-shadow: inset 0 2px 0 var(--col-accent, var(--accent, #4a9eff));
+  box-shadow: inset 0 -2px 0 var(--col-accent, var(--accent, #4a9eff));
 }
 .pane-tab-name {
   min-width: 0;

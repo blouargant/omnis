@@ -4628,10 +4628,15 @@ Surfaces:
   repeat; one terminal `done` at the very end. The run-guard is held across the
   whole loop so no other turn interleaves. Stop (`handleCancel`) also drops
   pending steering so a cancel doesn't leak notes into the next turn. Client
-  ([web/app.js](web/app.js)): the composer stays enabled while streaming, and the
-  send button stays enabled too — `applySessionUI` flips it into a **"Steer"**
-  state (`setSendButtonMode` toggles the label/tooltip + an `.is-steer` accent;
-  i18n `composer.steer`/`composer.steerTip`) so clicking it (or Enter) during
+  ([web/app.js](web/app.js)): the composer stays enabled while streaming, and its
+  **single round button** follows the turn state — `setSendButtonMode(panel)`
+  (called from `applySessionUI` and from `autoGrowPrompt`, which every text change
+  passes through) asks the pure `composerButtonMode`
+  ([web/composer-state.js](web/composer-state.js), unit-tested by `make web-test`)
+  for `send` / `steer` (turn running + text) / `stop` (local turn, empty composer:
+  a click forwards to the hidden `#cancel`) / `stop-disabled` (background turn this
+  browser cannot cancel), setting `data-mode`, the icon and the i18n label
+  (`composer.steer`/`composer.steerTip`). In steer mode clicking it (or Enter) during
   `sessionSending` routes to `steerMessage` (POST `/steer`), which **shows the note
   as a `.steer-chip` on the in-flight question bubble** it steers (not in the
   composer). The chips are driven by `renderUserBubbleSteer` from the
@@ -6475,6 +6480,31 @@ check landed; omitted for `dev`) and, when an update is available, **Update to
 vX** → `openUpdateDialog()` (the header Update button stays). It closes on outside
 click, Escape, scroll, resize and item click — an item also closes the phone
 drawer (`closeNav`).
+
+### Web UI look (Claude Desktop style)
+
+The web UI follows Claude Desktop's look and feel (spec
+[docs/superpowers/specs/2026-10-27-claude-desktop-look-design.md](docs/superpowers/specs/2026-10-27-claude-desktop-look-design.md)).
+Layout is **theme-independent**, driven by tokens with `:root` defaults in
+[web/css/features/common.css](web/css/features/common.css): `--chat-max-w` (720px
+reading column — `--col-w` is `min(90%, var(--chat-max-w))`, the phone band sets
+`--col-w: 100%`), `--radius-sm/-md/-composer`, `--font-ui` (system sans-serif, no
+web font), `--answer-font-size/-line-height`, `--user-bubble-bg/-fg` (the sent
+message is a small right-aligned bubble; answers are plain text, no frame). The
+default theme **`terracotta`** carries the Claude light palette and
+**`terracotta-dark`** the dark one (a theme to pick — it does NOT follow the OS).
+The **composer** is one rounded box: a **＋** button (`#attach-btn`) whose menu
+holds upload / add context / Enter mode (`#attach-editmode` → hidden
+`#edit-mode-btn`) / slash commands (`#attach-slash` → hidden `#slash-btn`), the
+context ring + subtle "?" + `#status`, and one round `#send` (Send/Steer/Stop, see
+"Mid-turn steering"). The hidden buttons keep their handlers as the single
+implementation and need explicit `[hidden] { display: none }` rules (their own
+`display` beats the UA rule). The sidebar's **New chat** is a plain row with the
+squad chevron revealed on hover (always on touch); the focused session row is a
+neutral fill + a dot in its collection colour; the active pane tab is underlined in
+the collection colour. **`make web-test`** runs the node tests in `web/tests/`
+(tokens have `:root` defaults, both terracotta themes define the palette, the
+composer state machine).
 
 ### Web UI tooltips (`data-tip`, never native `title`)
 

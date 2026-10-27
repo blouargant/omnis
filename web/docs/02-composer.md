@@ -6,10 +6,18 @@ message you send to the agent.
 ## Sending a message
 
 - **Enter** sends. **Shift+Enter** inserts a new line.
-- The **edit-mode** button (notepad icon) toggles this behavior: when active,
-  Enter inserts a new line and **Cmd/Ctrl+Enter** sends. Useful when drafting
-  longer prompts.
-- The **Stop** button cancels a streaming response.
+- The **＋** button at the bottom left opens a menu with **Upload from
+  computer**, **Add context**, the **Enter mode** switch and **Slash commands**.
+  The Enter mode switch toggles the behavior above: when it reads "Enter adds a
+  new line", Enter inserts a new line and **Cmd/Ctrl+Enter** sends. Useful when
+  drafting longer prompts.
+- The round button at the bottom right changes with the turn:
+  - **↑ Send** when nothing is running;
+  - **■ Stop** while a response streams and the composer is empty — it cancels
+    the response (greyed out for a turn running in the background, which this
+    browser cannot cancel);
+  - **Steer** while a response streams and you have typed something — your text
+    is sent to the running turn as a steering note.
 
 ## Reply suggestions
 
@@ -48,7 +56,7 @@ block.
 
 ## Attachments
 
-Click the paperclip to attach files in two ways:
+Click **＋** to attach files in two ways:
 
 - **Upload from computer** — multipart-uploads files to the server; they are
   stored under `$OMNIS_HOME/logs/uploads/<session>/` and the agent receives
@@ -61,7 +69,7 @@ Uploads are session-scoped and garbage-collected when the session is deleted.
 
 ## Slash commands
 
-Type `/` (or click the `/` button) to open the slash menu. Slash commands
+Type `/` (or pick **Slash commands** in the **＋** menu) to open the slash menu. Slash commands
 are short prompts the agent expands into a full instruction — for example:
 
 - `/init` — analyze the repository and write a starter **AGENT.md** project
@@ -130,7 +138,7 @@ nothing highlighted runs the command.
 
 ## Context ring
 
-The small ring next to the Stop/Send buttons visualises how much of the
+The small ring next to the **＋** button visualises how much of the
 model's context window the current session is consuming. Click it to see:
 
 - Tokens used vs. the model's maximum context.

@@ -182,7 +182,7 @@
   .pane-toolbar button { width: 32px; height: 32px; }
 
   /* Composer icon buttons (slash menu, attach). */
-  #slash-btn, #attach-btn { width: 34px; height: 34px; }
+  #attach-btn, #send { width: 36px; height: 36px; }
 
   /* Whole-message copy split-button under an assistant reply. */
   .copy-msg-btn, .copy-msg-caret { height: 32px; }

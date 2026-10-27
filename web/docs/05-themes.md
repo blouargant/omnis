@@ -9,14 +9,15 @@ Open **Settings → Appearance**, click a swatch. The theme is applied to the
 running tab immediately and synced to the server so it survives reloads and
 follows you across browsers signed in with the same token.
 
-First-time visitors who have never picked a theme see **VS Code Light** as the
-default skin. Selecting any palette (including VS Code Dark) overrides it and is
-remembered.
+First-time visitors who have never picked a theme see **Terracotta** — a calm
+cream and terracotta light skin — as the default. **Terracotta Dark** is its
+dark counterpart (it does not follow the system setting: pick it). Selecting any
+palette overrides the default and is remembered.
 
 ## Tiers
 
-- **Principal themes** — curated, default-quality palettes (VS Code Dark/Light,
-  GitHub Dark/Light, One Dark). Tested across every panel and chrome state.
+- **Principal themes** — curated, default-quality palettes (Terracotta,
+  Terracotta Dark, Ivory, VS Code Dark/Light, GitHub Dark/Light, One Dark). Tested across every panel and chrome state.
 - **Secondary themes** — well-known community palettes (Dracula, Nord, Tokyo
   Night, Solarized Dark/Light, Monokai, Gruvbox Dark). Maintained but less
   exhaustively tuned.

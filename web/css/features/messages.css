@@ -196,7 +196,6 @@
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-dim, var(--text));
-  box-shadow: var(--shadow-bubble);
   cursor: pointer;
   opacity: 0;
   transition: opacity .12s ease, color .12s ease, background .12s ease;
@@ -374,7 +373,7 @@
 .bubble-assistant pre {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 14px;
   overflow-x: auto;
   margin: 8px 0;
@@ -401,11 +400,14 @@
   color: var(--text-muted);
 }
 .bubble-assistant table { border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+/* Tables: horizontal hairlines only, header in muted semibold (Claude-style). */
 .bubble-assistant th, .bubble-assistant td {
-  border: 1px solid var(--border);
-  padding: 5px 10px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px 6px 0;
+  text-align: left;
 }
-.bubble-assistant th { background: var(--bg-panel); color: var(--text); }
+.bubble-assistant th { background: transparent; color: var(--text-muted); font-weight: 600; }
 
 /* Copy split-button on assistant messages: an icon (copy as Markdown) joined to
    a caret (copy as Slack / Jira / Rich text / Plain). */
@@ -511,7 +513,6 @@
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0.82;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
   transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
 }
 .reply-nav-btn:hover {
