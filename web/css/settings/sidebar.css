@@ -1,54 +1,5 @@
-/* Settings sidebar chrome: settings button, section labels, in-sidebar settings menu
+/* Settings chrome shared with the sidebar: section labels, hidden category tabs, client-only rules
    Part of web/css/settings.css — edit this partial, not the @import barrel. */
-
-/* Settings sidebar buttons: the gear plus the Appearance / Documentation
-   shortcut buttons stacked beneath it in #sidebar-footer share one look. */
-#settings-btn,
-#appearance-btn,
-#documentation-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 0.4rem;
-  /* 12px left padding puts the icon on the same column as the Archived/Folders
-     chevrons (their headers pad 12px, panels pad 0), so the whole lower sidebar
-     shares one clean left edge; the label then lines up with the section labels.
-     Paired with #sidebar-footer padding:8px 0 so the hover fill spans full width
-     like the section headers. */
-  padding: 0.45rem 12px;
-  background: transparent;
-  border: 1px solid transparent;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-  /* Match the 13px of the other interactive rows in the left column (collection
-     rows, settings-menu items, session + archived rows) so the footer buttons
-     don't read as smaller than everything above them. */
-  font-size: 13px;
-  /* Same muted tone as the ARCHIVED / FOLDERS section labels so the five lower
-     labels read as one group; brightens to --text on hover/active. */
-  color: var(--text-muted);
-}
-#settings-btn svg,
-#appearance-btn svg,
-#documentation-btn svg { flex-shrink: 0; opacity: 0.8; }
-#settings-btn:hover,
-#appearance-btn:hover,
-#documentation-btn:hover { background: var(--bg-raised); color: var(--text); }
-#settings-btn:hover svg,
-#appearance-btn:hover svg,
-#documentation-btn:hover svg { opacity: 1; }
-#settings-btn.active,
-#appearance-btn.active,
-#documentation-btn.active {
-  background: var(--accent-bg-soft);
-  border-color: var(--accent-border-soft);
-  color: var(--text);
-}
-#settings-btn.active svg,
-#appearance-btn.active svg,
-#documentation-btn.active svg { opacity: 1; }
 
 /* ─── Sidebar section labels ──────────────────────────────────────────── */
 .sidebar-section-label {

@@ -8670,24 +8670,141 @@ async function maybePromptNotifications() {
   } catch (e) { console.error("notification opt-in failed:", e); }
 }
 
-// loadWhoami shows the login this omnis-server serves in the sidebar footer.
-// A multi-user deployment runs one server per user behind an SSO gateway
-// (docs/multi-user-containers.md); a single-user install reports the default
-// id and shows nothing, so the footer is unchanged there.
-async function loadWhoami() {
-  const box = document.getElementById("sidebar-user");
-  const name = document.getElementById("sidebar-user-name");
-  if (!box || !name) return;
+// ─── Account button + menu (sidebar footer) ──────────────────────────────────
+// loadAccountIdentity labels the footer's account button with the login this
+// omnis-server serves. A multi-user deployment runs one server per user behind
+// an SSO gateway (docs/multi-user-containers.md), and cookie mode serves several
+// logins; a single-user install reports the default id, so the button just reads
+// "Omnis" there.
+let accountLogin = ""; // shown login ("" on a single-user install)
+async function loadAccountIdentity() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
   try {
     const res = await apiFetch("/api/whoami");
     if (!res.ok) return;
     const payload = await res.json();
     const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
     const shared = payload && payload.identity_mode === "cookie";
-    if (!user || (user === "web-user" && !shared)) return;
-    name.textContent = user;
-    box.hidden = false;
+    accountLogin = (!user || (user === "web-user" && !shared)) ? "" : user;
   } catch (e) { console.error("whoami failed:", e); }
+  const label = accountLogin || "Omnis";
+  btn.querySelector(".account-name").textContent = label;
+  btn.querySelector(".account-avatar").textContent = label.charAt(0).toUpperCase();
+}
+
+const ICON_GEAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const ICON_PALETTE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2 0-1.5 1-2 2-2h2a3 3 0 0 0 3-3 9 9 0 0 0-9-9z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>`;
+const ICON_GLOBE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></svg>`;
+const ICON_BOOK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+const ICON_UPDATE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+
+function ensureAccountMenu() {
+  let m = document.getElementById("account-menu");
+  if (m) return m;
+  m = document.createElement("div");
+  m.id = "account-menu";
+  m.setAttribute("role", "menu");
+  m.hidden = true;
+  document.body.appendChild(m);
+  return m;
+}
+
+// accountMenuItem builds one menu row (icon + label [+ shortcut hint]).
+function accountMenuItem(icon, label, action, kbd) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "folder-ctx-item has-icon";
+  btn.setAttribute("role", "menuitem");
+  btn.innerHTML = `<span class="ctx-item-icon" aria-hidden="true">${icon}</span><span class="ctx-item-label"></span>`;
+  btn.querySelector(".ctx-item-label").textContent = label;
+  if (kbd) {
+    const k = document.createElement("span");
+    k.className = "account-menu-kbd";
+    k.textContent = kbd;
+    btn.appendChild(k);
+  }
+  btn.addEventListener("click", (e) => { e.stopPropagation(); closeAccountMenu(); action(); });
+  return btn;
+}
+
+// openAccountMenu shows the account menu anchored above the footer button.
+function openAccountMenu() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
+  const m = ensureAccountMenu();
+  m.innerHTML = "";
+  if (accountLogin) {
+    const id = document.createElement("div");
+    id.className = "account-menu-id";
+    id.textContent = accountLogin;
+    m.appendChild(id);
+    const sep = document.createElement("div");
+    sep.className = "folder-ctx-sep";
+    m.appendChild(sep);
+  }
+  const S = window.Settings;
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+  m.appendChild(accountMenuItem(ICON_GEAR, tr("settings.label"), () => S && S.open(), isMac ? "⌘," : "Ctrl+,"));
+  m.appendChild(accountMenuItem(ICON_PALETTE, tr("settings.menu.appearance"), () => S && S.openSection("appearance")));
+  m.appendChild(accountMenuItem(ICON_GLOBE, tr("account.language"), () => S && S.openSection("appearance", "appearance-language")));
+  m.appendChild(accountMenuItem(ICON_BOOK, tr("settings.menu.documentation"), () => S && S.openSection("documentation")));
+  const st = updateStatus;
+  // Opened before the boot status fetch landed: fetch it, then repaint the menu
+  // (only if it is still open) so the version line appears.
+  if (!st) {
+    checkForUpdate().then(() => {
+      const open = document.getElementById("account-menu");
+      if (updateStatus && open && !open.hidden) openAccountMenu();
+    });
+  }
+  const version = st && st.current && st.current !== "dev" ? st.current : "";
+  if (version || (st && st.available)) {
+    const sep = document.createElement("div");
+    sep.className = "folder-ctx-sep";
+    m.appendChild(sep);
+  }
+  if (version) {
+    const v = document.createElement("div");
+    v.className = "account-menu-version";
+    v.textContent = tr("account.version", { version });
+    m.appendChild(v);
+  }
+  if (st && st.available) {
+    m.appendChild(accountMenuItem(ICON_UPDATE, tr("account.updateTo", { version: st.latest }), () => openUpdateDialog()));
+  }
+  m.hidden = false;
+  // Anchor above the button, left-aligned with it, clamped to the viewport.
+  const r = btn.getBoundingClientRect();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)) + "px";
+  m.style.top = Math.max(4, r.top - mh - 6) + "px";
+  btn.setAttribute("aria-expanded", "true");
+}
+
+function closeAccountMenu() {
+  const m = document.getElementById("account-menu");
+  if (m) m.hidden = true;
+  document.getElementById("account-btn")?.setAttribute("aria-expanded", "false");
+}
+
+function wireAccountMenu() {
+  const btn = document.getElementById("account-btn");
+  if (!btn) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const m = document.getElementById("account-menu");
+    if (m && !m.hidden) closeAccountMenu();
+    else openAccountMenu();
+  });
+  // Outside click / Escape / scroll / resize close it, like the context menus.
+  document.addEventListener("click", (e) => {
+    const m = document.getElementById("account-menu");
+    if (m && !m.hidden && !m.contains(e.target)) closeAccountMenu();
+  }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAccountMenu(); });
+  window.addEventListener("resize", closeAccountMenu);
+  document.addEventListener("scroll", closeAccountMenu, true);
 }
 
 // maybePromptWhatsNew runs once per upgrade. It asks the server for the feature
@@ -13164,7 +13281,8 @@ async function restoreLayout(rec, liveIds) {
   // recorded). The language offer runs first and may reload (switching language),
   // so chain the notification opt-in after it to avoid two stacked modals.
   (async () => {
-    loadWhoami(); // sidebar login — no-op on a single-user install
+    wireAccountMenu();
+    loadAccountIdentity(); // footer account button — reads "Omnis" on a single-user install
     await maybePromptLocale(); // may location.reload() when the user switches
     await maybePromptNotifications();
     maybePromptWhatsNew(); // once per upgrade; no-op on dev builds / when caught up

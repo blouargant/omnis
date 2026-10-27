@@ -10556,10 +10556,5 @@ const BASE_PATH = window.BASE_PATH || "";
     refreshBannerVisibility();
     refreshGenerationPill();
     syncThemeFromServer();
-    document.getElementById("settings-btn")?.addEventListener("click", () => open());
-    document.getElementById("appearance-btn")
-      ?.addEventListener("click", () => openSection(APPEARANCE_ID));
-    document.getElementById("documentation-btn")
-      ?.addEventListener("click", () => openSection(DOCUMENTATION_ID));
   });
 })();
