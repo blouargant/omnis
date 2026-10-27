@@ -4030,7 +4030,7 @@ async function rewindConversation(sessionId, turnIndex, userText) {
     }
     await rerenderSessionFromHistory(sessionId);
     for (const p of panelsForSession(sessionId)) prefillComposer(p, userText);
-    loadSessions(); // refresh sidebar turn counter
+    refreshSessionsFor(sessionId); // refresh the sidebar row
   } catch (e) {
     console.error("rewind failed:", e);
     showToast("Rewind failed", "err");
@@ -6080,6 +6080,68 @@ async function loadSessions() {
   await reloadArchivedPrefix();
 }
 
+// ─── Targeted live refresh ───────────────────────────────────────────────────
+// Session events (a turn ending, a routing hop, a pushed turn, a rename, a
+// create/delete elsewhere) used to call loadSessions(), which with the tree
+// would re-fetch EVERY open group — a burst per event, per browser, while turns
+// stream. These re-fetch only the affected group(s), plus one /api/collections
+// for the counts, coalesced into one pass per REFRESH_COALESCE_MS window.
+// loadSessions() stays the full refresh for rare, broad changes (import, fork,
+// batch actions, archive/unarchive, collection create/rename/delete).
+const REFRESH_COALESCE_MS = 250;
+const pendingRefresh = { groups: new Set(), archived: false, timer: null };
+
+// groupOf names the collection group a session is listed under (General when
+// the session has never been seen here).
+function groupOf(sessionId) {
+  const meta = sessionMetaById(sessionId);
+  return meta ? effectiveCollection(meta) : GENERAL_COLLECTION;
+}
+
+// refreshGroups queues a refresh of the named groups (and of the Archived panel
+// when `archived`).
+function refreshGroups(names, { archived = false } = {}) {
+  for (const n of names) if (n) pendingRefresh.groups.add(String(n).toLowerCase());
+  if (archived) pendingRefresh.archived = true;
+  if (!pendingRefresh.timer) pendingRefresh.timer = setTimeout(flushRefresh, REFRESH_COALESCE_MS);
+}
+
+async function flushRefresh() {
+  const keys = [...pendingRefresh.groups];
+  const archived = pendingRefresh.archived;
+  pendingRefresh.groups.clear();
+  pendingRefresh.archived = false;
+  pendingRefresh.timer = null;
+  await loadCollections(); // counts (and any group created meanwhile)
+  if (sessionSearch) {
+    await runTreeSearch();
+  } else {
+    await Promise.all(keys.map((k) => {
+      const c = collectionsData.find((x) => x.name.toLowerCase() === k);
+      const v = groupViews.get(k);
+      // Only groups that are open and were already fetched: a closed group loads
+      // when opened, an unfetched open one is loading its first page already.
+      if (!c || !v || !isGroupOpen(c.name) || !(v.loaded > 0 || v.exhausted)) return null;
+      return reloadGroupPrefix(c.name);
+    }));
+  }
+  if (archived) await reloadArchivedPrefix();
+}
+
+// refreshSessionsFor refreshes the group listing `sessionId`. A session never
+// seen here (created in another browser) is looked up first, so its own group —
+// not General by default — is the one refreshed.
+function refreshSessionsFor(sessionId) {
+  const meta = sessionMetaById(sessionId);
+  if (meta) {
+    refreshGroups([effectiveCollection(meta)], { archived: !!meta.archived });
+    return;
+  }
+  fetchSessionMeta(sessionId).then((m) => {
+    refreshGroups([m ? effectiveCollection(m) : GENERAL_COLLECTION], { archived: !!(m && m.archived) });
+  });
+}
+
 // Three-dots "kebab" trigger that opens each session row's actions menu.
 const ICON_DOTS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>`;
 // Icons shown beside the session actions-menu entries.
@@ -7525,6 +7587,7 @@ async function deleteCollection(name) {
 // clear). Optimistically nothing — we just POST and refresh both lists.
 async function moveSessionToCollection(sessionId, target) {
   const collection = target.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? "" : target;
+  const from = groupOf(sessionId);
   try {
     const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/collection`, {
       method: "POST",
@@ -7535,8 +7598,7 @@ async function moveSessionToCollection(sessionId, target) {
       showToast(b.error || tr("collections.moveFailed"), "err");
       return;
     }
-    await loadSessions();
-    await loadCollections(); // counts changed
+    refreshGroups([from, target]); // counts are refreshed with them
   } catch (e) { console.error(e); }
 }
 
@@ -7813,6 +7875,8 @@ function forgetSession(id) {
 }
 
 async function deleteSession(id, li) {
+  const group = groupOf(id);
+  const wasArchived = archivedSessions.has(id);
   try {
     await apiFetch(`/api/sessions/${id}`, { method: "DELETE" });
     forgetSession(id);
@@ -7820,10 +7884,10 @@ async function deleteSession(id, li) {
     refreshSidebarActive();
     saveLayout();
     // Reconcile against the server: removing the <li> directly gives instant
-    // feedback, but a loadSessions() still in flight from an earlier create/
+    // feedback, but a group reload still in flight from an earlier create/
     // delete burst could re-render and resurrect the deleted row. Issuing the
     // latest load (seq-guarded) makes the sidebar authoritative.
-    loadSessions();
+    refreshGroups([group], { archived: wasArchived });
   } catch (e) {
     console.error("failed to delete session:", e);
   }
@@ -7882,12 +7946,12 @@ function startRename(li, id, currentTitle) {
     } catch (e) {
       console.error("failed to rename session:", e);
     }
-    await loadSessions();
+    refreshSessionsFor(id);
   }
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    if (e.key === "Escape") { loadSessions(); }
+    if (e.key === "Escape") { refreshSessionsFor(id); }
   });
   input.addEventListener("blur", commit);
 }
@@ -8397,7 +8461,7 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     restoreComposerDraft(panel, newId); // fresh session → empty composer
     subscribeSessionEvents(newId);
     saveLayout();
-    await loadSessions();
+    refreshGroups([collection]);
     return newId;
   } catch (e) { console.error(e); return null; }
 }
@@ -8553,30 +8617,29 @@ async function subscribeGlobalEvents() {
         } else if (event === "ask_user_cancel" && data && data.question_id) {
           cancelAskUserWidget(data.question_id);
         } else if (event === "session_created" && sid) {
-          // Another browser (or this one) created a session — refresh the
-          // sidebar so the new row appears. We never auto-open it.
-          loadSessions();
+          // Another browser (or this one) created a session — refresh its group
+          // so the new row appears. We never auto-open it.
+          refreshSessionsFor(sid);
         } else if (event === "session_deleted" && sid) {
           // Another browser deleted a session — drop all local state, close any
           // tab holding it, and re-render the sidebar. Idempotent if this
           // browser was the deleter (its own broadcast echoes back).
+          const deletedFrom = groupOf(sid);
           forgetSession(sid);
           saveLayout();
-          loadSessions();
+          refreshGroups([deletedFrom], { archived: true });
         } else if (event === "session_renamed" && sid) {
-          // Title changed elsewhere — re-render the sidebar to pick it up.
-          loadSessions();
+          // Title changed elsewhere — refresh its group to pick it up.
+          refreshSessionsFor(sid);
         } else if (event === "collections_changed") {
           // A collection was created/renamed/deleted (here or elsewhere) —
-          // repaint the rail and re-fetch sessions (a rename/delete cascaded
-          // onto their Collection field).
-          loadCollections();
+          // rebuild the tree and re-fetch the open groups (a rename/delete
+          // cascaded onto their sessions' Collection field).
           loadSessions();
         } else if (event === "session_moved" && sid) {
           // A session was filed under a different collection (here or elsewhere)
-          // — refresh both lists so counts + filtering stay correct.
-          loadCollections();
-          loadSessions();
+          // — refresh the group it left and the one it joined (and the counts).
+          refreshGroups([groupOf(sid), (data && data.collection) || GENERAL_COLLECTION]);
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
           refreshSkills(sid);
@@ -9141,8 +9204,8 @@ async function appendNewPushTurns(sessionId) {
       requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
       showPushBanner(container);
     }
-    // Refresh sidebar turn counter.
-    loadSessions();
+    // Refresh the session's sidebar row.
+    refreshSessionsFor(sessionId);
   } catch (e) {
     console.error("appendNewPushTurns failed:", e);
   }
@@ -9760,7 +9823,7 @@ async function sendMessage(panel) {
           // persisted it before emitting this frame).
           finalizeSegment();
           appendRoutingChip(container, data.to, data.reason);
-          loadSessions();
+          refreshSessionsFor(sessionId);
           break;
         }
 
@@ -9943,7 +10006,7 @@ async function sendMessage(panel) {
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
-    loadSessions();
+    refreshSessionsFor(sessionId);
     // Catch any filesystem changes the turn made that didn't surface a
     // `file_changed` event (e.g. folders created/removed via the Bash tool).
     if (sessionId === activeSessionId) scheduleFoldersRefresh();
