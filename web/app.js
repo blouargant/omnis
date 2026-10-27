@@ -8385,13 +8385,7 @@ async function activateTab(panel, key) {
       container.appendChild(row);
       return;
     }
-    for (let i = 0; i < turns.length; i++) {
-      const turn = turns[i];
-      appendUserBubble(turn.user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, turn.assistant_text);
-      setReplyTime(bubble, turn.duration_ms);
-    }
+    for (let i = 0; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     scrollBottom(panel, true);
     scheduleReplyNav(panel);
   } catch (e) {
@@ -9352,6 +9346,43 @@ function showToast(text, kind) {
   setTimeout(() => { el.remove(); }, 2400);
 }
 
+// renderHistoryTurn renders one persisted turn: the user bubble, then the
+// reply split at each recorded tool run's offset, so the tool-run summary
+// lines reappear between the same paragraphs as when the turn streamed. A
+// legacy turn (no `tools`) renders as one reply bubble, as before.
+function renderHistoryTurn(turn, container, index) {
+  appendUserBubble(turn.user_text, container, null, index);
+  const text = turn.assistant_text || "";
+  const tools = (turn.tools || []).filter(c =>
+    !isRoutingTool(c.name) && !isTodoTool(c.name) && !(isSkillLoadTool(c.name) && !c.error));
+  let pos = 0;
+  let bubble = null;
+  for (const c of tools) {
+    const off = Math.max(pos, Math.min(c.offset || 0, text.length));
+    if (off > pos) {
+      const seg = text.slice(pos, off);
+      if (seg.trim()) { bubble = appendAssistantBubble(container); renderMarkdown(bubble, seg); }
+      pos = off;
+    }
+    const block = appendToolCall(c.name, c.args, container);
+    for (const k of c.children || []) {
+      if (isSkillLoadTool(k.name) && !k.error) continue;
+      resolveToolCall(appendNestedToolCall(block, k.name, k.args), toolRecordResponse(k), k.duration_ms);
+    }
+    resolveToolCall(block, toolRecordResponse(c), c.duration_ms);
+    refreshToolGroup(block.closest(".tool-group"));
+  }
+  const rest = text.slice(pos);
+  if (rest.trim() || !bubble) { bubble = appendAssistantBubble(container); renderMarkdown(bubble, rest); }
+  setReplyTime(bubble, turn.duration_ms);
+}
+
+// toolRecordResponse rebuilds the response object resolveToolCall expects.
+function toolRecordResponse(c) {
+  if (c.error) return { error: c.error };
+  return c.result == null ? {} : c.result;
+}
+
 // rerenderSessionFromHistory clears a session's transcript and rebuilds it from
 // the persisted history. Used as the recovery path when a reconnect can't replay
 // the live stream cleanly (the server's frame buffer was trimmed) — it drops any
@@ -9364,13 +9395,7 @@ async function rerenderSessionFromHistory(sessionId) {
     const turns = data.turns || [];
     const container = getContainer(sessionId);
     container.innerHTML = "";
-    for (let i = 0; i < turns.length; i++) {
-      const t = turns[i];
-      appendUserBubble(t.user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, t.assistant_text);
-      setReplyTime(bubble, t.duration_ms);
-    }
+    for (let i = 0; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     sessionTurnCounts.set(sessionId, turns.length);
     for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
   } catch (e) {
@@ -9394,12 +9419,7 @@ async function appendNewPushTurns(sessionId) {
     const placeholder = container.querySelector(".no-messages-placeholder");
     if (placeholder) placeholder.remove();
 
-    for (let i = rendered; i < turns.length; i++) {
-      appendUserBubble(turns[i].user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, turns[i].assistant_text);
-      setReplyTime(bubble, turns[i].duration_ms);
-    }
+    for (let i = rendered; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     sessionTurnCounts.set(sessionId, turns.length);
 
     for (const p of panelsForSession(sessionId)) {
