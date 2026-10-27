@@ -18,12 +18,7 @@ const BASE_PATH = window.BASE_PATH || "";
     "user-commands": `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="15" y1="7" x2="9" y2="17"/></svg>`,
     registries: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
     automation: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`,
-    raw: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
   };
-
-  // Pseudo-id used to mark the Raw JSON toggle in the sidebar menu. It is
-  // not a real section: clicking it flips activeView on the current file.
-  const RAW_VIEW_ID = "__raw__";
 
   // Server-backed JSON configs. Each id matches /api/config/{parsed,file}/<id>.
   const FILES = [
@@ -62,10 +57,20 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: DOCUMENTATION_ID,label: "Documentation", title: "Documentation",           kind: "client" },
   ];
 
-  // Menu ids surfaced as always-visible buttons in the sidebar footer (below
-  // the Settings gear) instead of in the in-Settings category list. They stay
-  // in MENU_ITEMS so breadcrumb/title lookups still resolve them.
-  const FOOTER_ITEMS = [APPEARANCE_ID, DOCUMENTATION_ID];
+  // Section order + grouping of the settings dialog's nav. MENU_ITEMS stays the
+  // label/kind source; every id there must appear in exactly one group.
+  const MENU_GROUPS = [
+    { key: "preferences", ids: [APPEARANCE_ID] },
+    { key: "agents",      ids: ["agent", "skills", USER_COMMANDS_ID, AUTOMATION_ID] },
+    { key: "connections", ids: ["models", "mcp", "a2a", REGISTRIES_ID] },
+    { key: "security",    ids: ["permissions", "hooks"] },
+    { key: "help",        ids: [DOCUMENTATION_ID] },
+  ];
+
+  // Sections reached directly from the account menu (Appearance, Documentation).
+  // Opening one does not count as "the last config section visited", so the
+  // plain Settings entry keeps reopening where the user was configuring.
+  const SHORTCUT_SECTIONS = [APPEARANCE_ID, DOCUMENTATION_ID];
 
   // Documentation pages: ordered list of markdown files served from /assets/docs/.
   // Each entry maps to <web/docs/<file>>; `group` partitions the TOC sidebar.
@@ -345,7 +350,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // ─── DOM refs ──────────────────────────────────────────────────────────
   let panelEl, tabsEl, viewToggleEl, bodyEl, statusEl;
-  let sidebarMenuEl, sidebarMenuListEl; // in-sidebar settings categories
+  let modalEl, navListEl, navSearchEl, navEmptyEl; // settings dialog + its section nav
 
   // Navigation-context for the consolidated Registries hub. When non-null, the
   // per-kind remote flows (skills / mcp / a2a / commands) re-render into the
@@ -387,12 +392,26 @@ const BASE_PATH = window.BASE_PATH || "";
     b = document.createElement("div");
     b.id = "restart-banner";
     b.hidden = true;
-    // Insert into #chat-area (the flex column) above #chat (the pane row), so
-    // the banner is a full-width top bar — not a flex item inside the pane row
-    // (where it became a phantom column that survived into the chat view).
-    const area = document.getElementById("chat-area") || document.getElementById("chat");
-    area.insertBefore(b, area.firstChild);
+    placeBanner(b);
     return b;
+  }
+
+  // placeBanner puts the reload/restart banner where the user is looking: at the
+  // top of the settings section while the dialog is open (the dialog covers the
+  // chat), otherwise at the top of #chat-area (the flex column) above #chat (the
+  // pane row), so it is a full-width bar — never a flex item inside the pane row
+  // (where it once became a phantom column). A pending reload thus stays visible
+  // after the dialog is closed.
+  function placeBanner(b) {
+    b = b || document.getElementById("restart-banner");
+    if (!b) return;
+    if (state.open && panelEl) {
+      const before = panelEl.querySelector(".settings-body");
+      if (b.parentNode !== panelEl || b.nextSibling !== before) panelEl.insertBefore(b, before);
+      return;
+    }
+    const area = document.getElementById("chat-area") || document.getElementById("chat");
+    if (b.parentNode !== area || area.firstChild !== b) area.insertBefore(b, area.firstChild);
   }
 
   // renderBannerContent (re)builds the banner's text + buttons for the given
@@ -447,6 +466,7 @@ const BASE_PATH = window.BASE_PATH || "";
     if (localStorage.getItem(RESTART_FLAG) !== "1") return;
     if (localStorage.getItem(BANNER_DISMISS_FLAG) === "1") return;
     const b = ensureBanner();
+    placeBanner(b);
     renderBannerContent(b, bannerMode());
     b.classList.remove("is-fading-out");
     b.hidden = false;
@@ -645,16 +665,42 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   // ─── Panel scaffolding ─────────────────────────────────────────────────
+  // Settings live in a dialog over the chat (#settings-modal): a header with the
+  // title + close button, a left nav (search + grouped sections) and the
+  // section panel (#settings-panel). The chat panes stay mounted behind it.
+  const CLOSE_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  const SEARCH_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>`;
+
   function ensurePanel() {
     if (panelEl) return panelEl;
+    modalEl = document.createElement("div");
+    modalEl.id = "settings-modal";
+    modalEl.hidden = true;
+    modalEl.innerHTML = `
+      <div class="settings-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="settings-modal-head">
+          <span id="settings-modal-title" class="settings-modal-title">${escHtml(tr("settings.label"))}</span>
+          <button type="button" class="settings-modal-close" data-tip="${escHtml(tr("settings.modal.close"))}" aria-label="${escHtml(tr("settings.modal.close"))}">${CLOSE_ICON}</button>
+        </div>
+        <div class="settings-modal-main">
+          <nav class="settings-modal-nav" aria-label="${escHtml(tr("settings.label"))}">
+            <label class="settings-nav-search">
+              ${SEARCH_ICON}
+              <input id="settings-nav-search" type="search" autocomplete="off" placeholder="${escHtml(tr("settings.nav.search"))}" aria-label="${escHtml(tr("settings.nav.search"))}" />
+            </label>
+            <div class="settings-nav-list"></div>
+            <div class="settings-nav-empty" hidden>${escHtml(tr("settings.nav.empty"))}</div>
+          </nav>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modalEl);
+
     panelEl = document.createElement("div");
     panelEl.id = "settings-panel";
-    panelEl.hidden = true;
     panelEl.innerHTML = `
       <header class="settings-header">
         <nav class="settings-breadcrumb" aria-label="Breadcrumb">
-          <span class="settings-breadcrumb-root">${escHtml(tr("settings.label"))}</span>
-          <svg class="settings-breadcrumb-sep" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           <span class="settings-breadcrumb-current"></span>
         </nav>
         <div class="settings-tabs" role="tablist"></div>
@@ -676,8 +722,7 @@ const BASE_PATH = window.BASE_PATH || "";
         <div class="settings-body-content"></div>
       </div>
     `;
-    const main = document.getElementById("chat");
-    main.appendChild(panelEl);
+    modalEl.querySelector(".settings-modal-main").appendChild(panelEl);
 
     tabsEl = panelEl.querySelector(".settings-tabs");
     viewToggleEl = panelEl.querySelector(".settings-view-toggle");
@@ -692,13 +737,14 @@ const BASE_PATH = window.BASE_PATH || "";
       b.addEventListener("click", () => setActiveFile(f.id));
       tabsEl.appendChild(b);
     }
-    buildSidebarMenu();
+    buildNav();
     viewToggleEl.querySelectorAll("button").forEach(b => {
       b.addEventListener("click", () => setActiveView(b.dataset.view));
     });
 
     panelEl.querySelector(".btn-save").addEventListener("click", saveActive);
     panelEl.querySelector(".btn-discard").addEventListener("click", discardActive);
+    modalEl.querySelector(".settings-modal-close").addEventListener("click", close);
 
     buildAssistant();
 
@@ -711,68 +757,71 @@ const BASE_PATH = window.BASE_PATH || "";
     statusEl.className = "settings-status" + (kind ? " " + kind : "");
   }
 
-  // Builds the in-sidebar category list (Agent / Permissions / MCP / Appearance).
-  // The list is rendered once into #settings-menu-list and stays in the DOM;
-  // open()/close() toggle the parent #settings-menu's visibility.
-  function buildSidebarMenu() {
-    sidebarMenuEl = document.getElementById("settings-menu");
-    sidebarMenuListEl = document.getElementById("settings-menu-list");
-    if (!sidebarMenuListEl || sidebarMenuListEl.children.length) return;
-    for (const m of MENU_ITEMS) {
-      // Appearance and Documentation live as always-visible buttons in the
-      // sidebar footer (below the Settings gear), not in this category list.
-      if (FOOTER_ITEMS.includes(m.id)) continue;
-      const li = document.createElement("li");
-      li.dataset.file = m.id;
-      li.innerHTML = `${ICONS[m.id] || ""}<span>${escHtml(tr("settings.menu." + m.id))}</span>`;
-      li.addEventListener("click", () => setActiveFile(m.id));
-      sidebarMenuListEl.appendChild(li);
-    }
-    // Raw JSON is appended last so new section entries inserted into
-    // MENU_ITEMS always render above it.
-    const raw = document.createElement("li");
-    raw.dataset.file = RAW_VIEW_ID;
-    raw.className = "settings-menu-raw";
-    raw.innerHTML = `${ICONS.raw}<span>${escHtml(tr("settings.viewRaw"))}</span>`;
-    raw.addEventListener("click", () => {
-      if (raw.classList.contains("disabled")) return;
-      toggleRawView();
-    });
-    sidebarMenuListEl.appendChild(raw);
+  // navLabel is the nav entry's text. "agent" covers the agents AND squads
+  // editors, so its nav label says so (settings.menu.agent stays "Agents" for
+  // the other places that use it).
+  function navLabel(id) {
+    return id === "agent" ? tr("settings.nav.agent") : tr("settings.menu." + id);
   }
 
-  // Toggle between form and raw view for the currently active JSON file.
-  // No-op for client-only sections (e.g. Appearance) — they have no JSON.
-  async function toggleRawView() {
-    if (isClientOnly(state.activeFile)) return;
-    const next = state.activeView === "raw" ? "form" : "raw";
-    await setActiveView(next);
+  // buildNav renders the dialog's section nav from MENU_GROUPS (once).
+  function buildNav() {
+    navListEl = modalEl.querySelector(".settings-nav-list");
+    navSearchEl = modalEl.querySelector("#settings-nav-search");
+    navEmptyEl = modalEl.querySelector(".settings-nav-empty");
+    for (const g of MENU_GROUPS) {
+      const group = document.createElement("div");
+      group.className = "settings-nav-group";
+      group.dataset.group = g.key;
+      const label = document.createElement("div");
+      label.className = "settings-nav-group-label";
+      label.textContent = tr("settings.group." + g.key);
+      group.appendChild(label);
+      for (const id of g.ids) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "settings-nav-item";
+        b.dataset.file = id;
+        b.innerHTML = `${ICONS[id] || ""}<span></span>`;
+        b.querySelector("span").textContent = navLabel(id);
+        b.addEventListener("click", () => setActiveFile(id));
+        group.appendChild(b);
+      }
+      navListEl.appendChild(group);
+    }
+    navSearchEl.addEventListener("input", () => filterNav(navSearchEl.value));
+  }
+
+  // filterNav keeps the nav items whose label (or id) contains the query, hides
+  // groups left empty, and shows a note when nothing matches.
+  function filterNav(query) {
+    const q = String(query || "").trim().toLowerCase();
+    let any = false;
+    for (const group of navListEl.querySelectorAll(".settings-nav-group")) {
+      let visible = 0;
+      for (const b of group.querySelectorAll(".settings-nav-item")) {
+        const hit = !q || b.textContent.toLowerCase().includes(q) || b.dataset.file.includes(q);
+        b.hidden = !hit;
+        if (hit) visible++;
+      }
+      group.hidden = visible === 0;
+      if (visible) any = true;
+    }
+    navEmptyEl.hidden = any;
   }
 
   function syncActiveHighlight(id) {
     tabsEl?.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b.dataset.file === id);
     });
-    sidebarMenuListEl?.querySelectorAll("li").forEach(li => {
-      const f = li.dataset.file;
-      if (f === RAW_VIEW_ID) {
-        li.classList.toggle("active", state.activeView === "raw" && !isClientOnly(id));
-        li.classList.toggle("disabled", isClientOnly(id));
-      } else {
-        li.classList.toggle("active", f === id);
-      }
+    navListEl?.querySelectorAll(".settings-nav-item").forEach(b => {
+      b.classList.toggle("active", b.dataset.file === id);
     });
-    // The Appearance / Documentation footer buttons highlight when their
-    // section is the active one (they live outside #settings-menu-list).
-    document.getElementById("appearance-btn")?.classList.toggle("active", id === APPEARANCE_ID);
-    document.getElementById("documentation-btn")?.classList.toggle("active", id === DOCUMENTATION_ID);
-    // Sidebar chrome follows the active section: a footer section (Appearance /
-    // Documentation) is autonomous — the Settings category menu stays hidden and
-    // the gear is not highlighted; a config section reveals the menu + lights
-    // the gear. Anything goes when the panel is closed.
-    const footer = FOOTER_ITEMS.includes(id);
-    document.getElementById("settings-btn")?.classList.toggle("active", state.open && !footer);
-    if (sidebarMenuEl) sidebarMenuEl.hidden = !state.open || footer;
+    // The Form / Raw JSON toggle is the only way into the raw editor now, so it
+    // must always show the view actually on screen (setActiveFile resets it).
+    viewToggleEl?.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("active", b.dataset.view === state.activeView);
+    });
     updateBreadcrumb(id);
   }
 
@@ -793,11 +842,11 @@ const BASE_PATH = window.BASE_PATH || "";
       return;
     }
     state.activeFile = id;
-    // Remember the last config section so the gear can return to it after an
-    // autonomous Appearance/Documentation view.
-    if (!FOOTER_ITEMS.includes(id)) state.lastMenuFile = id;
+    // Remember the last config section so plain "Settings" returns to it after
+    // the account menu jumped to Appearance/Documentation.
+    if (!SHORTCUT_SECTIONS.includes(id)) state.lastMenuFile = id;
     // Switching sections always returns to the form view; raw is opt-in
-    // per visit via the sidebar Raw JSON entry.
+    // per visit via the Form / Raw JSON toggle.
     state.activeView = "form";
     // Clicking "Skills" always resets sub-navigation back to the root list.
     if (id === "skills") {
@@ -1199,7 +1248,7 @@ const BASE_PATH = window.BASE_PATH || "";
         </button>
       `).join("");
     const languageSection = `
-      <section class="form-section">
+      <section class="form-section" id="appearance-language">
         <h3>${escHtml(tr("appearance.language"))}</h3>
         <p class="settings-hint" style="margin:0 0 0.5rem;">${escHtml(tr("appearance.languageHint"))}</p>
         <div class="theme-grid">${langCards}</div>
@@ -9871,53 +9920,88 @@ const BASE_PATH = window.BASE_PATH || "";
   }
 
   // ─── Public API ────────────────────────────────────────────────────────
-  function open() {
+  // showModal / hideModal only toggle the dialog; the section shown is decided
+  // by the callers (open → last config section, openSection → a given one).
+  function showModal() {
     ensurePanel();
-    refreshBannerVisibility();
     state.open = true;
-    // The gear always opens the configuration view (category menu visible). If
-    // we were showing an autonomous footer section (Appearance/Documentation),
-    // fall back to the last config section so the menu highlight matches.
-    if (FOOTER_ITEMS.includes(state.activeFile)) {
+    modalEl.hidden = false;
+    document.body.classList.add("settings-modal-open");
+    placeBanner();
+    refreshBannerVisibility();
+  }
+
+  function open() {
+    // Plain "Settings" reopens the last config section visited — not the
+    // Appearance/Documentation shortcut sections the account menu jumps to.
+    if (SHORTCUT_SECTIONS.includes(state.activeFile)) {
       state.activeFile = state.lastMenuFile || "skills";
       state.activeView = "form";
     }
-    // Single CSS class drives chat-vs-settings layout; no inline style fights
-    // with app.js for control of #transcript / #composer-wrap / #prompt-header.
-    document.getElementById("chat").classList.add("chat--settings");
-    panelEl.hidden = false;
-    // syncActiveHighlight reveals the category menu + lights the gear (config
-    // section ⇒ not a footer item).
+    showModal();
     syncActiveHighlight(state.activeFile);
+    assistantSetContext(state.activeFile);
     renderBody();
   }
 
+  // close hides the dialog and keeps every unsaved edit: state.parsed/state.raw
+  // survive, so reopening shows them and Save still saves them (beforeunload
+  // guards a page reload). No confirmation — nothing is lost by closing.
   function close() {
     if (!state.open) return;
     state.open = false;
-    if (panelEl) panelEl.hidden = true;
-    document.getElementById("chat").classList.remove("chat--settings");
-    const sb = document.getElementById("settings-btn");
-    if (sb) sb.classList.remove("active");
-    document.getElementById("appearance-btn")?.classList.remove("active");
-    document.getElementById("documentation-btn")?.classList.remove("active");
-    if (sidebarMenuEl) sidebarMenuEl.hidden = true;
+    if (modalEl) modalEl.hidden = true;
+    document.body.classList.remove("settings-modal-open");
+    placeBanner();
   }
 
   function isOpen() { return state.open; }
 
-  // Open an autonomous footer section (Appearance / Documentation) — the panel
-  // content shows, but the Settings category menu stays hidden and the gear is
-  // not highlighted (driven by syncActiveHighlight via setActiveFile). Clicking
-  // the button for the already-showing section closes it (toggle).
-  async function jumpToSection(id) {
-    if (state.open && state.activeFile === id) { close(); return; }
-    ensurePanel();
-    refreshBannerVisibility();
-    state.open = true;
-    document.getElementById("chat").classList.add("chat--settings");
-    panelEl.hidden = false;
-    await setActiveFile(id);
+  // openSection opens the dialog on section `id` (never toggles it closed) and,
+  // once rendered, scrolls the element with id `anchor` into view — e.g.
+  // openSection("appearance", "appearance-language") for the account menu's
+  // Language entry.
+  async function openSection(id, anchor) {
+    const wasOpen = state.open;
+    showModal();
+    if (state.activeFile !== id) {
+      await setActiveFile(id);
+    } else if (!wasOpen) {
+      syncActiveHighlight(id);
+      assistantSetContext(id);
+      await renderBody();
+    }
+    if (anchor) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(anchor);
+        if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    }
+  }
+
+  // Escape closes the dialog — except when something on top of it owns the key:
+  // a confirm/prompt dialog, the assistant drawer (closed first), the Monaco raw
+  // editor (its widgets use Escape), an open dropdown, or a non-empty nav search
+  // (cleared first). Capture phase, registered at boot, so it sees a nested
+  // dialog before that dialog's own Escape handler removes it.
+  const NESTED_DIALOGS = ".ui-modal-overlay, .app-dialog-overlay, #user-cmd-modal-overlay:not([hidden]), #skill-name-modal-overlay:not([hidden]), #ctx-browser-overlay:not([hidden]), #restart-overlay:not([hidden])";
+  function onSettingsKeydown(e) {
+    if (e.key !== "Escape" || !state.open) return;
+    if (document.querySelector(NESTED_DIALOGS)) return;
+    if (asst.box && !asst.box.classList.contains("hidden")) {
+      e.stopPropagation();
+      assistantHide();
+      return;
+    }
+    const t = e.target;
+    if (t && t.closest && (t.closest(".monaco-editor") || t.closest('[aria-expanded="true"]'))) return;
+    if (t === navSearchEl && navSearchEl.value) {
+      navSearchEl.value = "";
+      filterNav("");
+      return;
+    }
+    e.preventDefault();
+    close();
   }
 
   // ─── Settings assistant (in-panel Helper chat) ──────────────────────────
@@ -10458,23 +10542,24 @@ const BASE_PATH = window.BASE_PATH || "";
   });
 
   // Expose & wire button.
-  window.Settings = { open, close, isOpen, prefsReady, saveNotifications, refreshSchedules };
+  window.Settings = { open, close, isOpen, openSection, prefsReady, saveNotifications, refreshSchedules };
+
+  document.addEventListener("keydown", onSettingsKeydown, true);
+  // Ctrl+, (Cmd+, on macOS) opens Settings from anywhere, like desktop apps.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "," || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    open();
+  });
 
   document.addEventListener("DOMContentLoaded", () => {
     refreshBannerVisibility();
     refreshGenerationPill();
     syncThemeFromServer();
-    const btn = document.getElementById("settings-btn");
-    if (btn) btn.addEventListener("click", () => {
-      // Close only when already showing a config section; when showing an
-      // autonomous footer section (Appearance/Documentation), the gear switches
-      // to the config view rather than closing.
-      if (isOpen() && !FOOTER_ITEMS.includes(state.activeFile)) close();
-      else open();
-    });
+    document.getElementById("settings-btn")?.addEventListener("click", () => open());
     document.getElementById("appearance-btn")
-      ?.addEventListener("click", () => jumpToSection(APPEARANCE_ID));
+      ?.addEventListener("click", () => openSection(APPEARANCE_ID));
     document.getElementById("documentation-btn")
-      ?.addEventListener("click", () => jumpToSection(DOCUMENTATION_ID));
+      ?.addEventListener("click", () => openSection(DOCUMENTATION_ID));
   });
 })();

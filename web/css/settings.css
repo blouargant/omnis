@@ -14,6 +14,9 @@
 /* Settings shell — the panel, header, tabs, body, footer, forms every panel reuses. */
 @import "settings/core.css";
 
+/* The settings dialog (backdrop, frame, grouped section nav) hosting the panel. */
+@import "settings/modal.css";
+
 /* Cross-panel pieces. */
 @import "settings/permissions.css";
 @import "settings/hooks.css";

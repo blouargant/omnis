@@ -84,7 +84,8 @@ same colour/size in multiple partials.
 | `permissions.css` | Permission-rule editor + skill-contributed (read-only) permissions |
 | `hooks.css` | Lifecycle hooks editor (Settings → Hooks): matcher cards + command rows |
 | `status.css` | Restart-required banner, reload spinner, generation pill, full-page restart overlay |
-| `sidebar.css` | Settings **sidebar chrome**: the gear button, section labels; **and** the settings category menu (`#settings-menu`, now hosted in the middle `#session-pane` column — it replaces the session list while Settings is open) plus the `#session-pane` swap/collapse rules that drive that |
+| `sidebar.css` | Settings **sidebar chrome**: section labels, the hidden in-panel category tabs, and the client-only (no Save/Discard, no Form/Raw toolbar) rules |
+| `modal.css` | The **settings dialog**: `#settings-modal` backdrop (z-index 150, below the confirm/prompt dialogs), the dialog frame + header, and the grouped, searchable section nav (`.settings-nav-*`); full-screen below 820px |
 | `theme.css` | Theme picker |
 | `skills.css` | Skills panel |
 | `registries.css` | Remote registries split-panel list + browse view + cards |

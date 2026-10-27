@@ -392,16 +392,13 @@ function layoutWidths() {
 }
 
 // rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
-// It removes only existing panes and dividers, preserving #settings-panel
-// (which Settings.js appends to #chat) and inserts panes before it.
 function rebuildChatDOM() {
   for (const el of [...els.chat.querySelectorAll(":scope > .chat-pane, :scope > .pane-divider")]) {
     el.remove();
   }
-  const anchor = els.chat.querySelector(":scope > #settings-panel");
   panels.forEach((p, i) => {
-    if (i > 0) els.chat.insertBefore(makeDivider(panels[i - 1], p), anchor);
-    els.chat.insertBefore(p.root, anchor);
+    if (i > 0) els.chat.appendChild(makeDivider(panels[i - 1], p));
+    els.chat.appendChild(p.root);
   });
   els.chat.classList.toggle("solo", panels.length <= 1);
   layoutWidths();
@@ -11715,21 +11712,6 @@ els.sidebarToggle.addEventListener("click", () => {
 els.sidebar.addEventListener("transitionend", (e) => {
   if (e.target === els.sidebar && e.propertyName === "width") layoutWidths();
 });
-
-// Clicking anywhere in the sidebar while Settings is showing returns to the chat
-// view: everything in it (New Chat, collections, archived, Files) acts on a chat,
-// so touching it means the user is done with Settings. Capture-phase so it still
-// fires for the handlers that stopPropagation, and it never stops the click — the
-// folder/collection/archived action still runs, now against a visible chat area.
-// Excluded: the footer buttons (they own the Settings/Appearance/Documentation
-// toggle), the collapse chevron, the update button, and the Files resize grip —
-// none of those mean "go back to chat".
-const SIDEBAR_KEEPS_SETTINGS = "#sidebar-footer, #sidebar-toggle, #update-btn, #folders-resize";
-els.sidebar.addEventListener("click", (e) => {
-  if (!window.Settings || !window.Settings.isOpen()) return;
-  if (e.target.closest && e.target.closest(SIDEBAR_KEEPS_SETTINGS)) return;
-  window.Settings.close();
-}, true);
 
 // ─── Archived sessions panel collapse ─────────────────────────────────────────
 
