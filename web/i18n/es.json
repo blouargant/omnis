@@ -1000,5 +1000,14 @@
   "tool.row.otherBare": "Usó una herramienta",
   "env.label": "Entorno",
   "env.toggle": "Mostrar u ocultar el panel de entorno",
-  "env.files": "Archivos"
+  "env.files": "Archivos",
+  "env.environment": "Entorno",
+  "env.context": "Contexto",
+  "env.skills": "Skills",
+  "env.squad": "Squad",
+  "env.folder": "Carpeta de trabajo",
+  "env.branch": "Rama git",
+  "env.collection": "Colección",
+  "env.defaultSquad": "Squad predeterminado",
+  "env.noContext": "Todavía no hay consumo registrado."
 }

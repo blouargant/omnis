@@ -105,3 +105,35 @@ body.env-open #env-panel { display: block; }
     background: rgba(0, 0, 0, 0.3);
   }
 }
+
+/* Environnement / Contexte / Skills card details. */
+.env-col-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
+.env-folder { cursor: pointer; }
+.env-folder:hover .env-row-text { text-decoration: underline; }
+.env-bar { width: 34px; height: 6px; border-radius: 3px; background: var(--bg-active); position: relative; overflow: hidden; display: inline-block; }
+.env-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+.env-bar.zone-warn i { background: var(--warn-fg); }
+.env-bar.zone-danger i { background: var(--danger-fg); }
+.env-kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; color: var(--text-muted); }
+.env-kv span:nth-child(even) { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.env-sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.env-btn {
+  margin-top: 10px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.env-btn:hover { background: var(--bg-raised); }
+.env-btn:disabled { opacity: .6; cursor: default; }
+.env-row-btn { width: 100%; border: none; background: none; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.env-row-btn:hover { background: var(--bg-raised); }
+.env-skill-body { margin: 2px 0 8px 26px; font-size: 12.5px; max-height: 40vh; overflow: auto; }
+
+/* The context ring and skills dock left the composer for the panel. */
+#composer-wrap .skills-dock,
+#composer #ctx-ring-wrap { display: none !important; }

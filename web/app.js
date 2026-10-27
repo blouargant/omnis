@@ -1968,6 +1968,7 @@ function skillLoadFailed(resp, name) {
 
 function renderSkillsDock(panel) {
   if (!panel || !panel.root) return;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("skills");
   const dock = panel.root.querySelector(".skills-dock");
   if (!dock) return;
   const sid = panel.sessionId;
@@ -2367,6 +2368,31 @@ function renderCtxRing(panel) {
     : tokens_used >= soft_limit ? "warn" : "ok";
   e.ctxRingWrap.classList.add("has-data");
   e.ctxRingWrap.dataset.tip = `Context: ${pct}% used — click for more information`;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("context");
+}
+
+// ctxUsageInfo summarises a session's context use and spend for the context
+// popup and the environment panel's Contexte card: null when no usage is known.
+function ctxUsageInfo(sessionId) {
+  const usage = sessionCtxUsage.get(sessionId);
+  if (!usage || !usage.window_tokens) return null;
+  const { tokens_used, soft_limit, hard_limit, window_tokens } = usage;
+  const ratio = Math.min(tokens_used / window_tokens, 1);
+  const agentMap = sessionAgentTokens.get(sessionId);
+  let cost = 0;
+  if (agentMap && agentMap.size) {
+    for (const u of agentMap.values()) cost += (u.cost || 0);
+  } else {
+    const acc = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
+    cost = usageCostUSD(acc.prompt, acc.output, 0, 0, null);
+  }
+  const agents = agentMap ? [...agentMap.entries()].sort((a, b) =>
+    a[0] === "leader" ? -1 : b[0] === "leader" ? 1 : (b[1].prompt + b[1].output) - (a[1].prompt + a[1].output)
+  ) : [];
+  return {
+    used: tokens_used, max: window_tokens, ratio, pct: Math.round(ratio * 100), cost, agents,
+    zone: tokens_used >= hard_limit ? "danger" : tokens_used >= soft_limit ? "warn" : "ok",
+  };
 }
 
 function renderCtxPopup(panel) {
@@ -2467,7 +2493,7 @@ async function fetchUsageEstimate(sessionId) {
     }
     for (const p of panelsForSession(sessionId)) {
       renderCtxRing(p);
-      if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+      if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
     }
   } catch (e) {
     console.error("failed to fetch usage estimate:", e);
@@ -8734,7 +8760,7 @@ async function subscribeGlobalEvents() {
             },
           );
           for (const p of panelsForSession(sid)) {
-            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
           }
         } else if (event === "task_notification" && sid) {
           // A background task / monitor / spawned turn produced a result. In
@@ -10022,9 +10048,10 @@ async function sendMessage(panel) {
             },
           );
           for (const p of panelsForSession(sessionId)) {
-            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
           }
           if (AgentDebug.enabled && sessionId === activeSessionId) AgentDebug._paint();
+          if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("context");
           break;
         }
 
@@ -10053,6 +10080,7 @@ async function sendMessage(panel) {
           finalizeSegment();
           appendRoutingChip(container, data.to, data.reason);
           refreshSessionsFor(sessionId);
+          if (window.EnvPanel) setTimeout(() => EnvPanel.refresh("environment"), 400);
           break;
         }
 
@@ -12388,11 +12416,115 @@ els.foldersResize.addEventListener("pointerdown", (e) => {
   els.foldersResize.addEventListener("pointerup", onUp);
 });
 
+const envSkillsOpen = new Set(); // "kind:name:agent" of skills unfolded in the Skills card
+const ENV_ICON = {
+  squad:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 15c3 0 6 2 6 5"/></svg>`,
+  folder: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
+  branch: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>`,
+  skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
+};
+
+// envRow builds one icon + text row of an environment card.
+function envRow(icon, html, tip, cls) {
+  return `<div class="env-row${cls ? " " + cls : ""}"${tip ? ` data-tip="${escHtml(tip)}"` : ""}>` +
+    `<span class="env-row-icon">${icon}</span><span class="env-row-text">${html}</span></div>`;
+}
+
 // registerEnvCards registers the environment panel's cards (env-panel.js),
 // top to bottom. The file browser (#folders-panel) moves into the Fichiers
 // card; its "collapsed" class follows the card's fold state and the panel's
 // visibility, so every existing foldersCollapsed() guard keeps working.
 function registerEnvCards() {
+  EnvPanel.register({
+    id: "environment",
+    title: () => tr("env.environment"),
+    render(body, ctx) {
+      const meta = ctx.sessionId ? sessionMetaById(ctx.sessionId) : null;
+      const rows = [];
+      if (meta) rows.push(envRow(ENV_ICON.squad, escHtml(meta.squad || tr("env.defaultSquad")), tr("env.squad")));
+      if (foldersDir) rows.push(envRow(ENV_ICON.folder, escHtml(foldersDir.replace(/^\/home\/[^/]+/, "~")), tr("env.folder"), "env-folder"));
+      if (ctx.branch) rows.push(envRow(ENV_ICON.branch, escHtml(ctx.branch), tr("env.branch")));
+      if (meta) {
+        const col = effectiveCollection(meta) || "General";
+        const accent = collectionAccentVar(sessionCollectionColor(ctx.sessionId));
+        rows.push(envRow(`<span class="env-col-dot" style="${accent ? `background:${accent}` : ""}"></span>`, escHtml(col), tr("env.collection")));
+      }
+      body.innerHTML = rows.join("");
+      const f = body.querySelector(".env-folder");
+      if (f) f.addEventListener("click", () => EnvPanel.openCard("files"));
+    },
+  });
+  EnvPanel.register({
+    id: "context",
+    title: () => tr("env.context"),
+    sessionOnly: true,
+    defaultOpen: false,
+    render(body, ctx) {
+      const info = ctxUsageInfo(ctx.sessionId);
+      if (!info) { ctx.setValue(""); body.innerHTML = `<div class="env-empty">${escHtml(tr("env.noContext"))}</div>`; return; }
+      ctx.setValue(`${info.pct} % <span class="env-bar zone-${info.zone}"><i style="width:${info.pct}%"></i></span>`);
+      if (!ctx.open) return;
+      const agents = info.agents.map(([name, u]) =>
+        `<div class="env-row"><span class="env-row-text">${escHtml(name)}</span><span class="env-row-meta">$${(u.cost || 0).toFixed(4)}</span></div>`).join("");
+      body.innerHTML =
+        `<div class="env-kv"><span>${escHtml(tr("ctx.tokensUsed"))}</span><span>${info.used.toLocaleString(I18N.locale)}</span>` +
+        `<span>${escHtml(tr("ctx.maxContext"))}</span><span>${info.max.toLocaleString(I18N.locale)}</span>` +
+        `<span>${escHtml(tr("ctx.budget"))}</span><span>${info.cost > 0 ? "$" + info.cost.toFixed(4) : "—"}</span></div>` +
+        (agents ? `<div class="env-sub">${agents}</div>` : "") +
+        `<button type="button" class="env-btn env-compact">${escHtml(tr("ctx.compressNow"))}</button>`;
+      const btn = body.querySelector(".env-compact");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = tr("app.ctx.queuing");
+        try {
+          const res = await apiFetch(`/api/sessions/${ctx.sessionId}/compact`, { method: "POST" });
+          if (!res.ok) throw new Error(await res.text());
+          btn.textContent = tr("app.ctx.queued");
+        } catch (err) {
+          console.error("compact request failed:", err);
+          btn.textContent = tr("common.error");
+        }
+        setTimeout(() => { btn.disabled = false; btn.textContent = tr("ctx.compressNow"); }, 1400);
+      });
+    },
+  });
+  EnvPanel.register({
+    id: "skills",
+    title: () => tr("env.skills"),
+    sessionOnly: true,
+    render(body, ctx) {
+      const skills = sessionSkills.get(ctx.sessionId) || [];
+      ctx.setVisible(skills.length > 0);
+      ctx.setValue(String(skills.length));
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const s of skills) {
+        const key = `${s.kind}:${s.name}:${s.agent || ""}`;
+        const item = document.createElement("div");
+        item.className = "env-skill";
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "env-row env-row-btn";
+        row.innerHTML = `<span class="env-row-icon">${ENV_ICON.skill}</span>` +
+          `<span class="env-row-text">${escHtml(s.name)}</span>` +
+          `<span class="env-row-meta">${s.kind === "softskill" ? escHtml(tr("skillsDock.softskill")) : ""}${s.count > 1 ? ` ×${s.count}` : ""}</span>`;
+        if (s.description) row.setAttribute("data-tip", s.description);
+        item.appendChild(row);
+        if (envSkillsOpen.has(key) && s.instructions) {
+          const md = document.createElement("div");
+          md.className = "env-skill-body tool-md";
+          if (typeof marked !== "undefined" && typeof marked.parse === "function") md.innerHTML = marked.parse(s.instructions);
+          else md.textContent = s.instructions;
+          item.appendChild(md);
+        }
+        row.addEventListener("click", () => {
+          if (envSkillsOpen.has(key)) envSkillsOpen.delete(key); else envSkillsOpen.add(key);
+          EnvPanel.refresh("skills");
+        });
+        body.appendChild(item);
+      }
+    },
+  });
   EnvPanel.register({
     id: "files",
     title: () => tr("env.files"),
@@ -13582,7 +13714,7 @@ async function toggleFolderExpand(li, row, children, rel) {
 // navigate into it (loadFolder mutates the cwd). Single-click a file does
 // nothing; double-click opens it in the Monaco editor.
 function renderFolder(data, err) {
-  if (window.EnvPanel) queueMicrotask(() => EnvPanel.refresh("files"));
+  if (window.EnvPanel) queueMicrotask(() => { EnvPanel.refresh("files"); EnvPanel.refresh("environment"); });
   els.foldersList.innerHTML = "";
   if (!data) {
     els.foldersPath.textContent = "";

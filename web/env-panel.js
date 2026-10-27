@@ -119,6 +119,13 @@
   window.EnvPanel = {
     register, refresh, setSession, toggle, setOpen, isOpen,
     currentSession: () => session,
+    // openCard unfolds a card (and the panel) and scrolls it into view.
+    openCard(id) {
+      setCardOpen(id, true);
+      if (!isOpen()) setOpen(true); else refresh(id);
+      const el = list() && list().querySelector(`[data-card="${id}"]`);
+      if (el) el.scrollIntoView({ block: "nearest" });
+    },
     init() {
       if (!isMobile()) document.body.classList.toggle("env-open", load(OPEN_KEY, true));
       for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.toggle("active", isOpen());

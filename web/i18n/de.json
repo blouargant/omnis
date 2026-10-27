@@ -1000,5 +1000,14 @@
   "tool.row.otherBare": "Hat ein Werkzeug verwendet",
   "env.label": "Umgebung",
   "env.toggle": "Umgebungsbereich ein- oder ausblenden",
-  "env.files": "Dateien"
+  "env.files": "Dateien",
+  "env.environment": "Umgebung",
+  "env.context": "Kontext",
+  "env.skills": "Skills",
+  "env.squad": "Squad",
+  "env.folder": "Arbeitsordner",
+  "env.branch": "Git-Branch",
+  "env.collection": "Sammlung",
+  "env.defaultSquad": "Standard-Squad",
+  "env.noContext": "Noch kein Verbrauch erfasst."
 }

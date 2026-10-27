@@ -1000,5 +1000,14 @@
   "tool.row.otherBare": "A utilisé un outil",
   "env.label": "Environnement",
   "env.toggle": "Afficher ou masquer le panneau d'environnement",
-  "env.files": "Fichiers"
+  "env.files": "Fichiers",
+  "env.environment": "Environnement",
+  "env.context": "Contexte",
+  "env.skills": "Skills",
+  "env.squad": "Squad",
+  "env.folder": "Dossier de travail",
+  "env.branch": "Branche git",
+  "env.collection": "Collection",
+  "env.defaultSquad": "Squad par défaut",
+  "env.noContext": "Aucune consommation enregistrée pour l'instant."
 }

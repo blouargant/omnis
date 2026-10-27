@@ -1000,5 +1000,14 @@
   "tool.row.otherBare": "Used a tool",
   "env.label": "Environment",
   "env.toggle": "Show or hide the environment panel",
-  "env.files": "Files"
+  "env.files": "Files",
+  "env.environment": "Environment",
+  "env.context": "Context",
+  "env.skills": "Skills",
+  "env.squad": "Squad",
+  "env.folder": "Working folder",
+  "env.branch": "Git branch",
+  "env.collection": "Collection",
+  "env.defaultSquad": "Default squad",
+  "env.noContext": "No usage recorded yet."
 }
