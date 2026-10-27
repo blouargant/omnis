@@ -997,5 +997,8 @@
   "tool.row.delegateBare": "Delegó una tarea",
   "tool.row.skillBare": "Cargó una skill",
   "tool.row.mcpBare": "Usó un conector",
-  "tool.row.otherBare": "Usó una herramienta"
+  "tool.row.otherBare": "Usó una herramienta",
+  "env.label": "Entorno",
+  "env.toggle": "Mostrar u ocultar el panel de entorno",
+  "env.files": "Archivos"
 }

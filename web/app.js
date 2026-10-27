@@ -358,6 +358,7 @@ function setFocusedPanel(pid) {
   // draft/editor/terminal tab has no session, so the helper no-ops).
   revealSessionInTree(activeSessionId);
   refreshFoldersPanel();
+  if (window.EnvPanel) EnvPanel.setSession(activeSessionId);
   saveLayout();
 }
 
@@ -1167,6 +1168,11 @@ function attachPaneHandlers(panel) {
   wirePullToRefresh(panel);
 
   // Toolbar: terminal / split / close.
+  const envBtn = panel.root.querySelector(".pane-env-btn");
+  if (envBtn) {
+    envBtn.classList.toggle("active", !!(window.EnvPanel && EnvPanel.isOpen()));
+    envBtn.addEventListener("click", (e) => { e.stopPropagation(); EnvPanel.toggle(); });
+  }
   if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
@@ -12382,6 +12388,26 @@ els.foldersResize.addEventListener("pointerdown", (e) => {
   els.foldersResize.addEventListener("pointerup", onUp);
 });
 
+// registerEnvCards registers the environment panel's cards (env-panel.js),
+// top to bottom. The file browser (#folders-panel) moves into the Fichiers
+// card; its "collapsed" class follows the card's fold state and the panel's
+// visibility, so every existing foldersCollapsed() guard keeps working.
+function registerEnvCards() {
+  EnvPanel.register({
+    id: "files",
+    title: () => tr("env.files"),
+    render(body, ctx) {
+      if (!body.contains(els.foldersPanel)) body.appendChild(els.foldersPanel);
+      const show = ctx.open && EnvPanel.isOpen();
+      const was = !foldersCollapsed();
+      applyFoldersCollapse(!show);
+      if (show && !was) loadFolder();
+      const name = (foldersDir || "").split("/").filter(Boolean).pop() || foldersDir || "";
+      ctx.setValue(escHtml(name));
+    },
+  });
+}
+
 // refreshFoldersPanel reloads the listing when the panel is open. Called when the
 // active session changes, after a "!cd" mutates the cwd, or when the agent
 // creates/changes files or folders (see scheduleFoldersRefresh). The reload
@@ -13556,6 +13582,7 @@ async function toggleFolderExpand(li, row, children, rel) {
 // navigate into it (loadFolder mutates the cwd). Single-click a file does
 // nothing; double-click opens it in the Monaco editor.
 function renderFolder(data, err) {
+  if (window.EnvPanel) queueMicrotask(() => EnvPanel.refresh("files"));
   els.foldersList.innerHTML = "";
   if (!data) {
     els.foldersPath.textContent = "";
@@ -13695,6 +13722,8 @@ async function restoreLayout(rec, liveIds) {
   // session belongs to (no fold-to-General flash for filed sessions).
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
   wireTreeControls();
+  registerEnvCards();
+  EnvPanel.init();
   await loadCollections();
   await loadSessions();
 

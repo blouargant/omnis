@@ -18,6 +18,7 @@
 @import "features/collections.css";
 @import "features/sidebar.css";
 @import "features/folders.css";
+@import "features/env-panel.css";
 
 /* Chat workspace: panes, editor tabs, terminal tabs. */
 @import "features/panes.css";

@@ -997,5 +997,8 @@
   "tool.row.delegateBare": "Hat eine Aufgabe delegiert",
   "tool.row.skillBare": "Hat einen Skill geladen",
   "tool.row.mcpBare": "Hat einen Konnektor verwendet",
-  "tool.row.otherBare": "Hat ein Werkzeug verwendet"
+  "tool.row.otherBare": "Hat ein Werkzeug verwendet",
+  "env.label": "Umgebung",
+  "env.toggle": "Umgebungsbereich ein- oder ausblenden",
+  "env.files": "Dateien"
 }

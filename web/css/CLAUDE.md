@@ -70,7 +70,8 @@ same colour/size in multiple partials.
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
 | `collections.css` | Sidebar **primary actions** (Search / Import, `.sidebar-action`), the Collections header (sort + new), and the **collection tree**: one `li.collection-group` per collection — header `.collection-row` (chevron, glyph/star, name, active count swapped for the hover `.group-actions` ＋/⋯), its rows `ul.collection-sessions`, `.group-empty`, `.group-more`, the pinned-row style, drag-over state, the collapsed-rail colour pastille (`.collection-badge`), the bulk-select checkboxes (`#sidebar.selecting`) and the colour-picker swatch grid (`.collection-swatch*`) |
 | `sidebar.css` | Left sidebar (app chrome + tree + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, single-line **session rows** (tree + Archived), archived-sessions panel, the **account button + menu** (`#account-btn`, `#account-menu`), sidebar resize handle |
-| `folders.css` | Folders browser panel + its right-click context menu |
+| `folders.css` | Folders browser (now hosted in the environment panel's Fichiers card) + its right-click context menu |
+| `env-panel.css` | **Environment panel**: the right-hand column of cards (`#env-panel`, `.env-card*`, `.env-row*`), the hosted file browser overrides, and the small-screen right drawer (`body.env-drawer-open`, `#env-scrim`) |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |
 | `terminal.css` | xterm.js terminal tabs (`.pane-terminal`, `.xterm-*`) |
