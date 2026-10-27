@@ -1,0 +1,130 @@
+<style>
+  .om-wrap { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+  .om-frame { width:300px; height:640px; background:#1f1f22; color:#e8e8ea; border:1px solid #3a3a3e; border-radius:10px;
+    display:flex; flex-direction:column; font:13px/1.35 system-ui, sans-serif; position:relative; overflow:hidden; }
+  .om-cap { font-size:12px; color:var(--text-secondary); margin:6px 0 10px; max-width:300px; }
+  .om-head { display:flex; align-items:center; gap:8px; padding:12px 12px 8px; font-weight:600; font-size:15px; }
+  .om-logo { width:18px; height:18px; border-radius:5px; background:linear-gradient(135deg,#7c5cff,#3fb5ff); }
+  .om-head .sp { flex:1 }
+  .om-ico { color:#9a9aa0; font-size:13px; }
+  .om-nav { padding:2px 8px 6px; }
+  .om-nav div { padding:6px 8px; border-radius:7px; display:flex; gap:9px; align-items:center; }
+  .om-nav .new { background:#2c2c31; font-weight:600; }
+  .om-sec { display:flex; align-items:center; padding:10px 16px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:#8d8d93; }
+  .om-sec .sp { flex:1 }
+  .om-scroll { flex:1; overflow:hidden; padding:0 8px; }
+  .om-col { display:flex; align-items:center; gap:7px; padding:5px 8px; border-radius:7px; font-weight:600; }
+  .om-col .chev { width:10px; color:#8d8d93; font-size:10px; }
+  .om-col .dot { width:9px; height:9px; border-radius:3px; }
+  .om-col .cnt { color:#8d8d93; font-weight:400; font-size:12px; margin-left:auto; }
+  .om-col.hover { background:#2a2a2f; }
+  .om-col.hover .cnt { display:none; }
+  .om-col .acts { margin-left:auto; color:#b8b8be; letter-spacing:6px; display:none; }
+  .om-col.hover .acts { display:inline; }
+  .om-ses { padding:5px 8px 5px 26px; border-radius:7px; color:#d6d6da; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .om-ses.active { background:#34343a; color:#fff; border-left:2px solid var(--c, #3fb5ff); padding-left:24px; }
+  .om-more { padding:4px 8px 6px 26px; color:#8d8d93; font-size:12px; }
+  .om-arch { display:flex; gap:7px; align-items:center; padding:7px 16px; color:#a8a8ae; border-top:1px solid #303034; }
+  .om-files { display:flex; gap:7px; align-items:center; padding:7px 16px; color:#a8a8ae; border-top:1px solid #303034; }
+  .om-foot { border-top:1px solid #303034; padding:8px 10px; display:flex; align-items:center; gap:8px; }
+  .om-avatar { width:24px; height:24px; border-radius:50%; background:#4a4a52; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
+  .om-foot .who { font-weight:600; }
+  .om-foot .sub { color:#8d8d93; }
+  .om-foot .sp { flex:1 }
+  .om-menu { position:absolute; left:10px; right:10px; bottom:52px; background:#2a2a2f; border:1px solid #44444a; border-radius:10px;
+    box-shadow:0 12px 30px rgba(0,0,0,.5); padding:6px; }
+  .om-menu .id { padding:6px 10px 8px; color:#9a9aa0; font-size:12px; border-bottom:1px solid #3c3c42; margin-bottom:4px; }
+  .om-menu div.it { padding:7px 10px; border-radius:6px; display:flex; gap:10px; align-items:center; }
+  .om-menu div.it:first-of-type { }
+  .om-menu .hl { background:#36363d; }
+  .om-menu .kbd { margin-left:auto; color:#8d8d93; font-size:11px; }
+  .om-menu hr { border:0; border-top:1px solid #3c3c42; margin:4px 0; }
+  .om-guess { display:inline-block; font-size:10px; padding:1px 6px; border-radius:8px; background:#5a4a12; color:#ffd666; margin-left:6px; vertical-align:middle; }
+  .om-legend { max-width:420px; font-size:13px; }
+  .om-legend li { margin-bottom:6px; }
+</style>
+
+<h2>Nouvelle colonne gauche — première proposition</h2>
+<p class="subtitle">La colonne du milieu disparaît : chaque collection devient un groupe dépliable avec ses sessions dessous. Les éléments marqués <span class="om-guess">supposé</span> sont mes suppositions.</p>
+
+<div class="om-wrap">
+
+  <div>
+    <div class="om-cap"><b>1 · État normal</b> — « Kubernetes » survolée (actions au survol), « IA Parc » repliée.</div>
+    <div class="om-frame">
+      <div class="om-head"><span class="om-logo"></span>Omnis<span class="sp"></span><span class="om-ico">‹</span></div>
+      <div class="om-nav">
+        <div class="new">＋ Nouvelle discussion <span class="om-ico" style="margin-left:auto">▾</span></div>
+        <div>⌕ Rechercher <span class="om-guess">supposé</span></div>
+        <div>⇩ Importer une conversation <span class="om-guess">supposé</span></div>
+      </div>
+      <div class="om-sec">Collections<span class="sp"></span><span class="om-ico" style="letter-spacing:8px">⇅ ＋</span></div>
+      <div class="om-scroll">
+        <div class="om-col"><span class="chev">▾</span><span class="dot" style="background:#8d8d93"></span>Général<span class="cnt">12</span></div>
+        <div class="om-ses">Pastille fournisseur nœud élastique</div>
+        <div class="om-ses active" style="--c:#8d8d93">Export docs en plusieurs formats</div>
+        <div class="om-ses">Scheduler resource insufficiency</div>
+        <div class="om-more">Afficher plus (9) <span class="om-guess">supposé</span></div>
+
+        <div class="om-col hover"><span class="chev">▾</span><span class="dot" style="background:#3fb5ff"></span>Kubernetes<span class="cnt">4</span><span class="acts">＋ ⋯</span></div>
+        <div class="om-ses">Pods en CrashLoop dans test-system</div>
+        <div class="om-ses">Audit NetworkPolicy</div>
+        <div class="om-ses">Helm upgrade iaparc-hub</div>
+        <div class="om-ses">Nettoyage des pods éphémères</div>
+
+        <div class="om-col"><span class="chev">▸</span><span class="dot" style="background:#e5a33c"></span>IA Parc<span class="cnt">27</span></div>
+
+        <div class="om-col"><span class="chev">▾</span><span class="dot" style="background:#b07cff"></span>Recherche GPU<span class="cnt">2</span></div>
+        <div class="om-ses">Calculateur vllm-serve</div>
+        <div class="om-ses">Estimation mémoire GPU pour LLM</div>
+      </div>
+      <div class="om-arch">▸ 🗄 Archivées <span class="om-ico" style="margin-left:auto">38</span></div>
+      <div class="om-files">▸ 📁 Fichiers</div>
+      <div class="om-foot"><span class="om-avatar">B</span><span><span class="who">bertrand</span></span><span class="sp"></span><span class="om-ico">⌃</span></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="om-cap"><b>2 · Menu du bas ouvert</b> — remplace les boutons Settings / Appearance / Documentation.</div>
+    <div class="om-frame">
+      <div class="om-head"><span class="om-logo"></span>Omnis<span class="sp"></span><span class="om-ico">‹</span></div>
+      <div class="om-nav">
+        <div class="new">＋ Nouvelle discussion <span class="om-ico" style="margin-left:auto">▾</span></div>
+        <div>⌕ Rechercher</div>
+        <div>⇩ Importer une conversation</div>
+      </div>
+      <div class="om-sec">Collections<span class="sp"></span><span class="om-ico" style="letter-spacing:8px">⇅ ＋</span></div>
+      <div class="om-scroll" style="opacity:.45">
+        <div class="om-col"><span class="chev">▾</span><span class="dot" style="background:#8d8d93"></span>Général<span class="cnt">12</span></div>
+        <div class="om-ses">Pastille fournisseur nœud élastique</div>
+        <div class="om-ses">Export docs en plusieurs formats</div>
+        <div class="om-ses">Scheduler resource insufficiency</div>
+        <div class="om-col"><span class="chev">▸</span><span class="dot" style="background:#3fb5ff"></span>Kubernetes<span class="cnt">4</span></div>
+      </div>
+      <div class="om-menu">
+        <div class="id">bertrand <span class="om-guess">supposé</span></div>
+        <div class="it hl">⚙ Paramètres<span class="kbd">Ctrl+,</span></div>
+        <div class="it">◐ Apparence</div>
+        <div class="it">🌐 Langue <span class="om-guess">supposé</span></div>
+        <div class="it">📖 Documentation</div>
+        <hr>
+        <div class="it">ⓘ Version 1.9.2 · Mise à jour dispo <span class="om-guess">supposé</span></div>
+      </div>
+      <div class="om-arch">▸ 🗄 Archivées <span class="om-ico" style="margin-left:auto">38</span></div>
+      <div class="om-files">▸ 📁 Fichiers</div>
+      <div class="om-foot" style="background:#2a2a2f"><span class="om-avatar">B</span><span class="who">bertrand</span><span class="sp"></span><span class="om-ico">⌄</span></div>
+    </div>
+  </div>
+
+  <div class="om-legend">
+    <h3>Ce que je suppose</h3>
+    <ul>
+      <li><b>Rechercher</b> et <b>Importer</b> remontent en haut (comme « Rechercher » dans Claude Desktop) ; la recherche filtre toutes les collections d'un coup.</li>
+      <li><b>Trier</b> (⇅) et <b>Nouvelle collection</b> (＋) passent dans l'en-tête « Collections ».</li>
+      <li>Au survol d'une collection : <b>＋</b> = nouvelle discussion dans cette collection, <b>⋯</b> = renommer / couleur / contexte / sélectionner… (la sélection multiple passe dans ce menu).</li>
+      <li>Une collection longue n'affiche que ses sessions récentes, puis « Afficher plus ».</li>
+      <li>Archivées et Fichiers restent des panneaux repliables en bas.</li>
+      <li>Le pied devient un seul bouton (identité) qui ouvre un menu.</li>
+    </ul>
+  </div>
+</div>
