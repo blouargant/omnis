@@ -3206,57 +3206,7 @@ function jumpReplyNav(panel) {
   scheduleReplyNav(panel);
 }
 
-// ─── Tool metadata ──────────────────────────────────────────────────────────
-
-const TOOL_META = [
-  { match: /^bash/,              label: "Bash",     color: "amber"   },
-  { match: /^read/,              label: "Read",     color: "sky"     },
-  { match: /^write/,             label: "Write",    color: "emerald" },
-  { match: /^edit/,              label: "Edit",     color: "teal"    },
-  { match: /^grep/,              label: "Grep",     color: "purple"  },
-  { match: /^glob/,              label: "Glob",     color: "purple"  },
-  { match: /^revert/,            label: "Revert",   color: "rose"    },
-  { match: /^load_skill/,        label: "Skill",    color: "orange"  },
-  { match: /^list_skill/,        label: "Skills",   color: "orange"  },
-  { match: /^load_softskill/,    label: "Softskill", color: "orange" },
-  { match: /^list_softskill/,    label: "Softskills",color: "orange" },
-  { match: /^task/,              label: "Task",     color: "indigo"  },
-  { match: /^todo/,              label: "Todo",     color: "indigo"  },
-  { match: /^teammate/,          label: "Teammate", color: "indigo"  },
-  { match: /^worktree/,          label: "Worktree", color: "indigo"  },
-  { match: /^bg/,                label: "BG",       color: "slate"   },
-];
-
-function toolMeta(name) {
-  const n = (name || "").toLowerCase();
-  for (const m of TOOL_META) {
-    if (m.match.test(n)) return m;
-  }
-  const label = name
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase());
-  return { label, color: "slate" };
-}
-
-function toolDesc(name, args) {
-  if (!args || typeof args !== "object") return "";
-  if (args.command) {
-    const c = String(args.command).replace(/\n/g, " ").trim();
-    return c.length > 80 ? c.slice(0, 80) + "…" : c;
-  }
-  if (args.request) {
-    const r = String(args.request).replace(/\n/g, " ").trim();
-    return r.length > 80 ? r.slice(0, 80) + "…" : r;
-  }
-  if (args.file_path) return args.file_path;
-  if (args.path) return args.path;
-  if (args.pattern) {
-    const loc = args.directory || args.path || "";
-    return loc ? `${args.pattern}  in ${loc}` : args.pattern;
-  }
-  if (args.name) return args.name;
-  return "";
-}
+// ─── Tool results ───────────────────────────────────────────────────────────
 
 function extractResponse(response) {
   if (typeof response === "string") return response;
@@ -4913,38 +4863,79 @@ function appendGoalDivider(container, kind, data) {
 
 // buildToolBlock creates the shared DOM structure for both top-level and nested
 // tool call blocks. Returns the block element; the caller appends it.
+// toolRowTitle is a call's plain-language title in an unfolded tool run
+// ("Ran a command", "Edited main.go", "Delegated to web_agent").
+function toolRowTitle(name, args, kind) {
+  const a = (args && typeof args === "object") ? args : {};
+  const base = (p) => String(p || "").split("/").filter(Boolean).pop() || String(p || "");
+  let target = "";
+  switch (kind) {
+    case "read": case "write": case "edit":
+      target = base(a.file_path || a.path || a.name || ""); break;
+    case "search":
+      target = String(a.pattern || a.query || a.q || a.name || ""); break;
+    case "web":
+      target = String(a.url || a.query || a.q || ""); break;
+    case "skill":
+      target = String(a.name || a.skill_name || ""); break;
+    case "mcp":
+      target = String(name || "").split("__").pop(); break;
+    case "delegate": case "other":
+      target = String(name || ""); break;
+  }
+  if (target.length > 60) target = target.slice(0, 60) + "…";
+  return tr("tool.row." + kind + (target ? "" : "Bare"), { target });
+}
+
+// formatToolArgs renders a call's arguments as "key: value" lines (keys in
+// muted monospace), long values cut so an unfolded row stays readable.
+function formatToolArgs(args) {
+  if (!args || typeof args !== "object") return "";
+  const lines = [];
+  for (const [k, v] of Object.entries(args)) {
+    let val = typeof v === "string" ? v : JSON.stringify(v);
+    if (val === undefined) continue;
+    if (val.length > 600) val = val.slice(0, 600) + "…";
+    lines.push(`<div class="tool-arg"><span class="tool-arg-key">${escHtml(k)}:</span> <span class="tool-arg-val">${escHtml(val)}</span></div>`);
+  }
+  return lines.join("");
+}
+
+// buildToolBlock builds one call's row inside a tool run card: a title line
+// (status dot, plain-language title, short detail, time, chevron) that unfolds
+// to the arguments, any nested sub-agent calls, then the result.
 function buildToolBlock(name, args) {
-  const { label, color } = toolMeta(name);
-  const desc = toolDesc(name, args);
+  const kind = toolKind(name);
   const block = document.createElement("div");
-  block.className = `tool-block border-${color}`;
+  block.className = "tool-block";
   block.dataset.toolName = (name || "").toLowerCase();
+  block.dataset.toolRawName = name || "";
+  block.dataset.kind = kind;
 
   const header = document.createElement("div");
   header.className = "tool-header";
   header.innerHTML = `
     <span class="tool-dot pending"></span>
-    <span class="tool-badge badge-${color}">${escHtml(label)}</span>
-    <span class="tool-desc">${escHtml(desc)}</span>
+    <span class="tool-title">${escHtml(toolRowTitle(name, args, kind))}</span>
     <span class="tool-time"></span>
-    <span class="tool-chevron">▶</span>
+    <span class="tool-chevron" aria-hidden="true">›</span>
   `;
   header.addEventListener("click", () => block.classList.toggle("expanded"));
 
   const body = document.createElement("div");
   body.className = "tool-body";
-  body.innerHTML = `<div class="tool-out-slot"></div>`;
+  const argsHtml = formatToolArgs(args);
+  body.innerHTML = (argsHtml ? `<div class="tool-args">${argsHtml}</div>` : "") + `<div class="tool-out-slot"></div>`;
 
   block.appendChild(header);
   block.appendChild(body);
   return block;
 }
 
-// appendToolCall adds a top-level tool block to the transcript. Consecutive
-// calls (nothing else rendered between them) share one .tool-group: from the
-// second call on, the group folds to a single summary line ("5 calls · Skill ×2
-// · Bash ×3") that expands to the full list, so a long run of tool calls no
-// longer floods the chat. A lone call renders exactly as before.
+// appendToolCall adds a top-level call to the transcript. Consecutive calls
+// (nothing else rendered between them) share one .tool-group, shown as ONE
+// quiet summary line ("Ran 1 command, used 2 tools ›", Claude Desktop style)
+// that unfolds into a card listing each call.
 function appendToolCall(name, args, container) {
   const target = container || fpTranscript();
   let group = target.lastElementChild;
@@ -4964,68 +4955,45 @@ function appendToolCall(name, args, container) {
 
 function buildToolGroup() {
   const group = document.createElement("div");
-  group.className = "tool-group single";
-  const summaryRow = document.createElement("div");
-  summaryRow.className = "tool-row tool-group-summary-row";
-  const summary = document.createElement("div");
-  summary.className = "tool-block tool-group-summary border-slate";
-  summary.innerHTML = `
-    <div class="tool-header">
-      <span class="tool-dot pending"></span>
-      <span class="tool-group-label"></span>
-      <span class="tool-group-counts"></span>
-      <span class="tool-time"></span>
-      <span class="tool-chevron">▶</span>
-    </div>`;
-  summary.querySelector(".tool-header").addEventListener("click", () => {
+  group.className = "tool-group";
+  const line = document.createElement("button");
+  line.type = "button";
+  line.className = "tool-summary-line";
+  line.innerHTML = `<span class="tool-summary-text"></span><span class="tool-summary-chevron" aria-hidden="true">›</span>`;
+  line.addEventListener("click", () => {
     group.classList.toggle("expanded");
-    summary.classList.toggle("expanded", group.classList.contains("expanded"));
+    line.setAttribute("aria-expanded", group.classList.contains("expanded") ? "true" : "false");
   });
-  summaryRow.appendChild(summary);
   const body = document.createElement("div");
   body.className = "tool-group-body";
-  group.appendChild(summaryRow);
+  group.appendChild(line);
   group.appendChild(body);
   return group;
 }
 
-// refreshToolGroup recomputes a group's summary line from its current calls.
+// toolSummaryT adapts the i18n runtime to toolSummary's t(key, count).
+function toolSummaryT(key, n) {
+  return key.startsWith("tool.run.") ? tr(key) : trN(key, n);
+}
+
+// refreshToolGroup recomputes a run's summary line from its current calls.
 // Derived from the DOM each time because a resolved call can remove its own
 // row (empty teammate/soft-skill output).
 function refreshToolGroup(group) {
   if (!group) return;
   const blocks = group.querySelectorAll(":scope > .tool-group-body > .tool-row > .tool-block");
   if (blocks.length === 0) { group.remove(); return; }
-  group.classList.toggle("single", blocks.length < 2);
-  if (blocks.length < 2) return;
-
-  const counts = new Map(); // label → {color, n}
-  let pending = false, error = false, total = 0;
+  const calls = [];
   for (const b of blocks) {
-    const { label, color } = toolMeta(b.dataset.toolName || "");
-    const c = counts.get(label) || { color, n: 0 };
-    c.n++;
-    counts.set(label, c);
     const dot = b.querySelector(":scope > .tool-header > .tool-dot");
-    if (dot && dot.classList.contains("pending")) pending = true;
-    if (dot && dot.classList.contains("error")) error = true;
-    total += Number(b.dataset.durMs || 0);
+    const status = dot && dot.classList.contains("pending") ? "pending"
+      : dot && dot.classList.contains("error") ? "error" : "done";
+    calls.push({ kind: b.dataset.kind || "other", status });
   }
-  const summary = group.querySelector(".tool-group-summary");
-  const dot = summary.querySelector(".tool-dot");
-  dot.classList.remove("pending", "done", "error");
-  dot.classList.add(pending ? "pending" : error ? "error" : "done");
-  summary.querySelector(".tool-group-label").textContent = trN("chat.toolGroup.calls", blocks.length);
-  const countsEl = summary.querySelector(".tool-group-counts");
-  countsEl.innerHTML = "";
-  for (const [label, { color, n }] of counts) {
-    const chip = document.createElement("span");
-    chip.className = `tool-badge badge-${color}`;
-    chip.textContent = n > 1 ? `${label} ×${n}` : label;
-    countsEl.appendChild(chip);
-  }
-  const time = summary.querySelector(".tool-time");
-  time.textContent = total > 0 ? formatDuration(total) : "";
+  const text = toolSummary(calls, toolSummaryT);
+  group.classList.toggle("is-running", calls.some(c => c.status === "pending"));
+  group.classList.toggle("has-error", calls.some(c => c.status === "error"));
+  group.querySelector(".tool-summary-text").textContent = text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // appendFileDownloadCard renders a compact "file ready" card in the transcript
@@ -5085,6 +5053,14 @@ async function downloadHostFile(abs, name, sessionId) {
 // appendNestedToolCall adds an inner tool block inside a parent sub-agent block.
 // The parent is auto-expanded so the user can see activity in real time.
 function appendNestedToolCall(parentBlock, name, args) {
+  // A call that runs its own tool calls is a sub-agent delegation: retitle it
+  // ("Delegated to web_agent") and recount the run's summary line.
+  if (parentBlock.dataset.kind !== "delegate") {
+    parentBlock.dataset.kind = "delegate";
+    const title = parentBlock.querySelector(":scope > .tool-header > .tool-title");
+    if (title) title.textContent = toolRowTitle(parentBlock.dataset.toolRawName, null, "delegate");
+    refreshToolGroup(parentBlock.closest(".tool-group"));
+  }
   let nested = parentBlock.querySelector(".tool-nested");
   if (!nested) {
     const slot = parentBlock.querySelector(".tool-out-slot");

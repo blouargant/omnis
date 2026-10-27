@@ -534,31 +534,70 @@
 }
 .file-dl-btn:hover { background: var(--accent-strong); color: #fff; }
 
-/* ─── Tool-call groups ─────────────────────────────────────────
-   Consecutive tool calls share a .tool-group. From two calls on, the group
-   folds to one summary line; clicking it reveals every call. A lone call
-   (.single) renders with no summary, exactly like a bare tool row. */
-.tool-group { width: 100%; }
-.tool-group.single > .tool-group-summary-row { display: none; }
-.tool-group:not(.single):not(.expanded) > .tool-group-body { display: none; }
-.tool-group-summary .tool-group-label {
+/* ─── Tool runs (Claude Desktop style) ─────────────────────────
+   Consecutive tool calls share a .tool-group: ONE quiet grey line summarising
+   the actions by kind ("Ran 1 command, used 2 tools ›"), no frame. Clicking it
+   unfolds a rounded card (.tool-group-body) with one row per call; a row
+   unfolds to its arguments, nested sub-agent calls and result. */
+.tool-group {
+  width: 100%;
+  max-width: min(var(--col-w), 100%);
+  margin: 2px auto 8px;
+  padding: 0 20px;
+}
+.tool-summary-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border: none;
+  background: none;
   color: var(--text-muted);
-  font-size: 12px;
-  flex-shrink: 0;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
 }
-.tool-group-counts {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  gap: 4px;
+.tool-summary-line:hover { color: var(--text); }
+.tool-summary-chevron { display: inline-block; transition: transform 0.15s; }
+.tool-group.expanded > .tool-summary-line .tool-summary-chevron { transform: rotate(90deg); }
+.tool-group.is-running > .tool-summary-line .tool-summary-text {
+  animation: tool-run-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tool-run-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+.tool-group-body {
+  display: none;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
   overflow: hidden;
-  flex-wrap: nowrap;
 }
-/* Expanded: the summary and its calls read as one continuous block — the
-   rows stay flush with the summary (same left edge, no gaps or rounding
-   between them) and only each call's content is indented under the label. */
-.tool-group:not(.single) > .tool-group-summary-row > .tool-block { border-radius: 0 4px 0 0; }
-.tool-group.expanded:not(.single) > .tool-group-body > .tool-row > .tool-block { border-radius: 0; }
-.tool-group.expanded:not(.single) > .tool-group-body > .tool-row:last-child > .tool-block { border-radius: 0 0 4px 0; }
-.tool-group.expanded:not(.single) > .tool-group-body > .tool-row > .tool-block > .tool-header { padding-left: 26px; }
-.tool-group:not(.single):not(.expanded) > .tool-group-summary-row > .tool-block { border-radius: 0 4px 4px 0; }
+.tool-group.expanded > .tool-group-body { display: block; }
+.tool-group-body > .tool-row { padding: 0; max-width: none; }
+.tool-group-body > .tool-row + .tool-row { border-top: 1px solid var(--border); }
+
+/* A call row inside the card. */
+.tool-group .tool-block {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  max-width: none;
+  font-size: 13px;
+}
+.tool-group .tool-header { padding: 9px 14px; gap: 8px; color: var(--text-muted); }
+.tool-group .tool-header:hover { background: var(--bg-raised); color: var(--text); }
+.tool-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group .tool-chevron { color: var(--text-faint); font-size: 13px; margin-left: 0; }
+/* Status: no dot for a finished call (sobriety); pending pulses, error is red. */
+.tool-group .tool-dot.done { display: none; }
+.tool-group .tool-dot { border: none; }
+.tool-group .tool-dot.pending { background: var(--text-faint); }
+.tool-group .tool-body { padding: 0 14px 12px; }
+.tool-args { margin: 2px 0 8px; font-size: 12.5px; line-height: 1.6; }
+.tool-arg { color: var(--text); word-break: break-word; }
+.tool-arg-key { color: var(--text-faint); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.tool-group .tool-nested { border-left-color: var(--border); }
+.tool-group .tool-nested-item { background: transparent; }
+.tool-group .tool-nested-item .tool-header { padding: 4px 8px; }
