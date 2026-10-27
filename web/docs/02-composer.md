@@ -136,6 +136,15 @@ nothing highlighted runs the command.
 > The same `!` shell-escape and completion are also available in the terminal
 > UI (`omnis tui`), where it uses the input field's autocomplete dropdown.
 
+## Environment panel
+
+The panel on the right (toggle it with the panel button in the tab bar) lists
+everything around the conversation: squad, working folder and git branch,
+context use (with **Compress now**), loaded skills, MCP connectors, files the
+agent created (with a download button), git changes, and the file browser.
+Tool calls appear in the chat as one grey line ("Ran 1 command, used 2 tools");
+click it to see each call, and click a call to see its arguments and result.
+
 ## Context ring
 
 The small ring next to the **＋** button visualises how much of the

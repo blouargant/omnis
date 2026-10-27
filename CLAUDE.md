@@ -6481,6 +6481,31 @@ vX** → `openUpdateDialog()` (the header Update button stays). It closes on out
 click, Escape, scroll, resize and item click — an item also closes the phone
 drawer (`closeNav`).
 
+### Web UI environment panel + quiet tool runs
+
+Spec [docs/superpowers/specs/2026-10-27-environment-panel-design.md](docs/superpowers/specs/2026-10-27-environment-panel-design.md).
+A right-hand `#env-panel` (built by [web/env-panel.js](web/env-panel.js), cards
+registered in `registerEnvCards` in [web/app.js](web/app.js), styles in
+[web/css/features/env-panel.css](web/css/features/env-panel.css)) follows the
+focused pane (`EnvPanel.setSession` from `setFocusedPanel`); each async card
+render must stop when `ctx.stale()`. Cards: Environnement (squad, folder, git
+branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
+Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
+`Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
+(`GET …/produced`; files a `Write` CREATED — `WriteOut.Created`, recorded in
+`ConversationFile.Produced`, `produced_changed` event), Modifications (`GET …/git`,
+[server/git_status.go](server/git_status.go), 5 s timeout, untracked files
+included) and Fichiers (the old Files browser, `#folders-panel` re-parented; its
+`collapsed` class follows the card). The composer ring and skills dock are hidden
+by CSS. **Tool runs**: `.tool-group` is always one grey summary line
+(`toolKind`/`toolSummary`, [web/tool-summary.js](web/tool-summary.js)) unfolding
+into a card of titled rows (`toolRowTitle`); a delegation is detected when a
+nested call arrives. **Persisted**: `toolRecorder` ([server/tool_record.go](server/tool_record.go))
+wraps the interactive turn's SSE sink and stores `ConversationTurn.Tools`
+(offset = UTF-16 length of visible reply text before the call; caps 8 KiB /
+300 calls); `renderHistoryTurn` replays them. Injected turns (mailbox, background,
+scheduled) do not record tools yet.
+
 ### Web UI look (Claude Desktop style)
 
 The web UI follows Claude Desktop's look and feel (spec
