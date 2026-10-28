@@ -13,21 +13,33 @@
    composer, the empty-pane picker), which a padding would not. */
 #env-panel {
   display: none;
+  flex-direction: column;
   position: absolute;
   top: var(--topbar-h);
   right: 0;
   bottom: 0;
   width: var(--env-panel-w);
-  overflow-y: auto;
   background: var(--bg);
   padding: 16px 12px 12px;
   z-index: 5;
 }
-body.env-open #env-panel { display: block; }
+body.env-open #env-panel { display: flex; }
 body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
   margin-right: var(--env-panel-w);
 }
-.env-cards { display: flex; flex-direction: column; gap: 10px; }
+/* The cards scroll; the dock below them (the Question card) stays pinned to
+   the panel's bottom edge, outside the scroll, so the card coming and going
+   as the chat scrolls never shifts the cards above. */
+.env-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.env-dock { flex: none; }
+.env-dock:has(> .env-card:not([hidden])) { padding-top: 10px; }
 
 .env-card {
   background: var(--bg-input);
@@ -100,7 +112,7 @@ body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
 #env-scrim { display: none; }
 @media (max-width: 820px) {
   #env-panel {
-    display: block !important;
+    display: flex !important;
     position: fixed;
     top: 0;
     right: 0;

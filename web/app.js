@@ -12484,11 +12484,13 @@ function envRow(icon, html, tip, cls) {
 function registerEnvCards() {
   // The question whose reply is at the top of the focused pane's transcript
   // (updatePinnedForScroll): shown only once that question has scrolled out of
-  // view. A click brings it back; ↺ gives its copy/fork/rewind menu.
+  // view. A click brings it back; ↺ gives its copy/fork/rewind menu. Docked at
+  // the panel's bottom so its coming and going never moves the other cards.
   EnvPanel.register({
     id: "question",
     title: () => tr("env.question"),
     sessionOnly: true,
+    dock: "bottom",
     render(body, ctx) {
       const panel = fp();
       const pin = panel && panel.sessionId === ctx.sessionId ? panel._pinned : null;
@@ -12513,6 +12515,7 @@ function registerEnvCards() {
     id: "environment",
     title: () => tr("env.environment"),
     render(body, ctx) {
+      syncEnvFolder();
       const meta = ctx.sessionId ? sessionMetaById(ctx.sessionId) : null;
       const rows = [];
       if (meta) rows.push(envRow(ENV_ICON.squad, escHtml(meta.squad || tr("env.defaultSquad")), tr("env.squad")));
@@ -12699,6 +12702,7 @@ function registerEnvCards() {
   EnvPanel.register({
     id: "files",
     title: () => tr("env.files"),
+    defaultOpen: false,
     render(body, ctx) {
       if (!body.contains(els.foldersPanel)) body.appendChild(els.foldersPanel);
       const show = ctx.open && EnvPanel.isOpen();
@@ -12717,7 +12721,7 @@ function registerEnvCards() {
 // preserves the currently expanded subtree so an agent-driven refresh doesn't
 // collapse what the user opened.
 async function refreshFoldersPanel() {
-  if (foldersCollapsed()) return;
+  if (foldersCollapsed()) { syncEnvFolder(true); return; }
   const expanded = [];
   for (const li of els.foldersList.querySelectorAll("li.folder-dir.expanded")) {
     if (li.dataset.rel) expanded.push(li.dataset.rel);
@@ -12734,6 +12738,29 @@ async function refreshFoldersPanel() {
     const children = li.querySelector(".folder-children");
     if (row && children) await toggleFolderExpand(li, row, children, rel);
   }
+}
+
+// syncEnvFolder keeps foldersDir — the working folder the Environment card
+// shows — current while the Files card is folded: the listing is not loaded
+// then, so fetch it for its directory. Once per session unless forced (the
+// cwd moved: a "!cd"); a superseded response is dropped.
+let envFolderFor = null, envFolderSeq = 0;
+async function syncEnvFolder(force) {
+  if (!foldersCollapsed()) return;
+  const key = activeSessionId || "";
+  if (!force && envFolderFor === key) return;
+  envFolderFor = key;
+  const mySeq = ++envFolderSeq;
+  try {
+    const res = await apiFetch(folderApiBase(), { cache: "no-store" });
+    if (!res.ok || mySeq !== envFolderSeq) return;
+    const data = await res.json();
+    if (mySeq !== envFolderSeq || !foldersCollapsed()) return;
+    if ((data.dir || "") === foldersDir) return;
+    foldersDir = data.dir || "";
+    EnvPanel.refresh("environment");
+    EnvPanel.refresh("files");
+  } catch (_) {}
 }
 
 // scheduleFoldersRefresh coalesces bursty refresh requests (an agent turn can

@@ -18,7 +18,7 @@
   color-scheme: dark;
 
   /* Layout */
-  --sidebar-w: 280px;
+  --sidebar-w: 320px;
   /* Width of the middle session-list column (features/collections.css). */
   --session-pane-w: 280px;
   /* Height of the sidebar footer (Settings button, features/sidebar.css

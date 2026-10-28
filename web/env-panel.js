@@ -5,8 +5,8 @@
 // focused pane's session (app.js calls EnvPanel.setSession from
 // setFocusedPanel). Cards are registered by app.js; each renders itself.
 //
-// A card: { id, title(): string, sessionOnly?: bool,
-//           render(body, ctx) } where ctx = { sessionId, open, setValue(html),
+// A card: { id, title(): string, sessionOnly?: bool, defaultOpen?: bool,
+//           dock?: "bottom", render(body, ctx) } where ctx = { sessionId, open, setValue(html),
 //           setVisible(bool), stale() } — an async render must stop when
 //           ctx.stale() turns true (the panel moved to another session).
 (function () {
@@ -24,6 +24,10 @@
 
   const root = () => document.getElementById("env-panel");
   const list = () => root() && root().querySelector(".env-cards");
+  // Cards with dock: "bottom" sit below the scrolling list, pinned to the
+  // panel's bottom edge, so showing or hiding one never moves the others.
+  const dock = () => root() && root().querySelector(".env-dock");
+  const cardEl = (id) => root() && root().querySelector(`[data-card="${id}"]`);
   const isMobile = () => window.matchMedia("(max-width: 820px)").matches;
 
   function isOpen() {
@@ -91,7 +95,7 @@
     const l = list();
     if (!l) return null;
     for (const card of cards) {
-      if (!l.querySelector(`[data-card="${card.id}"]`)) l.appendChild(buildCard(card));
+      if (!cardEl(card.id)) (card.dock === "bottom" && dock() || l).appendChild(buildCard(card));
     }
     return l;
   }
@@ -102,7 +106,7 @@
     if (!l) return;
     for (const card of cards) {
       if (id && card.id !== id) continue;
-      renderCard(card, l.querySelector(`[data-card="${card.id}"]`));
+      renderCard(card, cardEl(card.id));
     }
   }
 
@@ -125,7 +129,7 @@
     openCard(id) {
       setCardOpen(id, true);
       if (!isOpen()) setOpen(true); else refresh(id);
-      const el = list() && list().querySelector(`[data-card="${id}"]`);
+      const el = cardEl(id);
       if (el) el.scrollIntoView({ block: "nearest" });
     },
     init() {

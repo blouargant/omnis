@@ -6516,7 +6516,7 @@ out of the document — it is held by reference (`envPanelNode`), never looked u
 by id, until `placeEnvPanel` docks it again. Below 820px it lives in `<body>`
 as the fixed right drawer (only the focused pane is shown there). The chat
 transcript shows **no scrollbar** (`scrollbar-width: none`; the old 14px
-`--scroll-gutter` token is gone). **The first card, Question, replaced the
+`--scroll-gutter` token is gone). **The Question card replaced the
 floating pinned-prompt header** (`#prompt-header`, removed with its CSS and the
 `--prompt-fade` theme token): `updatePinnedForScroll` records per pane
 (`panel._pinned` = `{text, turn, bubble}`) the question whose reply is at the
@@ -6525,7 +6525,11 @@ top, released once the next question comes within `PIN_RELEASE_PX` of it — and
 refreshes the card only when the question changes and the pane is focused. The
 card is hidden while nothing is pinned; a click scrolls back to the question
 (`scrollToPinnedQuestion`), ↺ opens its copy/fork/rewind menu. With the panel
-closed the current question is shown nowhere. Cards: Environnement (squad, folder, git
+closed the current question is shown nowhere. It is **docked at the panel's
+bottom** (card option `dock: "bottom"` in env-panel.js → the `.env-dock`
+container): the panel is a flex column whose `.env-cards` list scrolls on its
+own, so the card coming and going as the chat scrolls never shifts the cards
+above it — at the top of the list it made every card jump. Cards: Environnement (squad, folder, git
 branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
@@ -6533,7 +6537,11 @@ Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `ConversationFile.Produced`, `produced_changed` event), Modifications (`GET …/git`,
 [server/git_status.go](server/git_status.go), 5 s timeout, untracked files
 included) and Fichiers (the old Files browser, `#folders-panel` re-parented; its
-`collapsed` class follows the card). The composer ring and skills dock are hidden
+`collapsed` class follows the card; **folded by default**, `defaultOpen: false`).
+While it is folded the listing is not loaded, so `syncEnvFolder` fetches the
+folder endpoint just for its `dir` (once per session, forced by
+`refreshFoldersPanel` after a `!cd`) to keep `foldersDir` — the Environment
+card's folder row and the Files card's value — current. The composer ring and skills dock are hidden
 by CSS. **Tool runs**: `.tool-group` is always one grey summary line
 (`toolKind`/`toolSummary`, [web/tool-summary.js](web/tool-summary.js)) unfolding
 into a card of titled rows (`toolRowTitle`); a delegation is detected when a
