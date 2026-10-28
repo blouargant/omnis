@@ -2141,8 +2141,8 @@ additively with the file layers; every matcher from it is tagged with a
 ([core/permissions/clearance.go](core/permissions/clearance.go),
 [agent/hooks_plugin.go](agent/hooks_plugin.go)). A plugin guard (the IA Parc
 `guard.sh` pattern) answers `permissionDecision: "allow"` for a command it has
-checked and `"ask"`/`"deny"` otherwise. A `PreToolUse` hook's `allow` is recorded
-as a **clearance** on `Infrastructure`'s store, and the permission gate consumes it:
+checked and `"ask"`/`"deny"` otherwise. A `PreToolUse` hook's `allow` — **or a
+user-approved `ask` escalation** — is recorded as a **clearance** on `Infrastructure`'s store, and the permission gate consumes it:
 - **Key is 4-part**: `Grant/Take(sessionID, invocationID, callID, toolName)`. The
   hook side grants with `(realSessionID(tc), tc.InvocationID(), tc.FunctionCallID(),
   t.Name())` — the **un-normalised** tool name — and the gate takes with the same
@@ -2174,11 +2174,11 @@ before it runs. `hooks.DecisionAllow` is therefore no longer dead code; see the
 
 **Settings round trip** ([server/plugins.go](server/plugins.go),
 [server/config.go](server/config.go), [web/settings.js](web/settings.js)):
-- `GET /api/plugins` → `PluginInfo[]` (resolves and republishes plugin state, so a
+- `GET /api/plugins` → `{plugins: [PluginInfo…]}` (resolves and republishes plugin state, so a
   freshly installed plugin shows up without a reload — outside a reload, hence the
-  known limit below). `PUT /api/plugins {name, enabled}` writes
+  known limit below). `PUT /api/plugins/:name {enabled}` writes
   `disabled_plugins` through the layer-aware delta writer, reloads, and answers
-  `{ok, reloaded, reload_error?}`; unknown plugin ⇒ **404**; a write that cannot be
+  `{plugins: [PluginInfo…], reloaded, reload_error?}` (no `ok` field); unknown plugin ⇒ **404**; a write that cannot be
   verified (re-read does not reflect the change) ⇒ **500**. **Re-enabling a plugin
   that a *lower* layer disabled writes `disabled_plugins: []`** into the target
   layer rather than just dropping the name (a delta against the lower layer would
@@ -2403,7 +2403,7 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `mcp_config.json` | MCP server definitions (name, command, args, env) |
 | `a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
 | `claude_model_map` (in `models.json`) | Overrides, alias by alias, which catalogue model a Claude Code plugin agent's `model:` alias (`haiku`/`sonnet`/`opus`) stands for; built-in `haiku→hosted, sonnet→high, opus→premium`. See "Claude Code plugins" |
-| `disabled_plugins` (in `agents.json`) | Names of installed Claude Code plugins that are switched off (agents, squad, skills, hooks not loaded). Toggled from Settings → Agents → Plugins (`PUT /api/plugins`) |
+| `disabled_plugins` (in `agents.json`) | Names of installed Claude Code plugins that are switched off (agents, squad, skills, hooks not loaded). Toggled from Settings → Agents → Plugins (`PUT /api/plugins/:name`) |
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
@@ -2978,12 +2978,14 @@ predates this work. Budget stays last, unchanged, so a call a hook or the user
 refuses is still never charged. **`hookSpecificOutput.permissionDecision: "allow"` is now consumed, but only
 as a per-call clearance over the default ask** (see "Claude Code plugins" →
 "Hook clearances"): `hookToolCallbacks` grants a clearance keyed
-`(session, invocation, call id, tool name)` on a hook `allow`, and the permission
+`(session, invocation, call id, tool name)` on a hook `allow` or a user-approved `ask` escalation, and the permission
 gate takes it once at the top of its callback and turns a **mode-default ask**
 (no rule matched, mode not `plan`) into allow. An `ask` rule still prompts, a
 `deny` still blocks, plan mode ignores it, and the clearance expires after 10
-minutes. The shipped Kubernetes hook never answers `allow` (it `proceed`s), so
-its validation success still shows the permission card, unchanged — the reorder
+minutes. The shipped Kubernetes hook never answers `allow` (it `proceed`s); its approved
+escalations do now grant a clearance, but its `kubectl …` mutations match explicit
+`ask` rules (so `DefaultAsk` is false) and the permission card therefore still
+appears, unchanged — the reorder
 was a precondition for clearances, and plugin guards are what use them. **The design
 intent for this reorder was that the card would additionally carry the hook's
 diff** (the Kubernetes hook's successful-validation `systemMessage`) **— verify
