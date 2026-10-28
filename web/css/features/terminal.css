@@ -5,7 +5,6 @@
  * When a pane shows a terminal tab it gets the `.terminal` class: the chat
  * surfaces are hidden (same as `.editing`) and the xterm.js host fills the
  * pane. */
-.chat-pane.terminal #prompt-header,
 .chat-pane.terminal #transcript,
 .chat-pane.terminal #ask-user-slot,
 .chat-pane.terminal #composer-wrap,

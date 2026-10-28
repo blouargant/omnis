@@ -1000,6 +1000,7 @@
   "env.label": "Umgebung",
   "env.toggle": "Umgebungsbereich ein- oder ausblenden",
   "env.files": "Dateien",
+  "env.question": "Frage",
   "env.environment": "Umgebung",
   "env.context": "Kontext",
   "env.skills": "Skills",

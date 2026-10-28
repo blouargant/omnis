@@ -1000,6 +1000,7 @@
   "env.label": "Environnement",
   "env.toggle": "Afficher ou masquer le panneau d'environnement",
   "env.files": "Fichiers",
+  "env.question": "Question",
   "env.environment": "Environnement",
   "env.context": "Contexte",
   "env.skills": "Skills",

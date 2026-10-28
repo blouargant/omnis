@@ -48,7 +48,6 @@
      cards share this token, so they match the editor. */
   --composer-bg: var(--bg-input);
   --shadow-bubble: 0 2px 10px rgba(60, 50, 35, 0.08), 0 1px 3px rgba(60, 50, 35, 0.05);
-  --prompt-fade: rgba(0, 0, 0, 0.14);
 
   --danger-fg: #b23324;
   --danger-bg: rgba(178, 51, 36, 0.08);

@@ -231,7 +231,7 @@ const queuedAskWidgets = new Map();
 // root.querySelector so duplicates never matter to JS (and #id CSS selectors
 // style every pane identically).
 const PANE_EL_IDS = {
-  promptHeader: "prompt-header", transcript: "transcript",
+  transcript: "transcript",
   composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
   editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
   send: "send", cancel: "cancel", status: "status",
@@ -1393,7 +1393,7 @@ function attachPaneHandlers(panel) {
   });
   pe.ctxCompactBtn.addEventListener("click", (e) => onCompactClick(e, panel));
 
-  // Sticky-bottom autoscroll + pinned prompt header per pane.
+  // Sticky-bottom autoscroll + the pane's current question (Question card).
   pe.transcript.addEventListener("scroll", () => {
     updateStickOnScroll(panel);
     updatePinnedForScroll(panel);
@@ -1420,9 +1420,7 @@ function attachPaneHandlers(panel) {
   // ask-user slot's bottom margin track it so content always clears the card.
   // Re-pin to bottom while stuck so a growing composer never hides the last line.
   // The same observer keeps --ask-card-max-h current (see updateAskCardBounds):
-  // it must be recomputed whenever the composer, the top chrome (tab bar +
-  // pinned prompt header, whose height varies with the prompt length), or the
-  // pane itself changes size.
+  // it must be recomputed whenever the composer or the pane itself changes size.
   if (window.ResizeObserver) {
     const ro = new ResizeObserver(() => {
       const h = pe.composerWrap.offsetHeight || 0;
@@ -1432,7 +1430,6 @@ function attachPaneHandlers(panel) {
       scheduleReplyNav(panel);
     });
     ro.observe(pe.composerWrap);
-    if (pe.promptHeader && pe.promptHeader.parentElement) ro.observe(pe.promptHeader.parentElement);
     ro.observe(panel.root);
     panel._composerRO = ro;
   }
@@ -3884,62 +3881,26 @@ function streamMdFinalize(bubble, fullText) {
   linkifyFilePaths(bubble);
 }
 
-// ─── Pinned prompt header ────────────────────────────────────────────────────
+// ─── Current question (environment panel) ────────────────────────────────────
 
-// Return the full prompt text for the pinned header; CSS handles 3-line clamping.
+// Return the full prompt text for the Question card; CSS clamps its lines.
 function pinnedPromptLabel(text) {
   const s = String(text || "");
   return s.length > 1000 ? s.slice(0, 1000) + "…" : s;
 }
 
-// Apply a header mutation while keeping the transcript content visually
-// stationary. The floating header is a flex sibling of #transcript, so
-// showing/hiding/resizing it steals (or returns) height from the transcript
-// — which would otherwise shove every visible line up or down by the header's
-// height. That shove is the "jump" users see when the pinned prompt kicks in
-// mid-scroll. We measure the height the mutation costs the transcript and
-// counter-scroll by the same amount, so the content stays put and the header
-// simply appears in the constant gap above it. (This also keeps the activeBubble
-// decision in updatePinnedForScroll stable, avoiding a show/hide flicker.)
-function withStableScroll(panel, mutate) {
-  const t = panel.els.transcript;
-  const before = t.clientHeight;
-  mutate();
-  const delta = before - t.clientHeight; // >0 when header grew
-  if (delta) t.scrollTop += delta;
-}
-
-// Show the user prompt text in the floating header above the transcript.
-// Attachments are intentionally NOT rendered here — they live in the inline
-// user bubble so the floating header stays compact.
-// `turn` ({index, text}) carries the pinned question's identity so the header
-// gets the same ↺ copy/fork/rewind control as the inline bubble it stands in
-// for — the bubble is off-screen by then, so without it those actions are
-// unreachable for the very turn the user is reading. Absent for a synthetic
-// echo with no persisted index.
-function setPinnedPrompt(panel, text, _files, turn) {
-  const ph = panel.els.promptHeader;
-  const label = pinnedPromptLabel(text);
-  const turnIndex = turn && Number.isInteger(turn.index) ? turn.index : null;
-  // Called on every scroll tick — skip the rebuild (and the forced reflow it
-  // would cost) when the visible header already shows this prompt.
-  if (ph.classList.contains("visible") && ph._pinnedLabel === label &&
-      ph._pinnedTurn === turnIndex) return;
-  withStableScroll(panel, () => {
-    ph.innerHTML = "";
-    if (label) {
-      const textEl = document.createElement("span");
-      textEl.className = "pinned-prompt-text";
-      renderUserText(textEl, label, panel.sessionId);
-      ph.appendChild(textEl);
-    }
-    if (panel.sessionId && turnIndex !== null && turnIndex >= 0) {
-      addTurnActions(ph, panel.sessionId, turnIndex, turn.text || "");
-    }
-    ph._pinnedLabel = label;
-    ph._pinnedTurn = turnIndex;
-    ph.classList.add("visible");
-  });
+// setPinnedPrompt records the pane's current question ({text, turn, bubble};
+// `turn` = {index, text} gives the card the same ↺ copy/fork/rewind control as
+// the inline bubble it stands in for, absent for a synthetic echo with no
+// persisted index) and refreshes the environment panel's Question card when
+// it belongs to the focused pane.
+function setPinnedPrompt(panel, pin) {
+  const cur = panel._pinned;
+  // Called on every scroll tick — only a different question is worth a render.
+  if (cur && cur.bubble === pin.bubble && cur.text === pin.text &&
+      (cur.turn && cur.turn.text) === (pin.turn && pin.turn.text)) return;
+  panel._pinned = pin;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("question");
 }
 
 // Trailing punctuation stripped from an "@" reference token — mirrors
@@ -4090,8 +4051,8 @@ const ICON_REWIND =
   '<path d="M8 8h6a5 5 0 0 1 0 10H7"/><polyline points="8 4 4 8 8 12"/></svg>';
 
 // addTurnActions attaches the hover ↺ button to a user turn's host element —
-// the inline row, or the floating pinned-prompt header standing in for it once
-// the row has scrolled away. Both hosts are `position: relative`, which the
+// the inline row, or the environment panel's Question card standing in for it
+// once the row has scrolled away. Both hosts are `position: relative`, which the
 // button's absolute placement anchors to. Clicking it opens the copy/fork/rewind
 // menu anchored to the button.
 function addTurnActions(row, sessionId, turnIndex, userText) {
@@ -4396,102 +4357,54 @@ function appendSpawnResultBlock(text, container) {
   (container || fpTranscript()).appendChild(row);
 }
 
-// Update the floating prompt header to show the question whose agent reply is
-// currently at the top of the viewport. We pin a question only once its bubble
-// has scrolled *completely* above the transcript top (its bottom edge crosses the
-// line) — NOT the moment its top edge crosses. Pinning on the top edge meant that
-// as soon as the *next* question's top scrolled up, it was pinned into the header
-// while its bubble was still visible inline just below it, so the floating panel
-// and the inline bubble showed the same prompt twice. Keying on the bottom edge
-// keeps the previous question pinned until the next one has fully left the viewport,
-// so the header never duplicates a question that's still on screen.
-// The header steals height from the transcript when it appears, so transcriptRect.top
-// shifts down by the header height once shown; that visibility-dependent line gives
-// natural hysteresis (pin at the top line, unpin one header-height lower) so the
-// decision can't flicker around the threshold. withStableScroll counter-scrolls the
-// height it costs, keeping the content stationary as the bubble becomes the header.
-//
-// Fade-out before the hand-over: the header occupies the top of the pane, so once
-// the pinned question's answer is nearly scrolled away the header hides its last
-// lines and then the *next* question as it rises. So when only PIN_FADE_PX of the
-// answer remain between the header's bottom and the next question, the header
-// fades out progressively, and it is hidden outright once the next question
-// reaches that line. The gap is measured against a line that does not move with
-// the header's own visibility (the wrap's top + the space the header takes when
-// shown, remembered per question in bubble._pinSpace), so hiding it — which gives that space
-// back to the transcript, content held still by withStableScroll — cannot make
-// the next tick re-show it: no flicker, and scrolling back up fades it back in.
-// The fade starts ~ten lines out and reaches full transparency PIN_CLEAR_PX
-// (about one line) before the hand-over, so the header is already invisible when
-// it is removed, whatever the scroll step.
-const PIN_FADE_PX = 240;
-const PIN_CLEAR_PX = 24;
+// updatePinnedForScroll keeps the pane's current question: the one whose reply
+// is at the top of the transcript, shown as the environment panel's first card.
+// A question is pinned only once its bubble has scrolled *completely* above the
+// transcript top — while any of it is on screen the card would just repeat it —
+// and it is released once the next question reaches the top, i.e. its reply has
+// scrolled away — within PIN_RELEASE_PX (about a line), so the gap a jump to a
+// question leaves above it (scrollToPinnedQuestion) does not keep the previous
+// question pinned.
+const PIN_RELEASE_PX = 24;
 function updatePinnedForScroll(panel) {
   const t = panel.els.transcript;
-  const transcriptRect = t.getBoundingClientRect();
-  const userBubbles = t.querySelectorAll(".bubble-user");
-  let activeBubble = null;
-  let nextBubble = null;
-  for (const bubble of userBubbles) {
-    const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.bottom < transcriptRect.top) { activeBubble = bubble; nextBubble = null; }
-    else if (activeBubble && !nextBubble) nextBubble = bubble;
+  const top = t.getBoundingClientRect().top;
+  let active = null;
+  let next = null;
+  for (const bubble of t.querySelectorAll(".bubble-user")) {
+    if (bubble.parentElement.getBoundingClientRect().bottom < top) { active = bubble; next = null; }
+    else if (active && !next) next = bubble;
   }
-  let fade = 1;
-  if (activeBubble !== null && nextBubble !== null) {
-    const ph = panel.els.promptHeader;
-    const wrapTop = ph.parentElement.getBoundingClientRect().top;
-    // Remember the space per question (header heights differ with prompt length),
-    // recorded only while the header is showing *this* question.
-    const label = pinnedPromptLabel(activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "");
-    if (ph.classList.contains("visible") && ph._pinnedLabel === label) {
-      activeBubble._pinSpace = transcriptRect.top - wrapTop;
-    }
-    const nextTop = nextBubble.parentElement.getBoundingClientRect().top;
-    const gap = nextTop - (wrapTop + (activeBubble._pinSpace || 0));
-    if (gap <= 0) {
-      clearPinnedPrompt(panel);
-      return;
-    }
-    fade = Math.max(0, Math.min(1, (gap - PIN_CLEAR_PX) / (PIN_FADE_PX - PIN_CLEAR_PX)));
-  }
-  if (activeBubble !== null) {
-    // Pin the question only — steering notes show as chips on the inline bubble.
-    const text = activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "";
-    let files = [];
-    if (activeBubble.dataset.files) {
-      try { files = JSON.parse(activeBubble.dataset.files); } catch { files = []; }
-    } else {
-      const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
-      files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
-    }
-    // The turn's own control acts on the *persisted* prompt (steer fold included),
-    // exactly like the inline bubble's — so pass dataset.text, not the pinned label.
-    const idx = Number(activeBubble.parentElement.dataset.turnIndex);
-    const turn = Number.isInteger(idx) && idx >= 0
-      ? { index: idx, text: activeBubble.dataset.text ?? "" }
-      : null;
-    setPinnedPrompt(panel, text, files, turn);
-    panel.els.promptHeader.style.opacity = fade < 1 ? fade.toFixed(3) : "";
-    panel.els.promptHeader.style.pointerEvents = fade === 0 ? "none" : "";
-  } else {
-    clearPinnedPrompt(panel);
-  }
+  if (active && next && next.parentElement.getBoundingClientRect().top <= top + PIN_RELEASE_PX) active = null;
+  if (!active) { clearPinnedPrompt(panel); return; }
+  // Pin the question only — steering notes show as chips on the inline bubble.
+  // The turn's own control acts on the *persisted* prompt (steer fold included),
+  // exactly like the inline bubble's — so it carries dataset.text.
+  const idx = Number(active.parentElement.dataset.turnIndex);
+  setPinnedPrompt(panel, {
+    text: active.dataset.textOriginal ?? active.dataset.text ?? "",
+    turn: Number.isInteger(idx) && idx >= 0 ? { index: idx, text: active.dataset.text ?? "" } : null,
+    bubble: active,
+  });
 }
 
 function clearPinnedPrompt(panel) {
   panel = panel || fp();
-  if (!panel) return;
-  const ph = panel.els.promptHeader;
-  if (!ph.classList.contains("visible") && ph.innerHTML === "") return;
-  withStableScroll(panel, () => {
-    ph.innerHTML = "";
-    ph._pinnedLabel = "";
-    ph._pinnedTurn = null;
-    ph.classList.remove("visible");
-    ph.style.opacity = "";
-    ph.style.pointerEvents = "";
-  });
+  if (!panel || !panel._pinned) return;
+  panel._pinned = null;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("question");
+}
+
+// scrollToPinnedQuestion brings the pane's current question back to the top
+// of its transcript (a click on the Question card).
+function scrollToPinnedQuestion(panel) {
+  const pin = panel && panel._pinned;
+  const row = pin && pin.bubble.parentElement;
+  if (!row || !row.isConnected) return;
+  const tr = panel.els.transcript;
+  const top = row.getBoundingClientRect().top - tr.getBoundingClientRect().top + tr.scrollTop;
+  panel._stick = false;
+  tr.scrollTo({ top: Math.max(0, top - 12), behavior: "smooth" });
 }
 
 // Copy text to the clipboard. The async Clipboard API is only available in
@@ -12460,6 +12373,33 @@ function envRow(icon, html, tip, cls) {
 // card; its "collapsed" class follows the card's fold state and the panel's
 // visibility, so every existing foldersCollapsed() guard keeps working.
 function registerEnvCards() {
+  // The question whose reply is at the top of the focused pane's transcript
+  // (updatePinnedForScroll): shown only once that question has scrolled out of
+  // view. A click brings it back; ↺ gives its copy/fork/rewind menu.
+  EnvPanel.register({
+    id: "question",
+    title: () => tr("env.question"),
+    sessionOnly: true,
+    render(body, ctx) {
+      const panel = fp();
+      const pin = panel && panel.sessionId === ctx.sessionId ? panel._pinned : null;
+      ctx.setVisible(!!pin);
+      body.innerHTML = "";
+      if (!pin || !ctx.open) return;
+      const q = document.createElement("div");
+      q.className = "env-question";
+      const text = document.createElement("span");
+      text.className = "env-question-text";
+      renderUserText(text, pinnedPromptLabel(pin.text), ctx.sessionId);
+      q.appendChild(text);
+      if (pin.turn) addTurnActions(q, ctx.sessionId, pin.turn.index, pin.turn.text);
+      q.addEventListener("click", (e) => {
+        if (e.target.closest("a, button")) return;
+        scrollToPinnedQuestion(panel);
+      });
+      body.appendChild(q);
+    },
+  });
   EnvPanel.register({
     id: "environment",
     title: () => tr("env.environment"),

@@ -120,6 +120,32 @@ body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
   }
 }
 
+/* Question card: the current question, styled like the user bubble it stands
+   in for. Clicking it scrolls back to that question; the ↺ control
+   (.turn-action-btn, features/messages.css) shows on hover. */
+.env-question {
+  position: relative;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-fg);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.env-question-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  line-clamp: 8;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.env-question .turn-action-btn { top: 4px; right: 4px; }
+.env-question:hover .turn-action-btn,
+.env-question:focus-within .turn-action-btn { opacity: 1; }
+
 /* Environnement / Contexte / Skills card details. */
 .env-col-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
 .env-folder { cursor: pointer; }

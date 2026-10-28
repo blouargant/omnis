@@ -4037,7 +4037,7 @@ mirrored in JS for the web UI.
   the `@` prefix). Web reuses `#slash-menu` with `menuMode === "at"`
   (`atTokenAtCaret`/`renderAtMenu`/`applyAtCompletion`, served by
   `GET /api/complete-file?path=…&session=…` → `{candidates}`).
-- **Rendering**: in the web user bubble and the floating pinned-prompt header
+- **Rendering**: in the web user bubble and the environment panel's Question card
   (`renderUserText`), valid file refs render as `.file-ref` links (distinct
   colour) that open the file in a new tab via `GET /api/file?path=…&session=…`
   (auth'd blob fetch); valid dirs render as `.file-ref-dir` links (dir listing);
@@ -4641,7 +4641,7 @@ Surfaces:
   as a `.steer-chip` on the in-flight question bubble** it steers (not in the
   composer). The chips are driven by `renderUserBubbleSteer` from the
   bubble's `_steerNotes` (+ remembered `dataset.textOriginal`); `dataset.text` is
-  kept as the full `"[Sent while working]"` fold so the pinned header / fork-rewind
+  kept as the full `"[Sent while working]"` fold so the Question card / fork-rewind
   still see the verbatim persisted prompt, while the **base question stays plain
   text and each note is a chip**. On `{queued:false}` it `steerUndoFromQuestion`s
   the append and falls back to `sendMessage`. When the model never reached a note
@@ -6503,7 +6503,16 @@ out of the document — it is held by reference (`envPanelNode`), never looked u
 by id, until `placeEnvPanel` docks it again. Below 820px it lives in `<body>`
 as the fixed right drawer (only the focused pane is shown there). The chat
 transcript shows **no scrollbar** (`scrollbar-width: none`; the old 14px
-`--scroll-gutter` token is gone). Cards: Environnement (squad, folder, git
+`--scroll-gutter` token is gone). **The first card, Question, replaced the
+floating pinned-prompt header** (`#prompt-header`, removed with its CSS and the
+`--prompt-fade` theme token): `updatePinnedForScroll` records per pane
+(`panel._pinned` = `{text, turn, bubble}`) the question whose reply is at the
+top of the transcript — pinned once its bubble has scrolled fully above the
+top, released once the next question comes within `PIN_RELEASE_PX` of it — and
+refreshes the card only when the question changes and the pane is focused. The
+card is hidden while nothing is pinned; a click scrolls back to the question
+(`scrollToPinnedQuestion`), ↺ opens its copy/fork/rewind menu. With the panel
+closed the current question is shown nowhere. Cards: Environnement (squad, folder, git
 branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
@@ -6918,7 +6927,7 @@ helpers `focusedPanel()`/`fp()`, `setFocusedPanel`, `activateTab`/`closeTab`/
 tabs whose container is detached). `activeSessionId` is a **compatibility shim** =
 the focused pane's active tab, so global-action sites (sidebar, modals, ctx
 browser) keep working. Display-write functions (`applySessionUI`,
-`renderCtxRing/Popup`, `setStatus`, `scrollBottom`, pinned-prompt,
+`renderCtxRing/Popup`, `setStatus`, `scrollBottom`, the pinned question,
 `renderAttachmentsUI`, `renderAskUserWidget`, streaming gates) take/loop a `panel`
 via `panelsForSession` so **background panes update too**; `applySessionUI` also
 re-renders tabs (busy dot) via `panelsWithTab`. Listeners are wired **per-pane** in

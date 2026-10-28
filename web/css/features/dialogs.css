@@ -760,7 +760,7 @@
 /* ─── Ask-user widget ──────────────────────────────────────── */
 #ask-user-slot {
   /* Grow:0 so it only takes the space its content needs, shrink:1 + min-height:0
-   * so when the pane is tight (e.g. the pinned #prompt-header is also showing) it
+   * so when the pane is tight it
    * yields space and scrolls INTERNALLY rather than pushing #composer-wrap — and
    * its own Skip/Submit action row — off the bottom of the overflow:hidden pane.
    * #transcript (flex:1 1 0, basis 0) gives up its space first, so the ask card

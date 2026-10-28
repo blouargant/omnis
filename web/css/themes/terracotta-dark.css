@@ -36,7 +36,6 @@
   --bubble-user-border: #3a3936;
   --composer-bg: var(--bg-input);
   --shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.35);
-  --prompt-fade: rgba(0, 0, 0, 0.45);
 
   --danger-fg: #f0907a;
   --danger-bg: rgba(240, 144, 122, 0.10);

@@ -1,8 +1,7 @@
-/* Messages: user/pinned prompt, transcript, message rows, assistant markdown, copy/error/images
+/* Messages: user bubble, transcript, message rows, assistant markdown, copy/error/images
    Part of web/css/styles.css — edit this partial, not the @import barrel. */
 
-/* ─── Shared user message style (floating header + inline bubbles) ── */
-#prompt-header,
+/* ─── User message bubble ───────────────────────────────────── */
 .bubble-user {
   background: var(--user-bubble-bg);
   border: none;
@@ -11,56 +10,6 @@
   color: var(--user-bubble-fg);
   font-size: 15px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ─── Pinned user prompt (floating above transcript) ───────── */
-/* The transcript has no scrollbar gutter, so the header's percentage width
-   resolves against the same content width as the inline .msg-row bubbles —
-   the floating and inline prompt boxes are pixel-identical in width and (being
-   centred) in horizontal position. */
-.prompt-header-wrap {
-  flex-shrink: 0;
-}
-#prompt-header {
-  display: none;
-  width: 100%;
-  max-width: min(calc(var(--col-w) - 40px), calc(100% - 40px));
-  /* 18px top = #transcript padding-top (16px) + .msg-row padding-top (2px), so
-     the floating header card sits at the exact Y of the inline bubble it
-     replaces. */
-  margin: 18px auto 0;
-  white-space: normal;
-  position: relative;
-  /* Lift the floating header above the transcript so its downward box-shadow is
-     not occluded. Assistant rows are `position: relative` (z-index auto) to
-     anchor their copy button, so they paint in DOM order with the header (also
-     z-index auto) — and being later in the DOM, their opaque code-block
-     backgrounds would otherwise cover the header's shadow. A small explicit
-     z-index lifts the header above those auto-stacked rows while staying below
-     the composer (3), ask-user slot (4), and tab bar (8/9). */
-  z-index: 1;
-}
-/* The pinned prompt floats above the transcript, so it gets a soft, slightly
-   stronger, downward-biased drop shadow (rather than a hard fade band beneath
-   it). The shadow follows the card's 6px radius, so its bottom corners are
-   rounded for free — it reads as the panel's own cast shadow. The tint is
-   themed via --prompt-fade: dark themes fall back to a near-black shadow; light
-   themes override it with a softer one so it never becomes a white smear. */
-#prompt-header.visible {
-  display: block;
-  box-shadow: 0 4px 12px -2px var(--prompt-fade, rgba(0, 0, 0, 0.55)),
-              0 1px 3px rgba(0, 0, 0, 0.22);
-}
-
-.pinned-prompt-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -76,8 +25,8 @@
   padding: 16px 0 calc(52px + var(--composer-overlay-h, 0px));
   /* No visible scrollbar (Claude Desktop style): the transcript still scrolls
      with the wheel, touch and keyboard, and .reply-nav-btn jumps back to the
-     start of a long reply. No bar also means no gutter, so the message column,
-     the pinned prompt header and the composer all centre on the full pane. */
+     start of a long reply. No bar also means no gutter, so the message column
+     and the composer both centre on the full pane. */
   scrollbar-width: none;
 }
 #transcript::-webkit-scrollbar { display: none; }
@@ -100,8 +49,8 @@
   margin: 0 auto 2px;
 }
 
-/* User bubble (history — inline, shares style with #prompt-header): a small
-   quiet bubble, right-aligned in the column, sized to its text. */
+/* User bubble: a small quiet bubble, right-aligned in the column, sized to
+   its text. */
 .msg-row-user { justify-content: flex-end; }
 .bubble-user {
   width: auto;
@@ -154,11 +103,7 @@
   transition: opacity .12s ease, color .12s ease, background .12s ease;
 }
 .msg-row-user:hover .turn-action-btn,
-.msg-row-user:focus-within .turn-action-btn,
-/* Same control on the floating pinned prompt (it hosts the button once the
-   inline row has scrolled off), revealed on hovering the header card. */
-#prompt-header:hover .turn-action-btn,
-#prompt-header:focus-within .turn-action-btn { opacity: 1; }
+.msg-row-user:focus-within .turn-action-btn { opacity: 1; }
 .turn-action-btn:hover {
   color: var(--accent-strong);
   background: var(--bubble-user-bg);
@@ -196,18 +141,18 @@
    pending (not-yet-resolved) refs are dimmed; invalid refs are downgraded to
    plain text nodes in JS so they never reach these rules. */
 .bubble-user-text a.file-ref,
-.pinned-prompt-text a.file-ref {
+.env-question-text a.file-ref {
   color: #7ee787;
   text-decoration: none;
   border-bottom: 1px dotted currentColor;
   cursor: pointer;
 }
 .bubble-user-text a.file-ref:hover,
-.pinned-prompt-text a.file-ref:hover { text-decoration: none; border-bottom-style: solid; }
+.env-question-text a.file-ref:hover { text-decoration: none; border-bottom-style: solid; }
 .bubble-user-text a.file-ref.file-ref-dir,
-.pinned-prompt-text a.file-ref.file-ref-dir { color: #4fc1ff; }
+.env-question-text a.file-ref.file-ref-dir { color: #4fc1ff; }
 .bubble-user-text a.file-ref.file-ref-pending,
-.pinned-prompt-text a.file-ref.file-ref-pending {
+.env-question-text a.file-ref.file-ref-pending {
   color: inherit;
   border-bottom-color: transparent;
   opacity: 0.85;
