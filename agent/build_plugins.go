@@ -80,8 +80,9 @@ func buildPlugins(
 	//
 	// Mounted BEFORE the permission gate, for the reason in beforeToolChain
 	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
-	// already approved the call. Keep these two in this order. (It does not make
-	// permissionDecision:"allow" work — see that comment.)
+	// already approved the call. Keep these two in this order: a hook allow (or
+	// an approved hook ask) hands the gate a per-call clearance that skips only
+	// its mode-default prompt — see that comment.
 	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
