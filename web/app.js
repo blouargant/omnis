@@ -11723,6 +11723,7 @@ function initTooltips() {
   document.body.appendChild(layer);
 
   let current = null; // the [data-tip] element the tooltip is tracking
+  let pending = null; // timer of a delayed tooltip (data-tip-delay)
 
   function place() {
     if (!current) return;
@@ -11762,6 +11763,8 @@ function initTooltips() {
   }
 
   function show(el) {
+    clearTimeout(pending);
+    pending = null;
     current = el;
     layer.textContent = el.getAttribute("data-tip") || "";
     layer.classList.remove("below");
@@ -11769,6 +11772,8 @@ function initTooltips() {
     layer.classList.add("show");
   }
   function hide() {
+    clearTimeout(pending);
+    pending = null;
     current = null;
     layer.classList.remove("show");
   }
@@ -11777,6 +11782,19 @@ function initTooltips() {
     const el = e.target.closest && e.target.closest("[data-tip]");
     if (!el || el.classList.contains("model-status-dot")) { if (current) hide(); return; }
     if (el === current) return;
+    // data-tip-delay (ms): show only once the pointer has rested on the element
+    // that long, so a pointer merely passing over it raises nothing. The element
+    // is tracked meanwhile, so leaving it (or a scroll / click) cancels the wait.
+    const delay = parseInt(el.getAttribute("data-tip-delay"), 10);
+    if (delay > 0) {
+      hide();
+      current = el;
+      pending = setTimeout(() => {
+        pending = null;
+        if (current === el && el.isConnected) show(el);
+      }, delay);
+      return;
+    }
     show(el);
   });
   document.addEventListener("pointerout", (e) => {
@@ -12593,7 +12611,12 @@ function registerEnvCards() {
         row.innerHTML = `<span class="env-row-icon">${ENV_ICON.skill}</span>` +
           `<span class="env-row-text">${escHtml(s.name)}</span>` +
           `<span class="env-row-meta">${s.kind === "softskill" ? escHtml(tr("skillsDock.softskill")) : ""}${s.count > 1 ? ` ×${s.count}` : ""}</span>`;
-        if (s.description) row.setAttribute("data-tip", s.description);
+        if (s.description) {
+          row.setAttribute("data-tip", s.description);
+          // A skill list is crossed on the way to other cards: only a pointer
+          // that rests on a row asks for its description.
+          row.setAttribute("data-tip-delay", "700");
+        }
         item.appendChild(row);
         if (envSkillsOpen.has(key) && s.instructions) {
           const md = document.createElement("div");

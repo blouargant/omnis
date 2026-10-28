@@ -6604,6 +6604,11 @@ centre after horizontal clamping.
   its `data-tip` in place but don't expect the JS layer to render it.
 - The layer reads `data-tip` via `textContent` (no HTML injection); HTML-string
   call sites still `escHtml()` the value as usual.
+- **Delayed tips** (`data-tip-delay="<ms>"`): the tooltip appears only once the
+  pointer has rested on the element that long, so merely crossing it raises
+  nothing; leaving it, scrolling or clicking cancels the wait. Used on the
+  environment panel's skill rows (700 ms), whose long descriptions would
+  otherwise flash up as the pointer passes on its way to another card.
 - **Long tips wrap**: the layer is `white-space: normal` with `max-width: 18rem`,
   so short tips stay on one line (the box shrink-wraps) while a long description
   soft-wraps onto multiple lines instead of stretching into one unreadable
