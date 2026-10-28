@@ -196,3 +196,54 @@ func TestSetPluginLayersLastWins(t *testing.T) {
 		t.Fatalf("stale snapshot: %d commands after final SetPluginLayers(nil)", n)
 	}
 }
+
+// splitVerdictConfig is a plugin MultiEdit matcher whose command answers per
+// file: "allow" for paths listed in allow, "deny" for paths in deny, silence
+// otherwise.
+func splitVerdictConfig(t *testing.T, allow, deny []string) *Config {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString("in=$(cat); ")
+	for _, p := range deny {
+		sb.WriteString(`case "$in" in *'"file_path":"` + p + `"'*) echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"no"}}'; exit 0;; esac; `)
+	}
+	for _, p := range allow {
+		sb.WriteString(`case "$in" in *'"file_path":"` + p + `"'*) echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'; exit 0;; esac; `)
+	}
+	sb.WriteString("exit 0")
+	c := Empty()
+	c.events[PreToolUse] = []Matcher{{
+		Matcher: "MultiEdit",
+		Hooks:   []Command{{Type: "command", Command: sb.String(), Timeout: 10}},
+		Plugin:  &PluginRef{Name: "demo", Root: t.TempDir()},
+	}}
+	return c
+}
+
+func twoFileMultiEdit() Input {
+	return Input{ToolInput: map[string]any{"files": []any{
+		map[string]any{"file_path": "/a", "edits": []any{}},
+		map[string]any{"file_path": "/b", "edits": []any{}},
+	}}}
+}
+
+func TestSplitMultiEditPartialAllowDoesNotAllow(t *testing.T) {
+	out := runPre(splitVerdictConfig(t, []string{"/a"}, nil), context.Background(), "MultiEdit", twoFileMultiEdit())
+	if out.Ran != 2 || out.Decision != DecisionProceed {
+		t.Fatalf("partial allow must not clear the call: %+v", out)
+	}
+}
+
+func TestSplitMultiEditAllAllowAllows(t *testing.T) {
+	out := runPre(splitVerdictConfig(t, []string{"/a", "/b"}, nil), context.Background(), "MultiEdit", twoFileMultiEdit())
+	if out.Ran != 2 || out.Decision != DecisionAllow {
+		t.Fatalf("every split run allowed: want DecisionAllow, got %+v", out)
+	}
+}
+
+func TestSplitMultiEditOneDenyBlocks(t *testing.T) {
+	out := runPre(splitVerdictConfig(t, []string{"/a"}, []string{"/b"}), context.Background(), "MultiEdit", twoFileMultiEdit())
+	if out.Decision != DecisionBlock || out.Reason != "no" {
+		t.Fatalf("one deny must block: %+v", out)
+	}
+}

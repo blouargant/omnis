@@ -130,6 +130,8 @@ func (o Outcome) Asks() bool { return o.Decision == DecisionAsk }
 // the first reason. A permissionDecision="ask" or legacy decision="approve" (with
 // no deny) yields DecisionAsk or DecisionAllow respectively — but ask wins over
 // allow, so a permissive hook never cancels another's escalation to user input.
+// A plugin command whose input was split into several runs (a MultiEdit, one
+// run per file) contributes an allow only when every one of its runs allowed.
 // additionalContext fragments are joined with blank lines.
 //
 // Non-blocking command errors (exit codes other than 0/2, timeouts, safety-floor
@@ -154,31 +156,52 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 		return out
 	}
 
-	// A plugin command runs once per adapted input; a native one once.
+	// A plugin command runs once per adapted input; a native one once. A
+	// plugin MultiEdit is split into one run per file: the runs of one command
+	// share a group, and that command's "allow" counts only if EVERY run in
+	// the group allowed — an allow for file A must never clear the edit of a
+	// file B the hook said nothing about. Deny/ask/block aggregate as usual.
 	type job struct {
 		cmd   Command
 		stdin []byte
 		env   []string
+		group int // index into groupSize; -1 for an unsplit run
 	}
 	var jobs []job
+	var groupSize []int
 	for _, mc := range cmds {
 		if strings.TrimSpace(mc.Command.Command) == "" {
 			continue
 		}
 		if mc.plugin == nil {
-			jobs = append(jobs, job{cmd: mc.Command, stdin: stdinNative})
+			jobs = append(jobs, job{cmd: mc.Command, stdin: stdinNative, group: -1})
 			continue
 		}
 		cmd := mc.Command
 		cmd.Command = expandPluginRoot(cmd.Command, mc.plugin.Root)
 		env := []string{"CLAUDE_PLUGIN_ROOT=" + mc.plugin.Root}
+		var runs [][]byte
 		for _, pin := range claudeInputs(in) {
 			b, merr := json.Marshal(pin)
 			if merr != nil {
 				fmt.Fprintf(os.Stderr, "[hooks] %s: marshal input: %v\n", event, merr)
 				continue
 			}
-			jobs = append(jobs, job{cmd: cmd, stdin: b, env: env})
+			runs = append(runs, b)
+		}
+		group := -1
+		if len(runs) > 1 {
+			group = len(groupSize)
+			groupSize = append(groupSize, len(runs))
+		}
+		for _, b := range runs {
+			jobs = append(jobs, job{cmd: cmd, stdin: b, env: env, group: group})
+		}
+	}
+	groupAllows := make([]int, len(groupSize))
+	allow := func() {
+		if out.Decision != DecisionBlock && out.Decision != DecisionAsk {
+			out.Decision = DecisionAllow
 		}
 	}
 
@@ -232,7 +255,13 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 		// events and otherwise informational.
 		stdout := strings.TrimSpace(res.Stdout)
 		if jo, ok := parseJSONOutput(stdout); ok {
-			applyJSONOutput(jo, event, &out, &contexts)
+			if applyJSONOutput(jo, event, &out, &contexts) {
+				if j.group < 0 {
+					allow()
+				} else {
+					groupAllows[j.group]++
+				}
+			}
 			continue
 		}
 		if stdout != "" && addsContext(event) {
@@ -240,6 +269,11 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 		}
 	}
 
+	for g, n := range groupAllows {
+		if n == groupSize[g] {
+			allow()
+		}
+	}
 	if len(contexts) > 0 {
 		out.AdditionalContext = strings.Join(contexts, "\n\n")
 	}
@@ -278,8 +312,11 @@ func parseJSONOutput(stdout string) (jsonOutput, bool) {
 }
 
 // applyJSONOutput folds one command's structured output into the running
-// Outcome.
-func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]string) {
+// Outcome. It applies deny/ask/block itself but only REPORTS an allow vote
+// (permissionDecision="allow", or legacy decision="approve" on PreToolUse):
+// the caller decides whether that vote may clear the call, since an allow from
+// one run of a split plugin input only counts once every run agreed.
+func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]string) (allow bool) {
 	if jo.SystemMessage != "" && out.SystemMessage == "" {
 		out.SystemMessage = jo.SystemMessage
 	}
@@ -309,9 +346,7 @@ func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]stri
 				}
 			}
 		case "allow":
-			if out.Decision != DecisionBlock && out.Decision != DecisionAsk {
-				out.Decision = DecisionAllow
-			}
+			allow = true
 		}
 		if hs.AdditionalContext != "" {
 			*contexts = append(*contexts, hs.AdditionalContext)
@@ -325,10 +360,11 @@ func applyJSONOutput(jo jsonOutput, event string, out *Outcome, contexts *[]stri
 			out.Reason = jo.Reason
 		}
 	case "approve":
-		if out.Decision != DecisionBlock && out.Decision != DecisionAsk && event == PreToolUse {
-			out.Decision = DecisionAllow
+		if event == PreToolUse {
+			allow = true
 		}
 	}
+	return allow
 }
 
 func firstNonEmpty(vals ...string) string {

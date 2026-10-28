@@ -221,3 +221,43 @@ func TestClearanceMatchesUnderRootSessionOnly(t *testing.T) {
 		t.Fatalf("gate asked %d times, want 0 (grant and take must share the root session id)", n)
 	}
 }
+
+// splitAllowRig wires a plugin MultiEdit guard that allows only the listed
+// files and says nothing about the rest.
+func splitAllowRig(t *testing.T, allowed ...string) *wiringRig {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := "in=$(cat); "
+	for _, p := range allowed {
+		cmd += `case \"$in\" in *'\"file_path\":\"` + p + `\"'*) echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}';; esac; `
+	}
+	cmd += "exit 0"
+	hp := filepath.Join(dir, "hooks.json")
+	writeFile(t, hp, `{"hooks":{"PreToolUse":[{"matcher":"MultiEdit","hooks":[{"type":"command","command":"`+cmd+`"}]}]}}`)
+	return newWiringRig(t, "", "", func(rt *RuntimeSettings) {
+		rt.PluginHookLayers = []hooks.PluginLayer{{Name: "demo", Root: dir, Path: hp}}
+	}, "")
+}
+
+var twoFileEdit = map[string]any{"files": []any{
+	map[string]any{"file_path": "/a", "edits": []any{}},
+	map[string]any{"file_path": "/b", "edits": []any{}},
+}}
+
+func TestSplitMultiEditPartialAllowStillAsks(t *testing.T) {
+	r := splitAllowRig(t, "/a")
+	r.call(wtc("demo_worker"), "MultiEdit", twoFileEdit)
+	if n := r.asker.n.Load(); n != 1 {
+		t.Fatalf("gate asked %d times, want 1 (the hook allowed /a only, /b still needs the user)", n)
+	}
+}
+
+func TestSplitMultiEditFullAllowSkipsAsk(t *testing.T) {
+	r := splitAllowRig(t, "/a", "/b")
+	if out := r.call(wtc("demo_worker"), "MultiEdit", twoFileEdit); out != nil {
+		t.Fatalf("call blocked: %v", out)
+	}
+	if n := r.asker.n.Load(); n != 0 {
+		t.Fatalf("gate asked %d times, want 0 (the hook allowed every file)", n)
+	}
+}
