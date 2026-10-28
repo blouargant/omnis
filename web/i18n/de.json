@@ -1040,5 +1040,12 @@
   "env.connectors": "Konnektoren",
   "env.mcp.connected": "verbunden",
   "env.mcp.idle": "nicht gestartet",
-  "env.mcp.error": "Fehler"
+  "env.mcp.error": "Fehler",
+  "set.plugins.title": "Plugins",
+  "set.plugins.groupLabel": "Plugin: {name}",
+  "set.plugins.enabled": "Aktiviert",
+  "set.plugins.disabled": "Deaktiviert",
+  "set.plugins.agentsCount.one": "{count} Agent",
+  "set.plugins.agentsCount.other": "{count} Agenten",
+  "set.plugins.toggleFailed": "Plugin konnte nicht geändert werden: {error}"
 }
