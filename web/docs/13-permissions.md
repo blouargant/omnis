@@ -118,3 +118,9 @@ commands — see [Skills](11-skills.md).
 list per tier (deny / ask / allow). Each rule is a `Tool(specifier)` string with
 an optional reason; complex regex rules are easier to write in the **Raw JSON**
 view.
+
+**Plugin guards.** A [Claude Code plugin](23-plugins.md)'s hook may answer
+`allow` for a command it has checked. That only skips the *default* prompt for
+that single call (it expires after a few minutes): a rule of yours in `ask` still
+asks, one in `deny` still blocks, and Plan mode ignores it. Calls between agents
+of the same plugin do not prompt either, unless you wrote an `Agent(...)` rule.

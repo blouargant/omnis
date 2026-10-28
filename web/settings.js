@@ -91,6 +91,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "agent-md",        file: "21-agent-md.md",        label: "Project Memory (AGENT.md)", group: "Core Concepts" },
     { id: "permissions-concept", file: "13-permissions.md", label: "Permissions",     group: "Core Concepts" },
     { id: "hooks-concept",   file: "22-hooks.md",           label: "Lifecycle Hooks", group: "Core Concepts" },
+    { id: "plugins-concept", file: "23-plugins.md",        label: "Claude Code Plugins", group: "Core Concepts" },
     { id: "config",          file: "14-config.md",          label: "Configuration & Filesystem", group: "Core Concepts" },
     { id: "providers",       file: "15-providers.md",       label: "Providers & Models", group: "Core Concepts" },
     { id: "env-vars",        file: "16-env-vars.md",        label: "Environment Variables", group: "Core Concepts" },
