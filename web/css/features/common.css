@@ -26,8 +26,10 @@
   --bottom-bar-h: 60px;
   /* Height of the top chrome bar — the sidebar header (Omnis logo/title) and
      each pane's tab bar are pinned to this so they align edge-to-edge and read
-     as one continuous strip. */
-  --topbar-h: 56px;
+     as one continuous strip. 40px = the sidebar header's 24px toggle + its 8px
+     padding: the tabs fill the bar (the active one is an underline, so no strip
+     of chrome is left above them). */
+  --topbar-h: 40px;
   /* Chat content column width: 90% of the pane, capped at --chat-max-w so the
      column stays a centred, Claude-style reading width on wide windows. */
   --col-w: min(90%, var(--chat-max-w));

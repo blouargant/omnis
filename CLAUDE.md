@@ -6578,7 +6578,9 @@ implementation and need explicit `[hidden] { display: none }` rules (their own
 `display` beats the UA rule). The sidebar's **New chat** is a plain row with the
 squad chevron revealed on hover (always on touch); the focused session row is a
 neutral fill + a dot in its collection colour; the active pane tab is underlined in
-the collection colour. **`make web-test`** runs the node tests in `web/tests/`
+the collection colour. The top bar (`--topbar-h`, **40px** — the sidebar header's
+24px toggle + padding) has no strip of chrome above the tabs any more: they fill
+it, like the `+` button. The settings dialog's section header keeps its own 56px. **`make web-test`** runs the node tests in `web/tests/`
 (tokens have `:root` defaults, both terracotta themes define the palette, the
 composer state machine).
 

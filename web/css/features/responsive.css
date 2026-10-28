@@ -93,6 +93,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    align-self: center; /* the bar stretches its items; this one has a height */
     width: 32px;
     height: 32px;
     margin-left: 4px;

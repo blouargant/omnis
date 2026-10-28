@@ -132,10 +132,9 @@
   gap: 6px;
   min-width: 90px;
   max-width: 200px;
-  /* Shorter than the bar so a strip of chrome shows above the tab; the
-   * rounded top + white active fill give the folder-tab shape. The 1px
+  /* The tab fills the bar; the active tab is marked by its underline. The 1px
    * transparent border is reserved so activating a tab never nudges layout. */
-  height: 42px;
+  height: var(--topbar-h);
   padding: 0 6px 0 12px;
   background: transparent;
   border: 1px solid transparent;
@@ -250,14 +249,12 @@
 /* A single open tab can't be closed via its × when it's the pane's only tab in
  * the only pane — but we keep the affordance; closeTab handles the picker. */
 
-/* "+" new-tab button. Bottom-aligned to the tab band and given the tab's height
- * (rather than stretching the full 56px bar) so its glyph sits on the same line
- * as the tabs' close (×) button instead of ~7px above it. The 42px MUST match
- * .pane-tab height above. */
+/* "+" new-tab button, the tabs' height so its glyph sits on the same line as
+ * their close (×) button. */
 .pane-newtab-btn {
   flex-shrink: 0;
   align-self: flex-end;
-  height: 42px;
+  height: var(--topbar-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
