@@ -12509,6 +12509,13 @@ function registerEnvCards() {
         scrollToPinnedQuestion(panel);
       });
       body.appendChild(q);
+      // Another question taking the place of the one shown (a long scroll jump
+      // skips the moment none is pinned) fades in rather than swapping at once.
+      if (body._pinBubble && body._pinBubble !== pin.bubble && q.animate &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        q.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
+      }
+      body._pinBubble = pin.bubble;
     },
   });
   EnvPanel.register({

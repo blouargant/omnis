@@ -51,10 +51,41 @@
   function cardOpen(id, def) { const m = load(CARDS_KEY, {}); return id in m ? !!m[id] : def; }
   function setCardOpen(id, open) { const m = load(CARDS_KEY, {}); m[id] = open; save(CARDS_KEY, m); }
 
+  // setShown shows or hides a card with a short fade while its height (and the
+  // gap below it) opens or closes, so the cards around it glide instead of
+  // jumping. A change of mind mid-way plays the same animation back. Instant
+  // when the panel is not displayed or the user asked for reduced motion.
+  const FADE_MS = 180;
+  function setShown(el, show) {
+    if (el._fade) {
+      if (el._fadeShow !== show) { el._fadeShow = show; el._fade.reverse(); }
+      return;
+    }
+    if (show === !el.hidden) return;
+    const r = root();
+    if (!r || !r.getClientRects().length || !el.animate ||
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.hidden = !show;
+      return;
+    }
+    el.hidden = false;
+    const open = { opacity: 1, height: el.offsetHeight + "px", marginBottom: getComputedStyle(el).marginBottom };
+    const closed = { opacity: 0, height: "0px", marginBottom: "0px" };
+    const a = el.animate(show ? [closed, open] : [open, closed], { duration: FADE_MS, easing: "ease-out", fill: "both" });
+    el._fade = a;
+    el._fadeShow = show;
+    a.onfinish = () => {
+      el._fade = null;
+      el.hidden = !el._fadeShow;
+      a.cancel();
+    };
+  }
+
   function buildCard(card) {
     const el = document.createElement("section");
     el.className = "env-card";
     el.dataset.card = card.id;
+    el.hidden = true; // fades in on its first render that shows it
     el.innerHTML =
       `<button type="button" class="env-card-head" aria-expanded="false">` +
         `<span class="env-card-title"></span><span class="env-card-chevron" aria-hidden="true">›</span>` +
@@ -74,20 +105,26 @@
     el.classList.toggle("open", open);
     el.querySelector(".env-card-head").setAttribute("aria-expanded", String(open));
     el.querySelector(".env-card-title").textContent = card.title();
-    if (card.sessionOnly && !session) { el.hidden = true; return; }
-    el.hidden = false;
+    if (card.sessionOnly && !session) { setShown(el, false); return; }
     const gen = generation;
     const sid = session;
+    // A card is shown unless its render says otherwise. An async render (a
+    // fetch) keeps the card as it is until it answers, so a card that ends up
+    // hidden is not flashed in on the way.
+    let decided = false;
     const ctx = {
       sessionId: sid,
       open,
       stale: () => gen !== generation || sid !== session,
       setValue: (html) => { if (!ctx.stale()) el.querySelector(".env-card-value").innerHTML = html || ""; },
-      setVisible: (v) => { if (!ctx.stale()) el.hidden = !v; },
+      setVisible: (v) => { if (!ctx.stale()) { decided = true; setShown(el, !!v); } },
     };
     try {
       const r = card.render(el.querySelector(".env-card-body"), ctx);
-      if (r && typeof r.catch === "function") r.catch((e) => console.error("env card", card.id, e));
+      if (r && typeof r.then === "function") {
+        r.then(() => { if (!decided && !ctx.stale()) setShown(el, true); },
+          (e) => console.error("env card", card.id, e));
+      } else if (!decided) setShown(el, true);
     } catch (e) { console.error("env card", card.id, e); }
   }
 

@@ -6529,7 +6529,13 @@ closed the current question is shown nowhere. It is **docked at the panel's
 bottom** (card option `dock: "bottom"` in env-panel.js → the `.env-dock`
 container): the panel is a flex column whose `.env-cards` list scrolls on its
 own, so the card coming and going as the chat scrolls never shifts the cards
-above it — at the top of the list it made every card jump. Cards: Environnement (squad, folder, git
+above it — at the top of the list it made every card jump. **Cards fade in and
+out** (`setShown` in env-panel.js, ~180 ms Web Animations: opacity + height +
+the bottom margin that spaces the cards — a flex `gap` would stay put — played
+back if the state flips mid-way; instant with `prefers-reduced-motion` or the
+panel not displayed). A card starts hidden and is shown unless its render says
+otherwise; an async render keeps the card as it is until it answers, so a card
+that ends up hidden is never flashed in. Cards: Environnement (squad, folder, git
 branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats

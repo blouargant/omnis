@@ -36,10 +36,13 @@ body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
+/* The space between cards is each card's bottom margin, not a flex gap: a
+   gap would stay put while a card fades in or out (env-panel.js setShown
+   animates the margin with the height). The last card's margin also spaces
+   the list from the dock. */
+.env-cards > .env-card { margin-bottom: 10px; flex-shrink: 0; }
 .env-dock { flex: none; }
-.env-dock:has(> .env-card:not([hidden])) { padding-top: 10px; }
 
 .env-card {
   background: var(--bg-input);
