@@ -164,3 +164,35 @@ func TestSetPluginLayersReloads(t *testing.T) {
 		t.Fatalf("want 0 commands, got %d", n)
 	}
 }
+
+func TestPluginHooksCannotFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hooks.json")
+	os.WriteFile(path, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"exit 1","fail_closed":true}]}]}}`), 0o644)
+	r := NewReloader("", nil)
+	r.SetPluginLayers([]PluginLayer{{Name: "p", Root: dir, Path: path}})
+	out := r.Snapshot().Run(context.Background(), PreToolUse, "Bash", Input{ToolName: "Bash"}, "", 5*time.Second)
+	if out.Decision != DecisionProceed || out.Ran != 1 {
+		t.Fatalf("want proceed after 1 run, got %+v", out)
+	}
+}
+
+func TestSetPluginLayersLastWins(t *testing.T) {
+	layer := PluginLayer{Name: "demo", Root: mustAbs(t, fixtureRoot), Path: mustAbs(t, fixtureRoot+"/hooks/hooks.json")}
+	r := NewReloader("", nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			_ = r.Refresh()
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		r.SetPluginLayers([]PluginLayer{layer})
+		r.SetPluginLayers(nil)
+	}
+	<-done
+	if n := len(r.Snapshot().Match(PreToolUse, "Bash")); n != 0 {
+		t.Fatalf("stale snapshot: %d commands after final SetPluginLayers(nil)", n)
+	}
+}

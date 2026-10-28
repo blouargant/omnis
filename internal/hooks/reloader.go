@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"sync"
@@ -42,6 +43,9 @@ type Reloader struct {
 	cfg      atomic.Pointer[Config]
 	mtimes   map[string]time.Time
 	mtimesMu sync.Mutex
+	// reloadMu serialises whole reloads (read layers → load → store) so a poll
+	// that read stale plugin layers can never overwrite a newer snapshot.
+	reloadMu sync.Mutex
 	onChange []func()
 }
 
@@ -111,6 +115,8 @@ func (r *Reloader) Start(ctx context.Context) {
 }
 
 func (r *Reloader) reload(force bool) error {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
 	if !force && !r.detectChange() {
 		return nil
 	}
@@ -133,6 +139,9 @@ func (r *Reloader) reload(force bool) error {
 	for _, pl := range plugins {
 		pc, perr := Load(pl.Path)
 		if perr != nil || pc == nil {
+			if perr != nil {
+				fmt.Fprintf(os.Stderr, "[hooks] plugin %s: %s: %v\n", pl.Name, pl.Path, perr)
+			}
 			continue
 		}
 		ref := &PluginRef{Name: pl.Name, Root: pl.Root}
@@ -140,6 +149,11 @@ func (r *Reloader) reload(force bool) error {
 			tagged := make([]Matcher, len(ms))
 			for i, m := range ms {
 				m.Plugin = ref
+				// Plugin hooks follow Claude Code semantics: no fail_closed.
+				m.Hooks = append([]Command(nil), m.Hooks...)
+				for j := range m.Hooks {
+					m.Hooks[j].FailClosed = false
+				}
 				tagged[i] = m
 			}
 			pc.events[ev] = tagged
