@@ -175,4 +175,13 @@ Claude's tool names (the background shell tools count as `Bash`), get one
 `Edit`-style input per file for a multi-file edit, can use
 `${CLAUDE_PLUGIN_ROOT}`, and never block when their script fails. A plugin guard
 that answers `allow` lets that one call skip the generic "ask me" prompt, but
-never overrides an `ask` or `deny` rule of yours.
+never overrides an `ask` or `deny` rule of yours. For a multi-file edit, the guard
+must allow **every** file for the prompt to be skipped.
+
+Two differences from Claude Code to keep in mind:
+
+- A plugin matcher is a regexp like yours, so it is **not** an exact name: `Edit`
+  also matches `MultiEdit`. Claude Code compares the name exactly.
+- A plugin guard that matches the common tools (`Bash|Read|Grep|…`) runs on
+  almost every tool call of every agent, not just the plugin's own, which adds a
+  few milliseconds to each call.

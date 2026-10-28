@@ -14,7 +14,8 @@ For every installed plugin omnis loads:
   **Settings → Agents** under the plugin's name, with a `plugin` badge.
 - **Skills** — available to the plugin's agents like any other skill.
 - **Hooks** — the plugin's guard scripts run as [lifecycle hooks](22-hooks.md),
-  the way Claude Code runs them.
+  the way Claude Code runs them. A guard usually checks almost every tool call of
+  every agent (not only the plugin's own), which adds a few milliseconds to each.
 
 Not loaded: plugin slash commands, MCP and LSP declarations, output styles and
 per-agent hooks written inside an agent file.
@@ -38,7 +39,13 @@ omnis keeps both safeguards:
   command before it runs.
 
 Calls between agents of the same plugin do not raise a permission card.
-Your own [permission rules](13-permissions.md) always win.
+Your own [permission rules](13-permissions.md) always win. When the guard
+approves a multi-file edit, it must approve every file; otherwise you are asked
+as usual.
+
+A plugin's skill folder may contain a `permissions.json`, which omnis applies
+like the permission rules of any installed skill. The plugin folder is owned by
+the administrator, so it is trusted like the rest of the system configuration.
 
 If a specialist's session has expired (after long idle time, a reload or a
 restart), the lead may start a fresh specialist and tell it the action was
@@ -65,7 +72,10 @@ default. You can also set a plugin agent's model directly in Settings.
 
 **Settings → Agents → Plugins** lists the installed plugins with a toggle. Turning
 one off removes its agents, squad, skills and hooks after a reload; turning it
-back on restores them, with your edits to its agents intact. If a reload error
+back on restores them, with your edits to its agents intact. A conversation that
+was busy during the reload keeps the plugin's agents until it next pauses, but
+the plugin's guard stops applying to it straight away, so its calls go through
+your normal permission rules. If a reload error
 occurs, Settings shows it next to the toggle. If the Agents form has unsaved
 edits, Settings asks you to confirm first, since the toggle discards them.
 

@@ -2048,7 +2048,13 @@ and that plugin/agent is skipped, never a failure.
 - **Name**: agent `prod-support` of plugin `iaparc` is the omnis agent
   `iaparc_prod_support` (`pluginAgentName`: lower-cased, `-`→`_`); a name that
   does not match `^[a-z0-9][a-z0-9_]{0,63}$`, or collides with another agent of
-  the same plugin, is skipped (first by name wins) with a log line. The qualified
+  the same plugin, is skipped (first by name wins) with a log line. So is a name
+  equal to an **omnis tool name** (`isOmnisToolName`: the explicit
+  `omnisUnderscoreTools` list — `lsp_hover`, `ast_grep_search`, `todo_write`, … —
+  plus the `a2a_`/`mcp__` families): a sub-agent is mounted as a tool named after
+  it, so an agent holding both would fail the squad build with ADK's duplicate-tool
+  error. There is no runtime tool-name registry at resolution time, so **a new
+  underscored tool must be added to that list**. The qualified
   Claude name (`iaparc:prod-support`) is kept as the agent's *type*
   (`PluginAgentType`).
 - **Tools**: only the Claude tools omnis has an equivalent of survive —
@@ -2068,7 +2074,10 @@ and that plugin/agent is skipped, never a failure.
 - **Squad**: when at least one agent holds the Agent tool (`Agent` or
   `Agent(...)`), the plugin gets a squad named after it. The leader is the sole
   holder, else `lead` when several hold it, else the first by name (logged); every
-  other agent is a member. No Agent-tool holder ⇒ agents exist but no squad.
+  other agent is a member. No Agent-tool holder ⇒ agents exist but no squad. A
+  plugin named like an authored squad (`system`, `coding`, `helper`, …) is
+  **folded into** it (`mergePluginSquads`: it only fills the authored squad's empty
+  leader/members/description), with a log line.
   Entries are marked `leader: true/false`, `builtin: false` and carry an explicit
   `allow_file_attachments: false` — explicit so that the Settings editor's echo of
   those defaults diffs to nothing and an untouched save **forks nothing** into the
@@ -2122,7 +2131,16 @@ additively with the file layers; every matcher from it is tagged with a
   also fires for the background shell tools.
 - **`MultiEdit` split**: omnis's multi-file `MultiEdit` becomes **one `Edit`-like
   input per file** (`{file_path, edits}`) and the command runs once per input, since
-  a Claude hook script expects a single `file_path`.
+  a Claude hook script expects a single `file_path`. **All runs must allow**: a
+  split command contributes `allow` only when **every** one of its per-file runs
+  answered allow — an allow for file A with silence for file B is just "proceed",
+  so the default prompt still covers B (`Config.Run`'s per-command groups;
+  `applyJSONOutput` only *reports* an allow vote). Deny/ask/block from any run
+  aggregate as usual (Block > Ask > Allow > Proceed).
+- **Matchers are unanchored regexes** (omnis's own matcher semantics), whereas
+  Claude Code matches a plain string exactly: a plugin matcher `Edit` also fires
+  for `MultiEdit`. Harmless for the usual guard patterns, but a plugin author
+  relying on exact matching gets more calls than in Claude Code.
 - **`${CLAUDE_PLUGIN_ROOT}`** is expanded in the command and exported as the
   `CLAUDE_PLUGIN_ROOT` environment variable.
 - **`agent_type`**: the hook input carries the calling agent's qualified Claude type
@@ -2134,8 +2152,26 @@ additively with the file layers; every matcher from it is tagged with a
 - **Reload hygiene**: reloads are serialised (`reloadMu`) so a stale mtime-poll
   cannot resurrect a removed plugin's hooks after `SetPluginLayers`; an unparseable
   plugin `hooks.json` is logged and skipped; `SetPluginLayers` is a no-op when the
-  set is unchanged; `Infrastructure.Hooks(runtime)` re-applies the layers on
-  **every** call (a hot-reload's new runtime), not only at first build.
+  set is unchanged.
+- **Layers switch at install, not during the build.** `Infrastructure.Hooks(runtime)`
+  only returns the memoised engine; `installPluginHooks(inst)` applies the layers
+  of the generation that just became current — from `NewManager` (boot: server,
+  CLI, TUI), `Manager.Reload` after promotion (under `m.mu`, so concurrent installs
+  apply in promotion order) and `NewAgent`. A reload whose build fails, or that a
+  newer reload supersedes, leaves the previous layers in place
+  ([agent/plugin_hook_install_test.go](agent/plugin_hook_install_test.go)). The
+  engine is process-wide, so **sessions still draining on an older generation see
+  the new layers**: after a reload that disables a plugin, such a session keeps
+  running that plugin's agents (its generation still holds them) but its guard
+  hooks are gone, so their calls fall back to the plain permission rules; after a
+  reload that enables one, the hooks apply to older-generation sessions' calls too.
+- **Latency**: the IA Parc guard's matcher (`Bash|Read|Grep|Glob|Write|Edit|MultiEdit`,
+  typical of plugin guards) matches almost **every tool call of every agent in the
+  fleet**, not only the plugin's own agents (`Config.Match` matches the tool name,
+  never the caller), so each such call pays one guard process start
+  (`iapcli agent guard`, a Go binary — a few ms) before it decides it has nothing
+  to say — the same routine tax
+  as the k8s validation hook's Python start on every `Bash` call.
 
 **Hook clearances — `allow` finally means something, narrowly**
 ([core/permissions/clearance.go](core/permissions/clearance.go),
@@ -2161,6 +2197,10 @@ user-approved `ask` escalation** — is recorded as a **clearance** on `Infrastr
   clearances, and the Bash safety floor is untouched. So a hook can lift the
   *generic* "unmatched call → ask" friction for a command it vouches for, and can
   never weaken anything the operator wrote down.
+- **Split MultiEdit**: a clearance is only granted when the outcome is
+  `DecisionAllow`, which for a split plugin MultiEdit requires every file to have
+  been allowed (see "Plugin hooks" above), so a partial allow never clears the
+  other files.
 - **Same-plugin delegation**: `PluginConfig.DefaultAllow` is
   `samePluginDelegation(runtime)` — a plugin's leader calling a member of **its own
   plugin** needs no card — again only over the default ask; an `Agent(<name>)`
@@ -2207,10 +2247,14 @@ before it runs. `hooks.DecisionAllow` is therefore no longer dead code; see the
   confirmed. The guard's own card still shows the exact command before it runs, so
   nothing executes unseen — but the lead's confirmation step is not binding on the
   specialist.
-- **Plugin hook layers are applied while the new generation is being built**
-  (`Infrastructure.Hooks(runtime)` is process-wide), so a reload that then fails or
-  is superseded can still have switched them; they self-correct on the next
-  successful reload.
+- **Plugin skill folders are trusted like `/etc/omnis`.** Plugin skill dirs are in
+  `SkillsAllSearchDirs`, so a `permissions.json` inside a plugin's skill folder is
+  picked up by the skill-overlay permission scan exactly like a shipped skill's.
+  The plugin tree is root-owned (installed by an admin tool), so this is the same
+  trust as the system layer — but it does mean installing a plugin can add
+  permission rules.
+- **Draining sessions after a plugin is disabled** keep its agents but lose its
+  hooks (see "Layers switch at install" above).
 - **`GET /api/plugins` and the parsed-agent GET resolve and republish plugin state
   outside a reload**, so what Settings shows can briefly lead what running
   sessions use until the next reload.
