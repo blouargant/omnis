@@ -6439,8 +6439,8 @@ both are gone.
 
 - **DOM**: `#settings-modal` (backdrop, `z-index: 150` — below `.app-dialog-overlay`
   200, context menus 1000 and `.ui-modal-overlay` 1100, so dialogs opened from a
-  section still sit on top) > `.settings-modal-dialog` (`min(1200px, 94vw) ×
-  min(860px, 90vh)`; full-screen below 820px, with the nav as a horizontal
+  section still sit on top) > `.settings-modal-dialog` (`min(1560px, 96vw) ×
+  min(960px, 92vh)`; full-screen below 820px, with the nav as a horizontal
   scroller) > `.settings-modal-head` (title + ✕) + `.settings-modal-main` >
   `nav.settings-modal-nav` + the existing `#settings-panel`.
 - **Nav**: `MENU_GROUPS` orders the sections into Preferences (Appearance), Agents

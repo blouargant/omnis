@@ -16,8 +16,8 @@
 #settings-modal[hidden] { display: none; }
 
 .settings-modal-dialog {
-  width: min(1200px, 94vw);
-  height: min(860px, 90vh);
+  width: min(1560px, 96vw);
+  height: min(960px, 92vh);
   display: flex;
   flex-direction: column;
   background: var(--bg);
