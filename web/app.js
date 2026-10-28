@@ -9191,12 +9191,14 @@ async function maybePromptNotifications() {
 // loadAccountIdentity labels the footer's account button with the login this
 // omnis-server serves. A multi-user deployment runs one server per user behind
 // an SSO gateway (docs/multi-user-containers.md), and cookie mode serves several
-// logins; a single-user install reports the default id, so the button just reads
-// "Omnis" there.
+// logins; a single-user install reports the default id, which names no one, so
+// the button shows the name of the OS account running the server instead
+// (`display_name`), and "Omnis" only when even that is unknown.
 let accountLogin = ""; // shown login ("" on a single-user install)
 async function loadAccountIdentity() {
   const btn = document.getElementById("account-btn");
   if (!btn) return;
+  let displayName = "";
   try {
     const res = await apiFetch("/api/whoami");
     if (!res.ok) return;
@@ -9204,8 +9206,9 @@ async function loadAccountIdentity() {
     const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
     const shared = payload && payload.identity_mode === "cookie";
     accountLogin = (!user || (user === "web-user" && !shared)) ? "" : user;
+    if (payload && typeof payload.display_name === "string") displayName = payload.display_name.trim();
   } catch (e) { console.error("whoami failed:", e); }
-  const label = accountLogin || "Omnis";
+  const label = accountLogin || displayName || "Omnis";
   btn.querySelector(".account-name").textContent = label;
   btn.querySelector(".account-avatar").textContent = label.charAt(0).toUpperCase();
 }

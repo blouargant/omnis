@@ -28,9 +28,9 @@ The **sidebar** holds, top to bottom:
   directly under it, like the project groups in Claude Desktop. Click a
   collection's header to fold or unfold it; Omnis remembers your choice in this
   browser. A long collection shows its 10 most recent chats, then **Show more**.
-- Your **account button** at the very bottom — its menu opens your **Archived
-  sessions**, **Settings** (`Ctrl+,`), **Appearance**, **Language** and
-  **Documentation**.
+- Your **account button** at the very bottom, showing your name — its menu
+  opens your **Archived sessions**, **Settings** (`Ctrl+,`), **Appearance**,
+  **Language** and **Documentation**.
 
 The **Collections** header carries **Sort** (recent activity / date created /
 A–Z, applied inside every collection) and **+** (new collection). Hovering a

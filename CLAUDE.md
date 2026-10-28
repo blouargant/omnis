@@ -5193,10 +5193,13 @@ What omnis itself contributes (milestone 1):
   the checked `POST /api/terminal/token` — so a wrong/missing login is
   refused before any upgrade is attempted even with no token configured
   (empty `OMNIS_SERVER_TOKEN` fallback mode).
-- **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI labels
-  the sidebar's account button with the login (`loadAccountIdentity`; "Omnis"
-  for the single-user `web-user`, avatar only in the collapsed rail) and shows
-  it as the account menu's first line — see "Account menu".
+- **`GET /api/whoami`** → `{user_id, identity_enforced}`, plus `display_name` on
+  a single-user install (the `web-user` default names no one, so it reports the
+  OS account running the server: its full name, else its login — `localDisplayName`
+  in [server/identity.go](server/identity.go)); the web UI labels the sidebar's
+  account button with the login, else that name, else "Omnis"
+  (`loadAccountIdentity`; avatar only in the collapsed rail) and shows the login
+  as the account menu's first line — see "Account menu".
 - **Packaging assets** under `packaging/supervisord/` (program template with
   `${VAR}` placeholders — supervisord does not expand `%(ENV_…)s` in `user=`,
   so the entrypoint renders it with `envsubst`) and `packaging/container/`
@@ -6476,9 +6479,10 @@ The sidebar footer is **one account button** (`#account-btn`: avatar initial,
 label, chevron) — it replaced the Settings / Appearance / Documentation buttons and
 the `#sidebar-user` login badge ([web/app.js](web/app.js) "Account button + menu",
 styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)).
-`loadAccountIdentity` labels it with the login from `GET /api/whoami` (not shown for
-the single-user `web-user` outside cookie mode ⇒ "Omnis"); the collapsed rail shows
-the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
+`loadAccountIdentity` labels it with the login from `GET /api/whoami`; for the
+single-user `web-user` outside cookie mode it shows `display_name` instead — the
+name of the OS account running the server (e.g. "Bertrand") — and "Omnis" only
+when that is unknown. The collapsed rail shows the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
 (reusing the `.folder-ctx-item` / `.folder-ctx-sep` look), anchored above the
 button: the login (when shown), **Archived sessions** (with the archived count;
 opens the Archived sessions dialog — it replaced the sidebar's Archived panel),

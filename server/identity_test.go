@@ -145,6 +145,39 @@ func TestHandleWhoami(t *testing.T) {
 	}
 }
 
+// TestHandleWhoamiDisplayName: a single-user install (the shared default id)
+// reports the OS account's name for the account button; an instance serving
+// an explicit login does not, since the login is what it shows.
+func TestHandleWhoamiDisplayName(t *testing.T) {
+	t.Cleanup(func() { sessions.SetUserID("") })
+	get := func() map[string]any {
+		r := gin.New()
+		r.GET("/api/whoami", handleWhoami(serverDeps{}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	sessions.SetUserID("")
+	body := get()
+	if want := localDisplayName(); want != "" {
+		if body["display_name"] != want {
+			t.Fatalf("single-user: display_name = %v, want %q", body["display_name"], want)
+		}
+	} else if _, ok := body["display_name"]; ok {
+		t.Fatalf("single-user with no resolvable name: unexpected display_name %v", body["display_name"])
+	}
+
+	sessions.SetUserID("alice")
+	if _, ok := get()["display_name"]; ok {
+		t.Fatal("explicit user id: display_name must be absent")
+	}
+}
+
 // TestIdentityEnforcedOnAPIGroup drives the real router: the token is checked
 // first (a caller without the secret never learns the expected login), then the
 // identity header, on every protected route; /api/health stays open.
