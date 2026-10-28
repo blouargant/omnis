@@ -227,8 +227,25 @@ func (c *Config) Check(toolName, input, cwd string) (Decision, string) {
 	return c.CheckArgs(toolName, args, cwd)
 }
 
-// CheckArgs evaluates a tool call against the rule set with structured args.
+// Verdict is CheckArgsVerdict's result. DefaultAsk marks an ask that came from
+// the final mode-default step (no rule matched, mode not plan) rather than from
+// an explicit ask rule — the only kind a hook's allow may skip.
+type Verdict struct {
+	Decision   Decision
+	Reason     string
+	DefaultAsk bool
+}
+
+// CheckArgs evaluates a tool call against the rule set with structured args;
+// it is CheckArgsVerdict without the DefaultAsk detail.
 func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (Decision, string) {
+	v := c.CheckArgsVerdict(toolName, args, cwd)
+	return v.Decision, v.Reason
+}
+
+// CheckArgsVerdict evaluates a tool call against the rule set (deny → bypass →
+// plan → ask → read-only → acceptEdits → allow → mode default).
+func (c *Config) CheckArgsVerdict(toolName string, args map[string]any, cwd string) Verdict {
 	ps := &c.Permissions
 	// bash_background and monitor run shell commands exactly like Bash (same
 	// "command" arg), so they are governed by the same Bash(...) allow/ask/deny
@@ -249,7 +266,7 @@ func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (De
 	// agent/routing.go.
 	switch toolName {
 	case "route_to_squad", "handoff_to_router", "ask_squad":
-		return DecisionAllow, "internal routing control"
+		return Verdict{Decision: DecisionAllow, Reason: "internal routing control"}
 	}
 	ctx := matchCtx{
 		toolName:    toolName,
@@ -265,56 +282,56 @@ func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (De
 
 	// 1. Explicit deny always wins.
 	if rl, ok := firstMatch(ps.Deny, ctx); ok {
-		return DecisionDeny, reasonOr(rl, "denied by rule")
+		return Verdict{Decision: DecisionDeny, Reason: reasonOr(rl, "denied by rule")}
 	}
 	// 2. bypassPermissions: allow everything else (the hard safety floor in
 	//    core/tools/bash.go remains the circuit breaker).
 	if mode == ModeBypass {
-		return DecisionAllow, "bypassPermissions mode"
+		return Verdict{Decision: DecisionAllow, Reason: "bypassPermissions mode"}
 	}
 	// 3. plan mode is authoritative: reads allowed, edits / non-read-only
 	//    shell denied.
 	if mode == ModePlan {
 		switch {
 		case isReadTool(toolName):
-			return DecisionAllow, "plan mode (read-only)"
+			return Verdict{Decision: DecisionAllow, Reason: "plan mode (read-only)"}
 		case isEditTool(toolName):
-			return DecisionDeny, "plan mode forbids edits"
+			return Verdict{Decision: DecisionDeny, Reason: "plan mode forbids edits"}
 		case toolName == "Bash" && ctx.command != "" && !allReadOnly(ctx.command):
-			return DecisionDeny, "plan mode forbids non-read-only commands"
+			return Verdict{Decision: DecisionDeny, Reason: "plan mode forbids non-read-only commands"}
 		}
 	}
 	// 4. Explicit ask.
 	if rl, ok := firstMatch(ps.Ask, ctx); ok {
-		return DecisionAsk, reasonOr(rl, defaultAskReason)
+		return Verdict{Decision: DecisionAsk, Reason: reasonOr(rl, defaultAskReason)}
 	}
 	// 5. Built-in read-only Bash commands run without prompting (overridable
 	//    by deny/ask above).
 	if toolName == "Bash" && ctx.command != "" && allReadOnly(ctx.command) {
-		return DecisionAllow, "read-only command"
+		return Verdict{Decision: DecisionAllow, Reason: "read-only command"}
 	}
 	// 6. acceptEdits auto-allows edits in the working dir + common fs commands.
 	if mode == ModeAcceptEdits {
 		if isEditTool(toolName) && underWorkingDir(ctx.filePath, cwd, ps) {
-			return DecisionAllow, "acceptEdits mode"
+			return Verdict{Decision: DecisionAllow, Reason: "acceptEdits mode"}
 		}
 		if toolName == "Bash" && ctx.command != "" && isCommonFsCommand(ctx.command) {
-			return DecisionAllow, "acceptEdits mode"
+			return Verdict{Decision: DecisionAllow, Reason: "acceptEdits mode"}
 		}
 	}
 	// 7. Explicit allow.
 	if toolName == "Bash" && ctx.command != "" {
 		if bashAllowed(ps.Allow, ctx) {
-			return DecisionAllow, "allowed by rule"
+			return Verdict{Decision: DecisionAllow, Reason: "allowed by rule"}
 		}
 	} else if rl, ok := firstMatch(ps.Allow, ctx); ok {
-		return DecisionAllow, reasonOr(rl, "allowed by rule")
+		return Verdict{Decision: DecisionAllow, Reason: reasonOr(rl, "allowed by rule")}
 	}
 	// 8. Mode-based default.
 	if mode == ModeDontAsk {
-		return DecisionDeny, "dontAsk mode: tool not pre-approved"
+		return Verdict{Decision: DecisionDeny, Reason: "dontAsk mode: tool not pre-approved"}
 	}
-	return DecisionAsk, defaultAskReason
+	return Verdict{Decision: DecisionAsk, Reason: defaultAskReason, DefaultAsk: mode != ModePlan}
 }
 
 const defaultAskReason = "command is not on the allow list — confirm before running"
@@ -668,6 +685,12 @@ type PluginConfig struct {
 	SessionFunc func(tc adk.ToolContext) string
 	OnPersist   func()
 	Debug       bool
+	// Clearances holds per-call grants made by an approved/allowing hook; a
+	// cleared call skips only the mode-default prompt. Nil ⇒ none.
+	Clearances *Clearances
+	// DefaultAllow, when set and true for a tool, likewise skips only the
+	// mode-default prompt (e.g. a plugin's own tools). Optional.
+	DefaultAllow func(tc adk.ToolContext, toolName string) bool
 }
 
 // SessionCleaner exposes the internal session-approval cache so the caller can
@@ -751,6 +774,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		cwd := cfg.CWDFunc(tc)
 		probeKey := t.Name() + "\x00" + input
 		sid := cfg.SessionFunc(tc)
+		cleared := cfg.Clearances.Take(sid, tc.FunctionCallID(), t.Name())
 
 		if cache.hasTool(sid, t.Name()) {
 			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
@@ -761,7 +785,13 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 			return nil, nil
 		}
 
-		decision, reason := cfg.Source.Snapshot().CheckArgs(t.Name(), args, cwd)
+		v := cfg.Source.Snapshot().CheckArgsVerdict(t.Name(), args, cwd)
+		decision, reason := v.Decision, v.Reason
+		if decision == DecisionAsk && v.DefaultAsk &&
+			(cleared || (cfg.DefaultAllow != nil && cfg.DefaultAllow(tc, t.Name()))) {
+			logf("default-ask cleared sid=%q tool=%s", sid, t.Name())
+			return nil, nil
+		}
 		switch decision {
 		case DecisionDeny:
 			logf("DENY sid=%q tool=%s reason=%q", sid, t.Name(), reason)
