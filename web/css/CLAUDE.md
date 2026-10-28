@@ -74,7 +74,7 @@ same colour/size in multiple partials.
 | `env-panel.css` | **Environment panel**: the right-hand column of cards (`#env-panel`, `.env-card*`, `.env-row*`, the Question card `.env-question*` pinned at the bottom in `.env-dock`) docked under the rightmost pane's tab bar (`.chat-pane.env-host`, `--env-panel-w`), the hosted file browser overrides, and the small-screen right drawer (`body.env-drawer-open`, `#env-scrim`) |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |
-| `terminal.css` | xterm.js terminal tabs (`.pane-terminal`, `.xterm-*`) |
+| `terminal.css` | **Terminal dock**: the session's xterm.js terminals in the chat's right column (`#term-dock`, `.term-dock-*`, `--term-dock-w`), replacing the environment panel while shown (`body.term-shown`); full-screen sheet below 820px |
 | `messages.css` | User bubble, transcript (no visible scrollbar), message rows, assistant markdown, copy buttons (whole-message split-button `.copy-msg-*`, per-code-block `.code-block` / `.code-copy-btn`), in-reply jump button (`.reply-nav-btn`), error, inline images, `@file` ref links |
 | `tools.css` | Tool-call blocks, todo plan widget, bash `!`-escape block, badge colour variants |
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |

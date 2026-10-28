@@ -397,7 +397,7 @@
   bottom: calc(var(--composer-overlay-h, 0px) + 18px);
   /* Above the floating composer (z-index 3) + its fade so the pill isn't washed
      by the transparent→bg gradient; still below the pane-picker overlay, and
-     hidden on draft/editor/terminal tabs anyway (see updateReplyNav). */
+     hidden on draft/editor tabs anyway (see updateReplyNav). */
   z-index: 4;
   display: flex;
   align-items: center;

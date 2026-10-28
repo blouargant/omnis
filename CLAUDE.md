@@ -2349,7 +2349,7 @@ only `has_api_key`. When any provider fails, an orange warning banner
 (`.provider-warn-banner`) is revealed **inside every chat pane** — above the
 composer in an active chat and above the "Start a new chat" button in an
 empty/draft pane (each pane carries both variants; the `.pane-picker` overlay
-decides which is on screen, and `.editing`/`.terminal` tabs hide both). The
+decides which is on screen, and `.editing` (editor) tabs hide both). The
 banners live in the pane template ([web/index.html](web/index.html)), are styled
 in [web/css/features/dialogs.css](web/css/features/dialogs.css), and are toggled
 per-pane by `renderProviderWarning`/`applyProviderWarning` ([web/app.js](web/app.js),
@@ -7076,11 +7076,26 @@ sessions, live in at most one pane).
 
 ### Web UI interactive terminal (xterm.js + PTY)
 
-A **fourth** pane-tab kind — a terminal tab keyed `"term#<n>"` — runs a **real
-interactive shell** (vim/top/ssh all work, full ANSI/colour) next to chat,
-draft, and editor tabs in the same `.pane-tabs` strip. Open one from the pane
-toolbar's terminal button (`openTerminalTab`) or from the Folders panel context
-menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
+A **terminal dock** in the chat view (Claude Desktop style) runs **real
+interactive shells** (vim/top/ssh all work, full ANSI/colour). It replaced the
+former terminal *tabs* (`"term#<n>"` pane-tab kind, removed). **Each chat session
+owns its terminals**: `#term-dock` is the chat's right column — docked in the
+rightmost pane with the environment panel by `placeEnvPanel`, and **replacing it
+while shown** (`body.term-shown` hides `#env-panel`; the host pane's other
+children make room through the same `margin-right` rule, sized `--term-dock-w`,
+default 480px, dragged from its left edge and kept per browser in
+`localStorage["agent_term_dock_w"]`). It shows the focused session's terminals
+(`termCtxs`: session id → `{keys, active, open, seq}`, `""` for drafts/editor
+tabs); switching to a session with none, or with its dock hidden, gives the
+column back to the environment panel, while another session's shells keep
+running. The pane toolbar's terminal button toggles it (`toggleTermDock`, opening
+the first terminal in the session's folder); the dock's **+** adds one
+("Terminal 2", …); its tabs switch and close them (the last closed hides the
+dock); its ✕ hides it; the environment button while it is shown switches back to
+the panel. Files → **"Open Terminal here"** opens one in that folder
+(`openDockTerminal({cwd})`). A session's terminals are torn down when it is
+deleted (`forgetSession`) or archived (`disposeSessionTerminals`). Below 820px
+the dock is a full-screen sheet over the chat.
 
 - **Backend** ([server/terminal.go](server/terminal.go) + platform files,
   registered as `GET /api/terminal/ws` in [server/server.go](server/server.go)):
@@ -7111,36 +7126,36 @@ menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
   control (see cwd sync below). One PTY→WS goroutine + one cwd-watcher goroutine,
   both serialised on a write mutex; the WS read loop pumps stdin + resize. Shell
   exit closes the PTY which ends all three.
-- **cwd sync with the Folders panel**: a watcher goroutine polls `pty.Cwd()`
-  (every 400 ms, Linux `/proc/<pid>/cwd`) and emits a `{"cwd":…}` text frame on
-  change (and once on connect). Client `onTerminalCwd` ([web/app.js](web/app.js))
-  follows it: while the terminal is the **focused pane's active tab** and the
-  Folders panel is open, it `loadFolder(dir)`s — and because a terminal tab has no
-  active chat session, that targets the **global** `/api/folder` cwd (the same dir
-  the panel shows with no session), so the panel + the global "no session"
-  environment track the shell's `cd`. `mountTerminal` re-aligns the panel to a
-  terminal's last-known cwd on (re)activation. Best-effort: where `Cwd()` is
-  unsupported (non-Linux) the watcher is a no-op and the panel simply doesn't
-  auto-sync. (One-directional: navigating the Folders panel does **not** move the
-  live shell.)
+- **Shell cwd**: a watcher goroutine polls `pty.Cwd()` (every 400 ms, Linux
+  `/proc/<pid>/cwd`) and emits a `{"cwd":…}` text frame on change (and once on
+  connect); the client only records it on the terminal (`entry.cwd`). A `cd` in a
+  session's terminal does **not** move the session's working folder (the agent's
+  and the Files card's) — the former terminal tabs, which had no session, made
+  the global Files panel follow it.
 - **Trust model**: like the `!` shell-escape and the Monaco save route, the
   terminal **bypasses the agent permission layer by design** and, unlike the Bash
   tool, has **no safety floor** — it is an explicit, token-gated, fully
   interactive host shell. Output is never added to conversation/LLM history.
-- **Client** ([web/app.js](web/app.js) "Terminal tabs" section): **xterm.js** +
+- **Client** ([web/app.js](web/app.js) "Terminal dock" section, styles
+  [web/css/features/terminal.css](web/css/features/terminal.css)): **xterm.js** +
   the fit addon are **vendored offline** under `web/xterm/` (served at
   `assets/xterm/…`), re-vendored with `make vendor-xterm`; `ensureXterm()` lazily
   injects the scripts + stylesheet on first open (mirroring `ensureMonaco`). Each
-  terminal tab owns its own `Terminal` + `FitAddon` + `WebSocket` + detached host
-  element in `termTabs` (key → entry), kept alive while backgrounded (output keeps
-  streaming into the scrollback). `mountTerminal` moves the host into the pane's
-  `.pane-terminal-host` and `fit()`s; `refitVisibleTerminals` re-fits + pushes the
-  new size on pane-divider drag and window resize. The pane gets the `.terminal`
-  class while a terminal tab is active (CSS hides the chat/editor surfaces, shows
-  the xterm host); theme follows the app theme via the existing `data-theme`
-  `MutationObserver` (`xtermTheme`).
-- **Ephemeral**: terminal tabs are **stripped from the persisted layout**
-  (`saveLayout`) — a server PTY can't survive a page reload — and torn down
-  (`disposeTerminal`: close WS + dispose term) by `closeTab`/`closePanel`. They
-  carry no push subscription, so the session-only `releaseSessionIfUnviewed` is
-  skipped, like editor tabs.
+  terminal owns its own `Terminal` + `FitAddon` + `WebSocket` + detached host
+  element in `termTabs` (key → entry), kept alive while not shown (output keeps
+  streaming into the scrollback). `syncTermDock` (called from `setFocusedPanel`
+  and after every dock change) draws the dock's tabs and `mountDockTerminal` moves
+  the active host into `.term-dock-host` and `fit()`s; `refitVisibleTerminals`
+  re-fits + pushes the new size on pane-divider drag, dock drag and window resize.
+  Using the dock never changes the focused pane (its focus listeners ignore
+  `#term-dock`, like `#env-panel`).
+- **Theme**: `xtermTheme` takes the chat's `--bg` / `--text` / `--accent` (resolved
+  to hex through a probe element, `cssHex`) and, on a light theme, a light ANSI
+  palette (`XTERM_LIGHT_ANSI`, VS Code's — the xterm.js defaults are for dark
+  backgrounds). Light vs dark comes from the theme's declared `color-scheme`
+  (`themeIsLight`), **not its name**: the old `includes("light")` test made the
+  default light theme (`terracotta`) — and ivory, subtle-grey — a black terminal
+  and a dark Monaco editor (`monacoTheme` uses `themeIsLight` too). The
+  `data-theme` `MutationObserver` re-themes open terminals and Monaco.
+- **Ephemeral**: a server PTY can't survive a page reload, so terminals are never
+  persisted; `disposeTerminal` (close WS + dispose term) ends one.

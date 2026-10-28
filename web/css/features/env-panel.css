@@ -24,8 +24,12 @@
   z-index: 5;
 }
 body.env-open #env-panel { display: flex; }
-body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
+body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#term-dock) {
   margin-right: var(--env-panel-w);
+}
+/* The terminal dock (features/terminal.css) takes the same column while shown. */
+body.term-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#term-dock) {
+  margin-right: var(--term-dock-w);
 }
 /* The cards scroll; the dock below them (the Question card) stays pinned to
    the panel's bottom edge, outside the scroll, so the card coming and going

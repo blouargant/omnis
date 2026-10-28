@@ -255,7 +255,6 @@ function bindPaneEls(root) {
   e.editorStale = root.querySelector(".pane-editor-stale");
   e.editorReload = root.querySelector(".pane-editor-reload");
   e.terminalWrap = root.querySelector(".pane-terminal");
-  e.terminalHost = root.querySelector(".pane-terminal-host");
   e.ptr         = root.querySelector(".ptr-indicator");
   e.termBtn     = root.querySelector(".pane-term-btn");
   e.toolbar     = root.querySelector(".pane-toolbar");
@@ -351,10 +350,11 @@ function setFocusedPanel(pid) {
   if (AgentDebug.enabled) { AgentDebug.activeSession = activeSessionId; AgentDebug._paint(); }
   refreshSidebarActive();
   // The rail + middle list name the chat we just focused (fire-and-forget; a
-  // draft/editor/terminal tab has no session, so the helper no-ops).
+  // draft/editor tab has no session, so the helper no-ops).
   revealSessionInTree(activeSessionId);
   refreshFoldersPanel();
   if (window.EnvPanel) EnvPanel.setSession(activeSessionId);
+  syncTermDock();
   saveLayout();
 }
 
@@ -406,15 +406,17 @@ function layoutWidths() {
 }
 
 // paneMinW is a pane's minimum width: the pane hosting the open environment
-// panel (placeEnvPanel) needs room for it on top of the chat.
+// panel or terminal dock (placeEnvPanel) needs room for it on top of the chat.
 function paneMinW(p) {
-  if (!p.root.classList.contains("env-host") || !document.body.classList.contains("env-open")) return PANE_MIN_W;
-  const env = envPanelNode();
-  return PANE_MIN_W + (env ? env.offsetWidth : 0);
+  if (!p.root.classList.contains("env-host")) return PANE_MIN_W;
+  const side = termShown() ? termDockNode()
+    : document.body.classList.contains("env-open") ? envPanelNode() : null;
+  return PANE_MIN_W + (side ? side.offsetWidth : 0);
 }
 
-// placeEnvPanel docks the environment panel in the rightmost pane, under its
-// tab bar (see env-panel.css), so it reads as part of the chat page. It stays
+// placeEnvPanel docks the environment panel — and the terminal dock — in the
+// rightmost pane, under its tab bar (see env-panel.css), so they read as part of
+// the chat page. It stays
 // put when focus moves between panes — it follows the focused session, not
 // the focused pane. Small screens keep it in <body>: there it is a fixed
 // drawer, and only the focused pane is shown, so a panel living in another
@@ -431,7 +433,11 @@ function placeEnvPanel() {
   const host = window.matchMedia("(max-width: 820px)").matches ? null : panels[panels.length - 1];
   for (const p of panels) p.root.classList.toggle("env-host", p === host);
   const parent = host ? host.root : document.body;
-  if (env.parentElement !== parent) parent.appendChild(env);
+  // The terminal dock shares the right column (it replaces the panel while
+  // shown), so it moves with it.
+  for (const el of [env, termDockNode()]) {
+    if (el && el.parentElement !== parent) parent.appendChild(el);
+  }
 }
 
 // rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
@@ -503,7 +509,6 @@ function closePanel(panel) {
   // free any editor-tab models this pane owned.
   for (const k of tabIds) {
     if (isEditorTab(k)) { if (panelsWithTab(k).length === 0) disposeEditor(editorPathOf(k)); }
-    else if (isTermTab(k)) disposeTerminal(k);
     else releaseSessionIfUnviewed(k);
   }
   if (panel._editor) { panel._editor.dispose(); panel._editor = null; }
@@ -1160,10 +1165,10 @@ function attachPaneHandlers(panel) {
   const pe = panel.els;
 
   // Focus tracking: any pointer/focus inside the pane makes it the target of
-  // sidebar clicks and shared menus. The environment panel docked in this pane
-  // (placeEnvPanel) is not part of it: it shows the focused pane's session, so
-  // using it must not move the focus.
-  const inEnvPanel = (e) => !!(e.target.closest && e.target.closest("#env-panel"));
+  // sidebar clicks and shared menus. The environment panel and terminal dock
+  // docked in this pane (placeEnvPanel) are not part of it: they show the
+  // focused pane's session, so using them must not move the focus.
+  const inEnvPanel = (e) => !!(e.target.closest && e.target.closest("#env-panel, #term-dock"));
   panel.root.addEventListener("mousedown", (e) => {
     if (inEnvPanel(e)) return;
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
@@ -1210,9 +1215,16 @@ function attachPaneHandlers(panel) {
   const envBtn = panel.root.querySelector(".pane-env-btn");
   if (envBtn) {
     envBtn.classList.toggle("active", !!(window.EnvPanel && EnvPanel.isOpen()));
-    envBtn.addEventListener("click", (e) => { e.stopPropagation(); EnvPanel.toggle(); });
+    // While the terminal fills the right column, this brings the panel back.
+    envBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (termShown()) { hideTermDock(); EnvPanel.setOpen(true); } else EnvPanel.toggle();
+    });
   }
-  if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
+  if (pe.termBtn) {
+    pe.termBtn.classList.toggle("active", termShown());
+    pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleTermDock(); });
+  }
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
 
@@ -1561,7 +1573,7 @@ function saveLayout() {
         panes: panels.map(p => ({
           // Persist session + editor tabs — draft "New Chat" and terminal tabs
           // are ephemeral (a server PTY can't survive a reload).
-          tabs: p.tabs.filter(k => !isDraft(k) && !isTermTab(k)),
+          tabs: p.tabs.filter(k => !isDraft(k)),
           activeId: p.sessionId,     // null while a draft/editor tab is active
           activeKey: p.activeTab,    // the active tab key (session id or "file#<abs>")
           width: Math.round(p.width),
@@ -1715,20 +1727,20 @@ function clearAttachments(sessionId) {
 // Composer text is held per tab, so switching tabs/sessions inside a pane never
 // clobbers a half-typed message: leaving a tab snapshots its composer text and
 // returning restores it. Keyed by tab key (a sessionId for chat tabs, a
-// "draft#N" key for empty draft tabs); editor/terminal tabs have no composer and
+// "draft#N" key for empty draft tabs); editor tabs have no composer and
 // are skipped. In-memory only (like sessionAttachments) — a page reload starts
 // fresh. The composer is only typeable on a session tab (the opaque pane-picker
 // covers it on a draft tab), but keying by tab key keeps this correct regardless.
 const composerDrafts = new Map(); // tabKey → string
 
 function isChatTab(key) {
-  return typeof key === "string" && !isEditorTab(key) && !isTermTab(key);
+  return typeof key === "string" && !isEditorTab(key);
 }
 
 // saveComposerDraft snapshots a pane's current composer text under the tab it is
 // showing (panel.activeTab), so the text returns when that tab is reselected.
 // Empty text drops any stored draft, so a sent/cleared composer leaves nothing
-// stale behind. No-op for editor/terminal tabs (they have no composer).
+// stale behind. No-op for editor tabs (they have no composer).
 function saveComposerDraft(panel) {
   if (!panel || !panel.els || !panel.els.prompt) return;
   const key = panel.activeTab;
@@ -2116,7 +2128,6 @@ function paneTabTitle(sessionId) {
 }
 
 const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-const ICON_TERM_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
 
 // renderPaneTabs rebuilds a pane's tab strip — one button per open tab (session
 // or pending "New Chat" draft), the active one highlighted, each with a close
@@ -2129,14 +2140,12 @@ function renderPaneTabs(panel) {
   for (const key of panel.tabs) {
     const draft = isDraft(key);
     const editor = isEditorTab(key);
-    const term = isTermTab(key);
     const abs = editor ? editorPathOf(key) : null;
-    const label = draft ? "New Chat" : editor ? baseName(abs) : term ? "Terminal" : paneTabTitle(key);
+    const label = draft ? "New Chat" : editor ? baseName(abs) : paneTabTitle(key);
     const tab = document.createElement("div");
     tab.className = "pane-tab"
       + (draft ? " pane-tab-draft" : "")
       + (editor ? " pane-tab-editor" : "")
-      + (term ? " pane-tab-term" : "")
       + (editor && editorDirty.get(abs) ? " is-dirty" : "")
       + (key === panel.activeTab ? " active" : "");
     tab.setAttribute("role", "tab");
@@ -2144,7 +2153,7 @@ function renderPaneTabs(panel) {
     tab.setAttribute("data-tip", draft ? "New chat" : editor ? abs : label);
     // Session tabs wear their collection's colour as the top accent line (CSS
     // .pane-tab.active), so an open chat's collection is recognisable at a glance.
-    if (!draft && !editor && !term) {
+    if (!draft && !editor) {
       const accent = collectionAccentVar(sessionCollectionColor(key));
       if (accent) tab.style.setProperty("--col-accent", accent);
     }
@@ -2153,11 +2162,6 @@ function renderPaneTabs(panel) {
       const glyph = document.createElement("span");
       glyph.className = "pane-tab-glyph";
       glyph.innerHTML = fileIconSvg(baseName(abs));
-      tab.appendChild(glyph);
-    } else if (term) {
-      const glyph = document.createElement("span");
-      glyph.className = "pane-tab-glyph";
-      glyph.innerHTML = ICON_TERM_GLYPH;
       tab.appendChild(glyph);
     } else {
       const dot = document.createElement("span");
@@ -2185,7 +2189,7 @@ function renderPaneTabs(panel) {
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", !draft && !editor && !term && (sessionSending.has(key) || remoteBusy.has(key)));
+    tab.classList.toggle("is-busy", !draft && !editor && (sessionSending.has(key) || remoteBusy.has(key)));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
       if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
@@ -2607,10 +2611,10 @@ function langForPath(abs) {
   return EDITOR_LANGS[name.slice(dot + 1)] || "plaintext";
 }
 
-// Map the active app theme (data-theme on <html>) to a Monaco theme.
+// Map the active app theme to a Monaco theme — from its declared color-scheme
+// (themeIsLight), not its name: the default light theme is called "terracotta".
 function monacoTheme() {
-  const t = (document.documentElement.getAttribute("data-theme") || "").toLowerCase();
-  return t.includes("light") ? "vs" : "vs-dark";
+  return themeIsLight() ? "vs" : "vs-dark";
 }
 
 // ensureMonaco lazily injects the vendored AMD loader and resolves once
@@ -2689,8 +2693,8 @@ async function mountEditor(panel, abs) {
   }
   updateEditorStaleUI(panel);
   panel._editor.focus();
-  // Anchor the Folders panel to the ROOT this file was opened from (mirrors
-  // mountTerminal's cwd re-alignment). The editor tab carries no chat session,
+  // Anchor the Folders panel to the ROOT this file was opened from. The editor
+  // tab carries no chat session,
   // so without this the panel would fall back to the global root. Fall back to
   // the file's own directory when the open-time root is unknown (layout restore).
   if (focusedPanelId === panel.id && !foldersCollapsed()) {
@@ -2833,31 +2837,78 @@ function openFileInEditor(rel) {
 // (settings.js toggles the <html> data-theme attribute).
 new MutationObserver(() => {
   if (window.monaco && window.monaco.editor) window.monaco.editor.setTheme(monacoTheme());
-  for (const entry of termTabs.values()) { try { entry.term.options.theme = xtermTheme(); } catch (_) {} }
+  const theme = xtermTheme();
+  for (const entry of termTabs.values()) { try { entry.term.options.theme = theme; } catch (_) {} }
 }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
-// ─── Terminal tabs (xterm.js + PTY WebSocket) ─────────────────────────────────
-// A fourth pane-tab kind ("term#<n>") runs a real interactive shell over a
-// WebSocket to /api/terminal/ws (PTY-backed on the server). Unlike editor tabs
-// these are EPHEMERAL — stripped from the persisted layout — because the server
-// PTY does not survive a page reload. Each terminal tab owns its own xterm.js
-// instance + WebSocket + detached host element, kept alive while the tab sits in
-// the background (output keeps streaming into the scrollback buffer).
+// ─── Terminal dock (xterm.js + PTY WebSocket) ─────────────────────────────────
+// Terminals are part of the chat view (Claude Desktop style): each chat session
+// owns its terminals, shown in #term-dock — the chat's right column, docked with
+// the environment panel by placeEnvPanel and replacing it while shown. The dock
+// shows the focused session's terminals; another session's keep running in the
+// background. Drafts and editor tabs (no session) share the "" context. Each is
+// a real interactive shell over a WebSocket to /api/terminal/ws (PTY-backed on
+// the server), so none survives a page reload; a session's are closed when it is
+// deleted or archived.
 
-const TERM_TAB_PREFIX = "term#";
-function isTermTab(key) { return typeof key === "string" && key.startsWith(TERM_TAB_PREFIX); }
 let termSeq = 0;
-function newTermKey() { return TERM_TAB_PREFIX + (++termSeq); }
+const termTabs = new Map(); // term key → { term, fit, ws, host, opened, cwd }
+const termOpts = new Map(); // term key → { sid, cwd, label } resolved at open time
+const termCtxs = new Map(); // context (session id, "" with none) → { keys, active, open, seq }
+const TERM_DOCK_W_KEY = "agent_term_dock_w";
 
-const termTabs = new Map(); // term key → { term, fit, ws, host }
-const termOpts = new Map(); // term key → { sid, cwd } resolved at open time
+function termContext() { return activeSessionId || ""; }
+function termCtx(ctx) {
+  let c = termCtxs.get(ctx);
+  if (!c) { c = { keys: [], active: null, open: false, seq: 0 }; termCtxs.set(ctx, c); }
+  return c;
+}
+function termShown() { return document.body.classList.contains("term-shown"); }
 
-// xtermTheme maps the active app theme to an xterm.js colour theme.
+let termDockEl = null;
+function termDockNode() { return termDockEl || (termDockEl = document.getElementById("term-dock")); }
+
+// themeIsLight reports whether the active theme is a light one, from the
+// color-scheme every theme declares (features/common.css defaults to dark).
+function themeIsLight() {
+  return (getComputedStyle(document.documentElement).colorScheme || "").trim().split(/\s+/)[0] === "light";
+}
+
+// cssHex resolves a CSS colour expression (a var(--token) chain included) to
+// #rrggbb through a probe element's computed colour.
+function cssHex(expr, fallback) {
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  probe.style.color = expr;
+  document.body.appendChild(probe);
+  const m = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g);
+  probe.remove();
+  if (!m || m.length < 3) return fallback;
+  return "#" + m.slice(0, 3).map((v) => Math.round(+v).toString(16).padStart(2, "0")).join("");
+}
+
+// ANSI palette for a light background (VS Code's light terminal colours): the
+// xterm.js defaults are tuned for a dark one, where yellow and white all but
+// vanish on white.
+const XTERM_LIGHT_ANSI = {
+  black: "#000000", red: "#cd3131", green: "#107c10", yellow: "#949800",
+  blue: "#0451a5", magenta: "#bc05bc", cyan: "#0598bc", white: "#555555",
+  brightBlack: "#666666", brightRed: "#cd3131", brightGreen: "#14ce14", brightYellow: "#b5ba00",
+  brightBlue: "#0451a5", brightMagenta: "#bc05bc", brightCyan: "#0598bc", brightWhite: "#a5a5a5",
+};
+
+// xtermTheme builds the terminal's colours from the active app theme: the chat's
+// background and text, an accent-tinted selection, and a light or dark palette.
 function xtermTheme() {
-  const light = (document.documentElement.getAttribute("data-theme") || "").toLowerCase().includes("light");
-  return light
-    ? { background: "#ffffff", foreground: "#1e1e1e", cursor: "#1e1e1e", selectionBackground: "#bcd6f7" }
-    : { background: "#000000", foreground: "#e6e6e6", cursor: "#e6e6e6", selectionBackground: "#3a3d41" };
+  const light = themeIsLight();
+  const bg = cssHex("var(--bg)", light ? "#ffffff" : "#1e1e1e");
+  const fg = cssHex("var(--text)", light ? "#1e1e1e" : "#e6e6e6");
+  const accent = cssHex("var(--accent)", "#4a9eff");
+  return {
+    background: bg, foreground: fg, cursor: fg, cursorAccent: bg,
+    selectionBackground: accent + (light ? "40" : "66"),
+    ...(light ? XTERM_LIGHT_ANSI : {}),
+  };
 }
 
 // ensureXterm lazily injects the vendored xterm.js + fit addon + stylesheet
@@ -2918,30 +2969,18 @@ function sendTermResize(entry) {
   if (t.cols > 0 && t.rows > 0) entry.ws.send(JSON.stringify({ cols: t.cols, rows: t.rows }));
 }
 
-// onTerminalCwd handles a server-reported shell working-directory change: it
-// remembers it on the entry and, while this terminal is the visible (focused-
-// pane active) tab and the Folders panel is open, navigates the panel to follow
-// `cd`. Since a terminal tab has no active chat session, `loadFolder` targets the
-// global folder cwd (the same dir the panel shows with no session), so the panel
-// and the global "no session" environment both track the terminal.
-function onTerminalCwd(key, dir) {
-  const entry = termTabs.get(key);
-  if (entry) entry.cwd = dir;
-  const fpr = focusedPanel();
-  if (!fpr || fpr.activeTab !== key) return;     // not the visible terminal
-  if (foldersCollapsed()) return;                 // panel closed — nothing to move
-  if (!dir || dir === foldersDir) return;         // already there
-  loadFolder(dir);
+function fitTerm(entry) {
+  try { entry.fit.fit(); } catch (_) {}
+  sendTermResize(entry);
 }
 
-// createTerminal builds the xterm instance + WebSocket for a term tab (once).
+// createTerminal builds the xterm instance + WebSocket for a terminal (once).
 async function createTerminal(key) {
   await ensureXterm();
   if (termTabs.has(key)) return termTabs.get(key);
   const opts = termOpts.get(key) || {};
   const host = document.createElement("div");
-  host.style.width = "100%";
-  host.style.height = "100%";
+  host.className = "term-instance";
   const term = new window.Terminal({
     cursorBlink: true,
     fontSize: 13,
@@ -2952,24 +2991,25 @@ async function createTerminal(key) {
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
   // NOTE: do NOT term.open(host) here — the host is still detached, and xterm
-  // initialised on a 0×0 element renders nothing (a black pane where even the
-  // shell prompt and error text are invisible). open() happens in mountTerminal
-  // once the host is attached to the visible pane.
+  // initialised on a 0×0 element renders nothing (a blank pane where even the
+  // shell prompt and error text are invisible). open() happens in
+  // mountDockTerminal once the host is attached to the visible dock.
 
   const wsToken = await mintTerminalToken();
   const ws = new WebSocket(termWsUrl(opts, wsToken));
   ws.binaryType = "arraybuffer";
-  const entry = { term, fit, ws, host, opened: false };
+  const entry = { term, fit, ws, host, opened: false, cwd: "" };
   termTabs.set(key, entry);
 
   const enc = new TextEncoder();
   ws.onopen = () => sendTermResize(entry);
   ws.onmessage = (ev) => {
-    // Binary frames are raw PTY output; text frames are control JSON (cwd sync).
+    // Binary frames are raw PTY output; text frames are control JSON (the
+    // shell's cwd, remembered on the entry).
     if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return; }
     try {
       const m = JSON.parse(ev.data);
-      if (m && typeof m.cwd === "string") { onTerminalCwd(key, m.cwd); return; }
+      if (m && typeof m.cwd === "string") { entry.cwd = m.cwd; return; }
     } catch (_) { /* not control JSON — fall through to write as text */ }
     term.write(ev.data);
   };
@@ -2980,40 +3020,100 @@ async function createTerminal(key) {
   return entry;
 }
 
-// mountTerminal shows term tab `key` in `panel`, creating it on first use, and
-// moves its host element into the pane's terminal host.
-async function mountTerminal(panel, key) {
+// mountDockTerminal shows terminal `key` in the dock, creating it on first use.
+async function mountDockTerminal(key, focus) {
   let entry;
   try { entry = await createTerminal(key); }
-  catch (e) { setStatus(panel, tr("app.terminal.loadFailed", { error: e })); return; }
-  if (panel.activeTab !== key) return; // tab switched away while xterm loaded
-  const hostWrap = panel.els.terminalHost;
-  if (!hostWrap) return;
-  while (hostWrap.firstChild) hostWrap.removeChild(hostWrap.firstChild);
-  hostWrap.appendChild(entry.host);
-  // Open xterm only once, and only now that the host is attached + visible so the
-  // renderer measures real dimensions (see the NOTE in createTerminal).
+  catch (e) { const p = fp(); if (p) setStatus(p, tr("app.terminal.loadFailed", { error: e })); return; }
+  const c = termCtxs.get(termContext());
+  if (!c || c.active !== key || !termShown()) return; // switched away while xterm loaded
+  const host = termDockNode().querySelector(".term-dock-host");
+  if (entry.host.parentNode !== host) host.replaceChildren(entry.host);
+  // Open xterm only once, and only now that the host is attached + visible so
+  // the renderer measures real dimensions (see the NOTE in createTerminal).
   if (!entry.opened) { entry.term.open(entry.host); entry.opened = true; }
   requestAnimationFrame(() => {
-    try { entry.fit.fit(); } catch (_) {}
-    sendTermResize(entry);
-    entry.term.focus();
-    // Align the Folders panel to this terminal's last-known cwd on (re)activation.
-    if (entry.cwd && !foldersCollapsed() && entry.cwd !== foldersDir) loadFolder(entry.cwd);
+    fitTerm(entry);
+    if (focus) entry.term.focus();
   });
 }
 
-// refitVisibleTerminals re-fits the xterm grid of every pane currently showing
-// a terminal tab (called after a pane/window resize) and pushes the new size to
-// the PTY so server-side programs re-wrap.
-function refitVisibleTerminals() {
-  for (const panel of panels) {
-    if (!isTermTab(panel.activeTab)) continue;
-    const entry = termTabs.get(panel.activeTab);
-    if (!entry) continue;
-    try { entry.fit.fit(); } catch (_) {}
-    sendTermResize(entry);
+// renderTermDockTabs draws the dock's terminal tabs for context `c`.
+function renderTermDockTabs(c) {
+  const strip = termDockNode().querySelector(".term-dock-tabs");
+  strip.replaceChildren();
+  if (!c) return;
+  for (const key of c.keys) {
+    const tab = document.createElement("div");
+    tab.className = "term-dock-tab" + (key === c.active ? " active" : "");
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(key === c.active));
+    const name = document.createElement("span");
+    name.textContent = (termOpts.get(key) || {}).label || tr("term.label");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "term-dock-tab-close";
+    close.setAttribute("aria-label", tr("term.close"));
+    close.setAttribute("data-tip", tr("term.close"));
+    close.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeDockTerminal(key); });
+    tab.addEventListener("click", () => { c.active = key; syncTermDock({ focus: true }); });
+    tab.append(name, close);
+    strip.appendChild(tab);
   }
+}
+
+// syncTermDock shows the focused session's terminals when it has the dock open,
+// else the environment panel (or nothing) takes the right column back. Called
+// whenever the focused session changes (setFocusedPanel) and after any change.
+function syncTermDock({ focus = false } = {}) {
+  const dock = termDockNode();
+  if (!dock) return;
+  const c = termCtxs.get(termContext());
+  const show = !!(c && c.open && c.keys.length);
+  const was = termShown();
+  document.body.classList.toggle("term-shown", show);
+  for (const b of document.querySelectorAll(".pane-term-btn")) b.classList.toggle("active", show);
+  const envOpen = !!(window.EnvPanel && EnvPanel.isOpen());
+  for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.toggle("active", !show && envOpen);
+  renderTermDockTabs(show ? c : null);
+  if (show) mountDockTerminal(c.active, focus);
+  else dock.querySelector(".term-dock-host").replaceChildren();
+  if (show !== was) layoutWidths();
+}
+
+// openDockTerminal adds a terminal to the focused session and shows the dock.
+// `opts.cwd` starts it in that folder (Files → Open Terminal here); otherwise it
+// starts in the session's working folder.
+function openDockTerminal(opts) {
+  const ctx = termContext();
+  const c = termCtx(ctx);
+  const key = "term#" + (++termSeq);
+  c.seq += 1;
+  termOpts.set(key, {
+    ...(opts && opts.cwd ? { cwd: opts.cwd } : { sid: ctx }),
+    label: c.seq === 1 ? tr("term.label") : tr("term.labelN", { n: c.seq }),
+  });
+  c.keys.push(key);
+  c.active = key;
+  c.open = true;
+  syncTermDock({ focus: true });
+}
+
+// toggleTermDock is the pane toolbar's terminal button: hide the dock, or show
+// the session's terminals (opening the first one).
+function toggleTermDock() {
+  const c = termCtx(termContext());
+  if (c.open && c.keys.length) { c.open = false; syncTermDock(); return; }
+  if (!c.keys.length) { openDockTerminal(); return; }
+  c.open = true;
+  syncTermDock({ focus: true });
+}
+
+function hideTermDock() {
+  const c = termCtxs.get(termContext());
+  if (c) c.open = false;
+  syncTermDock();
 }
 
 function disposeTerminal(key) {
@@ -3026,21 +3126,74 @@ function disposeTerminal(key) {
   termTabs.delete(key);
 }
 
-// openTerminalTab opens a new terminal tab in `panel` (default: focused pane).
-// `opts` chooses the working directory: { cwd } for an explicit dir (Folders
-// "Open Terminal here") or { sid } to inherit a chat session's cwd. When the
-// active tab is a pending draft, the terminal takes that slot in place.
-function openTerminalTab(panel, opts) {
-  panel = panel || focusedPanel() || panels[0];
-  if (!panel) return;
-  const key = newTermKey();
-  termOpts.set(key, opts || { sid: activeSessionId || "" });
-  if (!panel.tabs.includes(key)) {
-    const ai = panel.tabs.indexOf(panel.activeTab);
-    if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = key;
-    else panel.tabs.push(key);
+// closeDockTerminal ends one terminal; the dock hides with the last one.
+function closeDockTerminal(key) {
+  for (const c of termCtxs.values()) {
+    const i = c.keys.indexOf(key);
+    if (i === -1) continue;
+    c.keys.splice(i, 1);
+    if (c.active === key) c.active = c.keys[Math.min(i, c.keys.length - 1)] || null;
+    if (!c.keys.length) { c.open = false; c.seq = 0; }
   }
-  activateTab(panel, key);
+  disposeTerminal(key);
+  syncTermDock({ focus: true });
+}
+
+// disposeSessionTerminals ends a session's terminals (deleted or archived).
+function disposeSessionTerminals(sid) {
+  const c = termCtxs.get(sid);
+  if (!c) return;
+  termCtxs.delete(sid);
+  for (const key of c.keys) disposeTerminal(key);
+  syncTermDock();
+}
+
+// refitVisibleTerminals re-fits the shown terminal's grid (after a pane, window
+// or dock resize) and pushes the new size to the PTY so programs re-wrap.
+function refitVisibleTerminals() {
+  if (!termShown()) return;
+  const c = termCtxs.get(termContext());
+  const entry = c && termTabs.get(c.active);
+  if (entry && entry.opened) fitTerm(entry);
+}
+
+// wireTermDock binds the dock's header buttons and its resize handle (the left
+// edge; the width persists per browser).
+function wireTermDock() {
+  const dock = termDockNode();
+  if (!dock) return;
+  const saved = localStorage.getItem(TERM_DOCK_W_KEY);
+  if (saved) document.documentElement.style.setProperty("--term-dock-w", saved);
+  dock.querySelector(".term-dock-new").addEventListener("click", () => openDockTerminal());
+  dock.querySelector(".term-dock-close").addEventListener("click", hideTermDock);
+  const grip = dock.querySelector(".term-dock-resize");
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const pane = dock.parentElement;
+    const right = dock.getBoundingClientRect().right;
+    let frame = 0;
+    const move = (ev) => {
+      const max = Math.max(320, pane.getBoundingClientRect().width - PANE_MIN_W);
+      const w = Math.round(Math.min(max, Math.max(320, right - ev.clientX)));
+      document.documentElement.style.setProperty("--term-dock-w", w + "px");
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; refitVisibleTerminals(); });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      grip.classList.remove("is-dragging");
+      document.body.classList.remove("resizing");
+      document.body.style.userSelect = "";
+      const w = getComputedStyle(document.documentElement).getPropertyValue("--term-dock-w").trim();
+      if (w) localStorage.setItem(TERM_DOCK_W_KEY, w);
+      refitVisibleTerminals();
+    };
+    grip.classList.add("is-dragging");
+    document.body.classList.add("resizing");
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -8107,6 +8260,7 @@ function closeTabEverywhere(id) {
 // holding it. Shared by the local delete flow and the remote "session_deleted"
 // push (another browser deleted the session).
 function forgetSession(id) {
+  disposeSessionTerminals(id);
   unsubscribeSessionEvents(id);
   unpinSession(id);
   sessionMeta.delete(id);
@@ -8173,6 +8327,7 @@ async function archiveSession(id) {
     const meta = sessionMeta.get(id);
     if (meta) meta.archived = true;
     unpinSession(id);
+    disposeSessionTerminals(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
     // opening it from the Archived sessions dialog re-mounts the read-only
@@ -8270,7 +8425,6 @@ function closeTab(panel, key) {
   const idx = panel.tabs.indexOf(key);
   if (idx === -1) return;
   const editor = isEditorTab(key);
-  const term = isTermTab(key);
   if (editor) {
     const abs = editorPathOf(key);
     if (editorDirty.get(abs) && !confirm(`Discard unsaved changes to ${baseName(abs)}?`)) return;
@@ -8280,10 +8434,8 @@ function closeTab(panel, key) {
   if (isDraft(key)) draftDirs.delete(key);
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
-  // Terminal tabs are pane-local and ephemeral; tear down the shell + WebSocket.
-  if (term) disposeTerminal(key);
-  // Session-only cleanup (push subscription); editor/terminal keys have none.
-  const releaseIfSession = () => { if (!editor && !term) releaseSessionIfUnviewed(key); };
+  // Session-only cleanup (push subscription); editor keys have none.
+  const releaseIfSession = () => { if (!editor) releaseSessionIfUnviewed(key); };
 
   if (!panel.tabs.length) {
     if (panels.length > 1) {
@@ -8315,7 +8467,7 @@ function closeTab(panel, key) {
 // out of the pane's shared #ask-user-slot and back into its queue (requeuing
 // every still-unanswered question), then tears the wizard down so re-selecting
 // the tab rebuilds a fresh one from the queue. `activeId` is the session that
-// stays visible; pass null for draft/editor/terminal tabs (they own no session,
+// stays visible; pass null for draft/editor tabs (they own no session,
 // so every wizard in the slot is hidden) — otherwise a leftover card covers the
 // new tab's picker/composer.
 function requeueHiddenWizards(panel, activeId) {
@@ -8354,7 +8506,6 @@ async function activateTab(panel, key) {
     panel.activeTab = key;
     panel.sessionId = null;
     panel.root.classList.add("editing");
-    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     hideReplyNav(panel);
     mountInPanel(panel, null);
@@ -8366,27 +8517,10 @@ async function activateTab(panel, key) {
     return;
   }
 
-  // Terminal tab — show the interactive shell, no chat session is active.
-  if (isTermTab(key)) {
-    panel.activeTab = key;
-    panel.sessionId = null;
-    panel.root.classList.add("terminal");
-    panel.root.classList.remove("editing");
-    hidePanePicker(panel);
-    hideReplyNav(panel);
-    mountInPanel(panel, null);
-    clearPinnedPrompt(panel);
-    setFocusedPanel(panel.id);
-    renderPaneTabs(panel);
-    saveLayout();
-    mountTerminal(panel, key);
-    return;
-  }
   panel.root.classList.remove("editing");
-  panel.root.classList.remove("terminal");
 
   // Draft tab — show the picker, no session is active. The shared ask-user slot
-  // is still visible here (unlike editor/terminal tabs, which CSS hides), so
+  // is still visible here (unlike editor tabs, which CSS hides), so
   // requeue any prior session's wizard or its card would cover the picker.
   if (isDraft(key)) {
     panel.activeTab = key;
@@ -8732,7 +8866,6 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     panel.activeTab = newId;
     panel.sessionId = newId;
     panel.root.classList.remove("editing");
-    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
     clearPinnedPrompt(panel);
@@ -13662,7 +13795,7 @@ document.addEventListener("keydown", (e) => {
 function openFolderDirCtxMenu(ev) {
   if (!foldersDir) return;
   const items = [];
-  items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: foldersDir })]);
+  items.push([tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: foldersDir })]);
   items.push(SEP);
   items.push([tr("menu.newFile"), () => folderNewEntry(foldersDir, "file")]);
   items.push([tr("menu.newFolder"), () => folderNewEntry(foldersDir, "dir")]);
@@ -13705,7 +13838,7 @@ function openFolderUpCtxMenu(ev) {
   const D = { disabled: true };
   const items = [
     [tr("menu.openChatHere"), () => openNewChatDraft({ dir: cur })],
-    [tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: cur })],
+    [tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: cur })],
     [tr("menu.download"), () => folderDownload(abs, name, true)],
     SEP,
     [tr("menu.newFile"), () => folderNewEntry(abs, "file")],
@@ -13776,7 +13909,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   if (isDir) {
     // Open / download
     items.push([tr("menu.openChatHere"), () => openNewChatDraft({ dir: abs })]);
-    items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: abs })]);
+    items.push([tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: abs })]);
     items.push([tr("menu.download"), () => folderDownload(abs, name, true)]);
     items.push(SEP);
     // Create inside this folder
@@ -14083,6 +14216,7 @@ async function restoreLayout(rec, liveIds) {
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
   wireTreeControls();
   registerEnvCards();
+  wireTermDock();
   EnvPanel.init();
   await loadCollections();
   await loadSessions();

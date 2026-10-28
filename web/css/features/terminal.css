@@ -1,36 +1,142 @@
-/* xterm.js interactive terminal tabs
+/* Terminal dock: the focused chat session's terminals in the chat's right
+   column (Claude Desktop style), docked in the rightmost pane with the
+   environment panel by placeEnvPanel (app.js) and replacing it while shown.
    Part of web/css/styles.css — edit this partial, not the @import barrel. */
 
-/* ─── Terminal tabs ────────────────────────────────────────────────────────
- * When a pane shows a terminal tab it gets the `.terminal` class: the chat
- * surfaces are hidden (same as `.editing`) and the xterm.js host fills the
- * pane. */
-.chat-pane.terminal #transcript,
-.chat-pane.terminal #ask-user-slot,
-.chat-pane.terminal #composer-wrap,
-.chat-pane.terminal .pane-editor,
-.chat-pane.terminal .pane-picker { display: none !important; }
-.pane-terminal { display: none; }
-.chat-pane.terminal .pane-terminal {
-  display: flex;
+:root { --term-dock-w: 480px; }
+
+#term-dock {
+  display: none;
   flex-direction: column;
+  position: absolute;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: var(--term-dock-w);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: 5;
+}
+body.term-shown #term-dock { display: flex; }
+/* Same specificity as env-panel.css's `body.env-open #env-panel`; this partial
+   is imported after it, so the terminal wins the column. */
+body.term-shown #env-panel { display: none; }
+
+/* Left-edge resize grip (wireTermDock); the line shows on hover / drag. */
+.term-dock-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.term-dock-resize::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.term-dock-resize:hover::before,
+.term-dock-resize.is-dragging::before { background: var(--accent); }
+
+.term-dock-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.term-dock-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.term-dock-tabs::-webkit-scrollbar { display: none; }
+.term-dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.term-dock-tab:hover { background: var(--bg-raised-hover); color: var(--text); }
+.term-dock-tab.active { background: var(--bg-active); color: var(--text-strong); }
+.term-dock-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+.term-dock-tab:hover .term-dock-tab-close,
+.term-dock-tab.active .term-dock-tab-close { opacity: 0.7; }
+.term-dock-tab-close:hover { opacity: 1; background: var(--bg-raised-hover); }
+.term-dock-new,
+.term-dock-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.term-dock-new:hover,
+.term-dock-close:hover { background: var(--bg-raised-hover); color: var(--text); }
+.term-dock-close { margin-left: auto; }
+
+.term-dock-host {
   flex: 1 1 0;
   min-height: 0;
-  background: #000;
+  padding: 8px 4px 6px 12px;
 }
-.pane-terminal-host {
-  flex: 1 1 0;
-  min-height: 0;
-  width: 100%;
-  padding: 4px 6px;
-  box-sizing: border-box;
-}
-/* xterm fills its host; the .xterm-viewport scrollbar follows the app theme. */
-.pane-terminal-host .xterm { height: 100%; }
-.pane-terminal-host .xterm-viewport::-webkit-scrollbar { width: 10px; }
-.pane-terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
-  background: var(--border, #444);
+.term-instance,
+.term-dock-host .xterm { width: 100%; height: 100%; }
+/* The .xterm-viewport scrollbar follows the app theme. */
+.term-dock-host .xterm-viewport::-webkit-scrollbar { width: 10px; }
+.term-dock-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb, var(--border));
   border-radius: 5px;
 }
 
-
+/* Small screens: the terminal covers the chat (only the focused pane shows);
+   placeEnvPanel keeps it in <body> there. */
+@media (max-width: 820px) {
+  #term-dock {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    border-left: none;
+    z-index: 62;
+  }
+  .term-dock-resize { display: none; }
+}
