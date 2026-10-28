@@ -395,3 +395,31 @@ func TestConvertPluginLogsUnmappedToolsOncePerAgent(t *testing.T) {
 		t.Errorf("agent b has nothing unmapped and must log nothing: %q", out)
 	}
 }
+
+func TestConvertibleAgentsSkipsOmnisToolNames(t *testing.T) {
+	logs := captureLog(t)
+	p := claudeplugins.Plugin{Name: "lsp", Agents: []claudeplugins.Agent{{Name: "hover"}, {Name: "helper"}}}
+	got := convertibleAgents(p)
+	if len(got) != 1 || got[0].Name != "helper" {
+		t.Fatalf("want only helper kept, got %+v", got)
+	}
+	if !strings.Contains(logs.String(), `"lsp_hover"`) {
+		t.Fatalf("missing skip log: %q", logs.String())
+	}
+	a2a := claudeplugins.Plugin{Name: "a2a", Agents: []claudeplugins.Agent{{Name: "peer"}}}
+	if got := convertibleAgents(a2a); len(got) != 0 {
+		t.Fatalf("a2a_ is the A2A peer tool prefix; want skipped, got %+v", got)
+	}
+}
+
+func TestMergePluginSquadsLogsFold(t *testing.T) {
+	logs := captureLog(t)
+	out := mergePluginSquads([]SquadEntry{{Name: "system", Leader: "leader"}},
+		[]SquadEntry{{Name: "System", Leader: "system_lead", Members: []string{"system_x"}}})
+	if len(out) != 1 || out[0].Leader != "leader" {
+		t.Fatalf("authored squad must keep its leader: %+v", out)
+	}
+	if !strings.Contains(logs.String(), `"system"`) || !strings.Contains(logs.String(), "folded") {
+		t.Fatalf("missing fold log: %q", logs.String())
+	}
+}

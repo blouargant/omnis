@@ -121,6 +121,10 @@ func convertibleAgents(p claudeplugins.Plugin) []claudeplugins.Agent {
 			log.Printf("claude plugin %q: agent %q cannot be an omnis agent name (want %s); skipped", p.Name, a.Name, pluginOmnisNamePattern)
 			continue
 		}
+		if isOmnisToolName(name) {
+			log.Printf("claude plugin %q: agent %q maps to %q, the name of an omnis tool; skipped (an agent holding both would fail with a duplicate tool)", p.Name, a.Name, name)
+			continue
+		}
 		if first, taken := owner[name]; taken {
 			log.Printf("claude plugin %q: agent %q maps to %q, already taken by %q; skipped", p.Name, a.Name, name, first)
 			continue
@@ -129,6 +133,44 @@ func convertibleAgents(p claudeplugins.Plugin) []claudeplugins.Agent {
 		out = append(out, a)
 	}
 	return out
+}
+
+// omnisUnderscoreTools are the tool names omnis can mount that a converted
+// plugin agent name (<plugin>_<agent>, always holding an underscore) could
+// collide with. A delegable sub-agent is mounted as a tool named after the
+// agent, so an agent named like a tool its caller (or itself) also holds makes
+// ADK reject the whole squad with a duplicate-tool error. There is no runtime
+// registry of tool names to consult at resolution time (tools are built per
+// group, with infrastructure), so this is an explicit list of the underscored
+// names the tool groups declare; keep it in step when adding such a tool.
+var omnisUnderscoreTools = map[string]bool{
+	"ask_squad": true, "ask_user": true, "ast_grep_rewrite": true, "ast_grep_search": true,
+	"bash_background": true, "bg_cancel": true, "bg_list": true, "bg_output": true,
+	"browse_registry": true, "compact_now": true, "curate_session": true,
+	"get_installed_skill": true, "get_remote_item": true, "get_remote_skill": true, "get_settings": true,
+	"grep_docs": true, "handoff_to_router": true, "html_to_markdown": true,
+	"install_remote_item": true, "install_remote_skill": true, "link_skill_to_agent": true,
+	"list_docs": true, "list_installed_skills": true, "list_registries": true, "list_sessions": true,
+	"list_skills": true, "list_softskills": true, "load_skill": true, "load_skill_resource": true,
+	"load_softskill": true, "load_softskill_resource": true,
+	"lsp_code_action": true, "lsp_definition": true, "lsp_diagnostics": true, "lsp_document_symbols": true,
+	"lsp_hover": true, "lsp_read_symbol": true, "lsp_references": true, "lsp_rename": true,
+	"lsp_workspace_symbol": true, "read_doc": true, "read_session": true, "recall_precedents": true, "recall_softskills": true,
+	"record_session_feedback": true, "record_validation": true,
+	"reindex_code": true, "reindex_docs": true, "reindex_registries": true, "remove_config": true,
+	"report_sessions": true, "rollback_settings": true, "route_to_squad": true, "run_tests": true,
+	"search_code": true, "search_docs": true, "search_registries": true, "search_sessions": true,
+	"set_agent": true, "set_model": true, "set_preference": true, "settings_history": true,
+	"spawn_session": true, "task_list": true, "task_next": true,
+	"teammate_ask": true, "teammate_check": true, "teammate_list": true, "teammate_tell": true,
+	"todo_read": true, "todo_update": true, "todo_write": true, "update_config": true,
+	"worktree_create": true, "worktree_merge": true, "worktree_remove": true,
+}
+
+// isOmnisToolName reports whether name is (or, for the a2a_ / mcp__ families,
+// could be) the name of a tool omnis mounts.
+func isOmnisToolName(name string) bool {
+	return omnisUnderscoreTools[name] || strings.HasPrefix(name, "a2a_") || strings.HasPrefix(name, "mcp__")
 }
 
 // isClaudeAgentTool reports whether a tool name is Claude Code's Agent tool,

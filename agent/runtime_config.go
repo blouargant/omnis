@@ -1192,6 +1192,7 @@ func mergePluginSquads(authored, plugin []SquadEntry) []SquadEntry {
 			if strings.TrimSpace(out[i].Description) == "" {
 				out[i].Description = ps.Description
 			}
+			log.Printf("claude plugins: plugin squad %q folded into the authored squad %q (it only fills that squad's empty leader/members/description)", ps.Name, out[i].Name)
 			merged = true
 			break
 		}
