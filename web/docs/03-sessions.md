@@ -28,17 +28,16 @@ The **sidebar** holds, top to bottom:
   directly under it, like the project groups in Claude Desktop. Click a
   collection's header to fold or unfold it; Omnis remembers your choice in this
   browser. A long collection shows its 10 most recent chats, then **Show more**.
-- The **Archived** panel (every collection's archived chats) and the per-chat
-  **Files** browser.
-- Your **account button** at the very bottom — its menu opens **Settings**
-  (`Ctrl+,`), **Appearance**, **Language** and **Documentation**.
+- Your **account button** at the very bottom, showing your name — its menu
+  opens your **Archived sessions**, **Settings** (`Ctrl+,`), **Appearance**,
+  **Language** and **Documentation**.
 
 The **Collections** header carries **Sort** (recent activity / date created /
 A–Z, applied inside every collection) and **+** (new collection). Hovering a
 collection's header replaces its chat count with **+** (start a chat in that
 collection) and **⋯** (its menu). **Search** turns into a field that shows the
-matching chats of every collection under their group, and filters the Archived
-panel too; press Escape to close it. To act on several chats at once, choose
+matching chats of every collection under their group; press Escape to close
+it. To act on several chats at once, choose
 **Select** in a collection's **⋯** menu: tick chats (or **Select all**), then
 **Actions** → **Move to** a collection, **Archive** or **Delete**.
 
@@ -62,6 +61,15 @@ or deleted.
 Collections and each session's filing are persisted (`collections.json` +
 `conversation_<id>.json`) and survive a server restart. Changes sync live across
 open browsers.
+
+### Archived sessions
+
+**Archive** a chat from its **⋯** menu (or several at once with **Select** →
+**Actions** → **Archive**): it leaves the sidebar and becomes read-only. Open the
+**account menu → Archived sessions** to find them — the item shows how many
+there are. In that window you can search, click a title to read a chat
+(read-only), **Restore** it to its collection so you can continue it, or
+export or delete it.
 
 ### Collection context (instructions, memory, defaults)
 

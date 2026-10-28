@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
@@ -37,8 +39,10 @@ func New() []tool.Tool {
 				"Arguments: `file_path` (string, required), `content` (string, required).",
 			func(ctx adk.ToolContext, in WriteIn) (WriteOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
+				_, statErr := os.Stat(in.Path)
 				out, _ := RunWrite(context.Background(), in)
-				return WriteOut{Result: out}, nil
+				created := os.IsNotExist(statErr) && !strings.HasPrefix(out, "Error")
+				return WriteOut{Result: out, Created: created}, nil
 			}),
 		mustTool("Edit",
 			"Perform a surgical in-place string replacement in a file. "+

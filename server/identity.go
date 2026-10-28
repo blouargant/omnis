@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"net/http"
+	"os"
+	"os/user"
 	"strings"
+	"sync"
 
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
@@ -78,9 +81,42 @@ func handleWhoami(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"user_id": requestLogin(c), "identity_mode": "cookie", "identity_enforced": true})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
+		out := gin.H{
 			"user_id":           sessions.UserID(),
 			"identity_enforced": strings.TrimSpace(d.IdentityHeader) != "",
-		})
+		}
+		// A single-user install serves the shared default id, which names no
+		// one: report the person it belongs to so the account button can show
+		// their name rather than a generic label.
+		if sessions.UserID() == sessions.DefaultUserID {
+			if name := localDisplayName(); name != "" {
+				out["display_name"] = name
+			}
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
+
+// localDisplayName is the name of the OS account running this server: its
+// full name (the first GECOS field), else its login (without a Windows
+// DOMAIN\ prefix), else $USER / $USERNAME. Looked up once.
+var localDisplayName = sync.OnceValue(func() string {
+	if u, err := user.Current(); err == nil {
+		if name, _, _ := strings.Cut(u.Name, ","); strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name)
+		}
+		login := u.Username
+		if i := strings.LastIndexByte(login, '\\'); i >= 0 {
+			login = login[i+1:]
+		}
+		if login = strings.TrimSpace(login); login != "" {
+			return login
+		}
+	}
+	for _, k := range []string{"USER", "USERNAME"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+})

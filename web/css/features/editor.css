@@ -3,9 +3,8 @@
 
 /* ─── Monaco editor tabs ───────────────────────────────────────────────────
  * When a pane shows an editor tab it gets the `.editing` class: the chat
- * surfaces (prompt header, transcript, ask-user slot, composer, picker) are
+ * surfaces (transcript, ask-user slot, composer, picker) are
  * hidden and the Monaco editor fills the pane. */
-.chat-pane.editing #prompt-header,
 .chat-pane.editing #transcript,
 .chat-pane.editing #ask-user-slot,
 .chat-pane.editing #composer-wrap,

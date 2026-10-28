@@ -159,10 +159,6 @@ const els = {
   treeSelectAllBtn: document.getElementById("tree-selectall-btn"),
   treeBatchBtn:    document.getElementById("tree-batch-btn"),
   treeSearchEmpty: document.getElementById("tree-search-empty"),
-  archivedPanel: document.getElementById("archived-panel"),
-  archivedHeader:document.getElementById("archived-header"),
-  archivedList:  document.getElementById("archived-list"),
-  archivedCount: document.getElementById("archived-count"),
   foldersPanel:  document.getElementById("folders-panel"),
   foldersResize: document.getElementById("folders-resize"),
   foldersHeader: document.getElementById("folders-header"),
@@ -231,7 +227,7 @@ const queuedAskWidgets = new Map();
 // root.querySelector so duplicates never matter to JS (and #id CSS selectors
 // style every pane identically).
 const PANE_EL_IDS = {
-  promptHeader: "prompt-header", transcript: "transcript",
+  transcript: "transcript",
   composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
   editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
   send: "send", cancel: "cancel", status: "status",
@@ -259,7 +255,6 @@ function bindPaneEls(root) {
   e.editorStale = root.querySelector(".pane-editor-stale");
   e.editorReload = root.querySelector(".pane-editor-reload");
   e.terminalWrap = root.querySelector(".pane-terminal");
-  e.terminalHost = root.querySelector(".pane-terminal-host");
   e.ptr         = root.querySelector(".ptr-indicator");
   e.termBtn     = root.querySelector(".pane-term-btn");
   e.toolbar     = root.querySelector(".pane-toolbar");
@@ -355,9 +350,11 @@ function setFocusedPanel(pid) {
   if (AgentDebug.enabled) { AgentDebug.activeSession = activeSessionId; AgentDebug._paint(); }
   refreshSidebarActive();
   // The rail + middle list name the chat we just focused (fire-and-forget; a
-  // draft/editor/terminal tab has no session, so the helper no-ops).
+  // draft/editor tab has no session, so the helper no-ops).
   revealSessionInTree(activeSessionId);
   refreshFoldersPanel();
+  if (window.EnvPanel) EnvPanel.setSession(activeSessionId);
+  syncTermDock();
   saveLayout();
 }
 
@@ -369,7 +366,7 @@ function refreshSidebarActive() {
   if (!els.tree) return;
   const shown = new Set(panels.flatMap(p => p.tabs));
   const focusedId = (focusedPanel() || {}).sessionId || null;
-  for (const li of [...els.tree.querySelectorAll("li[data-id]"), ...els.archivedList.querySelectorAll("li[data-id]")]) {
+  for (const li of els.tree.querySelectorAll("li[data-id]")) {
     const id = li.dataset.id;
     li.classList.toggle("active", shown.has(id));
     li.classList.toggle("active-focused", !!focusedId && id === focusedId);
@@ -383,21 +380,64 @@ function applyPaneWidths() {
 }
 
 // layoutWidths normalizes the stored per-pane widths to fill the chat area,
-// clamping each to PANE_MIN_W, then writes them to the DOM.
+// keeping each at least paneMinW, then writes them to the DOM.
 function layoutWidths() {
   if (!panels.length) return;
   const total = els.chat.clientWidth || (panels.length * PANE_MIN_W);
   const dividers = Math.max(0, panels.length - 1) * PANE_DIVIDER_W;
-  const avail = Math.max(panels.length * PANE_MIN_W, total - dividers);
-  let sum = panels.reduce((s, p) => s + (p.width > 0 ? p.width : 0), 0);
-  if (sum <= 0) {
-    const w = avail / panels.length;
-    for (const p of panels) p.width = w;
-  } else {
-    const k = avail / sum;
-    for (const p of panels) p.width = Math.max(PANE_MIN_W, (p.width > 0 ? p.width : avail / panels.length) * k);
+  const mins = new Map(panels.map((p) => [p, paneMinW(p)]));
+  const avail = Math.max(panels.reduce((s, p) => s + mins.get(p), 0), total - dividers);
+  const share = new Map(panels.map((p) => [p, p.width > 0 ? p.width : avail / panels.length]));
+  // A pane that would fall under its minimum is pinned to it and the others
+  // share what is left, in proportion to their stored widths — so the row
+  // still adds up to the chat width instead of overflowing it.
+  const pinned = new Set();
+  for (;;) {
+    const free = panels.filter((p) => !pinned.has(p));
+    const room = avail - [...pinned].reduce((s, p) => s + mins.get(p), 0);
+    const sum = free.reduce((s, p) => s + share.get(p), 0);
+    const under = free.filter((p) => share.get(p) * room / sum < mins.get(p));
+    if (under.length && under.length < free.length) { for (const p of under) pinned.add(p); continue; }
+    for (const p of free) p.width = Math.max(mins.get(p), share.get(p) * room / sum);
+    for (const p of pinned) p.width = mins.get(p);
+    break;
   }
   applyPaneWidths();
+}
+
+// paneMinW is a pane's minimum width: the pane hosting the open environment
+// panel or terminal dock (placeEnvPanel) needs room for it on top of the chat.
+function paneMinW(p) {
+  if (!p.root.classList.contains("env-host")) return PANE_MIN_W;
+  const side = termShown() ? termDockNode()
+    : document.body.classList.contains("env-open") ? envPanelNode() : null;
+  return PANE_MIN_W + (side ? side.offsetWidth : 0);
+}
+
+// placeEnvPanel docks the environment panel — and the terminal dock — in the
+// rightmost pane, under its tab bar (see env-panel.css), so they read as part of
+// the chat page. It stays
+// put when focus moves between panes — it follows the focused session, not
+// the focused pane. Small screens keep it in <body>: there it is a fixed
+// drawer, and only the focused pane is shown, so a panel living in another
+// pane would be hidden with it.
+//
+// The element is held by reference, not looked up by id: rebuildChatDOM
+// detaches every pane first, and closing the host pane takes the panel out
+// of the document with it until it is docked again here.
+let envPanelEl = null;
+function envPanelNode() { return envPanelEl || (envPanelEl = document.getElementById("env-panel")); }
+function placeEnvPanel() {
+  const env = envPanelNode();
+  if (!env) return;
+  const host = window.matchMedia("(max-width: 820px)").matches ? null : panels[panels.length - 1];
+  for (const p of panels) p.root.classList.toggle("env-host", p === host);
+  const parent = host ? host.root : document.body;
+  // The terminal dock shares the right column (it replaces the panel while
+  // shown), so it moves with it.
+  for (const el of [env, termDockNode()]) {
+    if (el && el.parentElement !== parent) parent.appendChild(el);
+  }
 }
 
 // rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
@@ -410,6 +450,7 @@ function rebuildChatDOM() {
     els.chat.appendChild(p.root);
   });
   els.chat.classList.toggle("solo", panels.length <= 1);
+  placeEnvPanel();
   layoutWidths();
 }
 
@@ -468,7 +509,6 @@ function closePanel(panel) {
   // free any editor-tab models this pane owned.
   for (const k of tabIds) {
     if (isEditorTab(k)) { if (panelsWithTab(k).length === 0) disposeEditor(editorPathOf(k)); }
-    else if (isTermTab(k)) disposeTerminal(k);
     else releaseSessionIfUnviewed(k);
   }
   if (panel._editor) { panel._editor.dispose(); panel._editor = null; }
@@ -1125,11 +1165,16 @@ function attachPaneHandlers(panel) {
   const pe = panel.els;
 
   // Focus tracking: any pointer/focus inside the pane makes it the target of
-  // sidebar clicks and shared menus.
-  panel.root.addEventListener("mousedown", () => {
+  // sidebar clicks and shared menus. The environment panel and terminal dock
+  // docked in this pane (placeEnvPanel) are not part of it: they show the
+  // focused pane's session, so using them must not move the focus.
+  const inEnvPanel = (e) => !!(e.target.closest && e.target.closest("#env-panel, #term-dock"));
+  panel.root.addEventListener("mousedown", (e) => {
+    if (inEnvPanel(e)) return;
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   }, true);
-  panel.root.addEventListener("focusin", () => {
+  panel.root.addEventListener("focusin", (e) => {
+    if (inEnvPanel(e)) return;
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   });
 
@@ -1167,7 +1212,19 @@ function attachPaneHandlers(panel) {
   wirePullToRefresh(panel);
 
   // Toolbar: terminal / split / close.
-  if (pe.termBtn) pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); openTerminalTab(panel, { sid: panel.sessionId || "" }); });
+  const envBtn = panel.root.querySelector(".pane-env-btn");
+  if (envBtn) {
+    envBtn.classList.toggle("active", !!(window.EnvPanel && EnvPanel.isOpen()));
+    // While the terminal fills the right column, this brings the panel back.
+    envBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (termShown()) { hideTermDock(); EnvPanel.setOpen(true); } else EnvPanel.toggle();
+    });
+  }
+  if (pe.termBtn) {
+    pe.termBtn.classList.toggle("active", termShown());
+    pe.termBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleTermDock(); });
+  }
   if (pe.splitBtn) pe.splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitPanel(panel); });
   if (pe.closeBtn) pe.closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePanel(panel); });
 
@@ -1344,7 +1401,7 @@ function attachPaneHandlers(panel) {
   });
   pe.ctxCompactBtn.addEventListener("click", (e) => onCompactClick(e, panel));
 
-  // Sticky-bottom autoscroll + pinned prompt header per pane.
+  // Sticky-bottom autoscroll + the pane's current question (Question card).
   pe.transcript.addEventListener("scroll", () => {
     updateStickOnScroll(panel);
     updatePinnedForScroll(panel);
@@ -1371,9 +1428,7 @@ function attachPaneHandlers(panel) {
   // ask-user slot's bottom margin track it so content always clears the card.
   // Re-pin to bottom while stuck so a growing composer never hides the last line.
   // The same observer keeps --ask-card-max-h current (see updateAskCardBounds):
-  // it must be recomputed whenever the composer, the top chrome (tab bar +
-  // pinned prompt header, whose height varies with the prompt length), or the
-  // pane itself changes size.
+  // it must be recomputed whenever the composer or the pane itself changes size.
   if (window.ResizeObserver) {
     const ro = new ResizeObserver(() => {
       const h = pe.composerWrap.offsetHeight || 0;
@@ -1383,7 +1438,6 @@ function attachPaneHandlers(panel) {
       scheduleReplyNav(panel);
     });
     ro.observe(pe.composerWrap);
-    if (pe.promptHeader && pe.promptHeader.parentElement) ro.observe(pe.promptHeader.parentElement);
     ro.observe(panel.root);
     panel._composerRO = ro;
   }
@@ -1519,7 +1573,7 @@ function saveLayout() {
         panes: panels.map(p => ({
           // Persist session + editor tabs — draft "New Chat" and terminal tabs
           // are ephemeral (a server PTY can't survive a reload).
-          tabs: p.tabs.filter(k => !isDraft(k) && !isTermTab(k)),
+          tabs: p.tabs.filter(k => !isDraft(k)),
           activeId: p.sessionId,     // null while a draft/editor tab is active
           activeKey: p.activeTab,    // the active tab key (session id or "file#<abs>")
           width: Math.round(p.width),
@@ -1673,20 +1727,20 @@ function clearAttachments(sessionId) {
 // Composer text is held per tab, so switching tabs/sessions inside a pane never
 // clobbers a half-typed message: leaving a tab snapshots its composer text and
 // returning restores it. Keyed by tab key (a sessionId for chat tabs, a
-// "draft#N" key for empty draft tabs); editor/terminal tabs have no composer and
+// "draft#N" key for empty draft tabs); editor tabs have no composer and
 // are skipped. In-memory only (like sessionAttachments) — a page reload starts
 // fresh. The composer is only typeable on a session tab (the opaque pane-picker
 // covers it on a draft tab), but keying by tab key keeps this correct regardless.
 const composerDrafts = new Map(); // tabKey → string
 
 function isChatTab(key) {
-  return typeof key === "string" && !isEditorTab(key) && !isTermTab(key);
+  return typeof key === "string" && !isEditorTab(key);
 }
 
 // saveComposerDraft snapshots a pane's current composer text under the tab it is
 // showing (panel.activeTab), so the text returns when that tab is reselected.
 // Empty text drops any stored draft, so a sent/cleared composer leaves nothing
-// stale behind. No-op for editor/terminal tabs (they have no composer).
+// stale behind. No-op for editor tabs (they have no composer).
 function saveComposerDraft(panel) {
   if (!panel || !panel.els || !panel.els.prompt) return;
   const key = panel.activeTab;
@@ -1962,6 +2016,7 @@ function skillLoadFailed(resp, name) {
 
 function renderSkillsDock(panel) {
   if (!panel || !panel.root) return;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("skills");
   const dock = panel.root.querySelector(".skills-dock");
   if (!dock) return;
   const sid = panel.sessionId;
@@ -2073,7 +2128,6 @@ function paneTabTitle(sessionId) {
 }
 
 const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-const ICON_TERM_GLYPH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
 
 // renderPaneTabs rebuilds a pane's tab strip — one button per open tab (session
 // or pending "New Chat" draft), the active one highlighted, each with a close
@@ -2086,14 +2140,12 @@ function renderPaneTabs(panel) {
   for (const key of panel.tabs) {
     const draft = isDraft(key);
     const editor = isEditorTab(key);
-    const term = isTermTab(key);
     const abs = editor ? editorPathOf(key) : null;
-    const label = draft ? "New Chat" : editor ? baseName(abs) : term ? "Terminal" : paneTabTitle(key);
+    const label = draft ? "New Chat" : editor ? baseName(abs) : paneTabTitle(key);
     const tab = document.createElement("div");
     tab.className = "pane-tab"
       + (draft ? " pane-tab-draft" : "")
       + (editor ? " pane-tab-editor" : "")
-      + (term ? " pane-tab-term" : "")
       + (editor && editorDirty.get(abs) ? " is-dirty" : "")
       + (key === panel.activeTab ? " active" : "");
     tab.setAttribute("role", "tab");
@@ -2101,7 +2153,7 @@ function renderPaneTabs(panel) {
     tab.setAttribute("data-tip", draft ? "New chat" : editor ? abs : label);
     // Session tabs wear their collection's colour as the top accent line (CSS
     // .pane-tab.active), so an open chat's collection is recognisable at a glance.
-    if (!draft && !editor && !term) {
+    if (!draft && !editor) {
       const accent = collectionAccentVar(sessionCollectionColor(key));
       if (accent) tab.style.setProperty("--col-accent", accent);
     }
@@ -2110,11 +2162,6 @@ function renderPaneTabs(panel) {
       const glyph = document.createElement("span");
       glyph.className = "pane-tab-glyph";
       glyph.innerHTML = fileIconSvg(baseName(abs));
-      tab.appendChild(glyph);
-    } else if (term) {
-      const glyph = document.createElement("span");
-      glyph.className = "pane-tab-glyph";
-      glyph.innerHTML = ICON_TERM_GLYPH;
       tab.appendChild(glyph);
     } else {
       const dot = document.createElement("span");
@@ -2142,7 +2189,7 @@ function renderPaneTabs(panel) {
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(panel, key); });
     tab.appendChild(close);
 
-    tab.classList.toggle("is-busy", !draft && !editor && !term && (sessionSending.has(key) || remoteBusy.has(key)));
+    tab.classList.toggle("is-busy", !draft && !editor && (sessionSending.has(key) || remoteBusy.has(key)));
     tab.addEventListener("mousedown", (e) => {
       // Middle-click closes the tab, like a browser.
       if (e.button === 1) { e.preventDefault(); closeTab(panel, key); return; }
@@ -2361,6 +2408,31 @@ function renderCtxRing(panel) {
     : tokens_used >= soft_limit ? "warn" : "ok";
   e.ctxRingWrap.classList.add("has-data");
   e.ctxRingWrap.dataset.tip = `Context: ${pct}% used — click for more information`;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("context");
+}
+
+// ctxUsageInfo summarises a session's context use and spend for the context
+// popup and the environment panel's Contexte card: null when no usage is known.
+function ctxUsageInfo(sessionId) {
+  const usage = sessionCtxUsage.get(sessionId);
+  if (!usage || !usage.window_tokens) return null;
+  const { tokens_used, soft_limit, hard_limit, window_tokens } = usage;
+  const ratio = Math.min(tokens_used / window_tokens, 1);
+  const agentMap = sessionAgentTokens.get(sessionId);
+  let cost = 0;
+  if (agentMap && agentMap.size) {
+    for (const u of agentMap.values()) cost += (u.cost || 0);
+  } else {
+    const acc = sessionTokenAccum.get(sessionId) || { prompt: 0, output: 0 };
+    cost = usageCostUSD(acc.prompt, acc.output, 0, 0, null);
+  }
+  const agents = agentMap ? [...agentMap.entries()].sort((a, b) =>
+    a[0] === "leader" ? -1 : b[0] === "leader" ? 1 : (b[1].prompt + b[1].output) - (a[1].prompt + a[1].output)
+  ) : [];
+  return {
+    used: tokens_used, max: window_tokens, ratio, pct: Math.round(ratio * 100), cost, agents,
+    zone: tokens_used >= hard_limit ? "danger" : tokens_used >= soft_limit ? "warn" : "ok",
+  };
 }
 
 function renderCtxPopup(panel) {
@@ -2461,7 +2533,7 @@ async function fetchUsageEstimate(sessionId) {
     }
     for (const p of panelsForSession(sessionId)) {
       renderCtxRing(p);
-      if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+      if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
     }
   } catch (e) {
     console.error("failed to fetch usage estimate:", e);
@@ -2539,10 +2611,10 @@ function langForPath(abs) {
   return EDITOR_LANGS[name.slice(dot + 1)] || "plaintext";
 }
 
-// Map the active app theme (data-theme on <html>) to a Monaco theme.
+// Map the active app theme to a Monaco theme — from its declared color-scheme
+// (themeIsLight), not its name: the default light theme is called "terracotta".
 function monacoTheme() {
-  const t = (document.documentElement.getAttribute("data-theme") || "").toLowerCase();
-  return t.includes("light") ? "vs" : "vs-dark";
+  return themeIsLight() ? "vs" : "vs-dark";
 }
 
 // ensureMonaco lazily injects the vendored AMD loader and resolves once
@@ -2621,8 +2693,8 @@ async function mountEditor(panel, abs) {
   }
   updateEditorStaleUI(panel);
   panel._editor.focus();
-  // Anchor the Folders panel to the ROOT this file was opened from (mirrors
-  // mountTerminal's cwd re-alignment). The editor tab carries no chat session,
+  // Anchor the Folders panel to the ROOT this file was opened from. The editor
+  // tab carries no chat session,
   // so without this the panel would fall back to the global root. Fall back to
   // the file's own directory when the open-time root is unknown (layout restore).
   if (focusedPanelId === panel.id && !foldersCollapsed()) {
@@ -2736,6 +2808,7 @@ function updateEditorStaleUI(panel) {
 // absForRel resolves a Folders-panel entry path (relative to the panel's
 // current dir) to an absolute host path.
 function absForRel(rel) {
+  if (String(rel).startsWith("/")) return rel; // already absolute (e.g. from the Modifications card)
   const root = (foldersDir || "").replace(/\/+$/, "");
   return root ? root + "/" + rel : "/" + rel;
 }
@@ -2764,31 +2837,78 @@ function openFileInEditor(rel) {
 // (settings.js toggles the <html> data-theme attribute).
 new MutationObserver(() => {
   if (window.monaco && window.monaco.editor) window.monaco.editor.setTheme(monacoTheme());
-  for (const entry of termTabs.values()) { try { entry.term.options.theme = xtermTheme(); } catch (_) {} }
+  const theme = xtermTheme();
+  for (const entry of termTabs.values()) { try { entry.term.options.theme = theme; } catch (_) {} }
 }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
-// ─── Terminal tabs (xterm.js + PTY WebSocket) ─────────────────────────────────
-// A fourth pane-tab kind ("term#<n>") runs a real interactive shell over a
-// WebSocket to /api/terminal/ws (PTY-backed on the server). Unlike editor tabs
-// these are EPHEMERAL — stripped from the persisted layout — because the server
-// PTY does not survive a page reload. Each terminal tab owns its own xterm.js
-// instance + WebSocket + detached host element, kept alive while the tab sits in
-// the background (output keeps streaming into the scrollback buffer).
+// ─── Terminal dock (xterm.js + PTY WebSocket) ─────────────────────────────────
+// Terminals are part of the chat view (Claude Desktop style): each chat session
+// owns its terminals, shown in #term-dock — the chat's right column, docked with
+// the environment panel by placeEnvPanel and replacing it while shown. The dock
+// shows the focused session's terminals; another session's keep running in the
+// background. Drafts and editor tabs (no session) share the "" context. Each is
+// a real interactive shell over a WebSocket to /api/terminal/ws (PTY-backed on
+// the server), so none survives a page reload; a session's are closed when it is
+// deleted or archived.
 
-const TERM_TAB_PREFIX = "term#";
-function isTermTab(key) { return typeof key === "string" && key.startsWith(TERM_TAB_PREFIX); }
 let termSeq = 0;
-function newTermKey() { return TERM_TAB_PREFIX + (++termSeq); }
+const termTabs = new Map(); // term key → { term, fit, ws, host, opened, cwd }
+const termOpts = new Map(); // term key → { sid, cwd, label } resolved at open time
+const termCtxs = new Map(); // context (session id, "" with none) → { keys, active, open, seq }
+const TERM_DOCK_W_KEY = "agent_term_dock_w";
 
-const termTabs = new Map(); // term key → { term, fit, ws, host }
-const termOpts = new Map(); // term key → { sid, cwd } resolved at open time
+function termContext() { return activeSessionId || ""; }
+function termCtx(ctx) {
+  let c = termCtxs.get(ctx);
+  if (!c) { c = { keys: [], active: null, open: false, seq: 0 }; termCtxs.set(ctx, c); }
+  return c;
+}
+function termShown() { return document.body.classList.contains("term-shown"); }
 
-// xtermTheme maps the active app theme to an xterm.js colour theme.
+let termDockEl = null;
+function termDockNode() { return termDockEl || (termDockEl = document.getElementById("term-dock")); }
+
+// themeIsLight reports whether the active theme is a light one, from the
+// color-scheme every theme declares (features/common.css defaults to dark).
+function themeIsLight() {
+  return (getComputedStyle(document.documentElement).colorScheme || "").trim().split(/\s+/)[0] === "light";
+}
+
+// cssHex resolves a CSS colour expression (a var(--token) chain included) to
+// #rrggbb through a probe element's computed colour.
+function cssHex(expr, fallback) {
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  probe.style.color = expr;
+  document.body.appendChild(probe);
+  const m = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g);
+  probe.remove();
+  if (!m || m.length < 3) return fallback;
+  return "#" + m.slice(0, 3).map((v) => Math.round(+v).toString(16).padStart(2, "0")).join("");
+}
+
+// ANSI palette for a light background (VS Code's light terminal colours): the
+// xterm.js defaults are tuned for a dark one, where yellow and white all but
+// vanish on white.
+const XTERM_LIGHT_ANSI = {
+  black: "#000000", red: "#cd3131", green: "#107c10", yellow: "#949800",
+  blue: "#0451a5", magenta: "#bc05bc", cyan: "#0598bc", white: "#555555",
+  brightBlack: "#666666", brightRed: "#cd3131", brightGreen: "#14ce14", brightYellow: "#b5ba00",
+  brightBlue: "#0451a5", brightMagenta: "#bc05bc", brightCyan: "#0598bc", brightWhite: "#a5a5a5",
+};
+
+// xtermTheme builds the terminal's colours from the active app theme: the chat's
+// background and text, an accent-tinted selection, and a light or dark palette.
 function xtermTheme() {
-  const light = (document.documentElement.getAttribute("data-theme") || "").toLowerCase().includes("light");
-  return light
-    ? { background: "#ffffff", foreground: "#1e1e1e", cursor: "#1e1e1e", selectionBackground: "#bcd6f7" }
-    : { background: "#000000", foreground: "#e6e6e6", cursor: "#e6e6e6", selectionBackground: "#3a3d41" };
+  const light = themeIsLight();
+  const bg = cssHex("var(--bg)", light ? "#ffffff" : "#1e1e1e");
+  const fg = cssHex("var(--text)", light ? "#1e1e1e" : "#e6e6e6");
+  const accent = cssHex("var(--accent)", "#4a9eff");
+  return {
+    background: bg, foreground: fg, cursor: fg, cursorAccent: bg,
+    selectionBackground: accent + (light ? "40" : "66"),
+    ...(light ? XTERM_LIGHT_ANSI : {}),
+  };
 }
 
 // ensureXterm lazily injects the vendored xterm.js + fit addon + stylesheet
@@ -2849,30 +2969,18 @@ function sendTermResize(entry) {
   if (t.cols > 0 && t.rows > 0) entry.ws.send(JSON.stringify({ cols: t.cols, rows: t.rows }));
 }
 
-// onTerminalCwd handles a server-reported shell working-directory change: it
-// remembers it on the entry and, while this terminal is the visible (focused-
-// pane active) tab and the Folders panel is open, navigates the panel to follow
-// `cd`. Since a terminal tab has no active chat session, `loadFolder` targets the
-// global folder cwd (the same dir the panel shows with no session), so the panel
-// and the global "no session" environment both track the terminal.
-function onTerminalCwd(key, dir) {
-  const entry = termTabs.get(key);
-  if (entry) entry.cwd = dir;
-  const fpr = focusedPanel();
-  if (!fpr || fpr.activeTab !== key) return;     // not the visible terminal
-  if (foldersCollapsed()) return;                 // panel closed — nothing to move
-  if (!dir || dir === foldersDir) return;         // already there
-  loadFolder(dir);
+function fitTerm(entry) {
+  try { entry.fit.fit(); } catch (_) {}
+  sendTermResize(entry);
 }
 
-// createTerminal builds the xterm instance + WebSocket for a term tab (once).
+// createTerminal builds the xterm instance + WebSocket for a terminal (once).
 async function createTerminal(key) {
   await ensureXterm();
   if (termTabs.has(key)) return termTabs.get(key);
   const opts = termOpts.get(key) || {};
   const host = document.createElement("div");
-  host.style.width = "100%";
-  host.style.height = "100%";
+  host.className = "term-instance";
   const term = new window.Terminal({
     cursorBlink: true,
     fontSize: 13,
@@ -2883,24 +2991,25 @@ async function createTerminal(key) {
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
   // NOTE: do NOT term.open(host) here — the host is still detached, and xterm
-  // initialised on a 0×0 element renders nothing (a black pane where even the
-  // shell prompt and error text are invisible). open() happens in mountTerminal
-  // once the host is attached to the visible pane.
+  // initialised on a 0×0 element renders nothing (a blank pane where even the
+  // shell prompt and error text are invisible). open() happens in
+  // mountDockTerminal once the host is attached to the visible dock.
 
   const wsToken = await mintTerminalToken();
   const ws = new WebSocket(termWsUrl(opts, wsToken));
   ws.binaryType = "arraybuffer";
-  const entry = { term, fit, ws, host, opened: false };
+  const entry = { term, fit, ws, host, opened: false, cwd: "" };
   termTabs.set(key, entry);
 
   const enc = new TextEncoder();
   ws.onopen = () => sendTermResize(entry);
   ws.onmessage = (ev) => {
-    // Binary frames are raw PTY output; text frames are control JSON (cwd sync).
+    // Binary frames are raw PTY output; text frames are control JSON (the
+    // shell's cwd, remembered on the entry).
     if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return; }
     try {
       const m = JSON.parse(ev.data);
-      if (m && typeof m.cwd === "string") { onTerminalCwd(key, m.cwd); return; }
+      if (m && typeof m.cwd === "string") { entry.cwd = m.cwd; return; }
     } catch (_) { /* not control JSON — fall through to write as text */ }
     term.write(ev.data);
   };
@@ -2911,40 +3020,100 @@ async function createTerminal(key) {
   return entry;
 }
 
-// mountTerminal shows term tab `key` in `panel`, creating it on first use, and
-// moves its host element into the pane's terminal host.
-async function mountTerminal(panel, key) {
+// mountDockTerminal shows terminal `key` in the dock, creating it on first use.
+async function mountDockTerminal(key, focus) {
   let entry;
   try { entry = await createTerminal(key); }
-  catch (e) { setStatus(panel, tr("app.terminal.loadFailed", { error: e })); return; }
-  if (panel.activeTab !== key) return; // tab switched away while xterm loaded
-  const hostWrap = panel.els.terminalHost;
-  if (!hostWrap) return;
-  while (hostWrap.firstChild) hostWrap.removeChild(hostWrap.firstChild);
-  hostWrap.appendChild(entry.host);
-  // Open xterm only once, and only now that the host is attached + visible so the
-  // renderer measures real dimensions (see the NOTE in createTerminal).
+  catch (e) { const p = fp(); if (p) setStatus(p, tr("app.terminal.loadFailed", { error: e })); return; }
+  const c = termCtxs.get(termContext());
+  if (!c || c.active !== key || !termShown()) return; // switched away while xterm loaded
+  const host = termDockNode().querySelector(".term-dock-host");
+  if (entry.host.parentNode !== host) host.replaceChildren(entry.host);
+  // Open xterm only once, and only now that the host is attached + visible so
+  // the renderer measures real dimensions (see the NOTE in createTerminal).
   if (!entry.opened) { entry.term.open(entry.host); entry.opened = true; }
   requestAnimationFrame(() => {
-    try { entry.fit.fit(); } catch (_) {}
-    sendTermResize(entry);
-    entry.term.focus();
-    // Align the Folders panel to this terminal's last-known cwd on (re)activation.
-    if (entry.cwd && !foldersCollapsed() && entry.cwd !== foldersDir) loadFolder(entry.cwd);
+    fitTerm(entry);
+    if (focus) entry.term.focus();
   });
 }
 
-// refitVisibleTerminals re-fits the xterm grid of every pane currently showing
-// a terminal tab (called after a pane/window resize) and pushes the new size to
-// the PTY so server-side programs re-wrap.
-function refitVisibleTerminals() {
-  for (const panel of panels) {
-    if (!isTermTab(panel.activeTab)) continue;
-    const entry = termTabs.get(panel.activeTab);
-    if (!entry) continue;
-    try { entry.fit.fit(); } catch (_) {}
-    sendTermResize(entry);
+// renderTermDockTabs draws the dock's terminal tabs for context `c`.
+function renderTermDockTabs(c) {
+  const strip = termDockNode().querySelector(".term-dock-tabs");
+  strip.replaceChildren();
+  if (!c) return;
+  for (const key of c.keys) {
+    const tab = document.createElement("div");
+    tab.className = "term-dock-tab" + (key === c.active ? " active" : "");
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(key === c.active));
+    const name = document.createElement("span");
+    name.textContent = (termOpts.get(key) || {}).label || tr("term.label");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "term-dock-tab-close";
+    close.setAttribute("aria-label", tr("term.close"));
+    close.setAttribute("data-tip", tr("term.close"));
+    close.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeDockTerminal(key); });
+    tab.addEventListener("click", () => { c.active = key; syncTermDock({ focus: true }); });
+    tab.append(name, close);
+    strip.appendChild(tab);
   }
+}
+
+// syncTermDock shows the focused session's terminals when it has the dock open,
+// else the environment panel (or nothing) takes the right column back. Called
+// whenever the focused session changes (setFocusedPanel) and after any change.
+function syncTermDock({ focus = false } = {}) {
+  const dock = termDockNode();
+  if (!dock) return;
+  const c = termCtxs.get(termContext());
+  const show = !!(c && c.open && c.keys.length);
+  const was = termShown();
+  document.body.classList.toggle("term-shown", show);
+  for (const b of document.querySelectorAll(".pane-term-btn")) b.classList.toggle("active", show);
+  const envOpen = !!(window.EnvPanel && EnvPanel.isOpen());
+  for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.toggle("active", !show && envOpen);
+  renderTermDockTabs(show ? c : null);
+  if (show) mountDockTerminal(c.active, focus);
+  else dock.querySelector(".term-dock-host").replaceChildren();
+  if (show !== was) layoutWidths();
+}
+
+// openDockTerminal adds a terminal to the focused session and shows the dock.
+// `opts.cwd` starts it in that folder (Files → Open Terminal here); otherwise it
+// starts in the session's working folder.
+function openDockTerminal(opts) {
+  const ctx = termContext();
+  const c = termCtx(ctx);
+  const key = "term#" + (++termSeq);
+  c.seq += 1;
+  termOpts.set(key, {
+    ...(opts && opts.cwd ? { cwd: opts.cwd } : { sid: ctx }),
+    label: c.seq === 1 ? tr("term.label") : tr("term.labelN", { n: c.seq }),
+  });
+  c.keys.push(key);
+  c.active = key;
+  c.open = true;
+  syncTermDock({ focus: true });
+}
+
+// toggleTermDock is the pane toolbar's terminal button: hide the dock, or show
+// the session's terminals (opening the first one).
+function toggleTermDock() {
+  const c = termCtx(termContext());
+  if (c.open && c.keys.length) { c.open = false; syncTermDock(); return; }
+  if (!c.keys.length) { openDockTerminal(); return; }
+  c.open = true;
+  syncTermDock({ focus: true });
+}
+
+function hideTermDock() {
+  const c = termCtxs.get(termContext());
+  if (c) c.open = false;
+  syncTermDock();
 }
 
 function disposeTerminal(key) {
@@ -2957,21 +3126,74 @@ function disposeTerminal(key) {
   termTabs.delete(key);
 }
 
-// openTerminalTab opens a new terminal tab in `panel` (default: focused pane).
-// `opts` chooses the working directory: { cwd } for an explicit dir (Folders
-// "Open Terminal here") or { sid } to inherit a chat session's cwd. When the
-// active tab is a pending draft, the terminal takes that slot in place.
-function openTerminalTab(panel, opts) {
-  panel = panel || focusedPanel() || panels[0];
-  if (!panel) return;
-  const key = newTermKey();
-  termOpts.set(key, opts || { sid: activeSessionId || "" });
-  if (!panel.tabs.includes(key)) {
-    const ai = panel.tabs.indexOf(panel.activeTab);
-    if (isDraft(panel.activeTab) && ai !== -1) panel.tabs[ai] = key;
-    else panel.tabs.push(key);
+// closeDockTerminal ends one terminal; the dock hides with the last one.
+function closeDockTerminal(key) {
+  for (const c of termCtxs.values()) {
+    const i = c.keys.indexOf(key);
+    if (i === -1) continue;
+    c.keys.splice(i, 1);
+    if (c.active === key) c.active = c.keys[Math.min(i, c.keys.length - 1)] || null;
+    if (!c.keys.length) { c.open = false; c.seq = 0; }
   }
-  activateTab(panel, key);
+  disposeTerminal(key);
+  syncTermDock({ focus: true });
+}
+
+// disposeSessionTerminals ends a session's terminals (deleted or archived).
+function disposeSessionTerminals(sid) {
+  const c = termCtxs.get(sid);
+  if (!c) return;
+  termCtxs.delete(sid);
+  for (const key of c.keys) disposeTerminal(key);
+  syncTermDock();
+}
+
+// refitVisibleTerminals re-fits the shown terminal's grid (after a pane, window
+// or dock resize) and pushes the new size to the PTY so programs re-wrap.
+function refitVisibleTerminals() {
+  if (!termShown()) return;
+  const c = termCtxs.get(termContext());
+  const entry = c && termTabs.get(c.active);
+  if (entry && entry.opened) fitTerm(entry);
+}
+
+// wireTermDock binds the dock's header buttons and its resize handle (the left
+// edge; the width persists per browser).
+function wireTermDock() {
+  const dock = termDockNode();
+  if (!dock) return;
+  const saved = localStorage.getItem(TERM_DOCK_W_KEY);
+  if (saved) document.documentElement.style.setProperty("--term-dock-w", saved);
+  dock.querySelector(".term-dock-new").addEventListener("click", () => openDockTerminal());
+  dock.querySelector(".term-dock-close").addEventListener("click", hideTermDock);
+  const grip = dock.querySelector(".term-dock-resize");
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const pane = dock.parentElement;
+    const right = dock.getBoundingClientRect().right;
+    let frame = 0;
+    const move = (ev) => {
+      const max = Math.max(320, pane.getBoundingClientRect().width - PANE_MIN_W);
+      const w = Math.round(Math.min(max, Math.max(320, right - ev.clientX)));
+      document.documentElement.style.setProperty("--term-dock-w", w + "px");
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; refitVisibleTerminals(); });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      grip.classList.remove("is-dragging");
+      document.body.classList.remove("resizing");
+      document.body.style.userSelect = "";
+      const w = getComputedStyle(document.documentElement).getPropertyValue("--term-dock-w").trim();
+      if (w) localStorage.setItem(TERM_DOCK_W_KEY, w);
+      refitVisibleTerminals();
+    };
+    grip.classList.add("is-dragging");
+    document.body.classList.add("resizing");
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -3206,57 +3428,7 @@ function jumpReplyNav(panel) {
   scheduleReplyNav(panel);
 }
 
-// ─── Tool metadata ──────────────────────────────────────────────────────────
-
-const TOOL_META = [
-  { match: /^bash/,              label: "Bash",     color: "amber"   },
-  { match: /^read/,              label: "Read",     color: "sky"     },
-  { match: /^write/,             label: "Write",    color: "emerald" },
-  { match: /^edit/,              label: "Edit",     color: "teal"    },
-  { match: /^grep/,              label: "Grep",     color: "purple"  },
-  { match: /^glob/,              label: "Glob",     color: "purple"  },
-  { match: /^revert/,            label: "Revert",   color: "rose"    },
-  { match: /^load_skill/,        label: "Skill",    color: "orange"  },
-  { match: /^list_skill/,        label: "Skills",   color: "orange"  },
-  { match: /^load_softskill/,    label: "Softskill", color: "orange" },
-  { match: /^list_softskill/,    label: "Softskills",color: "orange" },
-  { match: /^task/,              label: "Task",     color: "indigo"  },
-  { match: /^todo/,              label: "Todo",     color: "indigo"  },
-  { match: /^teammate/,          label: "Teammate", color: "indigo"  },
-  { match: /^worktree/,          label: "Worktree", color: "indigo"  },
-  { match: /^bg/,                label: "BG",       color: "slate"   },
-];
-
-function toolMeta(name) {
-  const n = (name || "").toLowerCase();
-  for (const m of TOOL_META) {
-    if (m.match.test(n)) return m;
-  }
-  const label = name
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase());
-  return { label, color: "slate" };
-}
-
-function toolDesc(name, args) {
-  if (!args || typeof args !== "object") return "";
-  if (args.command) {
-    const c = String(args.command).replace(/\n/g, " ").trim();
-    return c.length > 80 ? c.slice(0, 80) + "…" : c;
-  }
-  if (args.request) {
-    const r = String(args.request).replace(/\n/g, " ").trim();
-    return r.length > 80 ? r.slice(0, 80) + "…" : r;
-  }
-  if (args.file_path) return args.file_path;
-  if (args.path) return args.path;
-  if (args.pattern) {
-    const loc = args.directory || args.path || "";
-    return loc ? `${args.pattern}  in ${loc}` : args.pattern;
-  }
-  if (args.name) return args.name;
-  return "";
-}
+// ─── Tool results ───────────────────────────────────────────────────────────
 
 function extractResponse(response) {
   if (typeof response === "string") return response;
@@ -3858,62 +4030,26 @@ function streamMdFinalize(bubble, fullText) {
   linkifyFilePaths(bubble);
 }
 
-// ─── Pinned prompt header ────────────────────────────────────────────────────
+// ─── Current question (environment panel) ────────────────────────────────────
 
-// Return the full prompt text for the pinned header; CSS handles 3-line clamping.
+// Return the full prompt text for the Question card; CSS clamps its lines.
 function pinnedPromptLabel(text) {
   const s = String(text || "");
   return s.length > 1000 ? s.slice(0, 1000) + "…" : s;
 }
 
-// Apply a header mutation while keeping the transcript content visually
-// stationary. The floating header is a flex sibling of #transcript, so
-// showing/hiding/resizing it steals (or returns) height from the transcript
-// — which would otherwise shove every visible line up or down by the header's
-// height. That shove is the "jump" users see when the pinned prompt kicks in
-// mid-scroll. We measure the height the mutation costs the transcript and
-// counter-scroll by the same amount, so the content stays put and the header
-// simply appears in the constant gap above it. (This also keeps the activeBubble
-// decision in updatePinnedForScroll stable, avoiding a show/hide flicker.)
-function withStableScroll(panel, mutate) {
-  const t = panel.els.transcript;
-  const before = t.clientHeight;
-  mutate();
-  const delta = before - t.clientHeight; // >0 when header grew
-  if (delta) t.scrollTop += delta;
-}
-
-// Show the user prompt text in the floating header above the transcript.
-// Attachments are intentionally NOT rendered here — they live in the inline
-// user bubble so the floating header stays compact.
-// `turn` ({index, text}) carries the pinned question's identity so the header
-// gets the same ↺ copy/fork/rewind control as the inline bubble it stands in
-// for — the bubble is off-screen by then, so without it those actions are
-// unreachable for the very turn the user is reading. Absent for a synthetic
-// echo with no persisted index.
-function setPinnedPrompt(panel, text, _files, turn) {
-  const ph = panel.els.promptHeader;
-  const label = pinnedPromptLabel(text);
-  const turnIndex = turn && Number.isInteger(turn.index) ? turn.index : null;
-  // Called on every scroll tick — skip the rebuild (and the forced reflow it
-  // would cost) when the visible header already shows this prompt.
-  if (ph.classList.contains("visible") && ph._pinnedLabel === label &&
-      ph._pinnedTurn === turnIndex) return;
-  withStableScroll(panel, () => {
-    ph.innerHTML = "";
-    if (label) {
-      const textEl = document.createElement("span");
-      textEl.className = "pinned-prompt-text";
-      renderUserText(textEl, label, panel.sessionId);
-      ph.appendChild(textEl);
-    }
-    if (panel.sessionId && turnIndex !== null && turnIndex >= 0) {
-      addTurnActions(ph, panel.sessionId, turnIndex, turn.text || "");
-    }
-    ph._pinnedLabel = label;
-    ph._pinnedTurn = turnIndex;
-    ph.classList.add("visible");
-  });
+// setPinnedPrompt records the pane's current question ({text, turn, bubble};
+// `turn` = {index, text} gives the card the same ↺ copy/fork/rewind control as
+// the inline bubble it stands in for, absent for a synthetic echo with no
+// persisted index) and refreshes the environment panel's Question card when
+// it belongs to the focused pane.
+function setPinnedPrompt(panel, pin) {
+  const cur = panel._pinned;
+  // Called on every scroll tick — only a different question is worth a render.
+  if (cur && cur.bubble === pin.bubble && cur.text === pin.text &&
+      (cur.turn && cur.turn.text) === (pin.turn && pin.turn.text)) return;
+  panel._pinned = pin;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("question");
 }
 
 // Trailing punctuation stripped from an "@" reference token — mirrors
@@ -4064,8 +4200,8 @@ const ICON_REWIND =
   '<path d="M8 8h6a5 5 0 0 1 0 10H7"/><polyline points="8 4 4 8 8 12"/></svg>';
 
 // addTurnActions attaches the hover ↺ button to a user turn's host element —
-// the inline row, or the floating pinned-prompt header standing in for it once
-// the row has scrolled away. Both hosts are `position: relative`, which the
+// the inline row, or the environment panel's Question card standing in for it
+// once the row has scrolled away. Both hosts are `position: relative`, which the
 // button's absolute placement anchors to. Clicking it opens the copy/fork/rewind
 // menu anchored to the button.
 function addTurnActions(row, sessionId, turnIndex, userText) {
@@ -4370,102 +4506,54 @@ function appendSpawnResultBlock(text, container) {
   (container || fpTranscript()).appendChild(row);
 }
 
-// Update the floating prompt header to show the question whose agent reply is
-// currently at the top of the viewport. We pin a question only once its bubble
-// has scrolled *completely* above the transcript top (its bottom edge crosses the
-// line) — NOT the moment its top edge crosses. Pinning on the top edge meant that
-// as soon as the *next* question's top scrolled up, it was pinned into the header
-// while its bubble was still visible inline just below it, so the floating panel
-// and the inline bubble showed the same prompt twice. Keying on the bottom edge
-// keeps the previous question pinned until the next one has fully left the viewport,
-// so the header never duplicates a question that's still on screen.
-// The header steals height from the transcript when it appears, so transcriptRect.top
-// shifts down by the header height once shown; that visibility-dependent line gives
-// natural hysteresis (pin at the top line, unpin one header-height lower) so the
-// decision can't flicker around the threshold. withStableScroll counter-scrolls the
-// height it costs, keeping the content stationary as the bubble becomes the header.
-//
-// Fade-out before the hand-over: the header occupies the top of the pane, so once
-// the pinned question's answer is nearly scrolled away the header hides its last
-// lines and then the *next* question as it rises. So when only PIN_FADE_PX of the
-// answer remain between the header's bottom and the next question, the header
-// fades out progressively, and it is hidden outright once the next question
-// reaches that line. The gap is measured against a line that does not move with
-// the header's own visibility (the wrap's top + the space the header takes when
-// shown, remembered per question in bubble._pinSpace), so hiding it — which gives that space
-// back to the transcript, content held still by withStableScroll — cannot make
-// the next tick re-show it: no flicker, and scrolling back up fades it back in.
-// The fade starts ~ten lines out and reaches full transparency PIN_CLEAR_PX
-// (about one line) before the hand-over, so the header is already invisible when
-// it is removed, whatever the scroll step.
-const PIN_FADE_PX = 240;
-const PIN_CLEAR_PX = 24;
+// updatePinnedForScroll keeps the pane's current question: the one whose reply
+// is at the top of the transcript, shown as the environment panel's first card.
+// A question is pinned only once its bubble has scrolled *completely* above the
+// transcript top — while any of it is on screen the card would just repeat it —
+// and it is released once the next question reaches the top, i.e. its reply has
+// scrolled away — within PIN_RELEASE_PX (about a line), so the gap a jump to a
+// question leaves above it (scrollToPinnedQuestion) does not keep the previous
+// question pinned.
+const PIN_RELEASE_PX = 24;
 function updatePinnedForScroll(panel) {
   const t = panel.els.transcript;
-  const transcriptRect = t.getBoundingClientRect();
-  const userBubbles = t.querySelectorAll(".bubble-user");
-  let activeBubble = null;
-  let nextBubble = null;
-  for (const bubble of userBubbles) {
-    const rowRect = bubble.parentElement.getBoundingClientRect();
-    if (rowRect.bottom < transcriptRect.top) { activeBubble = bubble; nextBubble = null; }
-    else if (activeBubble && !nextBubble) nextBubble = bubble;
+  const top = t.getBoundingClientRect().top;
+  let active = null;
+  let next = null;
+  for (const bubble of t.querySelectorAll(".bubble-user")) {
+    if (bubble.parentElement.getBoundingClientRect().bottom < top) { active = bubble; next = null; }
+    else if (active && !next) next = bubble;
   }
-  let fade = 1;
-  if (activeBubble !== null && nextBubble !== null) {
-    const ph = panel.els.promptHeader;
-    const wrapTop = ph.parentElement.getBoundingClientRect().top;
-    // Remember the space per question (header heights differ with prompt length),
-    // recorded only while the header is showing *this* question.
-    const label = pinnedPromptLabel(activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "");
-    if (ph.classList.contains("visible") && ph._pinnedLabel === label) {
-      activeBubble._pinSpace = transcriptRect.top - wrapTop;
-    }
-    const nextTop = nextBubble.parentElement.getBoundingClientRect().top;
-    const gap = nextTop - (wrapTop + (activeBubble._pinSpace || 0));
-    if (gap <= 0) {
-      clearPinnedPrompt(panel);
-      return;
-    }
-    fade = Math.max(0, Math.min(1, (gap - PIN_CLEAR_PX) / (PIN_FADE_PX - PIN_CLEAR_PX)));
-  }
-  if (activeBubble !== null) {
-    // Pin the question only — steering notes show as chips on the inline bubble.
-    const text = activeBubble.dataset.textOriginal ?? activeBubble.dataset.text ?? "";
-    let files = [];
-    if (activeBubble.dataset.files) {
-      try { files = JSON.parse(activeBubble.dataset.files); } catch { files = []; }
-    } else {
-      const sentChips = activeBubble.querySelectorAll(".attachment-chip-sent");
-      files = Array.from(sentChips).map(c => ({ name: c.textContent, path: c.title }));
-    }
-    // The turn's own control acts on the *persisted* prompt (steer fold included),
-    // exactly like the inline bubble's — so pass dataset.text, not the pinned label.
-    const idx = Number(activeBubble.parentElement.dataset.turnIndex);
-    const turn = Number.isInteger(idx) && idx >= 0
-      ? { index: idx, text: activeBubble.dataset.text ?? "" }
-      : null;
-    setPinnedPrompt(panel, text, files, turn);
-    panel.els.promptHeader.style.opacity = fade < 1 ? fade.toFixed(3) : "";
-    panel.els.promptHeader.style.pointerEvents = fade === 0 ? "none" : "";
-  } else {
-    clearPinnedPrompt(panel);
-  }
+  if (active && next && next.parentElement.getBoundingClientRect().top <= top + PIN_RELEASE_PX) active = null;
+  if (!active) { clearPinnedPrompt(panel); return; }
+  // Pin the question only — steering notes show as chips on the inline bubble.
+  // The turn's own control acts on the *persisted* prompt (steer fold included),
+  // exactly like the inline bubble's — so it carries dataset.text.
+  const idx = Number(active.parentElement.dataset.turnIndex);
+  setPinnedPrompt(panel, {
+    text: active.dataset.textOriginal ?? active.dataset.text ?? "",
+    turn: Number.isInteger(idx) && idx >= 0 ? { index: idx, text: active.dataset.text ?? "" } : null,
+    bubble: active,
+  });
 }
 
 function clearPinnedPrompt(panel) {
   panel = panel || fp();
-  if (!panel) return;
-  const ph = panel.els.promptHeader;
-  if (!ph.classList.contains("visible") && ph.innerHTML === "") return;
-  withStableScroll(panel, () => {
-    ph.innerHTML = "";
-    ph._pinnedLabel = "";
-    ph._pinnedTurn = null;
-    ph.classList.remove("visible");
-    ph.style.opacity = "";
-    ph.style.pointerEvents = "";
-  });
+  if (!panel || !panel._pinned) return;
+  panel._pinned = null;
+  if (panel === fp() && window.EnvPanel) EnvPanel.refresh("question");
+}
+
+// scrollToPinnedQuestion brings the pane's current question back to the top
+// of its transcript (a click on the Question card).
+function scrollToPinnedQuestion(panel) {
+  const pin = panel && panel._pinned;
+  const row = pin && pin.bubble.parentElement;
+  if (!row || !row.isConnected) return;
+  const tr = panel.els.transcript;
+  const top = row.getBoundingClientRect().top - tr.getBoundingClientRect().top + tr.scrollTop;
+  panel._stick = false;
+  tr.scrollTo({ top: Math.max(0, top - 12), behavior: "smooth" });
 }
 
 // Copy text to the clipboard. The async Clipboard API is only available in
@@ -4913,38 +5001,79 @@ function appendGoalDivider(container, kind, data) {
 
 // buildToolBlock creates the shared DOM structure for both top-level and nested
 // tool call blocks. Returns the block element; the caller appends it.
+// toolRowTitle is a call's plain-language title in an unfolded tool run
+// ("Ran a command", "Edited main.go", "Delegated to web_agent").
+function toolRowTitle(name, args, kind) {
+  const a = (args && typeof args === "object") ? args : {};
+  const base = (p) => String(p || "").split("/").filter(Boolean).pop() || String(p || "");
+  let target = "";
+  switch (kind) {
+    case "read": case "write": case "edit":
+      target = base(a.file_path || a.path || a.name || ""); break;
+    case "search":
+      target = String(a.pattern || a.query || a.q || a.name || ""); break;
+    case "web":
+      target = String(a.url || a.query || a.q || ""); break;
+    case "skill":
+      target = String(a.name || a.skill_name || ""); break;
+    case "mcp":
+      target = String(name || "").split("__").pop(); break;
+    case "delegate": case "other":
+      target = String(name || ""); break;
+  }
+  if (target.length > 60) target = target.slice(0, 60) + "…";
+  return tr("tool.row." + kind + (target ? "" : "Bare"), { target });
+}
+
+// formatToolArgs renders a call's arguments as "key: value" lines (keys in
+// muted monospace), long values cut so an unfolded row stays readable.
+function formatToolArgs(args) {
+  if (!args || typeof args !== "object") return "";
+  const lines = [];
+  for (const [k, v] of Object.entries(args)) {
+    let val = typeof v === "string" ? v : JSON.stringify(v);
+    if (val === undefined) continue;
+    if (val.length > 600) val = val.slice(0, 600) + "…";
+    lines.push(`<div class="tool-arg"><span class="tool-arg-key">${escHtml(k)}:</span> <span class="tool-arg-val">${escHtml(val)}</span></div>`);
+  }
+  return lines.join("");
+}
+
+// buildToolBlock builds one call's row inside a tool run card: a title line
+// (status dot, plain-language title, short detail, time, chevron) that unfolds
+// to the arguments, any nested sub-agent calls, then the result.
 function buildToolBlock(name, args) {
-  const { label, color } = toolMeta(name);
-  const desc = toolDesc(name, args);
+  const kind = toolKind(name);
   const block = document.createElement("div");
-  block.className = `tool-block border-${color}`;
+  block.className = "tool-block";
   block.dataset.toolName = (name || "").toLowerCase();
+  block.dataset.toolRawName = name || "";
+  block.dataset.kind = kind;
 
   const header = document.createElement("div");
   header.className = "tool-header";
   header.innerHTML = `
     <span class="tool-dot pending"></span>
-    <span class="tool-badge badge-${color}">${escHtml(label)}</span>
-    <span class="tool-desc">${escHtml(desc)}</span>
+    <span class="tool-title">${escHtml(toolRowTitle(name, args, kind))}</span>
     <span class="tool-time"></span>
-    <span class="tool-chevron">▶</span>
+    <span class="tool-chevron" aria-hidden="true">›</span>
   `;
   header.addEventListener("click", () => block.classList.toggle("expanded"));
 
   const body = document.createElement("div");
   body.className = "tool-body";
-  body.innerHTML = `<div class="tool-out-slot"></div>`;
+  const argsHtml = formatToolArgs(args);
+  body.innerHTML = (argsHtml ? `<div class="tool-args">${argsHtml}</div>` : "") + `<div class="tool-out-slot"></div>`;
 
   block.appendChild(header);
   block.appendChild(body);
   return block;
 }
 
-// appendToolCall adds a top-level tool block to the transcript. Consecutive
-// calls (nothing else rendered between them) share one .tool-group: from the
-// second call on, the group folds to a single summary line ("5 calls · Skill ×2
-// · Bash ×3") that expands to the full list, so a long run of tool calls no
-// longer floods the chat. A lone call renders exactly as before.
+// appendToolCall adds a top-level call to the transcript. Consecutive calls
+// (nothing else rendered between them) share one .tool-group, shown as ONE
+// quiet summary line ("Ran 1 command, used 2 tools ›", Claude Desktop style)
+// that unfolds into a card listing each call.
 function appendToolCall(name, args, container) {
   const target = container || fpTranscript();
   let group = target.lastElementChild;
@@ -4964,96 +5093,45 @@ function appendToolCall(name, args, container) {
 
 function buildToolGroup() {
   const group = document.createElement("div");
-  group.className = "tool-group single";
-  const summaryRow = document.createElement("div");
-  summaryRow.className = "tool-row tool-group-summary-row";
-  const summary = document.createElement("div");
-  summary.className = "tool-block tool-group-summary border-slate";
-  summary.innerHTML = `
-    <div class="tool-header">
-      <span class="tool-dot pending"></span>
-      <span class="tool-group-label"></span>
-      <span class="tool-group-counts"></span>
-      <span class="tool-time"></span>
-      <span class="tool-chevron">▶</span>
-    </div>`;
-  summary.querySelector(".tool-header").addEventListener("click", () => {
+  group.className = "tool-group";
+  const line = document.createElement("button");
+  line.type = "button";
+  line.className = "tool-summary-line";
+  line.innerHTML = `<span class="tool-summary-text"></span><span class="tool-summary-chevron" aria-hidden="true">›</span>`;
+  line.addEventListener("click", () => {
     group.classList.toggle("expanded");
-    summary.classList.toggle("expanded", group.classList.contains("expanded"));
+    line.setAttribute("aria-expanded", group.classList.contains("expanded") ? "true" : "false");
   });
-  summaryRow.appendChild(summary);
   const body = document.createElement("div");
   body.className = "tool-group-body";
-  group.appendChild(summaryRow);
+  group.appendChild(line);
   group.appendChild(body);
   return group;
 }
 
-// refreshToolGroup recomputes a group's summary line from its current calls.
+// toolSummaryT adapts the i18n runtime to toolSummary's t(key, count).
+function toolSummaryT(key, n) {
+  return key.startsWith("tool.run.") ? tr(key) : trN(key, n);
+}
+
+// refreshToolGroup recomputes a run's summary line from its current calls.
 // Derived from the DOM each time because a resolved call can remove its own
 // row (empty teammate/soft-skill output).
 function refreshToolGroup(group) {
   if (!group) return;
   const blocks = group.querySelectorAll(":scope > .tool-group-body > .tool-row > .tool-block");
   if (blocks.length === 0) { group.remove(); return; }
-  group.classList.toggle("single", blocks.length < 2);
-  if (blocks.length < 2) return;
-
-  const counts = new Map(); // label → {color, n}
-  let pending = false, error = false, total = 0;
+  const calls = [];
   for (const b of blocks) {
-    const { label, color } = toolMeta(b.dataset.toolName || "");
-    const c = counts.get(label) || { color, n: 0 };
-    c.n++;
-    counts.set(label, c);
     const dot = b.querySelector(":scope > .tool-header > .tool-dot");
-    if (dot && dot.classList.contains("pending")) pending = true;
-    if (dot && dot.classList.contains("error")) error = true;
-    total += Number(b.dataset.durMs || 0);
+    const status = dot && dot.classList.contains("pending") ? "pending"
+      : dot && dot.classList.contains("error") ? "error" : "done";
+    calls.push({ kind: b.dataset.kind || "other", status });
   }
-  const summary = group.querySelector(".tool-group-summary");
-  const dot = summary.querySelector(".tool-dot");
-  dot.classList.remove("pending", "done", "error");
-  dot.classList.add(pending ? "pending" : error ? "error" : "done");
-  summary.querySelector(".tool-group-label").textContent = trN("chat.toolGroup.calls", blocks.length);
-  const countsEl = summary.querySelector(".tool-group-counts");
-  countsEl.innerHTML = "";
-  for (const [label, { color, n }] of counts) {
-    const chip = document.createElement("span");
-    chip.className = `tool-badge badge-${color}`;
-    chip.textContent = n > 1 ? `${label} ×${n}` : label;
-    countsEl.appendChild(chip);
-  }
-  const time = summary.querySelector(".tool-time");
-  time.textContent = total > 0 ? formatDuration(total) : "";
-}
-
-// appendFileDownloadCard renders a compact "file ready" card in the transcript
-// with a Download button, shown when the agent's Write tool generates a file so
-// the user can download the artifact straight from chat. Live-only, like tool
-// blocks (not replayed on reload — the file stays available in the Folders
-// panel). A fresh card per Write is intentional: a regenerated file gets a new
-// card, and same-turn double-writes are rare.
-function appendFileDownloadCard(sessionId, abs, container) {
-  if (!abs) return;
-  const root = container || getContainer(sessionId);
-  if (!root) return;
-  const name = abs.split("/").filter(Boolean).pop() || abs;
-  const row = document.createElement("div");
-  row.className = "tool-row";
-  const card = document.createElement("div");
-  card.className = "file-dl-card";
-  card.innerHTML =
-    `<span class="file-dl-icon">${fileIconSvg(name)}</span>` +
-    `<span class="file-dl-meta">` +
-      `<span class="file-dl-label">${escHtml(tr("chat.fileReady"))}</span>` +
-      `<span class="file-dl-name" data-tip="${escHtml(abs)}">${escHtml(name)}</span>` +
-    `</span>` +
-    `<button type="button" class="file-dl-btn">${escHtml(tr("menu.download"))}</button>`;
-  card.querySelector(".file-dl-btn").addEventListener("click", () => downloadHostFile(abs, name, sessionId));
-  row.appendChild(card);
-  root.appendChild(row);
-  scrollBottom(paneOfNode(row));
+  const text = toolSummary(calls, toolSummaryT);
+  group.classList.toggle("is-running", calls.some(c => c.status === "pending"));
+  group.classList.toggle("has-error", calls.some(c => c.status === "error"));
+  group.querySelector(".tool-summary-text").textContent = text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // downloadHostFile downloads a host file via the folder download route and saves
@@ -5085,6 +5163,14 @@ async function downloadHostFile(abs, name, sessionId) {
 // appendNestedToolCall adds an inner tool block inside a parent sub-agent block.
 // The parent is auto-expanded so the user can see activity in real time.
 function appendNestedToolCall(parentBlock, name, args) {
+  // A call that runs its own tool calls is a sub-agent delegation: retitle it
+  // ("Delegated to web_agent") and recount the run's summary line.
+  if (parentBlock.dataset.kind !== "delegate") {
+    parentBlock.dataset.kind = "delegate";
+    const title = parentBlock.querySelector(":scope > .tool-header > .tool-title");
+    if (title) title.textContent = toolRowTitle(parentBlock.dataset.toolRawName, null, "delegate");
+    refreshToolGroup(parentBlock.closest(".tool-group"));
+  }
   let nested = parentBlock.querySelector(".tool-nested");
   if (!nested) {
     const slot = parentBlock.querySelector(".tool-out-slot");
@@ -6498,13 +6584,12 @@ function rememberSessionMeta(s) {
 }
 
 // sessionsQuery builds a paginated GET /api/sessions URL across ALL collections
-// (no `collection` filter) for the Archived panel and for search, applying the
-// current search query. The chosen sort only applies to the active list (the
-// archived panel is always recent order).
+// (no `collection` filter): the tree's search over active sessions (current
+// sort), or the Archived sessions dialog (its own search, always recent order).
 function sessionsQuery(archived, offset, limit) {
   const p = new URLSearchParams();
   p.set("archived", archived ? "true" : "false");
-  const q = sessionSearch.trim();
+  const q = (archived ? archivedSearch : sessionSearch).trim();
   if (q) p.set("q", q);
   p.set("sort", archived ? "recent" : sessionSort);
   p.set("offset", String(offset));
@@ -6727,26 +6812,39 @@ function resetGroup(name) {
   if (isGroupOpen(name)) return loadGroupMore(name);
 }
 
-// ─── Archived panel: sentinel + IntersectionObserver ──
+// ─── Archived sessions dialog ─────────────────────────────────────────────────
+// Archived sessions are listed in a dialog opened from the account menu. It
+// pages through archivedView — an IntersectionObserver sentinel at the end of
+// the list loads the next page — with its own search. loadSessions keeps the
+// first page (and the count the menu shows) current even while it is closed,
+// so archivedSessions knows those ids for the read-only guard.
+let archivedListEl = null;      // the open dialog's <ul>; null while closed
+let archivedSearch = "";        // the dialog's search query (q=)
+let archivedCount = 0;          // unfiltered archived total (account menu)
+let archivedDialogClose = null; // closes the open dialog
+
 function appendArchivedRows(rows, { reset } = {}) {
-  const list = els.archivedList;
-  if (reset) list.innerHTML = "";
+  if (reset && archivedListEl) archivedListEl.innerHTML = "";
   for (const s of rows) {
     rememberSessionMeta(s);
-    list.appendChild(buildSessionRow(s, { archived: true }));
+    if (archivedListEl) archivedListEl.appendChild(buildArchivedRow(s));
   }
 }
 
-// updateArchivedChrome shows/hides the archived panel + header count from the
-// archived view's total (not just the loaded rows).
+// updateArchivedChrome records the archived total for the account menu and
+// shows the open dialog's empty state.
 function updateArchivedChrome() {
-  els.archivedPanel.hidden = archivedView.total === 0;
-  els.archivedCount.textContent = archivedView.total ? `(${archivedView.total})` : "";
+  if (!archivedSearch.trim()) archivedCount = archivedView.total;
+  if (!archivedListEl) return;
+  const empty = archivedListEl.nextElementSibling;
+  empty.hidden = archivedView.total > 0;
+  empty.textContent = archivedSearch.trim() ? tr("archived.noMatch") : tr("archived.empty");
 }
 
 let archivedSentinel = null, archivedObserver = null;
 function ensureArchivedSentinel() {
-  const list = els.archivedList;
+  const list = archivedListEl;
+  if (!list) return;
   if (!archivedSentinel) {
     archivedSentinel = document.createElement("li");
     archivedSentinel.className = "session-sentinel";
@@ -6787,7 +6885,7 @@ async function loadMoreArchived() {
 function resetArchivedView() {
   const v = archivedView;
   v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false;
-  els.archivedList.innerHTML = "";
+  if (archivedListEl) archivedListEl.innerHTML = "";
   loadMoreArchived();
 }
 
@@ -6797,7 +6895,7 @@ async function reloadArchivedPrefix() {
   const mySeq = v.seq;
   v.loading = true;
   const want = Math.max(PAGE_INITIAL, v.loaded);
-  const scrollTop = els.archivedList.scrollTop;
+  const scrollTop = archivedListEl ? archivedListEl.scrollTop : 0;
   try {
     const res = await apiFetch(sessionsQuery(true, 0, want), { cache: "no-store" });
     const data = await res.json();
@@ -6807,11 +6905,126 @@ async function reloadArchivedPrefix() {
     v.loaded = rows.length;
     v.total = Number.isFinite(data.total) ? data.total : rows.length;
     v.exhausted = v.loaded >= v.total;
-    els.archivedList.scrollTop = scrollTop;
+    if (archivedListEl) archivedListEl.scrollTop = scrollTop;
     updateArchivedChrome();
     syncPanesAfterRender();
   } catch (e) { console.error("reloadArchivedPrefix:", e); }
   finally { if (mySeq === v.seq) { v.loading = false; ensureArchivedSentinel(); } }
+}
+
+// buildArchivedRow renders one archived session in the dialog: its title opens
+// it read-only (and closes the dialog); Restore unarchives it back into its
+// collection; Export and Delete as on any session.
+function buildArchivedRow(s) {
+  const li = document.createElement("li");
+  li.className = "archived-row";
+  li.dataset.id = s.id;
+  const name = s.title || s.id;
+  const meta = [effectiveCollection(s)];
+  const when = new Date(s.last_used_at);
+  if (!isNaN(when.getTime())) meta.push(when.toLocaleString(I18N.locale, { dateStyle: "medium", timeStyle: "short" }));
+  meta.push(trN("archived.turns", s.turns || 0));
+  li.innerHTML = `
+    <button type="button" class="archived-row-open">
+      <span class="archived-row-title"></span>
+      <span class="archived-row-meta"></span>
+    </button>
+    <div class="archived-row-actions">
+      <button type="button" class="archived-restore">${ICON_UNARCHIVE}<span></span></button>
+      <button type="button" class="archived-icon-btn archived-export">${ICON_EXPORT}</button>
+      <button type="button" class="archived-icon-btn archived-delete">${ICON_DELETE}</button>
+    </div>`;
+  li.querySelector(".archived-row-title").textContent = name;
+  li.querySelector(".archived-row-meta").textContent = meta.join(" · ");
+  const open = li.querySelector(".archived-row-open");
+  open.setAttribute("data-tip", tr("archived.openTip"));
+  open.addEventListener("click", () => {
+    if (archivedDialogClose) archivedDialogClose();
+    selectSession(s.id);
+  });
+  const restore = li.querySelector(".archived-restore");
+  restore.querySelector("span").textContent = tr("archived.restore");
+  restore.setAttribute("data-tip", tr("archived.restoreTip"));
+  restore.addEventListener("click", async () => {
+    restore.disabled = true;
+    if (await unarchiveSession(s.id)) showToast(tr("archived.restored", { name }));
+    else { restore.disabled = false; showToast(tr("archived.restoreFailed"), "err"); }
+  });
+  const exp = li.querySelector(".archived-export");
+  exp.setAttribute("data-tip", tr("menu.export"));
+  exp.setAttribute("aria-label", tr("menu.export"));
+  exp.addEventListener("click", () => exportSession(s.id));
+  const del = li.querySelector(".archived-delete");
+  del.setAttribute("data-tip", tr("menu.delete"));
+  del.setAttribute("aria-label", tr("menu.delete"));
+  del.addEventListener("click", async () => {
+    const ok = await uiConfirm({
+      title: tr("app.session.deleteTitle"),
+      message: tr("app.session.deleteMsg", { name }),
+      confirmText: tr("common.delete"),
+      cancelText: tr("common.cancel"),
+      danger: true,
+    });
+    if (ok) deleteSession(s.id, li);
+  });
+  return li;
+}
+
+// openArchivedDialog shows the archived sessions (account menu).
+function openArchivedDialog() {
+  if (archivedDialogClose) return;
+  const overlay = uiModalShell(tr("archived.title"));
+  overlay.querySelector(".ui-modal").classList.add("archived-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  body.innerHTML =
+    `<input type="search" class="archived-search" autocomplete="off" spellcheck="false" />` +
+    `<ul class="archived-modal-list"></ul>` +
+    `<div class="archived-modal-empty" hidden></div>`;
+  const search = body.querySelector(".archived-search");
+  search.placeholder = tr("archived.search");
+  search.setAttribute("aria-label", tr("archived.search"));
+  body.querySelector(".archived-modal-list").setAttribute("aria-label", tr("archived.title"));
+  overlay.querySelector(".ui-modal-cancel").hidden = true;
+  const ok = overlay.querySelector(".ui-modal-ok");
+  ok.textContent = tr("common.close");
+
+  archivedListEl = body.querySelector(".archived-modal-list");
+  archivedSearch = "";
+  resetArchivedView();
+
+  let timer = null;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { archivedSearch = search.value; resetArchivedView(); }, 150);
+  });
+
+  const close = () => {
+    if (archivedDialogClose !== close) return;
+    archivedDialogClose = null;
+    clearTimeout(timer);
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+    if (archivedObserver) { archivedObserver.disconnect(); archivedObserver = null; }
+    archivedSentinel = null;
+    archivedListEl = null;
+    // A search narrowed archivedView: reload it unfiltered so the count holds.
+    if (archivedSearch.trim()) { archivedSearch = ""; reloadArchivedPrefix(); }
+  };
+  archivedDialogClose = close;
+  // Escape closes the dialog unless a confirm opened over it (Delete) — that
+  // one handles its own keys.
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    const overlays = document.querySelectorAll(".ui-modal-overlay");
+    if (overlays[overlays.length - 1] !== overlay) return;
+    e.preventDefault();
+    close();
+  };
+  ok.addEventListener("click", close);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey, true);
+  setTimeout(() => search.focus(), 0);
 }
 
 function setSessionBusy(sessionId, busy) {
@@ -7796,9 +8009,9 @@ let treeSearchSeq = 0;    // drops a slower, superseded search response
 
 // ── Search ──
 // setTreeSearch shows every collection's matches for `query` under their group
-// headers (groups without a hit hidden), filters the Archived panel the same
-// way, and — with an empty query — leaves search mode and restores the regular
-// tree (open states come from storage, which search never touches).
+// headers (groups without a hit hidden) and — with an empty query — leaves
+// search mode and restores the regular tree (open states come from storage,
+// which search never touches).
 async function setTreeSearch(query) {
   const q = String(query || "").trim();
   if (q === sessionSearch.trim()) return;
@@ -7827,11 +8040,9 @@ async function setTreeSearch(query) {
         resetGroup(name);
       }
     }
-    resetArchivedView();
     return;
   }
   await runTreeSearch();
-  resetArchivedView();
 }
 
 // runTreeSearch fetches the current query's matches across all collections (one
@@ -8049,6 +8260,7 @@ function closeTabEverywhere(id) {
 // holding it. Shared by the local delete flow and the remote "session_deleted"
 // push (another browser deleted the session).
 function forgetSession(id) {
+  disposeSessionTerminals(id);
   unsubscribeSessionEvents(id);
   unpinSession(id);
   sessionMeta.delete(id);
@@ -8106,7 +8318,8 @@ async function deleteSession(id, li) {
 }
 
 // archiveSession sets a session aside (read-only). Its history stays viewable
-// in the archived panel; the server detaches it from its agent generation.
+// from the Archived sessions dialog; the server detaches it from its agent
+// generation.
 async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
@@ -8114,9 +8327,11 @@ async function archiveSession(id) {
     const meta = sessionMeta.get(id);
     if (meta) meta.archived = true;
     unpinSession(id);
+    disposeSessionTerminals(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
-    // clicking it in the archived panel re-mounts the read-only history.
+    // opening it from the Archived sessions dialog re-mounts the read-only
+    // history.
     closeTabEverywhere(id);
     await loadSessions();
     saveLayout();
@@ -8126,16 +8341,20 @@ async function archiveSession(id) {
 }
 
 // unarchiveSession restores an archived session to active and re-enables chat.
+// Resolves to whether it worked.
 async function unarchiveSession(id) {
   try {
-    await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
+    const res = await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await loadSessions();
     if (panelsWithTab(id).length) {
       subscribeSessionEvents(id);
       applySessionUI(id);
     }
+    return true;
   } catch (e) {
     console.error("failed to unarchive session:", e);
+    return false;
   }
 }
 
@@ -8206,7 +8425,6 @@ function closeTab(panel, key) {
   const idx = panel.tabs.indexOf(key);
   if (idx === -1) return;
   const editor = isEditorTab(key);
-  const term = isTermTab(key);
   if (editor) {
     const abs = editorPathOf(key);
     if (editorDirty.get(abs) && !confirm(`Discard unsaved changes to ${baseName(abs)}?`)) return;
@@ -8216,10 +8434,8 @@ function closeTab(panel, key) {
   if (isDraft(key)) draftDirs.delete(key);
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
-  // Terminal tabs are pane-local and ephemeral; tear down the shell + WebSocket.
-  if (term) disposeTerminal(key);
-  // Session-only cleanup (push subscription); editor/terminal keys have none.
-  const releaseIfSession = () => { if (!editor && !term) releaseSessionIfUnviewed(key); };
+  // Session-only cleanup (push subscription); editor keys have none.
+  const releaseIfSession = () => { if (!editor) releaseSessionIfUnviewed(key); };
 
   if (!panel.tabs.length) {
     if (panels.length > 1) {
@@ -8251,7 +8467,7 @@ function closeTab(panel, key) {
 // out of the pane's shared #ask-user-slot and back into its queue (requeuing
 // every still-unanswered question), then tears the wizard down so re-selecting
 // the tab rebuilds a fresh one from the queue. `activeId` is the session that
-// stays visible; pass null for draft/editor/terminal tabs (they own no session,
+// stays visible; pass null for draft/editor tabs (they own no session,
 // so every wizard in the slot is hidden) — otherwise a leftover card covers the
 // new tab's picker/composer.
 function requeueHiddenWizards(panel, activeId) {
@@ -8290,7 +8506,6 @@ async function activateTab(panel, key) {
     panel.activeTab = key;
     panel.sessionId = null;
     panel.root.classList.add("editing");
-    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     hideReplyNav(panel);
     mountInPanel(panel, null);
@@ -8302,27 +8517,10 @@ async function activateTab(panel, key) {
     return;
   }
 
-  // Terminal tab — show the interactive shell, no chat session is active.
-  if (isTermTab(key)) {
-    panel.activeTab = key;
-    panel.sessionId = null;
-    panel.root.classList.add("terminal");
-    panel.root.classList.remove("editing");
-    hidePanePicker(panel);
-    hideReplyNav(panel);
-    mountInPanel(panel, null);
-    clearPinnedPrompt(panel);
-    setFocusedPanel(panel.id);
-    renderPaneTabs(panel);
-    saveLayout();
-    mountTerminal(panel, key);
-    return;
-  }
   panel.root.classList.remove("editing");
-  panel.root.classList.remove("terminal");
 
   // Draft tab — show the picker, no session is active. The shared ask-user slot
-  // is still visible here (unlike editor/terminal tabs, which CSS hides), so
+  // is still visible here (unlike editor tabs, which CSS hides), so
   // requeue any prior session's wizard or its card would cover the picker.
   if (isDraft(key)) {
     panel.activeTab = key;
@@ -8409,13 +8607,7 @@ async function activateTab(panel, key) {
       container.appendChild(row);
       return;
     }
-    for (let i = 0; i < turns.length; i++) {
-      const turn = turns[i];
-      appendUserBubble(turn.user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, turn.assistant_text);
-      setReplyTime(bubble, turn.duration_ms);
-    }
+    for (let i = 0; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     scrollBottom(panel, true);
     scheduleReplyNav(panel);
   } catch (e) {
@@ -8674,7 +8866,6 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     panel.activeTab = newId;
     panel.sessionId = newId;
     panel.root.classList.remove("editing");
-    panel.root.classList.remove("terminal");
     hidePanePicker(panel);
     setFocusedPanel(panel.id);
     clearPinnedPrompt(panel);
@@ -8758,7 +8949,7 @@ async function subscribeGlobalEvents() {
             },
           );
           for (const p of panelsForSession(sid)) {
-            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
           }
         } else if (event === "task_notification" && sid) {
           // A background task / monitor / spawned turn produced a result. In
@@ -8828,6 +9019,9 @@ async function subscribeGlobalEvents() {
           // The self-update poller found a newer stable release — refresh the
           // sidebar button without waiting for a page reload.
           checkForUpdate();
+        } else if (event === "produced_changed" && sid) {
+          // An agent created a file in this session — refresh the Résultats card.
+          if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("results");
         } else if (event === "skills_changed" && sid) {
           // A skill / soft-skill was loaded in this session — refresh its dock.
           if (panelsWithTab(sid).length > 0 || sessionSkills.has(sid)) refreshSkills(sid);
@@ -9130,12 +9324,14 @@ async function maybePromptNotifications() {
 // loadAccountIdentity labels the footer's account button with the login this
 // omnis-server serves. A multi-user deployment runs one server per user behind
 // an SSO gateway (docs/multi-user-containers.md), and cookie mode serves several
-// logins; a single-user install reports the default id, so the button just reads
-// "Omnis" there.
+// logins; a single-user install reports the default id, which names no one, so
+// the button shows the name of the OS account running the server instead
+// (`display_name`), and "Omnis" only when even that is unknown.
 let accountLogin = ""; // shown login ("" on a single-user install)
 async function loadAccountIdentity() {
   const btn = document.getElementById("account-btn");
   if (!btn) return;
+  let displayName = "";
   try {
     const res = await apiFetch("/api/whoami");
     if (!res.ok) return;
@@ -9143,8 +9339,9 @@ async function loadAccountIdentity() {
     const user = payload && typeof payload.user_id === "string" ? payload.user_id : "";
     const shared = payload && payload.identity_mode === "cookie";
     accountLogin = (!user || (user === "web-user" && !shared)) ? "" : user;
+    if (payload && typeof payload.display_name === "string") displayName = payload.display_name.trim();
   } catch (e) { console.error("whoami failed:", e); }
-  const label = accountLogin || "Omnis";
+  const label = accountLogin || displayName || "Omnis";
   btn.querySelector(".account-name").textContent = label;
   btn.querySelector(".account-avatar").textContent = label.charAt(0).toUpperCase();
 }
@@ -9201,6 +9398,10 @@ function openAccountMenu() {
     sep.className = "folder-ctx-sep";
     m.appendChild(sep);
   }
+  m.appendChild(accountMenuItem(ICON_ARCHIVE, tr("archived.title"), openArchivedDialog, archivedCount ? String(archivedCount) : ""));
+  const sepArchived = document.createElement("div");
+  sepArchived.className = "folder-ctx-sep";
+  m.appendChild(sepArchived);
   const S = window.Settings;
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
   m.appendChild(accountMenuItem(ICON_GEAR, tr("settings.label"), () => S && S.open(), isMac ? "⌘," : "Ctrl+,"));
@@ -9376,6 +9577,43 @@ function showToast(text, kind) {
   setTimeout(() => { el.remove(); }, 2400);
 }
 
+// renderHistoryTurn renders one persisted turn: the user bubble, then the
+// reply split at each recorded tool run's offset, so the tool-run summary
+// lines reappear between the same paragraphs as when the turn streamed. A
+// legacy turn (no `tools`) renders as one reply bubble, as before.
+function renderHistoryTurn(turn, container, index) {
+  appendUserBubble(turn.user_text, container, null, index);
+  const text = turn.assistant_text || "";
+  const tools = (turn.tools || []).filter(c =>
+    !isRoutingTool(c.name) && !isTodoTool(c.name) && !(isSkillLoadTool(c.name) && !c.error));
+  let pos = 0;
+  let bubble = null;
+  for (const c of tools) {
+    const off = Math.max(pos, Math.min(c.offset || 0, text.length));
+    if (off > pos) {
+      const seg = text.slice(pos, off);
+      if (seg.trim()) { bubble = appendAssistantBubble(container); renderMarkdown(bubble, seg); }
+      pos = off;
+    }
+    const block = appendToolCall(c.name, c.args, container);
+    for (const k of c.children || []) {
+      if (isSkillLoadTool(k.name) && !k.error) continue;
+      resolveToolCall(appendNestedToolCall(block, k.name, k.args), toolRecordResponse(k), k.duration_ms);
+    }
+    resolveToolCall(block, toolRecordResponse(c), c.duration_ms);
+    refreshToolGroup(block.closest(".tool-group"));
+  }
+  const rest = text.slice(pos);
+  if (rest.trim() || !bubble) { bubble = appendAssistantBubble(container); renderMarkdown(bubble, rest); }
+  setReplyTime(bubble, turn.duration_ms);
+}
+
+// toolRecordResponse rebuilds the response object resolveToolCall expects.
+function toolRecordResponse(c) {
+  if (c.error) return { error: c.error };
+  return c.result == null ? {} : c.result;
+}
+
 // rerenderSessionFromHistory clears a session's transcript and rebuilds it from
 // the persisted history. Used as the recovery path when a reconnect can't replay
 // the live stream cleanly (the server's frame buffer was trimmed) — it drops any
@@ -9388,13 +9626,7 @@ async function rerenderSessionFromHistory(sessionId) {
     const turns = data.turns || [];
     const container = getContainer(sessionId);
     container.innerHTML = "";
-    for (let i = 0; i < turns.length; i++) {
-      const t = turns[i];
-      appendUserBubble(t.user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, t.assistant_text);
-      setReplyTime(bubble, t.duration_ms);
-    }
+    for (let i = 0; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     sessionTurnCounts.set(sessionId, turns.length);
     for (const p of panelsForSession(sessionId)) requestAnimationFrame(() => { scrollBottom(p); scheduleReplyNav(p); });
   } catch (e) {
@@ -9418,12 +9650,7 @@ async function appendNewPushTurns(sessionId) {
     const placeholder = container.querySelector(".no-messages-placeholder");
     if (placeholder) placeholder.remove();
 
-    for (let i = rendered; i < turns.length; i++) {
-      appendUserBubble(turns[i].user_text, container, null, i);
-      const bubble = appendAssistantBubble(container);
-      renderMarkdown(bubble, turns[i].assistant_text);
-      setReplyTime(bubble, turns[i].duration_ms);
-    }
+    for (let i = rendered; i < turns.length; i++) renderHistoryTurn(turns[i], container, i);
     sessionTurnCounts.set(sessionId, turns.length);
 
     for (const p of panelsForSession(sessionId)) {
@@ -9947,12 +10174,10 @@ async function sendMessage(panel) {
           // a new/changed file in the Folders panel when it's in the visible dir.
           onAgentFileChanged(data.path);
           if (pathUnderFoldersDir(data.path)) scheduleFoldersRefresh();
-          // A freshly *generated* file (the Write tool) is offered as a download
-          // card in the transcript so the user can grab the artifact (a report,
-          // PDF, markdown, …) without opening the Folders panel. Edits/reverts to
-          // existing files don't render a card (they'd be noisy mid-coding) but
-          // still refresh editors above.
-          if ((data.tool || "") === "write") appendFileDownloadCard(sessionId, data.path, container);
+          // A file the agent created is listed in the environment panel's
+          // Résultats card (server-recorded; produced_changed refreshes it).
+          // Any file change may also change the git Modifications card.
+          if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("changes");
           break;
         }
 
@@ -10020,9 +10245,10 @@ async function sendMessage(panel) {
             },
           );
           for (const p of panelsForSession(sessionId)) {
-            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p);
+            if (p.els.ctxPopup && !p.els.ctxPopup.hasAttribute("hidden")) renderCtxPopup(p); if (p === fp() && window.EnvPanel) EnvPanel.refresh("context");
           }
           if (AgentDebug.enabled && sessionId === activeSessionId) AgentDebug._paint();
+          if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("context");
           break;
         }
 
@@ -10051,6 +10277,7 @@ async function sendMessage(panel) {
           finalizeSegment();
           appendRoutingChip(container, data.to, data.reason);
           refreshSessionsFor(sessionId);
+          if (window.EnvPanel) setTimeout(() => EnvPanel.refresh("environment"), 400);
           break;
         }
 
@@ -10230,6 +10457,8 @@ async function sendMessage(panel) {
     // "error" and "exhausted" do not (the user was present, or there's no reply).
     if (outcome === "done" || outcome === "reload") notifyChatReply(sessionId, lastReplyText);
     if (outcome === "done" || outcome === "reload") fetchSuggestion(sessionId);
+    // A finished turn may have changed files, git state or produced results.
+    if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh();
     // Track turn count so appendNewPushTurns knows where to start. The history
     // re-render path already set it authoritatively, so skip the bump there.
     if (!skipTurnCount) sessionTurnCounts.set(sessionId, (sessionTurnCounts.get(sessionId) ?? 0) + 1);
@@ -11616,7 +11845,7 @@ document.addEventListener("keydown", (e) => {
 // ─── Hover tooltips (data-tip) ────────────────────────────────────────────────
 // A single body-appended `#tip-layer` element renders every `[data-tip]`
 // tooltip. Because it is `position: fixed`, it escapes the sidebar /
-// archived-list `overflow` clipping and sits above every panel — fixing the
+// session-list `overflow` clipping and sits above every panel — fixing the
 // case where an action-button tooltip was masked by the surrounding panel.
 // Placement is *above* the target by default, flipping below only when the
 // target sits too close to the viewport top to fit. `.model-status-dot` keeps
@@ -11627,6 +11856,7 @@ function initTooltips() {
   document.body.appendChild(layer);
 
   let current = null; // the [data-tip] element the tooltip is tracking
+  let pending = null; // timer of a delayed tooltip (data-tip-delay)
 
   function place() {
     if (!current) return;
@@ -11666,6 +11896,8 @@ function initTooltips() {
   }
 
   function show(el) {
+    clearTimeout(pending);
+    pending = null;
     current = el;
     layer.textContent = el.getAttribute("data-tip") || "";
     layer.classList.remove("below");
@@ -11673,6 +11905,8 @@ function initTooltips() {
     layer.classList.add("show");
   }
   function hide() {
+    clearTimeout(pending);
+    pending = null;
     current = null;
     layer.classList.remove("show");
   }
@@ -11681,6 +11915,19 @@ function initTooltips() {
     const el = e.target.closest && e.target.closest("[data-tip]");
     if (!el || el.classList.contains("model-status-dot")) { if (current) hide(); return; }
     if (el === current) return;
+    // data-tip-delay (ms): show only once the pointer has rested on the element
+    // that long, so a pointer merely passing over it raises nothing. The element
+    // is tracked meanwhile, so leaving it (or a scroll / click) cancels the wait.
+    const delay = parseInt(el.getAttribute("data-tip-delay"), 10);
+    if (delay > 0) {
+      hide();
+      current = el;
+      pending = setTimeout(() => {
+        pending = null;
+        if (current === el && el.isConnected) show(el);
+      }, delay);
+      return;
+    }
     show(el);
   });
   document.addEventListener("pointerout", (e) => {
@@ -12105,6 +12352,11 @@ els.navScrim.addEventListener("click", closeNav);
 // layout (where the drawer classes mean nothing but the scrim would still eat
 // clicks if it were left interactive).
 MOBILE_MQ.addEventListener("change", closeNav);
+// The environment panel is docked in a pane on wide screens and is a <body>
+// drawer on small ones (placeEnvPanel); opening or closing it changes the
+// room its host pane needs.
+MOBILE_MQ.addEventListener("change", () => { placeEnvPanel(); layoutWidths(); });
+document.addEventListener("envpanel:toggle", () => { layoutWidths(); refitVisibleTerminals(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && navOpen()) closeNav();
 });
@@ -12243,7 +12495,7 @@ document.addEventListener("mousemove", (e) => {
     const d = paneDividerDrag;
     const totalPair = d.startLeftW + d.startRightW;
     const delta = e.clientX - d.startX;
-    let leftW = Math.max(PANE_MIN_W, Math.min(totalPair - PANE_MIN_W, d.startLeftW + delta));
+    let leftW = Math.max(paneMinW(d.left), Math.min(totalPair - paneMinW(d.right), d.startLeftW + delta));
     d.left.width = leftW;
     d.right.width = totalPair - leftW;
     applyPaneWidths();
@@ -12286,31 +12538,6 @@ els.sidebarToggle.addEventListener("click", () => {
 // its own width via the resize loop.)
 els.sidebar.addEventListener("transitionend", (e) => {
   if (e.target === els.sidebar && e.propertyName === "width") layoutWidths();
-});
-
-// ─── Archived sessions panel collapse ─────────────────────────────────────────
-
-const ARCHIVED_COL_KEY = "agent_archived_collapsed";
-function applyArchivedCollapse(collapsed) {
-  els.archivedPanel.classList.toggle("collapsed", collapsed);
-  els.archivedHeader.setAttribute("aria-expanded", String(!collapsed));
-}
-// Default collapsed; persists the user's choice across reloads.
-applyArchivedCollapse(localStorage.getItem(ARCHIVED_COL_KEY) !== "0");
-function toggleArchivedPanel() {
-  const collapsed = !els.archivedPanel.classList.contains("collapsed");
-  applyArchivedCollapse(collapsed);
-  localStorage.setItem(ARCHIVED_COL_KEY, collapsed ? "1" : "0");
-  // The archived list is display:none while collapsed, so its pagination sentinel
-  // can't intersect. On expand, re-arm the observer so a further page loads if the
-  // (now visible) sentinel is in view and the view isn't exhausted.
-  if (!collapsed && typeof ensureArchivedSentinel === "function" && archivedView.loaded > 0) {
-    ensureArchivedSentinel();
-  }
-}
-els.archivedHeader.addEventListener("click", toggleArchivedPanel);
-els.archivedHeader.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleArchivedPanel(); }
 });
 
 // ─── Folders browser panel ────────────────────────────────────────────────────
@@ -12386,13 +12613,278 @@ els.foldersResize.addEventListener("pointerdown", (e) => {
   els.foldersResize.addEventListener("pointerup", onUp);
 });
 
+const envGit = new Map(); // sessionId → last git status (Modifications card; branch row)
+const envSkillsOpen = new Set(); // "kind:name:agent" of skills unfolded in the Skills card
+const ENV_ICON = {
+  squad:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 15c3 0 6 2 6 5"/></svg>`,
+  folder: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
+  branch: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>`,
+  skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
+};
+
+// envRow builds one icon + text row of an environment card.
+function envRow(icon, html, tip, cls) {
+  return `<div class="env-row${cls ? " " + cls : ""}"${tip ? ` data-tip="${escHtml(tip)}"` : ""}>` +
+    `<span class="env-row-icon">${icon}</span><span class="env-row-text">${html}</span></div>`;
+}
+
+// registerEnvCards registers the environment panel's cards (env-panel.js),
+// top to bottom. The file browser (#folders-panel) moves into the Fichiers
+// card; its "collapsed" class follows the card's fold state and the panel's
+// visibility, so every existing foldersCollapsed() guard keeps working.
+function registerEnvCards() {
+  // The question whose reply is at the top of the focused pane's transcript
+  // (updatePinnedForScroll): shown only once that question has scrolled out of
+  // view. A click brings it back; ↺ gives its copy/fork/rewind menu. Docked at
+  // the panel's bottom so its coming and going never moves the other cards.
+  EnvPanel.register({
+    id: "question",
+    title: () => tr("env.question"),
+    sessionOnly: true,
+    dock: "bottom",
+    render(body, ctx) {
+      const panel = fp();
+      const pin = panel && panel.sessionId === ctx.sessionId ? panel._pinned : null;
+      ctx.setVisible(!!pin);
+      body.innerHTML = "";
+      if (!pin || !ctx.open) return;
+      const q = document.createElement("div");
+      q.className = "env-question";
+      const text = document.createElement("span");
+      text.className = "env-question-text";
+      renderUserText(text, pinnedPromptLabel(pin.text), ctx.sessionId);
+      q.appendChild(text);
+      if (pin.turn) addTurnActions(q, ctx.sessionId, pin.turn.index, pin.turn.text);
+      q.addEventListener("click", (e) => {
+        if (e.target.closest("a, button")) return;
+        scrollToPinnedQuestion(panel);
+      });
+      body.appendChild(q);
+      // Another question taking the place of the one shown (a long scroll jump
+      // skips the moment none is pinned) fades in rather than swapping at once.
+      if (body._pinBubble && body._pinBubble !== pin.bubble && q.animate &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        q.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
+      }
+      body._pinBubble = pin.bubble;
+    },
+  });
+  EnvPanel.register({
+    id: "environment",
+    title: () => tr("env.environment"),
+    render(body, ctx) {
+      syncEnvFolder();
+      const meta = ctx.sessionId ? sessionMetaById(ctx.sessionId) : null;
+      const rows = [];
+      if (meta) rows.push(envRow(ENV_ICON.squad, escHtml(meta.squad || tr("env.defaultSquad")), tr("env.squad")));
+      if (foldersDir) rows.push(envRow(ENV_ICON.folder, escHtml(foldersDir.replace(/^\/home\/[^/]+/, "~")), tr("env.folder"), "env-folder"));
+      const git = ctx.sessionId ? envGit.get(ctx.sessionId) : null;
+      if (git && git.repo && git.branch) rows.push(envRow(ENV_ICON.branch, escHtml(git.branch), tr("env.branch")));
+      if (meta) {
+        const col = effectiveCollection(meta) || "General";
+        const accent = collectionAccentVar(sessionCollectionColor(ctx.sessionId));
+        rows.push(envRow(`<span class="env-col-dot" style="${accent ? `background:${accent}` : ""}"></span>`, escHtml(col), tr("env.collection")));
+      }
+      body.innerHTML = rows.join("");
+      const f = body.querySelector(".env-folder");
+      if (f) f.addEventListener("click", () => EnvPanel.openCard("files"));
+    },
+  });
+  EnvPanel.register({
+    id: "context",
+    title: () => tr("env.context"),
+    sessionOnly: true,
+    defaultOpen: false,
+    render(body, ctx) {
+      const info = ctxUsageInfo(ctx.sessionId);
+      if (!info) { ctx.setValue(""); body.innerHTML = `<div class="env-empty">${escHtml(tr("env.noContext"))}</div>`; return; }
+      ctx.setValue(`${info.pct} % <span class="env-bar zone-${info.zone}"><i style="width:${info.pct}%"></i></span>`);
+      if (!ctx.open) return;
+      const agents = info.agents.map(([name, u]) =>
+        `<div class="env-row"><span class="env-row-text">${escHtml(name)}</span><span class="env-row-meta">$${(u.cost || 0).toFixed(4)}</span></div>`).join("");
+      body.innerHTML =
+        `<div class="env-kv"><span>${escHtml(tr("ctx.tokensUsed"))}</span><span>${info.used.toLocaleString(I18N.locale)}</span>` +
+        `<span>${escHtml(tr("ctx.maxContext"))}</span><span>${info.max.toLocaleString(I18N.locale)}</span>` +
+        `<span>${escHtml(tr("ctx.budget"))}</span><span>${info.cost > 0 ? "$" + info.cost.toFixed(4) : "—"}</span></div>` +
+        (agents ? `<div class="env-sub">${agents}</div>` : "") +
+        `<button type="button" class="env-btn env-compact">${escHtml(tr("ctx.compressNow"))}</button>`;
+      const btn = body.querySelector(".env-compact");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = tr("app.ctx.queuing");
+        try {
+          const res = await apiFetch(`/api/sessions/${ctx.sessionId}/compact`, { method: "POST" });
+          if (!res.ok) throw new Error(await res.text());
+          btn.textContent = tr("app.ctx.queued");
+        } catch (err) {
+          console.error("compact request failed:", err);
+          btn.textContent = tr("common.error");
+        }
+        setTimeout(() => { btn.disabled = false; btn.textContent = tr("ctx.compressNow"); }, 1400);
+      });
+    },
+  });
+  EnvPanel.register({
+    id: "skills",
+    title: () => tr("env.skills"),
+    sessionOnly: true,
+    render(body, ctx) {
+      const skills = sessionSkills.get(ctx.sessionId) || [];
+      ctx.setVisible(skills.length > 0);
+      ctx.setValue(String(skills.length));
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const s of skills) {
+        const key = `${s.kind}:${s.name}:${s.agent || ""}`;
+        const item = document.createElement("div");
+        item.className = "env-skill";
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "env-row env-row-btn";
+        row.innerHTML = `<span class="env-row-icon">${ENV_ICON.skill}</span>` +
+          `<span class="env-row-text">${escHtml(s.name)}</span>` +
+          `<span class="env-row-meta">${s.kind === "softskill" ? escHtml(tr("skillsDock.softskill")) : ""}${s.count > 1 ? ` ×${s.count}` : ""}</span>`;
+        if (s.description) {
+          row.setAttribute("data-tip", s.description);
+          // A skill list is crossed on the way to other cards: only a pointer
+          // that rests on a row asks for its description.
+          row.setAttribute("data-tip-delay", "700");
+        }
+        item.appendChild(row);
+        if (envSkillsOpen.has(key) && s.instructions) {
+          const md = document.createElement("div");
+          md.className = "env-skill-body tool-md";
+          if (typeof marked !== "undefined" && typeof marked.parse === "function") md.innerHTML = marked.parse(s.instructions);
+          else md.textContent = s.instructions;
+          item.appendChild(md);
+        }
+        row.addEventListener("click", () => {
+          if (envSkillsOpen.has(key)) envSkillsOpen.delete(key); else envSkillsOpen.add(key);
+          EnvPanel.refresh("skills");
+        });
+        body.appendChild(item);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "connectors",
+    title: () => tr("env.connectors"),
+    sessionOnly: true,
+    defaultOpen: false,
+    async render(body, ctx) {
+      let servers = [];
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/mcp`);
+        if (res.ok) servers = (await res.json()).servers || [];
+      } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      ctx.setVisible(servers.length > 0);
+      const up = servers.filter(s => s.state === "connected").length;
+      const bad = servers.filter(s => s.state === "error").length;
+      ctx.setValue(`<span class="env-dot state-connected"></span>${up}` +
+        (bad ? ` <span class="env-dot state-error"></span>${bad}` : ""));
+      if (!ctx.open) return;
+      body.innerHTML = servers.map(s =>
+        `<div class="env-row"${s.error ? ` data-tip="${escHtml(s.error)}"` : ""}>` +
+          `<span class="env-row-icon"><span class="env-dot state-${escHtml(s.state)}"></span></span>` +
+          `<span class="env-row-text">${escHtml(s.name)}</span>` +
+          `<span class="env-row-meta">${escHtml(tr("env.mcp." + s.state))}</span></div>` +
+          (s.error ? `<div class="env-err">${escHtml(s.error)}</div>` : "")).join("");
+    },
+  });
+  EnvPanel.register({
+    id: "results",
+    title: () => tr("env.results"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      let files = [];
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/produced`);
+        if (res.ok) files = (await res.json()).files || [];
+      } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      ctx.setVisible(files.length > 0);
+      ctx.setValue(String(files.length));
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const f of files) {
+        const row = document.createElement("div");
+        row.className = "env-row" + (f.exists ? "" : " is-gone");
+        row.setAttribute("data-tip", f.exists ? f.path : tr("env.fileGone", { path: f.path }));
+        row.innerHTML = `<span class="env-row-icon">${fileIconSvg(f.name)}</span>` +
+          `<span class="env-row-text">${escHtml(f.name)}</span>`;
+        if (f.exists) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "env-icon-btn";
+          btn.setAttribute("aria-label", tr("menu.download"));
+          btn.setAttribute("data-tip", tr("menu.download"));
+          btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+          btn.addEventListener("click", () => downloadHostFile(f.path, f.name, ctx.sessionId));
+          row.appendChild(btn);
+        }
+        body.appendChild(row);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "changes",
+    title: () => tr("env.changes"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      let st = null;
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/git`);
+        if (res.ok) st = await res.json();
+      } catch (_) { /* keep null */ }
+      if (ctx.stale()) return;
+      const hadBranch = (envGit.get(ctx.sessionId) || {}).branch;
+      envGit.set(ctx.sessionId, st || { repo: false });
+      if (((st && st.branch) || undefined) !== (hadBranch || undefined)) EnvPanel.refresh("environment");
+      const files = st && st.repo ? (st.files || []) : [];
+      ctx.setVisible(files.length > 0);
+      ctx.setValue(files.length ? `<span class="env-add">+${st.added}</span> <span class="env-del">−${st.removed}</span>` : "");
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const f of files) {
+        const row = document.createElement(f.status === "D" ? "div" : "button");
+        row.className = "env-row" + (f.status === "D" ? " is-gone" : " env-row-btn");
+        row.setAttribute("data-tip", f.path);
+        const name = f.path.split("/").pop();
+        row.innerHTML = `<span class="env-row-icon">${fileIconSvg(name)}</span>` +
+          `<span class="env-row-text">${escHtml(f.path)}</span>` +
+          `<span class="env-row-meta"><span class="env-add">+${f.added}</span> <span class="env-del">−${f.removed}</span></span>`;
+        if (f.status !== "D") {
+          row.type = "button";
+          row.addEventListener("click", () => openFileInEditor(f.abs));
+        }
+        body.appendChild(row);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "files",
+    title: () => tr("env.files"),
+    defaultOpen: false,
+    render(body, ctx) {
+      if (!body.contains(els.foldersPanel)) body.appendChild(els.foldersPanel);
+      const show = ctx.open && EnvPanel.isOpen();
+      const was = !foldersCollapsed();
+      applyFoldersCollapse(!show);
+      if (show && !was) loadFolder();
+      const name = (foldersDir || "").split("/").filter(Boolean).pop() || foldersDir || "";
+      ctx.setValue(escHtml(name));
+    },
+  });
+}
+
 // refreshFoldersPanel reloads the listing when the panel is open. Called when the
 // active session changes, after a "!cd" mutates the cwd, or when the agent
 // creates/changes files or folders (see scheduleFoldersRefresh). The reload
 // preserves the currently expanded subtree so an agent-driven refresh doesn't
 // collapse what the user opened.
 async function refreshFoldersPanel() {
-  if (foldersCollapsed()) return;
+  if (foldersCollapsed()) { syncEnvFolder(true); return; }
   const expanded = [];
   for (const li of els.foldersList.querySelectorAll("li.folder-dir.expanded")) {
     if (li.dataset.rel) expanded.push(li.dataset.rel);
@@ -12409,6 +12901,29 @@ async function refreshFoldersPanel() {
     const children = li.querySelector(".folder-children");
     if (row && children) await toggleFolderExpand(li, row, children, rel);
   }
+}
+
+// syncEnvFolder keeps foldersDir — the working folder the Environment card
+// shows — current while the Files card is folded: the listing is not loaded
+// then, so fetch it for its directory. Once per session unless forced (the
+// cwd moved: a "!cd"); a superseded response is dropped.
+let envFolderFor = null, envFolderSeq = 0;
+async function syncEnvFolder(force) {
+  if (!foldersCollapsed()) return;
+  const key = activeSessionId || "";
+  if (!force && envFolderFor === key) return;
+  envFolderFor = key;
+  const mySeq = ++envFolderSeq;
+  try {
+    const res = await apiFetch(folderApiBase(), { cache: "no-store" });
+    if (!res.ok || mySeq !== envFolderSeq) return;
+    const data = await res.json();
+    if (mySeq !== envFolderSeq || !foldersCollapsed()) return;
+    if ((data.dir || "") === foldersDir) return;
+    foldersDir = data.dir || "";
+    EnvPanel.refresh("environment");
+    EnvPanel.refresh("files");
+  } catch (_) {}
 }
 
 // scheduleFoldersRefresh coalesces bursty refresh requests (an agent turn can
@@ -13280,7 +13795,7 @@ document.addEventListener("keydown", (e) => {
 function openFolderDirCtxMenu(ev) {
   if (!foldersDir) return;
   const items = [];
-  items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: foldersDir })]);
+  items.push([tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: foldersDir })]);
   items.push(SEP);
   items.push([tr("menu.newFile"), () => folderNewEntry(foldersDir, "file")]);
   items.push([tr("menu.newFolder"), () => folderNewEntry(foldersDir, "dir")]);
@@ -13323,7 +13838,7 @@ function openFolderUpCtxMenu(ev) {
   const D = { disabled: true };
   const items = [
     [tr("menu.openChatHere"), () => openNewChatDraft({ dir: cur })],
-    [tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: cur })],
+    [tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: cur })],
     [tr("menu.download"), () => folderDownload(abs, name, true)],
     SEP,
     [tr("menu.newFile"), () => folderNewEntry(abs, "file")],
@@ -13394,7 +13909,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
   if (isDir) {
     // Open / download
     items.push([tr("menu.openChatHere"), () => openNewChatDraft({ dir: abs })]);
-    items.push([tr("menu.openTerminalHere"), () => openTerminalTab(null, { cwd: abs })]);
+    items.push([tr("menu.openTerminalHere"), () => openDockTerminal({ cwd: abs })]);
     items.push([tr("menu.download"), () => folderDownload(abs, name, true)]);
     items.push(SEP);
     // Create inside this folder
@@ -13560,6 +14075,7 @@ async function toggleFolderExpand(li, row, children, rel) {
 // navigate into it (loadFolder mutates the cwd). Single-click a file does
 // nothing; double-click opens it in the Monaco editor.
 function renderFolder(data, err) {
+  if (window.EnvPanel) queueMicrotask(() => { EnvPanel.refresh("files"); EnvPanel.refresh("environment"); });
   els.foldersList.innerHTML = "";
   if (!data) {
     els.foldersPath.textContent = "";
@@ -13699,6 +14215,9 @@ async function restoreLayout(rec, liveIds) {
   // session belongs to (no fold-to-General flash for filed sessions).
   if (els.collectionsNew) els.collectionsNew.addEventListener("click", createCollection);
   wireTreeControls();
+  registerEnvCards();
+  wireTermDock();
+  EnvPanel.init();
   await loadCollections();
   await loadSessions();
 

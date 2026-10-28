@@ -1,8 +1,7 @@
-/* Messages: user/pinned prompt, transcript, message rows, assistant markdown, copy/error/images
+/* Messages: user bubble, transcript, message rows, assistant markdown, copy/error/images
    Part of web/css/styles.css — edit this partial, not the @import barrel. */
 
-/* ─── Shared user message style (floating header + inline bubbles) ── */
-#prompt-header,
+/* ─── User message bubble ───────────────────────────────────── */
 .bubble-user {
   background: var(--user-bubble-bg);
   border: none;
@@ -11,57 +10,6 @@
   color: var(--user-bubble-fg);
   font-size: 15px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ─── Pinned user prompt (floating above transcript) ───────── */
-/* Wrapper reserves the same per-edge scrollbar gutter as #transcript so the
-   header's percentage width resolves against the identical content width as
-   the inline .msg-row bubbles — making the floating and inline prompt boxes
-   pixel-identical in width and (being centred) in horizontal position. */
-.prompt-header-wrap {
-  flex-shrink: 0;
-  padding: 0 var(--scroll-gutter);
-}
-#prompt-header {
-  display: none;
-  width: 100%;
-  max-width: min(calc(var(--col-w) - 40px), calc(100% - 40px));
-  /* 18px top = #transcript padding-top (16px) + .msg-row padding-top (2px), so
-     the floating header card sits at the exact Y of the inline bubble it
-     replaces. */
-  margin: 18px auto 0;
-  white-space: normal;
-  position: relative;
-  /* Lift the floating header above the transcript so its downward box-shadow is
-     not occluded. Assistant rows are `position: relative` (z-index auto) to
-     anchor their copy button, so they paint in DOM order with the header (also
-     z-index auto) — and being later in the DOM, their opaque code-block
-     backgrounds would otherwise cover the header's shadow. A small explicit
-     z-index lifts the header above those auto-stacked rows while staying below
-     the composer (3), ask-user slot (4), and tab bar (8/9). */
-  z-index: 1;
-}
-/* The pinned prompt floats above the transcript, so it gets a soft, slightly
-   stronger, downward-biased drop shadow (rather than a hard fade band beneath
-   it). The shadow follows the card's 6px radius, so its bottom corners are
-   rounded for free — it reads as the panel's own cast shadow. The tint is
-   themed via --prompt-fade: dark themes fall back to a near-black shadow; light
-   themes override it with a softer one so it never becomes a white smear. */
-#prompt-header.visible {
-  display: block;
-  box-shadow: 0 4px 12px -2px var(--prompt-fade, rgba(0, 0, 0, 0.55)),
-              0 1px 3px rgba(0, 0, 0, 0.22);
-}
-
-.pinned-prompt-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -75,59 +23,13 @@
      --composer-overlay-h by a ResizeObserver) plus the fade, so the last
      message can always scroll above the editor card. */
   padding: 16px 0 calc(52px + var(--composer-overlay-h, 0px));
-  /* Reserve the scrollbar gutter on BOTH edges so the message column stays
-   * centred within the full chat width — matching the floating #prompt-header
-   * (which sits outside the scroll container and has no scrollbar). Without
-   * this the in-transcript column is offset by half the scrollbar width, so
-   * the pinned prompt and the inline bubble don't line up. Also prevents a
-   * sideways shift when the scrollbar appears/disappears. */
-  scrollbar-gutter: stable both-edges;
+  /* No visible scrollbar (Claude Desktop style): the transcript still scrolls
+     with the wheel, touch and keyboard, and .reply-nav-btn jumps back to the
+     start of a long reply. No bar also means no gutter, so the message column
+     and the composer both centre on the full pane. */
+  scrollbar-width: none;
 }
-/* The chat bar is the one scrollbar users actually drag, so it is wider than
-   the 6px app-wide bar in features/common.css and keeps the browser's own
-   behaviour: a visible track (click above/below the thumb pages the transcript,
-   as in any native scrollbar) and a thumb that never shrinks below a grabbable
-   height on a long conversation. The 14px width is the full hit area; the 2px
-   transparent border + background-clip inset the *painted* thumb to 10px, which
-   keeps a hair of track showing on each side. Keep the width equal to
-   --scroll-gutter (the floating prompt header mirrors it — see
-   .prompt-header-wrap above).
-
-   Ink: the theme's --scroll-thumb is tuned for the incidental 6px bars and is
-   far too faint for a bar meant to be seen and grabbed — on the default light
-   theme it is #d9d6c7 on a #f5f0e8 canvas, near-invisible. Both the thumb and
-   the track are therefore pulled toward --text, which resolves per theme to
-   "more contrast against the canvas": darker on a light palette, lighter on a
-   dark one. Deriving from the tokens (rather than hard-coding a grey) keeps all
-   12 themes correct with no per-theme edits. */
-#transcript {
-  --chat-scroll-thumb: color-mix(in srgb, var(--scroll-thumb) 55%, var(--text));
-  --chat-scroll-thumb-hover: color-mix(in srgb, var(--scroll-thumb-hover) 38%, var(--text));
-  --chat-scroll-track: color-mix(in srgb, var(--scroll-thumb) 45%, transparent);
-}
-#transcript::-webkit-scrollbar { width: var(--scroll-gutter); }
-#transcript::-webkit-scrollbar-track { background: var(--chat-scroll-track); }
-#transcript::-webkit-scrollbar-thumb {
-  background: var(--chat-scroll-thumb);
-  background-clip: content-box;
-  border: 2px solid transparent;
-  border-radius: 7px;
-  min-height: 44px;
-}
-#transcript::-webkit-scrollbar-thumb:hover {
-  background: var(--chat-scroll-thumb-hover);
-  background-clip: content-box;
-  border-width: 1px; /* the thumb thickens under the cursor, like a native bar */
-}
-/* Firefox ignores the ::-webkit-* pseudo-elements and already ships a
-   full-width, click-to-page scrollbar — it only needs the theme colours. Scoped
-   behind @supports because in Chromium `scrollbar-color` would *override* the
-   pseudo-element styling above and lose the width/min-height. */
-@supports not selector(::-webkit-scrollbar) {
-  #transcript {
-    scrollbar-color: var(--chat-scroll-thumb) var(--chat-scroll-track);
-  }
-}
+#transcript::-webkit-scrollbar { display: none; }
 /* When an ask-user / permission card is showing it sits in-flow between the
    transcript and the floating composer, so the transcript no longer needs to
    reserve the composer's clearance (52px + overlay-h) — the card provides the
@@ -147,8 +49,8 @@
   margin: 0 auto 2px;
 }
 
-/* User bubble (history — inline, shares style with #prompt-header): a small
-   quiet bubble, right-aligned in the column, sized to its text. */
+/* User bubble: a small quiet bubble, right-aligned in the column, sized to
+   its text. */
 .msg-row-user { justify-content: flex-end; }
 .bubble-user {
   width: auto;
@@ -201,11 +103,7 @@
   transition: opacity .12s ease, color .12s ease, background .12s ease;
 }
 .msg-row-user:hover .turn-action-btn,
-.msg-row-user:focus-within .turn-action-btn,
-/* Same control on the floating pinned prompt (it hosts the button once the
-   inline row has scrolled off), revealed on hovering the header card. */
-#prompt-header:hover .turn-action-btn,
-#prompt-header:focus-within .turn-action-btn { opacity: 1; }
+.msg-row-user:focus-within .turn-action-btn { opacity: 1; }
 .turn-action-btn:hover {
   color: var(--accent-strong);
   background: var(--bubble-user-bg);
@@ -243,18 +141,18 @@
    pending (not-yet-resolved) refs are dimmed; invalid refs are downgraded to
    plain text nodes in JS so they never reach these rules. */
 .bubble-user-text a.file-ref,
-.pinned-prompt-text a.file-ref {
+.env-question-text a.file-ref {
   color: #7ee787;
   text-decoration: none;
   border-bottom: 1px dotted currentColor;
   cursor: pointer;
 }
 .bubble-user-text a.file-ref:hover,
-.pinned-prompt-text a.file-ref:hover { text-decoration: none; border-bottom-style: solid; }
+.env-question-text a.file-ref:hover { text-decoration: none; border-bottom-style: solid; }
 .bubble-user-text a.file-ref.file-ref-dir,
-.pinned-prompt-text a.file-ref.file-ref-dir { color: #4fc1ff; }
+.env-question-text a.file-ref.file-ref-dir { color: #4fc1ff; }
 .bubble-user-text a.file-ref.file-ref-pending,
-.pinned-prompt-text a.file-ref.file-ref-pending {
+.env-question-text a.file-ref.file-ref-pending {
   color: inherit;
   border-bottom-color: transparent;
   opacity: 0.85;
@@ -499,7 +397,7 @@
   bottom: calc(var(--composer-overlay-h, 0px) + 18px);
   /* Above the floating composer (z-index 3) + its fade so the pill isn't washed
      by the transparent→bg gradient; still below the pane-picker overlay, and
-     hidden on draft/editor/terminal tabs anyway (see updateReplyNav). */
+     hidden on draft/editor tabs anyway (see updateReplyNav). */
   z-index: 4;
   display: flex;
   align-items: center;

@@ -188,6 +188,7 @@ func handleImportSession(d serverDeps) gin.HandlerFunc {
 			Squad:      squad,
 			Collection: collection,
 			Skills:     conv.Skills,
+			Produced:   conv.Produced,
 			Turns:      conv.Turns,
 		}
 		if err := sessions.SaveConversationFile(newMeta.ID, dst); err != nil {

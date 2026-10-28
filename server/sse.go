@@ -277,10 +277,13 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 
 			d.Registry.Touch(meta.ID)
 
-			sink := func(event string, data []byte) { lt.emit(event, data) }
+			// Every frame passes through the tool recorder, which keeps the
+			// turn's tool calls (anchored in the reply text) to persist with it.
+			toolRec := &toolRecorder{}
+			sink := toolRec.wrap(func(event string, data []byte) { lt.emit(event, data) })
 			emitFrame := func(event string, payload any) {
 				if data, err := json.Marshal(payload); err == nil {
-					lt.emit(event, data)
+					sink(event, data)
 				}
 			}
 
@@ -401,6 +404,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				// Per-turn usage so each persisted turn carries its own cost; the
 				// runHop/streamEvents closures read this variable by reference.
 				usageAccum = map[string]sessions.TokenUsage{}
+				toolRec.take() // a fresh tool record per persisted turn
 				tStart := time.Now()
 				_, assistantText, runErr := d.Manager.RunWithRouting(runCtx, meta.UserID, meta.ID, curSquad, turnParts, turnRouterParts, runHop, notify)
 				if runErr != nil {
@@ -423,7 +427,7 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 				// persisted as a blank exchange. Persist BEFORE finish() so a reconnect
 				// that races completion always finds the durable turn.
 				if strings.TrimSpace(assistantText) != "" {
-					if err := sessions.AppendConversationTurnFull(meta.ID, prompt, assistantText, usageAccum, tDur.Milliseconds()); err != nil {
+					if err := sessions.AppendConversationTurnRecord(meta.ID, prompt, assistantText, usageAccum, tDur.Milliseconds(), toolRec.take()); err != nil {
 						log.Printf("server: failed to persist turn: %v", err)
 					}
 					// Announce the completed reply on the persistent /api/events stream
@@ -896,6 +900,9 @@ func streamEvents(
 		// files (Write), not edits/reverts to existing ones (which would be
 		// noisy during coding sessions); both still drive the editor refresh.
 		emit("file_changed", map[string]any{"path": fe.path, "tool": fe.tool})
+		if producedByWrite(fe.tool, resp) {
+			recordProducedFile(ownSession, fe.path)
+		}
 		// Keep any running language server's view of this file current so a
 		// follow-up lsp_definition/diagnostics reflects the edit (no-op unless a
 		// server has the doc open). fe.path is already absolute.

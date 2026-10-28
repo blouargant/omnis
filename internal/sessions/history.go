@@ -112,6 +112,27 @@ type ConversationTurn struct {
 	// survive a server restart / page reload. Omitted (nil) for legacy turns
 	// and turns where no usage was captured.
 	Usage map[string]TokenUsage `json:"usage,omitempty"`
+	// Tools are the turn's tool calls, in order, so the web UI can re-render
+	// its tool-run summary lines between the same paragraphs after a reload.
+	// Omitted for legacy turns and turns that called no tool.
+	Tools []ToolCallRecord `json:"tools,omitempty"`
+}
+
+// ToolCallRecord is one persisted tool call of a turn. Offset is the length,
+// in UTF-16 code units (what a JS String slices by), of the reply text that
+// was visible before the call — calls sharing an offset form one tool run.
+// Args/Result are JSON (capped by the recorder); Children are a delegated
+// sub-agent's own calls.
+type ToolCallRecord struct {
+	CallID     string           `json:"call_id,omitempty"`
+	Name       string           `json:"name"`
+	Agent      string           `json:"agent,omitempty"`
+	Args       json.RawMessage  `json:"args,omitempty"`
+	Result     json.RawMessage  `json:"result,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	DurationMs int64            `json:"duration_ms,omitempty"`
+	Offset     int              `json:"offset"`
+	Children   []ToolCallRecord `json:"children,omitempty"`
 }
 
 // ConversationFile is the on-disk format for a session's history.
@@ -151,8 +172,10 @@ type ConversationFile struct {
 	PendingQuestions []PendingQuestion `json:"pending_questions,omitempty"`
 	// Skills are the skills / soft-skills loaded during the session (see
 	// loaded_skills.go), shown in the web UI's composer skills area.
-	Skills []LoadedSkill      `json:"skills,omitempty"`
-	Turns  []ConversationTurn `json:"turns"`
+	Skills []LoadedSkill `json:"skills,omitempty"`
+	// Produced are the files agents created in this session (Résultats card).
+	Produced []ProducedFile     `json:"produced,omitempty"`
+	Turns    []ConversationTurn `json:"turns"`
 }
 
 // ConversationPath returns the on-disk path for a session's conversation file.
@@ -333,6 +356,15 @@ func AppendConversationTurnWithUsage(sessionID, userText, assistantText string, 
 // duration is omitted on disk; a nil/empty usage map behaves like
 // AppendConversationTurn.
 func AppendConversationTurnFull(sessionID, userText, assistantText string, usage map[string]TokenUsage, durationMs int64) error {
+	return AppendConversationTurnRecord(sessionID, userText, assistantText, usage, durationMs, nil)
+}
+
+// AppendConversationTurnRecord is AppendConversationTurnFull plus the turn's
+// tool calls (nil/empty ⇒ the field is omitted on disk).
+func AppendConversationTurnRecord(sessionID, userText, assistantText string, usage map[string]TokenUsage, durationMs int64, tools []ToolCallRecord) error {
+	if len(tools) == 0 {
+		tools = nil
+	}
 	if len(usage) == 0 {
 		usage = nil // keep the on-disk field omitted when there's nothing to store
 	}
@@ -343,6 +375,7 @@ func AppendConversationTurnFull(sessionID, userText, assistantText string, usage
 			At:            time.Now(),
 			DurationMs:    durationMs,
 			Usage:         usage,
+			Tools:         tools,
 		})
 		f.Harvested = false // new activity resets the harvest flag
 	})
@@ -364,6 +397,7 @@ func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, 
 		}
 		f.Turns = f.Turns[:keep]
 		f.Skills = skillsBefore(f.Skills, keep)
+		f.Produced = producedBefore(f.Produced, keep)
 		f.Harvested = false
 		// Copy out so the caller never aliases the slice we just wrote.
 		kept = append([]ConversationTurn(nil), f.Turns...)
@@ -396,6 +430,7 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 		Squad:      src.Squad,
 		Collection: src.Collection, // fork stays in the source's collection
 		Skills:     skillsBefore(src.Skills, keep),
+		Produced:   producedBefore(src.Produced, keep),
 		Turns:      kept,
 	}
 	if err := SaveConversationFile(dstID, dst); err != nil {

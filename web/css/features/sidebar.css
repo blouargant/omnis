@@ -1,4 +1,4 @@
-/* Sidebar: rail mode, tooltip, new-chat pill, session rows, archived panel, resize handle
+/* Sidebar: rail mode, tooltip, new-chat pill, session rows, resize handle
    Part of web/css/styles.css — edit this partial, not the @import barrel. */
 
 /* ─── Sidebar ──────────────────────────────────────────────── */
@@ -7,7 +7,7 @@
    `title`, so tooltips track the active theme. Rendered by a single
    body-appended `#tip-layer` element (see app.js `initTooltips`) rather
    than a CSS `::after` pseudo, so the tooltip is `position: fixed` and
-   escapes every `overflow`/stacking context — sidebar and archived-list
+   escapes every `overflow`/stacking context — sidebar and session-list
    action buttons no longer clip or mask it. Default placement is *above*
    the target, flipping below only when there is no room near the
    viewport top. `.model-status-dot` keeps its own pseudo tooltip
@@ -92,7 +92,6 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #squad-menu,
 #sidebar.collapsed .sidebar-section-label,
 #sidebar.collapsed #collections-header,
-#sidebar.collapsed #archived-panel,
 #sidebar.collapsed #folders-panel,
 #sidebar.collapsed .account-name,
 #sidebar.collapsed .account-chevron {
@@ -428,12 +427,10 @@ body.resizing #sidebar { transition: none; }
   pointer-events: none;
   transition: opacity 0.1s;
 }
-.collection-sessions li:hover .session-actions,
-#archived-list li:hover .session-actions {
+.collection-sessions li:hover .session-actions {
   opacity: 1;
   pointer-events: auto;
 }
-#archived-list .session-actions { background: linear-gradient(to right, transparent, var(--bg-raised-hover) 12px); }
 .session-action-btn {
   appearance: none;
   -webkit-appearance: none;
@@ -474,78 +471,6 @@ body.resizing #sidebar { transition: none; }
   box-sizing: border-box;
 }
 
-
-/* ─── Archived sessions panel ──────────────────────────────── */
-#archived-panel {
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex-shrink: 0;
-}
-#archived-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 12px;
-  cursor: pointer;
-  user-select: none;
-}
-#archived-header:hover { background: var(--bg-raised); }
-#archived-header .sidebar-section-label { margin: 0; }
-.archived-chevron {
-  flex-shrink: 0;
-  color: var(--text-faint);
-  transition: transform 0.12s ease;
-  position: relative;
-  top: 2.5px;
-}
-#archived-panel:not(.collapsed) .archived-chevron { transform: rotate(90deg); }
-.archived-icon {
-  flex-shrink: 0;
-  color: var(--text-faint);
-  margin-right: -12px;
-  position: relative;
-  top: 2.5px;
-}
-.archived-count { color: var(--text-faint); font-size: 12px; margin-left: auto; }
-#archived-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 6px 6px;
-  overflow-y: auto;
-  max-height: 32vh;
-}
-#archived-panel.collapsed #archived-list { display: none; }
-/* Expanded panel = an inset rounded "card" (border + soft shadow) so its rows
-   don't blend into the sidebar chrome. bg=--composer-bg matches the prompt
-   editor's surface (peach bubble by default, white in ivory/terracotta).
-   Collapsed it stays a plain header row. Mirrors Folders in features/folders.css. */
-#archived-panel:not(.collapsed) {
-  margin: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--composer-bg);
-  box-shadow: var(--shadow-bubble);
-  overflow: hidden;
-}
-/* Archived rows reuse the tree's single-line row look. */
-#archived-list li {
-  position: relative;
-  padding: 5px 8px 5px 10px;
-  border-radius: 7px;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-bottom: 1px;
-  transition: background 0.1s, color 0.1s;
-}
-#archived-list li:hover { background: var(--bg-raised-hover); color: var(--text); }
-#archived-list li.active { background: var(--bg-active); color: var(--text-strong); }
-#archived-list li.session-sentinel {
-  padding: 0; margin: 0; height: 1px; min-height: 0;
-  list-style: none; pointer-events: none; background: none; cursor: default;
-}
 
 #sidebar-footer {
   /* Holds the account button at the very bottom of the sidebar. */

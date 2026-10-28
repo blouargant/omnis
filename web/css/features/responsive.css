@@ -93,6 +93,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    align-self: center; /* the bar stretches its items; this one has a height */
     width: 32px;
     height: 32px;
     margin-left: 4px;
@@ -123,13 +124,6 @@
      follows the row's side padding down to this band's narrower gutter. */
   .msg-actions { right: 12px; }
 
-  /* The wide, grabbable transcript scrollbar (features/messages.css) is a
-     mouse affordance: a touch user flicks the transcript and never drags it,
-     so here it would only spend 2×14px of the width this band just reclaimed.
-     Shrink it back — --scroll-gutter drives both the reserved gutter and the
-     bar's width, so the pinned prompt stays aligned. */
-  :root { --scroll-gutter: 6px; }
-
   /* ─── Touch ergonomics ───────────────────────────────────── */
 
   /* Keep the composer clear of the home indicator / gesture bar. */
@@ -153,10 +147,9 @@
 
   /* The per-session ⋮ / delete actions are revealed by `li:hover`, so on touch
      they were reachable only by the sticky :hover a tap sometimes leaves behind
-     — and that same tap opens the session. Always show them (tree + archived),
+     — and that same tap opens the session. Always show them,
      and likewise a collection header's ＋ / ⋯ (which replace its count on hover). */
-  .collection-sessions li .session-actions,
-  #archived-list li .session-actions { opacity: 1; pointer-events: auto; }
+  .collection-sessions li .session-actions { opacity: 1; pointer-events: auto; }
   .collection-row .group-actions { display: inline-flex; }
   .collection-row .collection-count { display: none; }
 
@@ -166,8 +159,7 @@
      shown here, rows reserve their width instead of overlaying the title. */
   .session-actions { gap: 4px; right: 6px; background: none; padding-left: 0; }
   .session-action-btn { width: 34px; height: 34px; }
-  .collection-sessions li,
-  #archived-list li { padding-top: 7px; padding-bottom: 7px; padding-right: 84px; }
+  .collection-sessions li { padding-top: 7px; padding-bottom: 7px; padding-right: 84px; }
 
   /* Collection headers (＋ / ⋯), the Collections header (sort / new) and the
      sidebar search close button. */

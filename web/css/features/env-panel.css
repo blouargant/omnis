@@ -1,0 +1,227 @@
+/* Environment panel (right column of cards, Claude Desktop style) + its
+   small-screen drawer. Part of web/css/styles.css — edit this partial, not the
+   @import barrel. Cards are built by env-panel.js; the file browser
+   (#folders-panel, features/folders.css) lives inside the Fichiers card. */
+
+:root { --env-panel-w: 300px; }
+
+/* The panel is docked in the rightmost chat pane, under its tab bar
+   (placeEnvPanel in app.js): the tab bar runs across it and it shares the
+   chat's background, so it reads as part of the chat page rather than a
+   column of its own. The pane's other children give up its width on their
+   right — margins also shrink the absolutely positioned ones (the floating
+   composer, the empty-pane picker), which a padding would not. */
+#env-panel {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: var(--env-panel-w);
+  background: var(--bg);
+  padding: 16px 12px 12px;
+  z-index: 5;
+}
+body.env-open #env-panel { display: flex; }
+body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#term-dock) {
+  margin-right: var(--env-panel-w);
+}
+/* The terminal dock (features/terminal.css) takes the same column while shown. */
+body.term-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#term-dock) {
+  margin-right: var(--term-dock-w);
+}
+/* The cards scroll; the dock below them (the Question card) stays pinned to
+   the panel's bottom edge, outside the scroll, so the card coming and going
+   as the chat scrolls never shifts the cards above. */
+.env-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+/* The space between cards is each card's bottom margin, not a flex gap: a
+   gap would stay put while a card fades in or out (env-panel.js setShown
+   animates the margin with the height). The last card's margin also spaces
+   the list from the dock. */
+.env-cards > .env-card { margin-bottom: 10px; flex-shrink: 0; }
+.env-dock { flex: none; }
+
+.env-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.env-card[hidden] { display: none; }
+.env-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.env-card-head:hover { background: var(--bg-raised); }
+.env-card-chevron { color: var(--text-muted); transition: transform 0.15s; }
+.env-card.open .env-card-chevron { transform: rotate(90deg); }
+.env-card-value {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.env-card-body { display: none; padding: 0 14px 12px; font-size: 13px; }
+.env-card.open .env-card-body { display: block; }
+
+/* Generic rows inside a card. */
+.env-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  color: var(--text);
+  min-width: 0;
+}
+.env-row-icon { width: 16px; flex-shrink: 0; color: var(--text-muted); display: inline-flex; justify-content: center; }
+.env-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-row-meta { flex-shrink: 0; color: var(--text-faint); font-size: 12px; }
+.env-empty { color: var(--text-faint); padding: 4px 0; }
+
+/* The file browser inside the Fichiers card: no own header / resize grip /
+   card chrome (the env card provides them). */
+#env-panel #folders-panel { border: none; margin: 0; background: none; box-shadow: none; }
+#env-panel #folders-header,
+#env-panel #folders-resize { display: none; }
+#env-panel #folders-list { max-height: 50vh !important; }
+.env-card[data-card="files"] .env-card-body { padding: 0 4px 8px; }
+
+/* Toggle button in each pane toolbar. */
+.pane-toolbar .pane-env-btn.active { color: var(--text); }
+
+/* Small screens: the panel is a right-hand drawer over the chat (placeEnvPanel
+   keeps it in <body> there, so no pane is its host). */
+#env-scrim { display: none; }
+@media (max-width: 820px) {
+  #env-panel {
+    display: flex !important;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(92vw, 340px);
+    z-index: 60;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+  }
+  body.env-drawer-open #env-panel { transform: none; }
+  body.env-drawer-open #env-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Question card: the current question, styled like the user bubble it stands
+   in for. Clicking it scrolls back to that question; the ↺ control
+   (.turn-action-btn, features/messages.css) shows on hover. */
+.env-question {
+  position: relative;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-fg);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.env-question-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  line-clamp: 8;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.env-question .turn-action-btn { top: 4px; right: 4px; }
+.env-question:hover .turn-action-btn,
+.env-question:focus-within .turn-action-btn { opacity: 1; }
+
+/* Environnement / Contexte / Skills card details. */
+.env-col-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
+.env-folder { cursor: pointer; }
+.env-folder:hover .env-row-text { text-decoration: underline; }
+.env-bar { width: 34px; height: 6px; border-radius: 3px; background: var(--bg-active); position: relative; overflow: hidden; display: inline-block; }
+.env-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+.env-bar.zone-warn i { background: var(--warn-fg); }
+.env-bar.zone-danger i { background: var(--danger-fg); }
+.env-kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; color: var(--text-muted); }
+.env-kv span:nth-child(even) { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.env-sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.env-btn {
+  margin-top: 10px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.env-btn:hover { background: var(--bg-raised); }
+.env-btn:disabled { opacity: .6; cursor: default; }
+.env-row-btn { width: 100%; border: none; background: none; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.env-row-btn:hover { background: var(--bg-raised); }
+.env-skill-body { margin: 2px 0 8px 26px; font-size: 12.5px; max-height: 40vh; overflow: auto; }
+
+/* The context ring and skills dock left the composer for the panel. */
+#composer-wrap .skills-dock,
+#composer #ctx-ring-wrap { display: none !important; }
+
+/* Résultats card. */
+.env-row.is-gone { color: var(--text-faint); }
+.env-row .env-row-icon svg { display: block; }
+.env-icon-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.env-icon-btn:hover { color: var(--text); background: var(--bg-raised); }
+
+/* Modifications card. */
+.env-add { color: #3fa864; font-variant-numeric: tabular-nums; }
+.env-del { color: var(--danger-fg); font-variant-numeric: tabular-nums; }
+
+/* Connecteurs card. */
+.env-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--text-faint); }
+.env-dot.state-connected { background: #3fa864; }
+.env-dot.state-error { background: var(--danger-fg); }
+.env-err { margin: 0 0 6px 26px; color: var(--danger-fg); font-size: 12px; word-break: break-word; }

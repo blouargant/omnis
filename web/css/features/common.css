@@ -18,7 +18,7 @@
   color-scheme: dark;
 
   /* Layout */
-  --sidebar-w: 280px;
+  --sidebar-w: 360px;
   /* Width of the middle session-list column (features/collections.css). */
   --session-pane-w: 280px;
   /* Height of the sidebar footer (Settings button, features/sidebar.css
@@ -26,19 +26,13 @@
   --bottom-bar-h: 60px;
   /* Height of the top chrome bar — the sidebar header (Omnis logo/title) and
      each pane's tab bar are pinned to this so they align edge-to-edge and read
-     as one continuous strip. */
-  --topbar-h: 56px;
+     as one continuous strip. 40px = the sidebar header's 24px toggle + its 8px
+     padding: the tabs fill the bar (the active one is an underline, so no strip
+     of chrome is left above them). */
+  --topbar-h: 40px;
   /* Chat content column width: 90% of the pane, capped at --chat-max-w so the
      column stays a centred, Claude-style reading width on wide windows. */
   --col-w: min(90%, var(--chat-max-w));
-  /* Per-edge scrollbar gutter reserved by #transcript (scrollbar-gutter:
-     both-edges reserves the transcript's ::-webkit-scrollbar width on each
-     side). The floating prompt header lives outside the scroll container, so
-     its wrapper reserves the same gutter to keep the two prompt boxes
-     pixel-aligned. Keep this equal to the #transcript scrollbar width set in
-     features/messages.css — the chat bar is deliberately wider than the 6px
-     app-wide one so it is easy to find and grab. */
-  --scroll-gutter: 14px;
   /* Claude-style reading column: messages, tool blocks, the ask-user card and
      the composer share one centred column of this max width (the phone band in
      responsive.css lifts it to 100%). */

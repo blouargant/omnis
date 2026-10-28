@@ -2349,7 +2349,7 @@ only `has_api_key`. When any provider fails, an orange warning banner
 (`.provider-warn-banner`) is revealed **inside every chat pane** — above the
 composer in an active chat and above the "Start a new chat" button in an
 empty/draft pane (each pane carries both variants; the `.pane-picker` overlay
-decides which is on screen, and `.editing`/`.terminal` tabs hide both). The
+decides which is on screen, and `.editing` (editor) tabs hide both). The
 banners live in the pane template ([web/index.html](web/index.html)), are styled
 in [web/css/features/dialogs.css](web/css/features/dialogs.css), and are toggled
 per-pane by `renderProviderWarning`/`applyProviderWarning` ([web/app.js](web/app.js),
@@ -2936,10 +2936,13 @@ still pinned, watched, retained, and gets ask-user delivered.
 GC ([server/gc.go](server/gc.go) `activeFromRegistry`) treats them as live and
 retains their files — keeping them available for semantic-recall indexing.
 
-Both UI surfaces render archived sessions in a **collapsible panel above the
-Settings button**: the Web UI `#archived-panel` ([web/index.html](web/index.html),
-[web/app.js](web/app.js) `renderSessions`/`archiveSession`/`unarchiveSession`,
-collapse state in `localStorage`), and the TUI `archivedPane` in the left column
+The Web UI lists archived sessions in an **Archived sessions dialog** opened from
+the account menu (see "Account menu"; [web/app.js](web/app.js)
+`openArchivedDialog`/`buildArchivedRow`, styles `.archived-modal*` in
+[web/css/features/dialogs.css](web/css/features/dialogs.css)): its own search box,
+and per row a title that opens the session read-only (closing the dialog),
+**Restore** (`unarchiveSession`, toast on success), Export and Delete. The TUI
+keeps an `archivedPane` in the left column
 ([internal/tui/tui.go](internal/tui/tui.go), toggled with **Ctrl-A**; `a` archives
 the highlighted session, `u` unarchives, `d` deletes). Viewing an archived session
 disables the composer in both surfaces.
@@ -2956,8 +2959,9 @@ The web UI is a **two-column layout** like Claude Desktop
   (`#sidebar-import-btn` → `importSessionPrompt`), the Collections header (label,
   **sort** `#collections-sort`, **new** `#collections-new`), the bulk-select bar
   (`#tree-select-bar`, hidden), the **collection tree** (`ul#collection-tree`, the
-  column's scroll region), the Archived panel, the **Files** browser
-  (`#folders-panel`) and the **account button** (see "Account menu"). `#sidebar`
+  column's scroll region) and the **account button** (see "Account menu"; its
+  menu opens the archived sessions). The **Files** browser moved to the
+  environment panel. `#sidebar`
   keeps its collapse-to-rail + resize machinery.
 - **Right** = `#chat-area` — the chat panes. (Settings open in a modal over it;
   see "Settings dialog".) There is **no middle column any more** — the former
@@ -2988,7 +2992,8 @@ and a non-default squad live in the title's `data-tip`.
   are there".
 - **`loadSessions()` is the FULL refresh** (collections + the loaded prefix of
   every open, already-fetched group — **including one known to be empty**, or a
-  session moved into an empty open group would never show — + Archived). Use it
+  session moved into an empty open group would never show — + the archived
+  view). Use it
   only for broad changes (import, fork, batch actions, archive/unarchive,
   collection create/rename/delete). **Single-session events use the targeted
   refresh** — see "Targeted live refresh" below.
@@ -3010,7 +3015,7 @@ and a non-default squad live in the title's `data-tip`.
   client-side by `effectiveCollection`; groups with a hit get `.search-hit` and
   `#collection-tree.searching` shows them open (others hidden, "Show more"
   hidden, `#tree-search-empty` when nothing matches). The query sits in
-  `sessionSearch`, which the Archived panel's `sessionsQuery` also sends. While
+  `sessionSearch` (the Archived sessions dialog has its own, `archivedSearch`). While
   searching, group loads/reloads are no-ops (the search owns the rows) and header
   clicks do nothing; closing (Escape / ✕) resets every group, restoring the
   stored open states. **Search and select are mutually exclusive**.
@@ -3039,7 +3044,7 @@ one `/api/collections` for the counts — coalesced into one pass per
 group per event (what a `loadSessions()` per event would do) was a burst per
 event, per browser, while turns stream. A session never seen here (created in
 another browser) is looked up first (`fetchSessionMeta`) so its own group — not
-General — is refreshed. The Archived panel reloads only for events that can change
+General — is refreshed. The archived view reloads only for events that can change
 it. During a search the pass re-runs the search instead.
 
 A **collection** is a thematic folder that groups sessions; **each session is in
@@ -3125,11 +3130,11 @@ exactly one** ("move" semantics, flat — no nesting).
 
 ### Session list pagination (server-side windowing)
 
-The tree's groups and the Archived panel are **paginated server-side** — the
-client never holds every session. Each tree group loads **10** rows then **20**
-per "Show more" (see "Session collections"); the Archived panel (every
+The tree's groups and the Archived sessions dialog are **paginated server-side** —
+the client never holds every session. Each tree group loads **10** rows then **20**
+per "Show more" (see "Session collections"); the archived view (every
 collection's archived sessions) loads **50**, then **5** more each time the user
-scrolls to within ~5 rows of its end.
+scrolls the dialog's list to within ~5 rows of its end.
 
 - **Endpoint** = the extended `GET /api/sessions`
   ([server/session_list.go](server/session_list.go) `handleListSessions`). It is
@@ -3154,9 +3159,11 @@ scrolls to within ~5 rows of its end.
 - **Archived windowing** ([web/app.js](web/app.js)): `archivedView`
   (`{loaded, total, loading, exhausted, seq}`), `loadMoreArchived` / `reloadArchivedPrefix`
   / `resetArchivedView`, a **sentinel `<li class="session-sentinel">`** watched by
-  an `IntersectionObserver` (only fires while the panel is expanded), and the
-  query built by `sessionsQuery(true, …)` (no collection filter, the current
-  search `q`, recent order). A **per-view monotonic `seq`** drops stale in-flight
+  an `IntersectionObserver` rooted on the dialog's list (`archivedListEl`, null
+  while the dialog is closed — `loadSessions` still refreshes the first page so
+  the menu count `archivedCount` and the read-only guard stay current), and the
+  query built by `sessionsQuery(true, …)` (no collection filter, the dialog's
+  search `archivedSearch`, recent order). A **per-view monotonic `seq`** drops stale in-flight
   responses.
 - **`sessionMeta`** — a lazily-grown `id → session` map populated on every fetch —
   backs `sessionMetaById`, `sessionCollectionColor`, `groupOf`, the archived
@@ -3759,8 +3766,8 @@ LLM history (a convenience, like the todo widget).
 
 ### Web UI Folders panel
 
-A collapsible **Folders** panel in the sidebar (`#folders-panel`, directly above
-`#archived-panel`, same look/feel — chevron + folder icon + section label,
+A collapsible **Folders** panel (`#folders-panel`, now hosted in the environment
+panel's Files card — chevron + folder icon + section label,
 collapsed by default, collapse state in `localStorage["agent_folders_collapsed"]`)
 browses the **active session's working directory** — or, when **no session is
 active** (a Monaco editor tab or an empty draft is showing), the **global default
@@ -4037,7 +4044,7 @@ mirrored in JS for the web UI.
   the `@` prefix). Web reuses `#slash-menu` with `menuMode === "at"`
   (`atTokenAtCaret`/`renderAtMenu`/`applyAtCompletion`, served by
   `GET /api/complete-file?path=…&session=…` → `{candidates}`).
-- **Rendering**: in the web user bubble and the floating pinned-prompt header
+- **Rendering**: in the web user bubble and the environment panel's Question card
   (`renderUserText`), valid file refs render as `.file-ref` links (distinct
   colour) that open the file in a new tab via `GET /api/file?path=…&session=…`
   (auth'd blob fetch); valid dirs render as `.file-ref-dir` links (dir listing);
@@ -4641,7 +4648,7 @@ Surfaces:
   as a `.steer-chip` on the in-flight question bubble** it steers (not in the
   composer). The chips are driven by `renderUserBubbleSteer` from the
   bubble's `_steerNotes` (+ remembered `dataset.textOriginal`); `dataset.text` is
-  kept as the full `"[Sent while working]"` fold so the pinned header / fork-rewind
+  kept as the full `"[Sent while working]"` fold so the Question card / fork-rewind
   still see the verbatim persisted prompt, while the **base question stays plain
   text and each note is a chip**. On `{queued:false}` it `steerUndoFromQuestion`s
   the append and falls back to `sendMessage`. When the model never reached a note
@@ -5186,10 +5193,13 @@ What omnis itself contributes (milestone 1):
   the checked `POST /api/terminal/token` — so a wrong/missing login is
   refused before any upgrade is attempted even with no token configured
   (empty `OMNIS_SERVER_TOKEN` fallback mode).
-- **`GET /api/whoami`** → `{user_id, identity_enforced}`; the web UI labels
-  the sidebar's account button with the login (`loadAccountIdentity`; "Omnis"
-  for the single-user `web-user`, avatar only in the collapsed rail) and shows
-  it as the account menu's first line — see "Account menu".
+- **`GET /api/whoami`** → `{user_id, identity_enforced}`, plus `display_name` on
+  a single-user install (the `web-user` default names no one, so it reports the
+  OS account running the server: its full name, else its login — `localDisplayName`
+  in [server/identity.go](server/identity.go)); the web UI labels the sidebar's
+  account button with the login, else that name, else "Omnis"
+  (`loadAccountIdentity`; avatar only in the collapsed rail) and shows the login
+  as the account menu's first line — see "Account menu".
 - **Packaging assets** under `packaging/supervisord/` (program template with
   `${VAR}` placeholders — supervisord does not expand `%(ENV_…)s` in `user=`,
   so the entrypoint renders it with `envsubst`) and `packaging/container/`
@@ -6429,8 +6439,8 @@ both are gone.
 
 - **DOM**: `#settings-modal` (backdrop, `z-index: 150` — below `.app-dialog-overlay`
   200, context menus 1000 and `.ui-modal-overlay` 1100, so dialogs opened from a
-  section still sit on top) > `.settings-modal-dialog` (`min(1200px, 94vw) ×
-  min(860px, 90vh)`; full-screen below 820px, with the nav as a horizontal
+  section still sit on top) > `.settings-modal-dialog` (`min(1560px, 96vw) ×
+  min(960px, 92vh)`; full-screen below 820px, with the nav as a horizontal
   scroller) > `.settings-modal-head` (title + ✕) + `.settings-modal-main` >
   `nav.settings-modal-nav` + the existing `#settings-panel`.
 - **Nav**: `MENU_GROUPS` orders the sections into Preferences (Appearance), Agents
@@ -6469,17 +6479,83 @@ The sidebar footer is **one account button** (`#account-btn`: avatar initial,
 label, chevron) — it replaced the Settings / Appearance / Documentation buttons and
 the `#sidebar-user` login badge ([web/app.js](web/app.js) "Account button + menu",
 styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)).
-`loadAccountIdentity` labels it with the login from `GET /api/whoami` (not shown for
-the single-user `web-user` outside cookie mode ⇒ "Omnis"); the collapsed rail shows
-the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
+`loadAccountIdentity` labels it with the login from `GET /api/whoami`; for the
+single-user `web-user` outside cookie mode it shows `display_name` instead — the
+name of the OS account running the server (e.g. "Bertrand") — and "Omnis" only
+when that is unknown. The collapsed rail shows the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
 (reusing the `.folder-ctx-item` / `.folder-ctx-sep` look), anchored above the
-button: the login (when shown), **Settings** (`Ctrl+,` / `⌘,` hint), **Appearance**,
+button: the login (when shown), **Archived sessions** (with the archived count;
+opens the Archived sessions dialog — it replaced the sidebar's Archived panel),
+**Settings** (`Ctrl+,` / `⌘,` hint), **Appearance**,
 **Language**, **Documentation**, then the running version (`account.version`, from
 the cached `updateStatus`; fetched on demand if the menu opens before the boot
 check landed; omitted for `dev`) and, when an update is available, **Update to
 vX** → `openUpdateDialog()` (the header Update button stays). It closes on outside
 click, Escape, scroll, resize and item click — an item also closes the phone
 drawer (`closeNav`).
+
+### Web UI environment panel + quiet tool runs
+
+Spec [docs/superpowers/specs/2026-10-27-environment-panel-design.md](docs/superpowers/specs/2026-10-27-environment-panel-design.md).
+A right-hand `#env-panel` (built by [web/env-panel.js](web/env-panel.js), cards
+registered in `registerEnvCards` in [web/app.js](web/app.js), styles in
+[web/css/features/env-panel.css](web/css/features/env-panel.css)) follows the
+focused pane (`EnvPanel.setSession` from `setFocusedPanel`); each async card
+render must stop when `ctx.stale()`. **It is docked inside the rightmost chat
+pane, under that pane's tab bar** (`placeEnvPanel`, called by `rebuildChatDOM`
+and on the 820px breakpoint): absolutely positioned below `--topbar-h`, same
+`--bg` as the chat and no border, while every other child of the host pane
+(`.chat-pane.env-host`) gets `margin-right: var(--env-panel-w)` — a margin, not
+a padding, so the absolutely positioned composer and picker shrink too. The
+host pane's minimum width includes the panel (`paneMinW`, honoured by
+`layoutWidths` and the divider drag; `envpanel:toggle` re-lays out). It stays
+in the last pane when focus moves, and the pane's focus listeners ignore events
+from inside it, so using it never changes the focused session. **GOTCHA:**
+`rebuildChatDOM` detaches every pane, so closing the host pane takes the panel
+out of the document — it is held by reference (`envPanelNode`), never looked up
+by id, until `placeEnvPanel` docks it again. Below 820px it lives in `<body>`
+as the fixed right drawer (only the focused pane is shown there). The chat
+transcript shows **no scrollbar** (`scrollbar-width: none`; the old 14px
+`--scroll-gutter` token is gone). **The Question card replaced the
+floating pinned-prompt header** (`#prompt-header`, removed with its CSS and the
+`--prompt-fade` theme token): `updatePinnedForScroll` records per pane
+(`panel._pinned` = `{text, turn, bubble}`) the question whose reply is at the
+top of the transcript — pinned once its bubble has scrolled fully above the
+top, released once the next question comes within `PIN_RELEASE_PX` of it — and
+refreshes the card only when the question changes and the pane is focused. The
+card is hidden while nothing is pinned; a click scrolls back to the question
+(`scrollToPinnedQuestion`), ↺ opens its copy/fork/rewind menu. With the panel
+closed the current question is shown nowhere. It is **docked at the panel's
+bottom** (card option `dock: "bottom"` in env-panel.js → the `.env-dock`
+container): the panel is a flex column whose `.env-cards` list scrolls on its
+own, so the card coming and going as the chat scrolls never shifts the cards
+above it — at the top of the list it made every card jump. **Cards fade in and
+out** (`setShown` in env-panel.js, ~180 ms Web Animations: opacity + height +
+the bottom margin that spaces the cards — a flex `gap` would stay put — played
+back if the state flips mid-way; instant with `prefers-reduced-motion` or the
+panel not displayed). A card starts hidden and is shown unless its render says
+otherwise; an async render keeps the card as it is until it answers, so a card
+that ends up hidden is never flashed in. Cards: Environnement (squad, folder, git
+branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
+Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
+`Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
+(`GET …/produced`; files a `Write` CREATED — `WriteOut.Created`, recorded in
+`ConversationFile.Produced`, `produced_changed` event), Modifications (`GET …/git`,
+[server/git_status.go](server/git_status.go), 5 s timeout, untracked files
+included) and Fichiers (the old Files browser, `#folders-panel` re-parented; its
+`collapsed` class follows the card; **folded by default**, `defaultOpen: false`).
+While it is folded the listing is not loaded, so `syncEnvFolder` fetches the
+folder endpoint just for its `dir` (once per session, forced by
+`refreshFoldersPanel` after a `!cd`) to keep `foldersDir` — the Environment
+card's folder row and the Files card's value — current. The composer ring and skills dock are hidden
+by CSS. **Tool runs**: `.tool-group` is always one grey summary line
+(`toolKind`/`toolSummary`, [web/tool-summary.js](web/tool-summary.js)) unfolding
+into a card of titled rows (`toolRowTitle`); a delegation is detected when a
+nested call arrives. **Persisted**: `toolRecorder` ([server/tool_record.go](server/tool_record.go))
+wraps the interactive turn's SSE sink and stores `ConversationTurn.Tools`
+(offset = UTF-16 length of visible reply text before the call; caps 8 KiB /
+300 calls); `renderHistoryTurn` replays them. Injected turns (mailbox, background,
+scheduled) do not record tools yet.
 
 ### Web UI look (Claude Desktop style)
 
@@ -6502,7 +6578,9 @@ implementation and need explicit `[hidden] { display: none }` rules (their own
 `display` beats the UA rule). The sidebar's **New chat** is a plain row with the
 squad chevron revealed on hover (always on touch); the focused session row is a
 neutral fill + a dot in its collection colour; the active pane tab is underlined in
-the collection colour. **`make web-test`** runs the node tests in `web/tests/`
+the collection colour. The top bar (`--topbar-h`, **40px** — the sidebar header's
+24px toggle + padding) has no strip of chrome above the tabs any more: they fill
+it, like the `+` button. The settings dialog's section header keeps its own 56px. **`make web-test`** runs the node tests in `web/tests/`
 (tokens have `:root` defaults, both terracotta themes define the palette, the
 composer state machine).
 
@@ -6528,6 +6606,11 @@ centre after horizontal clamping.
   its `data-tip` in place but don't expect the JS layer to render it.
 - The layer reads `data-tip` via `textContent` (no HTML injection); HTML-string
   call sites still `escHtml()` the value as usual.
+- **Delayed tips** (`data-tip-delay="<ms>"`): the tooltip appears only once the
+  pointer has rested on the element that long, so merely crossing it raises
+  nothing; leaving it, scrolling or clicking cancels the wait. Used on the
+  environment panel's skill rows (700 ms), whose long descriptions would
+  otherwise flash up as the pointer passes on its way to another card.
 - **Long tips wrap**: the layer is `white-space: normal` with `max-width: 18rem`,
   so short tips stay on one line (the box shrink-wraps) while a long description
   soft-wraps onto multiple lines instead of stretching into one unreadable
@@ -6732,8 +6815,8 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
 
 - **The drawer** — `#sidebar` becomes `position: fixed`, full height (`100dvh`),
   `width: var(--m-drawer-w)` and `translateX(-100%)`. `body.nav-open` slides it in;
-  `#nav-scrim` is the backdrop. The whole sidebar (tree, Archived, Files, account
-  button) stays reachable — unlike the icon rail, which hides Archived/Files.
+  `#nav-scrim` is the backdrop. The whole sidebar (tree, account button) stays
+  reachable.
 - **`!important` is load-bearing.** The theme sheets are linked **after** `styles.css`
   and carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
   z-index: 1 }` (it anchors their drop-shadow onto the chat). Without `!important` on
@@ -6767,7 +6850,7 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
   `.copy-msg-group`, the dimmed `.pane-toolbar`, the **per-session-row ⋮ / delete
   actions** (`.session-actions`, revealed by `li:hover`, so on touch they were
   reachable only via the sticky `:hover` a tap sometimes leaves behind, and *that same
-  tap opens the session*) for the tree and `#archived-list`, and a **collection
+  tap opens the session*) for the tree, and a **collection
   header's ＋ / ⋯** (`.group-actions`, which replace its count on hover). Bulk-select
   still hides the row actions (`#sidebar.selecting … { display: none }` out-specifies
   the reveal). (2) **Enlarges the touch targets** the mouse-sized chrome makes too
@@ -6878,7 +6961,7 @@ helpers `focusedPanel()`/`fp()`, `setFocusedPanel`, `activateTab`/`closeTab`/
 tabs whose container is detached). `activeSessionId` is a **compatibility shim** =
 the focused pane's active tab, so global-action sites (sidebar, modals, ctx
 browser) keep working. Display-write functions (`applySessionUI`,
-`renderCtxRing/Popup`, `setStatus`, `scrollBottom`, pinned-prompt,
+`renderCtxRing/Popup`, `setStatus`, `scrollBottom`, the pinned question,
 `renderAttachmentsUI`, `renderAskUserWidget`, streaming gates) take/loop a `panel`
 via `panelsForSession` so **background panes update too**; `applySessionUI` also
 re-renders tabs (busy dot) via `panelsWithTab`. Listeners are wired **per-pane** in
@@ -6993,11 +7076,26 @@ sessions, live in at most one pane).
 
 ### Web UI interactive terminal (xterm.js + PTY)
 
-A **fourth** pane-tab kind — a terminal tab keyed `"term#<n>"` — runs a **real
-interactive shell** (vim/top/ssh all work, full ANSI/colour) next to chat,
-draft, and editor tabs in the same `.pane-tabs` strip. Open one from the pane
-toolbar's terminal button (`openTerminalTab`) or from the Folders panel context
-menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
+A **terminal dock** in the chat view (Claude Desktop style) runs **real
+interactive shells** (vim/top/ssh all work, full ANSI/colour). It replaced the
+former terminal *tabs* (`"term#<n>"` pane-tab kind, removed). **Each chat session
+owns its terminals**: `#term-dock` is the chat's right column — docked in the
+rightmost pane with the environment panel by `placeEnvPanel`, and **replacing it
+while shown** (`body.term-shown` hides `#env-panel`; the host pane's other
+children make room through the same `margin-right` rule, sized `--term-dock-w`,
+default 480px, dragged from its left edge and kept per browser in
+`localStorage["agent_term_dock_w"]`). It shows the focused session's terminals
+(`termCtxs`: session id → `{keys, active, open, seq}`, `""` for drafts/editor
+tabs); switching to a session with none, or with its dock hidden, gives the
+column back to the environment panel, while another session's shells keep
+running. The pane toolbar's terminal button toggles it (`toggleTermDock`, opening
+the first terminal in the session's folder); the dock's **+** adds one
+("Terminal 2", …); its tabs switch and close them (the last closed hides the
+dock); its ✕ hides it; the environment button while it is shown switches back to
+the panel. Files → **"Open Terminal here"** opens one in that folder
+(`openDockTerminal({cwd})`). A session's terminals are torn down when it is
+deleted (`forgetSession`) or archived (`disposeSessionTerminals`). Below 820px
+the dock is a full-screen sheet over the chat.
 
 - **Backend** ([server/terminal.go](server/terminal.go) + platform files,
   registered as `GET /api/terminal/ws` in [server/server.go](server/server.go)):
@@ -7028,36 +7126,36 @@ menu's **"Open Terminal here"** (rooted at the right-clicked dir / path header).
   control (see cwd sync below). One PTY→WS goroutine + one cwd-watcher goroutine,
   both serialised on a write mutex; the WS read loop pumps stdin + resize. Shell
   exit closes the PTY which ends all three.
-- **cwd sync with the Folders panel**: a watcher goroutine polls `pty.Cwd()`
-  (every 400 ms, Linux `/proc/<pid>/cwd`) and emits a `{"cwd":…}` text frame on
-  change (and once on connect). Client `onTerminalCwd` ([web/app.js](web/app.js))
-  follows it: while the terminal is the **focused pane's active tab** and the
-  Folders panel is open, it `loadFolder(dir)`s — and because a terminal tab has no
-  active chat session, that targets the **global** `/api/folder` cwd (the same dir
-  the panel shows with no session), so the panel + the global "no session"
-  environment track the shell's `cd`. `mountTerminal` re-aligns the panel to a
-  terminal's last-known cwd on (re)activation. Best-effort: where `Cwd()` is
-  unsupported (non-Linux) the watcher is a no-op and the panel simply doesn't
-  auto-sync. (One-directional: navigating the Folders panel does **not** move the
-  live shell.)
+- **Shell cwd**: a watcher goroutine polls `pty.Cwd()` (every 400 ms, Linux
+  `/proc/<pid>/cwd`) and emits a `{"cwd":…}` text frame on change (and once on
+  connect); the client only records it on the terminal (`entry.cwd`). A `cd` in a
+  session's terminal does **not** move the session's working folder (the agent's
+  and the Files card's) — the former terminal tabs, which had no session, made
+  the global Files panel follow it.
 - **Trust model**: like the `!` shell-escape and the Monaco save route, the
   terminal **bypasses the agent permission layer by design** and, unlike the Bash
   tool, has **no safety floor** — it is an explicit, token-gated, fully
   interactive host shell. Output is never added to conversation/LLM history.
-- **Client** ([web/app.js](web/app.js) "Terminal tabs" section): **xterm.js** +
+- **Client** ([web/app.js](web/app.js) "Terminal dock" section, styles
+  [web/css/features/terminal.css](web/css/features/terminal.css)): **xterm.js** +
   the fit addon are **vendored offline** under `web/xterm/` (served at
   `assets/xterm/…`), re-vendored with `make vendor-xterm`; `ensureXterm()` lazily
   injects the scripts + stylesheet on first open (mirroring `ensureMonaco`). Each
-  terminal tab owns its own `Terminal` + `FitAddon` + `WebSocket` + detached host
-  element in `termTabs` (key → entry), kept alive while backgrounded (output keeps
-  streaming into the scrollback). `mountTerminal` moves the host into the pane's
-  `.pane-terminal-host` and `fit()`s; `refitVisibleTerminals` re-fits + pushes the
-  new size on pane-divider drag and window resize. The pane gets the `.terminal`
-  class while a terminal tab is active (CSS hides the chat/editor surfaces, shows
-  the xterm host); theme follows the app theme via the existing `data-theme`
-  `MutationObserver` (`xtermTheme`).
-- **Ephemeral**: terminal tabs are **stripped from the persisted layout**
-  (`saveLayout`) — a server PTY can't survive a page reload — and torn down
-  (`disposeTerminal`: close WS + dispose term) by `closeTab`/`closePanel`. They
-  carry no push subscription, so the session-only `releaseSessionIfUnviewed` is
-  skipped, like editor tabs.
+  terminal owns its own `Terminal` + `FitAddon` + `WebSocket` + detached host
+  element in `termTabs` (key → entry), kept alive while not shown (output keeps
+  streaming into the scrollback). `syncTermDock` (called from `setFocusedPanel`
+  and after every dock change) draws the dock's tabs and `mountDockTerminal` moves
+  the active host into `.term-dock-host` and `fit()`s; `refitVisibleTerminals`
+  re-fits + pushes the new size on pane-divider drag, dock drag and window resize.
+  Using the dock never changes the focused pane (its focus listeners ignore
+  `#term-dock`, like `#env-panel`).
+- **Theme**: `xtermTheme` takes the chat's `--bg` / `--text` / `--accent` (resolved
+  to hex through a probe element, `cssHex`) and, on a light theme, a light ANSI
+  palette (`XTERM_LIGHT_ANSI`, VS Code's — the xterm.js defaults are for dark
+  backgrounds). Light vs dark comes from the theme's declared `color-scheme`
+  (`themeIsLight`), **not its name**: the old `includes("light")` test made the
+  default light theme (`terracotta`) — and ivory, subtle-grey — a black terminal
+  and a dark Monaco editor (`monacoTheme` uses `themeIsLight` too). The
+  `data-theme` `MutationObserver` re-themes open terminals and Monaco.
+- **Ephemeral**: a server PTY can't survive a page reload, so terminals are never
+  persisted; `disposeTerminal` (close WS + dispose term) ends one.
