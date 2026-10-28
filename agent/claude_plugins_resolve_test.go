@@ -213,6 +213,15 @@ func TestResolvePluginNameCollisionKeepsOmnisAgent(t *testing.T) {
 	if !strings.Contains(buf.String(), "demo_worker") {
 		t.Errorf("the skip must be logged, got %q", buf.String())
 	}
+	if IsPluginAgent("demo_worker") || PluginAgentType("demo_worker") != "" {
+		t.Error("a collided agent must not be reported as a plugin agent")
+	}
+	if _, ok := pluginAgentBase("demo_worker"); ok {
+		t.Error("a collided agent must have no plugin base")
+	}
+	if got := ReadAgentInstruction("demo_worker"); strings.Contains(got, "Running inside omnis") {
+		t.Errorf("the plugin instruction must not apply to omnis's agent: %q", got)
+	}
 }
 
 func TestResolveSetsPluginSkillDirsAndHookLayers(t *testing.T) {
@@ -281,5 +290,67 @@ func TestPluginAgentBaseIsJSONMarshalable(t *testing.T) {
 	}
 	if _, ok := pluginAgentBase("nope"); ok {
 		t.Error("an unknown agent has no base")
+	}
+}
+
+func TestResolveDisabledPluginMemberDropsFromSquad(t *testing.T) {
+	_, home := pluginResolveEnv(t, "", "")
+	writeFile(t, filepath.Join(home, "registry", "agents", "demo_reader", "agent.json"), `{"enabled":false}`)
+	s, err := ResolveRuntimeSettings(Options{})
+	if err != nil {
+		t.Fatalf("disabling a plugin agent must not fail the config: %v", err)
+	}
+	for _, sq := range s.Squads {
+		if sq.Name == "demo" {
+			if !reflect.DeepEqual(sq.Members, []string{"demo_worker"}) {
+				t.Errorf("members = %v, want [demo_worker]", sq.Members)
+			}
+			return
+		}
+	}
+	t.Fatal("demo squad missing")
+}
+
+func TestResolveDisabledOrDemotedPluginLeaderDropsSquad(t *testing.T) {
+	for _, overlay := range []string{`{"enabled":false}`, `{"leader":false}`} {
+		_, home := pluginResolveEnv(t, "", "")
+		writeFile(t, filepath.Join(home, "registry", "agents", "demo_lead", "agent.json"), overlay)
+		s, err := ResolveRuntimeSettings(Options{})
+		if err != nil {
+			t.Fatalf("overlay %s must not fail the config: %v", overlay, err)
+		}
+		for _, sq := range s.Squads {
+			if sq.Name == "demo" {
+				t.Errorf("overlay %s: the squad must be dropped, got %+v", overlay, sq)
+			}
+		}
+		for _, p := range ClaudePlugins() {
+			if p.Squad != "" {
+				t.Errorf("overlay %s: the catalogue must not list the dropped squad", overlay)
+			}
+		}
+	}
+}
+
+func TestFailedResolutionKeepsPublishedPluginState(t *testing.T) {
+	sys, _ := pluginResolveEnv(t, "", "")
+	if _, err := ResolveRuntimeSettings(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	before, dirsBefore := ClaudePlugins(), paths.SkillsAllSearchDirs()
+	if len(before) != 1 || len(dirsBefore) == 0 {
+		t.Fatalf("setup: %+v %v", before, dirsBefore)
+	}
+	writeFile(t, filepath.Join(sys, "agents.json"),
+		`{"agents": ["leader"], "router_squad": "none", "disabled_plugins": ["demo"],
+		  "squads": [{"name": "bad", "leader": "leader", "members": ["ghost"]}]}`)
+	if _, err := ResolveRuntimeSettings(Options{}); err == nil {
+		t.Fatal("the resolution was expected to fail")
+	}
+	if got := ClaudePlugins(); !reflect.DeepEqual(got, before) {
+		t.Errorf("ClaudePlugins() changed after a failed resolution: %+v", got)
+	}
+	if got := paths.SkillsAllSearchDirs(); !reflect.DeepEqual(got, dirsBefore) {
+		t.Errorf("SkillsAllSearchDirs() changed after a failed resolution: %v", got)
 	}
 }

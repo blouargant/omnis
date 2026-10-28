@@ -96,7 +96,7 @@ func readRawInstruction(name string) (string, bool) {
 		}
 	}
 	if e, ok := pluginAgentBase(name); ok && strings.TrimSpace(e.Instruction) != "" {
-		return e.Instruction, false
+		return e.Instruction, true
 	}
 	for _, dir := range dirs {
 		if b, err := os.ReadFile(filepath.Join(dir, "default.md")); err == nil {

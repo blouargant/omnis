@@ -1055,6 +1055,8 @@ type pluginResolution struct {
 	owner       map[string]string // agent name → plugin
 	typ         map[string]string // agent name → "plugin:agent"
 	squadPlugin map[string]string // squad name → plugin
+	catalog     *pluginCatalog    // published with skillDirs at the end of a successful resolution
+	skillDirs   []string
 }
 
 // loadClaudePlugins discovers the Claude Code plugins, replaces the plugin
@@ -1082,7 +1084,6 @@ func loadClaudePlugins(out *RuntimeSettings, cfg runtimeConfigFile, modelsCfg mo
 		modelMap[strings.ToLower(strings.TrimSpace(k))] = strings.ToLower(strings.TrimSpace(v))
 	}
 	cat := newPluginCatalog(plugins, func(n string) bool { return !disabled[n] }, modelMap, out.Models)
-	claudeCatalog.Store(cat)
 
 	taken := map[string]bool{}
 	for _, a := range out.Agents {
@@ -1090,7 +1091,20 @@ func loadClaudePlugins(out *RuntimeSettings, cfg runtimeConfigFile, modelsCfg mo
 	}
 	registryDirs := paths.AgentsRegistrySearchDirs()
 	var skillDirs []string
-	for _, cp := range cat.plugins {
+	for i := range cat.plugins {
+		cp := &cat.plugins[i]
+		// Decide the collisions first: an agent omnis already defines is not a
+		// plugin agent at all, so it leaves the catalogue too.
+		kept := cp.agents[:0:0]
+		for _, pa := range cp.agents {
+			if taken[pa.Entry.Name] {
+				log.Printf("claude plugin %q: agent %q is already defined in omnis; the plugin's agent is skipped", cp.plugin.Name, pa.Entry.Name)
+				delete(cat.byAgent, pa.Entry.Name)
+				continue
+			}
+			kept = append(kept, pa)
+		}
+		cp.agents = kept
 		if !cp.enabled {
 			continue
 		}
@@ -1100,40 +1114,57 @@ func loadClaudePlugins(out *RuntimeSettings, cfg runtimeConfigFile, modelsCfg mo
 		if cp.plugin.HooksPath != "" {
 			out.PluginHookLayers = append(out.PluginHookLayers, hooks.PluginLayer{Name: cp.plugin.Name, Root: cp.plugin.Dir, Path: cp.plugin.HooksPath})
 		}
-		produced := map[string]bool{}
+		merged := map[string]AgentEntry{}
 		for _, pa := range cp.agents {
 			name := pa.Entry.Name
-			if taken[name] {
-				log.Printf("claude plugin %q: agent %q is already defined in omnis; the plugin's agent is skipped", cp.plugin.Name, name)
-				continue
-			}
 			e, err := loadPluginAgentEntry(pa.Entry, registryDirs)
 			if err != nil {
 				log.Printf("claude plugin %q: agent %q skipped: %v", cp.plugin.Name, name, err)
 				continue
 			}
-			taken[name], produced[name] = true, true
+			taken[name] = true
+			merged[name] = e
 			res.agents = append(res.agents, e)
 			res.owner[name], res.typ[name] = cp.plugin.Name, pa.Type
 		}
 		if sq := cp.squad; sq != nil {
-			if !produced[sq.Leader] {
-				log.Printf("claude plugin %q: its leader %q was skipped, so the squad %q is not offered", cp.plugin.Name, sq.Leader, sq.Name)
-				continue
+			cp.squad = pluginSquadFromMerged(cp.plugin.Name, sq, merged)
+			if cp.squad != nil {
+				res.squads = append(res.squads, *cp.squad)
+				res.squadPlugin[strings.ToLower(cp.squad.Name)] = cp.plugin.Name
 			}
-			c := *sq
-			c.Members = nil
-			for _, m := range sq.Members {
-				if produced[m] {
-					c.Members = append(c.Members, m)
-				}
-			}
-			res.squads = append(res.squads, c)
-			res.squadPlugin[strings.ToLower(c.Name)] = cp.plugin.Name
 		}
 	}
-	paths.SetPluginSkillDirs(skillDirs)
+	res.catalog, res.skillDirs = cat, skillDirs
 	return res
+}
+
+// pluginSquadFromMerged builds the plugin's squad from the MERGED agent entries
+// (user overlays applied): a disabled member is dropped, and the squad itself is
+// dropped — with a log line — when its leader is missing, disabled or no longer
+// marked leader: true, since resolving such a squad would fail the whole config.
+func pluginSquadFromMerged(plugin string, sq *SquadEntry, merged map[string]AgentEntry) *SquadEntry {
+	on := func(e AgentEntry) bool { return e.Enabled == nil || *e.Enabled }
+	lead, ok := merged[sq.Leader]
+	switch {
+	case !ok:
+		log.Printf("claude plugin %q: its leader %q was skipped, so the squad %q is not offered", plugin, sq.Leader, sq.Name)
+		return nil
+	case !on(lead):
+		log.Printf("claude plugin %q: its leader %q is disabled, so the squad %q is not offered", plugin, sq.Leader, sq.Name)
+		return nil
+	case lead.Leader == nil || !*lead.Leader:
+		log.Printf("claude plugin %q: %q is no longer marked leader: true, so the squad %q is not offered", plugin, sq.Leader, sq.Name)
+		return nil
+	}
+	c := *sq
+	c.Members = nil
+	for _, m := range sq.Members {
+		if e, ok := merged[m]; ok && on(e) {
+			c.Members = append(c.Members, m)
+		}
+	}
+	return &c
 }
 
 // mergePluginSquads adds the plugin squads to the authored ones. A plugin squad
@@ -1450,6 +1481,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 
 	out.ConfigPath = filepath.Clean(out.ConfigPath)
 	out.ModelsConfigPath = filepath.Clean(out.ModelsConfigPath)
+	publishClaudePlugins(plugins.catalog, plugins.skillDirs)
 	return out, nil
 }
 

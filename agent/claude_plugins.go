@@ -7,10 +7,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/blouargant/omnis/internal/claudeplugins"
 	"github.com/blouargant/omnis/internal/configedit"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // Claude Code plugins, converted. A plugin discovered by internal/claudeplugins
@@ -315,6 +317,20 @@ type pluginCatalog struct {
 // accessors below (the Settings surfaces, the instruction readers, the
 // configedit base provider), so it is an atomic pointer, never mutated.
 var claudeCatalog atomic.Pointer[pluginCatalog]
+
+// claudePublishMu makes the catalogue and the skill search dirs one publish.
+var claudePublishMu sync.Mutex
+
+// publishClaudePlugins replaces the process-wide plugin state — the catalogue
+// and the plugin skill dirs — in one step. ResolveRuntimeSettings calls it only
+// at the end of a successful resolution, so a failing one leaves the previous
+// state untouched.
+func publishClaudePlugins(cat *pluginCatalog, skillDirs []string) {
+	claudePublishMu.Lock()
+	defer claudePublishMu.Unlock()
+	claudeCatalog.Store(cat)
+	paths.SetPluginSkillDirs(skillDirs)
+}
 
 func init() {
 	configedit.SetAgentBaseProvider(func(name string) map[string]any {
