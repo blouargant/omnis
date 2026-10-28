@@ -2030,23 +2030,41 @@ const BASE_PATH = window.BASE_PATH || "";
           </span>
         </label>`;
       const input = row.querySelector("input");
+      input.setAttribute("aria-label", tr("set.plugins.toggleAria", { name: p.name }));
       input.addEventListener("change", async () => {
+        const wanted = input.checked;
+        // The refresh below reloads the agent section from the server, which
+        // would silently drop unsaved edits — ask first.
+        if (state.parsed.agent && state.parsed.agent.dirty) {
+          if (!await appConfirm(tr("set.plugins.discardConfirm"))) { input.checked = !wanted; return; }
+        }
         input.disabled = true;
+        let j;
         try {
           const r = await fetch(BASE_PATH + `/api/plugins/${encodeURIComponent(p.name)}`, {
             method: "PUT",
             headers: { ...authHeaders(), "Content-Type": "application/json" },
-            body: JSON.stringify({ enabled: input.checked }),
+            body: JSON.stringify({ enabled: wanted }),
           });
           if (!r.ok) throw new Error(await errText(r));
-          const j = await r.json().catch(() => ({}));
-          await loadParsed("agent");
-          if (j.reloaded === false) showBanner();
-          if (state.activeFile === "agent") renderAgentForm();
+          j = await r.json().catch(() => ({}));
         } catch (e) {
-          input.checked = !input.checked;
+          input.checked = !wanted;
           input.disabled = false;
           setStatus(tr("set.plugins.toggleFailed", { error: e.message }), "error");
+          return;
+        }
+        // The change is persisted from here on: never revert the checkbox.
+        try {
+          await loadParsed("agent");
+          if (state.activeFile === "agent") renderAgentForm();
+        } catch (e) {
+          input.disabled = false;
+          setStatus(tr("set.plugins.refreshFailed", { error: e.message }), "error");
+        }
+        if (j.reloaded === false) {
+          showBanner();
+          if (j.reload_error) setStatus(tr("set.plugins.reloadError", { error: j.reload_error }), "error");
         }
       });
       box.appendChild(row);
@@ -4006,7 +4024,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // Custom agents first with no header (the panel title "ACTIVE FLEET"
     // already labels them), then the "BUILT-IN AGENTS" divider + built-ins.
     renderAgentGroup(customAgents, "");
-    for (const [pname, list] of pluginGroups) renderAgentGroup(list, escHtml(tr("set.plugins.groupLabel", { name: pname })));
+    for (const [pname, list] of [...pluginGroups].sort((x, y) => x[0].localeCompare(y[0], undefined, { sensitivity: "base" }))) renderAgentGroup(list, escHtml(tr("set.plugins.groupLabel", { name: pname })));
     renderAgentGroup(builtinAgents, tr("set.fleet.builtinAgentsLabel"));
 
     // Detail panel

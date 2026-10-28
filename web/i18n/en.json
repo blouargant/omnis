@@ -1047,5 +1047,9 @@
   "set.plugins.disabled": "Disabled",
   "set.plugins.agentsCount.one": "{count} agent",
   "set.plugins.agentsCount.other": "{count} agents",
-  "set.plugins.toggleFailed": "Could not change the plugin: {error}"
+  "set.plugins.toggleFailed": "Could not change the plugin: {error}",
+  "set.plugins.discardConfirm": "You have unsaved changes in the agents form. Toggling a plugin reloads the list and discards them. Continue?",
+  "set.plugins.refreshFailed": "The plugin was changed, but the list could not be refreshed: {error}",
+  "set.plugins.reloadError": "The plugin was changed, but the reload failed: {error}",
+  "set.plugins.toggleAria": "Enable plugin {name}"
 }
