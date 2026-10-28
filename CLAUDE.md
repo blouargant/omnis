@@ -6488,7 +6488,22 @@ A right-hand `#env-panel` (built by [web/env-panel.js](web/env-panel.js), cards
 registered in `registerEnvCards` in [web/app.js](web/app.js), styles in
 [web/css/features/env-panel.css](web/css/features/env-panel.css)) follows the
 focused pane (`EnvPanel.setSession` from `setFocusedPanel`); each async card
-render must stop when `ctx.stale()`. Cards: Environnement (squad, folder, git
+render must stop when `ctx.stale()`. **It is docked inside the rightmost chat
+pane, under that pane's tab bar** (`placeEnvPanel`, called by `rebuildChatDOM`
+and on the 820px breakpoint): absolutely positioned below `--topbar-h`, same
+`--bg` as the chat and no border, while every other child of the host pane
+(`.chat-pane.env-host`) gets `margin-right: var(--env-panel-w)` — a margin, not
+a padding, so the absolutely positioned composer and picker shrink too. The
+host pane's minimum width includes the panel (`paneMinW`, honoured by
+`layoutWidths` and the divider drag; `envpanel:toggle` re-lays out). It stays
+in the last pane when focus moves, and the pane's focus listeners ignore events
+from inside it, so using it never changes the focused session. **GOTCHA:**
+`rebuildChatDOM` detaches every pane, so closing the host pane takes the panel
+out of the document — it is held by reference (`envPanelNode`), never looked up
+by id, until `placeEnvPanel` docks it again. Below 820px it lives in `<body>`
+as the fixed right drawer (only the focused pane is shown there). The chat
+transcript shows **no scrollbar** (`scrollbar-width: none`; the old 14px
+`--scroll-gutter` token is gone). Cards: Environnement (squad, folder, git
 branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats

@@ -384,21 +384,58 @@ function applyPaneWidths() {
 }
 
 // layoutWidths normalizes the stored per-pane widths to fill the chat area,
-// clamping each to PANE_MIN_W, then writes them to the DOM.
+// keeping each at least paneMinW, then writes them to the DOM.
 function layoutWidths() {
   if (!panels.length) return;
   const total = els.chat.clientWidth || (panels.length * PANE_MIN_W);
   const dividers = Math.max(0, panels.length - 1) * PANE_DIVIDER_W;
-  const avail = Math.max(panels.length * PANE_MIN_W, total - dividers);
-  let sum = panels.reduce((s, p) => s + (p.width > 0 ? p.width : 0), 0);
-  if (sum <= 0) {
-    const w = avail / panels.length;
-    for (const p of panels) p.width = w;
-  } else {
-    const k = avail / sum;
-    for (const p of panels) p.width = Math.max(PANE_MIN_W, (p.width > 0 ? p.width : avail / panels.length) * k);
+  const mins = new Map(panels.map((p) => [p, paneMinW(p)]));
+  const avail = Math.max(panels.reduce((s, p) => s + mins.get(p), 0), total - dividers);
+  const share = new Map(panels.map((p) => [p, p.width > 0 ? p.width : avail / panels.length]));
+  // A pane that would fall under its minimum is pinned to it and the others
+  // share what is left, in proportion to their stored widths — so the row
+  // still adds up to the chat width instead of overflowing it.
+  const pinned = new Set();
+  for (;;) {
+    const free = panels.filter((p) => !pinned.has(p));
+    const room = avail - [...pinned].reduce((s, p) => s + mins.get(p), 0);
+    const sum = free.reduce((s, p) => s + share.get(p), 0);
+    const under = free.filter((p) => share.get(p) * room / sum < mins.get(p));
+    if (under.length && under.length < free.length) { for (const p of under) pinned.add(p); continue; }
+    for (const p of free) p.width = Math.max(mins.get(p), share.get(p) * room / sum);
+    for (const p of pinned) p.width = mins.get(p);
+    break;
   }
   applyPaneWidths();
+}
+
+// paneMinW is a pane's minimum width: the pane hosting the open environment
+// panel (placeEnvPanel) needs room for it on top of the chat.
+function paneMinW(p) {
+  if (!p.root.classList.contains("env-host") || !document.body.classList.contains("env-open")) return PANE_MIN_W;
+  const env = envPanelNode();
+  return PANE_MIN_W + (env ? env.offsetWidth : 0);
+}
+
+// placeEnvPanel docks the environment panel in the rightmost pane, under its
+// tab bar (see env-panel.css), so it reads as part of the chat page. It stays
+// put when focus moves between panes — it follows the focused session, not
+// the focused pane. Small screens keep it in <body>: there it is a fixed
+// drawer, and only the focused pane is shown, so a panel living in another
+// pane would be hidden with it.
+//
+// The element is held by reference, not looked up by id: rebuildChatDOM
+// detaches every pane first, and closing the host pane takes the panel out
+// of the document with it until it is docked again here.
+let envPanelEl = null;
+function envPanelNode() { return envPanelEl || (envPanelEl = document.getElementById("env-panel")); }
+function placeEnvPanel() {
+  const env = envPanelNode();
+  if (!env) return;
+  const host = window.matchMedia("(max-width: 820px)").matches ? null : panels[panels.length - 1];
+  for (const p of panels) p.root.classList.toggle("env-host", p === host);
+  const parent = host ? host.root : document.body;
+  if (env.parentElement !== parent) parent.appendChild(env);
 }
 
 // rebuildChatDOM re-lays the #chat row as pane / divider / pane / divider / …
@@ -411,6 +448,7 @@ function rebuildChatDOM() {
     els.chat.appendChild(p.root);
   });
   els.chat.classList.toggle("solo", panels.length <= 1);
+  placeEnvPanel();
   layoutWidths();
 }
 
@@ -1126,11 +1164,16 @@ function attachPaneHandlers(panel) {
   const pe = panel.els;
 
   // Focus tracking: any pointer/focus inside the pane makes it the target of
-  // sidebar clicks and shared menus.
-  panel.root.addEventListener("mousedown", () => {
+  // sidebar clicks and shared menus. The environment panel docked in this pane
+  // (placeEnvPanel) is not part of it: it shows the focused pane's session, so
+  // using it must not move the focus.
+  const inEnvPanel = (e) => !!(e.target.closest && e.target.closest("#env-panel"));
+  panel.root.addEventListener("mousedown", (e) => {
+    if (inEnvPanel(e)) return;
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   }, true);
-  panel.root.addEventListener("focusin", () => {
+  panel.root.addEventListener("focusin", (e) => {
+    if (inEnvPanel(e)) return;
     if (focusedPanelId !== panel.id) setFocusedPanel(panel.id);
   });
 
@@ -12111,6 +12154,11 @@ els.navScrim.addEventListener("click", closeNav);
 // layout (where the drawer classes mean nothing but the scrim would still eat
 // clicks if it were left interactive).
 MOBILE_MQ.addEventListener("change", closeNav);
+// The environment panel is docked in a pane on wide screens and is a <body>
+// drawer on small ones (placeEnvPanel); opening or closing it changes the
+// room its host pane needs.
+MOBILE_MQ.addEventListener("change", () => { placeEnvPanel(); layoutWidths(); });
+document.addEventListener("envpanel:toggle", () => { layoutWidths(); refitVisibleTerminals(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && navOpen()) closeNav();
 });
@@ -12249,7 +12297,7 @@ document.addEventListener("mousemove", (e) => {
     const d = paneDividerDrag;
     const totalPair = d.startLeftW + d.startRightW;
     const delta = e.clientX - d.startX;
-    let leftW = Math.max(PANE_MIN_W, Math.min(totalPair - PANE_MIN_W, d.startLeftW + delta));
+    let leftW = Math.max(paneMinW(d.left), Math.min(totalPair - paneMinW(d.right), d.startLeftW + delta));
     d.left.width = leftW;
     d.right.width = totalPair - leftW;
     applyPaneWidths();

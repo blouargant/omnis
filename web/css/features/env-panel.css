@@ -3,17 +3,30 @@
    @import barrel. Cards are built by env-panel.js; the file browser
    (#folders-panel, features/folders.css) lives inside the Fichiers card. */
 
+:root { --env-panel-w: 300px; }
+
+/* The panel is docked in the rightmost chat pane, under its tab bar
+   (placeEnvPanel in app.js): the tab bar runs across it and it shares the
+   chat's background, so it reads as part of the chat page rather than a
+   column of its own. The pane's other children give up its width on their
+   right — margins also shrink the absolutely positioned ones (the floating
+   composer, the empty-pane picker), which a padding would not. */
 #env-panel {
   display: none;
-  width: var(--env-panel-w, 300px);
-  flex-shrink: 0;
-  height: 100%;
+  position: absolute;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: var(--env-panel-w);
   overflow-y: auto;
-  border-left: 1px solid var(--border);
   background: var(--bg);
-  padding: 12px;
+  padding: 16px 12px 12px;
+  z-index: 5;
 }
 body.env-open #env-panel { display: block; }
+body.env-open .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel) {
+  margin-right: var(--env-panel-w);
+}
 .env-cards { display: flex; flex-direction: column; gap: 10px; }
 
 .env-card {
@@ -82,7 +95,8 @@ body.env-open #env-panel { display: block; }
 /* Toggle button in each pane toolbar. */
 .pane-toolbar .pane-env-btn.active { color: var(--text); }
 
-/* Small screens: the panel is a right-hand drawer over the chat. */
+/* Small screens: the panel is a right-hand drawer over the chat (placeEnvPanel
+   keeps it in <body> there, so no pane is its host). */
 #env-scrim { display: none; }
 @media (max-width: 820px) {
   #env-panel {

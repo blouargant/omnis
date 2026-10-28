@@ -39,6 +39,8 @@
     }
     for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.toggle("active", open);
     refresh(); // cards follow the panel (e.g. the file browser stops listening when hidden)
+    // The panel sits inside a chat pane, so its host pane re-lays out (app.js).
+    document.dispatchEvent(new CustomEvent("envpanel:toggle", { detail: { open } }));
   }
   function toggle() { setOpen(!isOpen()); }
 
