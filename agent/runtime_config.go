@@ -892,7 +892,8 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 func synthesizeDefaultSquad(agents []RuntimeAgentConfig) RuntimeSquadConfig {
 	sq := RuntimeSquadConfig{Name: DefaultSquadName, Leader: "leader"}
 	for _, a := range agents {
-		if !a.Enabled || a.Name == "leader" || a.Name == "curator" {
+		// A plugin agent belongs to its plugin's squad, not the fallback one.
+		if !a.Enabled || a.Name == "leader" || a.Name == "curator" || a.Plugin != "" {
 			continue
 		}
 		sq.Members = append(sq.Members, a.Name)

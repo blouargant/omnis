@@ -850,6 +850,11 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if a.MaxToolCalls > 0 {
 							agentMap["max_tool_calls"] = a.MaxToolCalls
 						}
+						// Display-only (absent from the PUT allowlist): marks an agent
+						// that comes from a Claude Code plugin so the UI can badge it.
+						if a.Plugin != "" {
+							agentMap["plugin"] = a.Plugin
+						}
 						agents = append(agents, agentMap)
 					}
 					// Sort agents: built-in first, then custom
@@ -886,6 +891,11 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					if declared, ok := m["squads"].([]any); !ok || len(declared) == 0 {
 						squads := make([]any, 0, len(settings.Squads))
 						for _, sq := range settings.Squads {
+							// A plugin's squad is derived from the plugin, never authored:
+							// handing it back would persist it into agents.json on save.
+							if sq.Plugin != "" {
+								continue
+							}
 							entry := map[string]any{
 								"name":        sq.Name,
 								"description": sq.Description,
@@ -945,7 +955,12 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		if name == "agent" {
 			if m, ok := req.Data.(map[string]any); ok {
 				if agentsList, ok := m["agents"].([]any); ok {
+					// Make the plugin catalogue reflect current disk state before
+					// IsPluginAgent is consulted (a resolve failure just leaves the
+					// previous catalogue; the save proceeds as before).
+					_, _ = agent.ResolveRuntimeSettings(agent.Options{ConfigPathStrict: true})
 					agentNames := make([]string, 0, len(agentsList))
+					processed := 0
 
 					for _, item := range agentsList {
 						agentMap, ok := item.(map[string]any)
@@ -1091,7 +1106,12 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							_ = os.Remove(agentDir) // succeeds only when the dir is empty
 						}
 
-						agentNames = append(agentNames, agentName)
+						processed++
+						// A plugin agent is derived from its plugin: it is never listed
+						// in agents.json (its overlay above is all that persists).
+						if !agent.IsPluginAgent(agentName) {
+							agentNames = append(agentNames, agentName)
+						}
 					}
 
 					// Guard: the loop above skips every entry that is not an agent
@@ -1101,7 +1121,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					// below delete every per-user agent overlay. Refuse it: an
 					// intentional "remove every agent" save carries an empty list, not
 					// a list of strings.
-					if len(agentsList) > 0 && len(agentNames) == 0 {
+					if len(agentsList) > 0 && processed == 0 {
 						c.JSON(http.StatusBadRequest, gin.H{"error": "agents list contains no agent objects — refusing to save (reload the page and retry)"})
 						return
 					}
@@ -1125,6 +1145,13 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 					agentSet := make(map[string]bool, len(agentNames))
 					for _, n := range agentNames {
 						agentSet[n] = true
+					}
+					// Plugin agents are kept — including those of a DISABLED plugin,
+					// which the editor never lists: their overrides must survive a save.
+					for _, pl := range agent.ClaudePlugins() {
+						for _, n := range pl.Agents {
+							agentSet[n] = true
+						}
 					}
 					sweepLayers := map[string]bool{"user": true}
 					for l := range touchedAgentLayers {

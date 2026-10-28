@@ -207,21 +207,24 @@ func convertPlugin(p claudeplugins.Plugin, modelMap map[string]string, catalog m
 			skills = p.SkillNames
 		}
 		logUnmappedTools(p.Name, a)
-		isLeader, isOn, isBuiltIn := i == leader, true, false
+		// allowFiles is explicit (false = the default) so the Settings editor's
+		// echoed `false` diffs to nothing against this base.
+		isLeader, isOn, isBuiltIn, allowFiles := i == leader, true, false, false
 		name := pluginAgentName(p.Name, a.Name)
 		agents = append(agents, pluginAgent{
 			Plugin: p.Name,
 			Type:   p.Name + ":" + a.Name,
 			Entry: AgentEntry{
-				Name:        name,
-				ModelRef:    resolveClaudeModelRef(a.ModelAlias, modelMap, catalog),
-				Description: a.Description,
-				Instruction: strings.ReplaceAll(a.Body, "${CLAUDE_PLUGIN_ROOT}", p.Dir) + "\n\n" + note,
-				Enabled:     &isOn,
-				Leader:      &isLeader,
-				BuiltIn:     &isBuiltIn,
-				Tools:       mapClaudeTools(a.Tools),
-				Skills:      append([]string(nil), skills...),
+				Name:                 name,
+				ModelRef:             resolveClaudeModelRef(a.ModelAlias, modelMap, catalog),
+				Description:          a.Description,
+				Instruction:          strings.ReplaceAll(a.Body, "${CLAUDE_PLUGIN_ROOT}", p.Dir) + "\n\n" + note,
+				Enabled:              &isOn,
+				Leader:               &isLeader,
+				BuiltIn:              &isBuiltIn,
+				AllowFileAttachments: &allowFiles,
+				Tools:                mapClaudeTools(a.Tools),
+				Skills:               append([]string(nil), skills...),
 			},
 		})
 		if !isLeader {
@@ -290,12 +293,12 @@ func foreignPluginAgents(p claudeplugins.Plugin) []string {
 
 // PluginInfo describes one discovered plugin for the surfaces that list them.
 type PluginInfo struct {
-	Name        string
-	Version     string
-	Description string
-	Squad       string // the plugin's squad name, "" when it has none
-	Enabled     bool
-	Agents      []string // omnis agent names, sorted
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description"`
+	Squad       string   `json:"squad"` // the plugin's squad name, "" when it has none
+	Enabled     bool     `json:"enabled"`
+	Agents      []string `json:"agents"` // omnis agent names, sorted
 }
 
 // catalogPlugin is one discovered plugin, converted, with whether it is on.
