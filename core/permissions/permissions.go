@@ -774,7 +774,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		cwd := cfg.CWDFunc(tc)
 		probeKey := t.Name() + "\x00" + input
 		sid := cfg.SessionFunc(tc)
-		cleared := cfg.Clearances.Take(sid, tc.FunctionCallID(), t.Name())
+		cleared := cfg.Clearances.Take(sid, tc.InvocationID(), tc.FunctionCallID(), t.Name())
 
 		if cache.hasTool(sid, t.Name()) {
 			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
