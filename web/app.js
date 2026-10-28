@@ -8961,6 +8961,8 @@ async function subscribeGlobalEvents() {
           // suggestion the same way as the mailbox_push handler above.
           clearSuggestion(sid);
           fetchSuggestion(sid);
+          // The task left the "running" list of the Background tasks card.
+          if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
         } else if (event === "schedule_run" && sid) {
@@ -10163,6 +10165,9 @@ async function sendMessage(panel) {
             resolveToolCall(block, data.response, data.duration_ms);
             refreshToolGroup(group);
           }
+          // The agent started or stopped a background task: the environment
+          // panel's Background tasks card lists them.
+          if (BG_TASK_TOOLS.has(data.name) && sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
           break;
@@ -12620,7 +12625,102 @@ const ENV_ICON = {
   folder: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
   branch: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>`,
   skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
+  task:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"/></svg>`,
+  stop:   `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`,
 };
+
+// ─── Background tasks card ───────────────────────────────────────────────────
+// The commands and monitors the session's agent launched in the background
+// (bash_background / monitor), Claude Desktop style: running ones with their
+// elapsed time and a stop button, finished ones folded under a count. A click
+// on a task shows its output. Refreshed when the agent starts or stops one
+// (BG_TASK_TOOLS results), when one finishes (task_notification), and every
+// ENV_TASKS_TICK_MS while one runs, which also moves the elapsed times on.
+
+const BG_TASK_TOOLS = new Set(["bash_background", "monitor", "bg_cancel"]);
+const ENV_TASKS_TICK_MS = 15000;
+let envTasksTimer = null;
+let envTasksDoneOpen = false;
+const envTaskOpen = new Set(); // task ids whose output is shown
+
+function scheduleEnvTasksTick(running) {
+  clearTimeout(envTasksTimer);
+  envTasksTimer = running ? setTimeout(() => EnvPanel.refresh("tasks"), ENV_TASKS_TICK_MS) : null;
+}
+
+// envDuration renders a duration the way the card shows it: 45s, 7min, 1h05.
+function envDuration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}min`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
+}
+
+function envTaskRow(t, sessionId) {
+  const running = t.status === "running";
+  const item = document.createElement("div");
+  item.className = "env-task";
+  const row = document.createElement("div");
+  row.className = "env-row env-row-btn env-task-row" + (running ? "" : ` is-${t.status}`);
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  if (t.command) row.setAttribute("data-tip", t.command);
+  const started = Date.parse(t.started);
+  const ended = t.ended && !t.ended.startsWith("0001") ? Date.parse(t.ended) : NaN;
+  const took = running ? Date.now() - started : (isNaN(ended) ? 0 : ended - started);
+  const icon = document.createElement("span");
+  icon.className = "env-row-icon env-task-icon";
+  icon.innerHTML = ENV_ICON.task;
+  icon.setAttribute("data-tip", tr("env.taskStatus." + t.status));
+  const text = document.createElement("span");
+  text.className = "env-row-text";
+  text.textContent = t.label || t.id;
+  const meta = document.createElement("span");
+  meta.className = "env-row-meta";
+  meta.textContent = isNaN(started) ? "" : envDuration(took);
+  row.append(icon, text, meta);
+  if (running) {
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "env-icon-btn env-task-stop";
+    stop.setAttribute("aria-label", tr("env.taskStop"));
+    stop.setAttribute("data-tip", tr("env.taskStop"));
+    stop.innerHTML = ENV_ICON.stop;
+    stop.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      stop.disabled = true;
+      try {
+        await apiFetch(`/api/sessions/${sessionId}/tasks/${encodeURIComponent(t.id)}/cancel`, { method: "POST" });
+      } catch (err) { console.error("stop task failed:", err); }
+      // The stop lands within a moment (the process group is killed).
+      setTimeout(() => EnvPanel.refresh("tasks"), 400);
+    });
+    row.appendChild(stop);
+  }
+  const toggle = () => {
+    if (envTaskOpen.has(t.id)) envTaskOpen.delete(t.id); else envTaskOpen.add(t.id);
+    EnvPanel.refresh("tasks");
+  };
+  row.addEventListener("click", toggle);
+  row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+  item.appendChild(row);
+  if (envTaskOpen.has(t.id)) {
+    const out = document.createElement("pre");
+    out.className = "env-task-output";
+    out.textContent = "…";
+    item.appendChild(out);
+    apiFetch(`/api/sessions/${sessionId}/tasks/${encodeURIComponent(t.id)}/output`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const lines = (d && d.output ? d.output : "").split("\n");
+        out.textContent = lines.slice(-40).join("\n").trim() || tr("env.taskNoOutput");
+        out.scrollTop = out.scrollHeight;
+      })
+      .catch(() => { out.textContent = tr("env.taskNoOutput"); });
+  }
+  return item;
+}
 
 // envRow builds one icon + text row of an environment card.
 function envRow(icon, html, tip, cls) {
@@ -12824,6 +12924,44 @@ function registerEnvCards() {
           row.appendChild(btn);
         }
         body.appendChild(row);
+      }
+    },
+  });
+  EnvPanel.register({
+    id: "tasks",
+    title: () => tr("env.tasks"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      let tasks = [];
+      try {
+        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/tasks`);
+        if (res.ok) tasks = (await res.json()).tasks || [];
+      } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      const running = tasks.filter((t) => t.status === "running");
+      const done = tasks.filter((t) => t.status !== "running");
+      ctx.setVisible(tasks.length > 0);
+      ctx.setValue(running.length ? `<span class="env-task-live"></span>${running.length}` : "");
+      scheduleEnvTasksTick(running.length > 0 && EnvPanel.isOpen()); // reopening the panel re-renders
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const t of running) body.appendChild(envTaskRow(t, ctx.sessionId));
+      if (done.length) {
+        const head = document.createElement("button");
+        head.type = "button";
+        head.className = "env-row env-row-btn env-tasks-done";
+        head.setAttribute("aria-expanded", String(envTasksDoneOpen));
+        head.innerHTML = `<span class="env-row-icon">${ENV_ICON.task}</span>` +
+          `<span class="env-row-text">${escHtml(tr("env.tasksDone", { n: done.length }))}</span>` +
+          `<span class="env-row-meta env-tasks-chevron" aria-hidden="true">${envTasksDoneOpen ? "▾" : "▸"}</span>`;
+        head.addEventListener("click", () => { envTasksDoneOpen = !envTasksDoneOpen; EnvPanel.refresh("tasks"); });
+        body.appendChild(head);
+        if (envTasksDoneOpen) {
+          const list = document.createElement("div");
+          list.className = "env-tasks-done-list";
+          for (const t of done) list.appendChild(envTaskRow(t, ctx.sessionId));
+          body.appendChild(list);
+        }
       }
     },
   });

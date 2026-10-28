@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -54,7 +53,10 @@ func (q *Queue) StartMonitor(label, command, filter string, timeout time.Duratio
 }
 
 func (q *Queue) runMonitor(ctx context.Context, t *Task, re *regexp.Regexp) {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", t.Command)
+	// Own process group: stopping the monitor kills what it started (a
+	// `tail -f` under the shell), not just the shell.
+	cmd := tools.NewShellCommand(ctx, t.Command)
+	cmd.WaitDelay = 5 * time.Second
 	if len(t.env) > 0 {
 		cmd.Env = append(os.Environ(), t.env...)
 	}

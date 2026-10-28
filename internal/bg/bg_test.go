@@ -69,3 +69,28 @@ func TestFormatNotification(t *testing.T) {
 		t.Fatalf("FormatNotification() = %q", msg)
 	}
 }
+
+// TestCancelStopsTheCommandsChildren: the shell runs `sleep` as a child (a
+// second command follows it), so killing only the shell would leave sleep
+// holding the output pipe and the task "running" until it exits. Cancelling
+// must end the whole process group at once.
+func TestCancelStopsTheCommandsChildren(t *testing.T) {
+	t.Parallel()
+
+	q := NewQueue(4)
+	id := q.Start("sleeper", "sleep 30; echo done", time.Minute)
+	time.Sleep(100 * time.Millisecond) // let the shell start its child
+	if _, ok := q.Cancel(id); !ok {
+		t.Fatal("Cancel() = false for a known task")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, info, _ := q.Output(id); info.Status == "cancelled" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a stopped task kept running: its children outlived the shell")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

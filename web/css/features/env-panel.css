@@ -225,3 +225,40 @@ body.term-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#te
 .env-dot.state-connected { background: #3fa864; }
 .env-dot.state-error { background: var(--danger-fg); }
 .env-err { margin: 0 0 6px 26px; color: var(--danger-fg); font-size: 12px; word-break: break-word; }
+
+/* Background tasks card (app.js "Background tasks card"). */
+.env-task-row .env-row-text { color: var(--text); }
+.env-task-icon { color: var(--text-muted); }
+.env-task-row:not([class*=" is-"]) .env-task-icon { color: var(--accent); animation: env-task-pulse 1.6s ease-in-out infinite; }
+.env-task-row.is-failed .env-task-icon,
+.env-task-row.is-timed_out .env-task-icon,
+.env-task-row.is-blocked .env-task-icon { color: var(--danger-fg); }
+.env-task-row.is-cancelled .env-task-icon { color: var(--text-faint); }
+.env-task-stop { flex-shrink: 0; }
+.env-task-stop:hover { color: var(--danger-fg); }
+.env-task-live {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: env-task-pulse 1.6s ease-in-out infinite;
+}
+@keyframes env-task-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .env-task-row .env-task-icon, .env-task-live { animation: none; }
+}
+.env-task-output {
+  margin: 2px 0 6px 26px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.env-tasks-chevron { color: var(--text-faint); }
