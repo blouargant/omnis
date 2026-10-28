@@ -30,6 +30,9 @@ type Input struct {
 	// agent's deletes but not for a change agent's, which may legitimately
 	// delete a real resource.
 	AgentName string `json:"agent_name,omitempty"`
+	// AgentType is the calling agent's Claude-style type ("plugin:agent") for
+	// plugin hooks that scope themselves to one agent.
+	AgentType string `json:"agent_type,omitempty"`
 	// Attempt is how many times this tool has been called with these exact
 	// arguments in this session, 1 on the first. Consecutive is how many calls
 	// of this tool were blocked back-to-back before this one. Omnis extensions:
@@ -135,7 +138,7 @@ func (o Outcome) Asks() bool { return o.Decision == DecisionAsk }
 // DecisionBlock instead. The fail_closed flag lets a command enforce its own
 // contract and refuse to be ignored.
 func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd string, defaultTimeout time.Duration) Outcome {
-	cmds := c.Match(event, subject)
+	cmds := c.match(event, subject)
 	out := Outcome{Decision: DecisionProceed}
 	if len(cmds) == 0 {
 		return out
@@ -145,22 +148,48 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 	if in.Cwd == "" {
 		in.Cwd = cwd
 	}
-	stdin, err := json.Marshal(in)
+	stdinNative, err := json.Marshal(in)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[hooks] %s: marshal input: %v\n", event, err)
 		return out
 	}
 
-	var contexts []string
-	for _, cmd := range cmds {
-		if strings.TrimSpace(cmd.Command) == "" {
+	// A plugin command runs once per adapted input; a native one once.
+	type job struct {
+		cmd   Command
+		stdin []byte
+		env   []string
+	}
+	var jobs []job
+	for _, mc := range cmds {
+		if strings.TrimSpace(mc.Command.Command) == "" {
 			continue
 		}
+		if mc.plugin == nil {
+			jobs = append(jobs, job{cmd: mc.Command, stdin: stdinNative})
+			continue
+		}
+		cmd := mc.Command
+		cmd.Command = expandPluginRoot(cmd.Command, mc.plugin.Root)
+		env := []string{"CLAUDE_PLUGIN_ROOT=" + mc.plugin.Root}
+		for _, pin := range claudeInputs(in) {
+			b, merr := json.Marshal(pin)
+			if merr != nil {
+				fmt.Fprintf(os.Stderr, "[hooks] %s: marshal input: %v\n", event, merr)
+				continue
+			}
+			jobs = append(jobs, job{cmd: cmd, stdin: b, env: env})
+		}
+	}
+
+	var contexts []string
+	for _, j := range jobs {
+		cmd := j.cmd
 		timeout := defaultTimeout
 		if cmd.Timeout > 0 {
 			timeout = time.Duration(cmd.Timeout) * time.Second
 		}
-		res := fstools.RunShellCaptured(ctx, cmd.Command, cwd, stdin, timeout)
+		res := fstools.RunShellCapturedEnv(ctx, cmd.Command, cwd, j.stdin, timeout, j.env)
 		out.Ran++
 
 		// Non-zero, non-blocking outcomes: log and move on.

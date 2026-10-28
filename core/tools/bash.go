@@ -457,6 +457,13 @@ type CapturedRun struct {
 // permission layer (hook commands are user-authored config), but the safety
 // floor still applies.
 func RunShellCaptured(ctx context.Context, command, cwd string, stdin []byte, timeout time.Duration) CapturedRun {
+	return RunShellCapturedEnv(ctx, command, cwd, stdin, timeout, nil)
+}
+
+// RunShellCapturedEnv is RunShellCaptured with extra NAME=value entries added
+// to the process environment (nil keeps it untouched). It deliberately never
+// reads WithShellEnv: hooks must not see the user's platform token.
+func RunShellCapturedEnv(ctx context.Context, command, cwd string, stdin []byte, timeout time.Duration, env []string) CapturedRun {
 	if b, blocked := SafetyFloorBlock(command); blocked {
 		return CapturedRun{Stderr: fmt.Sprintf("command blocked by safety floor (%q)", b), ExitCode: -1, Blocked: true}
 	}
@@ -471,6 +478,9 @@ func RunShellCaptured(ctx context.Context, command, cwd string, stdin []byte, ti
 	cmd := newShellCommand(cctx, command)
 	if cwd != "" {
 		cmd.Dir = cwd
+	}
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
 	}
 	if len(stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(stdin)
