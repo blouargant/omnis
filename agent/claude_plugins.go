@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/blouargant/omnis/internal/claudeplugins"
+	"github.com/blouargant/omnis/internal/configedit"
 )
 
 // Claude Code plugins, converted. A plugin discovered by internal/claudeplugins
@@ -126,6 +129,31 @@ func convertibleAgents(p claudeplugins.Plugin) []claudeplugins.Agent {
 	return out
 }
 
+// isClaudeAgentTool reports whether a tool name is Claude Code's Agent tool,
+// bare or restricted to some agents ("Agent(worker, reader)").
+func isClaudeAgentTool(t string) bool {
+	return t == "Agent" || strings.HasPrefix(t, "Agent(")
+}
+
+// claudeExpectedDrops are the Claude tools with no omnis tool of the same name
+// whose absence is by design (see pluginTranslationNote), so not worth a log.
+var claudeExpectedDrops = map[string]bool{"AskUserQuestion": true, "SendMessage": true}
+
+// logUnmappedTools logs, once for the agent, the tools of its frontmatter that
+// have no omnis equivalent, other than the expected drops.
+func logUnmappedTools(plugin string, a claudeplugins.Agent) {
+	var dropped []string
+	for _, t := range a.Tools {
+		if claudeNativeTools[t] || isClaudeAgentTool(t) || claudeExpectedDrops[t] {
+			continue
+		}
+		dropped = append(dropped, t)
+	}
+	if len(dropped) > 0 {
+		log.Printf("claude plugin %q: agent %q uses tools omnis does not have (%s); they are dropped", plugin, a.Name, strings.Join(dropped, ", "))
+	}
+}
+
 // pluginLeaderIndex picks the plugin's leader among its agents: the one that
 // holds the Agent tool — `lead` when several do, else the first by name — or -1
 // when none does.
@@ -133,7 +161,7 @@ func pluginLeaderIndex(plugin string, agents []claudeplugins.Agent) int {
 	var holders []int
 	for i, a := range agents {
 		for _, t := range a.Tools {
-			if t == "Agent" {
+			if isClaudeAgentTool(t) {
 				holders = append(holders, i)
 				break
 			}
@@ -176,6 +204,7 @@ func convertPlugin(p claudeplugins.Plugin, modelMap map[string]string, catalog m
 		if len(skills) == 0 {
 			skills = p.SkillNames
 		}
+		logUnmappedTools(p.Name, a)
 		isLeader, isOn, isBuiltIn := i == leader, true, false
 		name := pluginAgentName(p.Name, a.Name)
 		agents = append(agents, pluginAgent{
@@ -255,4 +284,143 @@ func foreignPluginAgents(p claudeplugins.Plugin) []string {
 		out[i] = "`" + n + "`"
 	}
 	return out
+}
+
+// PluginInfo describes one discovered plugin for the surfaces that list them.
+type PluginInfo struct {
+	Name        string
+	Version     string
+	Description string
+	Squad       string // the plugin's squad name, "" when it has none
+	Enabled     bool
+	Agents      []string // omnis agent names, sorted
+}
+
+// catalogPlugin is one discovered plugin, converted, with whether it is on.
+type catalogPlugin struct {
+	plugin  claudeplugins.Plugin
+	enabled bool
+	agents  []pluginAgent
+	squad   *SquadEntry
+}
+
+// pluginCatalog is what the last ResolveRuntimeSettings discovered: every
+// plugin, disabled ones included, sorted by name.
+type pluginCatalog struct {
+	plugins []catalogPlugin
+	byAgent map[string]*catalogPlugin // omnis agent name → its plugin
+}
+
+// claudeCatalog is replaced at each ResolveRuntimeSettings and read by the
+// accessors below (the Settings surfaces, the instruction readers, the
+// configedit base provider), so it is an atomic pointer, never mutated.
+var claudeCatalog atomic.Pointer[pluginCatalog]
+
+func init() {
+	configedit.SetAgentBaseProvider(func(name string) map[string]any {
+		e, ok := pluginAgentBase(name)
+		if !ok {
+			return nil
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			return nil
+		}
+		var m map[string]any
+		if json.Unmarshal(b, &m) != nil {
+			return nil
+		}
+		return m
+	})
+}
+
+// newPluginCatalog converts every discovered plugin; enabled says which are on.
+func newPluginCatalog(plugins []claudeplugins.Plugin, enabled func(name string) bool, modelMap map[string]string, catalog map[string]RuntimeModelConfig) *pluginCatalog {
+	c := &pluginCatalog{byAgent: map[string]*catalogPlugin{}}
+	for _, p := range plugins {
+		agents, squad := convertPlugin(p, modelMap, catalog)
+		c.plugins = append(c.plugins, catalogPlugin{plugin: p, enabled: enabled(p.Name), agents: agents, squad: squad})
+	}
+	sort.SliceStable(c.plugins, func(i, j int) bool { return c.plugins[i].plugin.Name < c.plugins[j].plugin.Name })
+	for i := range c.plugins {
+		for _, a := range c.plugins[i].agents {
+			c.byAgent[a.Entry.Name] = &c.plugins[i]
+		}
+	}
+	return c
+}
+
+// ClaudePlugins lists every discovered plugin, disabled ones included, sorted
+// by name. Empty until the first ResolveRuntimeSettings.
+func ClaudePlugins() []PluginInfo {
+	c := claudeCatalog.Load()
+	if c == nil {
+		return nil
+	}
+	out := make([]PluginInfo, 0, len(c.plugins))
+	for _, cp := range c.plugins {
+		info := PluginInfo{
+			Name:        cp.plugin.Name,
+			Version:     cp.plugin.Version,
+			Description: cp.plugin.Description,
+			Enabled:     cp.enabled,
+		}
+		if cp.squad != nil {
+			info.Squad = cp.squad.Name
+		}
+		for _, a := range cp.agents {
+			info.Agents = append(info.Agents, a.Entry.Name)
+		}
+		sort.Strings(info.Agents)
+		out = append(out, info)
+	}
+	return out
+}
+
+// IsPluginAgent reports whether name is an agent of any discovered plugin,
+// enabled or not.
+func IsPluginAgent(name string) bool {
+	c := claudeCatalog.Load()
+	if c == nil {
+		return false
+	}
+	_, ok := c.byAgent[name]
+	return ok
+}
+
+// PluginAgentType is the qualified Claude name ("demo:worker") of an agent of an
+// enabled plugin, else "".
+func PluginAgentType(name string) string {
+	c := claudeCatalog.Load()
+	if c == nil {
+		return ""
+	}
+	cp, ok := c.byAgent[name]
+	if !ok || !cp.enabled {
+		return ""
+	}
+	for _, a := range cp.agents {
+		if a.Entry.Name == name {
+			return a.Type
+		}
+	}
+	return ""
+}
+
+// pluginAgentBase is the converted entry of a plugin agent (enabled or not).
+func pluginAgentBase(name string) (AgentEntry, bool) {
+	c := claudeCatalog.Load()
+	if c == nil {
+		return AgentEntry{}, false
+	}
+	cp, ok := c.byAgent[name]
+	if !ok {
+		return AgentEntry{}, false
+	}
+	for _, a := range cp.agents {
+		if a.Entry.Name == name {
+			return a.Entry, true
+		}
+	}
+	return AgentEntry{}, false
 }

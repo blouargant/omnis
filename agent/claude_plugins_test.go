@@ -136,6 +136,7 @@ func TestResolveClaudeModelRef(t *testing.T) {
 }
 
 func TestConvertDemoPlugin(t *testing.T) {
+	captureLog(t)
 	p := discoverDemoPlugin(t)
 	agents, squad := convertPlugin(p, defaultClaudeModelMap, testClaudeCatalog())
 
@@ -359,5 +360,38 @@ func TestConvertPluginSkipsAgentsWithUnusableNames(t *testing.T) {
 	}
 	if strings.Contains(agents[0].Entry.Instruction, "a/b") || strings.Contains(agents[0].Entry.Instruction, "x:y") {
 		t.Errorf("the note must not name a skipped agent:\n%s", agents[0].Entry.Instruction)
+	}
+}
+
+func TestConvertPluginLeaderViaRestrictedAgentTool(t *testing.T) {
+	captureLog(t)
+	p := claudeplugins.Plugin{Name: "demo", Agents: []claudeplugins.Agent{
+		{Name: "boss", Tools: []string{"Read", "Agent(worker, reader)"}},
+		{Name: "worker"},
+	}}
+	_, squad := convertPlugin(p, nil, nil)
+	if squad == nil || squad.Leader != "demo_boss" {
+		t.Fatalf("Agent(...) must make its holder the leader, got %+v", squad)
+	}
+}
+
+func TestConvertPluginLogsUnmappedToolsOncePerAgent(t *testing.T) {
+	buf := captureLog(t)
+	p := claudeplugins.Plugin{Name: "demo", Agents: []claudeplugins.Agent{
+		{Name: "a", Tools: []string{"Read", "Agent", "AskUserQuestion", "SendMessage", "NotebookEdit", "WebFetch"}},
+		{Name: "b", Tools: []string{"Bash", "SendMessage"}},
+	}}
+	convertPlugin(p, nil, nil)
+	out := buf.String()
+	if strings.Count(out, "NotebookEdit") != 1 || !strings.Contains(out, "WebFetch") {
+		t.Errorf("unmapped tools must be logged once for the agent, got %q", out)
+	}
+	for _, expected := range []string{"AskUserQuestion", "SendMessage", `"Agent"`} {
+		if strings.Contains(out, expected) {
+			t.Errorf("the expected drop %s must not be logged: %q", expected, out)
+		}
+	}
+	if strings.Count(out, "\n") != 1 {
+		t.Errorf("agent b has nothing unmapped and must log nothing: %q", out)
 	}
 }

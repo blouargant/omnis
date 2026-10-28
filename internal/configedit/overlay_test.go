@@ -281,3 +281,35 @@ func TestDiffGenericKeepsEmptyListAgainstNonEmptyBase(t *testing.T) {
 		t.Fatalf("cleared subagents overlay should be empty, got %v", subs)
 	}
 }
+
+func TestAgentEntryOverlayAgainstProviderBase(t *testing.T) {
+	SetAgentBaseProvider(func(name string) map[string]any {
+		if name != "plug_agent" {
+			return nil
+		}
+		return map[string]any{"description": "d", "tools": []any{"Bash"}}
+	})
+	t.Cleanup(func() { SetAgentBaseProvider(nil) })
+
+	same, err := AgentEntryOverlayBytes("plug_agent", "user",
+		map[string]any{"description": "d", "tools": []any{"Bash"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(same); got != "{}\n" {
+		t.Errorf("an unchanged plugin agent must overlay to {}, got %q", got)
+	}
+
+	changed, err := AgentEntryOverlayBytes("plug_agent", "user",
+		map[string]any{"description": "d", "tools": []any{"Read"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(changed, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 1 || m["tools"] == nil {
+		t.Errorf("only the changed field must be written, got %s", changed)
+	}
+}

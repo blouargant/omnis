@@ -154,12 +154,26 @@ func OverlayBytes(filename string, desired map[string]any, writePath string) ([]
 	return append(out, '\n'), nil
 }
 
+// agentBaseProvider supplies an agent definition that lives in no registry
+// layer (a converted Claude Code plugin agent) as the lowest layer of its base.
+var agentBaseProvider func(name string) map[string]any
+
+// SetAgentBaseProvider installs the provider of the lowest-layer agent.json
+// map for agents defined outside the registry directories; a nil result means
+// "no such agent". The agent package installs it at init; nil removes it.
+func SetAgentBaseProvider(fn func(name string) map[string]any) { agentBaseProvider = fn }
+
 // agentEntryBaseBelow merges the agent.json of `name` across every registry
 // layer strictly below writeLayer (low→high, generic merge). registrySearchDirs
 // is high→low precedence (paths.AgentsRegistrySearchDirs()).
 func agentEntryBaseBelow(name, writeLayer string, registrySearchDirs []string) (map[string]any, error) {
 	r := layerRank(writeLayer)
 	var below []map[string]any
+	if fn := agentBaseProvider; fn != nil {
+		if m := fn(name); m != nil {
+			below = append(below, m)
+		}
+	}
 	for i := len(registrySearchDirs) - 1; i >= 0; i-- {
 		dir := registrySearchDirs[i]
 		if layerRank(paths.Layer(dir)) >= r {

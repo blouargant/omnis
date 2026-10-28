@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/blouargant/omnis/internal/budget"
+	"github.com/blouargant/omnis/internal/claudeplugins"
 	"github.com/blouargant/omnis/internal/configedit"
+	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -188,17 +190,23 @@ type modelsConfigFile struct {
 	// embed, and the evaluator is an internal, non-agent role).
 	OverrideModelRef     string `json:"override_model_ref,omitempty"`
 	OverrideModelEnabled bool   `json:"override_model_enabled,omitempty"`
+	// ClaudeModelMap overrides, alias by alias, which catalogue model a Claude
+	// Code plugin agent's `model:` alias stands for (defaultClaudeModelMap).
+	ClaudeModelMap map[string]string `json:"claude_model_map,omitempty"`
 }
 
 type runtimeConfigFile struct {
-	SoftSkillsDir         string `json:"softskills_dir"`
-	AppName               string `json:"app_name"`
-	BashTimeoutSeconds    int    `json:"bash_timeout_seconds"`
-	MCPConfigPath         string `json:"mcp_config_path"`
-	PermissionsConfigPath string `json:"permissions_config_path"`
-	HooksConfigPath       string `json:"hooks_config_path"`
-	SerpAPIKey            string `json:"serpapi_key"`
-	SerperKey             string `json:"serper_key"`
+	// DisabledPlugins names the Claude Code plugins that are installed but
+	// switched off: their agents, squad, skills and hooks are not loaded.
+	DisabledPlugins       []string `json:"disabled_plugins,omitempty"`
+	SoftSkillsDir         string   `json:"softskills_dir"`
+	AppName               string   `json:"app_name"`
+	BashTimeoutSeconds    int      `json:"bash_timeout_seconds"`
+	MCPConfigPath         string   `json:"mcp_config_path"`
+	PermissionsConfigPath string   `json:"permissions_config_path"`
+	HooksConfigPath       string   `json:"hooks_config_path"`
+	SerpAPIKey            string   `json:"serpapi_key"`
+	SerperKey             string   `json:"serper_key"`
 	// EmbedModelRef names the model in models.json used for internal semantic
 	// embedding (softskill/precedent/codebase recall). It must reference a
 	// model entry flagged `"embedding": true`. Empty disables semantic recall
@@ -309,6 +317,11 @@ type RuntimeAgentConfig struct {
 	// SubAgents is this agent's own delegable team (see AgentEntry.SubAgents).
 	// Validated as an acyclic graph over enabled agents by validateSubAgentGraph.
 	SubAgents []string
+	// Plugin is the Claude Code plugin this agent comes from ("demo"), and
+	// PluginType its qualified Claude name ("demo:worker"); both "" for an
+	// agent that is not a plugin's.
+	Plugin     string
+	PluginType string
 }
 
 // RuntimeSquadConfig is one normalized squad: a named group composed of an
@@ -323,6 +336,8 @@ type RuntimeSquadConfig struct {
 	// Hidden — see SquadEntry.Hidden. Excluded from the router catalogue and the
 	// web UI squad list; still built and resolvable by name.
 	Hidden bool
+	// Plugin is the Claude Code plugin that provides this squad ("" otherwise).
+	Plugin string
 }
 
 // DefaultSquadName is the name of the squad used when a session does not
@@ -346,6 +361,9 @@ type RuntimeSettings struct {
 	// Code-style lifecycle hooks (shell commands fired before/after tools, on
 	// prompt submit, on stop, etc.). Empty/missing means no hooks.
 	HooksConfigPath string
+	// PluginHookLayers is the hooks declaration of each enabled Claude Code
+	// plugin that has one, applied on top of hooks.json.
+	PluginHookLayers []hooks.PluginLayer
 	// A2AConfigPath is the resolved path to a2a_config.json, defining remote
 	// A2A agent endpoints that any agent's `a2a_agents` list can reference.
 	A2AConfigPath string
@@ -753,6 +771,8 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		MaxToolCalls:                      maxInt(in.MaxToolCalls, 0),
 		ResumableSessions:                 in.ResumableSessions,
 		SubAgents:                         normalizeNames(in.SubAgents),
+		Plugin:                            in.Plugin,
+		PluginType:                        in.PluginType,
 	}
 }
 
@@ -974,6 +994,182 @@ func loadAgentFromRegistry(name string, registryDirs []string) (AgentEntry, erro
 	return e, nil
 }
 
+// loadPluginAgentEntry is the entry of a plugin agent: the converted base as
+// the lowest layer, then every registry agent.json for that name (low→high,
+// registryDirs is high→low), deep-merged, so a user overlay changes only the
+// fields it names. The instruction is the highest registry instruction.md for
+// the name, else the converted one.
+func loadPluginAgentEntry(base AgentEntry, registryDirs []string) (AgentEntry, error) {
+	bb, err := json.Marshal(base)
+	if err != nil {
+		return AgentEntry{}, fmt.Errorf("plugin agent %q: %w", base.Name, err)
+	}
+	var baseMap map[string]any
+	if err := json.Unmarshal(bb, &baseMap); err != nil {
+		return AgentEntry{}, fmt.Errorf("plugin agent %q: %w", base.Name, err)
+	}
+	layers := []map[string]any{baseMap}
+	for i := len(registryDirs) - 1; i >= 0; i-- {
+		p := filepath.Join(registryDirs[i], base.Name, "agent.json")
+		b, err := os.ReadFile(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return AgentEntry{}, fmt.Errorf("agent registry %q: %w", p, err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			return AgentEntry{}, fmt.Errorf("agent registry %q: decode json: %w", p, err)
+		}
+		layers = append(layers, m)
+	}
+	mb, err := json.Marshal(configedit.MergeGeneric(layers))
+	if err != nil {
+		return AgentEntry{}, fmt.Errorf("plugin agent %q: merge: %w", base.Name, err)
+	}
+	var e AgentEntry
+	if err := json.Unmarshal(mb, &e); err != nil {
+		return AgentEntry{}, fmt.Errorf("plugin agent %q: decode merged json: %w", base.Name, err)
+	}
+	e.Name = base.Name
+	e.Instruction = base.Instruction
+	for _, dir := range registryDirs {
+		if ib, err := os.ReadFile(filepath.Join(dir, base.Name, "instruction.md")); err == nil {
+			e.Instruction = strings.TrimRight(StripInstructionFrontmatter(ib), "\n")
+			if fm, _ := ParseInstructionMarkdown(ib); fm.HasAny() {
+				applyInstructionFrontmatter(&e, fm)
+			}
+			break
+		}
+	}
+	return e, nil
+}
+
+// pluginResolution is what the discovered, enabled plugins contribute to a
+// resolution: agent entries (registry overlays applied), squads, and which
+// plugin each agent / squad belongs to.
+type pluginResolution struct {
+	agents      []AgentEntry
+	squads      []SquadEntry
+	owner       map[string]string // agent name → plugin
+	typ         map[string]string // agent name → "plugin:agent"
+	squadPlugin map[string]string // squad name → plugin
+}
+
+// loadClaudePlugins discovers the Claude Code plugins, replaces the plugin
+// catalogue, points the skill search chain at the enabled plugins' skills,
+// records their hook layers on out, and converts the enabled ones. A plugin
+// agent named like an agent already resolved (an agents.json entry, a default)
+// is skipped: the omnis agent wins. A resolution failure of one plugin agent is
+// logged and skips that agent — a broken plugin must not take the config down.
+func loadClaudePlugins(out *RuntimeSettings, cfg runtimeConfigFile, modelsCfg modelsConfigFile) pluginResolution {
+	res := pluginResolution{owner: map[string]string{}, typ: map[string]string{}, squadPlugin: map[string]string{}}
+
+	plugins, warnings := claudeplugins.Discover(paths.ClaudePluginsDir())
+	for _, w := range warnings {
+		log.Print(w)
+	}
+	disabled := map[string]bool{}
+	for _, n := range cfg.DisabledPlugins {
+		disabled[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	modelMap := map[string]string{}
+	for k, v := range defaultClaudeModelMap {
+		modelMap[k] = v
+	}
+	for k, v := range modelsCfg.ClaudeModelMap {
+		modelMap[strings.ToLower(strings.TrimSpace(k))] = strings.ToLower(strings.TrimSpace(v))
+	}
+	cat := newPluginCatalog(plugins, func(n string) bool { return !disabled[n] }, modelMap, out.Models)
+	claudeCatalog.Store(cat)
+
+	taken := map[string]bool{}
+	for _, a := range out.Agents {
+		taken[a.Name] = true
+	}
+	registryDirs := paths.AgentsRegistrySearchDirs()
+	var skillDirs []string
+	for _, cp := range cat.plugins {
+		if !cp.enabled {
+			continue
+		}
+		if cp.plugin.SkillsDir != "" {
+			skillDirs = append(skillDirs, cp.plugin.SkillsDir)
+		}
+		if cp.plugin.HooksPath != "" {
+			out.PluginHookLayers = append(out.PluginHookLayers, hooks.PluginLayer{Name: cp.plugin.Name, Root: cp.plugin.Dir, Path: cp.plugin.HooksPath})
+		}
+		produced := map[string]bool{}
+		for _, pa := range cp.agents {
+			name := pa.Entry.Name
+			if taken[name] {
+				log.Printf("claude plugin %q: agent %q is already defined in omnis; the plugin's agent is skipped", cp.plugin.Name, name)
+				continue
+			}
+			e, err := loadPluginAgentEntry(pa.Entry, registryDirs)
+			if err != nil {
+				log.Printf("claude plugin %q: agent %q skipped: %v", cp.plugin.Name, name, err)
+				continue
+			}
+			taken[name], produced[name] = true, true
+			res.agents = append(res.agents, e)
+			res.owner[name], res.typ[name] = cp.plugin.Name, pa.Type
+		}
+		if sq := cp.squad; sq != nil {
+			if !produced[sq.Leader] {
+				log.Printf("claude plugin %q: its leader %q was skipped, so the squad %q is not offered", cp.plugin.Name, sq.Leader, sq.Name)
+				continue
+			}
+			c := *sq
+			c.Members = nil
+			for _, m := range sq.Members {
+				if produced[m] {
+					c.Members = append(c.Members, m)
+				}
+			}
+			res.squads = append(res.squads, c)
+			res.squadPlugin[strings.ToLower(c.Name)] = cp.plugin.Name
+		}
+	}
+	paths.SetPluginSkillDirs(skillDirs)
+	return res
+}
+
+// mergePluginSquads adds the plugin squads to the authored ones. A plugin squad
+// whose name an authored squad already has fills that squad's empty
+// leader/members/description and leaves everything it sets alone; any other is
+// appended. The authored slice is not modified.
+func mergePluginSquads(authored, plugin []SquadEntry) []SquadEntry {
+	if len(plugin) == 0 {
+		return authored
+	}
+	out := append([]SquadEntry(nil), authored...)
+	for _, ps := range plugin {
+		merged := false
+		for i := range out {
+			if strings.ToLower(strings.TrimSpace(out[i].Name)) != strings.ToLower(ps.Name) {
+				continue
+			}
+			if strings.TrimSpace(out[i].Leader) == "" {
+				out[i].Leader = ps.Leader
+			}
+			if len(out[i].Members) == 0 {
+				out[i].Members = ps.Members
+			}
+			if strings.TrimSpace(out[i].Description) == "" {
+				out[i].Description = ps.Description
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			out = append(out, ps)
+		}
+	}
+	return out
+}
+
 // applyInstructionFrontmatter overlays frontmatter values onto an AgentEntry.
 // The model field is intentionally treated as a recommendation only — the
 // frontmatter never silently rewires which provider/model the runtime targets.
@@ -1121,6 +1317,22 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		}
 	}
 
+	// Claude Code plugins: their agents join whatever the agents list resolved
+	// to, and their squads join cfg.Squads before squads are resolved.
+	plugins := loadClaudePlugins(&out, cfg, modelsCfg)
+	if len(plugins.agents) > 0 {
+		pluginResolved, err := resolveAgentEntries(plugins.agents, out.Models)
+		if err != nil {
+			return RuntimeSettings{}, err
+		}
+		for i := range pluginResolved {
+			pluginResolved[i].Plugin = plugins.owner[pluginResolved[i].Name]
+			pluginResolved[i].PluginType = plugins.typ[pluginResolved[i].Name]
+		}
+		out.Agents = append(out.Agents, pluginResolved...)
+	}
+	cfg.Squads = mergePluginSquads(cfg.Squads, plugins.squads)
+
 	// ENV
 	if v, ok := parseBoolEnv("OMNIS_CURATOR_ENABLED"); ok {
 		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
@@ -1206,6 +1418,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out.Squads, err = resolveSquadEntries(cfg.Squads, out.Agents)
 	if err != nil {
 		return RuntimeSettings{}, err
+	}
+	for i := range out.Squads {
+		out.Squads[i].Plugin = plugins.squadPlugin[out.Squads[i].Name]
 	}
 	out.Squads, err = ensureDefaultSquad(out.Squads, out.Agents)
 	if err != nil {
