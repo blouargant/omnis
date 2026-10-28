@@ -1144,6 +1144,7 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		infra.Close()
 		return nil, err
 	}
+	infra.installPluginHooks(inst)
 	return assembleAgentResult(infra, inst), nil
 }
 

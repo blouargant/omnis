@@ -45,6 +45,7 @@ func NewManager(infra *Infrastructure, first *Instance) *Manager {
 	if first == nil {
 		return nil
 	}
+	infra.installPluginHooks(first)
 	return &Manager{
 		infra:      infra,
 		currentGen: first.Generation,
@@ -342,6 +343,9 @@ func (m *Manager) Reload(ctx context.Context, opts Options) (*Instance, error) {
 
 	m.instances[nextGen] = &managedInstance{inst: inst}
 	m.currentGen = nextGen
+	// Only now — the generation is live — do the plugin hook layers follow it.
+	// Under m.mu, so two installs apply their layers in promotion order.
+	m.infra.installPluginHooks(inst)
 	// Retire every generation BELOW the new current that has no pinned sessions.
 	// A full sweep (not just the immediately-previous generation) so out-of-order
 	// reload completion can't strand an idle intermediate generation in the map,
