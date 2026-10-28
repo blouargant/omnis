@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,10 +113,13 @@ func (q *Queue) Start(label, command string, timeout time.Duration, env ...strin
 			q.finish(t, "blocked", fmt.Sprintf("command blocked by safety floor (%q)", b))
 			return
 		}
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		// Own process group: a stop (or the timeout) kills the command's
+		// children too, instead of waiting on whatever still holds its output.
+		cmd := tools.NewShellCommand(ctx, command)
 		if len(env) > 0 {
 			cmd.Env = append(os.Environ(), env...)
 		}
+		cmd.WaitDelay = 5 * time.Second
 		out, err := cmd.CombinedOutput()
 		status := "completed"
 		switch {

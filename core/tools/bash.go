@@ -342,6 +342,14 @@ type BashOut struct {
 
 // RunBash executes a shell command via /bin/sh -c, with a default 120s
 // timeout. Output is truncated at MaxToolOutput.
+
+// NewShellCommand runs command through the shell in its own process group, so
+// cancelling ctx kills the shell and everything it started (see bash_unix.go /
+// bash_windows.go). For the background queue's commands and monitors, whose
+// children would otherwise outlive a stop and keep its output pipe open.
+func NewShellCommand(ctx context.Context, command string) *exec.Cmd {
+	return newShellCommand(ctx, command)
+}
 func RunBash(ctx context.Context, in BashIn) (string, error) {
 	if b, blocked := SafetyFloorBlock(in.Command); blocked {
 		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), nil

@@ -4154,6 +4154,25 @@ mount via the **`bg` tool group** ([agent/squad.go](agent/squad.go)
   queue) but only fires the `task_notification` toast; the result stays readable
   via `bg_output`. The toggle is read once in [server/main.go](server/main.go)
   and passed to `newPushManager` as `activeWake`.
+- **Background tasks card** (environment panel). `GET /api/sessions/:id/tasks`
+  lists the session's tasks (`Queue.ListTasks`, newest first), `POST
+  …/tasks/:tid/cancel` stops one, `GET …/tasks/:tid/output` reads its buffered
+  output ([server/bg_tasks.go](server/bg_tasks.go); the queue is looked up by
+  `(meta.UserID, id)`, the key the agent's own tools and the watcher use — a
+  sub-agent's launches land in its ephemeral session's queue and are not listed).
+  The card (`envTaskRow` in [web/app.js](web/app.js)) shows running tasks with
+  their elapsed time and a stop button, finished ones folded under "Finished: N";
+  a click shows a task's last 40 output lines. It refreshes on a
+  `bash_background`/`monitor`/`bg_cancel` tool result, on `task_notification`,
+  and every 15 s while a task runs and the panel is open.
+- **Stopping kills the whole command.** Commands and monitors run through
+  `tools.NewShellCommand` (the Bash tool's shell: its own process group, the
+  group killed on cancel) with a 5 s `WaitDelay`. They used to run under a plain
+  `exec.CommandContext("/bin/sh", "-c", …)`, which killed only the shell: a
+  command with a child (`sleep 30; echo done`, a `tail -f` under the shell) kept
+  the output pipe open, so a stopped task stayed "running" until the child
+  exited, and a stopped monitor left its child behind. Pinned by
+  `TestCancelStopsTheCommandsChildren` and `TestSessionTaskRoutes`.
 - **Web UI.** [web/app.js](web/app.js) `subscribeGlobalEvents` handles
   `task_notification`: it appends any injected turn (active mode) and calls
   `notifyTaskEvent` → an in-app toast (`#task-toast-layer`,
@@ -6542,7 +6561,8 @@ Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 (`GET …/produced`; files a `Write` CREATED — `WriteOut.Created`, recorded in
 `ConversationFile.Produced`, `produced_changed` event), Modifications (`GET …/git`,
 [server/git_status.go](server/git_status.go), 5 s timeout, untracked files
-included) and Fichiers (the old Files browser, `#folders-panel` re-parented; its
+included), Background tasks (the session's `bash_background` / `monitor` tasks,
+Claude Desktop style — see "Background task notifications") and Fichiers (the old Files browser, `#folders-panel` re-parented; its
 `collapsed` class follows the card; **folded by default**, `defaultOpen: false`).
 While it is folded the listing is not loaded, so `syncEnvFolder` fetches the
 folder endpoint just for its `dir` (once per session, forced by

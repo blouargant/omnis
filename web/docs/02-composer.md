@@ -141,7 +141,9 @@ nothing highlighted runs the command.
 The panel on the right (toggle it with the panel button in the tab bar) lists
 everything around the conversation: squad, working folder and git branch,
 context use (with **Compress now**), loaded skills, MCP connectors, files the
-agent created (with a download button), git changes, and the file browser.
+agent created (with a download button), git changes, the agent's **background
+tasks** (running ones with their time and a stop button, finished ones under
+"Finished"; click one to see its output), and the file browser.
 Tool calls appear in the chat as one grey line ("Ran 1 command, used 2 tools");
 click it to see each call, and click a call to see its arguments and result.
 
