@@ -1,0 +1,17 @@
+{
+  "description": "Records every Bash/Read/MultiEdit call the demo agents make",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/record.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

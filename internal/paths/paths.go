@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
@@ -122,6 +123,36 @@ func agentSkillsDir() string {
 		return strings.TrimSpace(v)
 	}
 	return AgentSkillsDir
+}
+
+// ClaudePluginsDir returns the directory under the shared Agent-Skills registry
+// where Claude Code plugins are installed (<agent-skills dir>/claude, e.g.
+// /etc/agentskills/claude, where iapcli installs its "iaparc" plugin). It is ""
+// when the Agent-Skills layer is disabled (OMNIS_AGENTSKILLS_DIR set empty).
+func ClaudePluginsDir() string {
+	as := agentSkillsDir()
+	if as == "" {
+		return ""
+	}
+	return filepath.Join(as, "claude")
+}
+
+// pluginSkillDirs are the skills/ directories of the loaded Claude Code
+// plugins. They are discovered at runtime (not derivable from the environment),
+// so the agent layer registers them here for SkillsAllSearchDirs to include.
+var (
+	pluginSkillMu   sync.RWMutex
+	pluginSkillDirs []string
+)
+
+// SetPluginSkillDirs records the skills/ directories contributed by Claude Code
+// plugins. SkillsAllSearchDirs appends them after the shared Agent-Skills
+// registry's skills/ — the lowest precedence of all. The slice is copied, and
+// passing nil clears the list. Process-wide.
+func SetPluginSkillDirs(dirs []string) {
+	pluginSkillMu.Lock()
+	defer pluginSkillMu.Unlock()
+	pluginSkillDirs = append([]string(nil), dirs...)
 }
 
 // LocalDirNames returns the candidate local-dir names in precedence order.
@@ -317,7 +348,8 @@ func SchedulesPath() string { return filepath.Join(Home(), "schedules.json") }
 // definitions, across all layers and both the hand-crafted (skills/) and
 // registry-installed (registry/skills/) sub-paths. Directories are ordered
 // by descending precedence; callers that deduplicate by skill name should
-// process them in order so the first occurrence wins.
+// process them in order so the first occurrence wins. Claude Code plugin skill
+// directories (SetPluginSkillDirs) come last.
 func SkillsAllSearchDirs() []string {
 	var out []string
 	for _, base := range LocalDirs() {
@@ -336,6 +368,9 @@ func SkillsAllSearchDirs() []string {
 	if as := agentSkillsDir(); as != "" {
 		out = append(out, filepath.Join(as, "skills"))
 	}
+	pluginSkillMu.RLock()
+	out = append(out, pluginSkillDirs...)
+	pluginSkillMu.RUnlock()
 	return out
 }
 
