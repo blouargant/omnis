@@ -19,6 +19,7 @@
 
 ## 2.1 (in development) — Collection tree and settings dialog
 
+- **Claude Code plugins** — omnis runs the agents, skills and guard of Claude Code plugins installed under /etc/agentskills/claude (e.g. iapcli's IA Parc squad), and lets you turn each plugin off in Settings.
 - **Collection tree** — the middle column is gone: each collection is a foldable group in the sidebar listing its own chats, with ＋ to start a chat in it and its menu on hover; search, sort and bulk select live in the sidebar too.
 - **Choose the collection of a new chat** — New Chat opens a draft where you pick the collection (and squad) before sending.
 - **Claude-style look** — a calmer cream and terracotta design (light, plus a new Terracotta Dark theme), a centred chat column with unframed answers, and a single rounded composer whose ＋ menu holds attachments, context, the Enter mode and slash commands; one round button sends, stops or steers.

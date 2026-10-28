@@ -1,0 +1,26 @@
+{
+  "name": "demo-marketplace",
+  "owner": {
+    "name": "omnis tests"
+  },
+  "plugins": [
+    {
+      "name": "demo",
+      "source": "./demo",
+      "description": "A demo plugin used by the omnis plugin tests"
+    },
+    {
+      "name": "escape",
+      "source": "../outside",
+      "description": "Resolves outside the marketplace root: must be refused"
+    },
+    {
+      "name": "remote",
+      "source": {
+        "source": "github",
+        "repo": "x/y"
+      },
+      "description": "Not a local path: must be skipped"
+    }
+  ]
+}

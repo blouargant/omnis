@@ -1050,6 +1050,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
 | `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` + `memory.md` (`$OMNIS_HOME/collections/<name>/`) into a `<collection-context>` block with a per-name mtime cache; `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`. Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on **every** squad root (the router included, under a routing-scoped framing — see "Collection context") per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
+| `internal/claudeplugins/` | Discovers **Claude Code plugins** under `<AgentSkillsDir>/claude/` (marketplace.json → `plugin.json`, `agents/*.md`, `skills/`, `hooks/hooks.json`); read-only, a broken plugin is a warning. Conversion to omnis agents/squad/hook layers lives in [agent/claude_plugins.go](agent/claude_plugins.go). See "Claude Code plugins" |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
 | `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
@@ -1991,6 +1992,9 @@ not substitute for a review.
   validation but is never read by `hookToolCallbacks`' `beforeTool` on the
   Proceed path, and the permission ask's reason text comes only from the
   matched permission rule, with no channel from the hooks `Outcome` at all.
+  (A hook `allow` is now honoured as a per-call clearance over the default ask —
+  see "Claude Code plugins" — but that skips the card; it does not enrich it, so
+  the diff-not-on-the-card statement above still holds.)
 - `k8s_validator` carries **no `max_tool_calls`** initially — its cost is
   quadratic in tool calls like any sub-agent's (it accumulates cluster JSON,
   re-sent on each step of its own flow loop), but a cap that fires on honest
@@ -2017,6 +2021,245 @@ Go test that pipes real JSON into the **shipped script as-is** (skipped when
 `python3` is absent), so it runs inside `make test` rather than a separate
 pytest suite. [packaging/hooks_assets_test.go](packaging/hooks_assets_test.go)
 guards the packaging side (see "Distribution / packaging").
+
+### Claude Code plugins (`/etc/agentskills/claude/`)
+
+omnis loads **Claude Code plugins** that an Agent-Skills tool (iapcli installs the
+IA Parc one) drops under `<paths.AgentSkillsDir>/claude/` — `/etc/agentskills/claude`
+by default, so `OMNIS_AGENTSKILLS_DIR` relocates or disables it with the rest of that
+layer. A plugin's agents, skills and hooks become ordinary omnis agents, skills and
+hooks; **no plugin-specific runtime exists** — the conversion produces the same
+`AgentEntry`/`SquadEntry` values the rest of the build already understands. Design:
+[docs/superpowers/specs/2026-10-28-claude-code-plugins-design.md](docs/superpowers/specs/2026-10-28-claude-code-plugins-design.md).
+Absent root ⇒ byte-identical no-op.
+
+**Discovery** ([internal/claudeplugins/](internal/claudeplugins/) `Discover`) reads
+`<root>/.claude-plugin/marketplace.json` and loads every entry whose `source` is a
+relative path resolving **inside** the root (symlinks resolved, `..` refused);
+each plugin supplies `.claude-plugin/plugin.json` (name/version/description),
+`agents/*.md` (Claude agent markdown, parsed by `internal/claudeformat`),
+`skills/<name>/SKILL.md` and `hooks/hooks.json`. Plugin names must match
+`^[a-z0-9][a-z0-9-]{0,63}$` (they become a namespace and a path segment);
+duplicates keep the first. It only reads: anything unreadable becomes a warning
+and that plugin/agent is skipped, never a failure.
+
+**Conversion** ([agent/claude_plugins.go](agent/claude_plugins.go)
+`convertPlugin`, pure functions of their inputs):
+- **Name**: agent `prod-support` of plugin `iaparc` is the omnis agent
+  `iaparc_prod_support` (`pluginAgentName`: lower-cased, `-`→`_`); a name that
+  does not match `^[a-z0-9][a-z0-9_]{0,63}$`, or collides with another agent of
+  the same plugin, is skipped (first by name wins) with a log line. So is a name
+  equal to an **omnis tool name** (`isOmnisToolName`: the explicit
+  `omnisUnderscoreTools` list — `lsp_hover`, `ast_grep_search`, `todo_write`, … —
+  plus the `a2a_`/`mcp__` families): a sub-agent is mounted as a tool named after
+  it, so an agent holding both would fail the squad build with ADK's duplicate-tool
+  error. There is no runtime tool-name registry at resolution time, so **a new
+  underscored tool must be added to that list**. The qualified
+  Claude name (`iaparc:prod-support`) is kept as the agent's *type*
+  (`PluginAgentType`).
+- **Tools**: only the Claude tools omnis has an equivalent of survive —
+  `Bash`/`Read`/`Grep`/`Glob`/`Write`/`Edit`/`MultiEdit` — plus `Skill`, which every
+  plugin agent gets. No `tools` field = Claude's "inherit everything" = every file
+  tool. `Agent`, `AskUserQuestion` and `SendMessage` are handled structurally (below)
+  and dropped silently; any other name is dropped with a log line.
+- **Skills**: an agent's own `skills:` list, else every skill of the plugin.
+- **Model**: the `model:` alias goes through the alias table — built-in
+  `haiku→hosted, sonnet→high, opus→premium` — overridden entry by entry by
+  **`claude_model_map`** in `models.json` (`ModelsConfig.ClaudeModelMap`, so it is
+  editable like the rest of the catalogue). `inherit`/absent ⇒ no `model_ref`, so
+  the agent inherits its leader's model. A value that is itself a catalogue ref is
+  used as is; an alias whose target is not in the catalogue, or an unknown value,
+  also falls back to inheriting (logged) — a dangling `model_ref` would fail the
+  whole config.
+- **Squad**: when at least one agent holds the Agent tool (`Agent` or
+  `Agent(...)`), the plugin gets a squad named after it. The leader is the sole
+  holder, else `lead` when several hold it, else the first by name (logged); every
+  other agent is a member. No Agent-tool holder ⇒ agents exist but no squad. A
+  plugin named like an authored squad (`system`, `coding`, `helper`, …) is
+  **folded into** it (`mergePluginSquads`: it only fills the authored squad's empty
+  leader/members/description), with a log line.
+  Entries are marked `leader: true/false`, `builtin: false` and carry an explicit
+  `allow_file_attachments: false` — explicit so that the Settings editor's echo of
+  those defaults diffs to nothing and an untouched save **forks nothing** into the
+  user layer.
+- **Instruction + translation note**: the agent body (with `${CLAUDE_PLUGIN_ROOT}`
+  expanded to the plugin dir) followed by an English "Running inside omnis" block:
+  the plugin's agents are tools named `<plugin>:<agent>` → `<plugin>_<agent>`;
+  calling an agent with the Agent tool means calling its tool; **`SendMessage` to
+  an agent means calling the same agent again with `resume_session` set to the
+  `session` handle its previous call returned** (the resumable-session mechanism —
+  see "Durable / re-attachable sub-agent sessions"); agents of *other* plugins
+  mentioned in the bodies (`foreignPluginAgents`) are unavailable and the model
+  should tell the user rather than call them. A Claude agent is written against
+  Claude's tool set; this note is what stops the model calling tools that do not
+  exist.
+- **Ignored on purpose**: agent-scoped frontmatter `hooks`, plugin `commands/`,
+  MCP and LSP declarations, output styles, and `maxTurns`.
+
+**Resolution** (`ResolveRuntimeSettings`, [agent/runtime_config.go](agent/runtime_config.go)).
+The converted agents and squad are merged into the **base** config *below* every
+layer, so a user overlay (Settings edits, a `model_ref` change, disabling an
+agent) wins field by field exactly as for any shipped agent. Ordering rules:
+- **Collisions are decided first**: an omnis agent keeps its name; the plugin agent
+  is dropped and is *not* reported as a plugin agent, so `IsPluginAgent` and the UI
+  never claim it.
+- **The plugin squad is built from the merged entries**: a user overlay disabling a
+  member removes it from the squad; disabling (or demoting from leader) the
+  **leader drops the squad** with a log line. **Resolution never fails because of a
+  plugin.** `synthesizeDefaultSquad` does not absorb plugin agents into `system`.
+- **Published once**: the plugin catalogue (`ClaudePlugins()`, `IsPluginAgent`,
+  `PluginAgentType`) and the plugin skill directories are computed during the
+  resolution and published **atomically at the end of a successful one** — a
+  failing resolution leaves the previous state untouched. Plugin skill dirs join
+  the skill search chain below `/etc/omnis/registry/skills` (only for enabled
+  plugins).
+- **`disabled_plugins`** (`agents.json`, a list of plugin names) switches a plugin
+  off: its agents, squad, skills and hooks are not loaded at all. It merges across
+  layers like any list, so a lower layer's disable is **undone** from a higher one
+  by writing `disabled_plugins: []` (see `/api/plugins` below).
+- `PluginInfo` (name, version, description, dir, enabled, agents, skills, hooks) is
+  what the surfaces list; disabled plugins are included, sorted by name.
+
+**Plugin hooks** (`internal/hooks`, [internal/hooks/plugin.go](internal/hooks/plugin.go),
+[internal/hooks/reloader.go](internal/hooks/reloader.go)). A plugin's `hooks/hooks.json`
+is loaded as a **`PluginLayer`** (`{Name, Root, Path}`) that the Reloader merges
+additively with the file layers; every matcher from it is tagged with a
+`PluginRef`. Tagged matchers follow **Claude Code semantics**, not omnis's:
+- **Tool aliases**: the matcher is tested against the *Claude* name of the tool
+  (`claudeToolName`: `bash_background` and `monitor` are `Bash`), and the hook's
+  stdin carries the Claude-shaped input; a plugin hook written for `Bash` therefore
+  also fires for the background shell tools.
+- **`MultiEdit` split**: omnis's multi-file `MultiEdit` becomes **one `Edit`-like
+  input per file** (`{file_path, edits}`) and the command runs once per input, since
+  a Claude hook script expects a single `file_path`. **All runs must allow**: a
+  split command contributes `allow` only when **every** one of its per-file runs
+  answered allow — an allow for file A with silence for file B is just "proceed",
+  so the default prompt still covers B (`Config.Run`'s per-command groups;
+  `applyJSONOutput` only *reports* an allow vote). Deny/ask/block from any run
+  aggregate as usual (Block > Ask > Allow > Proceed).
+- **Matchers are unanchored regexes** (omnis's own matcher semantics), whereas
+  Claude Code matches a plain string exactly: a plugin matcher `Edit` also fires
+  for `MultiEdit`. Harmless for the usual guard patterns, but a plugin author
+  relying on exact matching gets more calls than in Claude Code.
+- **`${CLAUDE_PLUGIN_ROOT}`** is expanded in the command and exported as the
+  `CLAUDE_PLUGIN_ROOT` environment variable.
+- **`agent_type`**: the hook input carries the calling agent's qualified Claude type
+  (`iaparc:prod-support`, from `PluginAgentType`) so a hook can scope itself to one
+  agent.
+- **Never `fail_closed`**: stripped when tagging, so a plugin script that fails,
+  times out or is missing proceeds (Claude's default). The omnis-native
+  `fail_closed` guarantee stays reserved for config the operator authored.
+- **Reload hygiene**: reloads are serialised (`reloadMu`) so a stale mtime-poll
+  cannot resurrect a removed plugin's hooks after `SetPluginLayers`; an unparseable
+  plugin `hooks.json` is logged and skipped; `SetPluginLayers` is a no-op when the
+  set is unchanged.
+- **Layers switch at install, not during the build.** `Infrastructure.Hooks(runtime)`
+  only returns the memoised engine; `installPluginHooks(inst)` applies the layers
+  of the generation that just became current — from `NewManager` (boot: server,
+  CLI, TUI), `Manager.Reload` after promotion (under `m.mu`, so concurrent installs
+  apply in promotion order) and `NewAgent`. A reload whose build fails, or that a
+  newer reload supersedes, leaves the previous layers in place
+  ([agent/plugin_hook_install_test.go](agent/plugin_hook_install_test.go)). The
+  engine is process-wide, so **sessions still draining on an older generation see
+  the new layers**: after a reload that disables a plugin, such a session keeps
+  running that plugin's agents (its generation still holds them) but its guard
+  hooks are gone, so their calls fall back to the plain permission rules; after a
+  reload that enables one, the hooks apply to older-generation sessions' calls too.
+- **Latency**: the IA Parc guard's matcher (`Bash|Read|Grep|Glob|Write|Edit|MultiEdit`,
+  typical of plugin guards) matches almost **every tool call of every agent in the
+  fleet**, not only the plugin's own agents (`Config.Match` matches the tool name,
+  never the caller), so each such call pays one guard process start
+  (`iapcli agent guard`, a Go binary — a few ms) before it decides it has nothing
+  to say — the same routine tax
+  as the k8s validation hook's Python start on every `Bash` call.
+
+**Hook clearances — `allow` finally means something, narrowly**
+([core/permissions/clearance.go](core/permissions/clearance.go),
+[agent/hooks_plugin.go](agent/hooks_plugin.go)). A plugin guard (the IA Parc
+`guard.sh` pattern) answers `permissionDecision: "allow"` for a command it has
+checked and `"ask"`/`"deny"` otherwise. A `PreToolUse` hook's `allow` — **or a
+user-approved `ask` escalation** — is recorded as a **clearance** on `Infrastructure`'s store, and the permission gate consumes it:
+- **Key is 4-part**: `Grant/Take(sessionID, invocationID, callID, toolName)`. The
+  hook side grants with `(realSessionID(tc), tc.InvocationID(), tc.FunctionCallID(),
+  t.Name())` — the **un-normalised** tool name — and the gate takes with the same
+  tuple, so a clearance can only ever cover the exact call the hook inspected,
+  never a sibling call in the same response or another invocation. The gate's
+  `SessionFunc` is now `realSessionID`, which gained the
+  `events.RootSessionFromContext` fallback, so a sub-agent in an injected
+  (mailbox/background/scheduled) turn keys correctly on both sides.
+- **Expiry and consumption**: a clearance expires after **10 minutes** and is
+  **consumed exactly once, at the top of the gate callback** — even when the call
+  then hits the approval cache or is denied — so a granted-but-unused clearance
+  cannot leak into a later call.
+- **Only over the default ask**: a clearance turns **only a mode-default ask** (no
+  rule matched and the mode is not `plan` — `Verdict.DefaultAsk`) into allow. An
+  explicit `ask` rule still prompts, a `deny` still blocks, `plan` mode ignores
+  clearances, and the Bash safety floor is untouched. So a hook can lift the
+  *generic* "unmatched call → ask" friction for a command it vouches for, and can
+  never weaken anything the operator wrote down.
+- **Split MultiEdit**: a clearance is only granted when the outcome is
+  `DecisionAllow`, which for a split plugin MultiEdit requires every file to have
+  been allowed (see "Plugin hooks" above), so a partial allow never clears the
+  other files.
+- **Same-plugin delegation**: `PluginConfig.DefaultAllow` is
+  `samePluginDelegation(runtime)` — a plugin's leader calling a member of **its own
+  plugin** needs no card — again only over the default ask; an `Agent(<name>)`
+  deny/ask rule still wins.
+
+**Confirmations** in a plugin squad come from two places and both are kept: the
+**lead agent asks the user** in words (its Claude-written instruction does, via the
+always-on ask tool) and the **guard's own card** still shows the exact command
+before it runs. `hooks.DecisionAllow` is therefore no longer dead code; see the
+"Before-tool chain order" bullet under the permissions section.
+
+**Settings round trip** ([server/plugins.go](server/plugins.go),
+[server/config.go](server/config.go), [web/settings.js](web/settings.js)):
+- `GET /api/plugins` → `{plugins: [PluginInfo…]}` (resolves and republishes plugin state, so a
+  freshly installed plugin shows up without a reload — outside a reload, hence the
+  known limit below). `PUT /api/plugins/:name {enabled}` writes
+  `disabled_plugins` through the layer-aware delta writer, reloads, and answers
+  `{plugins: [PluginInfo…], reloaded, reload_error?}` (no `ok` field); unknown plugin ⇒ **404**; a write that cannot be
+  verified (re-read does not reflect the change) ⇒ **500**. **Re-enabling a plugin
+  that a *lower* layer disabled writes `disabled_plugins: []`** into the target
+  layer rather than just dropping the name (a delta against the lower layer would
+  otherwise be empty and change nothing).
+- The **parsed-agent GET** marks plugin agents (`plugin: "<name>"`). The **PUT never
+  lists plugin agents in the `agents` name list** (they are not user-declared) but
+  **keeps their overlays out of the orphan sweep** — including those of *disabled*
+  plugins, so re-enabling later does not lose the user's edits. Editing a plugin
+  agent in Settings therefore writes a normal overlay (`model_ref`, instruction,
+  tools…) into the user layer; it keeps tracking the plugin for untouched fields.
+- Web: plugin agents are grouped per plugin (groups sorted by name) with a
+  **`plugin` badge**, **no delete control**, and a **Plugins** block with an
+  enable/disable toggle (a confirm precedes it when it would discard unsaved
+  Agents-form edits; `reload_error` is surfaced). User docs:
+  [web/docs/23-plugins.md](web/docs/23-plugins.md).
+- Test hygiene: the `server` and `agent` test packages have a `TestMain` that
+  blanks `OMNIS_AGENTSKILLS_DIR`, so a developer's real `/etc/agentskills` plugins
+  never leak into unit tests.
+
+**Known limits (state honestly, do not paper over):**
+- **A lost specialist session falls back to a fresh specialist that will run a
+  command "confirmed by the user".** A plugin lead confirms with the user, then
+  re-calls the specialist with `resume_session`; if that resumable session expired
+  (30-min idle TTL / 32-session LRU) or a reload/restart dropped it, the call starts
+  a *fresh* specialist that has no memory of the confirmation but is told the user
+  confirmed. The guard's own card still shows the exact command before it runs, so
+  nothing executes unseen — but the lead's confirmation step is not binding on the
+  specialist.
+- **Plugin skill folders are trusted like `/etc/omnis`.** Plugin skill dirs are in
+  `SkillsAllSearchDirs`, so a `permissions.json` inside a plugin's skill folder is
+  picked up by the skill-overlay permission scan exactly like a shipped skill's.
+  The plugin tree is root-owned (installed by an admin tool), so this is the same
+  trust as the system layer — but it does mean installing a plugin can add
+  permission rules.
+- **Draining sessions after a plugin is disabled** keep its agents but lose its
+  hooks (see "Layers switch at install" above).
+- **`GET /api/plugins` and the parsed-agent GET resolve and republish plugin state
+  outside a reload**, so what Settings shows can briefly lead what running
+  sessions use until the next reload.
+- Agent-scoped frontmatter hooks, plugin commands / MCP / LSP / output styles and
+  `maxTurns` are ignored (see Conversion).
 
 ### Configuration files
 
@@ -2203,6 +2446,8 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `registry/skills/<name>/SKILL.md` | Authored skill playbooks (YAML front matter: name, description) |
 | `mcp_config.json` | MCP server definitions (name, command, args, env) |
 | `a2a_config.json` | Remote A2A agent endpoints; each entry becomes an `a2a_<name>` tool on the leader |
+| `claude_model_map` (in `models.json`) | Overrides, alias by alias, which catalogue model a Claude Code plugin agent's `model:` alias (`haiku`/`sonnet`/`opus`) stands for; built-in `haiku→hosted, sonnet→high, opus→premium`. See "Claude Code plugins" |
+| `disabled_plugins` (in `agents.json`) | Names of installed Claude Code plugins that are switched off (agents, squad, skills, hooks not loaded). Toggled from Settings → Agents → Plugins (`PUT /api/plugins/:name`) |
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
@@ -2479,6 +2724,8 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   (`paths.AgentSkillsDir`, `OMNIS_AGENTSKILLS_DIR`) — a `/etc/omnis/registry`-shaped
   root (`agents/` + `skills/` subdirs) shared with other Agent-Skills tools. See
   the "Shared Agent-Skills registry" note above.
+  It also holds **Claude Code plugins** under `claude/` (read by
+  `internal/claudeplugins`, not a registry dir) — see "Claude Code plugins".
 
   Override the chain via `OMNIS_CONFIG_DIRS` (colon-separated; replaces
   the chain wholesale).
@@ -2772,17 +3019,18 @@ been shown and approved — on three failed validation attempts the user clicked
 "allow" three times for a call that was then refused anyway, which trains
 reflexive approval and degrades the permission layer, the only protection that
 predates this work. Budget stays last, unchanged, so a call a hook or the user
-refuses is still never charged. **This does NOT revive `hookSpecificOutput.
-permissionDecision: "allow"`** — that value is still dead code: nothing in
-`agent/` consumes `hooks.DecisionAllow` (`hookToolCallbacks` returns non-nil
-only on `out.Blocked()`, or on `out.Asks()` when the user declines the
-escalation, and a `nil` return — proceed, or an `Asks()` the user approved —
-is not a signal the permission gate has any way to read as "skip me").
-Honouring `"allow"` would
-need the hook callback to also tell the gate to skip — e.g. by seeding its
-approval cache — which nothing does. The reorder is a *precondition* for that
-feature, not the feature itself; it stays a known remaining gap. A validation
-success therefore still shows the permission card, unchanged. **The design
+refuses is still never charged. **`hookSpecificOutput.permissionDecision: "allow"` is now consumed, but only
+as a per-call clearance over the default ask** (see "Claude Code plugins" →
+"Hook clearances"): `hookToolCallbacks` grants a clearance keyed
+`(session, invocation, call id, tool name)` on a hook `allow` or a user-approved `ask` escalation, and the permission
+gate takes it once at the top of its callback and turns a **mode-default ask**
+(no rule matched, mode not `plan`) into allow. An `ask` rule still prompts, a
+`deny` still blocks, plan mode ignores it, and the clearance expires after 10
+minutes. The shipped Kubernetes hook never answers `allow` (it `proceed`s); its approved
+escalations do now grant a clearance, but its `kubectl …` mutations match explicit
+`ask` rules (so `DefaultAsk` is false) and the permission card therefore still
+appears, unchanged — the reorder
+was a precondition for clearances, and plugin guards are what use them. **The design
 intent for this reorder was that the card would additionally carry the hook's
 diff** (the Kubernetes hook's successful-validation `systemMessage`) **— verify
 this before repeating it**: `hookToolCallbacks`' `beforeTool`

@@ -50,7 +50,8 @@ type AgentDef struct {
 	Name        string
 	Description string
 	Tools       []string
-	Model       string
+	Model       string // normalized model id; "" for inherit/unset
+	ModelAlias  string // the raw `model` value as written, trimmed ("haiku", "inherit")
 	Skills      []string
 	MCPServers  []string
 	Instruction string
@@ -127,6 +128,7 @@ func ParseMarkdown(content []byte) (*AgentDef, error) {
 		Description: fm.Description,
 		Tools:       fm.Tools,
 		Model:       normalizeModel(fm.Model),
+		ModelAlias:  strings.TrimSpace(fm.Model),
 		Skills:      fm.Skills,
 		MCPServers:  fm.MCPServers,
 		Instruction: strings.TrimRight(body, "\n"),
@@ -197,6 +199,7 @@ func parseJSONObject(name string, data []byte) (*AgentDef, error) {
 		Description: obj.Description,
 		Tools:       obj.Tools,
 		Model:       normalizeModel(obj.Model),
+		ModelAlias:  strings.TrimSpace(obj.Model),
 		Skills:      obj.Skills,
 		MCPServers:  obj.MCPServers,
 		Instruction: obj.Prompt,

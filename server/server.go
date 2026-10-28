@@ -995,6 +995,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 
 	registerConfigRoutes(auth, d.ConfigFiles, d.Restart, d.Manager, d.AgentOptions)
+	registerPluginRoutes(auth, d.Manager, d.AgentOptions)
 	if d.Updates != nil {
 		registerUpdateRoutes(auth, d.Updates, d.Version)
 	}

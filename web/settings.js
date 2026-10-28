@@ -91,6 +91,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "agent-md",        file: "21-agent-md.md",        label: "Project Memory (AGENT.md)", group: "Core Concepts" },
     { id: "permissions-concept", file: "13-permissions.md", label: "Permissions",     group: "Core Concepts" },
     { id: "hooks-concept",   file: "22-hooks.md",           label: "Lifecycle Hooks", group: "Core Concepts" },
+    { id: "plugins-concept", file: "23-plugins.md",        label: "Claude Code Plugins", group: "Core Concepts" },
     { id: "config",          file: "14-config.md",          label: "Configuration & Filesystem", group: "Core Concepts" },
     { id: "providers",       file: "15-providers.md",       label: "Providers & Models", group: "Core Concepts" },
     { id: "env-vars",        file: "16-env-vars.md",        label: "Environment Variables", group: "Core Concepts" },
@@ -1946,6 +1947,7 @@ const BASE_PATH = window.BASE_PATH || "";
       renderAgentRemotesTab(d, host);
     } else {
       host.innerHTML = `
+        <div class="plugins-block" id="plugins-block" hidden></div>
         <div class="agent-split-layout agent-master-detail">
           <div class="agent-fleet-panel">
             <div class="agent-fleet-header">
@@ -1988,8 +1990,86 @@ const BASE_PATH = window.BASE_PATH || "";
         }
       });
       renderAgentAgents(d);
+      renderPluginsBlock();
     }
     updateFooter();
+  }
+
+  // renderPluginsBlock fills the Plugins card above the agents list: one row
+  // per Claude Code plugin discovered under /etc/agentskills/claude, each with
+  // an enable toggle. Hidden when there are none. A toggle persists
+  // immediately (PUT /api/plugins/:name), then re-fetches the agent section so
+  // the plugin's agents appear/disappear.
+  async function renderPluginsBlock() {
+    const box = bodyEl.querySelector("#plugins-block");
+    if (!box) return;
+    let plugins = [];
+    try {
+      const r = await fetch(BASE_PATH + "/api/plugins", { headers: authHeaders() });
+      if (r.ok) plugins = (await r.json()).plugins || [];
+    } catch (_) { /* no plugins block */ }
+    if (!bodyEl.contains(box)) return; // the panel was re-rendered meanwhile
+    if (!plugins.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    box.innerHTML = `<div class="plugins-block-title">${escHtml(tr("set.plugins.title"))}</div>`;
+    plugins.forEach(p => {
+      const n = (p.agents || []).length;
+      const row = document.createElement("div");
+      row.className = "plugins-row" + (p.enabled ? "" : " is-disabled");
+      row.innerHTML = `
+        <div class="plugins-row-main">
+          <div class="plugins-row-head"><span class="plugins-row-name">${escHtml(p.name)}</span>
+            ${p.version ? `<span class="plugins-row-version">${escHtml(p.version)}</span>` : ""}
+            <span class="plugins-row-count">${escHtml(trN("set.plugins.agentsCount", n))}</span></div>
+          ${p.description ? `<div class="plugins-row-desc">${escHtml(p.description)}</div>` : ""}
+        </div>
+        <label class="agent-active-toggle-wrap">
+          <span class="agent-active-toggle-label">${escHtml(p.enabled ? tr("set.plugins.enabled") : tr("set.plugins.disabled"))}</span>
+          <span class="agent-toggle-switch">
+            <input type="checkbox" class="agent-toggle-input" ${p.enabled ? "checked" : ""}>
+            <span class="agent-toggle-slider"></span>
+          </span>
+        </label>`;
+      const input = row.querySelector("input");
+      input.setAttribute("aria-label", tr("set.plugins.toggleAria", { name: p.name }));
+      input.addEventListener("change", async () => {
+        const wanted = input.checked;
+        // The refresh below reloads the agent section from the server, which
+        // would silently drop unsaved edits — ask first.
+        if (state.parsed.agent && state.parsed.agent.dirty) {
+          if (!await appConfirm(tr("set.plugins.discardConfirm"))) { input.checked = !wanted; return; }
+        }
+        input.disabled = true;
+        let j;
+        try {
+          const r = await fetch(BASE_PATH + `/api/plugins/${encodeURIComponent(p.name)}`, {
+            method: "PUT",
+            headers: { ...authHeaders(), "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: wanted }),
+          });
+          if (!r.ok) throw new Error(await errText(r));
+          j = await r.json().catch(() => ({}));
+        } catch (e) {
+          input.checked = !wanted;
+          input.disabled = false;
+          setStatus(tr("set.plugins.toggleFailed", { error: e.message }), "error");
+          return;
+        }
+        // The change is persisted from here on: never revert the checkbox.
+        try {
+          await loadParsed("agent");
+          if (state.activeFile === "agent") renderAgentForm();
+        } catch (e) {
+          input.disabled = false;
+          setStatus(tr("set.plugins.refreshFailed", { error: e.message }), "error");
+        }
+        if (j.reloaded === false) {
+          showBanner();
+          if (j.reload_error) setStatus(tr("set.plugins.reloadError", { error: j.reload_error }), "error");
+        }
+      });
+      box.appendChild(row);
+    });
   }
 
   // synthesizeDefaultSquad mirrors the server-side logic for the editor:
@@ -3900,7 +3980,11 @@ const BASE_PATH = window.BASE_PATH || "";
     const isBuiltinFlag = (a) => a.builtin === true;
     const byName = (x, y) => (x.name || "").localeCompare(y.name || "", undefined, { sensitivity: "base" });
     const builtinAgents = d.agents.filter(isBuiltinFlag).sort(byName);
-    const customAgents = d.agents.filter(a => !isBuiltinFlag(a)).sort(byName);
+    const isPluginAgent = (a) => !!a.plugin;
+    const customAgents = d.agents.filter(a => !isBuiltinFlag(a) && !isPluginAgent(a)).sort(byName);
+    const pluginGroups = new Map();
+    d.agents.filter(a => !isBuiltinFlag(a) && isPluginAgent(a)).sort(byName)
+      .forEach(a => { if (!pluginGroups.has(a.plugin)) pluginGroups.set(a.plugin, []); pluginGroups.get(a.plugin).push(a); });
 
     const renderAgentGroup = (agents, label) => {
       if (agents.length === 0) return;
@@ -3922,7 +4006,9 @@ const BASE_PATH = window.BASE_PATH || "";
         // Stable lookup key for the incremental updaters (name/model change),
         // since the list is grouped + alphabetised so DOM order != d.agents order.
         item.dataset.idx = String(originalIdx);
-        const agentSourceBadge = a.source === "local"
+        const agentSourceBadge = a.plugin
+          ? `<span class="source-badge source-badge-plugin">${escHtml(a.plugin)}</span>`
+          : a.source === "local"
           ? `<span class="source-badge source-badge-local">local</span>`
           : "";
         const refCount = agentReferencers(a.name, d).length;
@@ -3939,6 +4025,7 @@ const BASE_PATH = window.BASE_PATH || "";
     // Custom agents first with no header (the panel title "ACTIVE FLEET"
     // already labels them), then the "BUILT-IN AGENTS" divider + built-ins.
     renderAgentGroup(customAgents, "");
+    for (const [pname, list] of [...pluginGroups].sort((x, y) => x[0].localeCompare(y[0], undefined, { sensitivity: "base" }))) renderAgentGroup(list, escHtml(tr("set.plugins.groupLabel", { name: pname })));
     renderAgentGroup(builtinAgents, tr("set.fleet.builtinAgentsLabel"));
 
     // Detail panel
@@ -4004,7 +4091,9 @@ const BASE_PATH = window.BASE_PATH || "";
     const titleBar = document.createElement("div");
     titleBar.className = "agent-detail-titlebar";
     const isEnabled = isLeader ? true : a.enabled !== false;
-    const detailSourceBadge = a.source === "local"
+    const detailSourceBadge = a.plugin
+      ? `<span class="source-badge source-badge-plugin">${escHtml(a.plugin)}</span>`
+      : a.source === "local"
       ? `<span class="source-badge source-badge-local">local</span>`
       : "";
     titleBar.innerHTML = `
@@ -4021,14 +4110,14 @@ const BASE_PATH = window.BASE_PATH || "";
             <span class="agent-toggle-slider"></span>
           </span>
         </label>
-        ${(isBuiltin || readOnly) ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
+        ${(isBuiltin || readOnly || a.plugin) ? "" : `<button type="button" class="model-remove-link agent-remove-link">${escHtml(tr("set.agent.removeBtn"))}</button>`}
       </div>
     `;
     titleBar.querySelector(".agent-toggle-input").addEventListener("change", e => {
       a.enabled = e.target.checked;
       onChange();
     });
-    if (!isBuiltin && !readOnly) {
+    if (!isBuiltin && !readOnly && !a.plugin) {
       titleBar.querySelector(".agent-remove-link").addEventListener("click", async () => {
         if (!await appConfirm(tr("set.confirm.removeAgent", { name: a.name }))) return;
         d.agents.splice(idx, 1);

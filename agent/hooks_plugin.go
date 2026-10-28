@@ -13,6 +13,7 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/permissions"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/attest"
@@ -63,7 +64,24 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 		i.hooks.reloader = r
 		wireHookListeners(context.Background(), i.Bus, r)
 	})
+	// Plugin hook layers are NOT set here: this runs during a generation's
+	// build, and a build that fails (or loses a concurrent reload race) must
+	// not switch the process-wide layers to a config that never went live.
+	// installPluginHooks applies them once a generation is installed.
 	return i.hooks.reloader
+}
+
+// installPluginHooks points the process-wide hooks engine at the Claude Code
+// plugin hook layers of inst — the generation just installed as current. It
+// is called at install time only (NewManager for the boot generation,
+// Manager.Reload after promoting a new one, NewAgent for the single-generation
+// surfaces), never during a build. Nil-safe; a no-op when the engine was never
+// built or the layers are unchanged.
+func (i *Infrastructure) installPluginHooks(inst *Instance) {
+	if i == nil || inst == nil || i.hooks.reloader == nil {
+		return
+	}
+	i.hooks.reloader.SetPluginLayers(inst.Settings.PluginHookLayers)
 }
 
 // buildHooksPlugin builds the per-squad runner-level plugin that carries the
@@ -87,12 +105,12 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 // routes (it runs no real tools and the user turn it sees is a clean router
 // view), so UserPromptSubmit / tool hooks must fire on the answering squad, not
 // the router hop. Returns (nil, nil) for the router so the caller mounts nothing.
-func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, isRouter bool) (*plugin.Plugin, error) {
+func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool) (*plugin.Plugin, error) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
 
-	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, attestStore, isRouter)
+	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, attestStore, clearances, agentType, isRouter)
 
 	onUserMsg := func(ctx adk.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
@@ -158,7 +176,7 @@ func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hook
 // not the user turn), and a sub-agent's completion is already covered by the
 // SubagentStop bus hook — firing Stop on it would misfire the "main agent
 // finished" hook.
-func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
@@ -181,6 +199,14 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			Consecutive:  consecutive,
 			Attestations: attestStore.For(sid),
 		}
+		// Only plugin agents carry a Claude agent type; native agents send none.
+		if agentType != nil {
+			in.AgentType = agentType(tc.AgentName())
+		}
+		// grant lets the permission gate skip ONLY its mode-default prompt for
+		// this exact call: the hook has already given the verdict (or the user
+		// has, for an escalation), so a second card would just repeat it.
+		grant := func() { clearances.Grant(sid, tc.InvocationID(), tc.FunctionCallID(), t.Name()) }
 		out := cfg.Run(tc, hooks.PreToolUse, t.Name(), in, cwd, hookDefaultTimeout)
 
 		// An escalation is resolved here, not by the engine: the engine reports
@@ -209,6 +235,7 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			}
 			if askHookPermission(tc, reg, sid, t.Name(), reason) {
 				state.RecordOutcome(sid, t.Name(), false)
+				grant()
 				return nil, nil
 			}
 			state.RecordOutcome(sid, t.Name(), true)
@@ -226,6 +253,9 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			return map[string]any{
 				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s", t.Name(), reason),
 			}, nil
+		}
+		if out.Decision == hooks.DecisionAllow {
+			grant()
 		}
 		return nil, nil
 	}

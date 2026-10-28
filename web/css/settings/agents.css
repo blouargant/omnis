@@ -218,6 +218,43 @@
   border: 1px solid rgba(99, 179, 237, 0.3);
 }
 
+.source-badge-plugin {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Plugins card above the agents list */
+.plugins-block {
+  margin: 0 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+}
+.plugins-block[hidden] { display: none; }
+.plugins-block-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+.plugins-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+}
+.plugins-row.is-disabled .plugins-row-name { opacity: 0.6; }
+.plugins-row-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.plugins-row-name { font-weight: 600; }
+.plugins-row-version, .plugins-row-count, .plugins-row-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 /* Active-state toggle switch */
 .agent-active-toggle-wrap {
   display: flex;

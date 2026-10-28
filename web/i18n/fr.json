@@ -1040,5 +1040,16 @@
   "env.connectors": "Connecteurs",
   "env.mcp.connected": "connecté",
   "env.mcp.idle": "non démarré",
-  "env.mcp.error": "erreur"
+  "env.mcp.error": "erreur",
+  "set.plugins.title": "Plugins",
+  "set.plugins.groupLabel": "Plugin : {name}",
+  "set.plugins.enabled": "Activé",
+  "set.plugins.disabled": "Désactivé",
+  "set.plugins.agentsCount.one": "{count} agent",
+  "set.plugins.agentsCount.other": "{count} agents",
+  "set.plugins.toggleFailed": "Impossible de modifier le plugin : {error}",
+  "set.plugins.discardConfirm": "Le formulaire des agents contient des modifications non enregistrées. Basculer un plugin recharge la liste et les perd. Continuer ?",
+  "set.plugins.refreshFailed": "Le plugin a été modifié, mais la liste n'a pas pu être actualisée : {error}",
+  "set.plugins.reloadError": "Le plugin a été modifié, mais le rechargement a échoué : {error}",
+  "set.plugins.toggleAria": "Activer le plugin {name}"
 }

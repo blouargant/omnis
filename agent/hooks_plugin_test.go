@@ -25,13 +25,13 @@ import (
 func TestBuildHooksPluginRouterSkipped(t *testing.T) {
 	engine := hooks.NewReloader(filepath.Join(t.TempDir(), "hooks.json"), nil)
 
-	if p, err := buildHooksPlugin(engine, nil, nil, nil, true); err != nil || p != nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, nil, nil, nil, true); err != nil || p != nil {
 		t.Fatalf("router squad: got (%v, %v), want (nil, nil)", p, err)
 	}
-	if p, err := buildHooksPlugin(engine, nil, nil, nil, false); err != nil || p == nil {
+	if p, err := buildHooksPlugin(engine, nil, nil, nil, nil, nil, false); err != nil || p == nil {
 		t.Fatalf("answering squad: got (%v, %v), want a plugin", p, err)
 	}
-	if p, err := buildHooksPlugin(nil, nil, nil, nil, false); err != nil || p != nil {
+	if p, err := buildHooksPlugin(nil, nil, nil, nil, nil, nil, false); err != nil || p != nil {
 		t.Fatalf("nil engine: got (%v, %v), want (nil, nil)", p, err)
 	}
 }
@@ -117,7 +117,7 @@ func TestHookCallbacksLeaveTheStoreUntouchedWhenNoHookMatches(t *testing.T) {
 	engine := hooks.NewReloader(cfgPath, nil)
 	state := hookstate.New()
 
-	before, _ := hookToolCallbacks(engine, nil, state, nil, false)
+	before, _ := hookToolCallbacks(engine, nil, state, nil, nil, nil, false)
 	if before == nil {
 		t.Fatal("hookToolCallbacks returned a nil BeforeToolCallback")
 	}
@@ -165,8 +165,8 @@ func TestHookCallbacksRecordBlockedAndAllowedOutcomes(t *testing.T) {
 	// config): the store — not the engine — is what carries the consecutive
 	// counter across the two calls below.
 	state := hookstate.New()
-	beforeBlock, _ := hookToolCallbacks(hooks.NewReloader(blockPath, nil), nil, state, nil, false)
-	beforeAllow, _ := hookToolCallbacks(hooks.NewReloader(allowPath, nil), nil, state, nil, false)
+	beforeBlock, _ := hookToolCallbacks(hooks.NewReloader(blockPath, nil), nil, state, nil, nil, nil, false)
+	beforeAllow, _ := hookToolCallbacks(hooks.NewReloader(allowPath, nil), nil, state, nil, nil, nil, false)
 
 	sid, toolName := "outcome-session", "Bash"
 	args := map[string]any{"command": "irrelevant"}
@@ -213,7 +213,7 @@ func TestRecordedAttestationReachesTheHookInput(t *testing.T) {
 	subject := hookstate.HashArgs(args)
 	store.Record(sid, subject, attest.VerdictApproved, "helm-owned check passed")
 
-	before, _ := hookToolCallbacks(engine, nil, state, store, false)
+	before, _ := hookToolCallbacks(engine, nil, state, store, nil, nil, false)
 	if before == nil {
 		t.Fatal("hookToolCallbacks returned a nil BeforeToolCallback")
 	}
@@ -281,7 +281,7 @@ func TestUnanswerableEscalationBlocksWithAnHonestReason(t *testing.T) {
 	// takes.
 	reg := askuser.NewRegistry()
 	state := hookstate.New()
-	before, _ := hookToolCallbacks(hooks.NewReloader(cfgPath, nil), reg, state, nil, false)
+	before, _ := hookToolCallbacks(hooks.NewReloader(cfgPath, nil), reg, state, nil, nil, nil, false)
 
 	sid, toolName := "unattended-session", "Bash"
 	args := map[string]any{"command": "kubectl delete pod x -n demo"}

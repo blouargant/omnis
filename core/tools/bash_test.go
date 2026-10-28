@@ -208,3 +208,10 @@ func TestSetBashDefaultTimeoutZeroCoerced(t *testing.T) {
 		t.Fatalf("SetBashDefaultTimeout(0) left timeout = %v, want 120s", got)
 	}
 }
+
+func TestRunShellCapturedEnv(t *testing.T) {
+	res := RunShellCapturedEnv(context.Background(), `printf %s "$FOO"`, "", nil, 5*time.Second, []string{"FOO=bar"})
+	if res.Stdout != "bar" {
+		t.Fatalf("stdout = %q (stderr %q)", res.Stdout, res.Stderr)
+	}
+}

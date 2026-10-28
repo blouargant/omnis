@@ -2,7 +2,9 @@ package hooks
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,11 +37,15 @@ func Merge(base *Config, overlays ...*Config) *Config {
 type Reloader struct {
 	basePath     string
 	overlayPaths []string
+	pluginLayers []PluginLayer
 	interval     time.Duration
 
 	cfg      atomic.Pointer[Config]
 	mtimes   map[string]time.Time
 	mtimesMu sync.Mutex
+	// reloadMu serialises whole reloads (read layers → load → store) so a poll
+	// that read stale plugin layers can never overwrite a newer snapshot.
+	reloadMu sync.Mutex
 	onChange []func()
 }
 
@@ -75,6 +81,20 @@ func (r *Reloader) Snapshot() *Config {
 	return Empty()
 }
 
+// SetPluginLayers replaces the Claude Code plugin hook layers and forces a
+// reload. They merge after the base and overlays, each matcher tagged with its
+// plugin. A call with an unchanged set is a no-op.
+func (r *Reloader) SetPluginLayers(layers []PluginLayer) {
+	r.mtimesMu.Lock()
+	if slices.Equal(r.pluginLayers, layers) {
+		r.mtimesMu.Unlock()
+		return
+	}
+	r.pluginLayers = append([]PluginLayer(nil), layers...)
+	r.mtimesMu.Unlock()
+	_ = r.reload(true)
+}
+
 // Refresh forces an immediate reload regardless of mtime.
 func (r *Reloader) Refresh() error { return r.reload(true) }
 
@@ -95,6 +115,8 @@ func (r *Reloader) Start(ctx context.Context) {
 }
 
 func (r *Reloader) reload(force bool) error {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
 	if !force && !r.detectChange() {
 		return nil
 	}
@@ -102,6 +124,9 @@ func (r *Reloader) reload(force bool) error {
 	if err != nil {
 		base = Empty()
 	}
+	r.mtimesMu.Lock()
+	plugins := r.pluginLayers
+	r.mtimesMu.Unlock()
 	var overlays []*Config
 	for _, p := range r.overlayPaths {
 		ov, oerr := Load(p)
@@ -110,6 +135,30 @@ func (r *Reloader) reload(force bool) error {
 		} else if oerr != nil && !os.IsNotExist(oerr) && err == nil {
 			err = oerr
 		}
+	}
+	for _, pl := range plugins {
+		pc, perr := Load(pl.Path)
+		if perr != nil || pc == nil {
+			if perr != nil {
+				fmt.Fprintf(os.Stderr, "[hooks] plugin %s: %s: %v\n", pl.Name, pl.Path, perr)
+			}
+			continue
+		}
+		ref := &PluginRef{Name: pl.Name, Root: pl.Root}
+		for ev, ms := range pc.events {
+			tagged := make([]Matcher, len(ms))
+			for i, m := range ms {
+				m.Plugin = ref
+				// Plugin hooks follow Claude Code semantics: no fail_closed.
+				m.Hooks = append([]Command(nil), m.Hooks...)
+				for j := range m.Hooks {
+					m.Hooks[j].FailClosed = false
+				}
+				tagged[i] = m
+			}
+			pc.events[ev] = tagged
+		}
+		overlays = append(overlays, pc)
 	}
 	r.cfg.Store(Merge(base, overlays...))
 	for _, fn := range r.onChange {
@@ -122,6 +171,9 @@ func (r *Reloader) detectChange() bool {
 	r.mtimesMu.Lock()
 	defer r.mtimesMu.Unlock()
 	paths := append([]string{r.basePath}, r.overlayPaths...)
+	for _, pl := range r.pluginLayers {
+		paths = append(paths, pl.Path)
+	}
 	changed := false
 	for _, p := range paths {
 		if p == "" {

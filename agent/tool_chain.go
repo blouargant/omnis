@@ -13,14 +13,14 @@ import "google.golang.org/adk/v2/agent/llmagent"
 // the permission layer — the only protection that existed before the validation
 // work. That is what this order fixes, and it is reason enough on its own.
 //
-// It does NOT make hooks' documented permissionDecision:"allow" bypass
-// (internal/hooks/run.go:76) work. That is still dead: nothing in agent/
-// consumes hooks.DecisionAllow — hookToolCallbacks returns non-nil only on
-// out.Blocked(), or on out.Asks() when the user declines the escalation, and
-// returning nil (proceed, or an out.Asks() the user approved) is not a signal
-// the gate can act on. Honouring "allow" would additionally require the hook
-// callback to tell the gate to skip (e.g. by seeding the approval cache).
-// This order is a precondition for that, not the feature.
+// It is also what makes a hook's permissionDecision:"allow" meaningful. When
+// the hook callback ends with hooks.DecisionAllow — or with an "ask" the user
+// approved — it grants a one-shot clearance (permissions.Clearances, keyed by
+// session + invocation id + call id + tool name) for exactly that call, then
+// returns nil. The gate, running next, consumes the clearance and skips only
+// its MODE-DEFAULT prompt: an explicit deny or ask rule still applies, and
+// nothing is cached or persisted. With permissions first there would be no
+// verdict yet to hand over.
 //
 // budget LAST: a call already refused by a hook or by the user must not be
 // charged to the turn's budget.

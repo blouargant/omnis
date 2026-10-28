@@ -40,6 +40,9 @@ func ReadAgentInstructionBelowLayer(name, writeLayer string) string {
 			return strings.TrimRight(StripInstructionFrontmatter(b), "\n")
 		}
 	}
+	if e, ok := pluginAgentBase(name); ok && strings.TrimSpace(e.Instruction) != "" {
+		return strings.TrimRight(StripInstructionFrontmatter([]byte(e.Instruction)), "\n")
+	}
 	for _, dir := range dirs {
 		if registryLayerRank(paths.Layer(dir)) >= wr {
 			continue
@@ -91,6 +94,9 @@ func readRawInstruction(name string) (string, bool) {
 		if b, err := os.ReadFile(filepath.Join(dir, name, "instruction.md")); err == nil {
 			return string(b), true
 		}
+	}
+	if e, ok := pluginAgentBase(name); ok && strings.TrimSpace(e.Instruction) != "" {
+		return e.Instruction, true
 	}
 	for _, dir := range dirs {
 		if b, err := os.ReadFile(filepath.Join(dir, "default.md")); err == nil {

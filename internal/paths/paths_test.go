@@ -3,6 +3,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -388,5 +389,49 @@ func TestLayerClassifiesPaths(t *testing.T) {
 	}
 	if got := Layer("/etc/omnis/agents.json"); got != "system" {
 		t.Errorf("system path: got %q, want system", got)
+	}
+}
+
+func TestClaudePluginsDirFollowsAgentSkillsDir(t *testing.T) {
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "/x")
+	if got := ClaudePluginsDir(); got != filepath.Join("/x", "claude") {
+		t.Errorf("ClaudePluginsDir() = %q, want /x/claude", got)
+	}
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", "")
+	if got := ClaudePluginsDir(); got != "" {
+		t.Errorf("ClaudePluginsDir() = %q, want empty when the layer is disabled", got)
+	}
+}
+
+func TestSkillsAllSearchDirsAppendsPluginSkillDirsLast(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	extra := t.TempDir()
+	t.Setenv("OMNIS_AGENTSKILLS_DIR", extra)
+	chdirTemp(t)
+	t.Cleanup(func() { SetPluginSkillDirs(nil) })
+
+	before := SkillsAllSearchDirs()
+	SetPluginSkillDirs([]string{"/p/a/skills", "/p/b/skills"})
+	got := SkillsAllSearchDirs()
+	want := append(append([]string{}, before...), "/p/a/skills", "/p/b/skills")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SkillsAllSearchDirs() = %v, want %v", got, want)
+	}
+	if got[len(before)-1] != filepath.Join(extra, "skills") {
+		t.Errorf("plugin dirs must come after <agent-skills>/skills: %v", got)
+	}
+
+	// The setter copies its argument, so a caller mutating its slice later
+	// cannot reach into the process-wide list.
+	dirs := []string{"/p/c/skills"}
+	SetPluginSkillDirs(dirs)
+	dirs[0] = "/mutated"
+	if got := SkillsAllSearchDirs(); got[len(got)-1] != "/p/c/skills" {
+		t.Errorf("SetPluginSkillDirs kept the caller's slice: %v", got)
+	}
+
+	SetPluginSkillDirs(nil)
+	if got := SkillsAllSearchDirs(); !reflect.DeepEqual(got, before) {
+		t.Errorf("clearing the plugin dirs should restore %v, got %v", before, got)
 	}
 }

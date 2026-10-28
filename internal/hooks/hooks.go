@@ -64,6 +64,10 @@ type Command struct {
 type Matcher struct {
 	Matcher string    `json:"matcher,omitempty"`
 	Hooks   []Command `json:"hooks"`
+	// Plugin tags a matcher that came from a Claude Code plugin's hooks.json
+	// (never read from disk): its commands run with ${CLAUDE_PLUGIN_ROOT} and
+	// see Claude-shaped tool names and inputs (see plugin.go).
+	Plugin *PluginRef `json:"-"`
 }
 
 // File is the on-disk hooks.json shape: { "hooks": { "<Event>": [ Matcher ] } }.
@@ -154,13 +158,38 @@ func (c *Config) Events(event string) []Matcher {
 // (PreCompact: "manual" / "auto"), or "" for events without a subject (in which
 // case every matcher under the event applies). Commands preserve config order.
 func (c *Config) Match(event, subject string) []Command {
+	var out []Command
+	for _, mc := range c.match(event, subject) {
+		out = append(out, mc.Command)
+	}
+	return out
+}
+
+// matchedCommand is a matched hook command plus the plugin it came from (nil
+// for a native hook).
+type matchedCommand struct {
+	Command
+	plugin *PluginRef
+}
+
+// match is Match keeping each command's plugin origin. A plugin matcher is
+// tested against the Claude name of the subject, so a plugin written for
+// "Bash" also fires for omnis's background shell tools.
+func (c *Config) match(event, subject string) []matchedCommand {
 	if c == nil {
 		return nil
 	}
-	var out []Command
+	var out []matchedCommand
 	for _, m := range c.events[event] {
-		if c.matcherMatches(m.Matcher, subject) {
-			out = append(out, m.Hooks...)
+		subj := subject
+		if m.Plugin != nil {
+			subj = claudeToolName(subject)
+		}
+		if !c.matcherMatches(m.Matcher, subj) {
+			continue
+		}
+		for _, h := range m.Hooks {
+			out = append(out, matchedCommand{Command: h, plugin: m.Plugin})
 		}
 	}
 	return out
