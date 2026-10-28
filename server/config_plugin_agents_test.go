@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/internal/paths"
 )
 
@@ -30,7 +31,13 @@ func pluginServerEnv(t *testing.T, agentsJSON, modelsJSON string) (sys, home str
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	os.Unsetenv("OMNIS_CONFIG_PATH")
-	t.Cleanup(func() { paths.SetPluginSkillDirs(nil) })
+	t.Cleanup(func() {
+		// Re-resolve with the Agent-Skills layer blank so the published plugin
+		// catalogue does not leak into the next test.
+		os.Setenv("OMNIS_AGENTSKILLS_DIR", "")
+		_, _ = agent.ResolveRuntimeSettings(agent.Options{ConfigPathStrict: true})
+		paths.SetPluginSkillDirs(nil)
+	})
 	if agentsJSON == "" {
 		agentsJSON = `{"agents":["leader"],"router_squad":"none"}`
 	}

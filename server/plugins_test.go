@@ -64,6 +64,9 @@ func TestPluginsRouteListsAndToggles(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("enable: %d %s", w.Code, w.Body.String())
 	}
+	if u := readJSONFile(t, filepath.Join(home, "agents.json")); u["disabled_plugins"] != nil {
+		t.Fatalf("user layer keeps residue after disable-then-enable: %v", u)
+	}
 	merged, _, err := configedit.LoadMergedSection("agents.json")
 	if err != nil {
 		t.Fatal(err)
@@ -77,5 +80,29 @@ func TestPluginsRouteListsAndToggles(t *testing.T) {
 
 	if w = do(t, r, http.MethodPut, "/api/plugins/nope", map[string]any{"enabled": false}); w.Code != http.StatusNotFound {
 		t.Fatalf("unknown plugin: want 404, got %d", w.Code)
+	}
+}
+
+func TestEnableOverridesALowerLayerDisable(t *testing.T) {
+	pluginServerEnv(t, `{"agents":["leader"],"router_squad":"none","disabled_plugins":["demo"]}`, "")
+	r := pluginsEngine(t)
+	if ps := listPlugins(t, r); len(ps) != 1 || ps[0]["enabled"] != false {
+		t.Fatalf("setup: want demo disabled, got %v", ps)
+	}
+	w := do(t, r, http.MethodPut, "/api/plugins/demo", map[string]any{"enabled": true})
+	if w.Code != http.StatusOK {
+		t.Fatalf("enable: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Plugins []map[string]any `json:"plugins"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Plugins) != 1 || resp.Plugins[0]["enabled"] != true {
+		t.Fatalf("response must report demo enabled, got %v", resp.Plugins)
+	}
+	if ps := listPlugins(t, r); ps[0]["enabled"] != true {
+		t.Fatalf("fresh GET must report demo enabled, got %v", ps)
 	}
 }
