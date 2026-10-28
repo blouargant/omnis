@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/astgrep"
 	"github.com/blouargant/omnis/internal/attest"
@@ -100,6 +101,10 @@ type Infrastructure struct {
 	// hot-reload) and shared across a squad's root and sub-agents — see
 	// hookToolCallbacks for why a per-callback counter would be wrong.
 	HookState *hookstate.Store
+
+	// HookClearances carries a PreToolUse hook's allow / approved escalation to
+	// the permission gate for the same call (see permissions.Clearances).
+	HookClearances *permissions.Clearances
 
 	// Attest holds per-session reviewer verdicts (see internal/attest).
 	// Process-wide so it survives a hot-reload; lost on restart, which forces a
@@ -275,6 +280,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		GoalStore:       goal.New(),
 		Budget:          budget.New(),
 		HookState:       hookstate.New(),
+		HookClearances:  permissions.NewClearances(),
 		Attest:          attest.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),

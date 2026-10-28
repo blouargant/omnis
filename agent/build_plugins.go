@@ -82,7 +82,7 @@ func buildPlugins(
 	// (agent/tool_chain.go): a hook's refusal must not arrive after the user has
 	// already approved the call. Keep these two in this order. (It does not make
 	// permissionDecision:"allow" work — see that comment.)
-	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, isRouterSquad); herr == nil && hp != nil {
+	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouterSquad); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
 	// The permission gate is built once per squad by the caller (so the same
@@ -184,7 +184,7 @@ func buildPlugins(
 // (buildSquadInstance) runs the cleanup on generation teardown. Building the
 // gate here — once per squad — is what lets the SAME approval cache/asker cover
 // both the leader and its sub-agents.
-func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus) (*permissions.Gate, func(), error) {
+func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus, clearances *permissions.Clearances) (*permissions.Gate, func(), error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Skill overlays (in-memory; do not need to be polled).
 	// Merge across every layer of the skills search chain so overlays from
@@ -275,13 +275,13 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		// runs under an ephemeral agenttool session) so its approval cache keys —
 		// and grants like "Allow all Edit this session" — line up with the
 		// leader's. Falls back to tc.SessionID() for the root's own calls.
-		SessionFunc: func(tc adk.ToolContext) string {
-			if id := steerSessionID(tc); id != "" {
-				return id
-			}
-			return tc.SessionID()
-		},
-		Debug: os.Getenv("OMNIS_DEBUG") != "",
+		// It is the SAME resolver the hook callback grants clearances under
+		// (realSessionID), so both sides key identically — including a sub-agent
+		// in an injected turn, where only events.WithRootSession is planted.
+		SessionFunc:  realSessionID,
+		Clearances:   clearances,
+		DefaultAllow: samePluginDelegation(runtime),
+		Debug:        os.Getenv("OMNIS_DEBUG") != "",
 	})
 	if err != nil {
 		cancel()
@@ -298,4 +298,32 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		go func() { <-ctx.Done(); sub.Off() }()
 	}
 	return gate, cancel, nil
+}
+
+// pluginAgentTypes maps an agent name to its Claude agent type ("demo:worker")
+// for the hook input's agent_type; "" for an omnis-native agent.
+func pluginAgentTypes(runtime RuntimeSettings) func(string) string {
+	types := map[string]string{}
+	for _, a := range runtime.Agents {
+		if a.PluginType != "" {
+			types[a.Name] = a.PluginType
+		}
+	}
+	return func(name string) string { return types[name] }
+}
+
+// samePluginDelegation reports whether a call is a plugin agent delegating to
+// another agent of the SAME plugin — the plugin's own team, which needs no
+// permission card of its own.
+func samePluginDelegation(runtime RuntimeSettings) func(tc adk.ToolContext, toolName string) bool {
+	owner := map[string]string{}
+	for _, a := range runtime.Agents {
+		if a.Plugin != "" {
+			owner[a.Name] = a.Plugin
+		}
+	}
+	return func(tc adk.ToolContext, toolName string) bool {
+		p := owner[tc.AgentName()]
+		return p != "" && owner[toolName] == p
+	}
 }
