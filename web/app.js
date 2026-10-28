@@ -159,10 +159,6 @@ const els = {
   treeSelectAllBtn: document.getElementById("tree-selectall-btn"),
   treeBatchBtn:    document.getElementById("tree-batch-btn"),
   treeSearchEmpty: document.getElementById("tree-search-empty"),
-  archivedPanel: document.getElementById("archived-panel"),
-  archivedHeader:document.getElementById("archived-header"),
-  archivedList:  document.getElementById("archived-list"),
-  archivedCount: document.getElementById("archived-count"),
   foldersPanel:  document.getElementById("folders-panel"),
   foldersResize: document.getElementById("folders-resize"),
   foldersHeader: document.getElementById("folders-header"),
@@ -370,7 +366,7 @@ function refreshSidebarActive() {
   if (!els.tree) return;
   const shown = new Set(panels.flatMap(p => p.tabs));
   const focusedId = (focusedPanel() || {}).sessionId || null;
-  for (const li of [...els.tree.querySelectorAll("li[data-id]"), ...els.archivedList.querySelectorAll("li[data-id]")]) {
+  for (const li of els.tree.querySelectorAll("li[data-id]")) {
     const id = li.dataset.id;
     li.classList.toggle("active", shown.has(id));
     li.classList.toggle("active-focused", !!focusedId && id === focusedId);
@@ -6435,13 +6431,12 @@ function rememberSessionMeta(s) {
 }
 
 // sessionsQuery builds a paginated GET /api/sessions URL across ALL collections
-// (no `collection` filter) for the Archived panel and for search, applying the
-// current search query. The chosen sort only applies to the active list (the
-// archived panel is always recent order).
+// (no `collection` filter): the tree's search over active sessions (current
+// sort), or the Archived sessions dialog (its own search, always recent order).
 function sessionsQuery(archived, offset, limit) {
   const p = new URLSearchParams();
   p.set("archived", archived ? "true" : "false");
-  const q = sessionSearch.trim();
+  const q = (archived ? archivedSearch : sessionSearch).trim();
   if (q) p.set("q", q);
   p.set("sort", archived ? "recent" : sessionSort);
   p.set("offset", String(offset));
@@ -6664,26 +6659,39 @@ function resetGroup(name) {
   if (isGroupOpen(name)) return loadGroupMore(name);
 }
 
-// ─── Archived panel: sentinel + IntersectionObserver ──
+// ─── Archived sessions dialog ─────────────────────────────────────────────────
+// Archived sessions are listed in a dialog opened from the account menu. It
+// pages through archivedView — an IntersectionObserver sentinel at the end of
+// the list loads the next page — with its own search. loadSessions keeps the
+// first page (and the count the menu shows) current even while it is closed,
+// so archivedSessions knows those ids for the read-only guard.
+let archivedListEl = null;      // the open dialog's <ul>; null while closed
+let archivedSearch = "";        // the dialog's search query (q=)
+let archivedCount = 0;          // unfiltered archived total (account menu)
+let archivedDialogClose = null; // closes the open dialog
+
 function appendArchivedRows(rows, { reset } = {}) {
-  const list = els.archivedList;
-  if (reset) list.innerHTML = "";
+  if (reset && archivedListEl) archivedListEl.innerHTML = "";
   for (const s of rows) {
     rememberSessionMeta(s);
-    list.appendChild(buildSessionRow(s, { archived: true }));
+    if (archivedListEl) archivedListEl.appendChild(buildArchivedRow(s));
   }
 }
 
-// updateArchivedChrome shows/hides the archived panel + header count from the
-// archived view's total (not just the loaded rows).
+// updateArchivedChrome records the archived total for the account menu and
+// shows the open dialog's empty state.
 function updateArchivedChrome() {
-  els.archivedPanel.hidden = archivedView.total === 0;
-  els.archivedCount.textContent = archivedView.total ? `(${archivedView.total})` : "";
+  if (!archivedSearch.trim()) archivedCount = archivedView.total;
+  if (!archivedListEl) return;
+  const empty = archivedListEl.nextElementSibling;
+  empty.hidden = archivedView.total > 0;
+  empty.textContent = archivedSearch.trim() ? tr("archived.noMatch") : tr("archived.empty");
 }
 
 let archivedSentinel = null, archivedObserver = null;
 function ensureArchivedSentinel() {
-  const list = els.archivedList;
+  const list = archivedListEl;
+  if (!list) return;
   if (!archivedSentinel) {
     archivedSentinel = document.createElement("li");
     archivedSentinel.className = "session-sentinel";
@@ -6724,7 +6732,7 @@ async function loadMoreArchived() {
 function resetArchivedView() {
   const v = archivedView;
   v.seq++; v.loading = false; v.loaded = 0; v.total = 0; v.exhausted = false;
-  els.archivedList.innerHTML = "";
+  if (archivedListEl) archivedListEl.innerHTML = "";
   loadMoreArchived();
 }
 
@@ -6734,7 +6742,7 @@ async function reloadArchivedPrefix() {
   const mySeq = v.seq;
   v.loading = true;
   const want = Math.max(PAGE_INITIAL, v.loaded);
-  const scrollTop = els.archivedList.scrollTop;
+  const scrollTop = archivedListEl ? archivedListEl.scrollTop : 0;
   try {
     const res = await apiFetch(sessionsQuery(true, 0, want), { cache: "no-store" });
     const data = await res.json();
@@ -6744,11 +6752,126 @@ async function reloadArchivedPrefix() {
     v.loaded = rows.length;
     v.total = Number.isFinite(data.total) ? data.total : rows.length;
     v.exhausted = v.loaded >= v.total;
-    els.archivedList.scrollTop = scrollTop;
+    if (archivedListEl) archivedListEl.scrollTop = scrollTop;
     updateArchivedChrome();
     syncPanesAfterRender();
   } catch (e) { console.error("reloadArchivedPrefix:", e); }
   finally { if (mySeq === v.seq) { v.loading = false; ensureArchivedSentinel(); } }
+}
+
+// buildArchivedRow renders one archived session in the dialog: its title opens
+// it read-only (and closes the dialog); Restore unarchives it back into its
+// collection; Export and Delete as on any session.
+function buildArchivedRow(s) {
+  const li = document.createElement("li");
+  li.className = "archived-row";
+  li.dataset.id = s.id;
+  const name = s.title || s.id;
+  const meta = [effectiveCollection(s)];
+  const when = new Date(s.last_used_at);
+  if (!isNaN(when.getTime())) meta.push(when.toLocaleString(I18N.locale, { dateStyle: "medium", timeStyle: "short" }));
+  meta.push(trN("archived.turns", s.turns || 0));
+  li.innerHTML = `
+    <button type="button" class="archived-row-open">
+      <span class="archived-row-title"></span>
+      <span class="archived-row-meta"></span>
+    </button>
+    <div class="archived-row-actions">
+      <button type="button" class="archived-restore">${ICON_UNARCHIVE}<span></span></button>
+      <button type="button" class="archived-icon-btn archived-export">${ICON_EXPORT}</button>
+      <button type="button" class="archived-icon-btn archived-delete">${ICON_DELETE}</button>
+    </div>`;
+  li.querySelector(".archived-row-title").textContent = name;
+  li.querySelector(".archived-row-meta").textContent = meta.join(" · ");
+  const open = li.querySelector(".archived-row-open");
+  open.setAttribute("data-tip", tr("archived.openTip"));
+  open.addEventListener("click", () => {
+    if (archivedDialogClose) archivedDialogClose();
+    selectSession(s.id);
+  });
+  const restore = li.querySelector(".archived-restore");
+  restore.querySelector("span").textContent = tr("archived.restore");
+  restore.setAttribute("data-tip", tr("archived.restoreTip"));
+  restore.addEventListener("click", async () => {
+    restore.disabled = true;
+    if (await unarchiveSession(s.id)) showToast(tr("archived.restored", { name }));
+    else { restore.disabled = false; showToast(tr("archived.restoreFailed"), "err"); }
+  });
+  const exp = li.querySelector(".archived-export");
+  exp.setAttribute("data-tip", tr("menu.export"));
+  exp.setAttribute("aria-label", tr("menu.export"));
+  exp.addEventListener("click", () => exportSession(s.id));
+  const del = li.querySelector(".archived-delete");
+  del.setAttribute("data-tip", tr("menu.delete"));
+  del.setAttribute("aria-label", tr("menu.delete"));
+  del.addEventListener("click", async () => {
+    const ok = await uiConfirm({
+      title: tr("app.session.deleteTitle"),
+      message: tr("app.session.deleteMsg", { name }),
+      confirmText: tr("common.delete"),
+      cancelText: tr("common.cancel"),
+      danger: true,
+    });
+    if (ok) deleteSession(s.id, li);
+  });
+  return li;
+}
+
+// openArchivedDialog shows the archived sessions (account menu).
+function openArchivedDialog() {
+  if (archivedDialogClose) return;
+  const overlay = uiModalShell(tr("archived.title"));
+  overlay.querySelector(".ui-modal").classList.add("archived-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  body.innerHTML =
+    `<input type="search" class="archived-search" autocomplete="off" spellcheck="false" />` +
+    `<ul class="archived-modal-list"></ul>` +
+    `<div class="archived-modal-empty" hidden></div>`;
+  const search = body.querySelector(".archived-search");
+  search.placeholder = tr("archived.search");
+  search.setAttribute("aria-label", tr("archived.search"));
+  body.querySelector(".archived-modal-list").setAttribute("aria-label", tr("archived.title"));
+  overlay.querySelector(".ui-modal-cancel").hidden = true;
+  const ok = overlay.querySelector(".ui-modal-ok");
+  ok.textContent = tr("common.close");
+
+  archivedListEl = body.querySelector(".archived-modal-list");
+  archivedSearch = "";
+  resetArchivedView();
+
+  let timer = null;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { archivedSearch = search.value; resetArchivedView(); }, 150);
+  });
+
+  const close = () => {
+    if (archivedDialogClose !== close) return;
+    archivedDialogClose = null;
+    clearTimeout(timer);
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+    if (archivedObserver) { archivedObserver.disconnect(); archivedObserver = null; }
+    archivedSentinel = null;
+    archivedListEl = null;
+    // A search narrowed archivedView: reload it unfiltered so the count holds.
+    if (archivedSearch.trim()) { archivedSearch = ""; reloadArchivedPrefix(); }
+  };
+  archivedDialogClose = close;
+  // Escape closes the dialog unless a confirm opened over it (Delete) — that
+  // one handles its own keys.
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    const overlays = document.querySelectorAll(".ui-modal-overlay");
+    if (overlays[overlays.length - 1] !== overlay) return;
+    e.preventDefault();
+    close();
+  };
+  ok.addEventListener("click", close);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey, true);
+  setTimeout(() => search.focus(), 0);
 }
 
 function setSessionBusy(sessionId, busy) {
@@ -7733,9 +7856,9 @@ let treeSearchSeq = 0;    // drops a slower, superseded search response
 
 // ── Search ──
 // setTreeSearch shows every collection's matches for `query` under their group
-// headers (groups without a hit hidden), filters the Archived panel the same
-// way, and — with an empty query — leaves search mode and restores the regular
-// tree (open states come from storage, which search never touches).
+// headers (groups without a hit hidden) and — with an empty query — leaves
+// search mode and restores the regular tree (open states come from storage,
+// which search never touches).
 async function setTreeSearch(query) {
   const q = String(query || "").trim();
   if (q === sessionSearch.trim()) return;
@@ -7764,11 +7887,9 @@ async function setTreeSearch(query) {
         resetGroup(name);
       }
     }
-    resetArchivedView();
     return;
   }
   await runTreeSearch();
-  resetArchivedView();
 }
 
 // runTreeSearch fetches the current query's matches across all collections (one
@@ -8043,7 +8164,8 @@ async function deleteSession(id, li) {
 }
 
 // archiveSession sets a session aside (read-only). Its history stays viewable
-// in the archived panel; the server detaches it from its agent generation.
+// from the Archived sessions dialog; the server detaches it from its agent
+// generation.
 async function archiveSession(id) {
   try {
     await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" });
@@ -8053,7 +8175,8 @@ async function archiveSession(id) {
     unpinSession(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
-    // clicking it in the archived panel re-mounts the read-only history.
+    // opening it from the Archived sessions dialog re-mounts the read-only
+    // history.
     closeTabEverywhere(id);
     await loadSessions();
     saveLayout();
@@ -8063,16 +8186,20 @@ async function archiveSession(id) {
 }
 
 // unarchiveSession restores an archived session to active and re-enables chat.
+// Resolves to whether it worked.
 async function unarchiveSession(id) {
   try {
-    await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
+    const res = await apiFetch(`/api/sessions/${id}/unarchive`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await loadSessions();
     if (panelsWithTab(id).length) {
       subscribeSessionEvents(id);
       applySessionUI(id);
     }
+    return true;
   } catch (e) {
     console.error("failed to unarchive session:", e);
+    return false;
   }
 }
 
@@ -9135,6 +9262,10 @@ function openAccountMenu() {
     sep.className = "folder-ctx-sep";
     m.appendChild(sep);
   }
+  m.appendChild(accountMenuItem(ICON_ARCHIVE, tr("archived.title"), openArchivedDialog, archivedCount ? String(archivedCount) : ""));
+  const sepArchived = document.createElement("div");
+  sepArchived.className = "folder-ctx-sep";
+  m.appendChild(sepArchived);
   const S = window.Settings;
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
   m.appendChild(accountMenuItem(ICON_GEAR, tr("settings.label"), () => S && S.open(), isMac ? "⌘," : "Ctrl+,"));
@@ -11578,7 +11709,7 @@ document.addEventListener("keydown", (e) => {
 // ─── Hover tooltips (data-tip) ────────────────────────────────────────────────
 // A single body-appended `#tip-layer` element renders every `[data-tip]`
 // tooltip. Because it is `position: fixed`, it escapes the sidebar /
-// archived-list `overflow` clipping and sits above every panel — fixing the
+// session-list `overflow` clipping and sits above every panel — fixing the
 // case where an action-button tooltip was masked by the surrounding panel.
 // Placement is *above* the target by default, flipping below only when the
 // target sits too close to the viewport top to fit. `.model-status-dot` keeps
@@ -12253,31 +12384,6 @@ els.sidebarToggle.addEventListener("click", () => {
 // its own width via the resize loop.)
 els.sidebar.addEventListener("transitionend", (e) => {
   if (e.target === els.sidebar && e.propertyName === "width") layoutWidths();
-});
-
-// ─── Archived sessions panel collapse ─────────────────────────────────────────
-
-const ARCHIVED_COL_KEY = "agent_archived_collapsed";
-function applyArchivedCollapse(collapsed) {
-  els.archivedPanel.classList.toggle("collapsed", collapsed);
-  els.archivedHeader.setAttribute("aria-expanded", String(!collapsed));
-}
-// Default collapsed; persists the user's choice across reloads.
-applyArchivedCollapse(localStorage.getItem(ARCHIVED_COL_KEY) !== "0");
-function toggleArchivedPanel() {
-  const collapsed = !els.archivedPanel.classList.contains("collapsed");
-  applyArchivedCollapse(collapsed);
-  localStorage.setItem(ARCHIVED_COL_KEY, collapsed ? "1" : "0");
-  // The archived list is display:none while collapsed, so its pagination sentinel
-  // can't intersect. On expand, re-arm the observer so a further page loads if the
-  // (now visible) sentinel is in view and the view isn't exhausted.
-  if (!collapsed && typeof ensureArchivedSentinel === "function" && archivedView.loaded > 0) {
-    ensureArchivedSentinel();
-  }
-}
-els.archivedHeader.addEventListener("click", toggleArchivedPanel);
-els.archivedHeader.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleArchivedPanel(); }
 });
 
 // ─── Folders browser panel ────────────────────────────────────────────────────

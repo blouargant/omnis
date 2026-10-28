@@ -146,10 +146,9 @@
 
   /* The per-session ⋮ / delete actions are revealed by `li:hover`, so on touch
      they were reachable only by the sticky :hover a tap sometimes leaves behind
-     — and that same tap opens the session. Always show them (tree + archived),
+     — and that same tap opens the session. Always show them,
      and likewise a collection header's ＋ / ⋯ (which replace its count on hover). */
-  .collection-sessions li .session-actions,
-  #archived-list li .session-actions { opacity: 1; pointer-events: auto; }
+  .collection-sessions li .session-actions { opacity: 1; pointer-events: auto; }
   .collection-row .group-actions { display: inline-flex; }
   .collection-row .collection-count { display: none; }
 
@@ -159,8 +158,7 @@
      shown here, rows reserve their width instead of overlaying the title. */
   .session-actions { gap: 4px; right: 6px; background: none; padding-left: 0; }
   .session-action-btn { width: 34px; height: 34px; }
-  .collection-sessions li,
-  #archived-list li { padding-top: 7px; padding-bottom: 7px; padding-right: 84px; }
+  .collection-sessions li { padding-top: 7px; padding-bottom: 7px; padding-right: 84px; }
 
   /* Collection headers (＋ / ⋯), the Collections header (sort / new) and the
      sidebar search close button. */

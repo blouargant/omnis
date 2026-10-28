@@ -69,7 +69,7 @@ same colour/size in multiple partials.
 |---|---|
 | `common.css` | **Shared:** reset, theme-palette tokens (`:root` vars), `html`/`body` base, global scrollbar |
 | `collections.css` | Sidebar **primary actions** (Search / Import, `.sidebar-action`), the Collections header (sort + new), and the **collection tree**: one `li.collection-group` per collection — header `.collection-row` (chevron, glyph/star, name, active count swapped for the hover `.group-actions` ＋/⋯), its rows `ul.collection-sessions`, `.group-empty`, `.group-more`, the pinned-row style, drag-over state, the collapsed-rail colour pastille (`.collection-badge`), the bulk-select checkboxes (`#sidebar.selecting`) and the colour-picker swatch grid (`.collection-swatch*`) |
-| `sidebar.css` | Left sidebar (app chrome + tree + Archived + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, single-line **session rows** (tree + Archived), archived-sessions panel, the **account button + menu** (`#account-btn`, `#account-menu`), sidebar resize handle |
+| `sidebar.css` | Left sidebar (app chrome + tree + footer), hover tooltip (`#tip-layer`), collapsed icon rail, New-Chat split-button, single-line **session rows**, the **account button + menu** (`#account-btn`, `#account-menu`), sidebar resize handle |
 | `folders.css` | Folders browser (now hosted in the environment panel's Fichiers card) + its right-click context menu |
 | `env-panel.css` | **Environment panel**: the right-hand column of cards (`#env-panel`, `.env-card*`, `.env-row*`, the Question card `.env-question*`) docked under the rightmost pane's tab bar (`.chat-pane.env-host`, `--env-panel-w`), the hosted file browser overrides, and the small-screen right drawer (`body.env-drawer-open`, `#env-scrim`) |
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
@@ -79,7 +79,7 @@ same colour/size in multiple partials.
 | `tools.css` | Tool-call blocks, todo plan widget, bash `!`-escape block, badge colour variants |
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |
 | `context.css` | Context ring, context popup, context browser modal |
-| `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card |
+| `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card, Archived sessions dialog (`.archived-modal*`) |
 | `notifications.css` | Background-task / monitor toast notifications (`#task-toast-layer`, `.task-toast`) |
 | `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` out of the flow into a full-height off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` **touch block**: reveals every hover-only control (session-row actions, collection-header ＋/⋯, turn/copy buttons, tab ×) and enlarges the chrome buttons to tappable sizes |
 
@@ -108,7 +108,7 @@ same colour/size in multiple partials.
 | `assistant.css` | Settings assistant: the bottom-right floating action button + the floating right-side chat drawer (`.settings-assistant-fab`, `.settings-assistant-panel`, `.sa-composer`, `.sa-msg`, `.sa-ask`) |
 
 > **Two `sidebar.css` files:** `features/sidebar.css` is the **main app**
-> sidebar (session list, folders/archived panels). `settings/sidebar.css` is the
+> sidebar (collection tree, account button). `settings/sidebar.css` is the
 > **Settings**-specific sidebar chrome. Don't confuse them.
 
 ## Adding a new partial

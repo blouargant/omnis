@@ -23,7 +23,7 @@
 - **Choose the collection of a new chat** — New Chat opens a draft where you pick the collection (and squad) before sending.
 - **Claude-style look** — a calmer cream and terracotta design (light, plus a new Terracotta Dark theme), a centred chat column with unframed answers, and a single rounded composer whose ＋ menu holds attachments, context, the Enter mode and slash commands; one round button sends, stops or steers.
 - **Environment panel** — a right-hand panel under the tab bar shows the question you are reading the reply to, lists the session's squad, folder and git branch, context use, loaded skills, connectors, produced files, git changes and the file browser; tool calls shrink to one quiet line that unfolds on demand and is kept across reloads.
-- **Account menu and settings dialog** — the sidebar footer is one account button whose menu opens Settings (Ctrl+,), Appearance, Language and Documentation in a dialog over the chat.
+- **Account menu and settings dialog** — the sidebar footer is one account button whose menu opens your archived sessions (search, read, restore), Settings (Ctrl+,), Appearance, Language and Documentation in a dialog over the chat.
 
 ## 2.0 — Durable agent questions
 

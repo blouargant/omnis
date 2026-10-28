@@ -2936,10 +2936,13 @@ still pinned, watched, retained, and gets ask-user delivered.
 GC ([server/gc.go](server/gc.go) `activeFromRegistry`) treats them as live and
 retains their files — keeping them available for semantic-recall indexing.
 
-Both UI surfaces render archived sessions in a **collapsible panel above the
-Settings button**: the Web UI `#archived-panel` ([web/index.html](web/index.html),
-[web/app.js](web/app.js) `renderSessions`/`archiveSession`/`unarchiveSession`,
-collapse state in `localStorage`), and the TUI `archivedPane` in the left column
+The Web UI lists archived sessions in an **Archived sessions dialog** opened from
+the account menu (see "Account menu"; [web/app.js](web/app.js)
+`openArchivedDialog`/`buildArchivedRow`, styles `.archived-modal*` in
+[web/css/features/dialogs.css](web/css/features/dialogs.css)): its own search box,
+and per row a title that opens the session read-only (closing the dialog),
+**Restore** (`unarchiveSession`, toast on success), Export and Delete. The TUI
+keeps an `archivedPane` in the left column
 ([internal/tui/tui.go](internal/tui/tui.go), toggled with **Ctrl-A**; `a` archives
 the highlighted session, `u` unarchives, `d` deletes). Viewing an archived session
 disables the composer in both surfaces.
@@ -2956,8 +2959,9 @@ The web UI is a **two-column layout** like Claude Desktop
   (`#sidebar-import-btn` → `importSessionPrompt`), the Collections header (label,
   **sort** `#collections-sort`, **new** `#collections-new`), the bulk-select bar
   (`#tree-select-bar`, hidden), the **collection tree** (`ul#collection-tree`, the
-  column's scroll region), the Archived panel, the **Files** browser
-  (`#folders-panel`) and the **account button** (see "Account menu"). `#sidebar`
+  column's scroll region) and the **account button** (see "Account menu"; its
+  menu opens the archived sessions). The **Files** browser moved to the
+  environment panel. `#sidebar`
   keeps its collapse-to-rail + resize machinery.
 - **Right** = `#chat-area` — the chat panes. (Settings open in a modal over it;
   see "Settings dialog".) There is **no middle column any more** — the former
@@ -2988,7 +2992,8 @@ and a non-default squad live in the title's `data-tip`.
   are there".
 - **`loadSessions()` is the FULL refresh** (collections + the loaded prefix of
   every open, already-fetched group — **including one known to be empty**, or a
-  session moved into an empty open group would never show — + Archived). Use it
+  session moved into an empty open group would never show — + the archived
+  view). Use it
   only for broad changes (import, fork, batch actions, archive/unarchive,
   collection create/rename/delete). **Single-session events use the targeted
   refresh** — see "Targeted live refresh" below.
@@ -3010,7 +3015,7 @@ and a non-default squad live in the title's `data-tip`.
   client-side by `effectiveCollection`; groups with a hit get `.search-hit` and
   `#collection-tree.searching` shows them open (others hidden, "Show more"
   hidden, `#tree-search-empty` when nothing matches). The query sits in
-  `sessionSearch`, which the Archived panel's `sessionsQuery` also sends. While
+  `sessionSearch` (the Archived sessions dialog has its own, `archivedSearch`). While
   searching, group loads/reloads are no-ops (the search owns the rows) and header
   clicks do nothing; closing (Escape / ✕) resets every group, restoring the
   stored open states. **Search and select are mutually exclusive**.
@@ -3039,7 +3044,7 @@ one `/api/collections` for the counts — coalesced into one pass per
 group per event (what a `loadSessions()` per event would do) was a burst per
 event, per browser, while turns stream. A session never seen here (created in
 another browser) is looked up first (`fetchSessionMeta`) so its own group — not
-General — is refreshed. The Archived panel reloads only for events that can change
+General — is refreshed. The archived view reloads only for events that can change
 it. During a search the pass re-runs the search instead.
 
 A **collection** is a thematic folder that groups sessions; **each session is in
@@ -3125,11 +3130,11 @@ exactly one** ("move" semantics, flat — no nesting).
 
 ### Session list pagination (server-side windowing)
 
-The tree's groups and the Archived panel are **paginated server-side** — the
-client never holds every session. Each tree group loads **10** rows then **20**
-per "Show more" (see "Session collections"); the Archived panel (every
+The tree's groups and the Archived sessions dialog are **paginated server-side** —
+the client never holds every session. Each tree group loads **10** rows then **20**
+per "Show more" (see "Session collections"); the archived view (every
 collection's archived sessions) loads **50**, then **5** more each time the user
-scrolls to within ~5 rows of its end.
+scrolls the dialog's list to within ~5 rows of its end.
 
 - **Endpoint** = the extended `GET /api/sessions`
   ([server/session_list.go](server/session_list.go) `handleListSessions`). It is
@@ -3154,9 +3159,11 @@ scrolls to within ~5 rows of its end.
 - **Archived windowing** ([web/app.js](web/app.js)): `archivedView`
   (`{loaded, total, loading, exhausted, seq}`), `loadMoreArchived` / `reloadArchivedPrefix`
   / `resetArchivedView`, a **sentinel `<li class="session-sentinel">`** watched by
-  an `IntersectionObserver` (only fires while the panel is expanded), and the
-  query built by `sessionsQuery(true, …)` (no collection filter, the current
-  search `q`, recent order). A **per-view monotonic `seq`** drops stale in-flight
+  an `IntersectionObserver` rooted on the dialog's list (`archivedListEl`, null
+  while the dialog is closed — `loadSessions` still refreshes the first page so
+  the menu count `archivedCount` and the read-only guard stay current), and the
+  query built by `sessionsQuery(true, …)` (no collection filter, the dialog's
+  search `archivedSearch`, recent order). A **per-view monotonic `seq`** drops stale in-flight
   responses.
 - **`sessionMeta`** — a lazily-grown `id → session` map populated on every fetch —
   backs `sessionMetaById`, `sessionCollectionColor`, `groupOf`, the archived
@@ -3759,8 +3766,8 @@ LLM history (a convenience, like the todo widget).
 
 ### Web UI Folders panel
 
-A collapsible **Folders** panel in the sidebar (`#folders-panel`, directly above
-`#archived-panel`, same look/feel — chevron + folder icon + section label,
+A collapsible **Folders** panel (`#folders-panel`, now hosted in the environment
+panel's Files card — chevron + folder icon + section label,
 collapsed by default, collapse state in `localStorage["agent_folders_collapsed"]`)
 browses the **active session's working directory** — or, when **no session is
 active** (a Monaco editor tab or an empty draft is showing), the **global default
@@ -6473,7 +6480,9 @@ styles in [web/css/features/sidebar.css](web/css/features/sidebar.css)).
 the single-user `web-user` outside cookie mode ⇒ "Omnis"); the collapsed rail shows
 the avatar only. `openAccountMenu` builds the body-appended `#account-menu` popover
 (reusing the `.folder-ctx-item` / `.folder-ctx-sep` look), anchored above the
-button: the login (when shown), **Settings** (`Ctrl+,` / `⌘,` hint), **Appearance**,
+button: the login (when shown), **Archived sessions** (with the archived count;
+opens the Archived sessions dialog — it replaced the sidebar's Archived panel),
+**Settings** (`Ctrl+,` / `⌘,` hint), **Appearance**,
 **Language**, **Documentation**, then the running version (`account.version`, from
 the cached `updateStatus`; fetched on demand if the menu opens before the boot
 check landed; omitted for `dev`) and, when an update is available, **Update to
@@ -6781,8 +6790,8 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
 
 - **The drawer** — `#sidebar` becomes `position: fixed`, full height (`100dvh`),
   `width: var(--m-drawer-w)` and `translateX(-100%)`. `body.nav-open` slides it in;
-  `#nav-scrim` is the backdrop. The whole sidebar (tree, Archived, Files, account
-  button) stays reachable — unlike the icon rail, which hides Archived/Files.
+  `#nav-scrim` is the backdrop. The whole sidebar (tree, account button) stays
+  reachable.
 - **`!important` is load-bearing.** The theme sheets are linked **after** `styles.css`
   and carry a higher-specificity `[data-theme="x"] #sidebar { position: relative;
   z-index: 1 }` (it anchors their drop-shadow onto the chat). Without `!important` on
@@ -6816,7 +6825,7 @@ imported **last** in [styles.css](web/css/styles.css) so its media-query rules w
   `.copy-msg-group`, the dimmed `.pane-toolbar`, the **per-session-row ⋮ / delete
   actions** (`.session-actions`, revealed by `li:hover`, so on touch they were
   reachable only via the sticky `:hover` a tap sometimes leaves behind, and *that same
-  tap opens the session*) for the tree and `#archived-list`, and a **collection
+  tap opens the session*) for the tree, and a **collection
   header's ＋ / ⋯** (`.group-actions`, which replace its count on hover). Bulk-select
   still hides the row actions (`#sidebar.selecting … { display: none }` out-specifies
   the reveal). (2) **Enlarges the touch targets** the mouse-sized chrome makes too
