@@ -728,3 +728,41 @@ func TestNewGateExposesCallbackAndCleaner(t *testing.T) {
 		t.Errorf("NewPluginFromConfig returned nil plugin/cleaner (%v, %v)", p, cleaner)
 	}
 }
+
+// TestFindExecReadOnly: `find -exec CMD` is read-only when CMD is. The `\;`
+// terminator is split off by splitCompound (it does not honour backslash
+// escapes), which leaves a trailing `\` on the find segment — covered here
+// end to end through allReadOnly. A further action after `\;` lands in its own
+// segment and still asks; quote the terminator (`';'`) to keep it whole.
+func TestFindExecReadOnly(t *testing.T) {
+	readOnly := []string{
+		`find /etc/agentskills/skills/iaparc-docs -name "*.md" -exec grep -l -i "kata\|sandbox\|vm\|virtual.*machine\|runtime" {} \;`,
+		`find . -name '*.go' -exec grep -n TODO {} +`,
+		`find . -type f -execdir head -1 {} ';'`,
+	}
+	for _, c := range readOnly {
+		if !allReadOnly(c) {
+			t.Errorf("allReadOnly(%q) = false, want true", c)
+		}
+	}
+	mutating := []string{
+		`find . -exec rm {} \;`,
+		`find . -exec sed -i s/a/b/ {} +`,
+		`find . -exec sh -c 'rm "$1"' _ {} \;`,
+		`find . -name x -exec {} \;`,
+		`find . -exec grep a {} \; -exec rm {} \;`,
+		`find . -exec grep a {} + -delete`,
+		`find . -ok grep a {} \;`,
+		`find . -okdir grep a {} \;`,
+		`find . -fprintf out %p`,
+		`find . -fls out`,
+		`find . -fprint0 out`,
+		`find . -exec`,
+		`find . -name '*.md' -exec wc -l {} \; -print`,
+	}
+	for _, c := range mutating {
+		if allReadOnly(c) {
+			t.Errorf("allReadOnly(%q) = true, want false", c)
+		}
+	}
+}

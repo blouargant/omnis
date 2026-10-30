@@ -197,7 +197,7 @@ func bashSubcommands(command string) []string {
 }
 
 // readOnlyCommands are the base commands Claude Code runs without a prompt in
-// every mode. Mutating-capable tools (sed, sort, find with -delete/-exec,
+// every mode. Mutating-capable tools (sed, sort, find with -delete or -exec,
 // git non-read subcommands) are handled with extra care below.
 var readOnlyCommands = map[string]bool{
 	"ls": true, "cat": true, "echo": true, "pwd": true, "head": true,
@@ -217,6 +217,52 @@ var readOnlyCommands = map[string]bool{
 	"whoami": true, "id": true, "uname": true,
 }
 
+// findWriteActions are the find actions that write a file or run a command
+// interactively; any of them makes the find mutating.
+var findWriteActions = map[string]bool{
+	"-delete": true, "-ok": true, "-okdir": true,
+	"-fprint": true, "-fprint0": true, "-fprintf": true, "-fls": true,
+}
+
+// findIsReadOnly reports whether find's arguments are read-only. An
+// -exec/-execdir action is accepted when the command it runs is itself
+// read-only (`find … -exec grep -l pat {} \;`). The command runs up to its
+// terminator: `;`, `\;`, `';'`, `+`, or a trailing `\` — splitCompound cuts an
+// unquoted `\;` at the `;`, leaving the backslash as the segment's last token.
+// A command that is the found file itself (`-exec {} \;`) is refused.
+func findIsReadOnly(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		f := args[i]
+		if findWriteActions[f] {
+			return false
+		}
+		if f != "-exec" && f != "-execdir" {
+			continue
+		}
+		j := i + 1
+		for j < len(args) && !isFindExecTerminator(args[j]) {
+			j++
+		}
+		inner := args[i+1 : j]
+		if len(inner) == 0 || strings.Contains(inner[0], "{}") {
+			return false
+		}
+		if !isReadOnlyCommand(strings.Join(inner, " ")) {
+			return false
+		}
+		i = j
+	}
+	return true
+}
+
+func isFindExecTerminator(tok string) bool {
+	switch tok {
+	case ";", `\;`, `';'`, `";"`, "+", `\`:
+		return true
+	}
+	return false
+}
+
 // readOnlyGitSubcommands are the git subcommands that do not mutate the working
 // tree or remote.
 var readOnlyGitSubcommands = map[string]bool{
@@ -226,8 +272,9 @@ var readOnlyGitSubcommands = map[string]bool{
 }
 
 // isReadOnlyCommand reports whether a single (wrapper-stripped) subcommand is a
-// recognised read-only command. Conservative: a "find" with -delete/-exec, or
-// a non-read git subcommand, is not treated as read-only.
+// recognised read-only command. Conservative: a "find" that writes a file,
+// deletes, or -exec's a non-read-only command, or a non-read git subcommand, is
+// not treated as read-only.
 func isReadOnlyCommand(sub string) bool {
 	fields := strings.Fields(sub)
 	if len(fields) == 0 {
@@ -239,12 +286,7 @@ func isReadOnlyCommand(sub string) bool {
 	}
 	switch cmd {
 	case "find":
-		for _, f := range fields[1:] {
-			if f == "-delete" || f == "-exec" || f == "-execdir" || f == "-fprint" {
-				return false
-			}
-		}
-		return true
+		return findIsReadOnly(fields[1:])
 	case "date":
 		// date prints the time and is read-only unless it sets the system
 		// clock (-s / --set). -s is the only single-letter date flag with 's'.
