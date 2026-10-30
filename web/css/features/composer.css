@@ -221,7 +221,15 @@ body.resizing-composer #composer-resize { transition: none; }
 /* Translucent selection so the coloured backdrop text shows through the
    transparent textarea text while selecting. */
 #prompt::selection { background: rgba(79, 193, 255, 0.35); }
-#prompt::placeholder { color: #555558; }
+/* The hint stays on one line (cut with "…"): a wrapped placeholder counts in
+   the textarea's scrollHeight, so autoGrowPrompt grew the empty composer to
+   two lines in a narrow pane. */
+#prompt::placeholder {
+  color: #555558;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Prompt suggestion: the suggested next message is the textarea's placeholder
    (so the browser hides it on the first keystroke). Italic to set it apart from
