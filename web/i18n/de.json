@@ -1015,6 +1015,7 @@
   "term.hide": "Terminal ausblenden",
   "term.close": "Dieses Terminal schließen",
   "env.tasks": "Hintergrundaufgaben",
+  "env.liveDelegate": "Delegiert an {agent}",
   "env.tasksDone": "Beendet: {n}",
   "env.taskStop": "Stoppen",
   "env.taskNoOutput": "Noch keine Ausgabe.",

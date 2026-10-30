@@ -8962,7 +8962,7 @@ async function subscribeGlobalEvents() {
           clearSuggestion(sid);
           fetchSuggestion(sid);
           // The task left the "running" list of the Background tasks card.
-          if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
+          refreshEnvTasks(sid);
           if (!sessionSending.has(sid)) await appendNewPushTurns(sid);
           notifyTaskEvent(sid);
         } else if (event === "schedule_run" && sid) {
@@ -10140,6 +10140,7 @@ async function sendMessage(panel) {
           }
           const block = appendToolCall(data.name, data.args, container);
           pendingTools.push({ id: data.call_id || "", block });
+          startLiveAction(sessionId, data.call_id, data.name, data.args, "", block);
           activeOuterBlock = block;
           innerPending.length = 0;
           setSessionStatus(sessionId, `running ${data.name}…`);
@@ -10167,7 +10168,8 @@ async function sendMessage(panel) {
           }
           // The agent started or stopped a background task: the environment
           // panel's Background tasks card lists them.
-          if (BG_TASK_TOOLS.has(data.name) && sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
+          if (BG_TASK_TOOLS.has(data.name)) refreshEnvTasks(sessionId);
+          endLiveAction(sessionId, data.call_id);
           activeOuterBlock = null;
           setSessionStatus(sessionId, "thinking…");
           break;
@@ -10191,10 +10193,12 @@ async function sendMessage(panel) {
             skillCalls.set(data.call_id || "", { name: data.name, args: data.args });
             break;
           }
+          let innerBlock = null;
           if (activeOuterBlock) {
-            const inner = appendNestedToolCall(activeOuterBlock, data.name, data.args);
-            innerPending.push({ id: data.call_id || "", block: inner });
+            innerBlock = appendNestedToolCall(activeOuterBlock, data.name, data.args);
+            innerPending.push({ id: data.call_id || "", block: innerBlock });
           }
+          startLiveAction(sessionId, data.call_id, data.name, data.args, data.agent || "", innerBlock);
           break;
         }
 
@@ -10209,6 +10213,7 @@ async function sendMessage(panel) {
           }
           const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, data.response, data.duration_ms);
+          endLiveAction(sessionId, data.call_id);
           break;
         }
 
@@ -10221,6 +10226,7 @@ async function sendMessage(panel) {
           }
           const inner = takePending(innerPending, data.call_id);
           if (inner) resolveToolCall(inner, { error: data.error });
+          endLiveAction(sessionId, data.call_id);
           break;
         }
 
@@ -10451,6 +10457,7 @@ async function sendMessage(panel) {
       if (dot) dot.classList.remove("pending");
       refreshToolGroup(b.closest(".tool-group"));
     }
+    clearLiveActions(sessionId);
     sessionAbortCtrls.delete(sessionId);
     sessionStopped.delete(sessionId);
     sessionSending.delete(sessionId);
@@ -12626,6 +12633,7 @@ const ENV_ICON = {
   branch: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>`,
   skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
   task:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"/></svg>`,
+  command: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>`,
   stop:   `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`,
 };
 
@@ -12643,9 +12651,134 @@ let envTasksTimer = null;
 let envTasksDoneOpen = false;
 const envTaskOpen = new Set(); // task ids whose output is shown
 
+// The server list (GET …/tasks) is cached per session so the card can be
+// re-rendered for a live action without a fetch; refreshEnvTasks drops the
+// cached list when it may have changed.
+const envTasksCache = new Map(); // sessionId → tasks
+
+function refreshEnvTasks(sessionId) {
+  if (sessionId) envTasksCache.delete(sessionId); else envTasksCache.clear();
+  if (window.EnvPanel) EnvPanel.refresh("tasks");
+}
+
+// ─── Live actions ────────────────────────────────────────────────────────────
+// What the agent is doing right now in a turn this browser streams, listed at
+// the top of the Background tasks card: a delegation to a sub-agent, and a
+// command (run by the agent or by one of its sub-agents, shown under that
+// delegation). Client-side only: added on tool_call / agent_tool_call, dropped
+// on the matching result, all cleared when the turn ends. A click scrolls the
+// transcript to the call.
+
+const liveActions = new Map(); // sessionId → Map(callId → action)
+const LIVE_COMMAND_TOOLS = new Set(["bash", "run_tests"]);
+let liveActionSeq = 0;
+let liveActionsTimer = null;
+
+// liveDelegateArgs: a sub-agent tool takes { request } (plus resume_session
+// when its sessions are resumable) — the shape no other tool has.
+function liveDelegateArgs(args) {
+  if (!args || typeof args !== "object" || typeof args.request !== "string") return false;
+  return Object.keys(args).every((k) => k === "request" || k === "resume_session");
+}
+
+function startLiveAction(sessionId, callId, name, args, parentAgent, block) {
+  const a = (args && typeof args === "object") ? args : {};
+  let kind = "";
+  if (liveDelegateArgs(a)) kind = "delegate";
+  else if (LIVE_COMMAND_TOOLS.has(String(name || "").toLowerCase())) kind = "command";
+  if (!kind) return;
+  let text, tip;
+  if (kind === "delegate") {
+    text = tr("env.liveDelegate", { agent: name });
+    tip = a.request;
+  } else {
+    const cmd = String(a.command || "").trim();
+    text = cmd ? cmd.split("\n")[0] : (a.scope ? `run_tests ${a.scope}` : String(name));
+    tip = cmd || text;
+  }
+  if (tip && tip.length > 300) tip = tip.slice(0, 300) + "…";
+  let m = liveActions.get(sessionId);
+  if (!m) { m = new Map(); liveActions.set(sessionId, m); }
+  m.set(callId || `live#${++liveActionSeq}`, { kind, name, text, tip, parentAgent, block, started: Date.now() });
+  liveActionsChanged(sessionId);
+}
+
+function endLiveAction(sessionId, callId) {
+  const m = liveActions.get(sessionId);
+  if (!m || !callId || !m.delete(callId)) return;
+  if (!m.size) liveActions.delete(sessionId);
+  liveActionsChanged(sessionId);
+}
+
+function clearLiveActions(sessionId) {
+  if (liveActions.delete(sessionId)) liveActionsChanged(sessionId);
+}
+
+function liveActionsChanged(sessionId) {
+  if (sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
+  // Elapsed times move on in place, without re-rendering the card.
+  if (!liveActionsTimer && liveActions.size) {
+    liveActionsTimer = setInterval(() => {
+      if (!liveActions.size) { clearInterval(liveActionsTimer); liveActionsTimer = null; return; }
+      for (const el of document.querySelectorAll("#env-panel .env-live-time")) {
+        el.textContent = envDuration(Date.now() - Number(el.dataset.started));
+      }
+    }, 1000);
+  }
+}
+
+// appendLiveActionRows lists the live actions, each command run by a
+// sub-agent right under that sub-agent's delegation.
+function appendLiveActionRows(body, live) {
+  const top = live.filter((a) => !a.parentAgent || !live.some((d) => d.kind === "delegate" && d.name === a.parentAgent));
+  const add = (a, nested) => {
+    body.appendChild(liveActionRow(a, nested));
+    if (a.kind === "delegate") {
+      for (const c of live) if (c.parentAgent === a.name) add(c, true);
+    }
+  };
+  for (const a of top) add(a, false);
+}
+
+function liveActionRow(a, nested) {
+  const row = document.createElement("div");
+  row.className = "env-row env-task-row env-live-row" + (nested ? " is-nested" : "") + (a.block ? " env-row-btn" : "");
+  if (a.tip) row.setAttribute("data-tip", a.tip);
+  const icon = document.createElement("span");
+  icon.className = "env-row-icon env-task-icon";
+  icon.innerHTML = a.kind === "delegate" ? ENV_ICON.squad : ENV_ICON.command;
+  const text = document.createElement("span");
+  text.className = "env-row-text" + (a.kind === "command" ? " env-live-cmd" : "");
+  text.textContent = a.text;
+  const meta = document.createElement("span");
+  meta.className = "env-row-meta env-live-time";
+  meta.dataset.started = String(a.started);
+  meta.textContent = envDuration(Date.now() - a.started);
+  row.append(icon, text, meta);
+  if (a.block) {
+    row.setAttribute("role", "button");
+    row.tabIndex = 0;
+    const go = () => {
+      const group = a.block.closest(".tool-group");
+      if (group && !group.classList.contains("expanded")) {
+        group.classList.add("expanded");
+        const line = group.querySelector(":scope > .tool-summary-line");
+        if (line) line.setAttribute("aria-expanded", "true");
+      }
+      // A sub-agent's command sits inside its delegation's row.
+      const parent = a.block.parentElement && a.block.parentElement.closest(".tool-block");
+      if (parent) parent.classList.add("expanded");
+      a.block.scrollIntoView({ block: "center", behavior: "smooth" });
+    };
+    row.addEventListener("click", go);
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  }
+  return row;
+}
+
 function scheduleEnvTasksTick(running) {
   clearTimeout(envTasksTimer);
-  envTasksTimer = running ? setTimeout(() => EnvPanel.refresh("tasks"), ENV_TASKS_TICK_MS) : null;
+  envTasksTimer = running ? setTimeout(() => refreshEnvTasks(), ENV_TASKS_TICK_MS) : null;
 }
 
 // envDuration renders a duration the way the card shows it: 45s, 7min, 1h05.
@@ -12694,7 +12827,7 @@ function envTaskRow(t, sessionId) {
         await apiFetch(`/api/sessions/${sessionId}/tasks/${encodeURIComponent(t.id)}/cancel`, { method: "POST" });
       } catch (err) { console.error("stop task failed:", err); }
       // The stop lands within a moment (the process group is killed).
-      setTimeout(() => EnvPanel.refresh("tasks"), 400);
+      setTimeout(() => refreshEnvTasks(sessionId), 400);
     });
     row.appendChild(stop);
   }
@@ -12932,19 +13065,26 @@ function registerEnvCards() {
     title: () => tr("env.tasks"),
     sessionOnly: true,
     async render(body, ctx) {
-      let tasks = [];
-      try {
-        const res = await apiFetch(`/api/sessions/${ctx.sessionId}/tasks`);
-        if (res.ok) tasks = (await res.json()).tasks || [];
-      } catch (_) { /* keep empty */ }
-      if (ctx.stale()) return;
+      let tasks = envTasksCache.get(ctx.sessionId);
+      if (!tasks) {
+        tasks = [];
+        try {
+          const res = await apiFetch(`/api/sessions/${ctx.sessionId}/tasks`);
+          if (res.ok) tasks = (await res.json()).tasks || [];
+        } catch (_) { /* keep empty */ }
+        if (ctx.stale()) return;
+        envTasksCache.set(ctx.sessionId, tasks);
+      }
+      const live = [...(liveActions.get(ctx.sessionId) || new Map()).values()];
       const running = tasks.filter((t) => t.status === "running");
       const done = tasks.filter((t) => t.status !== "running");
-      ctx.setVisible(tasks.length > 0);
-      ctx.setValue(running.length ? `<span class="env-task-live"></span>${running.length}` : "");
+      const busy = running.length + live.length;
+      ctx.setVisible(tasks.length > 0 || live.length > 0);
+      ctx.setValue(busy ? `<span class="env-task-live"></span>${busy}` : "");
       scheduleEnvTasksTick(running.length > 0 && EnvPanel.isOpen()); // reopening the panel re-renders
       if (!ctx.open) return;
       body.innerHTML = "";
+      appendLiveActionRows(body, live);
       for (const t of running) body.appendChild(envTaskRow(t, ctx.sessionId));
       if (done.length) {
         const head = document.createElement("button");
