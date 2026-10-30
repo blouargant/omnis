@@ -7026,6 +7026,17 @@ read-only summary. On tab-hide the wizard requeues only its **unanswered**
 questions into `queuedAskWidgets` and is torn down (rebuilt fresh on reselect);
 session delete clears `askWizards`.
 
+**Look (Claude Desktop style).** The card is the composer's twin — same width
+(`--chat-max-w - 40px`), `--composer-bg` surface, `--border`, `--radius-md`, soft
+shadow ([web/css/features/dialogs.css](web/css/features/dialogs.css)). Single /
+confirm choices are a **numbered list**: the radio stays in the DOM but is
+visually hidden, a CSS counter draws the number badge (accent when selected),
+and pressing a digit while the choices have focus picks that choice
+(`buildAskInput`). Submit is a dark `--text-strong` button, Skip an outlined one.
+Multi-select keeps its visible checkboxes. **GOTCHA:** the selected-badge rule
+must repeat `:has(input[type="radio"])` — `:has()` takes its argument's
+specificity, so a plain `.is-selected::before` loses to the base badge rule.
+
 **The card folds to one line.** A pending question sits above the composer and
 can be tall enough to hide the very reply it is asking about, so the card's first
 child is a full-width toggle (`buildWizardHead` → `.ask-wizard-head`: chevron +

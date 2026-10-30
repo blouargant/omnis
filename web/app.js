@@ -5638,6 +5638,19 @@ function buildAskInput(q) {
       labels.push(label);
     });
     paint();
+    // The choices are numbered: pressing a digit while they have focus picks
+    // that choice (Enter then submits, as for a click).
+    choicesDiv.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || !/^[1-9]$/.test(e.key)) return;
+      const label = labels[Number(e.key) - 1];
+      if (!label) return;
+      e.preventDefault();
+      const radio = label.querySelector("input");
+      radio.checked = true;
+      radio.focus();
+      selectedValue = label.dataset.choice;
+      paint();
+    });
     el.appendChild(choicesDiv);
     getAnswer = () => selectedValue ? { selected: [selectedValue], text: "", cancelled: false } : null;
   } else if (kind === "multi") {
