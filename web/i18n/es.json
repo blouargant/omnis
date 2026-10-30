@@ -41,7 +41,7 @@
   "composer.addContext": "Añadir contexto",
   "composer.editMode": "Alternar la tecla Intro: enviar o nueva línea",
   "composer.slashTip": "Comandos slash (/)",
-  "composer.placeholder": "Escribe al agente… (Intro para enviar)",
+  "composer.placeholder": "Escribe al agente… (Ctrl+Intro para una nueva línea)",
   "composer.placeholderCtrl": "Escribe al agente… (Ctrl+Intro para enviar)",
   "composer.archivedPlaceholder": "Sesión archivada — desarchívala para continuar la conversación",
   "composer.suggestHint": "Tab ⇥",

@@ -41,7 +41,7 @@
   "composer.addContext": "Kontext hinzufügen",
   "composer.editMode": "Eingabetaste umschalten: senden oder neue Zeile",
   "composer.slashTip": "Slash-Befehle (/)",
-  "composer.placeholder": "Nachricht an den Agenten… (Enter zum Senden)",
+  "composer.placeholder": "Nachricht an den Agenten… (Strg+Enter für eine neue Zeile)",
   "composer.placeholderCtrl": "Nachricht an den Agenten… (Strg+Enter zum Senden)",
   "composer.archivedPlaceholder": "Sitzung archiviert — Archivierung aufheben, um fortzufahren",
   "composer.suggestHint": "Tab ⇥",
