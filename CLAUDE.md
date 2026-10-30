@@ -6845,11 +6845,18 @@ web font), `--answer-font-size/-line-height`, `--user-bubble-bg/-fg` (the sent
 message is a small right-aligned bubble; answers are plain text, no frame). The
 default theme **`terracotta`** carries the Claude light palette and
 **`terracotta-dark`** the dark one (a theme to pick — it does NOT follow the OS).
-The **composer** is one rounded box: a **＋** button (`#attach-btn`) whose menu
-holds upload / add context / Enter mode (`#attach-editmode` → hidden
-`#edit-mode-btn`) / slash commands (`#attach-slash` → hidden `#slash-btn`), the
-context ring + subtle "?" + `#status`, and one round `#send` (Send/Steer/Stop, see
-"Mid-turn steering"). The hidden buttons keep their handlers as the single
+The **composer** is one rounded box on **one line** (`.composer-row`): a **＋**
+button (`#attach-btn`) on the left whose menu holds upload / add context / Enter
+mode (`#attach-editmode` → hidden `#edit-mode-btn`) / slash commands
+(`#attach-slash` → hidden `#slash-btn`), the editor (`rows="1"`, auto-grows), then
+the context ring + subtle "?" and one round `#send` (Send/Steer/Stop, see
+"Mid-turn steering") — the side controls stay on the editor's last line as it
+grows. It is **wider than the reading column**: `--composer-max-w`
+(`--chat-max-w` + 160px) caps it and the cards sitting on it (goal chip,
+provider banner, ask-user card, resize handle). `#status` floats just **above**
+the card's right corner (absolute), so a ticking "working… (Ns)" never moves the
+editor's text; the goal chip and the composer provider banner keep a 26px bottom
+margin for it, and it is hidden while an ask-user card is shown. The hidden buttons keep their handlers as the single
 implementation and need explicit `[hidden] { display: none }` rules (their own
 `display` beats the UA rule). The sidebar's **New chat** is a plain row with the
 squad chevron revealed on hover (always on touch); the focused session row is a

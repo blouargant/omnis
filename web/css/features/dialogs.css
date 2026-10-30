@@ -87,11 +87,12 @@
   position: relative;
   z-index: 1;
   pointer-events: auto;
-  /* Match the centred prompt card (#composer: max-width 700px, centred). */
+  /* Match the centred prompt card (#composer: --composer-max-w, centred). */
   align-self: center;
   width: 100%;
-  max-width: 700px;
-  margin: 0 0 8px;
+  max-width: var(--composer-max-w);
+  /* Room for the turn status, which floats just above the card's corner. */
+  margin: 0 0 26px;
 }
 
 /* ─── Provider connection (model health) popup ─────────────── */
@@ -820,7 +821,7 @@
    white surface, same soft border and shadow — so a question reads as part of
    the input area rather than an alert. */
 .ask-user-card {
-  max-width: min(calc(var(--chat-max-w) - 40px), 100%);
+  max-width: min(var(--composer-max-w), 100%);
   width: 100%;
   margin-left: auto;
   margin-right: auto;

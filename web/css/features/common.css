@@ -37,6 +37,10 @@
      the composer share one centred column of this max width (the phone band in
      responsive.css lifts it to 100%). */
   --chat-max-w: 720px;
+  /* The composer (and the cards that sit on it: chips, the ask-user card) is
+     wider than the reading column, like Claude Desktop's input box. Capped to
+     the pane by its own 100% width. */
+  --composer-max-w: calc(var(--chat-max-w) + 160px);
   /* Corner radii — small controls/blocks, cards/bubbles, the composer box. */
   --radius-sm: 8px;
   --radius-md: 12px;

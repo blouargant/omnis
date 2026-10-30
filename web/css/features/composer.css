@@ -35,13 +35,13 @@
 .goal-chip,
 .skills-dock { pointer-events: auto; }
 /* The chips above the editor must sit over the wrap's fade (::before, z 0)
-   and match the centred prompt card (#composer: max-width 700px). */
+   and match the centred prompt card (#composer: --composer-max-w). */
 .goal-chip,
 .skills-dock {
   position: relative;
   z-index: 1;
   align-self: center;
-  max-width: calc(var(--chat-max-w) - 40px);
+  max-width: var(--composer-max-w);
   box-sizing: border-box;
 }
 
@@ -81,7 +81,7 @@
   left: 0;
   right: 0;
   /* Match the centred editor card so the line spans only the card width. */
-  max-width: 700px;
+  max-width: var(--composer-max-w);
   margin: 0 auto;
   padding: 0;
   box-sizing: border-box;
@@ -108,10 +108,11 @@ body.resizing-composer #composer-resize { transition: none; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: calc(var(--chat-max-w) - 40px);
+  gap: 4px;
+  /* Wider than the reading column, like Claude Desktop's input box. */
+  max-width: var(--composer-max-w);
   margin: 0 auto;
-  padding: 12px 12px 10px 16px;
+  padding: 6px 8px;
   width: 100%;
   /* Editor surface: --composer-bg defaults to the peach user bubble; ivory /
      terracotta override the token to white. The expanded Folders/Archived
@@ -132,9 +133,25 @@ body.resizing-composer #composer-resize { transition: none; }
    renders the text with "@file" references coloured, and the real <textarea>
    on top with TRANSPARENT text (only its caret/selection show). They share
    identical box metrics so glyphs line up exactly. See renderPromptHighlight. */
+/* One line: ＋ on the left, the editor, then the actions (Send/Steer/Stop) on
+   the right. The side controls stay on the editor's LAST line as it grows. */
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+.composer-row > #attach-wrap,
+.composer-row > .composer-actions {
+  /* The height of one editor line (1.5em of 15px + 12px padding + 2px border),
+     so the buttons sit centred on it. */
+  height: 37px;
+  display: flex;
+  align-items: center;
+}
 .prompt-stack {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: block;
 }
 /* Manual resize sizes the EDITOR (the prompt stack) to --composer-h, not the
@@ -247,12 +264,22 @@ body.resizing-composer #composer-resize { transition: none; }
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
+/* The turn status floats just above the card's right corner, so a status that
+   changes every second ("working… (12s)") never moves the editor's text. */
 #status {
+  position: absolute;
+  right: 14px;
+  bottom: calc(100% + 6px);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
   font-size: 13px;
   color: var(--text-muted);
-  margin-left: auto;
   font-style: italic;
   display: flex;
   align-items: center;
@@ -262,6 +289,8 @@ body.resizing-composer #composer-resize { transition: none; }
 }
 
 #status.active { opacity: 1; }
+/* An ask-user card sits right above the composer and owns that space. */
+.chat-pane:has(#ask-user-slot:not(:empty)) #status { display: none; }
 
 #status.active::before {
   content: '';
@@ -349,7 +378,7 @@ body.resizing-composer #composer-resize { transition: none; }
   padding: 0;
   border-radius: 50%;
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
@@ -454,7 +483,8 @@ body.resizing-composer #composer-resize { transition: none; }
   align-items: center;
   gap: 6px;
   width: 100%;
-  margin: 0 0 6px;
+  /* Room for the turn status, which floats just above the card's corner. */
+  margin: 0 0 26px;
   padding: 4px 10px;
   background: var(--accent-bg-soft);
   border: 1px solid var(--accent-border-soft);
