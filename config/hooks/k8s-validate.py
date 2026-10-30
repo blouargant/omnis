@@ -951,13 +951,18 @@ def segments(command):
     would split inside a quoted argument (turning `note="a && b"` into two
     unbalanced halves) and it would miss `\\n` and `&`, so a mutation on the
     second line of a multi-line command would never be examined. Like the Go
-    side, backslash escapes are NOT interpreted.
+    side, a backslash escapes the next character outside single quotes, so
+    `\\;` is an argument (find's terminator), not a separator.
     """
     out, buf = [], []
     quote = ""
     i, n = 0, len(command)
     while i < n:
         c = command[i]
+        if c == "\\" and quote != "'" and i + 1 < n:
+            buf.append(command[i:i + 2])
+            i += 2
+            continue
         if quote:
             buf.append(c)
             if c == quote:

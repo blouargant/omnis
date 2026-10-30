@@ -60,7 +60,10 @@ var compoundOps = []string{"&&", "||", "|&", ";", "\n", "|", "&"}
 
 // splitCompound breaks a shell command line into its subcommands, respecting
 // single and double quotes so an operator inside a quoted string is not
-// treated as a separator. Order is preserved; empty fragments are dropped.
+// treated as a separator. A backslash escapes the next character outside
+// single quotes, as in the shell: `find … -exec grep x {} \; 2>/dev/null` is one
+// command, and `\"` does not close a double-quoted string. Order is
+// preserved; empty fragments are dropped.
 func splitCompound(cmd string) []string {
 	var out []string
 	var cur strings.Builder
@@ -74,6 +77,12 @@ func splitCompound(cmd string) []string {
 	}
 	for i := 0; i < len(cmd); i++ {
 		c := cmd[i]
+		if c == '\\' && quote != '\'' && i+1 < len(cmd) {
+			cur.WriteByte(c)
+			cur.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
 		if quote != 0 {
 			cur.WriteByte(c)
 			if c == quote {
@@ -227,8 +236,7 @@ var findWriteActions = map[string]bool{
 // findIsReadOnly reports whether find's arguments are read-only. An
 // -exec/-execdir action is accepted when the command it runs is itself
 // read-only (`find … -exec grep -l pat {} \;`). The command runs up to its
-// terminator: `;`, `\;`, `';'`, `+`, or a trailing `\` — splitCompound cuts an
-// unquoted `\;` at the `;`, leaving the backslash as the segment's last token.
+// terminator: `;`, `\;`, `';'` or `+`.
 // A command that is the found file itself (`-exec {} \;`) is refused.
 func findIsReadOnly(args []string) bool {
 	for i := 0; i < len(args); i++ {
@@ -257,7 +265,7 @@ func findIsReadOnly(args []string) bool {
 
 func isFindExecTerminator(tok string) bool {
 	switch tok {
-	case ";", `\;`, `';'`, `";"`, "+", `\`:
+	case ";", `\;`, `';'`, `";"`, "+":
 		return true
 	}
 	return false

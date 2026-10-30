@@ -69,6 +69,14 @@ func TestPythonAndGoSegmentTheSameCorpus(t *testing.T) {
 		"kubectl get pods;",
 		"; kubectl get pods",
 		"kubectl exec pod -- sh -c 'echo a && echo b'",
+		// Backslash escapes: an escaped `;` is an argument, `\\;` is a
+		// literal backslash then a real separator, `\"` stays inside the
+		// quotes, and nothing is escaped inside single quotes.
+		`find . -exec grep x {} \; 2>/dev/null`,
+		`echo a\\; kubectl delete pod x`,
+		`echo "a \" ; b" ; kubectl get pods`,
+		`echo 'a\'; kubectl get pods`,
+		"kubectl get pods \\\nkubectl delete pod x",
 	}
 	for _, cmd := range corpus {
 		got := pySegments(t, cmd)

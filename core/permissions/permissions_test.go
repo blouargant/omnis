@@ -729,16 +729,17 @@ func TestNewGateExposesCallbackAndCleaner(t *testing.T) {
 	}
 }
 
-// TestFindExecReadOnly: `find -exec CMD` is read-only when CMD is. The `\;`
-// terminator is split off by splitCompound (it does not honour backslash
-// escapes), which leaves a trailing `\` on the find segment — covered here
-// end to end through allReadOnly. A further action after `\;` lands in its own
-// segment and still asks; quote the terminator (`';'`) to keep it whole.
+// TestFindExecReadOnly: `find -exec CMD` is read-only when CMD is. Checked end
+// to end through allReadOnly, so the escaped `\;` terminator must not split
+// the command (anything after it, a redirect or another action, stays part of
+// the find).
 func TestFindExecReadOnly(t *testing.T) {
 	readOnly := []string{
 		`find /etc/agentskills/skills/iaparc-docs -name "*.md" -exec grep -l -i "kata\|sandbox\|vm\|virtual.*machine\|runtime" {} \;`,
 		`find . -name '*.go' -exec grep -n TODO {} +`,
 		`find . -type f -execdir head -1 {} ';'`,
+		`find . -name '*.md' -exec wc -l {} \; -print`,
+		`find /etc/agentskills -name "*.md" -exec grep -l -i "kata" {} \; 2>/dev/null`,
 	}
 	for _, c := range readOnly {
 		if !allReadOnly(c) {
@@ -758,7 +759,7 @@ func TestFindExecReadOnly(t *testing.T) {
 		`find . -fls out`,
 		`find . -fprint0 out`,
 		`find . -exec`,
-		`find . -name '*.md' -exec wc -l {} \; -print`,
+		`find . -exec grep a {} \; ; rm x`,
 	}
 	for _, c := range mutating {
 		if allReadOnly(c) {
