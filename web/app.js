@@ -1041,6 +1041,19 @@ function renderPickerSquad(panel) {
   if (panel.els.pickerSquadName) panel.els.pickerSquadName.textContent = panel._pickerSquad;
 }
 
+// resetPickerSquad puts a pane's draft Squad selector back on the default squad,
+// or on `squad` when a new draft is opened for a given squad (the sidebar New
+// Chat chevron). A squad set this way counts as picked, so a collection's
+// default squad does not replace it. The collection selector is re-read too,
+// so the next render applies that collection's default squad again.
+function resetPickerSquad(panel, squad) {
+  const valid = squad && availableSquads.some((s) => s.name === squad);
+  panel._pickerSquad = valid ? squad : null;
+  panel._pickerSquadPicked = !!valid;
+  panel._pickerSquadAuto = false;
+  panel._pickerCollection = null;
+}
+
 function openPickerSquadMenu(panel) {
   const menu = panel.els.pickerSquadMenu;
   const toggle = panel.els.pickerSquadToggle;
@@ -2348,6 +2361,7 @@ function moveTab(fromPanel, key, toPanel, toIndex) {
 function newDraftTab(panel, opts = {}) {
   const key = newDraftKey();
   if (opts.dir) draftDirs.set(key, opts.dir);
+  resetPickerSquad(panel, opts.squad);
   panel.tabs.push(key);
   activateTab(panel, key);
 }
@@ -8674,12 +8688,12 @@ async function syncLiveTurn(id) {
 // when only the default squad is available so the UI stays empty for
 // single-squad setups.
 
+// Keys older builds used to remember the last squad picked (cleared on load).
 const SQUAD_PREF_KEY = "agent_toolkit_squad";
-const SQUAD_MIGRATION_KEY = "agent_toolkit_squad_reset_omnis"; // one-time Omnis rollout reset
-const SQUAD_DEFAULT_SEEN_KEY = "agent_toolkit_squad_default_seen"; // last server default seen
+const SQUAD_MIGRATION_KEY = "agent_toolkit_squad_reset_omnis";
+const SQUAD_DEFAULT_SEEN_KEY = "agent_toolkit_squad_default_seen";
 let availableSquads = [];          // [{name, description, leader, members, ...}]
 let defaultSquadName = "default";
-let selectedSquadName = "";
 
 async function loadSquads() {
   try {
@@ -8689,43 +8703,12 @@ async function loadSquads() {
     availableSquads = Array.isArray(data.squads) ? data.squads : [];
     defaultSquadName = data.default || "default";
 
-    // One-time migration (Omnis router rollout): older builds auto-persisted
-    // the then-default squad ("default"/"Default") into localStorage. Now that
-    // the Omnis router is the server default, that stale value shadows it and
-    // pins every new chat to the non-routed default team. Clear it exactly once
-    // so the fallback below adopts the server default (Omnis). A user who then
-    // deliberately re-picks the default team keeps it (the flag stops re-clearing).
-    if (!localStorage.getItem(SQUAD_MIGRATION_KEY)) {
-      const stale = localStorage.getItem(SQUAD_PREF_KEY);
-      if (stale && stale.toLowerCase() === "default"
-                && defaultSquadName.toLowerCase() !== "default") {
-        localStorage.removeItem(SQUAD_PREF_KEY);
-      }
-      localStorage.setItem(SQUAD_MIGRATION_KEY, "1");
-    }
-
-    // newChat() saves the squad of every new chat, so a browser that only ever
-    // used the default has that default saved as if it had been picked. When
-    // the server's default changes (a deployment's start_squad), such a value
-    // must follow it — otherwise every existing browser stays on the old one.
-    // Drop the saved pref once per default change when it is the previous
-    // default, or (first run of this code) the router, which is what the
-    // default was before start_squad existed. A squad picked since is kept.
+    // A squad pick applies to the one chat it starts: every new chat
+    // defaults to the server's default squad (the Omnis router). Older builds
+    // remembered the last squad here; drop what they left behind.
     try {
-      const seen = localStorage.getItem(SQUAD_DEFAULT_SEEN_KEY);
-      if (seen !== defaultSquadName) {
-        const saved = localStorage.getItem(SQUAD_PREF_KEY);
-        if (saved && (saved === seen || (!seen && data.router && saved === data.router))) {
-          localStorage.removeItem(SQUAD_PREF_KEY);
-        }
-        localStorage.setItem(SQUAD_DEFAULT_SEEN_KEY, defaultSquadName);
-      }
-    } catch (_) { /* storage unavailable: keep the saved pref */ }
-
-    const saved = localStorage.getItem(SQUAD_PREF_KEY);
-    selectedSquadName = (saved && availableSquads.some(s => s.name === saved))
-      ? saved
-      : defaultSquadName;
+      for (const k of [SQUAD_PREF_KEY, SQUAD_MIGRATION_KEY, SQUAD_DEFAULT_SEEN_KEY]) localStorage.removeItem(k);
+    } catch (_) {}
     renderSquadMenu();
     updateNewChatSubLabel();
   } catch (e) {
@@ -8735,20 +8718,13 @@ async function loadSquads() {
   }
 }
 
-// Show the selected squad as a subtitle under "New Chat" whenever the
-// user has picked something other than the default. Keeps the primary
-// affordance ("New Chat") readable while making the active squad
-// visible at a glance.
+// The "New Chat" subtitle used to show a remembered squad; a squad pick no
+// longer outlives its chat, so it stays hidden.
 function updateNewChatSubLabel() {
   const sub = els.newChat && els.newChat.querySelector(".new-chat-sub");
   if (!sub) return;
-  if (selectedSquadName && selectedSquadName !== defaultSquadName) {
-    sub.textContent = selectedSquadName;
-    sub.hidden = false;
-  } else {
-    sub.textContent = "";
-    sub.hidden = true;
-  }
+  sub.textContent = "";
+  sub.hidden = true;
 }
 
 // SVG icon for a squad menu row. Kept generic (a small "team" glyph) so
@@ -8771,7 +8747,7 @@ function renderSquadMenu() {
   for (const sq of availableSquads) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "squad-menu-item" + (sq.name === selectedSquadName ? " selected" : "");
+    btn.className = "squad-menu-item";
     btn.dataset.squad = sq.name;
     btn.setAttribute("role", "menuitem");
     btn.setAttribute("data-tip", sq.description || `${sq.leader} + ${(sq.members || []).join(", ")}`);
@@ -8782,22 +8758,11 @@ function renderSquadMenu() {
     btn.appendChild(label);
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      selectSquad(sq.name);
       closeSquadMenu();
+      openNewChatDraft({ squad: sq.name });
     });
     menu.appendChild(btn);
   }
-}
-
-function selectSquad(name) {
-  if (!availableSquads.some(s => s.name === name)) return;
-  selectedSquadName = name;
-  localStorage.setItem(SQUAD_PREF_KEY, name);
-  // Update the .selected state without re-rendering the whole menu.
-  for (const item of els.squadMenu.querySelectorAll(".squad-menu-item")) {
-    item.classList.toggle("selected", item.dataset.squad === name);
-  }
-  updateNewChatSubLabel();
 }
 
 function openSquadMenu() {
@@ -8812,7 +8777,7 @@ function closeSquadMenu() {
 }
 
 function currentSquadChoice() {
-  return selectedSquadName || defaultSquadName;
+  return defaultSquadName;
 }
 
 // newChat creates a fresh session and binds it into `panel` (the focused pane
@@ -8865,9 +8830,9 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     }
     const data = await res.json();
     const newId = data.session_id;
-    if (draftKey) { draftDirs.delete(draftKey); panel._pickerSquadPicked = false; panel._pickerSquadAuto = false; }
-    // Persist the choice so the same squad is preselected next time.
-    if (squad) localStorage.setItem(SQUAD_PREF_KEY, squad);
+    // The squad picked on the draft was for this chat only: the next draft
+    // starts again on the default squad.
+    if (draftKey) { draftDirs.delete(draftKey); resetPickerSquad(panel); }
 
     // Open the new session as a tab in the pane and make it active. If the
     // active tab is a pending draft, the session takes that draft's slot.

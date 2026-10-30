@@ -768,12 +768,14 @@ The whole mechanism is **host-side and config-driven** ([agent/routing.go](agent
   routing target. `/api/squads` also reports `router`, and `resolveStartingSquad`
   treats an explicit start squad like an explicit router (the browser sends the
   reported default on every new chat, so it must yield to a collection default).
-  **GOTCHA — the browser's saved squad pref.** `newChat` saves the squad of every
-  new chat into `localStorage`, so every browser that ever used Omnis has
-  `"omnis"` saved as if picked, and would ignore a new default forever.
-  `loadSquads` records the last default seen (`agent_toolkit_squad_default_seen`)
-  and, once per default change, drops a saved pref equal to the previous default
-  (or, on first run, to the reported `router`); a squad picked since is kept.
+  **A squad pick is per chat, never remembered.** The draft picker and the
+  sidebar New Chat chevron (which opens a draft for the chosen squad) choose the
+  squad of the chat they start only; `currentSquadChoice()` is always the server
+  default, and `newDraftTab`/`newChat` reset the picker (`resetPickerSquad`). It
+  used to be saved in `localStorage` (`agent_toolkit_squad`) on every new chat, so
+  one pick stuck to every later chat — including a collection's ＋, which has no
+  picker, and where an explicit non-router squad beats the collection default.
+  `loadSquads` deletes the keys older builds left behind.
 - **Default for everyone, opt-out.** `router_squad` in `agents.json` (or
   `OMNIS_ROUTER_SQUAD`) names the router squad; **absent ⇒ defaults to `omnis`**,
   `"none"` disables. `ensureRouterSquad` ([agent/routing.go](agent/routing.go)),
@@ -3509,11 +3511,10 @@ updates" below).
   to the router is not a choice of team, it is *"decide for me"* — which a
   collection whose profile names a squad has already answered, more specifically.
   This is not a nicety: the web UI has **no way to express "no preference"**.
-  `loadSquads` ([web/app.js](web/app.js)) seeds `selectedSquadName` from the
-  default reported by `GET /api/squads` — **the router**, when routing is on
+  `newChat` ([web/app.js](web/app.js)) sends `currentSquadChoice()` — the
+  default reported by `GET /api/squads`, **the router** when routing is on
   ([server/config.go](server/config.go) sets `out.Default = inst.RouterName`) —
-  and `newChat` sends `currentSquadChoice()` as `body.squad` on **every** new
-  chat, then persists it back into `SQUAD_PREF_KEY`. So `explicit` is *never*
+  as `body.squad` on **every** new chat. So `explicit` is *never*
   empty from a browser, and a plain `explicit`-wins rule made a collection's
   default squad **unreachable from the web UI entirely** — the one surface that
   can set it. Shipped as a real defect (a chat filed under a collection whose

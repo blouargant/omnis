@@ -184,9 +184,10 @@ persisted in `conversation_<id>.json` and survives server restarts. See
 **Forcing a starting squad.** The compact picker next to the **New Chat**
 button pins the next session to a specific squad, bypassing the router for
 that chat. Single-squad setups stay tidy: the picker hides itself when only
-the `default` squad is available, and your last choice is remembered in
-`localStorage`. A pinned squad can still hand back to the router if you go
-out of its scope.
+the `default` squad is available. The choice applies to that one chat only:
+the next new chat — including one started from a collection's **＋** — starts
+again on the default squad (the router, or the collection's default squad). A
+pinned squad can still hand back to the router if you go out of its scope.
 
 If a server reload removes or renames the squad a session was running
 on, the server falls back to the `default` squad on that session's
