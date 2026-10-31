@@ -18,8 +18,8 @@ This is a different discipline from a standard lookup:
 |---|---|---|
 | Goal | answer the question | equip a decision |
 | Scope | the question as asked | the question **and its premises** |
-| Waves | one search pass | ≥ 2, with a coverage review between |
-| Done when | you have an answer | a critic finds no blocker |
+| Waves | one search pass | 2 (3 at most), with a coverage review between |
+| Done when | you have an answer | a critic finds no blocker, or the remaining one is stated as open |
 | Failure mode | wrong answer | **complete, well-sourced answer to the wrong question** |
 
 That last row is the one that bites. A deep-research answer that faithfully
@@ -127,8 +127,16 @@ answered every row, wave 2 exists to attack the answer: search for the strongest
 case *against* your emerging recommendation, and for the failure reports of
 people who did what you are about to recommend.
 
-Iterate (wave 3, …) while a wave keeps opening material rows. Stop when a wave
-returns only confirmation of what you already have.
+**Run a third wave only when a load-bearing row is still unanswered or
+contradicted after wave 2** — and aim it at that row alone. Never run a wave to
+re-confirm what is already sourced: a wave that returns only confirmation is
+the most expensive way to learn nothing. Three waves is the ceiling; what is
+still open after that goes under "open questions" in the deliverable.
+
+**Within a wave, keep each task narrow.** One precise question per sub-agent
+call, with the URLs you already have when you want a page checked — a broad
+task ("research everything about X") makes the sub-agent read pages for
+questions nobody asked.
 
 ### Phase 6 — Adversarial review
 
@@ -137,8 +145,11 @@ Hand the **original question** and your **draft brief** to a fresh reviewer (the
 explicitly and in writing, before you answer). The reviewer answers one question:
 *"If the user acts on this, what will go wrong?"*
 
-Loop on the blockers it returns until none remain. Do not defend the draft —
-re-search.
+Fix the blockers it returns by re-searching — do not defend the draft. Then
+send the revised brief back **once**, asking the reviewer to check only the
+blockers it raised. A blocker still open after that re-check is stated in the
+deliverable as an open question, not chased with another loop. Should-fixes and
+nits are fixed without a further review.
 
 ### Phase 7 — Deliver
 

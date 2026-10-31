@@ -1454,6 +1454,15 @@ already has that content in *its* context — one shared cache would hand a sub-
 a stub for a file it has never seen), and `fusion` is the leader's edit→verify loop.
 The shaper is stateless, so there is no cache to key, invalidate, or leak.
 
+**`WebFetch` gets a tighter budget** (`webFetchMaxChars` = 20000, 85 % head) and
+its own cut note pointing at the remedy it actually has — re-fetch with a CSS
+`selector` — instead of the generic "line range / narrower pattern" advice
+(`shaperBudget.narrow`, `capTextHint`). Fetched pages are the bulk of a research
+sub-agent's context: in the 2026-10-31 Knowledge bench (`omnis-benches`
+`reports/model-cost-knowledge-2026-10-31`) a `web_agent` call carried 30–80k
+tokens on average, re-sent at each of its steps, and `web_agent` was ~60 % of the
+squad's cost.
+
 `dominantString` picks each tool's largest string field, so the plugin works
 across tools without hard-coding output keys. **No-op contract:** with nothing
 to fuse/dedup/cap the callback returns nil and behaviour is byte-identical.
@@ -4777,6 +4786,13 @@ toolset (`serpapi`/`ddg`/`web`) on the `high` model, so the "adversarial reviewe
 can run its own unbounded research — it was the single biggest spender. The
 deep-research skill's trigger is also broad enough to grab a simple A-vs-B hardware
 question. The budget now bounds both, but neither is *fixed*.
+(Update: the `knowledge_leader` depth ladder no longer sends a question to deep
+research merely because it states a setup — only an explicit request or a real
+decision does, and a stated setup gets one premise-check call in a standard wave;
+the skill caps waves at 2–3 and the critic at one re-check of its own blockers;
+`web_agent`, `web_fetcher` and `research_critic` carry explicit page/search
+budgets. Unmeasured yet — re-run the `model-cost` squad-bench before trusting the
+saving.)
 
 ### Live-turn visibility (a turn in flight is never invisible)
 
@@ -5983,6 +5999,17 @@ with no matching key configured still yields **no** WebSearch tool at all —
 unchanged from `NewSerpAPITools`/`NewSerperTools`'s own nil-on-empty-key
 behaviour; DDG only kicks in as a fallback when the agent explicitly declared
 `"ddg"` too.
+
+**Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
+`WebFetch` and every `WebSearch` provider go through `sharedWebCache`
+(15 min TTL, 512 entries, process memory), keyed by the turn's **root session**
+(`events.RootSessionFromContext`, else the tool's own session) + URL/selector or
+provider/query/max_results. Parallel `web_agent`/`web_fetcher` instances re-read
+the same pages (20–30 % of a deep-research turn's fetches in that bench); a hit
+saves the network round-trip and the search-provider call, **not context tokens**
+(each sub-agent still receives the content). Errors and `(no results)` are never
+cached, so a transient failure is retried; one session's results never reach
+another.
 
 **GOTCHA — this precedence is what keeps a configured `serper_key` from
 breaking `web_agent`.** Before `resolveWebSearchTools` existed, each of the

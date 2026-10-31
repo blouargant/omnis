@@ -75,12 +75,29 @@ var shaperExempt = map[string]bool{
 type shaperBudget struct {
 	maxChars  int
 	headRatio float64
+	// narrow is the advice appended when the result is cut; empty means the
+	// generic one (defaultNarrowHint).
+	narrow string
 }
+
+// webFetchMaxChars caps a fetched page (~5k tokens). Pages are the bulk of a
+// research sub-agent's context, and that context is re-sent on every one of
+// its model calls, so a page costs its size times the steps that follow it.
+// In the 2026-10-31 Knowledge bench a web_agent call carried 30–80k tokens of
+// context on average. The head is kept almost whole: a page's tail is
+// navigation and footer.
+const webFetchMaxChars = 20000
+
+const defaultNarrowHint = "narrow the request (an explicit line range, a more specific pattern, " +
+	"or a files-only search) to see the rest"
 
 func budgetFor(name string) shaperBudget {
 	switch name {
 	case "run_tests":
 		return shaperBudget{maxChars: shaperMaxChars, headRatio: 0.40}
+	case "WebFetch":
+		return shaperBudget{maxChars: webFetchMaxChars, headRatio: 0.85,
+			narrow: "fetch it again with a CSS `selector` (e.g. `main`, `article`, a section id) to read a specific part"}
 	}
 	return shaperBudget{maxChars: shaperMaxChars, headRatio: shaperHeadRatio}
 }
@@ -360,7 +377,7 @@ func shapeResult(name string, result map[string]any) (map[string]any, bool) {
 		return nil, false
 	}
 	b := budgetFor(name)
-	capped, ok := capText(text, b.maxChars, b.headRatio)
+	capped, ok := capTextHint(text, b.maxChars, b.headRatio, b.narrow)
 	if !ok {
 		return nil, false
 	}
@@ -372,6 +389,14 @@ func shapeResult(name string, result map[string]any) (map[string]any, bool) {
 // capText keeps a head and a tail slice of s (on line boundaries) joined by a
 // middle-omission note. Returns (,false) when s already fits within max.
 func capText(s string, max int, headRatio float64) (string, bool) {
+	return capTextHint(s, max, headRatio, "")
+}
+
+// capTextHint is capText with the advice the cut note gives (empty ⇒ default).
+func capTextHint(s string, max int, headRatio float64, narrow string) (string, bool) {
+	if narrow == "" {
+		narrow = defaultNarrowHint
+	}
 	if len(s) <= max {
 		return "", false
 	}
@@ -395,9 +420,8 @@ func capText(s string, max int, headRatio float64) (string, bool) {
 	}
 	marker := fmt.Sprintf(
 		"\n\n…[output truncated to fit context: ~%d chars / %d lines cut from the middle. "+
-			"This is a size guard, not the tool's real limit — narrow the request (an explicit "+
-			"line range, a more specific pattern, or a files-only search) to see the rest]…\n\n",
-		omittedChars, omittedLines)
+			"This is a size guard, not the tool's real limit — %s]…\n\n",
+		omittedChars, omittedLines, narrow)
 	return head + marker + tail, true
 }
 

@@ -28,9 +28,11 @@ func NewDDGTools() []tool.Tool {
 			"Search the web using DuckDuckGo and return a list of results. "+
 				"Arguments: `query` (string, required) — the search query; "+
 				"`max_results` (int, optional, default 5, max 10) — number of results to return.",
-			func(_ adk.ToolContext, in DDGIn) (DDGOut, error) {
-				out, _ := runDDGSearch(context.Background(), in)
-				return DDGOut{Results: out}, nil
+			func(tc adk.ToolContext, in DDGIn) (DDGOut, error) {
+				return DDGOut{Results: cachedSearch(tc, "ddg", in, func() string {
+					out, _ := runDDGSearch(context.Background(), in)
+					return out
+				})}, nil
 			}),
 	}
 }
