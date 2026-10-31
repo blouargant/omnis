@@ -850,6 +850,9 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if a.MaxToolCalls > 0 {
 							agentMap["max_tool_calls"] = a.MaxToolCalls
 						}
+						if a.MaxToolCallsPerCall > 0 {
+							agentMap["max_tool_calls_per_call"] = a.MaxToolCallsPerCall
+						}
 						// Display-only (absent from the PUT allowlist): marks an agent
 						// that comes from a Claude Code plugin so the UI can badge it.
 						if a.Plugin != "" {
@@ -1041,7 +1044,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								// field of research_critic would silently strip its gatherer
 								// team and its cap, handing retrieval back to the expensive
 								// model — the exact regression this feature exists to prevent.
-								"subagents", "max_tool_calls":
+								"subagents", "max_tool_calls", "max_tool_calls_per_call":
 								if isEmptyOverlayValue(v) {
 									continue
 								}

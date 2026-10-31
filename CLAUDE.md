@@ -4723,6 +4723,22 @@ unit is a *wave*, not a call.
   past that the callback sets **`tc.Actions().SkipSummarization = true`**, which
   makes the function-response event `IsFinalResponse()` and **terminates the flow
   loop**. Host-side guarantee, same mechanism the routing tools use.
+- **Per-CALL cap (`max_tool_calls_per_call`) — the one a fan-out agent can use.**
+  [agent/call_cap.go](agent/call_cap.go) `perCallCapCallback` counts the tool
+  calls of ONE invocation of a sub-agent, keyed by the ADK **invocation id**
+  (agenttool starts a fresh runner run per call; a `resume_session` call is a new
+  run too), so parallel instances do NOT share it. Same notice-then-terminate
+  escalation as the per-turn cap (`agentCapGraceCalls`), skill/soft-skill
+  discovery tools are free (`callCapFreeTools`), and it is chained ahead of the
+  turn budget in the sub-agent's budget slot (`chainBeforeTool`, shadowed per
+  agent in [agent/build_subagents.go](agent/build_subagents.go)) so a refused call
+  is not charged. Sub-agents only (the root has no per-call notion). Shipped:
+  `web_agent` 15, `web_fetcher` 8, `research_critic` 20. **Why it exists:** page
+  budgets written into those agents' instructions were ignored — the 2026-10-31
+  A/B (`omnis-benches` `reports/call-volume-ab-2026-10-31.jsonl`) measured
+  web_agent still reading 20–30 pages per call with "at most 8" in its prompt.
+  Round-trips through the Settings GET/PUT allowlist and the `set_agent` tool
+  (not yet a visible field in the Settings form).
 - **The two layers compose** (verified live): the per-agent cap bounds a
   *sub-agent's* loop; the *leader's* re-delegation loop (it re-invokes a capped
   sub-agent) is bounded by the shared turn budget, which asks the user.

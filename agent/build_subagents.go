@@ -201,6 +201,10 @@ func buildSubAgentsFromConfigs(
 		// attach their tool-level callbacks here so a sub-agent's
 		// Edit/Write/Bash/MCP calls are gated + hooked exactly like the leader's.
 		// Order lives in one place: see beforeToolChain (agent/tool_chain.go).
+		// The per-call cap rides in the budget slot, ahead of the turn budget, so
+		// a call it refuses is not charged to the turn (same rule as the per-turn
+		// agent cap). Shadowed per agent: the shared turn callback stays as is.
+		budgetBeforeTool := chainBeforeTool(perCallCapCallback(cfg.Name, cfg.MaxToolCallsPerCall), budgetBeforeTool)
 		beforeTool := beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {

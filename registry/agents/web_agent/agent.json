@@ -15,5 +15,6 @@
     "ddg",
     "web",
     "softskills"
-  ]
+  ],
+  "max_tool_calls_per_call": 15
 }

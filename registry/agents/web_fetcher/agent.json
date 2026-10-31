@@ -13,5 +13,6 @@
     "serper",
     "ddg",
     "web"
-  ]
+  ],
+  "max_tool_calls_per_call": 8
 }
