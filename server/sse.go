@@ -953,7 +953,7 @@ func streamEvents(
 		// (b) fold another session's sub-agent tokens into this turn's usage. An
 		// empty tag means no surface correlation (CLI/TUI/examples) — fall through to
 		// the agent-name dedup below, byte-identical to the old behaviour.
-		if rs, _ := p["root_session_id"].(string); rs != "" && ownSession != "" && rs != ownSession {
+		if foreignBusEvent(be.Event, p, ownSession) {
 			return
 		}
 		agentName, _ := p["agent"].(string)
@@ -1219,4 +1219,29 @@ func replyNotificationPreview(text string) string {
 		out = strings.TrimSpace(string(r[:maxRunes-1])) + "…"
 	}
 	return out
+}
+
+// foreignBusEvent reports whether a process-wide bus event belongs to a session
+// other than ownSession and must therefore not reach this turn's stream. Tool and
+// model events are tagged with root_session_id; ask_user / ask_user_cancel carry
+// no such tag but name their session in session_id (askuser.QuestionToPayload —
+// a question raised under a sub-agent is already attributed to the root session).
+// Without the second check, two concurrent turns each received the other's
+// questions: the web UI rendered them in the wrong pane and, in cookie mode, one
+// user saw another's question text. An empty tag (or an empty ownSession) never
+// filters, so CLI/TUI behave as before.
+func foreignBusEvent(event string, p map[string]any, ownSession string) bool {
+	if ownSession == "" {
+		return false
+	}
+	if rs, _ := p["root_session_id"].(string); rs != "" && rs != ownSession {
+		return true
+	}
+	switch event {
+	case events.EventAskUser, events.EventAskUserCancel:
+		if sid, _ := p["session_id"].(string); sid != "" && sid != ownSession {
+			return true
+		}
+	}
+	return false
 }

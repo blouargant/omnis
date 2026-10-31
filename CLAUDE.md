@@ -5376,7 +5376,16 @@ the sidebar. Server-only (CLI/TUI are single-session surfaces).
   (names + args) into the wrong browser and folded each other's sub-agent tokens
   into the wrong turn's persisted usage. All three run entry points tag the context
   — interactive (`handleMessages`), injected (`injectTurnRouted`), and A2A
-  (`runRouted`) — so no producer's events are mis-attributed.
+  (`runRouted`) — so no producer's events are mis-attributed. **`ask_user` /
+  `ask_user_cancel` are covered too**, keyed on their `session_id` (they carry no
+  `root_session_id`; a question raised under a sub-agent is already attributed to
+  the root session via `realSessionID`/`RootSessionFromContext`). The guard is
+  `foreignBusEvent` ([server/sse.go](server/sse.go)); before it checked
+  `session_id`, two concurrent turns each received — and the web UI rendered,
+  in cookie mode across users — the other session's questions (found by three
+  concurrent squad-bench sessions answering each other's questions). Empty tags
+  still fall through (CLI/TUI). Pinned by
+  [server/ask_user_stream_scope_test.go](server/ask_user_stream_scope_test.go).
   For the **live** ring/budget while the background turn runs (level 2),
   `recordInjectedUsage` broadcasts `turn_usage` + `context_usage` frames on the
   multiplexed `/api/events` stream via the new `broadcastData` (`pushMsg.Data`
