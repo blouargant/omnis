@@ -163,6 +163,7 @@ func selectionFromAgentConfig(cfg RuntimeAgentConfig) llm.Selection {
 		APIKey:           cfg.APIKey,
 		DisableStreaming: cfg.DisableStreaming,
 		PromptCache:      cfg.PromptCache,
+		MaxOutputTokens:  cfg.MaxOutputTokens,
 	}
 }
 
@@ -178,6 +179,7 @@ func selectionFromModelConfig(cfg RuntimeModelConfig) llm.Selection {
 		APIKey:           cfg.APIKey,
 		DisableStreaming: cfg.DisableStreaming,
 		PromptCache:      cfg.PromptCache,
+		MaxOutputTokens:  cfg.MaxOutputTokens,
 	}
 }
 

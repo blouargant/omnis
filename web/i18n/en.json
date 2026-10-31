@@ -583,6 +583,7 @@
   "set.model.noProviders": "(no providers — add one first)",
   "set.model.model": "MODEL",
   "set.model.cachedInputTip": "price for prompt tokens served from the provider's cache (cache read); defaults to the input price",
+  "set.model.maxOutputTip": "Sent as max_tokens on every request to this model. Leave empty to let the provider choose. Set it when replies are cut short: a LiteLLM gateway caps Anthropic models it does not know at 4096 tokens. Keep context length + this value within the model's window.",
   "set.model.cacheCreationTip": "price for prompt tokens written to the provider's cache (cache creation); defaults to the input price",
   "set.model.embeddingUsable": "usable as internal embedder",
   "set.model.embeddingModel": "EMBEDDING MODEL",

@@ -3409,6 +3409,7 @@ const BASE_PATH = window.BASE_PATH || "";
     fg.appendChild(combo);
 
     fg.appendChild(numField("context_length", m.context_length, v => { m.context_length = v; onChange(); }));
+    fg.appendChild(numField("max_output_tokens", m.max_output_tokens, v => { m.max_output_tokens = v > 0 ? v : undefined; onChange(); }, tr("set.model.maxOutputTip")));
     fg.appendChild(numField("input_token_price_per_million", m.input_token_price_per_million, v => { m.input_token_price_per_million = v; onChange(); }));
     fg.appendChild(numField("cached_input_token_price_per_million", m.cached_input_token_price_per_million, v => { m.cached_input_token_price_per_million = v; onChange(); }, tr("set.model.cachedInputTip")));
     fg.appendChild(numField("cache_creation_token_price_per_million", m.cache_creation_token_price_per_million, v => { m.cache_creation_token_price_per_million = v; onChange(); }, tr("set.model.cacheCreationTip")));

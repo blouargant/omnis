@@ -48,6 +48,9 @@ type openAI struct {
 	// OpenAI endpoint does automatic server-side caching and may reject the
 	// unrecognised field — only enable it for an Anthropic-backed gateway.
 	promptCache bool
+	// maxOutputTokens, when > 0, is sent as `max_tokens` on requests that set
+	// none (models.json `max_output_tokens`).
+	maxOutputTokens int32
 }
 
 // NewOpenAI returns an LLM. baseURL may be empty for the official endpoint.
@@ -379,6 +382,10 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 		// streaming mode and the harness reports "0/0 tok".
 		r.StreamOptions = &oaiStreamOptions{IncludeUsage: true}
 	}
+	if o.maxOutputTokens > 0 {
+		n := o.maxOutputTokens
+		r.MaxTokens = &n
+	}
 	if req.Config != nil {
 		r.Temperature = req.Config.Temperature
 		r.TopP = req.Config.TopP
@@ -473,6 +480,9 @@ func (o *openAI) fromResponse(r *oaiResponse) *model.LLMResponse {
 		content = oaiMsgToContent(r.Choices[0].Message)
 	}
 	out := &model.LLMResponse{Content: content, TurnComplete: true}
+	if len(r.Choices) > 0 {
+		out.FinishReason = oaiFinishReason(r.Choices[0].FinishReason)
+	}
 	if r.Usage != nil {
 		out.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
 			PromptTokenCount:        r.Usage.PromptTokens,
@@ -481,6 +491,7 @@ func (o *openAI) fromResponse(r *oaiResponse) *model.LLMResponse {
 			CachedContentTokenCount: r.Usage.cachedRead(),
 		}
 	}
+	markTruncated(o.model, out)
 	return out
 }
 
@@ -627,6 +638,7 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 	var collectedText strings.Builder
 	var imageDataURLs []string
 	var usage *oaiUsage
+	var finish string
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -660,6 +672,9 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 		}
 		if len(ch.Choices) == 0 {
 			continue
+		}
+		if fr := ch.Choices[0].FinishReason; fr != "" {
+			finish = fr
 		}
 		delta := ch.Choices[0].Delta
 		switch v := delta.Content.(type) {
@@ -763,6 +778,15 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 			CandidatesTokenCount:    usage.CompletionTokens,
 			TotalTokenCount:         usage.TotalTokens,
 			CachedContentTokenCount: usage.cachedRead(),
+		}
+	}
+	final.FinishReason = oaiFinishReason(finish)
+	if notice := markTruncated(o.model, final); notice != "" {
+		if !yield(&model.LLMResponse{
+			Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: notice}}},
+			Partial: true,
+		}, nil) {
+			return
 		}
 	}
 	yield(final, nil)

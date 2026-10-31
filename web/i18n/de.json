@@ -583,6 +583,7 @@
   "set.model.noProviders": "(keine Anbieter — fügen Sie zuerst einen hinzu)",
   "set.model.model": "MODELL",
   "set.model.cachedInputTip": "Preis für Prompt-Token, die aus dem Cache des Anbieters bedient werden (Cache-Lesen); standardmäßig der Eingabepreis",
+  "set.model.maxOutputTip": "Wird bei jeder Anfrage an dieses Modell als max_tokens gesendet. Leer lassen, damit der Anbieter entscheidet. Setzen, wenn Antworten abgeschnitten werden: Ein LiteLLM-Gateway begrenzt ihm unbekannte Anthropic-Modelle auf 4096 Tokens. Kontextlänge plus dieser Wert müssen ins Fenster des Modells passen.",
   "set.model.cacheCreationTip": "Preis für Prompt-Token, die in den Cache des Anbieters geschrieben werden (Cache-Erstellung); standardmäßig der Eingabepreis",
   "set.model.embeddingUsable": "als interner Embedder verwendbar",
   "set.model.embeddingModel": "EMBEDDING-MODELL",

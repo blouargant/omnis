@@ -583,6 +583,7 @@
   "set.model.noProviders": "(aucun fournisseur — ajoutez-en un d'abord)",
   "set.model.model": "MODÈLE",
   "set.model.cachedInputTip": "prix des jetons de prompt servis depuis le cache du fournisseur (lecture du cache) ; par défaut le prix d'entrée",
+  "set.model.maxOutputTip": "Envoyé comme max_tokens à chaque requête vers ce modèle. Laisser vide pour laisser le fournisseur choisir. À renseigner quand les réponses sont coupées : une passerelle LiteLLM plafonne à 4096 tokens les modèles Anthropic qu'elle ne connaît pas. La longueur de contexte plus cette valeur doivent tenir dans la fenêtre du modèle.",
   "set.model.cacheCreationTip": "prix des jetons de prompt écrits dans le cache du fournisseur (création du cache) ; par défaut le prix d'entrée",
   "set.model.embeddingUsable": "utilisable comme embedder interne",
   "set.model.embeddingModel": "MODÈLE D'EMBEDDING",

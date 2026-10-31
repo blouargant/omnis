@@ -349,6 +349,41 @@ func TestResolveRuntimeSettingsPromptCacheDefault(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimeSettingsMaxOutputTokens(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader", ModelRef: "sonnet"},
+		{Name: "investigator", ModelRef: "plain"},
+	})
+
+	path := filepath.Join(dir, "agent.json")
+	mustWrite(t, path, []byte(`{"agents": ["leader","investigator"]}`))
+	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
+  "providers": {"gw": {"kind": "openai_compat", "base_url": "https://gw.example/x", "api_key": "K"}},
+  "models": {
+    "sonnet": {"provider_ref": "gw", "model": "claude-sonnet-5-5", "max_output_tokens": 32000},
+    "plain":  {"provider_ref": "gw", "model": "Simple"}
+  }
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: path, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	for agent, want := range map[string]int{"leader": 32000, "investigator": 0} {
+		cfg, ok := runtime.AgentConfig(agent)
+		if !ok {
+			t.Fatalf("%s config missing", agent)
+		}
+		if cfg.MaxOutputTokens != want {
+			t.Fatalf("%s MaxOutputTokens = %d, want %d", agent, cfg.MaxOutputTokens, want)
+		}
+		if got := selectionFromAgentConfig(cfg).MaxOutputTokens; got != want {
+			t.Fatalf("%s selection MaxOutputTokens = %d, want %d", agent, got, want)
+		}
+	}
+}
+
 func TestResolveRuntimeSettingsUnknownProviderRef(t *testing.T) {
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{

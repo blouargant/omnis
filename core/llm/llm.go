@@ -58,6 +58,11 @@ type Selection struct {
 	// Only the openai/openai_compat adapters honour it (LiteLLM is reached via
 	// openai_compat); no effect on gemini or the native anthropic adapter.
 	PromptCache bool
+	// MaxOutputTokens is sent as the request's `max_tokens` when the request
+	// itself sets none (models.json `max_output_tokens`). Zero leaves the
+	// adapter's own behaviour: no field on openai/openai_compat, the built-in
+	// default on anthropic. No effect on gemini.
+	MaxOutputTokens int
 }
 
 // New returns an ADK LLM selected by OMNIS_PROVIDER.
@@ -145,8 +150,10 @@ func applyModelPrefs(m model.LLM, sel Selection) model.LLM {
 	case *openAI:
 		v.forceNonStreaming = sel.DisableStreaming
 		v.promptCache = sel.PromptCache
+		v.maxOutputTokens = int32(sel.MaxOutputTokens)
 	case *anthropic:
 		v.forceNonStreaming = sel.DisableStreaming
+		v.maxOutputTokens = int32(sel.MaxOutputTokens)
 	}
 	return m
 }

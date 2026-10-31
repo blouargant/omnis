@@ -90,7 +90,7 @@ func NewTools(deps Deps) []tool.Tool {
 
 		mustTool("set_model",
 			"Add or change a models.json catalogue entry and hot-reload. `model_ref` is the catalogue key. "+
-				"Provide only the fields to change: `model` (raw id), `provider_ref`, `context_length`, "+
+				"Provide only the fields to change: `model` (raw id), `provider_ref`, `context_length`, `max_output_tokens`, "+
 				"`disable_streaming`, `prompt_cache`, `dim`, `embedding`, and the connection fields `provider`, "+
 				"`base_url`, `api_key`. Changing a connection field is security-sensitive and is confirmed with "+
 				"the user. Changing the active embedding model's identity requires a server restart (reported as "+
@@ -385,6 +385,7 @@ type setModelIn struct {
 	Model            *string `json:"model,omitempty"`
 	ProviderRef      *string `json:"provider_ref,omitempty"`
 	ContextLength    *int    `json:"context_length,omitempty"`
+	MaxOutputTokens  *int    `json:"max_output_tokens,omitempty"`
 	DisableStreaming *bool   `json:"disable_streaming,omitempty"`
 	PromptCache      *bool   `json:"prompt_cache,omitempty"`
 	Dim              *int    `json:"dim,omitempty"`
@@ -449,6 +450,13 @@ func setModel(deps Deps) functiontool.Func[setModelIn, writeResult] {
 		}
 		if in.PromptCache != nil {
 			entry["prompt_cache"] = *in.PromptCache
+		}
+		if in.MaxOutputTokens != nil {
+			if *in.MaxOutputTokens > 0 {
+				entry["max_output_tokens"] = *in.MaxOutputTokens
+			} else {
+				delete(entry, "max_output_tokens")
+			}
 		}
 		if in.Dim != nil {
 			entry["dim"] = *in.Dim

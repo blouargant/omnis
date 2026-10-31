@@ -68,6 +68,30 @@ and may reject the `cache_control` annotation. The minimum cacheable prefix is
 model-dependent (≈1–4K tokens); a prefix below it is a silent no-op (the hit
 rate just stays at 0), never an error.
 
+## Output-token ceiling (replies cut short)
+
+By default omnis sends no `max_tokens` and lets the provider choose. A **LiteLLM
+gateway** then fills it in for Anthropic models — and for a model its bundled
+price list does not know yet (a new Claude release), it falls back to **4096
+tokens**, thinking included. Replies stop mid-sentence, and a long tool call
+arrives with incomplete arguments.
+
+Set **Max output tokens** on the model (Settings → Models, persisted as
+`max_output_tokens` in `models.json`) to send your own ceiling on every request:
+
+```json
+"sonnet": { "provider_ref": "gateway", "model": "claude-sonnet-5-5",
+            "context_length": 200000, "max_output_tokens": 32000 }
+```
+
+Leave room for the prompt: keep **context length + max output tokens** within
+the model's real window. On vLLM-backed models a value that does not fit is
+rejected with HTTP 400, so set it only where replies are being cut.
+
+The lasting fix is on the gateway: set `DEFAULT_ANTHROPIC_CHAT_MAX_TOKENS` on
+the LiteLLM proxy, or upgrade LiteLLM to a release whose price list includes
+the model.
+
 ## Web UI provider-model picker
 
 The **Settings → Models → Models** sub-tab lists known model IDs per provider

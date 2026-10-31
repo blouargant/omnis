@@ -35,6 +35,9 @@ type anthropic struct {
 	// See openAI.forceNonStreaming; set per-model via models.json
 	// `disable_streaming`.
 	forceNonStreaming bool
+	// maxOutputTokens, when > 0, replaces anthropicDefaultMaxToks (models.json
+	// `max_output_tokens`).
+	maxOutputTokens int32
 }
 
 // NewAnthropic returns an LLM. baseURL may be empty for the official endpoint.
@@ -243,6 +246,9 @@ func (a *anthropic) buildRequest(req *model.LLMRequest, stream bool) antRequest 
 		MaxTokens: anthropicDefaultMaxToks,
 		Stream:    stream,
 	}
+	if a.maxOutputTokens > 0 {
+		r.MaxTokens = a.maxOutputTokens
+	}
 	if req.Config != nil {
 		if sys := systemText(req.Config.SystemInstruction); sys != "" {
 			r.System = sys
@@ -341,10 +347,11 @@ func (a *anthropic) fromResponse(r *antResponse) *model.LLMResponse {
 			})
 		}
 	}
-	out := &model.LLMResponse{Content: c, TurnComplete: true}
+	out := &model.LLMResponse{Content: c, TurnComplete: true, FinishReason: antFinishReason(r.StopReason)}
 	if r.Usage != nil {
 		out.UsageMetadata = anthropicUsageToGenai(r.Usage)
 	}
+	markTruncated(a.model, out)
 	return out
 }
 
@@ -358,6 +365,7 @@ func (a *anthropic) streamSSE(body io.Reader, yield func(*model.LLMResponse, err
 	blocks := map[int]*pending{}
 	var usage antUsage
 	var eventType string
+	var stopReason string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -366,7 +374,7 @@ func (a *anthropic) streamSSE(body io.Reader, yield func(*model.LLMResponse, err
 			eventType = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
 			data := strings.TrimPrefix(line, "data: ")
-			a.handleEvent(eventType, data, blocks, &usage, yield)
+			a.handleEvent(eventType, data, blocks, &usage, &stopReason, yield)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -403,15 +411,23 @@ func (a *anthropic) streamSSE(body io.Reader, yield func(*model.LLMResponse, err
 			})
 		}
 	}
-	final := &model.LLMResponse{Content: c, TurnComplete: true}
+	final := &model.LLMResponse{Content: c, TurnComplete: true, FinishReason: antFinishReason(stopReason)}
 	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
 		final.UsageMetadata = anthropicUsageToGenai(&usage)
+	}
+	if notice := markTruncated(a.model, final); notice != "" {
+		if !yield(&model.LLMResponse{
+			Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: notice}}},
+			Partial: true,
+		}, nil) {
+			return
+		}
 	}
 	yield(final, nil)
 }
 
 // handleEvent updates per-block state and yields incremental text deltas.
-func (a *anthropic) handleEvent(eventType, data string, blocks map[int]*pending, usage *antUsage, yield func(*model.LLMResponse, error) bool) {
+func (a *anthropic) handleEvent(eventType, data string, blocks map[int]*pending, usage *antUsage, stopReason *string, yield func(*model.LLMResponse, error) bool) {
 	switch eventType {
 	case "content_block_start":
 		var ev struct {
@@ -454,9 +470,15 @@ func (a *anthropic) handleEvent(eventType, data string, blocks map[int]*pending,
 		}
 	case "message_delta":
 		var ev struct {
+			Delta struct {
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
 			Usage antUsage `json:"usage"`
 		}
 		_ = json.Unmarshal([]byte(data), &ev)
+		if ev.Delta.StopReason != "" {
+			*stopReason = ev.Delta.StopReason
+		}
 		if ev.Usage.OutputTokens > 0 {
 			usage.OutputTokens = ev.Usage.OutputTokens
 		}

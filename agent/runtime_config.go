@@ -162,6 +162,12 @@ type ModelEntry struct {
 	// ModelEntry→RuntimeModelConfig boundary, so the runtime side stays a plain
 	// bool.
 	PromptCache *bool `json:"prompt_cache,omitempty"`
+	// MaxOutputTokens is the output-token ceiling sent as `max_tokens` on every
+	// request to this model (unless the request sets its own). Zero/absent sends
+	// none and lets the backend pick its default — which a LiteLLM gateway gets
+	// wrong for Anthropic models missing from its bundled cost map: it falls
+	// back to 4096 tokens (thinking included) and cuts replies mid-answer.
+	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 }
 
 // modelsConfigFile is the on-disk shape of models.json.
@@ -270,6 +276,7 @@ type RuntimeModelConfig struct {
 	Dim                               int
 	DisableStreaming                  bool
 	PromptCache                       bool
+	MaxOutputTokens                   int
 }
 
 // RuntimeAgentConfig is one fully-resolved agent configuration entry.
@@ -287,6 +294,7 @@ type RuntimeAgentConfig struct {
 	CacheCreationTokenPricePerMillion float64
 	DisableStreaming                  bool
 	PromptCache                       bool
+	MaxOutputTokens                   int
 	Description                       string
 	Instruction                       string
 	Enabled                           bool
@@ -579,6 +587,7 @@ func normalizeModelCatalog(models map[string]ModelEntry, providers map[string]Ru
 			Dim:                               m.Dim,
 			DisableStreaming:                  m.DisableStreaming,
 			PromptCache:                       promptCacheEnabled(m.PromptCache, provider),
+			MaxOutputTokens:                   max(m.MaxOutputTokens, 0),
 		}
 	}
 	return out, nil
@@ -642,6 +651,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			CacheCreationTokenPricePerMillion: refModel.CacheCreationTokenPricePerMillion,
 			DisableStreaming:                  refModel.DisableStreaming,
 			PromptCache:                       refModel.PromptCache,
+			MaxOutputTokens:                   refModel.MaxOutputTokens,
 			Description:                       strings.TrimSpace(e.Description),
 			Instruction:                       strings.TrimSpace(e.Instruction),
 			Enabled:                           enabled,
@@ -754,6 +764,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		CacheCreationTokenPricePerMillion: in.CacheCreationTokenPricePerMillion,
 		DisableStreaming:                  in.DisableStreaming,
 		PromptCache:                       in.PromptCache,
+		MaxOutputTokens:                   in.MaxOutputTokens,
 		Description:                       strings.TrimSpace(in.Description),
 		Instruction:                       strings.TrimSpace(in.Instruction),
 		Enabled:                           in.Enabled,
@@ -1522,6 +1533,7 @@ func applyModelOverride(rs *RuntimeSettings) {
 		rs.Agents[i].CacheCreationTokenPricePerMillion = m.CacheCreationTokenPricePerMillion
 		rs.Agents[i].DisableStreaming = m.DisableStreaming
 		rs.Agents[i].PromptCache = m.PromptCache
+		rs.Agents[i].MaxOutputTokens = m.MaxOutputTokens
 	}
 }
 
