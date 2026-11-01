@@ -4737,7 +4737,9 @@ unit is a *wave*, not a call.
   turn budget in the sub-agent's budget slot (`chainBeforeTool`, shadowed per
   agent in [agent/build_subagents.go](agent/build_subagents.go)) so a refused call
   is not charged. Sub-agents only (the root has no per-call notion). Shipped:
-  `web_agent` 15, `web_fetcher` 8, `research_critic` 20. **Why it exists:** page
+  `web_agent` 20, `web_fetcher` 8, `research_critic` 20 (`web_agent` was 15: a
+  precise lookup then found the right value in only 6 of 11 cheap-bench runs vs
+  3/3 at 20, for ~30 % more cost per run — 2026-11-01). **Why it exists:** page
   budgets written into those agents' instructions were ignored — the 2026-10-31
   A/B (`omnis-benches` `reports/call-volume-ab-2026-10-31.jsonl`) measured
   web_agent still reading 20–30 pages per call with "at most 8" in its prompt.
