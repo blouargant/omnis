@@ -361,3 +361,14 @@ func TestConcurrentAgentToolForgetsIdleSessions(t *testing.T) {
 		t.Fatalf("%d per-session semaphores retained after every call finished, want 0", n)
 	}
 }
+
+// The caller is told the per-call budget so it sizes each task to fit it.
+func TestBudgetedAgentToolAnnouncesThePerCallBudget(t *testing.T) {
+	d := newBudgetedAgentTool(&countingRunnableTool{}, 1, 15).Description()
+	if !strings.Contains(d, "at most 15 tools") {
+		t.Errorf("per-call budget not announced: %q", d)
+	}
+	if strings.Contains(newConcurrentAgentTool(&countingRunnableTool{}, 1).Description(), "at most") {
+		t.Error("an uncapped sub-agent announced a budget")
+	}
+}

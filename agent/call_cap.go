@@ -43,61 +43,136 @@ func callCapNotice(agentName string, limit int) string {
 
 const callCapIdleTTL = 2 * time.Hour
 
-type callCounter struct {
-	n    int
-	seen time.Time
+// callCapWarnRemaining is when the sub-agent is told its budget is nearly spent.
+// Without it the cap arrives unannounced: in the 2026-11-01 Knowledge bench
+// nearly every web_agent call ended at 18 tool calls — the 15 allowed plus the 3
+// refused grace calls, each a full model round on the call's largest context —
+// instead of writing up what it had.
+const callCapWarnRemaining = 3
+
+// callCapWarning is added to a tool result once the invocation has at most
+// callCapWarnRemaining tool calls left.
+func callCapWarning(left int) string {
+	return fmt.Sprintf("[CALL BUDGET] %d tool call(s) left for this task. Use them only for what is "+
+		"essential, then write your result; list anything you could not check under open questions.", left)
 }
 
-// perCallCapCallback returns the BeforeToolCallback enforcing limit tool calls
-// per invocation of agentName, or nil when limit <= 0 (no cap, no-op).
-func perCallCapCallback(agentName string, limit int) llmagent.BeforeToolCallback {
+type callCounter struct {
+	n      int
+	warned bool
+	seen   time.Time
+}
+
+// perCallCap counts the tool calls of each invocation of one sub-agent.
+type perCallCap struct {
+	agent  string
+	limit  int
+	mu     sync.Mutex
+	counts map[string]*callCounter
+}
+
+// newPerCallCap returns nil when limit <= 0 (no cap).
+func newPerCallCap(agentName string, limit int) *perCallCap {
 	if limit <= 0 {
 		return nil
 	}
-	var mu sync.Mutex
-	counts := map[string]*callCounter{}
+	return &perCallCap{agent: agentName, limit: limit, counts: map[string]*callCounter{}}
+}
 
-	charge := func(inv string) (overBy int) {
-		mu.Lock()
-		defer mu.Unlock()
-		now := time.Now()
-		c := counts[inv]
-		if c == nil {
-			// An invocation's entry is dead once its call returned; drop the
-			// idle ones so a long-lived generation does not keep one per call.
-			for k, old := range counts {
-				if now.Sub(old.seen) > callCapIdleTTL {
-					delete(counts, k)
-				}
+func counted(name string) bool {
+	return !budgetExemptTools[name] && !callCapFreeTools[name]
+}
+
+func (p *perCallCap) charge(inv string) (overBy int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	c := p.counts[inv]
+	if c == nil {
+		// An invocation's entry is dead once its call returned; drop the
+		// idle ones so a long-lived generation does not keep one per call.
+		for k, old := range p.counts {
+			if now.Sub(old.seen) > callCapIdleTTL {
+				delete(p.counts, k)
 			}
-			c = &callCounter{}
-			counts[inv] = c
 		}
-		c.n++
-		c.seen = now
-		return c.n - limit
+		c = &callCounter{}
+		p.counts[inv] = c
 	}
+	c.n++
+	c.seen = now
+	return c.n - p.limit
+}
 
-	return func(tc adk.ToolContext, t tool.Tool, _ map[string]any) (map[string]any, error) {
-		name := t.Name()
-		if budgetExemptTools[name] || callCapFreeTools[name] {
-			return nil, nil
-		}
-		inv := tc.InvocationID()
-		if inv == "" {
-			return nil, nil
-		}
-		overBy := charge(inv)
-		if overBy <= 0 {
-			return nil, nil
-		}
-		// Same escalation as the per-turn cap: a few notices let a cooperative
-		// agent write up what it has; past that, end its flow loop.
-		if overBy > agentCapGraceCalls {
-			adk.EndTurnAfterToolCall(tc)
-		}
-		return map[string]any{"output": callCapNotice(agentName, limit)}, nil
+// takeWarning reports how many calls the invocation has left when it is time
+// to warn (once per invocation), else -1.
+func (p *perCallCap) takeWarning(inv string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.counts[inv]
+	if c == nil || c.warned {
+		return -1
 	}
+	left := p.limit - c.n
+	if left <= 0 || left > callCapWarnRemaining {
+		return -1
+	}
+	c.warned = true
+	return left
+}
+
+// before is the BeforeToolCallback enforcing the cap.
+func (p *perCallCap) before(tc adk.ToolContext, t tool.Tool, _ map[string]any) (map[string]any, error) {
+	if !counted(t.Name()) {
+		return nil, nil
+	}
+	inv := tc.InvocationID()
+	if inv == "" {
+		return nil, nil
+	}
+	overBy := p.charge(inv)
+	if overBy <= 0 {
+		return nil, nil
+	}
+	// Same escalation as the per-turn cap: a few notices let a cooperative
+	// agent write up what it has; past that, end its flow loop.
+	if overBy > agentCapGraceCalls {
+		adk.EndTurnAfterToolCall(tc)
+	}
+	return map[string]any{"output": callCapNotice(p.agent, p.limit)}, nil
+}
+
+// warn is the AfterToolCallback adding the low-budget note to a result.
+func (p *perCallCap) warn(tc adk.ToolContext, t tool.Tool, _, result map[string]any, err error) (map[string]any, error) {
+	if err != nil || result == nil || !counted(t.Name()) {
+		return nil, nil
+	}
+	left := p.takeWarning(tc.InvocationID())
+	if left < 0 {
+		return nil, nil
+	}
+	out := make(map[string]any, len(result)+1)
+	for k, v := range result {
+		out[k] = v
+	}
+	out["call_budget"] = callCapWarning(left)
+	return out, nil
+}
+
+// perCallCapCallbacks returns the cap's before- and after-tool callbacks, or
+// two nils when limit <= 0 (no cap, no-op).
+func perCallCapCallbacks(agentName string, limit int) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+	p := newPerCallCap(agentName, limit)
+	if p == nil {
+		return nil, nil
+	}
+	return p.before, p.warn
+}
+
+// perCallCapCallback returns only the enforcing BeforeToolCallback.
+func perCallCapCallback(agentName string, limit int) llmagent.BeforeToolCallback {
+	before, _ := perCallCapCallbacks(agentName, limit)
+	return before
 }
 
 // chainBeforeTool runs first, then second when first let the call through.
@@ -114,5 +189,35 @@ func chainBeforeTool(first, second llmagent.BeforeToolCallback) llmagent.BeforeT
 			return out, err
 		}
 		return second(tc, t, args)
+	}
+}
+
+// chainAfterTool runs first, then second on the (possibly rewritten) result.
+// ADK stops at the first after-tool callback that returns a result, so two
+// callbacks that both need to see the result must be composed. Either may be nil.
+func chainAfterTool(first, second llmagent.AfterToolCallback) llmagent.AfterToolCallback {
+	switch {
+	case first == nil:
+		return second
+	case second == nil:
+		return first
+	}
+	return func(tc adk.ToolContext, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
+		out, ferr := first(tc, t, args, result, err)
+		if ferr != nil {
+			return nil, ferr
+		}
+		base := result
+		if out != nil {
+			base = out
+		}
+		out2, serr := second(tc, t, args, base, err)
+		if serr != nil {
+			return nil, serr
+		}
+		if out2 != nil {
+			return out2, nil
+		}
+		return out, nil
 	}
 }

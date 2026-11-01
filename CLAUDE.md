@@ -4743,6 +4743,21 @@ unit is a *wave*, not a call.
   web_agent still reading 20–30 pages per call with "at most 8" in its prompt.
   Round-trips through the Settings GET/PUT allowlist and the `set_agent` tool
   (not yet a visible field in the Settings form).
+  **Two companions make the cap cheap rather than merely bounding:**
+  - **The caller is told the budget** — the sub-agent's tool `Description()`
+    (`newBudgetedAgentTool`, [agent/concurrent_agent_tool.go](agent/concurrent_agent_tool.go))
+    appends "each call may use at most N tools … give it ONE focused question",
+    generated from the config like the `max_instances` invitation. Without it the
+    leader handed over tasks sized for an unbounded agent, every call ended on the
+    cap with open questions, and it re-delegated the gaps in small waves
+    (2026-11-01 Knowledge bench: 14–23 `web_agent` calls per question vs 9–11).
+  - **The sub-agent is warned before the cap** — once an invocation has
+    `callCapWarnRemaining` (3) calls left, a `call_budget` note is added to the
+    tool result (`perCallCap.warn`). Without it nearly every call ended at
+    15 + 3 refused grace calls, each a full model round on the call's largest
+    context. It rides on the shaped result via `chainAfterTool`: **ADK stops at
+    the first after-tool callback that returns a result**, so two callbacks that
+    must both see it have to be composed, not listed.
 - **The two layers compose** (verified live): the per-agent cap bounds a
   *sub-agent's* loop; the *leader's* re-delegation loop (it re-invokes a capped
   sub-agent) is bounded by the shared turn budget, which asks the user.

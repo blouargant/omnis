@@ -72,6 +72,9 @@ type runnableTool interface {
 type concurrentAgentTool struct {
 	inner runnableTool
 	max   int
+	// perCall is the sub-agent's max_tool_calls_per_call (0 = none), announced in
+	// Description so the caller sizes each task to fit it.
+	perCall int
 
 	mu   sync.Mutex
 	sems map[string]*sessionSem
@@ -85,10 +88,19 @@ type sessionSem struct {
 }
 
 func newConcurrentAgentTool(inner runnableTool, max int) tool.Tool {
+	return newBudgetedAgentTool(inner, max, 0)
+}
+
+// newBudgetedAgentTool is newConcurrentAgentTool for a sub-agent that also has a
+// per-call tool budget (max_tool_calls_per_call).
+func newBudgetedAgentTool(inner runnableTool, max, perCall int) tool.Tool {
 	if max < 1 {
 		max = 1
 	}
-	return &concurrentAgentTool{inner: inner, max: max, sems: map[string]*sessionSem{}}
+	if perCall < 0 {
+		perCall = 0
+	}
+	return &concurrentAgentTool{inner: inner, max: max, perCall: perCall, sems: map[string]*sessionSem{}}
 }
 
 func (t *concurrentAgentTool) Name() string { return t.inner.Name() }
@@ -103,15 +115,28 @@ func (t *concurrentAgentTool) Declaration() *genai.FunctionDeclaration {
 // Description tells a fan-out-capable sub-agent's caller that it may issue several
 // calls at once. Without this the model has no way to know parallelism is available
 // — the schema is single-task and looks exactly like a serial tool.
+//
+// It also announces the per-call tool budget. A caller that does not know it
+// hands over tasks sized for an unbounded agent; the sub-agent hits the cap,
+// returns a partial result, and the caller re-delegates the gaps in small
+// waves (2026-11-01 Knowledge bench: 14–23 web_agent calls per question
+// instead of 9–11, every one ending on the cap).
 func (t *concurrentAgentTool) Description() string {
-	if t.max <= 1 {
-		return t.inner.Description()
+	desc := t.inner.Description()
+	if t.max > 1 {
+		desc += fmt.Sprintf(
+			"\n\nYou may call this tool SEVERAL TIMES IN THE SAME RESPONSE — one call per "+
+				"independent job — and the calls run in parallel (up to %d at a time; any beyond "+
+				"that queue and start as slots free up). Prefer one call per question over "+
+				"bundling several questions into one call.", t.max)
 	}
-	return t.inner.Description() + fmt.Sprintf(
-		"\n\nYou may call this tool SEVERAL TIMES IN THE SAME RESPONSE — one call per "+
-			"independent job — and the calls run in parallel (up to %d at a time; any beyond "+
-			"that queue and start as slots free up). Prefer one call per question over "+
-			"bundling several questions into one call.", t.max)
+	if t.perCall > 0 {
+		desc += fmt.Sprintf(
+			"\n\nEach call may use at most %d tools (searches, page fetches…) before it must "+
+				"answer. Give it ONE focused question that fits that budget; split a broad topic "+
+				"into several calls rather than one call that will stop half-way.", t.perCall)
+	}
+	return desc
 }
 
 // ProcessRequest packs THIS wrapper (not the inner agenttool) into the request.

@@ -105,3 +105,62 @@ func TestChainBeforeToolStopsAtFirstRefusal(t *testing.T) {
 		t.Error("two nil callbacks must chain to nil")
 	}
 }
+
+// The sub-agent is told once, before the cap, that its budget is nearly spent,
+// so it writes up its result instead of burning the refused grace calls.
+func TestPerCallCapWarnsOnceBeforeTheCap(t *testing.T) {
+	before, warn := perCallCapCallbacks("web_agent", 5)
+	c := newCapCtx("inv")
+	fetch := namedTool{name: "WebFetch"}
+	var notes []int
+	for i := 1; i <= 5; i++ {
+		before(c, fetch, nil)
+		out, _ := warn(c, fetch, nil, map[string]any{"output": "page"}, nil)
+		if out != nil {
+			if out["output"] != "page" {
+				t.Fatal("the warning dropped the tool's own result")
+			}
+			if !strings.Contains(out["call_budget"].(string), "left for this task") {
+				t.Fatalf("unexpected note %v", out["call_budget"])
+			}
+			notes = append(notes, i)
+		}
+	}
+	if len(notes) != 1 || notes[0] != 2 {
+		t.Errorf("warned after calls %v, want once after call 2 (3 left of 5)", notes)
+	}
+	if out, _ := warn(newCapCtx("other"), fetch, nil, map[string]any{"output": "x"}, nil); out != nil {
+		t.Error("an invocation with no counted calls was warned")
+	}
+	if b, w := perCallCapCallbacks("x", 0); b != nil || w != nil {
+		t.Error("a zero cap must yield no callbacks")
+	}
+}
+
+func TestChainAfterToolFeedsTheRewrittenResult(t *testing.T) {
+	shape := func(_ adk.ToolContext, _ tool.Tool, _, r map[string]any, _ error) (map[string]any, error) {
+		return map[string]any{"output": "short"}, nil
+	}
+	note := func(_ adk.ToolContext, _ tool.Tool, _, r map[string]any, _ error) (map[string]any, error) {
+		out := map[string]any{"note": "n"}
+		for k, v := range r {
+			out[k] = v
+		}
+		return out, nil
+	}
+	noop := func(adk.ToolContext, tool.Tool, map[string]any, map[string]any, error) (map[string]any, error) {
+		return nil, nil
+	}
+	ctx, tl := newCapCtx("i"), namedTool{name: "WebFetch"}
+	out, _ := chainAfterTool(shape, note)(ctx, tl, nil, map[string]any{"output": "long"}, nil)
+	if out["output"] != "short" || out["note"] != "n" {
+		t.Errorf("second callback did not see the shaped result: %v", out)
+	}
+	out, _ = chainAfterTool(shape, noop)(ctx, tl, nil, map[string]any{"output": "long"}, nil)
+	if out["output"] != "short" {
+		t.Errorf("the first callback's rewrite was lost: %v", out)
+	}
+	if out, _ := chainAfterTool(noop, noop)(ctx, tl, nil, map[string]any{"output": "x"}, nil); out != nil {
+		t.Error("two no-op callbacks must leave the result alone")
+	}
+}
