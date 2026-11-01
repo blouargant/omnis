@@ -4753,11 +4753,25 @@ unit is a *wave*, not a call.
     (2026-11-01 Knowledge bench: 14–23 `web_agent` calls per question vs 9–11).
   - **The sub-agent is warned before the cap** — once an invocation has
     `callCapWarnRemaining` (3) calls left, a `call_budget` note is added to the
-    tool result (`perCallCap.warn`). Without it nearly every call ended at
-    15 + 3 refused grace calls, each a full model round on the call's largest
-    context. It rides on the shaped result via `chainAfterTool`: **ADK stops at
-    the first after-tool callback that returns a result**, so two callbacks that
-    must both see it have to be composed, not listed.
+    tool result (`perCallCap.warn`). It rides on the shaped result via
+    `chainAfterTool`: **ADK stops at the first after-tool callback that returns
+    a result**, so two callbacks that must both see it have to be composed, not
+    listed.
+  - **Then its tools are switched off** (`perCallCap.finalRound`, a sub-agent
+    `BeforeModelCallback`): once the budget is spent the next model call gets
+    `FunctionCallingConfig` mode NONE (→ `tool_choice: "none"` in the
+    OpenAI-compat adapter; tools stay declared because the history holds tool
+    calls) plus a "write your final result now" user note. **This is the part
+    that matters, not the notes:** Balanced ignored both notes and kept calling
+    until the 3 grace refusals ended the loop host-side — and a sub-agent's
+    result is the text of its **last event**, which was then a tool response
+    with no text, so the caller got an **empty result** and lost everything the
+    15 calls had found. That, not task size alone, drove the leader's
+    re-delegation waves. Verified on the gateway: with that history + note +
+    `tool_choice: none`, Balanced/Hosted/Premium all write the answer. The
+    resumable wrapper now also replaces an empty result with an explicit
+    "stopped without writing a result" (`emptySubAgentResult`).
+    Not mapped in the native `anthropic` adapter (no sub-agent uses it).
 - **The two layers compose** (verified live): the per-agent cap bounds a
   *sub-agent's* loop; the *leader's* re-delegation loop (it re-invokes a capped
   sub-agent) is bounded by the shared turn budget, which asks the user.

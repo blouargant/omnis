@@ -141,9 +141,13 @@ type oaiImageURL struct {
 }
 
 type oaiRequest struct {
-	Model         string            `json:"model"`
-	Messages      []oaiMessage      `json:"messages"`
-	Tools         []oaiTool         `json:"tools,omitempty"`
+	Model    string       `json:"model"`
+	Messages []oaiMessage `json:"messages"`
+	Tools    []oaiTool    `json:"tools,omitempty"`
+	// ToolChoice is "none" when the caller switches tools off for this call
+	// (genai FunctionCallingConfig mode NONE) while still declaring them, as a
+	// history holding tool calls requires. Omitted otherwise.
+	ToolChoice    string            `json:"tool_choice,omitempty"`
 	Stream        bool              `json:"stream,omitempty"`
 	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
 	Temperature   *float32          `json:"temperature,omitempty"`
@@ -387,6 +391,10 @@ func (o *openAI) buildRequest(req *model.LLMRequest, stream bool) oaiRequest {
 		r.MaxTokens = &n
 	}
 	if req.Config != nil {
+		if tc := req.Config.ToolConfig; len(r.Tools) > 0 && tc != nil && tc.FunctionCallingConfig != nil &&
+			tc.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone {
+			r.ToolChoice = "none"
+		}
 		r.Temperature = req.Config.Temperature
 		r.TopP = req.Config.TopP
 		if req.Config.MaxOutputTokens > 0 {

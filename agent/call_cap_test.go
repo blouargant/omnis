@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool"
+
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
 )
@@ -162,5 +165,42 @@ func TestChainAfterToolFeedsTheRewrittenResult(t *testing.T) {
 	}
 	if out, _ := chainAfterTool(noop, noop)(ctx, tl, nil, map[string]any{"output": "x"}, nil); out != nil {
 		t.Error("two no-op callbacks must leave the result alone")
+	}
+}
+
+// Once the budget is spent the next model call has its tools switched off and
+// is told to write the result: a model that ignores the notice otherwise keeps
+// calling until the loop is cut, and its result (the last event's text) is empty.
+func TestPerCallCapForcesAToolLessFinalRound(t *testing.T) {
+	h := newPerCallCapHooks("web_agent", 2)
+	c := newCapCtx("inv")
+	fetch := namedTool{name: "WebFetch"}
+	newReq := func() *model.LLMRequest {
+		return &model.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "tool result"}}}}}
+	}
+	h.Before(c, fetch, nil)
+	req := newReq()
+	h.FinalRound(c, req)
+	if req.Config != nil && req.Config.ToolConfig != nil {
+		t.Fatal("tools switched off before the budget was spent")
+	}
+	h.Before(c, fetch, nil)
+	req = newReq()
+	h.FinalRound(c, req)
+	if req.Config == nil || req.Config.ToolConfig == nil ||
+		req.Config.ToolConfig.FunctionCallingConfig.Mode != genai.FunctionCallingConfigModeNone {
+		t.Fatal("tools still enabled once the budget was spent")
+	}
+	if len(req.Contents) != 1 || len(req.Contents[0].Parts) != 2 ||
+		!strings.Contains(req.Contents[0].Parts[1].Text, "tools are now disabled") {
+		t.Errorf("final-round note not merged into the trailing user turn: %+v", req.Contents)
+	}
+	other := newReq()
+	h.FinalRound(newCapCtx("other"), other)
+	if other.Config != nil {
+		t.Error("another invocation was cut off")
+	}
+	if z := newPerCallCapHooks("x", 0); z.Before != nil || z.Warn != nil || z.FinalRound != nil {
+		t.Error("a zero cap must yield no hooks")
 	}
 }

@@ -204,8 +204,11 @@ func buildSubAgentsFromConfigs(
 		// The per-call cap rides in the budget slot, ahead of the turn budget, so
 		// a call it refuses is not charged to the turn (same rule as the per-turn
 		// agent cap). Shadowed per agent: the shared turn callback stays as is.
-		capBefore, capWarn := perCallCapCallbacks(cfg.Name, cfg.MaxToolCallsPerCall)
-		budgetBeforeTool := chainBeforeTool(capBefore, budgetBeforeTool)
+		capHooks := newPerCallCapHooks(cfg.Name, cfg.MaxToolCallsPerCall)
+		if capHooks.FinalRound != nil {
+			beforeModel = append(beforeModel, capHooks.FinalRound)
+		}
+		budgetBeforeTool := chainBeforeTool(capHooks.Before, budgetBeforeTool)
 		beforeTool := beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {
@@ -219,7 +222,7 @@ func buildSubAgentsFromConfigs(
 		// that rewrote the result is shaped too.
 		// The per-call cap's low-budget note rides on the shaped result (ADK stops
 		// at the first after-tool callback that returns one).
-		afterTool = append(afterTool, chainAfterTool(subAgentShaperCallback(), capWarn))
+		afterTool = append(afterTool, chainAfterTool(subAgentShaperCallback(), capHooks.Warn))
 
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                 cfg.Name,

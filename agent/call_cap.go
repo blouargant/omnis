@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/tool"
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
 )
@@ -157,6 +159,70 @@ func (p *perCallCap) warn(tc adk.ToolContext, t tool.Tool, _, result map[string]
 	}
 	out["call_budget"] = callCapWarning(left)
 	return out, nil
+}
+
+// callCapFinalRound is shown to a sub-agent whose budget is spent, on the model
+// call where its tools are switched off.
+func callCapFinalRound(limit int) string {
+	return fmt.Sprintf("[CALL BUDGET REACHED] You have used all %d tool calls for this task and tools are "+
+		"now disabled. Write your final result now from what you have gathered; list anything you "+
+		"could not check under open questions.", limit)
+}
+
+// exhausted reports whether the invocation has used its whole budget.
+func (p *perCallCap) exhausted(inv string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.counts[inv]
+	return c != nil && c.n >= p.limit
+}
+
+// finalRound is the BeforeModelCallback that switches tools off once the budget
+// is spent, so the next model call writes the result.
+//
+// A note is not enough: models ignore it and keep calling tools until the
+// refusals end the loop host-side — and a sub-agent's result is the text of its
+// LAST event, which is then a tool response with no text. The caller got an
+// EMPTY result and lost everything the 15 calls had found, which is what drove
+// the leader's re-delegation waves (2026-11-01 Knowledge bench).
+func (p *perCallCap) finalRound(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+	if req == nil || !p.exhausted(ctx.InvocationID()) {
+		return nil, nil
+	}
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	req.Config.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+		Mode: genai.FunctionCallingConfigModeNone,
+	}}
+	appendUserText(req, callCapFinalRound(p.limit))
+	return nil, nil
+}
+
+// appendUserText adds text as a user turn, merged into a trailing user turn
+// (the tool results) so two user messages never follow each other.
+func appendUserText(req *model.LLMRequest, text string) {
+	part := &genai.Part{Text: text}
+	if n := len(req.Contents); n > 0 && req.Contents[n-1] != nil && req.Contents[n-1].Role == "user" {
+		req.Contents[n-1].Parts = append(req.Contents[n-1].Parts, part)
+		return
+	}
+	req.Contents = append(req.Contents, &genai.Content{Role: "user", Parts: []*genai.Part{part}})
+}
+
+// perCallCapHooks are the per-call cap's callbacks; all nil when there is no cap.
+type perCallCapHooks struct {
+	Before     llmagent.BeforeToolCallback
+	Warn       llmagent.AfterToolCallback
+	FinalRound llmagent.BeforeModelCallback
+}
+
+func newPerCallCapHooks(agentName string, limit int) perCallCapHooks {
+	p := newPerCallCap(agentName, limit)
+	if p == nil {
+		return perCallCapHooks{}
+	}
+	return perCallCapHooks{Before: p.before, Warn: p.warn, FinalRound: p.finalRound}
 }
 
 // perCallCapCallbacks returns the cap's before- and after-tool callbacks, or
