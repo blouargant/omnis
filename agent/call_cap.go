@@ -163,10 +163,16 @@ func (p *perCallCap) warn(tc adk.ToolContext, t tool.Tool, _, result map[string]
 
 // callCapFinalRound is shown to a sub-agent whose budget is spent, on the model
 // call where its tools are switched off.
+//
+// It insists on citing what was gathered: without that, a broad task's final
+// answer was written from memory — no URLs or invented references — in 2 of 3
+// cheap-bench runs (2026-11-01), although the fetched pages were in context.
 func callCapFinalRound(limit int) string {
 	return fmt.Sprintf("[CALL BUDGET REACHED] You have used all %d tool calls for this task and tools are "+
-		"now disabled. Write your final result now from what you have gathered; list anything you "+
-		"could not check under open questions.", limit)
+		"now disabled. Write your final result now, using ONLY what the tool results above contain: "+
+		"back each claim with the URL of the page it came from (copy the URLs exactly as fetched; never "+
+		"invent or guess one). Do not fill gaps from memory — put anything you could not check under "+
+		"open questions.", limit)
 }
 
 // exhausted reports whether the invocation has used its whole budget.
