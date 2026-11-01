@@ -1454,14 +1454,18 @@ already has that content in *its* context — one shared cache would hand a sub-
 a stub for a file it has never seen), and `fusion` is the leader's edit→verify loop.
 The shaper is stateless, so there is no cache to key, invalidate, or leak.
 
-**`WebFetch` gets a tighter budget** (`webFetchMaxChars` = 20000, 85 % head) and
+**`WebFetch` gets its own budget** (`webFetchMaxChars` = 32000, 85 % head) and
 its own cut note pointing at the remedy it actually has — re-fetch with a CSS
 `selector` — instead of the generic "line range / narrower pattern" advice
 (`shaperBudget.narrow`, `capTextHint`). Fetched pages are the bulk of a research
 sub-agent's context: in the 2026-10-31 Knowledge bench (`omnis-benches`
 `reports/model-cost-knowledge-2026-10-31`) a `web_agent` call carried 30–80k
 tokens on average, re-sent at each of its steps, and `web_agent` was ~60 % of the
-squad's cost.
+squad's cost. **Do not lower it to cut cost**: at 20000 a precise lookup (a
+default value deep in a large docs/source page) lost the line past the cut and
+`web_agent` answered from memory (0/2 correct vs 3/3 at 32000, `omnis-benches`
+`tasks-callvolume.json`, 2026-11-01). Volume is bounded by
+`max_tool_calls_per_call` instead, which is where the saving came from.
 
 `dominantString` picks each tool's largest string field, so the plugin works
 across tools without hard-coding output keys. **No-op contract:** with nothing

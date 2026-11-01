@@ -80,13 +80,15 @@ type shaperBudget struct {
 	narrow string
 }
 
-// webFetchMaxChars caps a fetched page (~5k tokens). Pages are the bulk of a
+// webFetchMaxChars caps a fetched page (~8k tokens). Pages are the bulk of a
 // research sub-agent's context, and that context is re-sent on every one of
 // its model calls, so a page costs its size times the steps that follow it.
-// In the 2026-10-31 Knowledge bench a web_agent call carried 30–80k tokens of
-// context on average. The head is kept almost whole: a page's tail is
-// navigation and footer.
-const webFetchMaxChars = 20000
+// The head is kept almost whole: a page's tail is navigation and footer.
+// 20000 was too tight: on a precise lookup (a default value in a large vLLM
+// source/docs page) the line sat past the cut and web_agent answered from
+// memory; 32000 found it in 3/3 runs (omnis-benches tasks-callvolume,
+// 2026-11-01). Call volume is bounded by max_tool_calls_per_call instead.
+const webFetchMaxChars = 32000
 
 const defaultNarrowHint = "narrow the request (an explicit line range, a more specific pattern, " +
 	"or a files-only search) to see the rest"
