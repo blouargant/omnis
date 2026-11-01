@@ -176,8 +176,18 @@ func (t *resumableAgentTool) Run(toolCtx adk.ToolContext, args any) (map[string]
 		}
 		out["result"] = b.String()
 	}
+	// A run that ended on a tool call (a host-side stop) has no text in its last
+	// event. Say so rather than hand the caller an empty string it may read as
+	// "nothing found".
+	if r, _ := out["result"].(string); strings.TrimSpace(r) == "" {
+		out["result"] = emptySubAgentResult
+	}
 	return out, nil
 }
+
+// emptySubAgentResult replaces an empty sub-agent result.
+const emptySubAgentResult = "(The sub-agent stopped without writing a result. Its findings are lost; " +
+	"if they are still needed, delegate a narrower task.)"
 
 // buildSubAgentContent mirrors agenttool's content shaping without the internal
 // schema package: a lone `request` string becomes the content text, otherwise

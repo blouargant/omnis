@@ -1454,6 +1454,19 @@ already has that content in *its* context — one shared cache would hand a sub-
 a stub for a file it has never seen), and `fusion` is the leader's edit→verify loop.
 The shaper is stateless, so there is no cache to key, invalidate, or leak.
 
+**`WebFetch` gets its own budget** (`webFetchMaxChars` = 32000, 85 % head) and
+its own cut note pointing at the remedy it actually has — re-fetch with a CSS
+`selector` — instead of the generic "line range / narrower pattern" advice
+(`shaperBudget.narrow`, `capTextHint`). Fetched pages are the bulk of a research
+sub-agent's context: in the 2026-10-31 Knowledge bench (`omnis-benches`
+`reports/model-cost-knowledge-2026-10-31`) a `web_agent` call carried 30–80k
+tokens on average, re-sent at each of its steps, and `web_agent` was ~60 % of the
+squad's cost. **Do not lower it to cut cost**: at 20000 a precise lookup (a
+default value deep in a large docs/source page) lost the line past the cut and
+`web_agent` answered from memory (0/2 correct vs 3/3 at 32000, `omnis-benches`
+`tasks-callvolume.json`, 2026-11-01). Volume is bounded by
+`max_tool_calls_per_call` instead, which is where the saving came from.
+
 `dominantString` picks each tool's largest string field, so the plugin works
 across tools without hard-coding output keys. **No-op contract:** with nothing
 to fuse/dedup/cap the callback returns nil and behaviour is byte-identical.
@@ -4714,6 +4727,53 @@ unit is a *wave*, not a call.
   past that the callback sets **`tc.Actions().SkipSummarization = true`**, which
   makes the function-response event `IsFinalResponse()` and **terminates the flow
   loop**. Host-side guarantee, same mechanism the routing tools use.
+- **Per-CALL cap (`max_tool_calls_per_call`) — the one a fan-out agent can use.**
+  [agent/call_cap.go](agent/call_cap.go) `perCallCapCallback` counts the tool
+  calls of ONE invocation of a sub-agent, keyed by the ADK **invocation id**
+  (agenttool starts a fresh runner run per call; a `resume_session` call is a new
+  run too), so parallel instances do NOT share it. Same notice-then-terminate
+  escalation as the per-turn cap (`agentCapGraceCalls`), skill/soft-skill
+  discovery tools are free (`callCapFreeTools`), and it is chained ahead of the
+  turn budget in the sub-agent's budget slot (`chainBeforeTool`, shadowed per
+  agent in [agent/build_subagents.go](agent/build_subagents.go)) so a refused call
+  is not charged. Sub-agents only (the root has no per-call notion). Shipped:
+  `web_agent` 20, `web_fetcher` 8, `research_critic` 20 (`web_agent` was 15: a
+  precise lookup then found the right value in only 6 of 11 cheap-bench runs vs
+  3/3 at 20, for ~30 % more cost per run — 2026-11-01). **Why it exists:** page
+  budgets written into those agents' instructions were ignored — the 2026-10-31
+  A/B (`omnis-benches` `reports/call-volume-ab-2026-10-31.jsonl`) measured
+  web_agent still reading 20–30 pages per call with "at most 8" in its prompt.
+  Round-trips through the Settings GET/PUT allowlist and the `set_agent` tool
+  (not yet a visible field in the Settings form).
+  **Two companions make the cap cheap rather than merely bounding:**
+  - **The caller is told the budget** — the sub-agent's tool `Description()`
+    (`newBudgetedAgentTool`, [agent/concurrent_agent_tool.go](agent/concurrent_agent_tool.go))
+    appends "each call may use at most N tools … give it ONE focused question",
+    generated from the config like the `max_instances` invitation. Without it the
+    leader handed over tasks sized for an unbounded agent, every call ended on the
+    cap with open questions, and it re-delegated the gaps in small waves
+    (2026-11-01 Knowledge bench: 14–23 `web_agent` calls per question vs 9–11).
+  - **The sub-agent is warned before the cap** — once an invocation has
+    `callCapWarnRemaining` (3) calls left, a `call_budget` note is added to the
+    tool result (`perCallCap.warn`). It rides on the shaped result via
+    `chainAfterTool`: **ADK stops at the first after-tool callback that returns
+    a result**, so two callbacks that must both see it have to be composed, not
+    listed.
+  - **Then its tools are switched off** (`perCallCap.finalRound`, a sub-agent
+    `BeforeModelCallback`): once the budget is spent the next model call gets
+    `FunctionCallingConfig` mode NONE (→ `tool_choice: "none"` in the
+    OpenAI-compat adapter; tools stay declared because the history holds tool
+    calls) plus a "write your final result now" user note. **This is the part
+    that matters, not the notes:** Balanced ignored both notes and kept calling
+    until the 3 grace refusals ended the loop host-side — and a sub-agent's
+    result is the text of its **last event**, which was then a tool response
+    with no text, so the caller got an **empty result** and lost everything the
+    15 calls had found. That, not task size alone, drove the leader's
+    re-delegation waves. Verified on the gateway: with that history + note +
+    `tool_choice: none`, Balanced/Hosted/Premium all write the answer. The
+    resumable wrapper now also replaces an empty result with an explicit
+    "stopped without writing a result" (`emptySubAgentResult`).
+    Not mapped in the native `anthropic` adapter (no sub-agent uses it).
 - **The two layers compose** (verified live): the per-agent cap bounds a
   *sub-agent's* loop; the *leader's* re-delegation loop (it re-invokes a capped
   sub-agent) is bounded by the shared turn budget, which asks the user.
@@ -4777,6 +4837,13 @@ toolset (`serpapi`/`ddg`/`web`) on the `high` model, so the "adversarial reviewe
 can run its own unbounded research — it was the single biggest spender. The
 deep-research skill's trigger is also broad enough to grab a simple A-vs-B hardware
 question. The budget now bounds both, but neither is *fixed*.
+(Update: the `knowledge_leader` depth ladder no longer sends a question to deep
+research merely because it states a setup — only an explicit request or a real
+decision does, and a stated setup gets one premise-check call in a standard wave;
+the skill caps waves at 2–3 and the critic at one re-check of its own blockers;
+`web_agent`, `web_fetcher` and `research_critic` carry explicit page/search
+budgets. Unmeasured yet — re-run the `model-cost` squad-bench before trusting the
+saving.)
 
 ### Live-turn visibility (a turn in flight is never invisible)
 
@@ -5983,6 +6050,17 @@ with no matching key configured still yields **no** WebSearch tool at all —
 unchanged from `NewSerpAPITools`/`NewSerperTools`'s own nil-on-empty-key
 behaviour; DDG only kicks in as a fallback when the agent explicitly declared
 `"ddg"` too.
+
+**Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
+`WebFetch` and every `WebSearch` provider go through `sharedWebCache`
+(15 min TTL, 512 entries, process memory), keyed by the turn's **root session**
+(`events.RootSessionFromContext`, else the tool's own session) + URL/selector or
+provider/query/max_results. Parallel `web_agent`/`web_fetcher` instances re-read
+the same pages (20–30 % of a deep-research turn's fetches in that bench); a hit
+saves the network round-trip and the search-provider call, **not context tokens**
+(each sub-agent still receives the content). Errors and `(no results)` are never
+cached, so a transient failure is retried; one session's results never reach
+another.
 
 **GOTCHA — this precedence is what keeps a configured `serper_key` from
 breaking `web_agent`.** Before `resolveWebSearchTools` existed, each of the

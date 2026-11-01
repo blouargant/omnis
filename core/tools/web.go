@@ -35,8 +35,11 @@ func NewWebTools() []tool.Tool {
 			"Fetch a web page and return its content as Markdown. "+
 				"Arguments: `url` (string, required) — the URL to fetch; "+
 				"`selector` (string, optional) — CSS selector to extract a specific page section (e.g. \"main\", \"article\", \"#content\").",
-			func(_ adk.ToolContext, in WebFetchIn) (WebFetchOut, error) {
-				out, _ := runWebFetch(context.Background(), in)
+			func(tc adk.ToolContext, in WebFetchIn) (WebFetchOut, error) {
+				out := sharedWebCache.get(webCacheScope(tc, tc.SessionID()), "fetch\x00"+in.URL+"\x00"+in.Selector, func() string {
+					out, _ := runWebFetch(context.Background(), in)
+					return out
+				})
 				return WebFetchOut{Content: out}, nil
 			}),
 		mustTool("html_to_markdown",

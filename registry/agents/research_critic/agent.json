@@ -16,5 +16,6 @@
     "Skill",
     "calc",
     "softskills"
-  ]
+  ],
+  "max_tool_calls_per_call": 20
 }

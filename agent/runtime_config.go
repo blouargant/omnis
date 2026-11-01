@@ -78,6 +78,11 @@ type AgentEntry struct {
 	// 9.1M prompt tokens from ~20 fetches across 2 invocations, so capping N is
 	// worth far more than capping tokens.
 	MaxToolCalls int `json:"max_tool_calls,omitempty"`
+	// MaxToolCallsPerCall caps the tool calls of ONE invocation of this agent as
+	// a sub-agent (0 = uncapped). Unlike MaxToolCalls it is not shared by the
+	// parallel instances of a fan-out, so it is the cap a web_agent ×10 can use.
+	// See agent/call_cap.go.
+	MaxToolCallsPerCall int `json:"max_tool_calls_per_call,omitempty"`
 	// ResumableSessions controls durable, re-attachable sessions for this
 	// sub-agent: each call returns a `session` handle the leader can pass back as
 	// `resume_session` to continue that exact conversation (keeping its prior
@@ -318,6 +323,8 @@ type RuntimeAgentConfig struct {
 	MaxInstances int
 	// MaxToolCalls is this agent's per-turn tool-call cap (0 = uncapped).
 	MaxToolCalls int
+	// MaxToolCallsPerCall is the cap per sub-agent invocation (0 = uncapped).
+	MaxToolCallsPerCall int
 	// ResumableSessions is the resolved (opt-out default applied) flag for durable,
 	// re-attachable sub-agent sessions: true unless the agent explicitly opted out.
 	// The leader can resume a prior call via its returned handle. See AgentEntry.
@@ -667,6 +674,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			A2AAgents:                         normalizeNames(e.A2AAgents),
 			MaxInstances:                      maxInstances,
 			MaxToolCalls:                      maxInt(e.MaxToolCalls, 0),
+			MaxToolCallsPerCall:               maxInt(e.MaxToolCallsPerCall, 0),
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
 			SubAgents:                         normalizeNames(e.SubAgents),
 		})
@@ -780,6 +788,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		A2AAgents:                         normalizeNames(in.A2AAgents),
 		MaxInstances:                      maxInt(in.MaxInstances, 1),
 		MaxToolCalls:                      maxInt(in.MaxToolCalls, 0),
+		MaxToolCallsPerCall:               maxInt(in.MaxToolCallsPerCall, 0),
 		ResumableSessions:                 in.ResumableSessions,
 		SubAgents:                         normalizeNames(in.SubAgents),
 		Plugin:                            in.Plugin,

@@ -201,6 +201,14 @@ func buildSubAgentsFromConfigs(
 		// attach their tool-level callbacks here so a sub-agent's
 		// Edit/Write/Bash/MCP calls are gated + hooked exactly like the leader's.
 		// Order lives in one place: see beforeToolChain (agent/tool_chain.go).
+		// The per-call cap rides in the budget slot, ahead of the turn budget, so
+		// a call it refuses is not charged to the turn (same rule as the per-turn
+		// agent cap). Shadowed per agent: the shared turn callback stays as is.
+		capHooks := newPerCallCapHooks(cfg.Name, cfg.MaxToolCallsPerCall)
+		if capHooks.FinalRound != nil {
+			beforeModel = append(beforeModel, capHooks.FinalRound)
+		}
+		budgetBeforeTool := chainBeforeTool(capHooks.Before, budgetBeforeTool)
 		beforeTool := beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {
@@ -212,7 +220,9 @@ func buildSubAgentsFromConfigs(
 		// subsequent model call of its private flow loop — the quadratic blow-up
 		// behind research_critic's 9.1M prompt tokens. Last in the chain, so a hook
 		// that rewrote the result is shaped too.
-		afterTool = append(afterTool, subAgentShaperCallback())
+		// The per-call cap's low-budget note rides on the shaped result (ADK stops
+		// at the first after-tool callback that returns one).
+		afterTool = append(afterTool, chainAfterTool(subAgentShaperCallback(), capHooks.Warn))
 
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                 cfg.Name,
@@ -292,5 +302,5 @@ func wrapSubAgentTool(sa adkagent.Agent, cfg RuntimeAgentConfig) (tool.Tool, err
 		}
 		wrapped = w
 	}
-	return newConcurrentAgentTool(wrapped, cfg.MaxInstances), nil
+	return newBudgetedAgentTool(wrapped, cfg.MaxInstances, cfg.MaxToolCallsPerCall), nil
 }

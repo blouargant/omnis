@@ -193,3 +193,28 @@ func TestDiagnosticsIfRunningNoServer(t *testing.T) {
 		t.Error("no running server should return ok=false")
 	}
 }
+
+// A fetched page is capped tighter than other tools, and the cut note points
+// at the remedy WebFetch actually has (a selector), not at line ranges.
+func TestShapeResultWebFetchCapAndHint(t *testing.T) {
+	page := strings.Repeat("paragraph of page text\n", 2000) // ~46k chars
+	out, ok := shapeResult("WebFetch", map[string]any{"content": page})
+	if !ok {
+		t.Fatal("a 46k-char page should be capped")
+	}
+	got := out["content"].(string)
+	if len(got) > webFetchMaxChars+600 {
+		t.Errorf("capped page is %d chars, want about %d", len(got), webFetchMaxChars)
+	}
+	if !strings.Contains(got, "selector") {
+		t.Errorf("cut note should suggest a selector:\n%s", got[len(got)/2-200:len(got)/2+400])
+	}
+	// A page under the cap is untouched.
+	if _, ok := shapeResult("WebFetch", map[string]any{"content": strings.Repeat("a\n", 5000)}); ok {
+		t.Error("a 10k-char page should not be capped")
+	}
+	// Other tools keep the larger default budget.
+	if _, ok := shapeResult("Grep", map[string]any{"matches": page[:25000]}); ok {
+		t.Error("Grep at 25k chars is under the default budget and must not be capped")
+	}
+}

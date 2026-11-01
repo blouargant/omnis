@@ -33,9 +33,11 @@ func NewSerperTools(apiKey string) []tool.Tool {
 			"Search the web using Serper.dev (Google) and return a list of results. "+
 				"Arguments: `query` (string, required) — the search query; "+
 				"`max_results` (int, optional, default 5, max 10) — number of results to return.",
-			func(_ adk.ToolContext, in DDGIn) (DDGOut, error) {
-				out, _ := runSerperSearch(context.Background(), apiKey, in)
-				return DDGOut{Results: out}, nil
+			func(tc adk.ToolContext, in DDGIn) (DDGOut, error) {
+				return DDGOut{Results: cachedSearch(tc, "serper", in, func() string {
+					out, _ := runSerperSearch(context.Background(), apiKey, in)
+					return out
+				})}, nil
 			}),
 	}
 }
