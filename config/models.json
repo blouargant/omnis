@@ -49,12 +49,12 @@
     },
     "premium": {
       "provider_ref": "openai-compat",
-      "model": "Premium",
+      "model": "claude-sonnet-5-5",
       "context_length": 200000,
-      "input_token_price_per_million": 3.15,
-      "output_token_price_per_million": 15.75,
-      "cached_input_token_price_per_million": 0.3,
-      "cache_creation_token_price_per_million": 3.75
+      "input_token_price_per_million": 2.1,
+      "output_token_price_per_million": 10.5,
+      "cached_input_token_price_per_million": 0.21,
+      "cache_creation_token_price_per_million": 2.625
     },
     "simple": {
       "provider_ref": "openai-compat",
