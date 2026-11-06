@@ -17,7 +17,8 @@ import (
 func New() []tool.Tool {
 	return []tool.Tool{
 		mustTool("Bash",
-			"Run a shell command via /bin/sh -c. Use for arbitrary shell operations. Times out after 120s by default. "+
+			"Run a shell command via /bin/sh -c. Use for arbitrary shell operations. Times out after 120s by default (pass `timeout` for long builds). "+
+				"Output over 50,000 bytes keeps its END and the full output is saved to a file whose path is given — Read or Grep that file rather than re-running the command. "+
 				"Arguments: `command` (string, required) — the full shell command line to run. Do NOT use any other field name (e.g. `cmd`, `script`, `file_path`); calls with extra or missing properties are rejected.",
 			func(ctx adk.ToolContext, in BashIn) (BashOut, error) {
 				in.Cwd = sessionCwd(ctx)
@@ -28,7 +29,8 @@ func New() []tool.Tool {
 		mustTool("Read",
 			"Read a file and return numbered lines. Use when you need to inspect file content or reference specific line numbers in a subsequent write. "+
 				"Arguments: `file_path` (string, required), "+
-				"`start_line` (int, optional, 1-based), `end_line` (int, optional). Returns up to 50,000 characters.",
+				"`start_line` (int, optional, 1-based), `end_line` (int, optional). Returns at most 2,000 lines / 30,000 characters; "+
+				"a longer file is cut on a whole line and the result ends with the `start_line` to continue from.",
 			func(ctx adk.ToolContext, in ReadIn) (ReadOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				out, _ := RunRead(context.Background(), in)

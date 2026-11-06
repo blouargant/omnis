@@ -120,14 +120,19 @@ func buildSquadInstance(
 		// tool-call parser) is withheld and retried once instead of ending the
 		// turn with the raw markup shown to the user. Inert for requests
 		// without tools.
+		//
+		// Outermost, llm.RepairToolCalls rewrites the argument shapes models
+		// commonly send to the file tools (`path` for `file_path`, `edits` as
+		// a JSON string, …) before ANY callback sees the call — the permission
+		// gate reads `file_path`, so the repair must precede it.
 		if opts.DeferModelErrors {
-			return llm.GuardToolText(llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg))), nil
+			return llm.RepairToolCalls(llm.GuardToolText(llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg))), fstools.RepairToolArgs), nil
 		}
 		m, err := newModelForAgent(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("squad %q: %w", squad.Name, err)
 		}
-		return llm.GuardToolText(m), nil
+		return llm.RepairToolCalls(llm.GuardToolText(m), fstools.RepairToolArgs), nil
 	}
 
 	orchestratorLLM, err := modelForAgent(rootCfg)

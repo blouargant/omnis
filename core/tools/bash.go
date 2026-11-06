@@ -341,7 +341,8 @@ type BashOut struct {
 }
 
 // RunBash executes a shell command via /bin/sh -c, with a default 120s
-// timeout. Output is truncated at MaxToolOutput.
+// timeout. Output over MaxToolOutput keeps its tail and is saved in full to a
+// temp file (see capCommandOutput).
 
 // NewShellCommand runs command through the shell in its own process group, so
 // cancelling ctx kills the shell and everything it started (see bash_unix.go /
@@ -377,7 +378,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	out, err := cmd.CombinedOutput()
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, truncate(s)), nil
+		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), nil
 	}
 	if err != nil && s == "" {
 		return fmt.Sprintf("Error: %v", err), nil
@@ -385,7 +386,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	if s == "" {
 		return "(no output)", nil
 	}
-	return truncate(s), nil
+	return capCommandOutput(s), nil
 }
 
 // RunBashInteractive runs command through the platform shell with cwd as the
@@ -422,7 +423,7 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 	s, resultCwd := extractCapturedCwd(string(out), cwd)
 	s = strings.TrimRight(s, "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, truncate(s)), resultCwd, nil
+		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), resultCwd, nil
 	}
 	if runErr != nil && s == "" {
 		return fmt.Sprintf("Error: %v", runErr), resultCwd, nil
@@ -430,7 +431,7 @@ func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int
 	if s == "" {
 		s = "(no output)"
 	}
-	return truncate(s), resultCwd, nil
+	return capCommandOutput(s), resultCwd, nil
 }
 
 // CapturedRun is the result of RunShellCaptured: stdout and stderr separated,
