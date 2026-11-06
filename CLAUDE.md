@@ -1029,7 +1029,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
-| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor) |
+| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read and `RepairToolArgs` |
 | `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle. `FileLoggerWithOptions` composes each record into one `[]byte` and does a **single `f.Write`** (one `write(2)` to an `O_APPEND` fd is atomic against other appenders on POSIX, so a line can never be interleaved mid-record). The audit log is **process-wide — one file per build, ONE bus subscription**: it is owned by `Infrastructure.EventLog` ([agent/event_log.go](agent/event_log.go)), never by a squad/generation (see "Event audit log") |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
@@ -1354,6 +1354,60 @@ at startup (same reason import lives at `/api/import/session`).
 and every path falls back to `Scan` — the feature works, it is just literal and
 slower. CLI/TUI are untouched (server-only UI; the `sessions` tool group works
 anywhere the agent is mounted).
+
+### File tool robustness (ported from Pi)
+
+Four behaviours of the `fs` tools, taken from the Pi harness (earendil-works/pi,
+MIT — `file-mutation-queue.ts`, `edit-diff.ts`, `bash.ts`, `read.ts`), which ties
+for first on the Harness Leaderboard at about half the cost per solved task:
+
+- **Per-file lock** ([core/tools/edit_match.go](core/tools/edit_match.go)
+  `LockFiles`). ADK runs every function call of one model response
+  concurrently, and `RunEdit` is a read-modify-write: two `Edit`s of the same
+  file in one response used to both read the old content, and the second write
+  silently dropped the first (`TestConcurrentEditsOfOneFileAllLand` fails
+  without the lock). `RunWrite`, `RunEdit`, `RunMultiEdit` (all its files,
+  sorted, so two batches cannot deadlock) and `RunRevert` hold the lock for
+  the whole read-modify-write; keys are the resolved absolute path, so
+  different files still mutate in parallel. `lsp_rename` / `ast_grep_rewrite`
+  write through `RunWrite` (the write is serialised) but read outside the lock
+  — `LockFiles` is exported for them if that ever matters.
+- **Normalized edit matching** (`findEditMatches`). Exact match first; when
+  there is none, both texts are normalized — CRLF → LF, trailing whitespace
+  stripped per line, typographic quotes/dashes/ellipsis and special spaces →
+  ASCII — and the hits are mapped back to byte ranges of the ORIGINAL file, so
+  text outside a replaced range stays byte-identical. Uniqueness is judged on
+  the normalized hits. On a normalized match the replacement adopts the file's
+  CRLF endings, and the result says it was normalized. Edit now refuses an
+  empty `old_string` (it used to report "appears N+1 times").
+- **Bash keeps the tail** (`capCommandOutput` in
+  [core/tools/common.go](core/tools/common.go)). Output over `MaxToolOutput`
+  used to keep its HEAD — a long build/test log lost the error at its end —
+  and the shaper then cut again. It now keeps the last ~50 KB from a line
+  boundary, writes the whole output to `$TMPDIR/omnis-bash-*.log`, and puts a
+  notice FIRST (`[Output truncated: showing lines X-Y of Z. Full output: …]`)
+  so the 70/30 shaper keeps it. Also for the `!` escape and timeouts. The temp
+  files are not reaped by omnis (the OS's tmp cleanup is). `truncate` no longer
+  splits a UTF-8 sequence.
+- **Line-aware Read** (`readMaxChars` 30 000 / `readMaxLines` 2 000 in
+  [core/tools/file.go](core/tools/file.go)). The cap sits BELOW the shaper's
+  32k so a long read is cut on a whole line with
+  `[Showing lines S-E of T. Use start_line=E+1 to continue.]`, instead of the
+  shaper dropping its middle.
+- **Argument repair at the model boundary** (`RepairToolArgs` in
+  [core/tools/arg_repair.go](core/tools/arg_repair.go), applied by
+  `llm.RepairToolCalls` — [core/llm/toolcall_repair.go](core/llm/toolcall_repair.go)
+  — wrapped OUTERMOST around every agent model in `modelForAgent`,
+  [agent/squad.go](agent/squad.go)). Rewrites the shapes models send instead
+  of the schema: `path`→`file_path`, `oldText`/`old_text`/…→`old_string`, a
+  one-element `edits` list to `Edit`, MultiEdit `files`/`edits` as a JSON
+  string or a single object, a top-level MultiEdit `file_path`+`edits`, Read
+  `offset`/`limit`. A canonical key already present always wins. **GOTCHA —
+  it must run before the callbacks, never inside the tool:** the permission
+  gate reads `file_path` (`core/permissions/permissions.go` `matchCtx`), so an
+  alias repaired only in `Run` would let a call slip past an `Edit(.env)` rule.
+  Repairing the model's FunctionCall in place means events, hooks, the gate,
+  the tool and the persisted history all see the corrected arguments.
 
 ### Coding squad (token-efficient code intelligence)
 
@@ -2954,6 +3008,17 @@ calls fall through to the mode default (ask in `default` mode).
   word-boundary, compound-command splitting, wrapper stripping, built-in
   read-only allowlist); paths use gitignore anchors in
   [match_path.go](core/permissions/match_path.go).
+- **MultiEdit is checked per file** (`checkMultiEdit` in
+  [permissions.go](core/permissions/permissions.go)). Its paths live in
+  `files[].file_path`, which the path matchers (they read a top-level
+  `file_path`) never saw — so an `Edit(.env)` deny did not stop a MultiEdit of
+  `.env`, and `acceptEdits` auto-allowed a MultiEdit outside the working dir
+  (`underWorkingDir("")` trusts the mode). Each file is now checked as its own
+  Edit-class call, plus the whole call once (so a deny/explicit ask regex
+  written against the full args still fires); most restrictive wins (deny >
+  ask > allow), and `DefaultAsk` stays true only when every ask was a default
+  ask. Pinned by `TestMultiEditPathsAreCheckedPerFile`. Reminder: in path
+  specs `/x/**` is relative to the project root — an absolute path is `//x/**`.
 - **Modes** (`defaultMode`): `default`/`acceptEdits`/`plan`/`dontAsk`/
   `bypassPermissions`/`auto` — applied in `CheckArgs` (bypass & plan are
   authoritative; the rest only change the unmatched-call default). The Bash

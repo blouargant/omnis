@@ -25,8 +25,18 @@ type ReadOut struct {
 	Content string `json:"content"`
 }
 
+// Read output limits. The char cap sits below the coding-efficiency output
+// shaper's budget (32k chars), so a long read is cut HERE, on a whole line and
+// with a resume hint, instead of having its middle dropped by the shaper.
+const (
+	readMaxChars = 30_000
+	readMaxLines = 2_000
+)
+
 // RunRead returns numbered lines of a file, optionally bounded by a
-// [start_line, end_line] inclusive range (1-indexed).
+// [start_line, end_line] inclusive range (1-indexed). A read that hits the
+// line or character cap stops on a whole line and ends with the start_line to
+// continue from.
 func RunRead(_ context.Context, in ReadIn) (string, error) {
 	data, err := os.ReadFile(in.Path)
 	if err != nil {
@@ -49,13 +59,25 @@ func RunRead(_ context.Context, in ReadIn) (string, error) {
 		return "(empty range)", nil
 	}
 	var b strings.Builder
+	shown := start - 1
 	for i := start - 1; i < end; i++ {
-		fmt.Fprintf(&b, "%4d\t%s\n", i+1, lines[i])
+		line := fmt.Sprintf("%4d\t%s\n", i+1, lines[i])
+		if i > start-1 && (b.Len()+len(line) > readMaxChars || i-(start-1) >= readMaxLines) {
+			break
+		}
+		if b.Len()+len(line) > readMaxChars { // a single line over the cap
+			line = truncateAt(line, readMaxChars) + "\n"
+		}
+		b.WriteString(line)
+		shown = i + 1
 	}
 	if b.Len() == 0 {
 		return "(empty file)", nil
 	}
-	return truncate(b.String()), nil
+	if shown < end {
+		fmt.Fprintf(&b, "\n[Showing lines %d-%d of %d. Use start_line=%d to continue.]", start, shown, len(lines), shown+1)
+	}
+	return b.String(), nil
 }
 
 type WriteIn struct {
@@ -72,21 +94,27 @@ type WriteOut struct {
 // RunWrite writes content to a file, snapshotting the previous contents (if
 // any) so RunRevert can restore them.
 func RunWrite(_ context.Context, in WriteIn) (string, error) {
+	defer LockFiles(in.Path)()
+	return writeSnapshotted(in.Path, in.Content), nil
+}
+
+// writeSnapshotted is RunWrite's body; the caller holds the file's lock.
+func writeSnapshotted(path, content string) string {
 	snapMu.Lock()
-	if data, err := os.ReadFile(in.Path); err == nil {
+	if data, err := os.ReadFile(path); err == nil {
 		s := string(data)
-		snapshots[in.Path] = &s
+		snapshots[path] = &s
 	} else if os.IsNotExist(err) {
-		snapshots[in.Path] = nil // marker: file did not exist
+		snapshots[path] = nil // marker: file did not exist
 	}
 	snapMu.Unlock()
-	if dir := filepath.Dir(in.Path); dir != "" {
+	if dir := filepath.Dir(path); dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	if err := os.WriteFile(in.Path, []byte(in.Content), 0o644); err != nil {
-		return fmt.Sprintf("Error writing %s: %v", in.Path, err), nil
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Sprintf("Error writing %s: %v", path, err)
 	}
-	return fmt.Sprintf("wrote %s (%d bytes; snapshot saved - call revert to undo)", in.Path, len(in.Content)), nil
+	return fmt.Sprintf("wrote %s (%d bytes; snapshot saved - call revert to undo)", path, len(content))
 }
 
 type EditIn struct {
@@ -99,19 +127,30 @@ type EditOut struct {
 	Result string `json:"result"`
 }
 
+// normalizedMatchNote is appended to a result whose old_string only matched
+// after normalization, so the model knows its text differed from the file.
+const normalizedMatchNote = " — matched after normalizing line endings, trailing whitespace and typographic quotes/dashes"
+
 // RunEdit replaces the first (or all) occurrence of OldString with NewString
 // in the named file, snapshotting the previous content so RunRevert can undo.
 // Returns an error message if OldString is not found or (when ReplaceAll is
-// false) appears more than once — the caller must be explicit.
+// false) appears more than once — the caller must be explicit. An exact match
+// is tried first, then a normalized one (see findEditMatches). The whole
+// read-modify-write runs under the file's lock (see LockFiles).
 func RunEdit(_ context.Context, in EditIn) (string, error) {
+	if in.OldString == "" {
+		return fmt.Sprintf("Error: empty old_string for %s — use Write to create or replace a whole file", in.Path), nil
+	}
+	defer LockFiles(in.Path)()
 	data, err := os.ReadFile(in.Path)
 	if err != nil {
 		return fmt.Sprintf("Error reading %s: %v", in.Path, err), nil
 	}
 	content := string(data)
-	count := strings.Count(content, in.OldString)
+	ranges, normalized := findEditMatches(content, in.OldString)
+	count := len(ranges)
 	if count == 0 {
-		return fmt.Sprintf("Error: old_string not found in %s", in.Path), nil
+		return fmt.Sprintf("Error: old_string not found in %s — Read the file again and copy the exact text", in.Path), nil
 	}
 	if !in.ReplaceAll && count > 1 {
 		return fmt.Sprintf("Error: old_string appears %d times in %s — set replace_all:true or provide more context to make it unique", count, in.Path), nil
@@ -122,20 +161,15 @@ func RunEdit(_ context.Context, in EditIn) (string, error) {
 	snapshots[in.Path] = &s
 	snapMu.Unlock()
 
-	var updated string
-	if in.ReplaceAll {
-		updated = strings.ReplaceAll(content, in.OldString, in.NewString)
-	} else {
-		updated = strings.Replace(content, in.OldString, in.NewString, 1)
-	}
+	updated := applyEditMatches(content, ranges, in.NewString, normalized)
 	if err := os.WriteFile(in.Path, []byte(updated), 0o644); err != nil {
 		return fmt.Sprintf("Error writing %s: %v", in.Path, err), nil
 	}
-	n := count
-	if !in.ReplaceAll {
-		n = 1
+	note := ""
+	if normalized {
+		note = normalizedMatchNote
 	}
-	return fmt.Sprintf("edited %s (%d replacement(s); snapshot saved - call revert to undo)", in.Path, n), nil
+	return fmt.Sprintf("edited %s (%d replacement(s); snapshot saved - call revert to undo)%s", in.Path, count, note), nil
 }
 
 // EditOp is one string replacement within a file, as used by MultiEdit.
@@ -171,6 +205,11 @@ func RunMultiEdit(_ context.Context, in MultiEditIn) (string, error) {
 	if len(in.Files) == 0 {
 		return "Error: no files supplied to MultiEdit", nil
 	}
+	paths := make([]string, 0, len(in.Files))
+	for _, f := range in.Files {
+		paths = append(paths, f.Path)
+	}
+	defer LockFiles(paths...)()
 	// Phase 1 — validate + compute every file's final content, no writes.
 	type plan struct {
 		path    string
@@ -178,6 +217,7 @@ func RunMultiEdit(_ context.Context, in MultiEditIn) (string, error) {
 		count   int
 	}
 	seen := map[string]bool{}
+	anyNormalized := false
 	plans := make([]plan, 0, len(in.Files))
 	for fi, f := range in.Files {
 		if f.Path == "" {
@@ -200,32 +240,33 @@ func RunMultiEdit(_ context.Context, in MultiEditIn) (string, error) {
 			if e.OldString == "" {
 				return fmt.Sprintf("Error: %s edit %d has an empty old_string", f.Path, ei+1), nil
 			}
-			count := strings.Count(content, e.OldString)
+			ranges, normalized := findEditMatches(content, e.OldString)
+			count := len(ranges)
 			if count == 0 {
 				return fmt.Sprintf("Error: old_string of %s edit %d not found", f.Path, ei+1), nil
 			}
 			if !e.ReplaceAll && count > 1 {
 				return fmt.Sprintf("Error: old_string of %s edit %d appears %d times — set replace_all:true or add context to make it unique", f.Path, ei+1, count), nil
 			}
-			if e.ReplaceAll {
-				content = strings.ReplaceAll(content, e.OldString, e.NewString)
-				applied += count
-			} else {
-				content = strings.Replace(content, e.OldString, e.NewString, 1)
-				applied++
-			}
+			content = applyEditMatches(content, ranges, e.NewString, normalized)
+			applied += count
+			anyNormalized = anyNormalized || normalized
 		}
 		plans = append(plans, plan{path: f.Path, content: content, count: applied})
 	}
 	// Phase 2 — commit. Each write snapshots the prior content (revertible).
 	total := 0
 	for _, p := range plans {
-		if _, err := RunWrite(context.Background(), WriteIn{Path: p.path, Content: p.content}); err != nil {
-			return fmt.Sprintf("Error writing %s: %v", p.path, err), nil
+		if out := writeSnapshotted(p.path, p.content); strings.HasPrefix(out, "Error") {
+			return out, nil
 		}
 		total += p.count
 	}
-	return fmt.Sprintf("MultiEdit applied %d replacement(s) across %d file(s); snapshots saved - call revert per file to undo.", total, len(plans)), nil
+	note := ""
+	if anyNormalized {
+		note = normalizedMatchNote
+	}
+	return fmt.Sprintf("MultiEdit applied %d replacement(s) across %d file(s); snapshots saved - call revert per file to undo.%s", total, len(plans), note), nil
 }
 
 type RevertIn struct {
@@ -237,6 +278,7 @@ type RevertOut struct {
 
 // RunRevert restores a file to its pre-write state.
 func RunRevert(_ context.Context, in RevertIn) (string, error) {
+	defer LockFiles(in.Path)()
 	snapMu.Lock()
 	snap, ok := snapshots[in.Path]
 	if ok {

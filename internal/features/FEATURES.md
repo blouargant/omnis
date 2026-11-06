@@ -19,6 +19,7 @@
 
 ## 2.1 (in development) — Collection tree and settings dialog
 
+- **Sturdier file edits and command output** — parallel edits of one file no longer overwrite each other; an edit still applies when the file uses Windows line endings or typographic quotes; a long command output keeps its end (where errors are) and saves the full output to a file; a long file read says which line to continue from.
 - **Claude Code plugins** — omnis runs the agents, skills and guard of Claude Code plugins installed under /etc/agentskills/claude (e.g. iapcli's IA Parc squad), and lets you turn each plugin off in Settings.
 - **Collection tree** — the middle column is gone: each collection is a foldable group in the sidebar listing its own chats, with ＋ to start a chat in it and its menu on hover; search, sort and bulk select live in the sidebar too.
 - **Choose the collection of a new chat** — New Chat opens a draft where you pick the collection (and squad) before sending.

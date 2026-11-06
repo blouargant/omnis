@@ -245,7 +245,70 @@ func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (De
 
 // CheckArgsVerdict evaluates a tool call against the rule set (deny → bypass →
 // plan → ask → read-only → acceptEdits → allow → mode default).
+//
+// MultiEdit carries its paths in files[].file_path, which the path matchers
+// (they read a top-level file_path) never saw: an `Edit(.env)` deny did not
+// stop a MultiEdit of .env, and acceptEdits auto-allowed a MultiEdit outside
+// the working directory. So each file is checked as its own Edit-class call
+// and the most restrictive verdict wins (deny > ask > allow); the whole call is
+// still checked too so a deny or explicit ask written against its full
+// arguments (a regex rule) keeps applying.
 func (c *Config) CheckArgsVerdict(toolName string, args map[string]any, cwd string) Verdict {
+	if toolName == "MultiEdit" {
+		if files, ok := args["files"].([]any); ok && len(files) > 0 {
+			return c.checkMultiEdit(files, args, cwd)
+		}
+	}
+	return c.checkArgsVerdict(toolName, args, cwd)
+}
+
+func (c *Config) checkMultiEdit(files []any, args map[string]any, cwd string) Verdict {
+	whole := c.checkArgsVerdict("MultiEdit", args, cwd)
+	if whole.Decision == DecisionDeny {
+		return whole
+	}
+	var ask, allow *Verdict
+	defaultAsksOnly := true
+	if whole.Decision == DecisionAsk && !whole.DefaultAsk {
+		ask, defaultAsksOnly = &whole, false
+	}
+	for _, f := range files {
+		fm, ok := f.(map[string]any)
+		if !ok {
+			continue
+		}
+		one := map[string]any{"file_path": fm["file_path"], "edits": fm["edits"]}
+		v := c.checkArgsVerdict("MultiEdit", one, cwd)
+		switch v.Decision {
+		case DecisionDeny:
+			return v
+		case DecisionAsk:
+			if !v.DefaultAsk {
+				defaultAsksOnly = false
+			}
+			if ask == nil || (ask.DefaultAsk && !v.DefaultAsk) {
+				vv := v
+				ask = &vv
+			}
+		default:
+			if allow == nil {
+				vv := v
+				allow = &vv
+			}
+		}
+	}
+	if ask != nil {
+		out := *ask
+		out.DefaultAsk = defaultAsksOnly
+		return out
+	}
+	if allow != nil {
+		return *allow
+	}
+	return whole
+}
+
+func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd string) Verdict {
 	ps := &c.Permissions
 	// bash_background and monitor run shell commands exactly like Bash (same
 	// "command" arg), so they are governed by the same Bash(...) allow/ask/deny
