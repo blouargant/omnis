@@ -1055,7 +1055,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
-| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read and `RepairToolArgs` |
+| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read, the Pi-style Grep (`git grep`, match limit, line cap) and `RepairToolArgs` |
 | `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle. `FileLoggerWithOptions` composes each record into one `[]byte` and does a **single `f.Write`** (one `write(2)` to an `O_APPEND` fd is atomic against other appenders on POSIX, so a line can never be interleaved mid-record). The audit log is **process-wide — one file per build, ONE bus subscription**: it is owned by `Infrastructure.EventLog` ([agent/event_log.go](agent/event_log.go)), never by a squad/generation (see "Event audit log") |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
@@ -1488,6 +1488,25 @@ for first on the Harness Leaderboard at about half the cost per solved task:
   32k so a long read is cut on a whole line with
   `[Showing lines S-E of T. Use start_line=E+1 to continue.]`, instead of the
   shaper dropping its middle.
+- **Grep like Pi's** (`RunGrep` in [core/tools/search.go](core/tools/search.go)).
+  Inside a git work tree it runs `git grep --untracked -I`, so `.gitignore` is
+  respected (no `node_modules`, build output, vendored lockfiles) and binary files
+  are skipped; outside one, or when git refuses (not a repository, a path outside
+  it, "dubious ownership" in a container), it falls back to `grep -r -I
+  --exclude-dir=.git`. An explicit `path` git finds nothing in is re-searched with
+  grep, so a file the agent names inside an ignored directory is still searched.
+  Output stops at `limit` matches (default 100, context lines not counted), lines
+  are cut at 500 chars, and a notice says what was cut and how to get more
+  (`[100 matches limit reached. Use limit=200 for more, or refine the pattern]`).
+  New optional arguments `glob`, `ignore_case`, `literal`, `context`, `limit`
+  (aliases repaired by `RepairToolArgs`); `recursive` is still accepted and
+  ignored (a directory is always searched recursively). **GOTCHA:** `git grep -z`
+  puts a NUL after the line number of both matches and context lines, so with
+  `context` the pattern is re-checked in Go (`grepMatcher`) to tell them apart; a
+  pattern Go cannot compile counts every line (stops early, never late). The
+  permission gate now reads Grep's `path` as its file path, so a `Read(.env)` deny
+  stops a Grep of `.env` (it used to see only `file_path`, which Grep does not
+  have).
 - **Argument repair at the model boundary** (`RepairToolArgs` in
   [core/tools/arg_repair.go](core/tools/arg_repair.go), applied by
   `llm.RepairToolCalls` — [core/llm/toolcall_repair.go](core/llm/toolcall_repair.go)
@@ -1654,6 +1673,25 @@ cause, "do not summarise", continue with the next tool call), at most
 not re-armed, so the continuation still sees the original deadline. The server and
 the REPL are unchanged (a human is there). Pinned by
 [internal/cli/continue_test.go](internal/cli/continue_test.go).
+
+**A reply cut while writing a tool call is retried in the model layer, on every
+surface** (`llm.RetryCutToolCall`, [core/llm/cutcall.go](core/llm/cutcall.go),
+wrapped innermost on every agent model in `modelForAgent`,
+[agent/squad.go](agent/squad.go)). `markTruncated` drops a call whose arguments
+were cut mid-JSON and records its name in the final response's `CustomMetadata`
+(`omnis_cut_tool_call`); the reply then has no tool call and ADK would end the
+turn. Pi turns such calls into error tool results so its loop continues; here the
+cut attempt is discarded (it would leave up to `max_output_tokens` of a broken call
+in the context — Pi also removes a failed attempt) together with its streamed
+notice (tagged `omnis_truncation_notice`), and the request is re-sent once with
+`CutToolCallNudge`: the call was cut at N tokens, nothing ran, redo it in smaller
+steps (Write a first part, then Edit). A second cut reply is returned as it is, so
+the CLI auto-continue above still covers it. A reply cut in plain text (no call
+dropped) is not retried here. Inert for requests without tools. Known limit: text
+streamed before the call stays on screen. Verified live (deepseek-v4.1-flash,
+`max_output_tokens` 900, a 400-line file): the first reply was cut in the `Write`,
+the retry wrote a 185-line first part and stopped normally. Pinned by
+[core/llm/cutcall_test.go](core/llm/cutcall_test.go).
 
 ### Read-only agents (`read_only`, Landlock sandbox)
 

@@ -21,6 +21,12 @@ func RepairToolArgs(name string, args map[string]any) {
 		return
 	}
 	switch name {
+	case "Grep":
+		renameKey(args, "path", "file_path", "dir", "directory")
+		renameKey(args, "ignore_case", "ignoreCase", "case_insensitive", "-i", "i")
+		renameKey(args, "glob", "include", "file_pattern", "files")
+		renameKey(args, "limit", "max_results", "head_limit", "max_count")
+		renameKey(args, "context", "context_lines", "-C", "C")
 	case "Read":
 		renameKey(args, "file_path", "path", "filePath", "file")
 		if _, ok := args["start_line"]; !ok {

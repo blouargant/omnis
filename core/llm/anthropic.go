@@ -416,10 +416,7 @@ func (a *anthropic) streamSSE(body io.Reader, yield func(*model.LLMResponse, err
 		final.UsageMetadata = anthropicUsageToGenai(&usage)
 	}
 	if notice := markTruncated(a.model, final); notice != "" {
-		if !yield(&model.LLMResponse{
-			Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: notice}}},
-			Partial: true,
-		}, nil) {
+		if !yield(noticePartial(notice), nil) {
 			return
 		}
 	}

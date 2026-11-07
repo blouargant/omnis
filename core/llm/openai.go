@@ -790,10 +790,7 @@ func (o *openAI) streamSSE(body io.Reader, yield func(*model.LLMResponse, error)
 	}
 	final.FinishReason = oaiFinishReason(finish)
 	if notice := markTruncated(o.model, final); notice != "" {
-		if !yield(&model.LLMResponse{
-			Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: notice}}},
-			Partial: true,
-		}, nil) {
+		if !yield(noticePartial(notice), nil) {
 			return
 		}
 	}

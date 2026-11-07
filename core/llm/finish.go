@@ -75,11 +75,15 @@ func markTruncated(modelName string, r *model.LLMResponse) string {
 		r.Content = &genai.Content{Role: "model"}
 	}
 	dropped := false
+	cutName := ""
 	kept := r.Content.Parts[:0]
 	for _, p := range r.Content.Parts {
 		if p != nil && p.FunctionCall != nil {
 			if _, broken := p.FunctionCall.Args["_raw"]; broken {
 				dropped = true
+				if cutName == "" {
+					cutName = p.FunctionCall.Name
+				}
 				continue
 			}
 		}
@@ -91,10 +95,36 @@ func markTruncated(modelName string, r *model.LLMResponse) string {
 		out = r.UsageMetadata.CandidatesTokenCount
 	}
 	notice := truncationNotice(out, dropped)
+	if dropped {
+		if r.CustomMetadata == nil {
+			r.CustomMetadata = map[string]any{}
+		}
+		if cutName == "" {
+			cutName = "unknown"
+		}
+		r.CustomMetadata[cutToolCallKey] = cutName
+	}
 	r.Content.Parts = append(r.Content.Parts, &genai.Part{Text: notice})
 	mergeTextParts(r.Content)
 	log.Printf("llm: %s reply cut at the output limit (%d tokens, unfinished tool call dropped: %v)", modelName, out, dropped)
 	return notice
+}
+
+// cutToolCallKey, in a final response's CustomMetadata, names the tool call
+// markTruncated dropped because its arguments were cut (RetryCutToolCall).
+const cutToolCallKey = "omnis_cut_tool_call"
+
+// truncationNoticeKey marks the partial that carries the truncation notice
+// while streaming, so RetryCutToolCall can withhold it when it retries.
+const truncationNoticeKey = "omnis_truncation_notice"
+
+// noticePartial is the streamed copy of the truncation notice.
+func noticePartial(notice string) *model.LLMResponse {
+	return &model.LLMResponse{
+		Content:        &genai.Content{Role: "model", Parts: []*genai.Part{{Text: notice}}},
+		Partial:        true,
+		CustomMetadata: map[string]any{truncationNoticeKey: true},
+	}
 }
 
 // mergeTextParts moves the trailing notice part added by markTruncated into the

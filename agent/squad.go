@@ -121,18 +121,22 @@ func buildSquadInstance(
 		// turn with the raw markup shown to the user. Inert for requests
 		// without tools.
 		//
+		// Innermost, llm.RetryCutToolCall re-sends once a reply cut at the
+		// output limit while writing a tool call (asking for smaller steps),
+		// so it does not end the turn.
+		//
 		// Outermost, llm.RepairToolCalls rewrites the argument shapes models
 		// commonly send to the file tools (`path` for `file_path`, `edits` as
 		// a JSON string, …) before ANY callback sees the call — the permission
 		// gate reads `file_path`, so the repair must precede it.
 		if opts.DeferModelErrors {
-			return llm.RepairToolCalls(llm.GuardToolText(llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg))), fstools.RepairToolArgs), nil
+			return llm.RepairToolCalls(llm.GuardToolText(llm.RetryCutToolCall(llm.NewDeferredWithSelection(ctx, selectionFromAgentConfig(cfg)))), fstools.RepairToolArgs), nil
 		}
 		m, err := newModelForAgent(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("squad %q: %w", squad.Name, err)
 		}
-		return llm.RepairToolCalls(llm.GuardToolText(m), fstools.RepairToolArgs), nil
+		return llm.RepairToolCalls(llm.GuardToolText(llm.RetryCutToolCall(m)), fstools.RepairToolArgs), nil
 	}
 
 	orchestratorLLM, err := modelForAgent(rootCfg)

@@ -75,9 +75,10 @@ func New() []tool.Tool {
 				return MultiEditOut{Result: out}, nil
 			}),
 		mustTool("Grep",
-			"Search a regex pattern across files or a single file. Returns file:line matches. Prefer this over 'Bash grep'. "+
-				"Arguments: `pattern` (string, required) — extended regex; `path` (string, optional) — file or directory to search, defaults to '.' (current directory); `recursive` (bool, optional) — recurse into subdirectories, default false. "+
-				"Do NOT pass `file_path`, `start_line`, or `end_line` — those belong to the 'Read' tool.",
+			"Search file contents for a regex (or literal) pattern. Returns `path:line:text` matches, directories searched recursively. "+
+				"Respects .gitignore and skips binary files inside a git repository. "+
+				"Output stops at 100 matches (raise with `limit`, or narrow with `path`/`glob`) and lines are cut at 500 chars. "+
+				"Prefer this over Bash grep. To read a file, use Read, not Grep.",
 			func(ctx adk.ToolContext, in GrepIn) (GrepOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				out, _ := RunGrep(context.Background(), in)
