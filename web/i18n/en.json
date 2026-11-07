@@ -1017,6 +1017,8 @@
   "term.close": "Close this terminal",
   "env.tasks": "Background tasks",
   "env.liveDelegate": "Delegated to {agent}",
+  "env.liveSearch": "Searching: {what}",
+  "env.liveFetch": "Reading {what}",
   "env.tasksDone": "Finished: {n}",
   "env.taskStop": "Stop",
   "env.taskNoOutput": "No output yet.",

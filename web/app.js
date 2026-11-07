@@ -12612,6 +12612,7 @@ const ENV_ICON = {
   skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
   task:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"/></svg>`,
   command: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>`,
+  web:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>`,
   stop:   `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`,
 };
 
@@ -12649,6 +12650,7 @@ function refreshEnvTasks(sessionId) {
 
 const liveActions = new Map(); // sessionId → Map(callId → action)
 const LIVE_COMMAND_TOOLS = new Set(["bash", "run_tests"]);
+const LIVE_WEB_TOOLS = new Set(["websearch", "webfetch"]);
 let liveActionSeq = 0;
 let liveActionsTimer = null;
 
@@ -12664,11 +12666,17 @@ function startLiveAction(sessionId, callId, name, args, parentAgent, block) {
   let kind = "";
   if (liveDelegateArgs(a)) kind = "delegate";
   else if (LIVE_COMMAND_TOOLS.has(String(name || "").toLowerCase())) kind = "command";
+  else if (LIVE_WEB_TOOLS.has(String(name || "").toLowerCase())) kind = "web";
   if (!kind) return;
   let text, tip;
   if (kind === "delegate") {
     text = tr("env.liveDelegate", { agent: name });
     tip = a.request;
+  } else if (kind === "web") {
+    const search = String(name).toLowerCase() === "websearch";
+    const what = String((search ? a.query : a.url) || "").trim();
+    text = tr(search ? "env.liveSearch" : "env.liveFetch", { what: what || "…" });
+    tip = what || String(name);
   } else {
     const cmd = String(a.command || "").trim();
     text = cmd ? cmd.split("\n")[0] : (a.scope ? `run_tests ${a.scope}` : String(name));
@@ -12724,7 +12732,7 @@ function liveActionRow(a, nested) {
   if (a.tip) row.setAttribute("data-tip", a.tip);
   const icon = document.createElement("span");
   icon.className = "env-row-icon env-task-icon";
-  icon.innerHTML = a.kind === "delegate" ? ENV_ICON.squad : ENV_ICON.command;
+  icon.innerHTML = a.kind === "delegate" ? ENV_ICON.squad : (a.kind === "web" ? ENV_ICON.web : ENV_ICON.command);
   const text = document.createElement("span");
   text.className = "env-row-text" + (a.kind === "command" ? " env-live-cmd" : "");
   text.textContent = a.text;

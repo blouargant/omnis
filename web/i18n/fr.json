@@ -1017,6 +1017,8 @@
   "term.close": "Fermer ce terminal",
   "env.tasks": "Tâches en arrière-plan",
   "env.liveDelegate": "Délégation à {agent}",
+  "env.liveSearch": "Recherche : {what}",
+  "env.liveFetch": "Lecture de {what}",
   "env.tasksDone": "Terminées : {n}",
   "env.taskStop": "Arrêter",
   "env.taskNoOutput": "Pas encore de sortie.",

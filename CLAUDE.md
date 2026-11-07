@@ -7393,7 +7393,8 @@ included), Background tasks (the session's `bash_background` / `monitor` tasks,
 Claude Desktop style — see "Background task notifications"; above them, the
 **live actions** of the turn this browser streams: delegations to a sub-agent
 (a call whose args are `{request[, resume_session]}`) and `Bash`/`run_tests`
-commands, a sub-agent's command nested under its delegation. Client-only
+commands, plus `WebSearch`/`WebFetch` calls (query or URL, globe icon), a
+sub-agent's action nested under its delegation. Client-only
 (`liveActions` in app.js, fed by `tool_call`/`agent_tool_call`, dropped on the
 result, cleared at turn end — not shown for injected turns or after a reload);
 a click scrolls to the call. The server task list is cached per session
