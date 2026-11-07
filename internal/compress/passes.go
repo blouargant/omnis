@@ -242,10 +242,33 @@ func SplitMiddle(contents []*genai.Content, keepHead, keepRecent int) ([]*genai.
 	if keepHead+keepRecent >= len(contents) {
 		return nil, nil, nil
 	}
-	head := contents[:keepHead]
-	middle := contents[keepHead : len(contents)-keepRecent]
-	tail := contents[len(contents)-keepRecent:]
-	return head, middle, tail
+	// Never cut between a tool call and its result: the middle is replaced
+	// by a summary, so a result left at the start of the tail (or after the
+	// head) would lose its call, and providers reject an orphan tool result.
+	// Move each boundary past any content that carries function responses.
+	h, t := keepHead, len(contents)-keepRecent
+	for h < t && hasFunctionResponse(contents[h]) {
+		h++
+	}
+	for t > h && hasFunctionResponse(contents[t]) {
+		t--
+	}
+	if h >= t {
+		return nil, nil, nil
+	}
+	return contents[:h], contents[h:t], contents[t:]
+}
+
+func hasFunctionResponse(c *genai.Content) bool {
+	if c == nil {
+		return false
+	}
+	for _, p := range c.Parts {
+		if p != nil && p.FunctionResponse != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // PassSummarizeMiddle is the heavyweight pass: it preserves the first

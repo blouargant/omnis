@@ -318,16 +318,27 @@ func writeEditMap(edits map[DocumentURI][]TextEdit, cwd string) (lines string, f
 	var b strings.Builder
 	for _, uri := range uris {
 		path := URIToPath(uri)
-		data, rerr := os.ReadFile(path)
+		changed, rerr := func() (bool, error) {
+			// Read, apply and write under the file's lock (see fstools.WriteLocked).
+			defer fstools.LockFiles(path)()
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return false, err
+			}
+			updated := applyTextEdits(string(data), edits[uri])
+			if updated == string(data) {
+				return false, nil
+			}
+			if out := fstools.WriteLocked(path, updated); strings.HasPrefix(out, "Error") {
+				return false, fmt.Errorf("write: %s", out)
+			}
+			return true, nil
+		}()
 		if rerr != nil {
 			return "", 0, 0, fmt.Errorf("%s: %w", path, rerr)
 		}
-		updated := applyTextEdits(string(data), edits[uri])
-		if updated == string(data) {
+		if !changed {
 			continue
-		}
-		if _, werr := fstools.RunWrite(context.Background(), fstools.WriteIn{Path: path, Content: updated}); werr != nil {
-			return "", 0, 0, fmt.Errorf("write %s: %w", path, werr)
 		}
 		n := len(edits[uri])
 		files++

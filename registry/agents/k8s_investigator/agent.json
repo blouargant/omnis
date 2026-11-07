@@ -7,6 +7,7 @@
   "max_instances": 5,
   "model_ref": "high",
   "name": "k8s_investigator",
+  "read_only": true,
   "skills": [
     "k8s-investigation",
     "k8s-audit",

@@ -6,6 +6,7 @@
   "leader": false,
   "model_ref": "high",
   "name": "k8s_auditor",
+  "read_only": true,
   "skills": [
     "k8s-audit"
   ],

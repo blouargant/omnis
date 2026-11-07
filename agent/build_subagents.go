@@ -14,6 +14,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/attest"
 	"github.com/blouargant/omnis/internal/codeindex"
+	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/docindex"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/regindex"
@@ -43,6 +44,7 @@ func buildSubAgents(
 	hooksAfterTool llmagent.AfterToolCallback,
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
+	timeNoteBeforeModel llmagent.BeforeModelCallback,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -57,7 +59,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -105,6 +107,7 @@ func buildSubAgentsFromConfigs(
 	hooksAfterTool llmagent.AfterToolCallback,
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
+	timeNoteBeforeModel llmagent.BeforeModelCallback,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -150,6 +153,8 @@ func buildSubAgentsFromConfigs(
 		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore, false, nil)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
+		subTools = applyReadOnly(cfg, subTools, subToolsets)
+		subTools = applyDeferredTools(cfg.DeferredTools, subTools)
 
 		// Nested delegation: this agent's OWN team, mounted with the same agenttool
 		// mechanism a squad root uses, one level down. This is what lets an expensive
@@ -183,6 +188,19 @@ func buildSubAgentsFromConfigs(
 		// via the context value the surface planted (steerSessionID), not the
 		// ephemeral agenttool session.
 		beforeModel := []llmagent.BeforeModelCallback{callbacks.BeforeModel}
+		// Context compaction + overflow recovery for THIS sub-agent. The squad's
+		// compress plugin is a runner plugin and never reached sub-agents: in the
+		// 2026-11-07 smoke code_docs reached 228k tokens of a 229k window. Its own
+		// window and model (the overflow retry must call this agent's model, not
+		// the leader's); bounded state, since each call is a fresh session.
+		compressBefore, compressOnErr := compress.AgentCallbacks(compress.Config{
+			LLM:              agentLLM,
+			WindowTokens:     cfg.ContextLength,
+			ReserveTokens:    cfg.CompressionReserve(),
+			KeepRecentTokens: compressKeepRecentTokens,
+			MaxSessions:      subAgentCompressSessions,
+		})
+		beforeModel = append(beforeModel, compressBefore)
 		if steerStore != nil {
 			beforeModel = append(beforeModel, subAgentSteerYield(steerStore))
 		}
@@ -194,6 +212,9 @@ func buildSubAgentsFromConfigs(
 		afterModel := []llmagent.AfterModelCallback{callbacks.AfterModel}
 		if budgetAfterModel != nil {
 			afterModel = append(afterModel, budgetAfterModel)
+		}
+		if timeNoteBeforeModel != nil {
+			beforeModel = append(beforeModel, timeNoteBeforeModel)
 		}
 
 		// A sub-agent runs in agenttool's own plugin-less runner, so the
@@ -225,17 +246,19 @@ func buildSubAgentsFromConfigs(
 		afterTool = append(afterTool, chainAfterTool(subAgentShaperCallback(), capHooks.Warn))
 
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
-			Name:                 cfg.Name,
-			Description:          desc,
-			Instruction:          instr,
-			Model:                agentLLM,
-			Tools:                subTools,
-			Toolsets:             subToolsets,
-			BeforeToolCallbacks:  beforeTool,
-			AfterToolCallbacks:   afterTool,
-			OnToolErrorCallbacks: []llmagent.OnToolErrorCallback{callbacks.OnToolError},
-			BeforeModelCallbacks: beforeModel,
-			AfterModelCallbacks:  afterModel,
+			Name:                  cfg.Name,
+			Description:           desc,
+			Instruction:           instr,
+			Model:                 agentLLM,
+			OnModelErrorCallbacks: []llmagent.OnModelErrorCallback{compressOnErr},
+			SubAgent:              true,
+			Tools:                 subTools,
+			Toolsets:              subToolsets,
+			BeforeToolCallbacks:   beforeTool,
+			AfterToolCallbacks:    afterTool,
+			OnToolErrorCallbacks:  []llmagent.OnToolErrorCallback{callbacks.OnToolError},
+			BeforeModelCallbacks:  beforeModel,
+			AfterModelCallbacks:   afterModel,
 		})
 		if sErr != nil {
 			return nil, nil, nil, nil, sErr
@@ -304,3 +327,7 @@ func wrapSubAgentTool(sa adkagent.Agent, cfg RuntimeAgentConfig) (tool.Tool, err
 	}
 	return newBudgetedAgentTool(wrapped, cfg.MaxInstances, cfg.MaxToolCallsPerCall), nil
 }
+
+// subAgentCompressSessions bounds a sub-agent's compression state: one entry per
+// call (each call is its own session), oldest dropped first.
+const subAgentCompressSessions = 64

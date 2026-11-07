@@ -266,6 +266,9 @@ func buildSquadInstance(
 	// unbounded search loop and never be charged for it — which is exactly what a
 	// runaway deep-research turn did. Nil for the router squad / unlimited config.
 	budgetBeforeTool, budgetAfterModel := budgetCallbacks(infra.Budget, infra.AskUserRegistry, runtime.TurnBudget, isRouter)
+	// Tells the root and its sub-agents how much of the turn's time limit is
+	// left once half is spent (no-op without turn_budget.max_seconds).
+	timeNoteBeforeModel := timeNoteCallback(infra.Budget, isRouter)
 
 	// ── Sub-agents + coordinator-only session tools ──
 	//
@@ -314,7 +317,7 @@ func buildSquadInstance(
 			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
 			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
-			budgetBeforeTool, budgetAfterModel,
+			budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel,
 		)
 		if berr != nil {
 			permGateClose()
@@ -395,6 +398,11 @@ func buildSquadInstance(
 		}
 	}
 
+	// Rarely used tools are callable but undeclared until tool_search loads
+	// them (agent.json deferred_tools; no-op when empty).
+	leadTools = applyReadOnly(rootCfg, leadTools, capToolsets)
+	leadTools = applyDeferredTools(rootCfg.DeferredTools, leadTools)
+
 	lead, err := agentkit.New(agentkit.AgentConfig{
 		Name:        rootCfg.Name,
 		Description: rootDescription,
@@ -416,7 +424,7 @@ func buildSquadInstance(
 	// the root's runner plugin; buildHooksPlugin reads the same hooksEngine).
 	suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(infra, runtime, opts, orchestratorLLM, suffix, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel)
+	plugins, pluginCloser, err := buildPlugins(infra, runtime, opts, orchestratorLLM, suffix, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel, rootCfg)
 	if err != nil {
 		permGateClose()
 		for _, h := range allMCPHandles {

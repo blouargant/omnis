@@ -34,7 +34,7 @@ func buildTree(t *testing.T, members []RuntimeAgentConfig, catalogue []RuntimeAg
 		nil, nil, nil, nil,
 		modelFor, events.AgentCallbacks{},
 		nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("build: %v", err)

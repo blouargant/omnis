@@ -72,6 +72,13 @@ func askUserHandler(reg *askuser.Registry) func(adk.ToolContext, askUserIn) (ask
 		if err := validateAskUserIn(in); err != nil {
 			return askUserOut{}, err
 		}
+		// Nobody can answer in an unattended run: say so at once instead of
+		// waiting on a card no one will resolve (the wait has no timeout by
+		// design). The first Harbor smoke had the coder ask which branch to
+		// use; the answer it needed was "decide yourself".
+		if askuser.NonInteractive() {
+			return askUserOut{Cancelled: true, Text: NonInteractiveAnswer}, nil
+		}
 		q := askuser.Question{
 			Kind:        askuser.Kind(in.Kind),
 			Prompt:      in.Prompt,
@@ -90,6 +97,10 @@ func askUserHandler(reg *askuser.Registry) func(adk.ToolContext, askUserIn) (ask
 		return askUserOut{Selected: ans.Selected, Text: ans.Text, Cancelled: ans.Cancelled}, nil
 	}
 }
+
+// NonInteractiveAnswer is AskUserQuestion's reply when no user can answer.
+const NonInteractiveAnswer = "No user is available in this run: nobody will answer. Do not ask again. " +
+	"Choose the option a careful engineer would pick, state that assumption in your final answer, and continue."
 
 func validateAskUserIn(in askUserIn) error {
 	switch askuser.Kind(in.Kind) {

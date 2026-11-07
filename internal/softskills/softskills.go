@@ -57,18 +57,17 @@ Using the wrong loader always returns "skill not found". Never use 'load_skill' 
 // loads relevant soft-skills before planning, regardless of what its own
 // instruction file says.
 const LoaderProtocol = `
-MANDATORY SOFT-SKILL DISCOVERY — non-negotiable, overrides other instructions:
-- Immediately after list_skills (and before any bash/kubectl/MCP call), you MUST call 'list_softskills' to scan curator-distilled procedures from past sessions.
-- For EACH soft-skill whose description overlaps ANY aspect of the task, you MUST call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL matching soft-skills.
+MANDATORY SOFT-SKILL USE — non-negotiable, overrides other instructions:
+- The soft-skills (curator-distilled procedures from past sessions) are already listed, with their descriptions, in the <available_skills> block of this prompt that follows the soft-skills instructions. Read that list; do not call 'list_softskills' to fetch it again unless the block is missing.
+- For EACH soft-skill whose description overlaps ANY aspect of the task, call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name') before acting. Load ALL matching soft-skills; none matching means none to load.
 - Treat soft-skills as hints rather than authority; defer to authored skills, tool docs, and the user when they disagree.
-- Skipping soft-skill discovery is a protocol violation.
 `
 
 const instruction = `You also have access to **soft-skills**: learned procedures distilled by a curator agent from past sessions. They live alongside authored skills but are auto-generated, so treat them as helpful hints rather than authoritative documentation.
 
 Tool protocol:
 
-1. Call ` + "`" + listToolName + "`" + ` once at the start of any non-trivial task to discover relevant learned procedures (cheap — only frontmatter is returned).
+1. The soft-skills are listed in the <available_skills> block below (` + "`" + listToolName + "`" + ` returns the same list; call it only if the block is missing).
 2. If a soft-skill looks relevant, call ` + "`" + loadToolName + "`" + ` with ` + "`name=\"<SOFTSKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `) before planning.
 3. Use ` + "`" + resourceToolName + "`" + ` to read files inside a soft-skill directory (` + "`references/*`, `assets/*`, `scripts/*`" + `).
 4. If a soft-skill conflicts with an authored skill or a tool's own documentation, prefer the authored source and mention the conflict in your reply.

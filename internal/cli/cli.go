@@ -30,9 +30,11 @@ import (
 
 	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/llm"
 	"github.com/blouargant/omnis/internal/agentmd"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/fileref"
 	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/scheduler"
@@ -68,6 +70,11 @@ type Config struct {
 	// at the next model boundary, or run as a follow-up turn). Nil-safe — when
 	// nil the REPL ignores input typed during a turn (the old behaviour).
 	SteerStore *steer.Store
+	// Budget + TimeLimit arm the turn's wall-clock limit (turn_budget
+	// max_seconds) so the agents are told how much time is left. Only the time
+	// axis is armed: the CLI keeps not prompting on spend.
+	Budget    *budget.Store
+	TimeLimit time.Duration
 	// Scheduler, when non-nil, enables /loop and /schedule in the REPL. Due jobs
 	// fire into the current session between idle prompts (the single-session
 	// fallback; the server spawns a fresh session per scheduled run instead).
@@ -170,8 +177,62 @@ func runOneShot(ctx context.Context, cfg Config, prompt string) error {
 	}
 	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	_, _, err := runTurn(turnCtx, cfg, prompt, false /*showTrace*/, cfg.Squad)
+	armTimeLimit(cfg)
+	squad, text, err := runTurn(turnCtx, cfg, prompt, false /*showTrace*/, cfg.Squad)
+	// Unattended: nobody will type "continue" after a turn that stopped
+	// half-way, so the CLI does it — at most maxContinuations times.
+	for i := 0; err == nil && askuser.NonInteractive() && i < maxContinuations; i++ {
+		why := prematureStop(text)
+		if why == "" {
+			break
+		}
+		fmt.Fprintf(cfg.Stderr, "omnis: the turn stopped before finishing (%s); continuing\n", why)
+		squad, text, err = runTurn(turnCtx, cfg, continuationPrompt(why), false, squad)
+	}
 	return err
+}
+
+// maxContinuations bounds the automatic continuations of one unattended turn.
+const maxContinuations = 2
+
+// prematureStop reports why a turn's text shows the agent stopped before the
+// work was done, "" when it does not. Two endings were seen in the 2026-11-07
+// DeepSWE smokes, on 3 of 4 attempts at the longest task, each leaving the
+// work uncommitted:
+//   - the reply was cut at the output limit (llm.TruncationNoticePrefix);
+//   - the model wrote a context-compaction summary ("<analysis>…<summary>…
+//     </summary>", a format it learned from other harnesses) instead of its
+//     next tool call, which ADK takes as the final answer.
+//
+// Only the end of the text is inspected: either marker earlier in a turn that
+// then went on is not a stop.
+func prematureStop(text string) string {
+	tail := text
+	if len(tail) > 4000 {
+		tail = tail[len(tail)-4000:]
+	}
+	tail = strings.TrimSpace(tail)
+	switch {
+	case strings.Contains(tail, llm.TruncationNoticePrefix):
+		return "the reply was cut at the output limit"
+	case strings.HasSuffix(tail, "</summary>") || (strings.Contains(tail, "<analysis>") && strings.Contains(tail, "<summary>")):
+		return "the reply was a summary of the conversation instead of the next step"
+	}
+	return ""
+}
+
+func continuationPrompt(why string) string {
+	return "Your previous turn ended before the task was finished: " + why + ". Nothing was lost: your context is intact. " +
+		"Do not summarise or restate the conversation. Continue the task from where you stopped by calling the next tool you need; " +
+		"keep any text short. When the task is fully done, give your final answer."
+}
+
+// armTimeLimit starts the turn's wall-clock limit (time axis only: the CLI
+// never prompts on spend). Called once per user turn, before its first hop.
+func armTimeLimit(cfg Config) {
+	if cfg.Budget != nil && cfg.TimeLimit > 0 {
+		cfg.Budget.StartTurn(cfg.SessionID, budget.Limits{MaxDuration: cfg.TimeLimit})
+	}
 }
 
 // runRepl is the interactive read-eval-print loop. Each turn gets its own
@@ -404,6 +465,9 @@ func runTurnSteering(ctx context.Context, cfg Config, prompt, startSquad string)
 	for i := 0; ; i++ {
 		var text string
 		var err error
+		if i == 0 {
+			armTimeLimit(cfg)
+		}
 		squad, text, err = runTurn(ctx, cfg, turnPrompt, true /*showTrace*/, squad)
 		if cfg.SteerStore != nil {
 			cfg.SteerStore.TakeConsumed(cfg.SessionID) // clear; the CLI keeps no transcript to fold into

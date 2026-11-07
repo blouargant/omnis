@@ -7,6 +7,7 @@
   "max_instances": 1,
   "model_ref": "high",
   "name": "k8s_validator",
+  "read_only": true,
   "skills": ["k8s-modification", "k8s-investigation"],
   "softskills_dir": "",
   "tools": ["Bash", "Read", "Grep", "Glob", "Skill", "mime", "calc", "attest"]

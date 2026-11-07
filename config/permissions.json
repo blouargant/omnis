@@ -122,6 +122,7 @@
       "WebFetch",
       "html_to_markdown",
       "calculate",
+      "tool_search",
       "list_registries",
       "browse_registry",
       "list_installed_skills",

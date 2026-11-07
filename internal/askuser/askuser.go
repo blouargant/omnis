@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -447,4 +449,16 @@ func QuestionToPayload(q Question) map[string]any {
 		p["item"] = item
 	}
 	return p
+}
+
+// NonInteractive reports whether this process declared that nobody can answer
+// a prompt (OMNIS_NON_INTERACTIVE=1/true/yes/on): a bench, a CI run. Declared,
+// never inferred — see agent/hooks_ask.go canEscalate for why a missing
+// listener is not evidence of an absent user.
+func NonInteractive() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OMNIS_NON_INTERACTIVE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

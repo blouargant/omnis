@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/adk/v2/tool"
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
@@ -165,17 +167,83 @@ func budgetCallbacks(store *budget.Store, reg *askuser.Registry, limits budget.L
 	return beforeTool, afterModel
 }
 
+// timeNote is the line appended to a model call once half of the turn's time
+// limit is spent ("" before that). In the 2026-11-07 Harbor smokes 4 of 9 full
+// trials hit the task's wall-clock limit — a second review pass started with
+// minutes left, a `sleep 540` polling a run that could not finish — because
+// nothing told the agents a deadline existed.
+func timeNote(left, limit time.Duration) string {
+	if limit <= 0 || left > limit/2 {
+		return ""
+	}
+	if left <= 0 {
+		return "[Time: this run is past its time limit and can be stopped at any moment. Write your final answer now with what you have.]"
+	}
+	if left <= limit/5 {
+		return fmt.Sprintf("[Time: about %s left of this run's %s limit. Finish now: start no new review, delegation or long-running command; check only what is fast, then give your final answer.]",
+			humanDuration(left), humanDuration(limit))
+	}
+	return fmt.Sprintf("[Time: about %s left of this run's %s limit. Plan the rest to fit: prefer fast checks, and do not start work that cannot finish in time.]",
+		humanDuration(left), humanDuration(limit))
+}
+
+// humanDuration is "N min", or "N s" under two minutes.
+func humanDuration(d time.Duration) string {
+	if d < 2*time.Minute {
+		return fmt.Sprintf("%d s", int(d.Round(time.Second)/time.Second))
+	}
+	return fmt.Sprintf("%d min", int(d.Round(time.Minute)/time.Minute))
+}
+
+// timeNoteCallback appends timeNote to every model call of a turn that has a
+// time limit — on the root (runner plugin) and on sub-agents (attached
+// directly), keyed by the user-facing session. nil without a store.
+func timeNoteCallback(store *budget.Store, isRouterSquad bool) llmagent.BeforeModelCallback {
+	if store == nil || isRouterSquad {
+		return nil
+	}
+	return func(cb adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
+		sid := budgetSessionID(cb)
+		if sid == "" {
+			sid = cb.SessionID()
+		}
+		left, limit, ok := store.TimeLeft(sid)
+		if !ok {
+			return nil, nil
+		}
+		if note := timeNote(left, limit); note != "" {
+			appendUserNote(req, note)
+		}
+		return nil, nil
+	}
+}
+
+// appendUserNote adds text to the trailing user turn, or a new user turn, so
+// two user-role messages never follow each other (see injectSteering).
+func appendUserNote(req *model.LLMRequest, text string) {
+	if req == nil {
+		return
+	}
+	part := &genai.Part{Text: text}
+	if n := len(req.Contents); n > 0 && req.Contents[n-1] != nil && req.Contents[n-1].Role == "user" {
+		req.Contents[n-1].Parts = append(req.Contents[n-1].Parts, part)
+		return
+	}
+	req.Contents = append(req.Contents, &genai.Content{Role: "user", Parts: []*genai.Part{part}})
+}
+
 // budgetPlugin mounts the budget callbacks on a squad root's runner. Sub-agents
 // get the same two callbacks attached directly (runner plugins do not reach
 // them), so both halves of a turn spend from one bucket.
-func budgetPlugin(name string, beforeTool llmagent.BeforeToolCallback, afterModel llmagent.AfterModelCallback) (*plugin.Plugin, error) {
-	if beforeTool == nil && afterModel == nil {
+func budgetPlugin(name string, beforeTool llmagent.BeforeToolCallback, afterModel llmagent.AfterModelCallback, beforeModel llmagent.BeforeModelCallback) (*plugin.Plugin, error) {
+	if beforeTool == nil && afterModel == nil && beforeModel == nil {
 		return nil, nil
 	}
 	return plugin.New(plugin.Config{
-		Name:               name,
-		BeforeToolCallback: beforeTool,
-		AfterModelCallback: afterModel,
+		Name:                name,
+		BeforeToolCallback:  beforeTool,
+		AfterModelCallback:  afterModel,
+		BeforeModelCallback: beforeModel,
 	})
 }
 

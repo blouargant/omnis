@@ -103,6 +103,15 @@ type AgentEntry struct {
 	// leader, so a pure gatherer can serve one specialist without cluttering the
 	// coordinator's tool list.
 	SubAgents []string `json:"subagents,omitempty"`
+	// DeferredTools lists tool names or path.Match globs ("lsp_*") whose
+	// declarations are withheld from every model call until the session loads
+	// them with tool_search (or calls one by name). See agent/deferred_tools.go.
+	DeferredTools []string `json:"deferred_tools,omitempty"`
+	// ReadOnly makes the agent unable to change the filesystem outside the
+	// scratch directories: Bash runs under the Landlock sandbox, file writes
+	// are limited to scratch paths, project-changing tools are removed. See
+	// agent/read_only.go.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // ProviderEntry describes one reusable provider profile in models.json.
@@ -255,6 +264,9 @@ type runtimeConfigFile struct {
 type turnBudgetFile struct {
 	MaxToolCalls *int   `json:"max_tool_calls,omitempty"`
 	MaxTokens    *int64 `json:"max_tokens,omitempty"`
+	// MaxSeconds is the turn's wall-clock limit the agents are told about
+	// (never enforced, never asks). 0/absent = none. OMNIS_TURN_MAX_SECONDS.
+	MaxSeconds *int `json:"max_seconds,omitempty"`
 }
 
 // RuntimeProviderConfig is one normalized provider profile.
@@ -332,6 +344,11 @@ type RuntimeAgentConfig struct {
 	// SubAgents is this agent's own delegable team (see AgentEntry.SubAgents).
 	// Validated as an acyclic graph over enabled agents by validateSubAgentGraph.
 	SubAgents []string
+	// DeferredTools is the trimmed agent.json deferred_tools list (case kept:
+	// tool names are case-sensitive).
+	DeferredTools []string
+	// ReadOnly is agent.json read_only (see AgentEntry.ReadOnly).
+	ReadOnly bool
 	// Plugin is the Claude Code plugin this agent comes from ("demo"), and
 	// PluginType its qualified Claude name ("demo:worker"); both "" for an
 	// agent that is not a plugin's.
@@ -470,6 +487,21 @@ func (s RuntimeSettings) DefaultSquad() (RuntimeSquadConfig, bool) {
 // normalizeNames lower-cases, trims and de-dups a list of names while
 // preserving order. Returns nil for an empty input so the field round-trips
 // cleanly through JSON.
+// trimList trims and de-duplicates entries, keeping their case.
+func trimList(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, raw := range in {
+		t := strings.TrimSpace(raw)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
 func normalizeNames(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -677,6 +709,8 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			MaxToolCallsPerCall:               maxInt(e.MaxToolCallsPerCall, 0),
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
 			SubAgents:                         normalizeNames(e.SubAgents),
+			DeferredTools:                     trimList(e.DeferredTools),
+			ReadOnly:                          e.ReadOnly,
 		})
 	}
 	return out, nil
@@ -791,6 +825,8 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		MaxToolCallsPerCall:               maxInt(in.MaxToolCallsPerCall, 0),
 		ResumableSessions:                 in.ResumableSessions,
 		SubAgents:                         normalizeNames(in.SubAgents),
+		DeferredTools:                     trimList(in.DeferredTools),
+		ReadOnly:                          in.ReadOnly,
 		Plugin:                            in.Plugin,
 		PluginType:                        in.PluginType,
 	}
@@ -1329,6 +1365,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		if tb.MaxToolCalls != nil {
 			out.TurnBudget.MaxToolCalls = *tb.MaxToolCalls
 		}
+		if tb.MaxSeconds != nil && *tb.MaxSeconds > 0 {
+			out.TurnBudget.MaxDuration = time.Duration(*tb.MaxSeconds) * time.Second
+		}
 		if tb.MaxTokens != nil {
 			out.TurnBudget.MaxTokens = *tb.MaxTokens
 		}
@@ -1394,6 +1433,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// "no ceiling on this axis" — setting both to 0 restores unbounded turns.
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOOL_CALLS"))); err == nil && v >= 0 {
 		out.TurnBudget.MaxToolCalls = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_SECONDS"))); err == nil && v >= 0 {
+		out.TurnBudget.MaxDuration = time.Duration(v) * time.Second
 	}
 	if v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOKENS")), 10, 64); err == nil && v >= 0 {
 		out.TurnBudget.MaxTokens = v

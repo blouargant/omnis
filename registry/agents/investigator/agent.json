@@ -7,6 +7,7 @@
   "max_instances": 5,
   "model_ref": "high",
   "name": "investigator",
+  "read_only": true,
   "skills": [],
   "softskills_dir": "",
   "tools": [

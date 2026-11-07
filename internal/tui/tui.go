@@ -44,6 +44,7 @@ import (
 	"github.com/blouargant/omnis/internal/agentmd"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/bg"
+	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/fileref"
 	"github.com/blouargant/omnis/internal/goal"
 	"github.com/blouargant/omnis/internal/paths"
@@ -253,6 +254,9 @@ type Config struct {
 	// while a turn is computing: queued via the steering plugin's drain during
 	// the turn, with leftover run as a follow-up turn here. Nil-safe.
 	SteerStore *steer.Store
+	// Budget + TimeLimit arm the turn's wall-clock limit only (see cli.Config).
+	Budget    *budget.Store
+	TimeLimit time.Duration
 	// Scheduler, when non-nil, enables /loop and /schedule. Due jobs fire into
 	// the current session when the TUI is idle (the single-session fallback;
 	// the server spawns a fresh session per scheduled run). Nil-safe.
@@ -1794,6 +1798,9 @@ func Run(ctx context.Context, cfg Config) error {
 			// Tag the run with the real session id so mid-turn steering reaches
 			// sub-agents (which run under an ephemeral agenttool session id).
 			steerCtx := toolkitagent.WithSteerSession(ctx, sessionID)
+			if cfg.Budget != nil && cfg.TimeLimit > 0 {
+				cfg.Budget.StartTurn(sessionID, budget.Limits{MaxDuration: cfg.TimeLimit})
+			}
 			const maxSteerFollowups = 16
 			for i := 0; ; i++ {
 				startSquad := cur.Squad

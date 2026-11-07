@@ -17,5 +17,16 @@
     "tests",
     "astgrep",
     "spawn"
+  ],
+  "deferred_tools": [
+    "lsp_*",
+    "ast_grep_*",
+    "worktree_*",
+    "TaskCreate",
+    "TaskUpdate",
+    "task_next",
+    "task_list",
+    "monitor",
+    "bg_cancel"
   ]
 }

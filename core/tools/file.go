@@ -98,6 +98,13 @@ func RunWrite(_ context.Context, in WriteIn) (string, error) {
 	return writeSnapshotted(in.Path, in.Content), nil
 }
 
+// WriteLocked writes content to path through the snapshotting Write path for
+// a caller that already holds LockFiles(path): a read-modify-write outside the
+// fs tools (lsp_rename, ast_grep_rewrite) takes the lock around its read and
+// writes with this, so an Edit of the same file in the same response cannot
+// interleave. Returns the same result line as RunWrite.
+func WriteLocked(path, content string) string { return writeSnapshotted(path, content) }
+
 // writeSnapshotted is RunWrite's body; the caller holds the file's lock.
 func writeSnapshotted(path, content string) string {
 	snapMu.Lock()

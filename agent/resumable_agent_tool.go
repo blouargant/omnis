@@ -50,13 +50,20 @@ type resumableAgentTool struct {
 	cap     int
 
 	mu      sync.Mutex
-	handles map[string]*subSession
+	handles map[string]*subSession // ADK session id → state
+	aliases map[string]string      // short handle ("reviewer-3") → ADK session id
+	seq     int
 }
 
 type subSession struct {
 	userID   string
 	lastUsed time.Time
 	inUse    bool
+	// parent is the user-facing session that created it. A session is only
+	// ever resumed from that same parent: the tool instance is shared by every
+	// session of the generation, and a short handle is guessable.
+	parent string
+	alias  string
 }
 
 // newResumableAgentTool builds the persistent runner + service for sa.
@@ -85,15 +92,17 @@ func newResumableAgentTool(sa adkagent.Agent) (runnableTool, error) {
 		ttl:          resumeSessionTTL,
 		cap:          resumeSessionCap,
 		handles:      map[string]*subSession{},
+		aliases:      map[string]string{},
 	}, nil
 }
 
 // Description appends a note so the leader knows the call is resumable.
 func (t *resumableAgentTool) Description() string {
 	return t.runnableTool.Description() +
-		"\n\nThis sub-agent keeps its session: the result includes a `session` handle. " +
+		"\n\nThis sub-agent keeps its session: the result includes a short `session` handle (e.g. `" + t.Name() + "-1`). " +
 		"Pass that handle back as `resume_session` on a later call to CONTINUE the same " +
-		"conversation (it remembers its prior context and work); omit it to start fresh."
+		"conversation (it remembers its prior context and work); omit it to start fresh. " +
+		"`resume_session: \"last\"` continues your most recent session with this sub-agent."
 }
 
 // Declaration adds the optional `resume_session` parameter to the sub-agent's
@@ -142,7 +151,7 @@ func (t *resumableAgentTool) Run(toolCtx adk.ToolContext, args any) (map[string]
 		return nil, err
 	}
 
-	handle, err := t.resolveSession(toolCtx, resume)
+	handle, alias, note, err := t.resolveSession(toolCtx, resume)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +175,10 @@ func (t *resumableAgentTool) Run(toolCtx adk.ToolContext, args any) (map[string]
 		}
 	}
 
-	out := map[string]any{"session": handle}
+	out := map[string]any{"session": alias}
+	if note != "" {
+		out["note"] = note
+	}
 	if lastEvent != nil {
 		var b strings.Builder
 		for _, p := range lastEvent.Content.Parts {
@@ -212,26 +224,61 @@ func buildSubAgentContent(name string, margs map[string]any) (*genai.Content, er
 	return genai.NewContentFromText(string(b), genai.RoleUser), nil
 }
 
-// resolveSession returns the session handle to run on: the resumed one when the
-// handle is live and free, otherwise a freshly created session. It marks the
-// chosen handle in-use (released by Run's defer) and bounds the map by TTL + cap.
-func (t *resumableAgentTool) resolveSession(toolCtx adk.ToolContext, resume string) (string, error) {
+// resolveSession returns the ADK session id and short handle to run on, and a
+// note when the requested handle could not be honoured as given.
+//
+//   - "" starts a fresh session.
+//   - a known short handle (or raw session id) of the caller's own session is
+//     resumed; "last"/"latest" resumes the caller's most recent one.
+//   - an unknown handle resumes the caller's most recent session with this
+//     sub-agent, and says so. Models paraphrase opaque ids: in the 2026-11-07
+//     smoke the coder passed resume_session "sentinel" for a UUID handle, the
+//     reviewer silently restarted from scratch and re-read everything. The caller
+//     meant "continue", so continuing its latest session is closer to the intent
+//     than a fresh one.
+//
+// It marks the chosen session in-use (released by Run's defer) and bounds the
+// map by TTL + cap.
+func (t *resumableAgentTool) resolveSession(toolCtx adk.ToolContext, resume string) (id, alias, note string, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sweepLocked()
 
 	now := time.Now()
+	parent := ""
+	if toolCtx != nil {
+		parent = realSessionID(toolCtx)
+	}
 	if resume != "" {
-		if s, ok := t.handles[resume]; ok {
+		target := ""
+		switch strings.ToLower(resume) {
+		case "last", "latest", "previous":
+			target = t.latestLocked(parent)
+		default:
+			if aid, ok := t.aliases[resume]; ok {
+				target = aid
+			} else if _, ok := t.handles[resume]; ok {
+				target = resume
+			}
+			if s := t.handles[target]; target != "" && (s == nil || s.parent != parent) {
+				target = "" // not the caller's: treat as unknown
+			}
+			if target == "" {
+				if latest := t.latestLocked(parent); latest != "" {
+					target = latest
+					note = fmt.Sprintf("resume_session %q is not a handle of yours; continued your latest session %s instead.", resume, t.handles[latest].alias)
+				}
+			}
+		}
+		if s := t.handles[target]; target != "" && s != nil {
 			if s.inUse {
-				return "", fmt.Errorf("sub-agent session %q is already running; wait for it to finish before resuming it", resume)
+				return "", "", "", fmt.Errorf("sub-agent session %q is already running; wait for it to finish before resuming it", s.alias)
 			}
 			s.inUse = true
 			s.lastUsed = now
-			return resume, nil
+			return target, s.alias, note, nil
 		}
-		// Unknown/expired handle (or a different generation after hot-reload):
-		// fall back to a fresh session rather than erroring.
+		note = fmt.Sprintf("resume_session %q: no earlier session to continue; started a fresh one.", resume)
 	}
 
 	stateMap := map[string]any{}
@@ -246,12 +293,27 @@ func (t *resumableAgentTool) resolveSession(toolCtx adk.ToolContext, resume stri
 		State:   stateMap,
 	})
 	if err != nil {
-		return "", fmt.Errorf("resumable sub-agent %q: create session: %w", t.Name(), err)
+		return "", "", "", fmt.Errorf("resumable sub-agent %q: create session: %w", t.Name(), err)
 	}
-	handle := resp.Session.ID()
-	t.handles[handle] = &subSession{userID: toolCtx.UserID(), lastUsed: now, inUse: true}
+	id = resp.Session.ID()
+	t.seq++
+	alias = fmt.Sprintf("%s-%d", t.Name(), t.seq)
+	t.handles[id] = &subSession{userID: toolCtx.UserID(), lastUsed: now, inUse: true, parent: parent, alias: alias}
+	t.aliases[alias] = id
 	t.evictLocked()
-	return handle, nil
+	return id, alias, note, nil
+}
+
+// latestLocked is the caller's most recently used idle session, "" if none.
+func (t *resumableAgentTool) latestLocked(parent string) string {
+	best := ""
+	var bestAt time.Time
+	for id, s := range t.handles {
+		if s.parent == parent && !s.inUse && (best == "" || s.lastUsed.After(bestAt)) {
+			best, bestAt = id, s.lastUsed
+		}
+	}
+	return best
 }
 
 func (t *resumableAgentTool) release(handle string) {
@@ -303,4 +365,5 @@ func (t *resumableAgentTool) dropLocked(handle string, s *subSession) {
 		SessionID: handle,
 	})
 	delete(t.handles, handle)
+	delete(t.aliases, s.alias)
 }

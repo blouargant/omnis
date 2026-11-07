@@ -97,3 +97,16 @@ func TestAskUserQuestionSubtleIsNotDurableAndFlagged(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// In a declared non-interactive run the tool answers at once; it never
+// reaches the registry (here nil), where it would wait for ever.
+func TestAskUserAnswersItselfWhenNonInteractive(t *testing.T) {
+	t.Setenv("OMNIS_NON_INTERACTIVE", "1")
+	out, err := askUserHandler(nil)(nil, askUserIn{Kind: "single", Prompt: "Which branch?", Choices: []string{"main", "dev"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Cancelled || out.Text != NonInteractiveAnswer {
+		t.Fatalf("out = %+v", out)
+	}
+}

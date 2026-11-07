@@ -24,7 +24,10 @@ import (
 type Handle struct {
 	Name    string
 	Toolset tool.Toolset
-	key     string
+	// ReadOnly mirrors Server.ReadOnly (part of the dedup key, so a handle
+	// shared by two identical servers cannot inherit the other's flag).
+	ReadOnly bool
+	key      string
 }
 
 // Pool deduplicates MCP toolset construction by configuration key. Two
@@ -78,7 +81,7 @@ func (p *Pool) Acquire(s Server, inputs []Input) (*Handle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q: %w", s.Name, err)
 	}
-	h := &Handle{Name: s.Name, Toolset: ts, key: key}
+	h := &Handle{Name: s.Name, Toolset: ts, ReadOnly: s.ReadOnly, key: key}
 	p.entries[key] = &poolEntry{handle: h, refcount: 1}
 	return h, nil
 }
@@ -163,6 +166,9 @@ func (p *Pool) buildPooledTransport(s Server, inputs []Input) (mcp.Transport, er
 // don't collide.
 func configKey(s Server) string {
 	h := sha256.New()
+	if s.ReadOnly {
+		h.Write([]byte("read_only\x00"))
+	}
 	kind := s.TransportKind()
 	h.Write([]byte(kind))
 	h.Write([]byte{0})

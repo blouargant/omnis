@@ -50,6 +50,10 @@ const (
 	DefaultMemoryPath         = ".agent_memory.md"
 	DefaultStateLogEvery      = 5
 	DefaultStateLogPath       = ".agent_statelog.json"
+	// DefaultReserveTokens is the headroom kept free for the model's reply
+	// (and the estimate's error): the hard trigger never fires later than
+	// WindowTokens - ReserveTokens.
+	DefaultReserveTokens = 16_000
 )
 
 // Config controls compression behaviour. v2 is a breaking change from v1:
@@ -69,8 +73,19 @@ type Config struct {
 	// (typically the original user goal + first lead reply).
 	KeepHeadTurns int
 	// KeepRecentTurns is the count of trailing turns preserved verbatim
-	// to maintain immediate coherence.
+	// to maintain immediate coherence. It is a floor when KeepRecentTokens
+	// is set.
 	KeepRecentTurns int
+	// KeepRecentTokens, when > 0, sizes the verbatim tail by tokens instead
+	// of by turn count: the tail grows backwards until it holds about this
+	// many tokens (never fewer than KeepRecentTurns turns, never more than a
+	// quarter of the soft limit). Four turns is two tool round trips — after
+	// a compaction the agent lost the file it was editing.
+	KeepRecentTokens int
+	// ReserveTokens is the headroom kept for the reply: the hard trigger
+	// fires at min(HardRatio*WindowTokens, WindowTokens-ReserveTokens).
+	// Ignored when the window is too small to afford it.
+	ReserveTokens int
 	// ToolResultMaxBytes caps individual FunctionResponse payloads.
 	ToolResultMaxBytes int
 	// LLM is used to summarise the dropped middle. If nil, an extractive
@@ -100,6 +115,10 @@ type Config struct {
 	// StateLogPath is the single State Log path used when
 	// StateLogPathFunc is nil. Suitable for single-user demos only.
 	StateLogPath string
+	// MaxSessions bounds how many per-session states are kept (0 = no bound).
+	// A sub-agent gets a fresh session for every call, so without a bound its
+	// manager would keep one state per call for the generation's lifetime.
+	MaxSessions int
 }
 
 func (c *Config) applyDefaults() {
@@ -117,6 +136,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.KeepRecentTurns <= 0 {
 		c.KeepRecentTurns = DefaultKeepRecentTurns
+	}
+	if c.ReserveTokens <= 0 {
+		c.ReserveTokens = DefaultReserveTokens
 	}
 	if c.ToolResultMaxBytes <= 0 {
 		c.ToolResultMaxBytes = DefaultToolResultMaxBytes
@@ -184,9 +206,10 @@ func PluginWithTools(name string, cfg Config) (*plugin.Plugin, []tool.Tool, func
 		})
 	}
 	p, err := plugin.New(plugin.Config{
-		Name:                name,
-		BeforeModelCallback: llmagent.BeforeModelCallback(mgr.beforeModel),
-		AfterModelCallback:  llmagent.AfterModelCallback(mgr.afterModel),
+		Name:                 name,
+		BeforeModelCallback:  llmagent.BeforeModelCallback(mgr.beforeModel),
+		AfterModelCallback:   llmagent.AfterModelCallback(mgr.afterModel),
+		OnModelErrorCallback: llmagent.OnModelErrorCallback(mgr.onModelError),
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -207,6 +230,10 @@ const stateLogRefreshTimeout = 60 * time.Second
 type manager struct {
 	cfg      Config
 	sessions sync.Map // string -> *sessionState
+	// order is the insertion order of session keys, kept only when
+	// cfg.MaxSessions bounds the map (oldest evicted first).
+	orderMu sync.Mutex
+	order   []string
 	// refreshWG tracks in-flight async State Log refreshes so callers (and
 	// tests) can wait for them to settle. The State Log extractor makes a
 	// blocking LLM call; it now runs on a detached goroutine (never on the
@@ -221,12 +248,104 @@ func (m *manager) state(userID, sessionID string) *sessionState {
 	if v, ok := m.sessions.Load(key); ok {
 		return v.(*sessionState)
 	}
-	v, _ := m.sessions.LoadOrStore(key, &sessionState{sumCache: newSummaryCache()})
+	v, loaded := m.sessions.LoadOrStore(key, &sessionState{sumCache: newSummaryCache()})
+	if !loaded && m.cfg.MaxSessions > 0 {
+		m.orderMu.Lock()
+		m.order = append(m.order, key)
+		for len(m.order) > m.cfg.MaxSessions {
+			m.sessions.Delete(m.order[0])
+			m.order = m.order[1:]
+		}
+		m.orderMu.Unlock()
+	}
 	return v.(*sessionState)
 }
 
-func (m *manager) softLimit() int { return int(float64(m.cfg.WindowTokens) * m.cfg.SoftRatio) }
-func (m *manager) hardLimit() int { return int(float64(m.cfg.WindowTokens) * m.cfg.HardRatio) }
+// AgentCallbacks returns compression as agent-level callbacks, for an agent
+// that no runner plugin reaches — a sub-agent runs in agenttool's private,
+// plugin-less runner, so the squad's compress plugin never sees its requests.
+// The pair is the plugin's BeforeModel (triggers against cfg.WindowTokens,
+// request overhead counted, call/result pairs kept together) and OnModelError
+// (overflow → compact → one non-streamed retry with cfg.LLM, which must be THIS
+// agent's model). No State Log extraction (it would cost a model call every few
+// steps of every sub-agent) and no audit file unless AuditPathFunc is given.
+func AgentCallbacks(cfg Config) (llmagent.BeforeModelCallback, llmagent.OnModelErrorCallback) {
+	if cfg.AuditPathFunc == nil && cfg.AuditPath == "" {
+		cfg.AuditPathFunc = func(_, _ string) string { return "" }
+	}
+	if cfg.StateLogPathFunc == nil && cfg.StateLogPath == "" {
+		cfg.StateLogPathFunc = func(_, _ string) string { return "" }
+	}
+	cfg.applyDefaults()
+	m := newManager(cfg)
+	return llmagent.BeforeModelCallback(m.beforeModel), llmagent.OnModelErrorCallback(m.onModelError)
+}
+
+// limits computes the soft and hard triggers. The hard trigger is HardRatio
+// of the window, but never closer to the window than reserve (a 32k-window
+// model at 92 % would leave 2.5k tokens for the reply); a window too small to
+// afford the reserve keeps the plain ratio. The soft trigger keeps the
+// configured soft/hard proportion under it.
+func limits(window, reserve int, softRatio, hardRatio float64) (soft, hard int) {
+	hard = int(float64(window) * hardRatio)
+	if r := window - reserve; r >= window/2 && r < hard {
+		hard = r
+	}
+	soft = int(float64(window) * softRatio)
+	if hardRatio > 0 {
+		if s := int(float64(hard) * softRatio / hardRatio); s < soft {
+			soft = s
+		}
+	}
+	return soft, hard
+}
+
+// Limits returns the soft and hard triggers the plugin uses for a model with
+// this window and reply reserve (0 ⇒ the defaults), so a surface can draw the
+// same thresholds the plugin acts on.
+func Limits(window, reserve int) (windowTokens, soft, hard int) {
+	if window <= 0 {
+		window = DefaultWindowTokens
+	}
+	if reserve <= 0 {
+		reserve = DefaultReserveTokens
+	}
+	soft, hard = limits(window, reserve, DefaultSoftRatio, DefaultHardRatio)
+	return window, soft, hard
+}
+
+func (m *manager) hardLimit() int {
+	_, hard := limits(m.cfg.WindowTokens, m.cfg.ReserveTokens, m.cfg.SoftRatio, m.cfg.HardRatio)
+	return hard
+}
+
+func (m *manager) softLimit() int {
+	soft, _ := limits(m.cfg.WindowTokens, m.cfg.ReserveTokens, m.cfg.SoftRatio, m.cfg.HardRatio)
+	return soft
+}
+
+// recentCount is how many trailing contents the passes must keep verbatim.
+// With KeepRecentTokens set it walks back from the end until the tail holds
+// that many tokens (capped at a quarter of target so a long tail cannot eat
+// the whole budget), never below KeepRecentTurns.
+func (m *manager) recentCount(contents []*genai.Content, tokens, target int) int {
+	n := m.cfg.KeepRecentTurns
+	if tokens <= 0 {
+		return n
+	}
+	if limit := target / 4; tokens > limit {
+		tokens = limit
+	}
+	sum, k := 0, 0
+	for i := len(contents) - 1; i >= 0 && sum < tokens; i-- {
+		sum += CountContents(contents[i : i+1])
+		k++
+	}
+	if k > n {
+		n = k
+	}
+	return n
+}
 
 // beforeModel inspects req.Contents, decides whether to compress, and
 // rewrites the slice in place if so.
@@ -244,7 +363,11 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 
 	maybeMarkTaskSwitch(st, req.Contents)
 
-	before := CountContents(req.Contents)
+	// The system instruction and the tool declarations ride along on every
+	// call (~16k tokens for the coder) and no pass can shrink them, so they
+	// count against the window but are subtracted from the passes' target.
+	overhead := CountRequestOverhead(req)
+	before := CountContents(req.Contents) + overhead
 	st.lastTokenCount.Store(int64(before))
 
 	soft, hard := m.softLimit(), m.hardLimit()
@@ -261,33 +384,81 @@ func (m *manager) compressOnce(ctx context.Context, userID, sessionID string, re
 	default:
 		m.emit(events.EventCompressionSkipped, map[string]any{
 			"tokens": before, "soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
+			"root_session_id": sessionID,
 		})
 		return nil, nil
 	}
+	m.compactInPlace(ctx, userID, sessionID, st, req, trigger, overhead, soft, m.cfg.KeepRecentTokens)
+	return nil, nil
+}
 
+// compactInPlace runs the pipeline on req.Contents towards target (total
+// tokens, overhead included) and rewrites them. Reports whether anything was
+// removed.
+func (m *manager) compactInPlace(ctx context.Context, userID, sessionID string, st *sessionState, req *model.LLMRequest, trigger string, overhead, target, keepTokens int) bool {
+	soft, hard := m.softLimit(), m.hardLimit()
+	before := CountContents(req.Contents) + overhead
 	m.emit(events.EventCompressionStart, map[string]any{
-		"trigger": trigger, "tokens_before": before,
+		"trigger": trigger, "tokens_before": before, "root_session_id": sessionID,
 	})
 	start := time.Now()
 
-	newContents, applied := m.runPipeline(ctx, st, req.Contents, trigger == "hard" || trigger == "forced")
-	if applied == nil {
-		m.emit(events.EventCompressionEnd, map[string]any{
-			"trigger": trigger, "tokens_before": before, "tokens_after": before,
-			"passes": []string{}, "duration_ms": time.Since(start).Milliseconds(),
-			"soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
-		})
-		return nil, nil
+	full := trigger != "soft"
+	contentTarget := target - overhead
+	keep := m.recentCount(req.Contents, keepTokens, contentTarget)
+	newContents, applied := m.runPipeline(ctx, st, req.Contents, full, contentTarget, keep)
+	after := before
+	if applied != nil {
+		req.Contents = newContents
+		after = CountContents(req.Contents) + overhead
+		m.audit(userID, sessionID, trigger, before, after, applied)
+	} else {
+		applied = []string{}
 	}
-	req.Contents = newContents
-	after := CountContents(req.Contents)
-	m.audit(userID, sessionID, trigger, before, after, applied)
 	m.emit(events.EventCompressionEnd, map[string]any{
 		"trigger": trigger, "tokens_before": before, "tokens_after": after,
 		"passes": applied, "duration_ms": time.Since(start).Milliseconds(),
 		"soft": soft, "hard": hard, "window": m.cfg.WindowTokens,
+		"root_session_id": sessionID,
 	})
-	return nil, nil
+	return len(applied) > 0
+}
+
+// onModelError recovers from a context-window overflow: it compacts the
+// request (full pipeline, a tighter target and a smaller tail) and calls the
+// model once more, non-streamed. Any other error, a request nothing could be
+// removed from, or a failed retry leaves the original error to propagate.
+// The token estimate is only an estimate and a window may be misconfigured,
+// so the provider's refusal is the authoritative signal.
+func (m *manager) onModelError(ctx adk.CallbackContext, req *model.LLMRequest, llmErr error) (*model.LLMResponse, error) {
+	if req == nil || m.cfg.LLM == nil || !IsContextOverflow(llmErr) {
+		return nil, nil
+	}
+	userID, sessionID := ctx.UserID(), ctx.SessionID()
+	return m.recoverOverflow(ctx, userID, sessionID, req)
+}
+
+func (m *manager) recoverOverflow(ctx context.Context, userID, sessionID string, req *model.LLMRequest) (*model.LLMResponse, error) {
+	st := m.state(userID, sessionID)
+	overhead := CountRequestOverhead(req)
+	current := CountContents(req.Contents) + overhead
+	// The provider just refused `current`: aim well below it, and below the
+	// soft limit too in case the window is configured too large.
+	target := min(m.softLimit(), current*6/10)
+	keepTokens := m.cfg.KeepRecentTokens / 2
+	if !m.compactInPlace(ctx, userID, sessionID, st, req, "overflow", overhead, target, keepTokens) {
+		return nil, nil
+	}
+	var final *model.LLMResponse
+	for resp, err := range m.cfg.LLM.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return nil, nil
+		}
+		if resp != nil && !resp.Partial {
+			final = resp
+		}
+	}
+	return final, nil
 }
 
 // afterModel records the most recent UsageMetadata count, buffers the
@@ -368,14 +539,17 @@ func (m *manager) emit(name string, payload map[string]any) {
 
 // runPipeline applies passes in order. Returns (newContents, appliedPassNames)
 // or (nil, nil) when no pass altered the conversation.
-func (m *manager) runPipeline(ctx context.Context, st *sessionState, contents []*genai.Content, includeSummariser bool) ([]*genai.Content, []string) {
+//
+// target is the token budget for the contents alone (the request overhead
+// already subtracted); keep is the verbatim tail length in contents.
+func (m *manager) runPipeline(ctx context.Context, st *sessionState, contents []*genai.Content, includeSummariser bool, target, keep int) ([]*genai.Content, []string) {
 	var applied []string
-	soft := m.softLimit()
+	soft := target
 	cur := contents
 
 	step := func(name string, p Pass) {
 		before := CountContents(cur)
-		next := p(cur, m.cfg.KeepRecentTurns)
+		next := p(cur, keep)
 		if next == nil {
 			next = cur
 		}
@@ -400,7 +574,7 @@ func (m *manager) runPipeline(ctx context.Context, st *sessionState, contents []
 
 	// Build a cache-aware summariser keyed on the exact middle slice
 	// the pass will see, and inject the State Log digest as prefix.
-	summarise := m.cachedSummariser(ctx, st, cur)
+	summarise := m.cachedSummariser(ctx, st, cur, keep)
 	logPrefix := ""
 	st.stateLog.mu.Lock()
 	logPrefix = st.stateLog.log.renderForPrompt()
@@ -418,16 +592,16 @@ func finalize(cur []*genai.Content, applied []string) ([]*genai.Content, []strin
 
 // cachedSummariser wraps the configured LLM with a per-session LRU keyed
 // on the (head, recent, middle) tuple about to be summarised.
-func (m *manager) cachedSummariser(ctx context.Context, st *sessionState, cur []*genai.Content) func(string) (string, error) {
+func (m *manager) cachedSummariser(ctx context.Context, st *sessionState, cur []*genai.Content, keep int) func(string) (string, error) {
 	base := m.summariser(ctx)
 	if base == nil || st == nil || st.sumCache == nil {
 		return base
 	}
-	_, middle, _ := SplitMiddle(cur, m.cfg.KeepHeadTurns, m.cfg.KeepRecentTurns)
+	_, middle, _ := SplitMiddle(cur, m.cfg.KeepHeadTurns, keep)
 	if middle == nil {
 		return base
 	}
-	key := summaryKey(middle, m.cfg.KeepHeadTurns, m.cfg.KeepRecentTurns)
+	key := summaryKey(middle, m.cfg.KeepHeadTurns, keep)
 	return func(text string) (string, error) {
 		if cached, ok := st.sumCache.get(key); ok {
 			return cached, nil
@@ -573,10 +747,31 @@ func (m *manager) stateLogDelta(st *sessionState) string {
 	return b.String()
 }
 
-const summariserPrompt = `Summarise the following agent transcript in fewer than 500 words.
-Preserve: file paths touched, tool names invoked, decisions made, open questions, and any errors encountered.
-Drop: small talk, intermediate reasoning, and verbose tool output.
-Write in past tense bullet points.`
+// summariserPrompt asks for a checkpoint the agent can resume from, not a
+// recap: the middle it summarises is about to leave the context for good.
+// The section list follows Pi's compaction summary. A transcript that starts
+// with an earlier checkpoint (a previous compaction) is updated, not
+// re-summarised, so repeated compactions do not lose the oldest facts.
+const summariserPrompt = `The transcript below is the earlier part of an agent session. It is about to be removed from the agent's context; the agent will continue the work from your summary alone.
+Write a checkpoint summary with these sections (omit a section that would be empty):
+## Goal
+What the user asked for, in their terms.
+## Constraints and preferences
+Requirements, rules and preferences the user stated.
+## Progress
+- Done: what was completed.
+- In progress: what was being worked on when the transcript ends.
+- Blocked: what failed or is waiting, and why.
+## Key decisions
+Choices made and the reason for each.
+## Next steps
+What remains to do, in order.
+## Critical context
+Exact values the agent must not lose: identifiers, commands, error messages, numbers, URLs.
+## Files
+Paths read and paths modified (say which).
+If the transcript starts with an earlier checkpoint summary, update it with the new material instead of summarising it again.
+Drop small talk, intermediate reasoning and verbose tool output. Stay under 600 words.`
 
 // audit appends a structured entry to the per-session memory file.
 func (m *manager) audit(userID, sessionID, trigger string, before, after int, applied []string) {

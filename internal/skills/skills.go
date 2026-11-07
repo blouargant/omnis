@@ -27,14 +27,13 @@ import (
 // authored skills before planning, regardless of what its own instruction
 // file says.
 const LoaderProtocol = `
-MANDATORY SKILL DISCOVERY — this rule is non-negotiable and overrides every other instruction you receive:
-- Your VERY FIRST tool call for ANY task MUST be 'list_skills'. No bash, no kubectl, no MCP calls, no other tools may precede it.
-- Even if the task seems obvious or you "already know" how to do it, you MUST call 'list_skills' first and inspect every entry.
-- For EACH skill whose description overlaps ANY aspect of the task, you MUST call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name'). Load ALL matching skills — do not stop at the first match.
+MANDATORY SKILL USE — this rule is non-negotiable and overrides every other instruction you receive:
+- The skills you can load are already listed, with their descriptions, in the <available_skills> block of this prompt that follows the skills instructions. Read that list; do not call 'list_skills' to fetch it again (call it only if the block is missing, or after a skill was installed during this session).
+- Before your first other tool call, call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name') for EACH listed skill whose description overlaps ANY aspect of the task. Load ALL matching skills — do not stop at the first match. Several matches can be loaded in the same step.
 - Skills covering the same domain are COMPLEMENTARY, never alternatives. If two skills both mention the task's technology (e.g. 'kubernetes' in both 'k8s-investigation' and 'k8s-log-investigation'), you MUST load BOTH. Picking only "the closest match" is a protocol violation.
 - A skill is "matching" if ANY keyword in its description overlaps the task — the technology (kubernetes, postgres, redis…), the artefact (pod, table, container…), or the symptom (crash, freeze, error, slow, hang…). Err on the side of loading more skills, not fewer.
 - Loaded skill instructions OVERRIDE your default behaviour. Follow them exactly before taking any other action.
-- Skipping skill discovery is a protocol violation. If you find yourself reaching for bash/kubectl/mcp before list_skills, stop and call list_skills first.
+- Acting without loading a matching skill is a protocol violation.
 `
 
 const skillInstruction = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
@@ -47,7 +46,7 @@ Skills are folders of instructions and resources that extend your capabilities f
 
 This is very important:
 
-1. Use the ` + "`list_skills`" + ` tool to discover what skills are available.
+1. The available skills are listed in the <available_skills> block below; ` + "`list_skills`" + ` returns the same list and is only needed when that block is missing or a skill was installed meanwhile.
 2. For EACH skill whose description is relevant to the current task, call ` + "`load_skill`" + ` with ` + "`name=\"<SKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `). Load ALL relevant skills — do not stop at the first match.
 3. Once you have read the instructions, follow them exactly as documented before replying to the user. If the instructions list multiple steps, complete all of them in order.
 4. The ` + "`load_skill_resource`" + ` tool reads any other file of a skill: pass ` + "`skill_name`" + ` and ` + "`resource_path`" + ` exactly as SKILL.md names it, relative to the skill directory (e.g. ` + "`projects.md`, `apply/hub.md`, `references/guide.md`" + `). Do NOT use other tools to access these files.

@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,6 +305,12 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// Explicit opt-in: only the servers named in cfg.MCPServers
 			// (matched case-insensitively against handle Name) are mounted.
 			for _, h := range filterMCPHandles(resolvedMCPHandles, cfg.MCPServers) {
+				// A read-only agent only gets servers the operator declared
+				// read_only in mcp_config.json (see agent/read_only.go).
+				if cfg.ReadOnly && !h.ReadOnly {
+					log.Printf("agent %q is read_only: MCP server %q is not mounted (declare \"read_only\": true on it in mcp_config.json if its tools change nothing)", cfg.Name, h.Name)
+					continue
+				}
 				toolsets = append(toolsets, h.Toolset)
 				mountedMCPNames = append(mountedMCPNames, h.Name)
 			}
@@ -961,7 +968,18 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 		// `skills` tool group, so the leader can route by skill ownership.
 		if hasTool(cfg.Tools, "Skill") {
 			catalog := scanSkillCatalog(cfg.Skills)
-			if len(catalog) > 0 {
+			if len(catalog) > 0 && len(cfg.Skills) == 0 {
+				// No explicit list = every installed skill. Their descriptions
+				// cost ~100 tokens each and were repeated for every such
+				// sub-agent on every call of the leader (2.8k tokens on coder);
+				// the names are enough to route by, and the sub-agent reads the
+				// descriptions itself when it lists its skills.
+				names := make([]string, len(catalog))
+				for i, sk := range catalog {
+					names[i] = sk.Name
+				}
+				sb.WriteString(fmt.Sprintf("  - Skills available to this agent: every installed skill (%s)\n", strings.Join(names, ", ")))
+			} else if len(catalog) > 0 {
 				sb.WriteString("  - Skills available to this agent:\n")
 				for _, sk := range catalog {
 					if sk.Description != "" {

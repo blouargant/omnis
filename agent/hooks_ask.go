@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/blouargant/omnis/internal/askuser"
 )
@@ -44,13 +42,7 @@ const (
 // A CI run or a bench, by contrast, KNOWS it is unattended. Letting it say so
 // costs one env var and has no false positives, where the inference has a whole
 // class of them.
-func nonInteractive() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("OMNIS_NON_INTERACTIVE"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
+func nonInteractive() bool { return askuser.NonInteractive() }
 
 // canEscalate reports whether a hook's escalation can reach anyone at all.
 // Read by the caller BEFORE asking, so a refusal it causes can say what

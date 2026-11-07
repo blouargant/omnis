@@ -335,6 +335,9 @@ type BashIn struct {
 	// Env holds extra "NAME=value" entries appended to the process environment.
 	// Set internally from ShellEnvFrom(ctx); excluded from the LLM schema.
 	Env []string `json:"-"`
+	// ReadOnly runs the command where it cannot write outside the scratch
+	// directories (see ReadOnlyBash). Set internally; not in the LLM schema.
+	ReadOnly bool `json:"-"`
 }
 type BashOut struct {
 	Output string `json:"output"`
@@ -370,6 +373,11 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	cmd := newShellCommand(cctx, in.Command)
 	if in.Cwd != "" {
 		cmd.Dir = in.Cwd
+	}
+	if in.ReadOnly {
+		if msg := confineReadOnly(cmd, in.Command); msg != "" {
+			return msg, nil
+		}
 	}
 	if len(in.Env) > 0 {
 		cmd.Env = append(os.Environ(), in.Env...)

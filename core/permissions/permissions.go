@@ -517,6 +517,11 @@ func bashAllowed(allow []Rule, ctx matchCtx) bool {
 	return true
 }
 
+// AllReadOnly reports whether every subcommand of a (possibly compound)
+// command is a recognised read-only command (the allowlist Claude Code runs
+// without a prompt). Read-only agents use it where the sandbox is missing.
+func AllReadOnly(command string) bool { return allReadOnly(command) }
+
 // allReadOnly reports whether every subcommand of a (possibly compound) command
 // is a recognised read-only command.
 func allReadOnly(command string) bool {
