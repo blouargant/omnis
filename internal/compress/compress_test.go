@@ -247,7 +247,7 @@ func TestPipelineEndToEnd(t *testing.T) {
 	beforeTail := contents[len(contents)-1]
 	beforeCount := CountContents(contents)
 
-	newContents, applied := mgr.runPipeline(context.Background(), mgr.state("", ""), contents, true)
+	newContents, applied := mgr.runPipeline(context.Background(), mgr.state("", ""), contents, true, mgr.softLimit(), mgr.cfg.KeepRecentTurns)
 	if applied == nil {
 		t.Fatal("pipeline returned nil applied list, expected at least one pass")
 	}

@@ -68,6 +68,11 @@ type Server struct {
 	// lazy point as "${input:id}" resolution. A dependency that stays
 	// unavailable makes the server fail to connect rather than degrade silently.
 	Requires []deps.Requirement `json:"requires,omitempty"`
+	// ReadOnly is the operator's statement that this server's tools change
+	// nothing. Only such a server is mounted on a read-only agent
+	// (agent.json read_only): omnis cannot inspect an MCP tool's effects —
+	// ADK's MCP wrapper drops the protocol's readOnlyHint annotation.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // TransportKind returns the normalised transport kind for s, defaulting

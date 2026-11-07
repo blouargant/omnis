@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/blouargant/omnis/internal/sandbox"
+
 	"google.golang.org/adk/v2/runner"
 
 	"github.com/blouargant/omnis/agent"
@@ -106,6 +108,9 @@ Flags (must appear before any subcommand or prompt):
 }
 
 func main() {
+	// The read-only sandbox re-executes this binary as its helper; in that
+	// mode it never returns (internal/sandbox).
+	sandbox.MaybeRunHelper()
 	ctx := context.Background()
 	opts, rest, err := parseFlags(os.Args[1:])
 	if err != nil {
@@ -224,6 +229,8 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		AskUserRegistry: infra.AskUserRegistry,
 		BgQueues:        infra.BgQueues,
 		SteerStore:      infra.SteerStore,
+		Budget:          infra.Budget,
+		TimeLimit:       inst.Settings.TurnBudget.MaxDuration,
 		Scheduler:       infra.Scheduler,
 		GoalStore:       infra.GoalStore,
 		AppName:         inst.RunnerConfig.AppName,
@@ -292,6 +299,8 @@ func runTUI(ctx context.Context, opts options) error {
 		WatchMailbox:                      infra.WatchMailbox,
 		BgQueues:                          infra.BgQueues,
 		SteerStore:                        infra.SteerStore,
+		Budget:                            infra.Budget,
+		TimeLimit:                         inst.Settings.TurnBudget.MaxDuration,
 		Scheduler:                         infra.Scheduler,
 		GoalStore:                         infra.GoalStore,
 		AgentOptions:                      agentOpts,

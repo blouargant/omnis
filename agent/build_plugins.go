@@ -53,6 +53,8 @@ func buildPlugins(
 	isRouterSquad bool,
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
+	timeNoteBeforeModel llmagent.BeforeModelCallback,
+	rootCfg RuntimeAgentConfig,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	bus := infra.Bus
 	// Process-wide, opened + subscribed exactly once however many squads and
@@ -99,7 +101,7 @@ func buildPlugins(
 	// once it runs out. Mounted after the permission/hook gates so a rejected call
 	// is not charged. nil callbacks (router squad, or no ceiling configured) ⇒
 	// no plugin, byte-identical to before.
-	if bp, berr := budgetPlugin("budget", budgetBeforeTool, budgetAfterModel); berr == nil && bp != nil {
+	if bp, berr := budgetPlugin("budget", budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel); berr == nil && bp != nil {
 		plugins = append(plugins, bp)
 	}
 	// Mid-turn steering: inject notes the user types while a turn is computing
@@ -158,6 +160,12 @@ func buildPlugins(
 		},
 		LLM:      orchestratorLLM,
 		EventBus: bus,
+		// Trigger against the ROOT model's real window (models.json
+		// context_length; 0 ⇒ the 200k default), keep room for its reply,
+		// and keep ~20k tokens of recent work verbatim after a compaction.
+		WindowTokens:     rootCfg.ContextLength,
+		ReserveTokens:    rootCfg.CompressionReserve(),
+		KeepRecentTokens: compressKeepRecentTokens,
 	}); err == nil {
 		plugins = append(plugins, cmp)
 		// NOTE: compact_now tool returned here is intentionally not mounted
@@ -165,6 +173,16 @@ func buildPlugins(
 		// a custom agent (see examples/s06_compress for the pattern).
 	}
 	return plugins, closer, nil
+}
+
+// compressKeepRecentTokens is the verbatim tail kept after a compaction (Pi
+// keeps ~20k). Capped by compress at a quarter of the target.
+const compressKeepRecentTokens = 20_000
+
+// CompressionReserve is the reply headroom compression keeps for this agent
+// as a squad root: its output cap when larger than the default reserve.
+func (c RuntimeAgentConfig) CompressionReserve() int {
+	return max(compress.DefaultReserveTokens, c.MaxOutputTokens)
 }
 
 // buildPermissionGate wires the shared permission gate with three rule

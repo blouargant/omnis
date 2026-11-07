@@ -46,12 +46,16 @@ func antFinishReason(s string) genai.FinishReason {
 // reason, so without it the reply simply ends mid-sentence — and a gateway
 // that silently caps output (LiteLLM's 4096 fallback for Anthropic models it
 // does not know) looks like a broken model.
+// TruncationNoticePrefix starts the notice appended to a reply cut at the
+// output limit, so a surface can recognise a turn that ended that way.
+const TruncationNoticePrefix = "[Reply cut: the model reached its output limit"
+
 func truncationNotice(outTokens int32, droppedCall bool) string {
 	n := ""
 	if outTokens > 0 {
 		n = fmt.Sprintf(" after %d tokens", outTokens)
 	}
-	s := fmt.Sprintf("\n\n[Reply cut: the model reached its output limit%s.", n)
+	s := fmt.Sprintf("\n\n%s%s.", TruncationNoticePrefix, n)
 	if droppedCall {
 		s += " An unfinished tool call was dropped."
 	}

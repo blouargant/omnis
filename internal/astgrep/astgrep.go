@@ -311,8 +311,12 @@ func applyRewrites(matches []sgMatch, cwd string, apply bool) string {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Join(cwd, file)
 		}
+		// Read, rewrite and write under the file's lock (see fstools.WriteLocked);
+		// a dry run takes it too, which costs nothing and keeps one code path.
+		unlock := fstools.LockFiles(abs)
 		data, err := os.ReadFile(abs)
 		if err != nil {
+			unlock()
 			failures = append(failures, fmt.Sprintf("%s: %v", displayPath(file, cwd), err))
 			continue
 		}
@@ -335,18 +339,21 @@ func applyRewrites(matches []sgMatch, cwd string, apply bool) string {
 			content = content[:s] + m.Replacement + content[e:]
 		}
 		if !ok {
+			unlock()
 			failures = append(failures, displayPath(file, cwd)+": stale offsets, skipped")
 			continue
 		}
 		if string(data) == content {
+			unlock()
 			continue
 		}
 		changedFiles++
 		if apply {
-			if _, werr := fstools.RunWrite(context.Background(), fstools.WriteIn{Path: abs, Content: content}); werr != nil {
-				failures = append(failures, fmt.Sprintf("%s: write failed: %v", displayPath(file, cwd), werr))
+			if out := fstools.WriteLocked(abs, content); strings.HasPrefix(out, "Error") {
+				failures = append(failures, fmt.Sprintf("%s: write failed: %s", displayPath(file, cwd), out))
 			}
 		}
+		unlock()
 	}
 
 	var b strings.Builder

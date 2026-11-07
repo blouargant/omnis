@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
 
 	"google.golang.org/genai"
 
@@ -30,7 +31,7 @@ const DefaultModel = "gpt-4o-mini"
 // agent by mounting the right tools, skills and MCP servers, not by
 // rewriting this prompt. Per-agent context goes into AgentConfig.Instruction
 // and is appended below.
-const SystemPrompt = `You are a harness agent built on the methodology
+const systemPromptTemplate = `You are a harness agent built on the methodology
 proven by Anthropic's Claude Code. The harness is generic and stays
 generic: it has no built-in domain knowledge. Your effective capability
 on any given run equals exactly the union of the tools, skills and MCP
@@ -43,21 +44,7 @@ task because your "role" doesn't fit — discover the mounted tools and
 skills, and let them define the role.
 
 Operating method (apply to every task, in order):
-  1. RESTATE the user's request in your own words as the very first
-     thing in your reply, BEFORE any tool call, planning, skill
-     lookup, or delegation. This lets the user verify you understood
-     correctly. Format it as: "<acknowledgement>: <your restatement>."
-     where <acknowledgement> is a single word meaning "Understood" in
-     the SAME language as the user's request (e.g. "Understood" in
-     English, "Compris" in French, "Entendido" in Spanish, "Verstanden"
-     in German) — never mix languages. Write the whole restatement in
-     the user's language. Then confirm scope before any irreversible
-     action.
-     EXCEPTION — skip the restatement (and act directly) only for
-     trivial acknowledgements such as "yes", "no", "do it",
-     "continue", "ok", "go", "stop", and similar short confirmations
-     or denials that refer to your previous turn.
-  2. PLAN with todo_write or task_create whenever the task has more than
+%STEP1%  2. PLAN with todo_write or task_create whenever the task has more than
      one step. Keep steps small and individually verifiable.
   3. INVESTIGATE before you act. Read state with read-only tools first;
      never assume what a tool can confirm.
@@ -96,6 +83,52 @@ Tool selection rules:
 If a step in this protocol references a tool you do not have, skip it
 silently rather than refusing the task.`
 
+// rootStep1 opens a user-facing root agent's reply with a restatement the
+// user can check.
+const rootStep1 = `  1. RESTATE the user's request in your own words as the very first
+     thing in your reply, BEFORE any tool call, planning, skill
+     lookup, or delegation. This lets the user verify you understood
+     correctly. Format it as: "<acknowledgement>: <your restatement>."
+     where <acknowledgement> is a single word meaning "Understood" in
+     the SAME language as the user's request (e.g. "Understood" in
+     English, "Compris" in French, "Entendido" in Spanish, "Verstanden"
+     in German) — never mix languages. Write the whole restatement in
+     the user's language. Then confirm scope before any irreversible
+     action.
+     EXCEPTION — skip the restatement (and act directly) only for
+     trivial acknowledgements such as "yes", "no", "do it",
+     "continue", "ok", "go", "stop", and similar short confirmations
+     or denials that refer to your previous turn.
+`
+
+// subAgentStep1 replaces it for a sub-agent. A sub-agent is called as a tool
+// by another agent, runs once, and returns: nobody can answer a question it
+// asks. Given the root's step 1 ("restate, then confirm scope") a
+// research_critic replied with a scope restatement and a request for
+// confirmation instead of its review — a wasted 9 s call the leader had to
+// repeat — and printed the "<acknowledgement>" placeholder literally.
+const subAgentStep1 = `  1. START WORKING IMMEDIATELY. You are a sub-agent: another agent
+     called you as a tool with a task, you run once, and your final
+     reply is returned to it as the result. Nobody can answer a
+     question you ask, so do NOT restate the task, do NOT ask for
+     confirmation or clarification, and do NOT announce what you are
+     about to do — do the work and return the result. If the task is
+     ambiguous, pick the most reasonable reading, state that
+     assumption in one line at the top of your result, and proceed.
+`
+
+// SystemPrompt is the operating contract of a user-facing (root) agent.
+var SystemPrompt = strings.Replace(systemPromptTemplate, "%STEP1%", rootStep1, 1)
+
+// SubAgentSystemPrompt is the same contract for an agent invoked as a tool by
+// another agent: step 1 says to start working instead of restating the task
+// and confirming scope, and escalation goes to the calling agent.
+var SubAgentSystemPrompt = strings.NewReplacer(
+	"%STEP1%", subAgentStep1,
+	"surface\n     it to the user and ask how to proceed.", "report\n     it in your result instead of asking how to proceed.",
+	"before asking the user.", "before giving up.",
+).Replace(systemPromptTemplate)
+
 // NewModel selects an LLM via core/llm based on OMNIS_PROVIDER. See the
 // llm package docs for the supported providers and required env vars.
 func NewModel(ctx context.Context) (model.LLM, error) {
@@ -116,6 +149,10 @@ type AgentConfig struct {
 	SubAgents   []agent.Agent
 	Model       model.LLM
 
+	// SubAgent selects SubAgentSystemPrompt: the agent is invoked as a tool
+	// by another agent (one run, no user to confirm with).
+	SubAgent bool
+
 	// Optional per-agent callbacks. Use these to attach observers (e.g. an
 	// events bus) directly on the agent so they fire even when the agent is
 	// invoked outside the runner that owns the toolkit's plugin — most
@@ -126,6 +163,9 @@ type AgentConfig struct {
 	OnToolErrorCallbacks []llmagent.OnToolErrorCallback
 	BeforeModelCallbacks []llmagent.BeforeModelCallback
 	AfterModelCallbacks  []llmagent.AfterModelCallback
+	// OnModelErrorCallbacks may replace a failed model call's error with a
+	// response (sub-agent context-overflow recovery, internal/compress).
+	OnModelErrorCallbacks []llmagent.OnModelErrorCallback
 }
 
 // New constructs an llmagent with the article's default system prompt
@@ -138,22 +178,26 @@ func New(cfg AgentConfig) (agent.Agent, error) {
 		return nil, fmt.Errorf("agentkit.New: Model required")
 	}
 	instr := SystemPrompt
+	if cfg.SubAgent {
+		instr = SubAgentSystemPrompt
+	}
 	if cfg.Instruction != "" {
-		instr = SystemPrompt + "\n\n" + cfg.Instruction
+		instr += "\n\n" + cfg.Instruction
 	}
 	return llmagent.New(llmagent.Config{
-		Name:                 cfg.Name,
-		Description:          cfg.Description,
-		Instruction:          instr,
-		Model:                cfg.Model,
-		Tools:                cfg.Tools,
-		Toolsets:             cfg.Toolsets,
-		SubAgents:            cfg.SubAgents,
-		BeforeToolCallbacks:  cfg.BeforeToolCallbacks,
-		AfterToolCallbacks:   cfg.AfterToolCallbacks,
-		OnToolErrorCallbacks: cfg.OnToolErrorCallbacks,
-		BeforeModelCallbacks: cfg.BeforeModelCallbacks,
-		AfterModelCallbacks:  cfg.AfterModelCallbacks,
+		Name:                  cfg.Name,
+		Description:           cfg.Description,
+		Instruction:           instr,
+		Model:                 cfg.Model,
+		Tools:                 cfg.Tools,
+		Toolsets:              cfg.Toolsets,
+		SubAgents:             cfg.SubAgents,
+		BeforeToolCallbacks:   cfg.BeforeToolCallbacks,
+		AfterToolCallbacks:    cfg.AfterToolCallbacks,
+		OnToolErrorCallbacks:  cfg.OnToolErrorCallbacks,
+		BeforeModelCallbacks:  cfg.BeforeModelCallbacks,
+		AfterModelCallbacks:   cfg.AfterModelCallbacks,
+		OnModelErrorCallbacks: cfg.OnModelErrorCallbacks,
 	})
 }
 

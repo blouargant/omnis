@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/pkoukk/tiktoken-go"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
 
@@ -81,6 +82,33 @@ func CountPart(p *genai.Part) int {
 		n += CountText(p.FunctionResponse.Name)
 		if len(p.FunctionResponse.Response) > 0 {
 			if b, err := json.Marshal(p.FunctionResponse.Response); err == nil {
+				n += CountText(string(b))
+			}
+		}
+	}
+	return n
+}
+
+// CountRequestOverhead counts what rides along on every call besides the
+// conversation: the system instruction and the tool declarations. No pass can
+// shrink it, but it fills the same window.
+func CountRequestOverhead(req *model.LLMRequest) int {
+	if req == nil || req.Config == nil {
+		return 0
+	}
+	n := 0
+	if si := req.Config.SystemInstruction; si != nil {
+		n += CountContents([]*genai.Content{si})
+	}
+	for _, t := range req.Config.Tools {
+		if t == nil {
+			continue
+		}
+		for _, fd := range t.FunctionDeclarations {
+			if fd == nil {
+				continue
+			}
+			if b, err := json.Marshal(fd); err == nil {
 				n += CountText(string(b))
 			}
 		}

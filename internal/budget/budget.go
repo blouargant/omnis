@@ -16,7 +16,10 @@
 // so a surface that does not opt in behaves exactly as before.
 package budget
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // A ceiling exists to stop a turn that has gone WILD — not to ration honest work.
 // That distinction sets the numbers, because a ceiling that trips on legitimate
@@ -70,11 +73,18 @@ type Limits struct {
 	// from ~20 fetches × 2 invocations. Bounding N is therefore worth far more than
 	// bounding the tokens directly.
 	PerAgent map[string]int
+
+	// MaxDuration is the turn's wall-clock limit (0 = none). Unlike the other
+	// axes it is never enforced and never asks the user: an agent is TOLD how
+	// much time is left once half is spent, so it can stop starting long work
+	// it cannot finish (see TimeLeft and agent/budget_plugin.go). Set by an
+	// unattended run that is killed at a deadline it cannot otherwise see.
+	MaxDuration time.Duration
 }
 
 // Unlimited reports whether the limits impose no ceiling at all.
 func (l Limits) Unlimited() bool {
-	return l.MaxToolCalls <= 0 && l.MaxTokens <= 0 && len(l.PerAgent) == 0
+	return l.MaxToolCalls <= 0 && l.MaxTokens <= 0 && len(l.PerAgent) == 0 && l.MaxDuration <= 0
 }
 
 // Usage is what a turn has spent so far, plus the ceiling it is spending against.
@@ -112,6 +122,7 @@ type turn struct {
 	grants    int
 	halted    bool
 	unlimited bool
+	started   time.Time
 
 	// askMu single-flights the user prompt. Parallel sub-agents (max_instances
 	// fan-out) all hit the ceiling at once; the first one asks while the rest
@@ -166,7 +177,27 @@ func (s *Store) StartTurn(sid string, l Limits) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[sid] = &turn{limits: l, grant: l, agents: map[string]int{}}
+	s.m[sid] = &turn{limits: l, grant: l, agents: map[string]int{}, started: time.Now()}
+}
+
+// TimeLeft reports how much of the turn's wall-clock limit remains (negative
+// once past it). ok is false when the session has no turn or no time limit.
+func (s *Store) TimeLeft(sid string) (left, limit time.Duration, ok bool) {
+	if s == nil || sid == "" {
+		return 0, 0, false
+	}
+	s.mu.Lock()
+	t := s.m[sid]
+	s.mu.Unlock()
+	if t == nil {
+		return 0, 0, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.limits.MaxDuration <= 0 {
+		return 0, 0, false
+	}
+	return t.limits.MaxDuration - time.Since(t.started), t.limits.MaxDuration, true
 }
 
 // ChargeAgent counts one tool call made by `agent` and reports whether that

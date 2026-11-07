@@ -889,6 +889,20 @@ or answer with what it has, flagging what is unverified. (The underlying cause t
 was the sub-agent's model not emitting its tool call at all; this rule bounds the
 *leader's* reaction to it, which is the half that is instructable.)
 
+**A sub-agent gets its own operating contract** (`agentkit.SubAgentSystemPrompt`,
+selected by `AgentConfig.SubAgent`, set in [agent/build_subagents.go](agent/build_subagents.go)).
+The universal `agentkit.SystemPrompt` opens with "RESTATE the user's request as
+`<acknowledgement>: …`, then confirm scope", which is right for a user-facing root
+and wrong for a one-shot tool call nobody can answer. Observed live: a
+`research_critic` replied with a scope restatement and a request for confirmation
+instead of its review (the leader had to re-call it), printing the placeholder
+literally (`<acknowledgement>: Compris.`). The sub-agent variant replaces step 1
+with "start working immediately; state an assumption instead of asking" and points
+escalation at the caller; everything else is shared. A/B on the critic's `high`
+model with the same request: old prompt 3/3 opened with a restatement, new 0/3,
+all three going straight to `web_fetcher`. Pinned by
+[core/agentkit/systemprompt_test.go](core/agentkit/systemprompt_test.go).
+
 **Dispatch contract (do not break):** the wrapper's `ProcessRequest` packs **itself**
 (via `toolutils.PackTool`), not
 the inner agenttool. ADK dispatches function calls by the object stored in
@@ -976,6 +990,18 @@ leader and curator since both are excluded from fan-out); the toggle round-trips
 through the editor save and the GET only surfaces the flag when **disabled** (an
 absent key reads as on), keeping agent.json clean for the default case.
 
+**Handles are short and forgiving** (2026-11-07). A call returns
+`session: "<agent>-<n>"` (e.g. `reviewer-1`), mapped internally to the ADK
+session id, and `resume_session: "last"` continues the caller's most recent
+session with that sub-agent. An **unknown handle continues the caller's latest
+session** (with a `note` in the result) instead of silently starting fresh: in a
+Harbor smoke the coder passed `"sentinel"` for a UUID handle, the reviewer
+restarted from scratch, re-read everything and ran its verification pass to the
+40-call cap. Every session records its **parent** (the user-facing session,
+`realSessionID`) and is only ever resumed from that parent — the wrapper is
+shared by every session of the generation and a short handle is guessable
+(`TestResumableHandleResolution`).
+
 **Soft-skill reflection pipeline** — at `EventSessionEnd`, [agent/load_recorder.go](agent/load_recorder.go)
 drains its in-memory bucket (leader-loaded skills, tool errors), runs
 the deterministic `softskills.ReflectHeuristic`, applies the heuristic
@@ -1062,7 +1088,9 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/docindex/` | Semantic index over **omnis's own documentation** (user docs `web/docs` + developer docs `docs` → `/usr/share/doc/omnis/docs`; roots from `Roots()`, override `OMNIS_DOCS_DIRS`) over `semindex` at `index/docs`; markdown line-window chunks, content-hash incremental, heading-aware, stores the quotable text in chunk meta; `search_docs` + `reindex_docs` tools plus always-on `list_docs`/`read_doc`/`grep_docs` glob fallback (`NewNavTools`). Mounted on the `helper` agent via the `docs` tool group; built/refreshed in the background at server startup |
 | `internal/configedit/` | Layer-aware config read/write shared by the HTTP server (web-UI editor) and the in-process `settings` tools: `SourceLayer`/`AgentsConfigLayer`/`AgentTargetLayer` (moved from `server/layers.go`), `AtomicWriteFile`, `ConfigFileNames`, `ReadSection`/`WriteSection`, `ReadAgentEntry`/`WriteAgentEntry`, `ReadPreferences`/`SetPreference`, `EmbedderFingerprint`, and JSON-pointer `SetByPointer`/`RemoveByPointer`. Also the **layered deep-merge engine** ([merge.go](internal/configedit/merge.go) `MergeSection`/`LoadMergedSection`/`MergedBytes`/`MergeGeneric`, [diff.go](internal/configedit/diff.go) `DiffSection`/`DiffGeneric`, [overlay.go](internal/configedit/overlay.go) `OverlayBytes`/`AgentEntryOverlayBytes`/`BaseBelowLayer`) that merges every config file across layers and writes only the delta — see "Layered deep-merge" under Configuration files. Depends only on `internal/paths` + stdlib (no server/agent import), so both surfaces share one "where does this write land". `server/layers.go`/`config.go`/`preferences.go` delegate to it |
 | `internal/settings/` | The **`settings` tool group** mounted on the Helper: `get_settings`, `set_preference`, `set_agent`, `set_model`, `update_config`, `remove_config` (see "Settings management via chat"). All IO via `configedit`; sensitive changes gated by a process-wide `Confirmer` (`SetConfirmer`); `Deps{RequestReload}` for hot-reload; `LoaderProtocol` instruction addendum |
-| `internal/compress/` | Per-session context compression plugin + audit/statelog files |
+| `internal/sandbox/` | Read-only command sandbox (Landlock, Linux): `Wrap` re-executes the binary as `__omnis-readonly-exec`, which denies every filesystem write outside `DefaultWritable` (temp dirs, `/dev`, user caches) then execs the command. `MaybeRunHelper` MUST be the first call of every binary's `main` (and of test mains that use it). See "Read-only agents" |
+| `agent/deferred_tools.go` | `deferred_tools` + `tool_search`: rarely used tools stay callable but are declared only once the session loads them — see "Deferred tools" |
+| `internal/compress/` | Per-session context compression plugin + audit/statelog files. Triggers against the squad root's real window with a reply reserve, recovers from a provider overflow by compacting and retrying once, never splits a tool call from its result — see "Context compression" |
 | `internal/cache/` | Prompt cache hit-rate stats plugin |
 | `internal/mcp/` | MCP config loader (path resolved from search chain) |
 | `internal/a2a/` | A2A protocol client (`client.go`) + ADK tool wiring (`tools.go`); config types in `a2a.go` |
@@ -1355,6 +1383,70 @@ and every path falls back to `Scan` — the feature works, it is just literal an
 slower. CLI/TUI are untouched (server-only UI; the `sessions` tool group works
 anywhere the agent is mounted).
 
+### Context compression (window, overflow recovery, checkpoint summary)
+
+[internal/compress/](internal/compress/) is a runner plugin on every squad root
+(`buildPlugins`, [agent/build_plugins.go](agent/build_plugins.go)). Three things
+changed after the Pi comparison; all are in the plugin, so they reach every surface:
+
+- **Real window + reply reserve.** `WindowTokens` is the root model's
+  `context_length` (models.json, follows the single-model override; 0 ⇒ the 200k
+  default) and `ReserveTokens` is `RuntimeAgentConfig.CompressionReserve()` =
+  max(16k, the model's `max_output_tokens`). `compress.limits`: hard =
+  min(92 % of the window, window − reserve) — the reserve is skipped when it would
+  eat more than half the window — and soft keeps the 75/92 proportion under it.
+  The count now includes the **request overhead** (`CountRequestOverhead`: system
+  instruction + tool declarations, ~16k tokens on `coder`), which no pass can
+  shrink, so the passes' target is the limit minus that overhead. Before, a 92 %
+  trigger on contents alone fired with ~16k of overhead already on top — i.e. at
+  the window. `compress.Limits(window, reserve)` is the same computation for
+  surfaces: the server's context ring (live injected turns, `usage-estimate`) draws
+  the session root's window via `Manager.ContextWindow` instead of a fixed 200k.
+  Compression events now carry `root_session_id`, so `foreignBusEvent` stops one
+  session's ring updates from reaching another session's stream.
+- **Overflow recovery** (`onModelError`, an `OnModelErrorCallback`). When the
+  provider refuses the request as too long (`IsContextOverflow`: OpenAI/vLLM
+  "maximum context length", Anthropic "prompt is too long", LiteLLM
+  `ContextWindowExceededError`, Gemini "exceeds the maximum number of tokens"…),
+  the plugin runs the full pipeline towards min(soft, 60 % of what was refused)
+  with half the usual tail, then calls the root model once more **non-streamed**
+  and returns that response in place of the error (ADK runs the after-model
+  callbacks on it). The estimate is tiktoken and a window may be misconfigured, so
+  the provider's refusal is the authoritative signal. Any other error, nothing to
+  remove, or a failed retry ⇒ the original error propagates. Verified live on the
+  ChapsVision gateway: LiteLLM wraps Scaleway's 400 ("This model's maximum context
+  length is 262144 tokens…") in an HTTP **500**, which `shouldRetryHTTPError`
+  ([core/llm/retry.go](core/llm/retry.go)) used to retry verbatim twice — it now
+  skips any body naming a context overflow. **Known gap:** the same gateway
+  answered an oversized `claude-sonnet-5-5` request with an opaque Anthropic
+  `api_error` "Internal server error", which nothing can recognise as an overflow;
+  the proactive trigger is the only protection there.
+- **Never cut between a call and its result.** `SplitMiddle` moves each boundary
+  past any content carrying function responses: a result left at the start of the
+  tail (or right after the head) used to lose its call to the summary, and
+  providers reject an orphan tool result.
+- **Tail by tokens + checkpoint summary.** `KeepRecentTokens` (20k in production,
+  `compressKeepRecentTokens`; 0 ⇒ count-only, what tests/examples use) grows the
+  verbatim tail backwards to ~20k tokens, never below `KeepRecentTurns` (4), capped
+  at a quarter of the target. Four contents was two tool round trips — after a
+  compaction the agent had lost the file it was editing. `summariserPrompt` now
+  asks for Pi's checkpoint sections (Goal / Constraints / Progress done-in
+  progress-blocked / Key decisions / Next steps / Critical context / Files) and
+  to **update** an earlier checkpoint found at the start of the middle rather than
+  re-summarise it, so repeated compactions keep the oldest facts.
+
+**Sub-agents** (2026-11-07). Compression is a runner plugin and sub-agents run in
+agenttool's plugin-less runner, so their contexts were never compacted — in a
+Harbor smoke `code_docs` reached 228k tokens of a 229k window. Each sub-agent now
+gets `compress.AgentCallbacks` ([agent/build_subagents.go](agent/build_subagents.go)):
+the same BeforeModel trigger and OnModelError overflow recovery, against **its own**
+window (`ContextLength`) and reserve, retrying with **its own** model, the 20k
+token tail, and **no** State Log extraction (a model call every few steps of every
+sub-agent) and no audit file (it would land in the working directory). Each call
+is a fresh session, so the state map is bounded (`Config.MaxSessions`,
+`subAgentCompressSessions` = 64, oldest dropped). `agentkit.AgentConfig` gained
+`OnModelErrorCallbacks` for it.
+
 ### File tool robustness (ported from Pi)
 
 Four behaviours of the `fs` tools, taken from the Pi harness (earendil-works/pi,
@@ -1369,9 +1461,11 @@ for first on the Harness Leaderboard at about half the cost per solved task:
   without the lock). `RunWrite`, `RunEdit`, `RunMultiEdit` (all its files,
   sorted, so two batches cannot deadlock) and `RunRevert` hold the lock for
   the whole read-modify-write; keys are the resolved absolute path, so
-  different files still mutate in parallel. `lsp_rename` / `ast_grep_rewrite`
-  write through `RunWrite` (the write is serialised) but read outside the lock
-  — `LockFiles` is exported for them if that ever matters.
+  different files still mutate in parallel. `lsp_rename`/`lsp_code_action`
+  (`writeEditMap`) and `ast_grep_rewrite` take `LockFiles` around each file's
+  read-apply-write and write with `fstools.WriteLocked` (the snapshotting write
+  for a caller that already holds the lock — `RunWrite` would deadlock, the mutex
+  is not reentrant).
 - **Normalized edit matching** (`findEditMatches`). Exact match first; when
   there is none, both texts are normalized — CRLF → LF, trailing whitespace
   stripped per line, typographic quotes/dashes/ellipsis and special spaces →
@@ -1432,7 +1526,16 @@ returns to the leader's context.
   - **`code_docs`** ([registry/agents/code_docs/](registry/agents/code_docs/),
     `balanced`) — programming-documentation web researcher (official docs, API
     refs, specs, GitHub, Stack Overflow) via the `web`/`serpapi`/`ddg` tools.
-  - **`reviewer`** (`high`, skill `review`) — read-only diff review.
+    **No `Skill` group and `max_tool_calls_per_call: 20`** (as `web_agent`): with
+    an empty skills list it saw every skill, and in the 2026-11-07 regression smoke
+    it loaded `deep-research` for one API question — 76 WebFetch + 16 WebSearch,
+    54 model calls, its context at 228k (sub-agents are not compacted), 16 minutes,
+    and the rstan task timed out before its final run. `refactorer` lost `Skill`
+    for the same reason.
+  - **`reviewer`** (`high`, skill `review`) — read-only diff review, **enforced**
+    (`read_only: true`, see "Read-only agents"), `max_tool_calls_per_call: 40`;
+    `coder` gives it at most two rounds per change (a review, then one
+    verification pass resumed with `resume_session`).
   - **`refactorer`** (`high`, `worktree`) — behaviour-preserving structural
     changes in an isolated worktree.
 
@@ -1527,6 +1630,159 @@ to fuse/dedup/cap the callback returns nil and behaviour is byte-identical.
 Permission fan-out ([core/permissions/spec.go](core/permissions/spec.go)
 `toolClasses`): `lsp_read_symbol` + `ast_grep_search` → **Read** class;
 `ast_grep_rewrite` → **Edit** class (like `lsp_rename`/`MultiEdit`).
+
+### Unattended turns that stop half-way (CLI auto-continue)
+
+In the 2026-11-07 DeepSWE smokes, 3 of 4 attempts at the longest task (tengo)
+ended **before the work was done, and uncommitted**, in two ways ADK reads as a
+final answer (a text-only response):
+- the reply was cut at the output limit (`llm.TruncationNoticePrefix`, appended by
+  `markTruncated`) — a 32,000-token reply;
+- the model (deepseek-v4.1-flash) wrote a **context-compaction summary**
+  ("`<analysis>` Let me chronologically analyze the conversation… `<summary>` …
+  `</summary>`", a format it learned from other harnesses) instead of its next
+  tool call. omnis had not compacted anything.
+
+Neither is a reviewer problem: they are the model stopping. In an interactive
+session the user types "continue"; nobody does in an unattended run. So
+`runOneShot` ([internal/cli/cli.go](internal/cli/cli.go)), when
+`askuser.NonInteractive()`, checks the end of the turn's text (`prematureStop`,
+last 4,000 chars only, so a marker earlier in a turn that went on is ignored) and
+runs a continuation turn on the same session (`continuationPrompt`: name the
+cause, "do not summarise", continue with the next tool call), at most
+`maxContinuations` (2) times, logging a line on stderr. The turn's time limit is
+not re-armed, so the continuation still sees the original deadline. The server and
+the REPL are unchanged (a human is there). Pinned by
+[internal/cli/continue_test.go](internal/cli/continue_test.go).
+
+### Read-only agents (`read_only`, Landlock sandbox)
+
+**Why it is enforced, not requested.** In the first Harbor smoke the `reviewer`
+— described "read-only… Does not modify code", told the same in its instruction —
+ran `sed -i` on project files, wrote a probe spec into the project's `test/`, and
+`git stash`ed (then `stash pop`ped) the coder's uncommitted work to compare with
+the base revision, on 3 of 6 tasks. A failed `stash pop` loses that work. The
+permission layer would have shown a card interactively, but nothing stops it
+unattended or behind a reflexive click. `code_scout`'s instruction even said
+"some tool groups expose edit operations" — it held `lsp_rename`,
+`lsp_code_action`, `ast_grep_rewrite`.
+
+**`read_only: true`** (agent.json; round-trips through Settings and `set_agent`)
+— `applyReadOnly` ([agent/read_only.go](agent/read_only.go)), applied to a root's
+final tool list ([agent/squad.go](agent/squad.go)) and to each sub-agent's
+([agent/build_subagents.go](agent/build_subagents.go)), before deferral:
+- **Bash → `fstools.NewReadOnlyBash`**: `BashIn.ReadOnly` makes `RunBash` run the
+  command under the sandbox ([core/tools/readonly.go](core/tools/readonly.go)
+  `confineReadOnly`). Where the sandbox is unavailable (no Landlock: macOS,
+  Windows, old kernel), only a command `permissions.AllReadOnly` recognises may
+  run; anything else is refused with a message. The safety floor still applies.
+- **Write / Edit / MultiEdit → `scratchOnlyTool`**: refused unless every target
+  path (`file_path`, or each `files[].file_path`) is under a writable root
+  (`fstools.UnderWritable`, symlinks resolved on the longest existing prefix, so a
+  link in `/tmp` into the project does not count).
+- **Removed**: `revert`, `ast_grep_rewrite`, `lsp_rename`, `lsp_code_action`,
+  `worktree_*`, `bash_background`, `monitor`, `bg_cancel`, `run_tests` (it runs
+  commands outside the sandbox), `spawn_session`, the settings writers and the
+  registry installers (`readOnlyDropped`).
+- **MCP**: omnis cannot inspect an MCP tool's effects (ADK's MCP wrapper drops the
+  protocol's `readOnlyHint`), so a read-only agent mounts **only servers declared
+  `"read_only": true` in `mcp_config.json`** (`Server.ReadOnly` → `Handle.ReadOnly`,
+  part of the pool's dedup key so a shared handle never inherits another entry's
+  flag); any other server named in its `mcp_servers` is skipped with a log line
+  (`toolsForAgentConfig`, `TestReadOnlyAgentMountsOnlyReadOnlyMCPServers`). No MCP
+  server ships, and none is mounted unless named, so the default is unchanged.
+
+**The sandbox** ([internal/sandbox/](internal/sandbox/)). `Wrap` rewrites the
+`exec.Cmd` to `<self> __omnis-readonly-exec --rw <dir>… -- /bin/sh -c <cmd>`; the
+helper (`MaybeRunHelper`, first line of `main.go` and `server/main.go`, and of the
+`agent`/`server`/`core/tools`/`internal/sandbox` test mains) locks its OS thread,
+creates a Landlock ruleset that **handles every write right** (WRITE_FILE,
+REMOVE_*, MAKE_*, REFER from ABI 2, TRUNCATE from ABI 3) but no read/execute
+right, grants them beneath `DefaultWritable` (`os.TempDir`, `/tmp`, `/var/tmp`,
+`/dev`, `os.UserCacheDir`, the Go module cache, `~/.npm`, `~/.kube/cache`), sets
+`no_new_privs`, restricts itself and `exec`s the command, which inherits the
+domain. Any setup failure exits 126 — a command never runs unrestricted. Reads,
+execution and the network are untouched, so `go test`, `pytest`, `npx jest`,
+`kubectl get`, `helm list` work; a project cache write (`.pytest_cache`,
+`__pycache__`) fails harmlessly. **`git worktree add` and `git stash` write into
+`.git` and are refused** — the reviewer instruction points at
+`git archive HEAD | tar -x -C /tmp/review-base` and `git show HEAD:<path>`.
+
+**Shipped read-only agents:** `reviewer`, `agentmd_reviewer`, `code_scout`,
+`investigator`, `k8s_investigator`, `k8s_auditor`, `k8s_validator`.
+`TestShippedReadOnlyClaimsAreEnforced` fails when a shipped agent's first
+description sentence claims read-only and it holds a writing tool group without
+`read_only`. Landlock does not touch cluster state: Kubernetes mutations stay the
+k8s change guard's job.
+
+**Verified live** (Coding squad, deepseek-v4.1-flash, project outside `/tmp`): the
+reviewer's `echo probe >> main.go` and `git stash` both failed with "Permission
+denied" and the author's uncommitted change and stash list were untouched; its
+copy to `/tmp` worked; on a real review it loaded `review` and ran every probe in
+`/tmp` copies. Tests: [internal/sandbox/sandbox_test.go](internal/sandbox/sandbox_test.go)
+(writes, `sed -i`, `rm`, `mv`, truncation, `git stash` refused; scratch writes and
+copies allowed), [core/tools/readonly_test.go](core/tools/readonly_test.go),
+[agent/read_only_test.go](agent/read_only_test.go).
+
+### Skill discovery reads the in-prompt catalogue
+
+`skills.LoaderProtocol` and `softskills.LoaderProtocol` used to make
+`list_skills` then `list_softskills` the mandatory first calls of **every**
+invocation of every agent holding those groups — two model round trips, each
+re-sending the whole context, to fetch a list ADK's skill toolset **already puts
+in the system prompt** (`<available_skills>`, one block per toolset). In the
+smoke every reviewer invocation spent its first three calls on
+`list_skills`/`list_softskills`/`load_skill`. The protocols now say to read that
+block and `load_skill` / `load_softskill` every matching entry before acting
+(load ALL matches is kept — the k8s audit precision depends on it); `list_*` stays
+for a missing block or a skill installed mid-session. The four instructions that
+repeated "call list_skills first" (`leader`, `k8s_leader`, `knowledge_leader`,
+`doc_agent`) were aligned. Verified live: the reviewer went straight to
+`load_skill review`.
+
+### Deferred tools (`deferred_tools`) and the fixed prompt
+
+Every declared tool's schema, and the whole system instruction, are re-sent on
+every model call. Measured on the Coding squad's `coder` (the 2026-11-07 Harbor
+smoke, `omnis-benches/reports/harbor-omnis-smoke-2026-11-07.md`): **18.5k tokens**
+per call — 9.1k of instruction, 9.4k for 51 tool declarations — while over six
+trials it used 9 tools (Bash, Edit, Read, Write, MultiEdit, todo, bash_background,
+bg_output, reviewer) and never an `lsp_*`, `ast_grep_*`, `worktree_*` or task-graph
+tool.
+
+- **`deferred_tools`** (agent.json, tool names or `path.Match` globs such as
+  `"lsp_*"`; case kept) — [agent/deferred_tools.go](agent/deferred_tools.go)
+  `applyDeferredTools`, applied to a squad root's final tool list in
+  [agent/squad.go](agent/squad.go) and to each sub-agent's in
+  [agent/build_subagents.go](agent/build_subagents.go). A matching tool is wrapped
+  (`deferredTool`): its `ProcessRequest` always registers it in `req.Tools` (the
+  dispatch map) but adds its declaration only when the session has activated it,
+  so it stays **callable by name** and a direct call activates it. One
+  **`tool_search(query)`** tool is added; its description lists every deferred
+  name, an exact name in the query wins, otherwise terms score 3 in the name / 1
+  in the description, up to 12 loaded per call. Activation is per session
+  (`ctx.SessionID()`) and lasts until the generation is rebuilt. Only plain
+  runnable function tools are wrapped (anything else stays declared). Loading a
+  tool changes the tools prefix, so the prompt cache misses once per load.
+  `tool_search` is in the shipped `permissions.allow`. `deferred_tools`
+  round-trips through the Settings GET/PUT allowlist and `set_agent`
+  (`TestParsedAgentRoundTripKeepsDeferredTools`). **No-op contract:** no pattern,
+  or none matching, returns the list unchanged and adds no `tool_search`.
+- **Shipped on `coder`:** `lsp_*`, `ast_grep_*`, `worktree_*`, the task-graph
+  tools (`TaskCreate`/`TaskUpdate`/`task_next`/`task_list`), `monitor`,
+  `bg_cancel`. Its instruction tells it to `tool_search("lsp")` (or `ast_grep`,
+  `worktree`) once when a task needs them. Verified live (deepseek-v4.1-flash):
+  asked for references "using the language server", it called `tool_search`, then
+  `lsp_references`, and answered correctly.
+- **Sub-agent catalogue:** `buildSubAgentCapabilitiesBlock` lists only the skill
+  **names** for a sub-agent with no explicit `skills` list (= every installed
+  skill); it used to print each description, ~1.4k tokens per such agent on
+  every leader call (`code_docs` + `refactorer` on `coder`).
+- **Result:** `coder`'s first request fell from **18,527 to 12,707 tokens**
+  (instruction 9,143 → 6,440; tools 51/9,384 → 32/6,267), measured on the same
+  config before/after from the `-d` event log. The behavioural cost driver of the
+  full squad (the `reviewer` loop: 720 Bash calls over the six trials) is
+  untouched.
 
 ### Kubernetes squad (change validation)
 
@@ -2946,6 +3202,7 @@ mistaken for a broken reference.
 | `OMNIS_GOAL_MAX_TURNS` | Hard ceiling on how many turns one `/goal` may drive before the loop stops regardless of the condition (default `30`) |
 | `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `2000`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
 | `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `10000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
+| `OMNIS_TURN_MAX_SECONDS` | Per-turn wall-clock limit in seconds (default `0` = none). Never enforced: past half of it, every model call of the turn (root and sub-agents) carries a "N min left" note, and in the last fifth a "finish now" note. Overrides `turn_budget.max_seconds` in `agents.json`. Armed on the server and, for this axis only, on the CLI/TUI. See "Per-turn spend budget" |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_SESSION_INDEX_IDLE` | How long the past-session search index may sit unused before it is dropped from memory (Go duration, default `10m`; `0` keeps it resident once loaded). The next search transparently re-reads it from disk. See "Session search" |
 | `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
@@ -2971,7 +3228,7 @@ mistaken for a broken reference.
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
 | `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
 | `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
-| `OMNIS_NON_INTERACTIVE` | `1`/`true`/`yes`/`on` — declares that **nobody can answer a prompt in this process**, so a `PreToolUse` hook's `ask` escalation is **refused** instead of waiting on a card no one will ever resolve (`askuser.DefaultTimeout` is `0` by design, so that wait ends only with the run context). What a bench or a CI run needs. Opt-in and deliberately DECLARED, never inferred from "does this session have a listener" — see `canEscalate` in [agent/hooks_ask.go](agent/hooks_ask.go) for why that inference is unsound. Scoped to the hook escalation only: the permission layer already has `defaultMode: bypassPermissions` for the same need, and the `ask_user` tool is untouched |
+| `OMNIS_NON_INTERACTIVE` | `1`/`true`/`yes`/`on` — declares that **nobody can answer a prompt in this process**, so a `PreToolUse` hook's `ask` escalation is **refused** instead of waiting on a card no one will ever resolve (`askuser.DefaultTimeout` is `0` by design, so that wait ends only with the run context). What a bench or a CI run needs. Opt-in and deliberately DECLARED, never inferred from "does this session have a listener" — see `canEscalate` in [agent/hooks_ask.go](agent/hooks_ask.go) for why that inference is unsound. Scoped to the hook escalation only: the permission layer already has `defaultMode: bypassPermissions` for the same need, and the `ask_user` tool is untouched. It also makes **`AskUserQuestion` answer itself** at once (`Cancelled` + `tools.NonInteractiveAnswer`: "nobody will answer — decide, state the assumption, continue") instead of waiting on a card nobody resolves (the first Harbor smoke had the coder ask which branch to use). `askuser.NonInteractive()` is the one reader |
 | `OMNIS_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
 | `OMNIS_HOME` | Per-user state root for all mutable files (default `$HOME/.omnis`) |
 | `OMNIS_PATH_AUGMENT` | `true`/`false` (default `true`) — at startup ([internal/binpath/](internal/binpath/) `binpath.Ensure`, called from `BuildInfrastructure`) append the standard user-local bin dirs (`~/.local/bin` from pipx/pip-user, `$GOBIN`/`$GOPATH/bin`/`~/go/bin` from `go install`, `$CARGO_HOME/bin`/`~/.cargo/bin`, `~/.deno/bin`) to the process `$PATH`. Append-only + idempotent, so it never shadows system binaries; makes a dependency-gate auto-install (skill/MCP/LSP `requires`) that drops its binary in a user dir immediately visible to `exec.LookPath` and every spawned subprocess (fixes the "installed to ~/.local/bin but not on PATH" trap for pipx, and for the existing gopls `go install`→`~/go/bin` gate). `false` disables. |
@@ -4757,6 +5014,24 @@ guarantee.**
   from the material you have already gathered, and state plainly which parts are
   unverified"). Verified end-to-end: the model stops calling tools and writes an
   honest incomplete answer.
+**Time limit (`turn_budget.max_seconds`, `OMNIS_TURN_MAX_SECONDS`) — told, never
+enforced.** `budget.Limits.MaxDuration`; `Store.TimeLeft`. Once half of it is
+spent, `timeNoteCallback` ([agent/budget_plugin.go](agent/budget_plugin.go))
+appends a `[Time: about N min left …]` line to every model call of the turn — on
+the root (budget runner plugin `BeforeModelCallback`) and on every sub-agent
+(attached directly) — and in the last fifth it says to finish now: no new review,
+delegation or long-running command. It never blocks or asks. Armed by the server
+like the rest of the budget, and **by the CLI and TUI for the time axis only**
+(`cli.Config`/`tui.Config` `Budget` + `TimeLimit`), so they still never prompt on
+spend. **GOTCHA — the CLI has two turn paths:** the REPL goes through
+`runTurnSteering`, a one-shot (prompt argument or piped stdin — what Harbor uses)
+calls `runTurn` directly from `runOneShot`; both call `armTimeLimit`. The first
+version armed only the REPL, and a live check showed the agent never received a
+note in one-shot mode. The Harbor adapter sets it from the task's `[agent] timeout_sec` minus 60 s:
+in the 2026-11-07 smokes 4 of 9 full trials hit the task's wall clock (a second
+review started with minutes left, `sleep 540` polling a run that could not
+finish) because nothing told the agents a deadline existed.
+
 **Per-agent cap (`max_tool_calls`) — a different instrument.** An agent's
 `agent.json` may set `"max_tool_calls": N`, capping how many tool calls **that
 agent** makes in one turn (0/absent = uncapped; folded into `Limits.PerAgent` by
@@ -6116,6 +6391,24 @@ unchanged from `NewSerpAPITools`/`NewSerperTools`'s own nil-on-empty-key
 behaviour; DDG only kicks in as a fallback when the agent explicitly declared
 `"ddg"` too.
 
+**`WebFetch` dispatches on the response, not the URL** ([core/tools/web.go](core/tools/web.go)
+`runWebFetch`). A non-2xx status is `error fetching URL: HTTP <status>` (an
+Akamai "Access Denied" 403 used to be rendered as Markdown and read as a source —
+and, lacking the `error ` prefix, cached). A PDF (`application/pdf`, or a body
+starting `%PDF-` whatever the header says) goes through `pdfToText` → `pdftotext
+-layout` on a temp file; missing binary, no text layer (scanned) and extraction
+failures each return an explicit `error …` naming the remedy. `text/*` and JSON
+come back raw; any other binary type is an explicit error; HTML (or no
+Content-Type) takes the original goquery → Markdown path. Bodies are capped at
+32 MiB. **GOTCHA:** before this, every PDF went to the HTML parser and failed with
+`error parsing HTML: html: open stack of elements exceeds 512 nodes` — 9 of a
+single Knowledge research turn's fetches, including 4 retries of the same
+manufacturer manual, which the leader then had to fetch itself with `curl` +
+`pdftotext` (sub-agents have no Bash). `pdftotext` (poppler-utils) is NOT a
+declared package dependency; without it a PDF fetch degrades to that explicit
+error. Pinned by [core/tools/web_test.go](core/tools/web_test.go) (builds a
+minimal PDF in-process; skips the PDF case without `pdftotext`).
+
 **Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
 `WebFetch` and every `WebSearch` provider go through `sharedWebCache`
 (15 min TTL, 512 entries, process memory), keyed by the turn's **root session**
@@ -6166,8 +6459,10 @@ silently the same way. Regression coverage:
    ```json
    { "skills": ["my-skill", "other-skill"] }
    ```
-   An empty list means no skills; the field is absent for agents that
-   don't expose the `"Skill"` tool at all.
+   An empty or absent list means **every installed skill** (`skills.Toolset`
+   only filters when the list is non-empty), not none; to give an agent no
+   skills, leave `"Skill"` out of its `tools`. For such an agent the leader's
+   sub-agent catalogue lists the skill NAMES only (see "Deferred tools").
 
 Hot-reload picks up changes to `agent.json` without a process restart.
 The skill files themselves are read on demand at `load_skill` call time.

@@ -47,6 +47,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/blouargant/omnis/internal/sandbox"
 	"log"
 	"net"
 	"net/http"
@@ -81,6 +82,9 @@ var (
 )
 
 func main() {
+	// The read-only sandbox re-executes this binary as its helper; in that
+	// mode it never returns (internal/sandbox).
+	sandbox.MaybeRunHelper()
 	// Background-daemon subcommands are dispatched before run()'s flag parsing.
 	// "start" re-execs this binary detached and frees the terminal; "stop"
 	// signals it to shut down; "status" reports liveness. Any other first arg

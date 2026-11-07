@@ -14,6 +14,12 @@ const maxGenerateAttempts = 3
 var generateRetryBaseDelay = 750 * time.Millisecond
 
 func shouldRetryHTTPError(statusCode int, body string) bool {
+	// A request too long for the model fails identically every time. LiteLLM
+	// wraps the backend's 400 in a 500, which would otherwise be retried
+	// verbatim; the compression plugin recovers from it instead.
+	if isContextOverflowBody(body) {
+		return false
+	}
 	if statusCode == http.StatusRequestTimeout || statusCode == http.StatusConflict || statusCode == http.StatusTooEarly || statusCode == http.StatusTooManyRequests {
 		return true
 	}
@@ -68,4 +74,16 @@ func contextDone(ctx context.Context) bool {
 	}
 	err := ctx.Err()
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// isContextOverflowBody reports whether an error body says the prompt did not
+// fit the context window. Kept narrow (internal/compress has the full list).
+func isContextOverflowBody(body string) bool {
+	b := strings.ToLower(body)
+	for _, m := range []string{"maximum context length", "context_length_exceeded", "contextwindowexceeded", "prompt is too long"} {
+		if strings.Contains(b, m) {
+			return true
+		}
+	}
+	return false
 }

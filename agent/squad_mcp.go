@@ -57,3 +57,22 @@ func (m *Manager) SquadMCPServers(sessionID, squadName string) []string {
 	}
 	return squadMCPServers(inst.Settings, squadName)
 }
+
+// ContextWindow returns the context window and the reply reserve (tokens)
+// the compression plugin of the named squad's root uses for a session, from
+// the generation the session is pinned to (never pins). Zeros when unknown —
+// compress.Limits then applies its defaults.
+func (m *Manager) ContextWindow(sessionID, squadName string) (window, reserve int) {
+	inst := m.Peek(sessionID)
+	if inst == nil {
+		return 0, 0
+	}
+	sq := inst.Squad(squadName)
+	if sq == nil {
+		sq = inst.Default()
+	}
+	if sq == nil {
+		return 0, 0
+	}
+	return sq.LeaderCfg.ContextLength, sq.LeaderCfg.CompressionReserve()
+}

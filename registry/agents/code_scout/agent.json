@@ -6,6 +6,7 @@
   "max_instances": 5,
   "model_ref": "simple",
   "name": "code_scout",
+  "read_only": true,
   "skills": [],
   "softskills_dir": "",
   "tools": [

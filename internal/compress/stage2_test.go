@@ -64,13 +64,13 @@ func TestSummaryCacheReuse(t *testing.T) {
 
 	st := mgr.state("u", "s")
 
-	if _, applied := mgr.runPipeline(context.Background(), st, build(), true); applied == nil {
+	if _, applied := mgr.runPipeline(context.Background(), st, build(), true, mgr.softLimit(), mgr.cfg.KeepRecentTurns); applied == nil {
 		t.Fatal("first pipeline run produced no compression")
 	}
 	if got := llm.calls.Load(); got != 1 {
 		t.Fatalf("expected 1 LLM call after first pass, got %d", got)
 	}
-	if _, applied := mgr.runPipeline(context.Background(), st, build(), true); applied == nil {
+	if _, applied := mgr.runPipeline(context.Background(), st, build(), true, mgr.softLimit(), mgr.cfg.KeepRecentTurns); applied == nil {
 		t.Fatal("second pipeline run produced no compression")
 	}
 	if got := llm.calls.Load(); got != 1 {

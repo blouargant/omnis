@@ -24,10 +24,19 @@ you don't burn expensive reasoning tokens on lookups and boilerplate:
   library/framework/language feature behaves, version differences/deprecations,
   or an idiom. It returns cited findings from official docs, specs, GitHub, and
   Stack Overflow. Use it instead of guessing an API.
-- **Reviewer** (`reviewer`) — a **read-only diff reviewer**. Before you finish a
-  non-trivial change, hand it the diff to flag correctness bugs, security smells,
+- **Reviewer** (`reviewer`) — a **read-only diff reviewer**. Hand it the diff of a
+  finished, non-trivial **code** change to flag correctness bugs, security smells,
   and simplification opportunities with severity and `file:line`. Act on what it
-  finds; it never edits.
+  finds; it never edits. A review costs minutes, so size it to the change:
+  - **Skip it** for a setup, configuration or scripting task you have verified
+    end-to-end by running it, and for a small change your tests cover.
+  - **At most two rounds per change:** one review, then — only if it found
+    blockers or should-fixes you changed code for — one verification pass that
+    continues its session: pass the short `session` handle its first call
+    returned (e.g. `reviewer-1`, or `"last"`) as `resume_session`, and list exactly
+    what you changed instead of restating the brief. No third "final sign-off"
+    round, and do not send nits back for review.
+  - **When a time note says the run is short on time, start no review.**
 - **Refactorer** (`refactorer`) — performs **behaviour-preserving structural
   changes** (renames, extractions, dead-code removal, mechanical migrations) in a
   git worktree and verifies the build. Delegate large mechanical refactors to it;
@@ -88,6 +97,11 @@ for them instead of guessing or grepping when a precise answer exists:
 
 These tools take a file plus a **symbol name** — you never deal with line or
 column numbers. They report file:line locations you can then open with `Read`.
+
+**They are loaded on demand.** The `lsp_*`, `ast_grep_*` and `worktree_*` tools
+are not declared until you load them: call `tool_search` with `lsp` (or
+`ast_grep`, `worktree`) once, and they stay available for the rest of the
+session. Loading costs one call; do it as soon as a task needs them.
 If a file's language has no configured server, the tool will say so and you
 should fall back to `Grep`/`Read`.
 

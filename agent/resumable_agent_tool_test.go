@@ -15,6 +15,7 @@ func newTestResumable(cap int, ttl time.Duration) *resumableAgentTool {
 		ttl:          ttl,
 		cap:          cap,
 		handles:      map[string]*subSession{},
+		aliases:      map[string]string{},
 	}
 }
 
@@ -130,7 +131,43 @@ func TestResumableResumeInUseRejected(t *testing.T) {
 	rt := newTestResumable(8, time.Minute)
 	rt.handles["h"] = &subSession{lastUsed: time.Now(), inUse: true}
 	// resolveSession returns before touching toolCtx on the in-use branch.
-	if _, err := rt.resolveSession(nil, "h"); err == nil {
+	if _, _, _, err := rt.resolveSession(nil, "h"); err == nil {
 		t.Fatal("resuming an in-use session should error")
+	}
+}
+
+// A resume handle the model paraphrased must not silently start over: the
+// caller meant "continue". It never reaches another session's sub-agent.
+func TestResumableHandleResolution(t *testing.T) {
+	rt := newTestResumable(8, time.Hour)
+	now := time.Now()
+	rt.handles["id1"] = &subSession{lastUsed: now.Add(-2 * time.Minute), alias: "reviewer-1"}
+	rt.handles["id2"] = &subSession{lastUsed: now.Add(-1 * time.Minute), alias: "reviewer-2"}
+	rt.handles["idX"] = &subSession{lastUsed: now, alias: "reviewer-3", parent: "someone-else"}
+	for a, id := range map[string]string{"reviewer-1": "id1", "reviewer-2": "id2", "reviewer-3": "idX"} {
+		rt.aliases[a] = id
+	}
+	resolve := func(h string) (string, string) {
+		id, _, note, err := rt.resolveSession(nil, h)
+		if err != nil {
+			t.Fatalf("%q: %v", h, err)
+		}
+		rt.release(id)
+		return id, note
+	}
+	if id, note := resolve("reviewer-1"); id != "id1" || note != "" {
+		t.Fatalf("alias: %s %q", id, note)
+	}
+	if id, note := resolve("id1"); id != "id1" || note != "" {
+		t.Fatalf("raw id: %s %q", id, note)
+	}
+	if id, _ := resolve("last"); id != "id1" { // id1 was just used, so it is the latest now
+		t.Fatalf("last: %s", id)
+	}
+	if id, note := resolve("sentinel"); id != "id1" || note == "" {
+		t.Fatalf("unknown handle must continue the latest own session, with a note: %s %q", id, note)
+	}
+	if id, note := resolve("reviewer-3"); id == "idX" || note == "" {
+		t.Fatalf("another session's handle was resumed: %s %q", id, note)
 	}
 }

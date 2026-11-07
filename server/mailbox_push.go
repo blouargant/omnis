@@ -420,7 +420,7 @@ func (pm *pushManager) injectTurn(ctx context.Context, d serverDeps, sessionID, 
 // ring + budget update while it runs. Called only for the answering root agent
 // from its session-scoped ADK stream (never the shared bus), so concurrent turns
 // on other sessions cannot contaminate it.
-func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, output, cacheRead, cacheCreate int64, acc map[string]sessions.TokenUsage, priceFor func(string) agentPrices) {
+func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, output, cacheRead, cacheCreate int64, acc map[string]sessions.TokenUsage, priceFor func(string) agentPrices, rootCfg toolkitagent.RuntimeAgentConfig) {
 	if agent == "" {
 		return
 	}
@@ -449,14 +449,14 @@ func (pm *pushManager) recordInjectedUsage(sessionID, agent string, prompt, outp
 		"cache_read_price_per_m":   pr.cacheRead,
 		"cache_create_price_per_m": pr.cacheCreate,
 	})
-	// The latest prompt size IS the current context-window fill; use the default
-	// window (the same basis as the cold usage-estimate endpoint) so the ring is
-	// consistent whether it's fed live or rebuilt from history on reload.
-	window := compress.DefaultWindowTokens
+	// The latest prompt size IS the current context-window fill, drawn against
+	// the answering root's own window and the thresholds compression acts on
+	// (the same basis as the live interactive stream and usage-estimate).
+	window, soft, hard := compress.Limits(rootCfg.ContextLength, rootCfg.CompressionReserve())
 	pm.bcast.broadcastData("context_usage", sessionID, map[string]any{
 		"tokens_used":   int(prompt),
-		"soft_limit":    int(float64(window) * compress.DefaultSoftRatio),
-		"hard_limit":    int(float64(window) * compress.DefaultHardRatio),
+		"soft_limit":    soft,
+		"hard_limit":    hard,
 		"window_tokens": window,
 	})
 }
@@ -665,7 +665,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 				if u := ev.LLMResponse.UsageMetadata; u != nil {
 					cacheRead, cacheCreate := llm.CacheCounts(u)
 					pm.recordInjectedUsage(sessionID, rootAgent, int64(u.PromptTokenCount),
-						int64(u.CandidatesTokenCount), cacheRead, cacheCreate, usageAccum, priceFor)
+						int64(u.CandidatesTokenCount), cacheRead, cacheCreate, usageAccum, priceFor, sq.LeaderCfg)
 				}
 			}
 			if ev.Content == nil {

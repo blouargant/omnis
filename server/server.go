@@ -818,17 +818,24 @@ func newEngine(d serverDeps) *gin.Engine {
 	})
 	auth.GET("/sessions/:id/usage-estimate", func(c *gin.Context) {
 		id := c.Param("id")
-		if _, ok := d.Registry.Get(id); !ok {
+		meta, ok := d.Registry.Get(id)
+		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
+		// The thresholds of the session's own root model, as compression uses them.
+		var ctxWin, ctxReserve int
+		if d.Manager != nil {
+			ctxWin, ctxReserve = d.Manager.ContextWindow(id, meta.Squad)
+		}
+		window, soft, hard := compress.Limits(ctxWin, ctxReserve)
 		turns, err := sessions.LoadConversationTurns(id)
 		if err != nil || len(turns) == 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"tokens_used": 0, "prompt_total": 0, "output_total": 0,
-				"window_tokens": compress.DefaultWindowTokens,
-				"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
-				"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),
+				"window_tokens": window,
+				"soft_limit":    soft,
+				"hard_limit":    hard,
 			})
 			return
 		}
@@ -885,9 +892,9 @@ func newEngine(d serverDeps) *gin.Engine {
 			"output_total":  totalOutput,
 			"agents":        agents,
 			"budget":        budget,
-			"window_tokens": compress.DefaultWindowTokens,
-			"soft_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultSoftRatio),
-			"hard_limit":    int(float64(compress.DefaultWindowTokens) * compress.DefaultHardRatio),
+			"window_tokens": window,
+			"soft_limit":    soft,
+			"hard_limit":    hard,
 		})
 	})
 

@@ -84,7 +84,9 @@ func NewTools(deps Deps) []tool.Tool {
 				"(a raw model id), `enabled`, `description`, `tools` (string list), `skills` (string list), "+
 				"`max_instances`, `max_tool_calls`, `max_tool_calls_per_call`, `resumable_sessions`, `subagents` (string list — the agents "+
 				"THIS agent may delegate to; every name must be an enabled agent and the graph must stay acyclic, "+
-				"or the config will fail to reload). The agent must already exist (use the registry tools to "+
+				"or the config will fail to reload), `deferred_tools` (string list of tool names or globs such as "+
+				"\"lsp_*\" whose schemas are only sent once the session loads them with tool_search), `read_only` (bool — the agent can change no "+
+				"file outside the temp directories: sandboxed Bash, writes limited to scratch paths). The agent must already exist (use the registry tools to "+
 				"install a new one). Covers \"switch agent X to model Y\".",
 			setAgent(deps)),
 
@@ -306,6 +308,11 @@ type setAgentIn struct {
 	// runtime config fail to resolve, so a bad value here breaks the next reload
 	// rather than merely degrading one agent.
 	SubAgents *[]string `json:"subagents,omitempty"`
+	// DeferredTools are tool names or globs ("lsp_*") declared only once the
+	// session loads them with tool_search.
+	DeferredTools *[]string `json:"deferred_tools,omitempty"`
+	// ReadOnly confines the agent: no file change outside the scratch dirs.
+	ReadOnly *bool `json:"read_only,omitempty"`
 }
 
 func setAgent(deps Deps) functiontool.Func[setAgentIn, writeResult] {
@@ -376,6 +383,20 @@ func setAgent(deps Deps) functiontool.Func[setAgentIn, writeResult] {
 				entry["subagents"] = *in.SubAgents
 			} else {
 				delete(entry, "subagents")
+			}
+		}
+		if in.ReadOnly != nil {
+			if *in.ReadOnly {
+				entry["read_only"] = true
+			} else {
+				delete(entry, "read_only")
+			}
+		}
+		if in.DeferredTools != nil {
+			if len(*in.DeferredTools) > 0 {
+				entry["deferred_tools"] = *in.DeferredTools
+			} else {
+				delete(entry, "deferred_tools")
 			}
 		}
 		path, layer, werr := configedit.WriteAgentEntry(name, entry)
