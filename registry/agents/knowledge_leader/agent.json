@@ -31,5 +31,6 @@
     "planning",
     "worktree",
     "bg"
-  ]
+  ],
+  "max_tool_calls": 80
 }
