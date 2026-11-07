@@ -17,9 +17,8 @@ import (
 func New() []tool.Tool {
 	return []tool.Tool{
 		mustTool("Bash",
-			"Run a shell command via /bin/sh -c. Use for arbitrary shell operations. Times out after 120s by default (pass `timeout` for long builds). "+
-				"Output over 50,000 bytes keeps its END and the full output is saved to a file whose path is given — Read or Grep that file rather than re-running the command. "+
-				"Arguments: `command` (string, required) — the full shell command line to run. Do NOT use any other field name (e.g. `cmd`, `script`, `file_path`); calls with extra or missing properties are rejected.",
+			"Run a shell command (/bin/sh -c) in the working directory. Times out after 120 s unless `timeout` (seconds) is set. "+
+				"Output over 50 KB keeps its end and saves the full output to a file it names: Read or Grep that file instead of re-running the command.",
 			func(ctx adk.ToolContext, in BashIn) (BashOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				in.Env = ShellEnvFrom(ctx)
@@ -27,18 +26,16 @@ func New() []tool.Tool {
 				return BashOut{Output: out}, nil
 			}),
 		mustTool("Read",
-			"Read a file and return numbered lines. Use when you need to inspect file content or reference specific line numbers in a subsequent write. "+
-				"Arguments: `file_path` (string, required), "+
-				"`start_line` (int, optional, 1-based), `end_line` (int, optional). Returns at most 2,000 lines / 30,000 characters; "+
-				"a longer file is cut on a whole line and the result ends with the `start_line` to continue from.",
+			"Read a file as numbered lines; `start_line`/`end_line` (1-based) select a range. "+
+				"At most 2,000 lines / 30,000 characters per call: a longer file is cut on a whole line and ends with the `start_line` to continue from.",
 			func(ctx adk.ToolContext, in ReadIn) (ReadOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				out, _ := RunRead(context.Background(), in)
 				return ReadOut{Content: out}, nil
 			}),
 		mustTool("Write",
-			"Write content to a file. Automatically snapshots the previous contents so you can revert. Creates parent directories if needed. "+
-				"Arguments: `file_path` (string, required), `content` (string, required).",
+			"Create or overwrite a file, creating parent directories. Use it for new files and full rewrites, Edit for changes. "+
+				"The previous content is kept for revert.",
 			func(ctx adk.ToolContext, in WriteIn) (WriteOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				_, statErr := os.Stat(in.Path)
@@ -47,25 +44,17 @@ func New() []tool.Tool {
 				return WriteOut{Result: out, Created: created}, nil
 			}),
 		mustTool("Edit",
-			"Perform a surgical in-place string replacement in a file. "+
-				"Automatically snapshots the file so you can revert. "+
-				"Fails if `old_string` is not found, or if it appears more than once and `replace_all` is false — "+
-				"add more surrounding context to make `old_string` unique, or set `replace_all:true`. "+
-				"Arguments: `file_path` (string, required), `old_string` (string, required), `new_string` (string, required), "+
-				"`replace_all` (bool, optional, default false).",
+			"Replace `old_string` with `new_string` in a file. `old_string` must occur exactly once unless `replace_all` is true: "+
+				"include surrounding lines to make it unique. The previous content is kept for revert.",
 			func(ctx adk.ToolContext, in EditIn) (EditOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				out, _ := RunEdit(context.Background(), in)
 				return EditOut{Result: out}, nil
 			}),
 		mustTool("MultiEdit",
-			"Apply many string replacements across one or more files in a single call — the efficient way to make a "+
-				"multi-file change (a refactor, a rename-by-hand, a coordinated edit) instead of many separate Edit calls. "+
-				"Each edit follows the same rules as Edit (old_string must be present, and unique unless replace_all is set); "+
-				"edits within a file apply in order. The batch is atomic: if any edit in any file would fail, nothing is "+
-				"written and the error names the offending file/edit. Snapshots each written file so you can revert. "+
-				"Arguments: `files` (array, required) — each item is `{ file_path (string), edits (array of "+
-				"{ old_string, new_string, replace_all? }) }`.",
+			"Several Edit-style replacements across one or more files in one atomic call: "+
+				"`files` = [{file_path, edits: [{old_string, new_string, replace_all?}]}]. "+
+				"Edits apply in order; if any fails, nothing is written. The previous contents are kept for revert.",
 			func(ctx adk.ToolContext, in MultiEditIn) (MultiEditOut, error) {
 				cwd := sessionCwd(ctx)
 				for i := range in.Files {
@@ -75,34 +64,30 @@ func New() []tool.Tool {
 				return MultiEditOut{Result: out}, nil
 			}),
 		mustTool("Grep",
-			"Search file contents for a regex (or literal) pattern. Returns `path:line:text` matches, directories searched recursively. "+
-				"Respects .gitignore and skips binary files inside a git repository. "+
-				"Output stops at 100 matches (raise with `limit`, or narrow with `path`/`glob`) and lines are cut at 500 chars. "+
-				"Prefer this over Bash grep. To read a file, use Read, not Grep.",
+			"Search file contents for a regex (or `literal`) pattern; directories are searched recursively. "+
+				"In a git repository, .gitignore is respected and binary files are skipped. "+
+				"Stops at 100 matches (`limit`, or narrow with `path`/`glob`); lines are cut at 500 characters.",
 			func(ctx adk.ToolContext, in GrepIn) (GrepOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				out, _ := RunGrep(context.Background(), in)
 				return GrepOut{Matches: out}, nil
 			}),
 		mustTool("Glob",
-			"Find files matching a glob pattern, e.g. '**/*.go'. Returns sorted matches.",
+			"Find files matching a glob pattern, e.g. '**/*.go'. Returns sorted paths.",
 			func(ctx adk.ToolContext, in GlobIn) (GlobOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				out, _ := RunGlob(context.Background(), in)
 				return GlobOut{Files: out}, nil
 			}),
 		mustTool("revert",
-			"Restore a file to its state before the last write call. Use when a write produced incorrect results. "+
-				"Arguments: `file_path` (string, required).",
+			"Restore a file to its content before the last Write, Edit or MultiEdit.",
 			func(ctx adk.ToolContext, in RevertIn) (RevertOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				out, _ := RunRevert(context.Background(), in)
 				return RevertOut{Result: out}, nil
 			}),
 		mustTool("mime",
-			"Inspect a file's content (magic bytes) to detect its true MIME type and canonical extension, "+
-				"then compare against the filename extension. Returns a formatted identity card. "+
-				"Arguments: `file_path` (string, required).",
+			"Detect a file's real MIME type and extension from its content, and compare them with its name.",
 			func(ctx adk.ToolContext, in MimeIn) (MimeOut, error) {
 				in.Path = resolveAgainst(sessionCwd(ctx), in.Path)
 				out, _ := RunMime(context.Background(), in)

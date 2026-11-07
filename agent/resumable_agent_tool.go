@@ -99,10 +99,8 @@ func newResumableAgentTool(sa adkagent.Agent) (runnableTool, error) {
 // Description appends a note so the leader knows the call is resumable.
 func (t *resumableAgentTool) Description() string {
 	return t.runnableTool.Description() +
-		"\n\nThis sub-agent keeps its session: the result includes a short `session` handle (e.g. `" + t.Name() + "-1`). " +
-		"Pass that handle back as `resume_session` on a later call to CONTINUE the same " +
-		"conversation (it remembers its prior context and work); omit it to start fresh. " +
-		"`resume_session: \"last\"` continues your most recent session with this sub-agent."
+		"\n\nThe result carries a `session` handle (e.g. `" + t.Name() + "-1`): pass it, or \"last\", as " +
+		"`resume_session` to continue that conversation with its context; omit it to start fresh."
 }
 
 // Declaration adds the optional `resume_session` parameter to the sub-agent's
@@ -124,9 +122,7 @@ func (t *resumableAgentTool) Declaration() *genai.FunctionDeclaration {
 	}
 	props["resume_session"] = &genai.Schema{
 		Type: genai.TypeString,
-		Description: "Optional. The `session` handle returned by a previous call to this sub-agent. " +
-			"Pass it to CONTINUE that conversation (the sub-agent keeps its prior context); " +
-			"omit it to start a fresh, independent session.",
+		Description: "optional: a `session` handle from an earlier call, or \"last\"",
 	}
 	params.Properties = props
 	decl.Parameters = params

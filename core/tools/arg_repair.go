@@ -21,6 +21,8 @@ func RepairToolArgs(name string, args map[string]any) {
 		return
 	}
 	switch name {
+	case "Bash":
+		renameKey(args, "command", "cmd", "script", "shell_command", "commandLine")
 	case "Grep":
 		renameKey(args, "path", "file_path", "dir", "directory")
 		renameKey(args, "ignore_case", "ignoreCase", "case_insensitive", "-i", "i")

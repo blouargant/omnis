@@ -380,6 +380,10 @@ and driven over HTTP; **nothing imports omnis**, so they evolve independently.
   premium's coarse streaming). Seeded k8s bench:
   `squad-bench/tasks-kubernetes.json` (+ `README-kubernetes.md`) sweeps model tiers
   for `k8s_editor`/`k8s_cleaner`.
+- **`prompt-size/`** — measures the **fixed prompt** (system instruction + tool
+  declarations) of every agent of a checkout, against a fake model server, at no
+  model cost (see "Fixed prompt of every agent"). Re-run it after touching an
+  instruction, a shared block or a tool description.
 - **`model-probe/`** — verifies a live OpenAI-compatible **endpoint + model**
   supports the features omnis actually uses with **real requests**: streamed chat,
   tool calling (streaming **and** non-streaming), **parameterless tools over
@@ -1777,6 +1781,66 @@ for a missing block or a skill installed mid-session. The four instructions that
 repeated "call list_skills first" (`leader`, `k8s_leader`, `knowledge_leader`,
 `doc_agent`) were aligned. Verified live: the reviewer went straight to
 `load_skill review`.
+
+Since the fixed-prompt pass below, the skill and soft-skill rules live in **one
+place each**: the toolset's own system instruction (`skillInstruction` in
+[internal/skills/skills.go](internal/skills/skills.go), `instruction` in
+[internal/softskills/softskills.go](internal/softskills/softskills.go)), which ADK
+places right before its `<available_skills>` list. `skills.LoaderProtocol`,
+`softskills.LoaderProtocol` and `softskills.LoaderRule` are gone, and the leaders'
+own "call list_softskills once" lines were removed (they contradicted the rule).
+
+### Fixed prompt of every agent (measured, 2026-11-07)
+
+Pi's fixed prompt is ~1.7k tokens with 4 tools; omnis's squad roots were at
+12.5k–14.7k per model call. **`omnis-benches/prompt-size/`** measures it for the
+whole tree at no model cost: `run.sh <omnis-checkout>` builds the checkout, uses
+its `config/` + `registry/` as the only config, points every agent at a fake
+OpenAI server that records each request and calls each sub-agent tool once per
+conversation, runs one CLI turn per squad, and reports per agent the first
+request's instruction and tool-declaration tokens (chars/4). The pass that
+followed (sum of first requests **185k → 139k tokens, −25 %**; System root 14.0k →
+9.1k, Coding 12.6k → 9.4k, Kubernetes 14.7k → 11.0k, Helper 12.8k → 10.2k):
+
+- **Shared texts said the same rule several times.** The skill discipline was
+  stated five times (~1.4k tokens on 16–18 agents); the universal contract
+  (`agentkit.SystemPrompt`) opened with two paragraphs about "the harness" and
+  named tools that do not exist (`compact_now`, `task_create`); the language,
+  choice, steering and out-of-scope blocks explained their rules with examples.
+  Each was rewritten to its rules only. **Every rule that came from an observed
+  failure was kept** (load every matching skill; the `name` parameter; prose
+  question ends the turn; never offload the routing decision; quote the user's
+  request verbatim; a sub-agent call is final and an identical re-call repeats
+  it; stop after two unhelpful attempts) and the tests that pin them still pass.
+- **The sub-agent block contradicted the fan-out rule**: it said "call at most one
+  sub-agent at a time" while the leader instructions say to issue independent
+  calls together. It now says the latter.
+- **Tool descriptions repeated their parameters** ("Arguments: `file_path`
+  (string, required)…") already in the schema, and warned against wrong argument
+  names that `RepairToolArgs` now repairs (`cmd` → `command` was added for Bash).
+  Descriptions of the fs tools, `AskUserQuestion`, the teammate tools,
+  `calculate`, `curate_session`, `record_session_feedback`, `handoff_to_router`
+  and the resumable sub-agent note were cut to what the schema does not say.
+- **The router gets no operating contract** (`agentkit.AgentConfig.NoContract`,
+  set for the router squad's root): "restate the request, plan, report" only cost
+  it tokens — and output — on every message, and its text is withheld anyway.
+- **A group's loader protocol is skipped when the agent's own instruction already
+  documents those tools** (registries: mentions `install_remote_item`; settings:
+  `get_settings`) — the Helper's instruction does, in more detail.
+- **Leader instructions** (`leader`, `k8s_leader`, `knowledge_leader`) lost the
+  steps the contract and blocks already state (restate, plan, respect
+  permissions, sub-agent statelessness, `list_softskills`).
+
+Left as they are: the router's own instruction (routing accuracy is
+benchmarked), the k8s/knowledge domain rules, ADK's built-in "You are an agent.
+Your internal name is…" line, and the tool sets themselves. Behaviour was checked
+with a squad-bench A/B (`squad-bench/setup-ab.sh`, `tasks-prompt-ab.json`, 9 tasks
+× 2, whole fleet on deepseek-v4.1-flash): same correctness in both arms, root
+prompt per call −18 % to −38 % live, total cost unchanged in that sample (web
+sub-agents dominate and vary 2-3×). Report:
+`omnis-benches/reports/prompt-size-2026-11-07.md`. The same A/B found a docs gap:
+`web/docs` does not document the single-model override, so the Helper answers
+that no such setting exists.
 
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 

@@ -326,8 +326,8 @@ func SetBashDefaultTimeout(d time.Duration) {
 }
 
 type BashIn struct {
-	Command string `json:"command" jsonschema:"required,the exact shell command line to execute (this field is required and is the only accepted argument besides the optional 'timeout')"`
-	Timeout int    `json:"timeout,omitempty" jsonschema:"timeout in seconds, default 120"`
+	Command string `json:"command" jsonschema:"required,the shell command line"`
+	Timeout int    `json:"timeout,omitempty" jsonschema:"seconds, default 120"`
 	// Cwd is the directory to run the command in. It is set internally by the
 	// tool handler from the session's working directory and is excluded from the
 	// LLM-facing schema (json:"-"); empty means the process working directory.

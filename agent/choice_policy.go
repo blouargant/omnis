@@ -28,25 +28,17 @@ package agent
 // user can make, never a way to offload one the agent owns.
 func choicePolicyBlock(handsBack bool) string {
 	b := "\n\n## Putting a choice to the user\n\n" +
-		"When you genuinely need the user to decide before you can continue, and the options " +
-		"are enumerable, **call `AskUserQuestion`** — do not write the question as prose. Use " +
-		"`kind: \"single\"` (or `\"confirm\"`) with 2-4 concrete `choices`, and set " +
-		"`allow_text: true` when a free-form answer also makes sense.\n\n" +
-		"This is not a style preference. A question written in prose **ends your turn**: the " +
-		"user has to retype an answer and you start again from a new turn, losing the work you " +
-		"had in flight. `AskUserQuestion` keeps the turn alive — the answer arrives as the " +
-		"tool result and you carry straight on. Asked in prose, a stopped turn reads to the " +
-		"user as the agent having simply given up.\n\n" +
-		"**Only ask about what only the user can decide** — a preference, a trade-off, an " +
-		"ambiguity in *their* intent, or permission for something consequential. Never use it " +
-		"to hand back a decision that is yours: which squad or specialist should handle the " +
-		"request, which tool or source to consult, or whether some lookup is worth doing. " +
-		"Decide those yourself.\n"
-
+		"When the user must decide before you can continue and the options are enumerable, " +
+		"call `AskUserQuestion` (`kind: \"single\"` or `\"confirm\"`, 2-4 `choices`, " +
+		"`allow_text: true` when free text also fits). A question written in prose ends your " +
+		"turn and loses the work in flight; the tool keeps the turn alive. " +
+		"Only ask about what only the user can decide — a preference, a trade-off, an ambiguity " +
+		"in their intent, permission for something consequential — never which squad or " +
+		"specialist should handle the request, which tool to use or whether a lookup is worth " +
+		"doing: decide those yourself.\n"
 	if handsBack {
-		b += "\nIn particular, if the honest answer is that the request is outside your scope, " +
-			"**call `handoff_to_router`** — do not ask the user to choose which kind of request " +
-			"it was. Working out where a request belongs is the router's job, not theirs.\n"
+		b += "If the request is outside your scope, call `handoff_to_router` instead of asking " +
+			"the user what kind of request it is.\n"
 	}
 	return b
 }

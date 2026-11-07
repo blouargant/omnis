@@ -43,36 +43,11 @@ const (
 	resourceToolName = "load_softskill_resource"
 )
 
-// LoaderRule is injected into any agent that has both skills and softskills
-// toolsets mounted, so it always knows which loader to pair with which source.
-const LoaderRule = `
-LOADER RULE — never break this:
-- Names from 'list_skills'     → load with 'load_skill'     (reads skills/ directory)
-- Names from 'list_softskills' → load with 'load_softskill' (reads softskills/ directory)
-Using the wrong loader always returns "skill not found". Never use 'load_skill' with a name from 'list_softskills', and never use 'load_softskill' with a name from 'list_skills'.
-`
-
-// LoaderProtocol is prepended to any agent instruction whose tools include
-// the 'softskills' group. It guarantees that the agent always discovers and
-// loads relevant soft-skills before planning, regardless of what its own
-// instruction file says.
-const LoaderProtocol = `
-MANDATORY SOFT-SKILL USE — non-negotiable, overrides other instructions:
-- The soft-skills (curator-distilled procedures from past sessions) are already listed, with their descriptions, in the <available_skills> block of this prompt that follows the soft-skills instructions. Read that list; do not call 'list_softskills' to fetch it again unless the block is missing.
-- For EACH soft-skill whose description overlaps ANY aspect of the task, call 'load_softskill' with name="<SOFTSKILL_NAME>" (the parameter is literally 'name', not 'skill_name') before acting. Load ALL matching soft-skills; none matching means none to load.
-- Treat soft-skills as hints rather than authority; defer to authored skills, tool docs, and the user when they disagree.
-`
-
-const instruction = `You also have access to **soft-skills**: learned procedures distilled by a curator agent from past sessions. They live alongside authored skills but are auto-generated, so treat them as helpful hints rather than authoritative documentation.
-
-Tool protocol:
-
-1. The soft-skills are listed in the <available_skills> block below (` + "`" + listToolName + "`" + ` returns the same list; call it only if the block is missing).
-2. If a soft-skill looks relevant, call ` + "`" + loadToolName + "`" + ` with ` + "`name=\"<SOFTSKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `) before planning.
-3. Use ` + "`" + resourceToolName + "`" + ` to read files inside a soft-skill directory (` + "`references/*`, `assets/*`, `scripts/*`" + `).
-4. If a soft-skill conflicts with an authored skill or a tool's own documentation, prefer the authored source and mention the conflict in your reply.
-
-IMPORTANT — do NOT use ` + "`load_skill`" + ` to open names returned by ` + "`" + listToolName + "`" + `. ` + "`load_skill`" + ` reads the authored ` + "`skills/`" + ` directory and will return "skill not found" for soft-skills, which live in ` + "`softskills/`" + ` and are only reachable through ` + "`" + loadToolName + "`" + `.
+// instruction is the soft-skill toolset's system instruction, placed right
+// before its <available_skills> list. It is the one place the soft-skill rules
+// are stated (they used to be repeated by a LoaderProtocol and a LoaderRule
+// prepended to the agent instruction).
+const instruction = `Soft-skills are procedures a curator distilled from past sessions, listed in the <available_skills> block below (` + "`" + listToolName + "`" + ` returns the same list: call it only if the block is missing). For each one whose description overlaps the task, call ` + "`" + loadToolName + "`" + ` with ` + "`name=\"<soft-skill>\"`" + ` before acting; ` + "`" + resourceToolName + "`" + ` reads its other files. They are hints: when one disagrees with an authored skill, a tool's documentation or the user, follow those and mention the conflict. A soft-skill name loads only with ` + "`" + loadToolName + "`" + `, a skill name only with ` + "`load_skill`" + ` — the wrong loader answers "skill not found".
 `
 
 // Toolset returns an ADK tool.Toolset reading softskills from `dir`.

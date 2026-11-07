@@ -239,11 +239,8 @@ func (a *Agent) checkWith(ctx context.Context, name string, timeout time.Duratio
 func (a *Agent) Tools() []tool.Tool {
 	ask, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_ask",
-		Description: "Send a question to another agent and block up to 30s for a reply. " +
-			"`to` accepts an intra-session agent name (e.g. 'investigator') or a cross-session name " +
-			"(petname such as 'happy-panda', or user-assigned title such as 'my-project'). " +
-			"Use teammate_list to discover available cross-session peers. " +
-			"Arguments: `to` (string, required), `question` (string, required).",
+		Description: "Ask another session a `question` and wait up to 30 s for its reply. " +
+			"`to` is a session name (petname such as 'happy-panda', or its title); teammate_list lists them. Both are required.",
 	}, func(ctx adk.ToolContext, in askIn) (askOut, error) {
 		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Question) == "" {
 			return askOut{Reply: "Error: required arguments: to and question"}, nil
@@ -258,10 +255,7 @@ func (a *Agent) Tools() []tool.Tool {
 	})
 	tell, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_tell",
-		Description: "Send a one-way message to another agent (no reply expected). " +
-			"`to` accepts an intra-session agent name or a cross-session name (petname or title). " +
-			"The recipient's next teammate_check will surface this message along with your session name in the [From] field. " +
-			"Arguments: `to` (string, required), `body` (string, required).",
+		Description: "Send a one-way message `body` to another session (no reply expected). `to` is a session name or title. Both are required.",
 	}, func(ctx adk.ToolContext, in tellIn) (tellOut, error) {
 		if strings.TrimSpace(in.To) == "" || strings.TrimSpace(in.Body) == "" {
 			return tellOut{Result: "Error: required arguments: to and body"}, nil
@@ -275,10 +269,8 @@ func (a *Agent) Tools() []tool.Tool {
 	})
 	check, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_check",
-		Description: "Poll your own mailbox once for a pending cross-session message (waits up to 1s). " +
-			"Returns the message with a [From] field showing the sender's session name, or '(none)' if empty. " +
-			"Call this on demand — e.g. when the user asks whether a peer has replied, or after a 'teammate_tell' you expect a follow-up to. " +
-			"You do NOT need to poll every turn: incoming messages are normally delivered to you automatically.",
+		Description: "Check your mailbox once for a message from another session ('(none)' if empty). " +
+			"Only on demand, e.g. to see whether a peer replied: messages are normally delivered to you automatically.",
 	}, func(ctx adk.ToolContext, _ checkIn) (checkOut, error) {
 		name := a.resolveName(ctx, a.Name)
 		m, err := a.checkWith(context.Background(), name, time.Second)
@@ -297,10 +289,7 @@ func (a *Agent) Tools() []tool.Tool {
 	}
 	list, _ := functiontool.New(functiontool.Config{
 		Name: "teammate_list",
-		Description: "List all known agent sessions available for cross-session communication. " +
-			"Returns `sessions` (map of session name to mailbox address) and `your_session_name` " +
-			"(the name other sessions use to address THIS session). " +
-			"When a received message refers to `your_session_name`, it is referring to you.",
+		Description: "List the sessions you can message, and `your_session_name` (the name others use for you).",
 	}, func(ctx adk.ToolContext, _ struct{}) (listOut, error) {
 		if a.Registry == nil {
 			return listOut{Sessions: map[string]string{}}, nil

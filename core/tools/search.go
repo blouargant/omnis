@@ -16,13 +16,13 @@ import (
 )
 
 type GrepIn struct {
-	Pattern    string `json:"pattern" jsonschema:"extended regular expression (or a literal string with literal=true)"`
-	Path       string `json:"path,omitempty" jsonschema:"file or directory to search, default the current directory"`
-	Glob       string `json:"glob,omitempty" jsonschema:"only search files matching this glob, e.g. *.go or src/**/*.ts; a pattern without / matches file names at any depth"`
-	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"case-insensitive search"`
-	Literal    bool   `json:"literal,omitempty" jsonschema:"treat pattern as a literal string, not a regex"`
-	Context    int    `json:"context,omitempty" jsonschema:"lines to show before and after each match, default 0"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"maximum number of matches to return, default 100"`
+	Pattern    string `json:"pattern" jsonschema:"extended regular expression"`
+	Path       string `json:"path,omitempty" jsonschema:"file or directory, default ."`
+	Glob       string `json:"glob,omitempty" jsonschema:"file filter, e.g. *.go or src/**/*.ts"`
+	IgnoreCase bool   `json:"ignore_case,omitempty"`
+	Literal    bool   `json:"literal,omitempty" jsonschema:"pattern is a plain string"`
+	Context    int    `json:"context,omitempty" jsonschema:"lines around each match"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"max matches, default 100"`
 	// Recursive is accepted for compatibility: a directory is always searched
 	// recursively.
 	Recursive bool `json:"recursive,omitempty"`

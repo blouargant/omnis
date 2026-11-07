@@ -295,7 +295,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	agentTools := []tool.Tool{}
 	agentTools = append(agentTools, webSearchTools...)
 	toolsets := []tool.Toolset{}
-	hasSkills, hasSoftSkills, hasRegistries, hasSettings := false, false, false, false
+	hasSoftSkills, hasRegistries, hasSettings := false, false, false
 	var mountedMCPNames []string
 	for _, key := range keys {
 		switch key {
@@ -317,7 +317,6 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 		case "Skill":
 			if resolvedSkillTS != nil {
 				toolsets = append(toolsets, resolvedSkillTS)
-				hasSkills = true
 			}
 		case "softskills":
 			if resolvedSoftSkillTS != nil {
@@ -432,25 +431,27 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			}
 		}
 	}
+	// The skill and soft-skill rules are stated once, in each toolset's own
+	// system instruction next to its <available_skills> list.
 	var instructionParts []string
-	if hasSkills {
-		instructionParts = append(instructionParts, skills.LoaderProtocol)
-	}
 	if hasSoftSkills {
-		instructionParts = append(instructionParts, softskills.LoaderProtocol)
 		if asLeader && emb != nil {
 			// The coordinating leader's soft-skill toolset is embedder-backed, so
 			// advertise recall_softskills alongside the glob loader.
 			instructionParts = append(instructionParts, softskills.RecallProtocolAddendum)
 		}
 	}
-	if hasSkills && hasSoftSkills {
-		instructionParts = append(instructionParts, softskills.LoaderRule)
+	// A group's protocol is the default guide for an agent that mounts it; an
+	// instruction that already documents those tools (the Helper's does, in
+	// more detail) does not get it a second time.
+	ownInstr := cfg.Instruction
+	if ownInstr == "" && (hasRegistries || hasSettings) {
+		ownInstr = defaultAgentInstruction(cfg.Name)
 	}
-	if hasRegistries {
+	if hasRegistries && !strings.Contains(ownInstr, "install_remote_item") {
 		instructionParts = append(instructionParts, registries.LoaderProtocol)
 	}
-	if hasSettings {
+	if hasSettings && !strings.Contains(ownInstr, "get_settings") {
 		instructionParts = append(instructionParts, settings.LoaderProtocol)
 	}
 	if p := mcpcfg.BuildLoaderProtocol(mountedMCPNames); p != "" {
@@ -938,9 +939,15 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 
 	var sb strings.Builder
 	sb.WriteString("\n\n# Available Sub-Agents\n\n")
-	sb.WriteString("The following sub-agents are mounted as tools. Invoke them by name — they return their findings to you automatically. Call at most one sub-agent at a time; wait for its findings before deciding whether another sub-agent call is needed. When one or more skills in a sub-agent's catalog match the user's request, delegate to that sub-agent and explicitly name EVERY applicable skill in the delegation (e.g. \"load the k8s-investigation and k8s-log-investigation skills, then …\"). Skills covering the same domain are complementary, not alternatives — listing only the closest match is a delegation bug. The sub-agent retains discretion to load additional skills from its own catalog if it judges them relevant. The same applies to mounted MCP servers: when a sub-agent has an MCP server whose name or domain matches the user's request (e.g. a `github` server for repo/issue/PR questions), delegate to that sub-agent and explicitly tell it to use that server — do not try the task with bash first. Never use transfer_to_agent — it permanently hands off control.\n\n")
-	sb.WriteString("## A sub-agent call is synchronous and one-shot\n\nThe call returns only once the sub-agent has finished, and the text you get back **is its complete, final answer**. There is no initialization phase, no partial result, and nothing running in the background afterwards: a sub-agent never keeps working after it has returned, and calling it again does not \"let it finish\". So never tell the user you are waiting for a sub-agent, and never re-issue the same call to give it time to warm up — there is nothing to wait for.\n\nIf what comes back is empty, vague, or does not answer your brief, that IS its answer, and an identical re-call will reproduce it. Change something instead: brief it more concretely (see below), give it the specific skill/tool/server to use, split the task, or hand the work to a different sub-agent. **After two unhelpful attempts on the same sub-agent, stop calling it** — do the work with your own tools, or answer from what you already have and state plainly which parts are unverified. Repeating a failing call burns the user's budget and delays the answer without changing it.\n\n")
-	sb.WriteString("## Briefing a sub-agent\n\nA sub-agent starts in a fresh session with no transcript and no memory of this conversation — it sees ONLY the `request` string you pass. Asking a bare question (\"investigate the auth bug\") wastes the call: the sub-agent has to rediscover what you already know. Always brief it with the concrete context it needs to act:\n\n- file paths it should read (e.g. `core/auth/session.go:120-180`)\n- prior findings from earlier in this session\n- which skill to load, or which MCP server to use\n- constraints and out-of-scope items\n- the exact shape of the answer you want back\n\n**Inline vs. file brief — the ~20-line rule.** If the brief fits in roughly 20 lines, write it directly into `request`. If it would be longer (long lists of files, multi-paragraph findings, code excerpts, briefs you will reference more than once), write it to a scratch file first and reference that path in `request` instead — e.g. write `$OMNIS_HOME/logs/brief_<topic>.md` (or a path under the current worktree) with the Write tool, then call the sub-agent with a short `request` like \"Read $OMNIS_HOME/logs/brief_auth.md, then answer the questions at the bottom.\" This keeps the bulk of the brief out of your own transcript (you pay for tool-call args on every subsequent turn) and lets you update or extend the brief across multiple sub-agent calls.\n\n")
+	// One block, ~250 tokens (it was ~900 and told the leader to call "at most
+	// one sub-agent at a time", against the fan-out rule: independent questions
+	// go in separate calls of the same response, which ADK runs concurrently).
+	// Each rule comes from an observed failure: a leader re-calling a sub-agent
+	// "to let it finish" six times; bare briefs that made the sub-agent
+	// rediscover everything; delegations naming only one of two matching skills.
+	sb.WriteString("Each sub-agent below is a tool: call it by name with a `request`. A call is synchronous and one-shot: the returned text is its complete, final answer, with no initialization phase and nothing running afterwards — never tell the user you are waiting for it. Put independent questions in separate calls of the same response (they run in parallel); combine two only when one needs the other's answer.\n\n")
+	sb.WriteString("Briefing a sub-agent: it starts in a fresh session and sees ONLY the `request` string. Give it the file paths it should read, prior findings, constraints and the shape of answer you want; name EVERY skill of its catalog that matches (same-domain skills are complementary) and the MCP server to use when one fits. Past ~20 lines (the 20-line rule), write the brief to a scratch file (e.g. `$OMNIS_HOME/logs/brief_<topic>.md`) and point `request` at it.\n\n")
+	sb.WriteString("If the answer is empty or misses the point, an identical re-call will reproduce it: change the brief, the skill or the agent. After two unhelpful attempts on the same sub-agent, stop calling it — do the work yourself, or answer with what you have and say what is unverified. Never use transfer_to_agent.\n\n")
 
 	for _, cfg := range enabled {
 		desc := cfg.Description

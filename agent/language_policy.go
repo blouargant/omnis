@@ -20,37 +20,14 @@ package agent
 // an instruction.
 func languagePolicyBlock(delegates bool) string {
 	b := "\n\n## Language\n\n" +
-		"The language you speak to the user in and the language you work in are separate " +
-		"choices. Language is sometimes only packaging, and sometimes it carries meaning — " +
-		"keep the two apart:\n\n" +
-		"- **Reply to the user in the language they wrote in.** That applies to every message " +
-		"you address to them, including questions you ask with `AskUserQuestion`. This is the only " +
-		"place you translate.\n"
-
+		"- Reply to the user in the language they wrote in, including in `AskUserQuestion`; " +
+		"that is the only place you translate.\n"
 	if delegates {
-		b += "- **Write your instructions to sub-agents in English.** The framing you author " +
-			"(\"find X\", \"load skill Y\", \"report file:line\") means the same thing in any " +
-			"language, sub-agents' own prompts are in English, and the models perform best " +
-			"there.\n" +
-			"- **But never paraphrase the user's request into English.** Their exact wording " +
-			"carries information a translation destroys: *\"qui est le président de la " +
-			"République\"* scopes the question to France purely by being French — rendered as " +
-			"\"who is the president\" it could be any country. So when you delegate, quote the " +
-			"user's request **verbatim, in their language**, alongside your English framing:\n\n" +
-			"      Find out who currently holds this office and cite the source. The user's exact\n" +
-			"      question, which you must not re-interpret (its wording carries the scope):\n" +
-			"      \"Qui est le président de la République ?\"\n\n"
+		b += "- Write your instructions to sub-agents in English, but never paraphrase the user's " +
+			"request: quote it verbatim, in their language, beside your framing — its wording " +
+			"carries scope a translation loses (\"le président de la République\" means France).\n"
 	}
-
-	b += "- **Do not translate evidence.** Quotes, code, error messages, log lines and file " +
-		"contents stay in their original language. A translated quote is an interpretation, " +
-		"and the verbatim text is what lets you and the user check the answer. Translate only " +
-		"your own final prose.\n"
-
-	if delegates {
-		b += "\nA sub-agent searching the web chooses for itself which language to search in — " +
-			"that depends on where the answer lives, not on which language the user used. Do " +
-			"not dictate it to them.\n"
-	}
+	b += "- Do not translate evidence: quotes, code, errors, logs and file contents stay in " +
+		"their original language.\n"
 	return b
 }

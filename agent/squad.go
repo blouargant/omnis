@@ -414,6 +414,8 @@ func buildSquadInstance(
 		Tools:       leadTools,
 		Toolsets:    capToolsets,
 		Instruction: rootInstruction,
+		// The router only routes; its text is withheld. See AgentConfig.NoContract.
+		NoContract: runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad,
 	})
 	if err != nil {
 		permGateClose()

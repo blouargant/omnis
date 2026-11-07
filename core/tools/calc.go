@@ -19,10 +19,8 @@ type CalcOut struct {
 func NewCalcTools() []tool.Tool {
 	return []tool.Tool{
 		mustTool("calculate",
-			"Evaluate a mathematical expression and return the result. "+
-				"Supports arithmetic (+, -, *, /), exponentiation (**), modulo (%), "+
-				"bitwise ops, comparisons, and standard functions (abs, ceil, floor, round, sqrt, log, pow, sin, cos, tan). "+
-				"Arguments: `expression` (string, required) — the expression to evaluate, e.g. \"sqrt(2) + 3 * 4\".",
+			"Evaluate a math expression, e.g. \"sqrt(2) + 3 * 4\": + - * / ** %, comparisons, bitwise ops, "+
+				"abs ceil floor round sqrt log pow sin cos tan.",
 			func(_ adk.ToolContext, in CalcIn) (CalcOut, error) {
 				expr, err := govaluate.NewEvaluableExpression(in.Expression)
 				if err != nil {
