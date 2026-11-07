@@ -19,7 +19,7 @@ This is a different discipline from a standard lookup:
 | Goal | answer the question | equip a decision |
 | Scope | the question as asked | the question **and its premises** |
 | Waves | one search pass | 2 (3 at most), with a coverage review between |
-| Done when | you have an answer | a critic finds no blocker, or the remaining one is stated as open |
+| Done when | you have an answer | the adversarial review finds no blocker, or the remaining one is stated as open |
 | Failure mode | wrong answer | **complete, well-sourced answer to the wrong question** |
 
 That last row is the one that bites. A deep-research answer that faithfully
@@ -83,10 +83,10 @@ well enough to be giving a decision-grade answer yet.
 
 ### Phase 3 — Wave 1: breadth
 
-Dispatch the matrix to the research sub-agent(s) — **in parallel, one task per
-angle**, not one task containing everything. Each task must be a self-contained,
-precisely worded question with the context it needs (the sub-agent is stateless
-across calls).
+Run the matrix **in parallel, one search (or one research sub-agent task) per
+angle** — several calls in the same response, not one call containing
+everything. Each must be a precisely worded question; a sub-agent task also
+needs the context it relies on (a sub-agent is stateless across calls).
 
 Rules for the wave:
 
@@ -133,10 +133,10 @@ re-confirm what is already sourced: a wave that returns only confirmation is
 the most expensive way to learn nothing. Three waves is the ceiling; what is
 still open after that goes under "open questions" in the deliverable.
 
-**Within a wave, keep each task narrow.** One precise question per sub-agent
-call, with the URLs you already have when you want a page checked — a broad
-task ("research everything about X") makes the sub-agent read pages for
-questions nobody asked.
+**Within a wave, keep each search narrow.** One precise question per search or
+sub-agent call, with the URLs you already have when you want a page checked — a
+broad one ("research everything about X") reads pages for questions nobody
+asked.
 
 ### Phase 6 — Adversarial review
 
@@ -190,7 +190,7 @@ audit:
 - You accepted a number, a topology, or a product name from the question without
   a single search aimed at it.
 - Your brief answers every question the user asked and raises none they did not.
-- One sub-agent call produced the whole brief.
+- One search pass produced the whole brief.
 - The recommendation has no measurement attached — nothing the user could run
   tomorrow to falsify it.
 - You "know" a fact you did not fetch.

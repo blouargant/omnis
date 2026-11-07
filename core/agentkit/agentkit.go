@@ -61,8 +61,9 @@ sessions; never use transfer_to_agent. Skip any step whose tool you lack.`
 const rootStep1 = `  1. RESTATE the user's request in your own words as the very first thing
      in your reply, before any tool call, as "<acknowledgement>: <your
      restatement>." — <acknowledgement> is one word meaning "Understood" in
-     the user's language ("Compris", "Entendido", "Verstanden"), and the
-     whole line is in that language. Then confirm scope before any
+     the user's language ("Understood" in English, "Compris" in French,
+     "Entendido" in Spanish, "Verstanden" in German), and the whole line is
+     in that language. Then confirm scope before any
      irreversible action. Skip this only for short replies to your previous
      turn ("yes", "ok", "continue", "stop"…).
 `

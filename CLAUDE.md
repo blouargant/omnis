@@ -420,18 +420,14 @@ main.go / server/
             │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer · agentmd_reviewer (read-only fresh-eyes verifier for /init-generated AGENT.md)
-            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
+            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner (audits: one investigator pass with the k8s-audit skill, the leader checks flags without a quoted field — the k8s_auditor second pass was dropped, see "Squad shape (measured)"; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
             │    │    └── k8s_validator ← NESTED sub-agent (high, read-only): independent reviewer
             │    │         whose APPROVED `record_validation` verdict a PreToolUse hook requires
             │    │         before letting a k8s_editor/k8s_cleaner mutation through. Nested via
             │    │         `subagents` on BOTH callers (built once, a fresh wrapper per mount
             │    │         point); not a squad member, so k8s_leader never sees it. See
             │    │         "Kubernetes squad (change validation)".
-            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic · summariser · image_generator (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering; also hosts image generation)
-            │    │    └── research_critic (high, read-only fresh-eyes brief reviewer; NO web tools)
-            │    │         └── web_fetcher   ← NESTED sub-agent (hosted): retrieves + quotes, never judges.
-            │    │                             Not a squad member, so the leader never sees it. See
-            │    │                             "Nested sub-agents (`subagents`) — the gatherer doctrine".
+            │    ├── "Knowledge"   ← knowledge_leader (does its web research ITSELF: `serper`/`ddg`/`web` tools) + doc_agent · summariser · image_generator (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search passes with a coverage review between → a written adversarial self-review before delivering). `web_agent` and `research_critic` (+ its nested `web_fetcher`) are no longer members — see "Squad shape (measured)"; `web_agent` still serves the Skill Editor squad
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
             │    ├── "Helper"      ← leaderless single specialist (helper)
             │    │    └── session_search ← NESTED sub-agent (hosted): finds PAST CHAT SESSIONS.
@@ -453,6 +449,40 @@ same generation can use different squads. Squads only *reference* agents
 — skills, tools and MCP servers stay on the agent definitions, so two
 squads that share a member also share that member's wiring (and the MCP
 pool dedups any subprocess backing it).
+
+### Squad shape (measured, 2026-11-07)
+
+Pi (one agent, no sub-agents) ties for first on the Harness Leaderboard at half
+the cost, so each squad was compared with lighter shapes **under production
+tiering** (leader on `premium` = Sonnet 5.5, members on their own tiers), at
+equal quality; report `omnis-benches/reports/squad-shape-2026-11-07.md`, design
+`docs/superpowers/specs/2026-11-07-squad-shape-design.md`. Only members the
+benches exercise were candidates; members whose capability no bench calls
+(`code_docs`, `refactorer`, `agentmd_reviewer`, `doc_agent`, `image_generator`,
+`summariser`) and every safety member (`k8s_validator`) were kept regardless.
+
+- **Knowledge — the leader researches itself.** Squad A (with `web_agent` and
+  `research_critic`) $5.43 for the 4 model-cost questions, judges 6.88;
+  without the critic $3.31, 6.50; **leader alone with the web tools $1.77
+  (−67 %), 6.88 → 7.00**, fewer answers capped for a serious error (1 vs 2).
+  Adopted. Why the gatherer doctrine below did not pay here: Sonnet 5.5 reads its
+  prompt cache at $0.21/M, so holding fetched pages is cheap, and alone it doses
+  the research (one pass) where the squad fanned out ~20 `web_agent` calls on a
+  deep question. The doctrine still holds where the leader's cached input is
+  expensive or the retrieval volume is large.
+- **Kubernetes — no second audit pass.** k8s-ai-bench gatekeeper suite: 26/31
+  with and without `k8s_auditor`, **the same tasks passing**, $2.59 → $0.98
+  (−62 %). Adopted: the audit is one `k8s_investigator` pass (k8s-audit skill),
+  the leader checking any flag without a quoted field.
+- **Coding — undecided.** On the Terminal-Bench smoke the `premium` coder called
+  **no** sub-agent in 18 trials, so dropping `reviewer`/`code_scout` changed only
+  the prompt and the results were noise (4/6, 5/6, 5/6). The shape stays as
+  shipped until a bench where the coder delegates.
+
+The arms are reproducible: `omnis-benches/squad-bench/shapes.json` +
+`shape_overlay.py` (an overlay for the user layer), `harbor/run.sh` with
+`TIERED=1 SHAPE=<arm>`, `squad-bench/setup-ab.sh` with `MODEL=tiered OVERLAY=`,
+`k8s-ai-bench` with `OMNIS_BENCH_OVERLAY`.
 
 ### Nested sub-agents (`subagents`) — the gatherer doctrine
 

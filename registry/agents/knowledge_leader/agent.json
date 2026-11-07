@@ -1,7 +1,7 @@
 {
   "allow_file_attachments": true,
   "builtin": false,
-  "description": "Information retrieval & document creation coordinator. Researches questions via the web_agent, extracts text from documents and converts/generates files via the doc_agent (liteparse/pandoc/pdf), and condenses bulk material via the summariser.",
+  "description": "Information retrieval & document creation coordinator. Researches questions itself with web search and page fetch, extracts text from documents and converts/generates files via the doc_agent (liteparse/pandoc/pdf), and condenses bulk material via the summariser.",
   "enabled": true,
   "leader": true,
   "model_ref": "premium",
@@ -20,6 +20,9 @@
     "Grep",
     "Glob",
     "Skill",
+    "serper",
+    "ddg",
+    "web",
     "revert",
     "mime",
     "mcp",
