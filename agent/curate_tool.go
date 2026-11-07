@@ -85,11 +85,8 @@ type curateOut struct {
 func curateSessionTool() tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
 		Name: "curate_session",
-		Description: "Mark the current session for soft-skill curation. " +
-			"Call this when the user explicitly says something like 'save this as a skill', " +
-			"'remember how we solved this', or when you reached a non-trivial multi-step success " +
-			"the curator should learn from. The actual curation runs after the session ends. " +
-			"Argument: `reason` (string, required, one-line explanation).",
+		Description: "Mark this session for soft-skill curation (run after the session ends), when the user asks to " +
+			"remember how something was solved or after a non-trivial multi-step success. `reason`: one line.",
 	}, func(ctx adk.ToolContext, in curateIn) (curateOut, error) {
 		msg, err := RequestCurateSession(ctx.UserID(), ctx.SessionID(), in.Reason)
 		if err != nil {

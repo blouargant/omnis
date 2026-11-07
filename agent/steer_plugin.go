@@ -140,24 +140,12 @@ func lastAssistantText(contents []*genai.Content) string {
 // buildSquadInstance).
 func steeringAwarenessBlock() string {
 	return "\n\n## Mid-turn steering\n\n" +
-		"While you work, the user may send extra information, remarks, or corrections. " +
-		"You — the coordinator — decide what to do with each one; sub-agents never act " +
-		"on them by themselves.\n\n" +
-		"- A steering note reaches you as a user message beginning " +
-		"\"[The user sent the following while you were working …]\". Treat it as the " +
-		"user's latest intent; never ignore it.\n" +
-		"- If a sub-agent was running when the note arrived, it **stops and hands " +
-		"control back to you** with a result saying it was interrupted by new user " +
-		"input (and any work it had done so far). It did not see the note.\n" +
-		"- Then decide: (a) the note changes the plan → drop or redo that sub-agent's " +
-		"task; (b) the sub-agent needs the new information → re-invoke it with the note " +
-		"folded into its instructions (pass back its partial work if useful); " +
-		"(c) you should handle it yourself; or (d) the note does not affect that " +
-		"sub-agent → re-invoke it to finish its original task.\n" +
-		"- If that sub-agent's result carries a `session` handle, you can resume it " +
-		"exactly where it left off (its prior context intact) by passing the handle " +
-		"back as `resume_session` — the cleanest way to feed it the new information " +
-		"and have it continue rather than restart.\n"
+		"A user message beginning \"[The user sent the following while you were working …]\" " +
+		"is the user's latest intent: never ignore it. You decide what it changes; a sub-agent " +
+		"running when it arrived stops and returns to you marked as interrupted, with its partial " +
+		"work, without having seen the note. Then drop or redo its task, re-invoke it with the " +
+		"note folded in (pass its `session` handle as `resume_session` to continue it), handle " +
+		"the note yourself, or re-invoke it to finish if the note does not concern it.\n"
 }
 
 // injectSteering appends the steering notes to req as a user message so the model

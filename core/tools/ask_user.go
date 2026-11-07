@@ -45,18 +45,10 @@ type askUserOut struct {
 // The tool blocks until the user answers (via the web UI, TUI, or console).
 func NewAskUserTool(reg *askuser.Registry) tool.Tool {
 	return mustTool("AskUserQuestion",
-		"Present a question to the user and wait for their answer. "+
-			"Use this tool whenever you need the user to make a choice or provide information before proceeding. "+
-			"Arguments: "+
-			"`kind` (string, required) — question type: \"single\" (choose one of 2-4 options), "+
-			"\"multi\" (choose one or more), \"text\" (free-text answer), or \"confirm\" (yes/no — safest first). "+
-			"`prompt` (string, required) — the question shown to the user (markdown). "+
-			"`choices` ([]string) — options for single/multi/confirm (required for those kinds; 2-4 items for single/confirm). "+
-			"`allow_text` (bool) — also accept free text alongside choices (single/multi only). "+
-			"`default` (string) — pre-suggested value. "+
-			"`timeout_seconds` (int) — override default timeout (0 = use default). "+
-			"`subtle` (bool) — the question is optional (e.g. a wrap-up check): shown discreetly instead of as a card; "+
-			"pair it with a timeout_seconds so it goes away on its own.",
+		"Ask the user a question and wait for the answer. `kind`: \"single\" (pick one of 2-4 `choices`), "+
+			"\"multi\" (pick several), \"text\" (free text) or \"confirm\" (yes/no, safest choice first). "+
+			"`prompt` is markdown. `allow_text` also accepts free text with choices; `default` pre-selects a value; "+
+			"`subtle` shows an optional question (e.g. a wrap-up check) discreetly — pair it with `timeout_seconds`.",
 		askUserHandler(reg),
 	)
 }

@@ -162,11 +162,8 @@ func NewFeedbackTool(logsDir string, suffixFor func(userID, sessionID string) st
 	}
 	t, err := functiontool.New(functiontool.Config{
 		Name: "record_session_feedback",
-		Description: "Persist the user's wrap-up answer for this session. Call this exactly once per session, right after the wrap-up question is answered.\n" +
-			"Arguments:\n" +
-			"  `question` (string, required) — the wrap-up question you asked verbatim.\n" +
-			"  `answer`   (string, required) — the user's answer (≥1 non-whitespace char). Blank answers are rejected so a prior record is never clobbered.\n" +
-			"Returns: a short status string. The file lands at logs/agent_feedback_<session-suffix>.json and is consumed by the post-session reflector.",
+		Description: "Record the user's answer to the wrap-up question, once per session, right after it is answered. " +
+			"`question` is the question as you asked it; `answer` must not be blank.",
 	}, h)
 	if err != nil {
 		panic(fmt.Errorf("softskills: build feedback tool: %w", err))

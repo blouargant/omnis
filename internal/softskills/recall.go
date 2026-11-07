@@ -30,7 +30,7 @@ const RecallToolName = "recall_softskills"
 // mounted, telling the model to rank with recall_softskills before the glob
 // scan. The glob path stays authoritative as a completeness fallback.
 const RecallProtocolAddendum = `
-- A 'recall_softskills' tool is available: call it FIRST with the user's task as the query to semantically rank soft-skills, then 'load_softskill' the top matches. Still scan 'list_softskills' afterwards for completeness — recall ranks, it does not replace discovery.
+- 'recall_softskills' ranks soft-skills against the task: call it with the user's task, then 'load_softskill' the top matches. It ranks; the soft-skill list still applies.
 `
 
 type recallEntry struct {

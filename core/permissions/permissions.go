@@ -341,6 +341,11 @@ func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd stri
 		projectRoot: findProjectRoot(cwd),
 		home:        userHome(),
 	}
+	// Grep names its target `path`; without this a Read(.env) deny never saw
+	// a Grep of .env (Grep is in the Read class).
+	if ctx.filePath == "" && toolName == "Grep" {
+		ctx.filePath = stringArg(args, "path")
+	}
 	mode := ps.DefaultMode
 
 	// 1. Explicit deny always wins.

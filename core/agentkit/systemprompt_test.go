@@ -27,3 +27,14 @@ func TestRootPromptKeepsRestatement(t *testing.T) {
 		t.Fatal("root SystemPrompt step 6 changed")
 	}
 }
+
+// The acknowledgement examples must pair each word with its language: with
+// only "Compris", "Entendido", "Verstanden" listed, a Sonnet 5.5 root opened an
+// English answer with "Compris :" (2026-11-07 squad-shape check).
+func TestRootPromptPairsAcknowledgementWithLanguage(t *testing.T) {
+	for _, want := range []string{`"Understood" in English`, `"Compris" in French`} {
+		if !strings.Contains(SystemPrompt, want) {
+			t.Errorf("root SystemPrompt lacks %s", want)
+		}
+	}
+}

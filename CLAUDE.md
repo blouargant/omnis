@@ -380,6 +380,10 @@ and driven over HTTP; **nothing imports omnis**, so they evolve independently.
   premium's coarse streaming). Seeded k8s bench:
   `squad-bench/tasks-kubernetes.json` (+ `README-kubernetes.md`) sweeps model tiers
   for `k8s_editor`/`k8s_cleaner`.
+- **`prompt-size/`** — measures the **fixed prompt** (system instruction + tool
+  declarations) of every agent of a checkout, against a fake model server, at no
+  model cost (see "Fixed prompt of every agent"). Re-run it after touching an
+  instruction, a shared block or a tool description.
 - **`model-probe/`** — verifies a live OpenAI-compatible **endpoint + model**
   supports the features omnis actually uses with **real requests**: streamed chat,
   tool calling (streaming **and** non-streaming), **parameterless tools over
@@ -416,18 +420,14 @@ main.go / server/
             │    ├── "Coding"      ← coding leader + specialists (see "Coding squad")
             │    │    ├── coder               ← plans/edits + verify loop
             │    │    └── code_scout · code_docs · reviewer · refactorer · agentmd_reviewer (read-only fresh-eyes verifier for /init-generated AGENT.md)
-            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner · k8s_auditor (independent compliance-audit verifier; two-pass audit flow via k8s-audit skill; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
+            │    ├── "Kubernetes"  ← k8s_leader + k8s_investigator · k8s_editor · k8s_cleaner (audits: one investigator pass with the k8s-audit skill, the leader checks flags without a quoted field — the k8s_auditor second pass was dropped, see "Squad shape (measured)"; triage split across two skills — k8s-triage = the decision playbook (classify → propose one fix + safety Hard Rules) on the leader/editor/cleaner, k8s-investigation = the read-only kubectl evidence-gathering mechanics on the investigator)
             │    │    └── k8s_validator ← NESTED sub-agent (high, read-only): independent reviewer
             │    │         whose APPROVED `record_validation` verdict a PreToolUse hook requires
             │    │         before letting a k8s_editor/k8s_cleaner mutation through. Nested via
             │    │         `subagents` on BOTH callers (built once, a fresh wrapper per mount
             │    │         point); not a squad member, so k8s_leader never sees it. See
             │    │         "Kubernetes squad (change validation)".
-            │    ├── "Knowledge"   ← knowledge_leader + doc_agent · web_agent · research_critic · summariser · image_generator (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search waves with a coverage review between → mandatory research_critic pass before delivering; also hosts image generation)
-            │    │    └── research_critic (high, read-only fresh-eyes brief reviewer; NO web tools)
-            │    │         └── web_fetcher   ← NESTED sub-agent (hosted): retrieves + quotes, never judges.
-            │    │                             Not a squad member, so the leader never sees it. See
-            │    │                             "Nested sub-agents (`subagents`) — the gatherer doctrine".
+            │    ├── "Knowledge"   ← knowledge_leader (does its web research ITSELF: `serper`/`ddg`/`web` tools) + doc_agent · summariser · image_generator (research depth ladder: lookup / standard / DEEP RESEARCH — the deep tier loads the deep-research skill: premise audit → research matrix → ≥2 search passes with a coverage review between → a written adversarial self-review before delivering). `web_agent` and `research_critic` (+ its nested `web_fetcher`) are no longer members — see "Squad shape (measured)"; `web_agent` still serves the Skill Editor squad
             │    ├── "Skill Editor" ← skill_editor + web_agent · helper
             │    ├── "Helper"      ← leaderless single specialist (helper)
             │    │    └── session_search ← NESTED sub-agent (hosted): finds PAST CHAT SESSIONS.
@@ -449,6 +449,40 @@ same generation can use different squads. Squads only *reference* agents
 — skills, tools and MCP servers stay on the agent definitions, so two
 squads that share a member also share that member's wiring (and the MCP
 pool dedups any subprocess backing it).
+
+### Squad shape (measured, 2026-11-07)
+
+Pi (one agent, no sub-agents) ties for first on the Harness Leaderboard at half
+the cost, so each squad was compared with lighter shapes **under production
+tiering** (leader on `premium` = Sonnet 5.5, members on their own tiers), at
+equal quality; report `omnis-benches/reports/squad-shape-2026-11-07.md`, design
+`docs/superpowers/specs/2026-11-07-squad-shape-design.md`. Only members the
+benches exercise were candidates; members whose capability no bench calls
+(`code_docs`, `refactorer`, `agentmd_reviewer`, `doc_agent`, `image_generator`,
+`summariser`) and every safety member (`k8s_validator`) were kept regardless.
+
+- **Knowledge — the leader researches itself.** Squad A (with `web_agent` and
+  `research_critic`) $5.43 for the 4 model-cost questions, judges 6.88;
+  without the critic $3.31, 6.50; **leader alone with the web tools $1.77
+  (−67 %), 6.88 → 7.00**, fewer answers capped for a serious error (1 vs 2).
+  Adopted. Why the gatherer doctrine below did not pay here: Sonnet 5.5 reads its
+  prompt cache at $0.21/M, so holding fetched pages is cheap, and alone it doses
+  the research (one pass) where the squad fanned out ~20 `web_agent` calls on a
+  deep question. The doctrine still holds where the leader's cached input is
+  expensive or the retrieval volume is large.
+- **Kubernetes — no second audit pass.** k8s-ai-bench gatekeeper suite: 26/31
+  with and without `k8s_auditor`, **the same tasks passing**, $2.59 → $0.98
+  (−62 %). Adopted: the audit is one `k8s_investigator` pass (k8s-audit skill),
+  the leader checking any flag without a quoted field.
+- **Coding — undecided.** On the Terminal-Bench smoke the `premium` coder called
+  **no** sub-agent in 18 trials, so dropping `reviewer`/`code_scout` changed only
+  the prompt and the results were noise (4/6, 5/6, 5/6). The shape stays as
+  shipped until a bench where the coder delegates.
+
+The arms are reproducible: `omnis-benches/squad-bench/shapes.json` +
+`shape_overlay.py` (an overlay for the user layer), `harbor/run.sh` with
+`TIERED=1 SHAPE=<arm>`, `squad-bench/setup-ab.sh` with `MODEL=tiered OVERLAY=`,
+`k8s-ai-bench` with `OMNIS_BENCH_OVERLAY`.
 
 ### Nested sub-agents (`subagents`) — the gatherer doctrine
 
@@ -1055,7 +1089,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
-| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read and `RepairToolArgs` |
+| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read, the Pi-style Grep (`git grep`, match limit, line cap) and `RepairToolArgs` |
 | `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle. `FileLoggerWithOptions` composes each record into one `[]byte` and does a **single `f.Write`** (one `write(2)` to an `O_APPEND` fd is atomic against other appenders on POSIX, so a line can never be interleaved mid-record). The audit log is **process-wide — one file per build, ONE bus subscription**: it is owned by `Infrastructure.EventLog` ([agent/event_log.go](agent/event_log.go)), never by a squad/generation (see "Event audit log") |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
@@ -1488,6 +1522,25 @@ for first on the Harness Leaderboard at about half the cost per solved task:
   32k so a long read is cut on a whole line with
   `[Showing lines S-E of T. Use start_line=E+1 to continue.]`, instead of the
   shaper dropping its middle.
+- **Grep like Pi's** (`RunGrep` in [core/tools/search.go](core/tools/search.go)).
+  Inside a git work tree it runs `git grep --untracked -I`, so `.gitignore` is
+  respected (no `node_modules`, build output, vendored lockfiles) and binary files
+  are skipped; outside one, or when git refuses (not a repository, a path outside
+  it, "dubious ownership" in a container), it falls back to `grep -r -I
+  --exclude-dir=.git`. An explicit `path` git finds nothing in is re-searched with
+  grep, so a file the agent names inside an ignored directory is still searched.
+  Output stops at `limit` matches (default 100, context lines not counted), lines
+  are cut at 500 chars, and a notice says what was cut and how to get more
+  (`[100 matches limit reached. Use limit=200 for more, or refine the pattern]`).
+  New optional arguments `glob`, `ignore_case`, `literal`, `context`, `limit`
+  (aliases repaired by `RepairToolArgs`); `recursive` is still accepted and
+  ignored (a directory is always searched recursively). **GOTCHA:** `git grep -z`
+  puts a NUL after the line number of both matches and context lines, so with
+  `context` the pattern is re-checked in Go (`grepMatcher`) to tell them apart; a
+  pattern Go cannot compile counts every line (stops early, never late). The
+  permission gate now reads Grep's `path` as its file path, so a `Read(.env)` deny
+  stops a Grep of `.env` (it used to see only `file_path`, which Grep does not
+  have).
 - **Argument repair at the model boundary** (`RepairToolArgs` in
   [core/tools/arg_repair.go](core/tools/arg_repair.go), applied by
   `llm.RepairToolCalls` — [core/llm/toolcall_repair.go](core/llm/toolcall_repair.go)
@@ -1655,6 +1708,25 @@ not re-armed, so the continuation still sees the original deadline. The server a
 the REPL are unchanged (a human is there). Pinned by
 [internal/cli/continue_test.go](internal/cli/continue_test.go).
 
+**A reply cut while writing a tool call is retried in the model layer, on every
+surface** (`llm.RetryCutToolCall`, [core/llm/cutcall.go](core/llm/cutcall.go),
+wrapped innermost on every agent model in `modelForAgent`,
+[agent/squad.go](agent/squad.go)). `markTruncated` drops a call whose arguments
+were cut mid-JSON and records its name in the final response's `CustomMetadata`
+(`omnis_cut_tool_call`); the reply then has no tool call and ADK would end the
+turn. Pi turns such calls into error tool results so its loop continues; here the
+cut attempt is discarded (it would leave up to `max_output_tokens` of a broken call
+in the context — Pi also removes a failed attempt) together with its streamed
+notice (tagged `omnis_truncation_notice`), and the request is re-sent once with
+`CutToolCallNudge`: the call was cut at N tokens, nothing ran, redo it in smaller
+steps (Write a first part, then Edit). A second cut reply is returned as it is, so
+the CLI auto-continue above still covers it. A reply cut in plain text (no call
+dropped) is not retried here. Inert for requests without tools. Known limit: text
+streamed before the call stays on screen. Verified live (deepseek-v4.1-flash,
+`max_output_tokens` 900, a 400-line file): the first reply was cut in the `Write`,
+the retry wrote a 185-line first part and stopped normally. Pinned by
+[core/llm/cutcall_test.go](core/llm/cutcall_test.go).
+
 ### Read-only agents (`read_only`, Landlock sandbox)
 
 **Why it is enforced, not requested.** In the first Harbor smoke the `reviewer`
@@ -1739,6 +1811,66 @@ for a missing block or a skill installed mid-session. The four instructions that
 repeated "call list_skills first" (`leader`, `k8s_leader`, `knowledge_leader`,
 `doc_agent`) were aligned. Verified live: the reviewer went straight to
 `load_skill review`.
+
+Since the fixed-prompt pass below, the skill and soft-skill rules live in **one
+place each**: the toolset's own system instruction (`skillInstruction` in
+[internal/skills/skills.go](internal/skills/skills.go), `instruction` in
+[internal/softskills/softskills.go](internal/softskills/softskills.go)), which ADK
+places right before its `<available_skills>` list. `skills.LoaderProtocol`,
+`softskills.LoaderProtocol` and `softskills.LoaderRule` are gone, and the leaders'
+own "call list_softskills once" lines were removed (they contradicted the rule).
+
+### Fixed prompt of every agent (measured, 2026-11-07)
+
+Pi's fixed prompt is ~1.7k tokens with 4 tools; omnis's squad roots were at
+12.5k–14.7k per model call. **`omnis-benches/prompt-size/`** measures it for the
+whole tree at no model cost: `run.sh <omnis-checkout>` builds the checkout, uses
+its `config/` + `registry/` as the only config, points every agent at a fake
+OpenAI server that records each request and calls each sub-agent tool once per
+conversation, runs one CLI turn per squad, and reports per agent the first
+request's instruction and tool-declaration tokens (chars/4). The pass that
+followed (sum of first requests **185k → 139k tokens, −25 %**; System root 14.0k →
+9.1k, Coding 12.6k → 9.4k, Kubernetes 14.7k → 11.0k, Helper 12.8k → 10.2k):
+
+- **Shared texts said the same rule several times.** The skill discipline was
+  stated five times (~1.4k tokens on 16–18 agents); the universal contract
+  (`agentkit.SystemPrompt`) opened with two paragraphs about "the harness" and
+  named tools that do not exist (`compact_now`, `task_create`); the language,
+  choice, steering and out-of-scope blocks explained their rules with examples.
+  Each was rewritten to its rules only. **Every rule that came from an observed
+  failure was kept** (load every matching skill; the `name` parameter; prose
+  question ends the turn; never offload the routing decision; quote the user's
+  request verbatim; a sub-agent call is final and an identical re-call repeats
+  it; stop after two unhelpful attempts) and the tests that pin them still pass.
+- **The sub-agent block contradicted the fan-out rule**: it said "call at most one
+  sub-agent at a time" while the leader instructions say to issue independent
+  calls together. It now says the latter.
+- **Tool descriptions repeated their parameters** ("Arguments: `file_path`
+  (string, required)…") already in the schema, and warned against wrong argument
+  names that `RepairToolArgs` now repairs (`cmd` → `command` was added for Bash).
+  Descriptions of the fs tools, `AskUserQuestion`, the teammate tools,
+  `calculate`, `curate_session`, `record_session_feedback`, `handoff_to_router`
+  and the resumable sub-agent note were cut to what the schema does not say.
+- **The router gets no operating contract** (`agentkit.AgentConfig.NoContract`,
+  set for the router squad's root): "restate the request, plan, report" only cost
+  it tokens — and output — on every message, and its text is withheld anyway.
+- **A group's loader protocol is skipped when the agent's own instruction already
+  documents those tools** (registries: mentions `install_remote_item`; settings:
+  `get_settings`) — the Helper's instruction does, in more detail.
+- **Leader instructions** (`leader`, `k8s_leader`, `knowledge_leader`) lost the
+  steps the contract and blocks already state (restate, plan, respect
+  permissions, sub-agent statelessness, `list_softskills`).
+
+Left as they are: the router's own instruction (routing accuracy is
+benchmarked), the k8s/knowledge domain rules, ADK's built-in "You are an agent.
+Your internal name is…" line, and the tool sets themselves. Behaviour was checked
+with a squad-bench A/B (`squad-bench/setup-ab.sh`, `tasks-prompt-ab.json`, 9 tasks
+× 2, whole fleet on deepseek-v4.1-flash): same correctness in both arms, root
+prompt per call −18 % to −38 % live, total cost unchanged in that sample (web
+sub-agents dominate and vary 2-3×). Report:
+`omnis-benches/reports/prompt-size-2026-11-07.md`. The same A/B found a docs gap:
+`web/docs` does not document the single-model override, so the Helper answers
+that no such setting exists.
 
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 

@@ -59,8 +59,7 @@
       "members": [
         "k8s_investigator",
         "k8s_editor",
-        "k8s_cleaner",
-        "k8s_auditor"
+        "k8s_cleaner"
       ]
     },
     {
@@ -69,8 +68,6 @@
       "leader": "knowledge_leader",
       "members": [
         "doc_agent",
-        "web_agent",
-        "research_critic",
         "summariser",
         "image_generator"
       ]

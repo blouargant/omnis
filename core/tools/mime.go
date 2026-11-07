@@ -21,7 +21,7 @@ import (
 )
 
 type MimeIn struct {
-	Path string `json:"file_path" jsonschema:"required,path to the file to inspect"`
+	Path string `json:"file_path" jsonschema:"required"`
 }
 type MimeOut struct {
 	Card string `json:"result"`

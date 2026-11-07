@@ -22,35 +22,18 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 )
 
-// LoaderProtocol is prepended to any agent instruction whose tools include
-// the 'skills' group. It guarantees that the agent always discovers and loads
-// authored skills before planning, regardless of what its own instruction
-// file says.
-const LoaderProtocol = `
-MANDATORY SKILL USE — this rule is non-negotiable and overrides every other instruction you receive:
-- The skills you can load are already listed, with their descriptions, in the <available_skills> block of this prompt that follows the skills instructions. Read that list; do not call 'list_skills' to fetch it again (call it only if the block is missing, or after a skill was installed during this session).
-- Before your first other tool call, call 'load_skill' with name="<SKILL_NAME>" (the parameter is literally 'name', not 'skill_name') for EACH listed skill whose description overlaps ANY aspect of the task. Load ALL matching skills — do not stop at the first match. Several matches can be loaded in the same step.
-- Skills covering the same domain are COMPLEMENTARY, never alternatives. If two skills both mention the task's technology (e.g. 'kubernetes' in both 'k8s-investigation' and 'k8s-log-investigation'), you MUST load BOTH. Picking only "the closest match" is a protocol violation.
-- A skill is "matching" if ANY keyword in its description overlaps the task — the technology (kubernetes, postgres, redis…), the artefact (pod, table, container…), or the symptom (crash, freeze, error, slow, hang…). Err on the side of loading more skills, not fewer.
-- Loaded skill instructions OVERRIDE your default behaviour. Follow them exactly before taking any other action.
-- Acting without loading a matching skill is a protocol violation.
-`
+// skillInstruction is the skill toolset's system instruction; ADK places it
+// right before the <available_skills> list. It is the ONE place the skill
+// discipline is stated: it used to be spread over a LoaderProtocol prepended
+// to the agent instruction plus this text (~540 tokens on every call of 16
+// agents). Every rule is kept: load every matching skill (the k8s audit
+// precision depends on it), the parameter is `name`, a skill's files are read
+// with load_skill_resource, never guess what a skill does not document.
+const skillInstruction = `Skills are authored playbooks, listed with their descriptions in the <available_skills> block below (` + "`list_skills`" + ` returns the same list: call it only if the block is missing or a skill was installed meanwhile).
 
-const skillInstruction = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
+MANDATORY — before your first other tool call, call ` + "`load_skill`" + ` with ` + "`name=\"<skill>\"`" + ` (the parameter is ` + "`name`" + `, not ` + "`skill_name`" + `) for EVERY listed skill whose description overlaps any aspect of the task: its technology (kubernetes, postgres…), artefact (pod, table…) or symptom (crash, error, slow…). Load all matches, in one step if you like; skills of the same domain are complementary, never alternatives, and loading one too many beats missing one. A loaded skill overrides your default behaviour: follow its steps, all of them, in order, before replying.
 
-Skills are folders of instructions and resources that extend your capabilities for specialized tasks. Each skill folder contains:
-- **SKILL.md** (required): The main instruction file with skill metadata and detailed markdown instructions.
-- **references/** (Optional): Additional documentation or examples for skill usage.
-- **assets/** (Optional): Templates, scripts or other resources used by the skill.
-- **scripts/** (Optional): Executable scripts that can be run via bash.
-
-This is very important:
-
-1. The available skills are listed in the <available_skills> block below; ` + "`list_skills`" + ` returns the same list and is only needed when that block is missing or a skill was installed meanwhile.
-2. For EACH skill whose description is relevant to the current task, call ` + "`load_skill`" + ` with ` + "`name=\"<SKILL_NAME>\"`" + ` (the parameter is literally ` + "`name`" + `, not ` + "`skill_name`" + `). Load ALL relevant skills — do not stop at the first match.
-3. Once you have read the instructions, follow them exactly as documented before replying to the user. If the instructions list multiple steps, complete all of them in order.
-4. The ` + "`load_skill_resource`" + ` tool reads any other file of a skill: pass ` + "`skill_name`" + ` and ` + "`resource_path`" + ` exactly as SKILL.md names it, relative to the skill directory (e.g. ` + "`projects.md`, `apply/hub.md`, `references/guide.md`" + `). Do NOT use other tools to access these files.
-5. When SKILL.md points to a detail file for the part of the task you are doing, load it BEFORE acting. Never guess a command, sub-command or option the skill's files do not document — if it is not written there, it does not exist.
+A skill's other files: ` + "`load_skill_resource`" + ` with ` + "`skill_name`" + ` and ` + "`resource_path`" + ` exactly as SKILL.md names it (e.g. ` + "`projects.md`, `references/guide.md`" + `); do not read them with other tools. Load the detail file for your part of the task before acting, and never guess a command, sub-command or option the skill's files do not document.
 `
 
 // Toolset returns an ADK tool.Toolset that exposes skills merged across all

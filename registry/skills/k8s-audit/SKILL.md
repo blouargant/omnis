@@ -141,26 +141,18 @@ follow this mechanically instead of shortlisting roles by name.
    resource names, then a short evidence appendix (one line each: resource →
    field → value). The grader's format always wins over this skill's default.
 
-## Two-pass audit (leader / coordinator)
+## Checking an audit (leader / coordinator)
 
-For a high-stakes audit, run **two independent passes and reconcile** — this is
-what removes the last false positives and false negatives:
+When you delegated the audit, check what comes back before reporting it:
 
-1. **Pass A** — delegate the audit to the **k8s_investigator** (this skill).
-2. **Pass B** — delegate an **independent** audit to the **k8s_auditor**. Do
-   *not* hand it Pass A's list as the answer; have it audit from scratch and, if
-   given Pass A's findings at all, treat them as unverified claims to confirm or
-   refute with its own field evidence, while independently hunting for anything
-   Pass A missed (especially off-happy-path container types).
-3. **Reconcile:**
-   - Flagged by **both** with concrete field evidence → **include**.
-   - Flagged by **only one** pass → **you (the leader) inspect that one resource
-     yourself** with a targeted read and break the tie on the field evidence;
-     include only if the offending field is real.
-   - A flag **no** pass can back with a quoted field → **drop it**.
-   This union-then-tie-break kills over-reporting (a decoy flagged by one pass is
-   tie-broken away) and under-reporting (a violation only the independent pass
-   caught is included).
+- A flag backed by a **quoted offending field** → **include**.
+- A flag with **no quoted field**, or one that looks like an on-topic decoy →
+  **inspect that one resource yourself** with a targeted read and decide on the
+  field evidence.
+- A flag **no field supports** → **drop it**.
+
+(A second, independent audit pass by another agent was tried on the gatekeeper
+suite and changed no result at about 2.5× the cost; it is not part of this flow.)
 
 ## Hard rules
 

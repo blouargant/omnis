@@ -206,7 +206,7 @@ func routeToSquadTool(reg *RouteRegistry, validTargets []string) tool.Tool {
 }
 
 type handoffIn struct {
-	Reason string `json:"reason" jsonschema:"one short line explaining why this request is outside your squad's scope"`
+	Reason string `json:"reason" jsonschema:"one line: why this is outside your scope"`
 }
 type handoffOut struct {
 	Result string `json:"result"`
@@ -218,11 +218,8 @@ type handoffOut struct {
 func handoffToRouterTool(reg *RouteRegistry) tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
 		Name: "handoff_to_router",
-		Description: "Hand control of the conversation back to the Omnis router when the user's " +
-			"request falls outside your squad's scope and you cannot help with it. The router will " +
-			"choose a better-suited squad. The user's original message and any attached files are " +
-			"forwarded automatically — you do not restate the request. Do not use this for requests " +
-			"you can handle — answer those yourself.",
+		Description: "Hand the conversation back to the Omnis router for a request outside your squad's scope; " +
+			"it picks a better squad and receives the user's message as is. Not for requests you can handle.",
 	}, func(ctx adk.ToolContext, in handoffIn) (handoffOut, error) {
 		reg.Set(ctx.SessionID(), &RouteDirective{
 			Kind:   routeKindHandoff,
@@ -1006,20 +1003,13 @@ func routerDeclineNote(order []string, reasons map[string]string) *genai.Part {
 // router for out-of-scope requests instead of attempting them.
 func routerHandoffProtocolBlock() string {
 	return "\n\n## Out-of-scope requests\n\n" +
-		"You were given this conversation by the Omnis router because it matched your squad. " +
-		"Handle everything within your scope directly. If the user later asks for something " +
-		"clearly outside your squad's domain and skills, call `handoff_to_router` (with a " +
-		"one-line `reason`) instead of attempting it — the request is forwarded to the router " +
-		"automatically and it will pick a better squad.\n\n" +
-		"**A dead end is a routing signal too.** If you genuinely try and cannot fulfil the " +
-		"request because it needs capabilities your squad lacks — including when your searches " +
-		"or tools turn up nothing and the request looks like it really belongs to a different " +
-		"squad — hand it back with `handoff_to_router` rather than replying \"I couldn't find " +
-		"anything\" and stopping. State in the `reason` what you looked for and why it seems to " +
-		"belong elsewhere, so the router can re-route it well. Two guards: do NOT hand back a " +
-		"request you can reasonably handle, and do NOT hand back merely because a legitimate, " +
-		"in-scope search returned no results (for an in-scope question, an honest \"nothing " +
-		"found\" IS the answer — give it).\n"
+		"The router gave you this conversation because it matched your squad. When the user " +
+		"asks for something clearly outside your squad's domain, or you cannot fulfil a request " +
+		"because it needs capabilities your squad lacks, call `handoff_to_router` with a " +
+		"one-line `reason` (what you looked for, why it belongs elsewhere) instead of " +
+		"attempting it or replying that you found nothing. Do not hand back a request you can " +
+		"reasonably handle, nor an in-scope search that simply found nothing — that answer is " +
+		"\"nothing found\".\n"
 }
 
 // defaultRouterInstruction is the built-in router prompt used when no

@@ -68,9 +68,15 @@ func TestRepairToolArgs(t *testing.T) {
 		},
 		{
 			name: "other tools are untouched",
-			tool: "Bash",
+			tool: "WebFetch",
 			in:   map[string]any{"path": "x", "cmd": "ls"},
 			want: map[string]any{"path": "x", "cmd": "ls"},
+		},
+		{
+			name: "Bash cmd becomes command",
+			tool: "Bash",
+			in:   map[string]any{"cmd": "ls"},
+			want: map[string]any{"command": "ls"},
 		},
 	}
 	for _, c := range cases {
