@@ -6412,6 +6412,7 @@ function refreshSessionsFor(sessionId) {
 // Three-dots "kebab" trigger that opens each session row's actions menu.
 const ICON_DOTS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>`;
 // Icons shown beside the session actions-menu entries.
+const ICON_DUPLICATE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 011-1h11"/><line x1="14.5" y1="11.5" x2="14.5" y2="17.5"/><line x1="11.5" y1="14.5" x2="17.5" y2="14.5"/></svg>`;
 const ICON_COPY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
 const ICON_RENAME = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
 const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`;
@@ -6510,6 +6511,9 @@ function openSessionCtxMenu(ev, s, archived, li) {
   const displayName = s.title || s.id;
   const items = [[tr("menu.copyName"), () => writeClipboard(displayName), { icon: ICON_COPY }]];
   if (!archived) items.push([tr("menu.rename"), () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
+  // Duplicate = a full fork (the whole conversation), shown nested under this
+  // one in the tree. Allowed on archived rows too: forking never touches the source.
+  items.push([tr("menu.duplicate"), () => forkConversation(s.id, 0, "", { full: true }), { icon: ICON_DUPLICATE }]);
   // Move-to: one "Move to ▸" item opening a submenu of collections. The
   // session's current collection is shown disabled so the target set is
   // unambiguous. General is always offered.

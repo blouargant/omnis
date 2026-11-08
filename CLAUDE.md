@@ -5773,7 +5773,9 @@ gets a chevron after its title (`.session-fork-toggle`) that folds its forks —
 fold state per browser in `localStorage["agent_fork_open"]` (default open). A
 fork whose parent is not in the same list (another collection, archived,
 deleted, not loaded yet) stays a top-level row; search and bulk-select show
-folded forks. Import drops `parent_id`.
+folded forks. Import drops `parent_id`. The session context menu's
+**Duplicate** item is a full fork (`forkConversation(id, 0, "", {full:true})`,
+like `/fork`), offered on archived rows too.
 
 **Web UI** ([web/app.js](web/app.js)): `appendUserBubble` takes a `turnIndex` and
 stamps it on the row (`addTurnActions` adds the control); each render site

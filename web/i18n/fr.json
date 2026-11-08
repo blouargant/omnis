@@ -1059,5 +1059,6 @@
   "set.plugins.reloadError": "Le plugin a été modifié, mais le rechargement a échoué : {error}",
   "set.plugins.toggleAria": "Activer le plugin {name}",
   "tree.showForks": "Afficher les copies ({count})",
-  "tree.hideForks": "Masquer les copies"
+  "tree.hideForks": "Masquer les copies",
+  "menu.duplicate": "Dupliquer"
 }

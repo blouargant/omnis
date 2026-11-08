@@ -1059,5 +1059,6 @@
   "set.plugins.reloadError": "Das Plugin wurde geändert, aber das Neuladen ist fehlgeschlagen: {error}",
   "set.plugins.toggleAria": "Plugin {name} aktivieren",
   "tree.showForks": "Kopien anzeigen ({count})",
-  "tree.hideForks": "Kopien ausblenden"
+  "tree.hideForks": "Kopien ausblenden",
+  "menu.duplicate": "Duplizieren"
 }
