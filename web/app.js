@@ -6502,18 +6502,16 @@ function openSessionCtxMenu(ev, s, archived, li) {
   const displayName = s.title || s.id;
   const items = [[tr("menu.copyName"), () => writeClipboard(displayName), { icon: ICON_COPY }]];
   if (!archived) items.push([tr("menu.rename"), () => startRename(li, s.id, s.title || ""), { icon: ICON_RENAME }]);
-  // Move-to: a flat "Move to <collection>" group (the shared menu has no
-  // submenus). The session's current collection is shown disabled so the target
-  // set is unambiguous. General is always offered.
+  // Move-to: one "Move to ▸" item opening a submenu of collections. The
+  // session's current collection is shown disabled so the target set is
+  // unambiguous. General is always offered.
   const cur = effectiveCollection(s);
   const targets = [GENERAL_COLLECTION, ...collectionsData.filter(c => !c.general).map(c => c.name)];
   if (targets.length > 1) {
     items.push(SEP);
-    items.push([tr("collections.moveTo"), null, { disabled: true }]);
-    for (const name of targets) {
-      const isCur = name.toLowerCase() === cur.toLowerCase();
-      items.push([name, () => moveSessionToCollection(s.id, name), { icon: ICON_FOLDER, disabled: isCur }]);
-    }
+    const sub = targets.map((name) => [name, () => moveSessionToCollection(s.id, name),
+      { icon: ICON_FOLDER, disabled: name.toLowerCase() === cur.toLowerCase() }]);
+    items.push([tr("collections.moveTo"), null, { icon: ICON_FOLDER, submenu: sub }]);
   }
   items.push(SEP);
   items.push([tr("menu.export"), () => exportSession(s.id), { icon: ICON_EXPORT }]);
@@ -8205,9 +8203,9 @@ function toggleSelectAll() {
 // collection, archive, delete. A no-op when nothing is selected.
 function openBatchMenu(ev) {
   if (selectedSessions.size === 0) { showToast(tr("sessionbar.noneSelected"), "err"); return; }
-  const items = [[tr("collections.moveTo"), null, { disabled: true }]];
   const targets = [GENERAL_COLLECTION, ...collectionsData.filter((c) => !c.general).map((c) => c.name)];
-  for (const name of targets) items.push([name, () => batchMove(name), { icon: ICON_FOLDER }]);
+  const sub = targets.map((name) => [name, () => batchMove(name), { icon: ICON_FOLDER }]);
+  const items = [[tr("collections.moveTo"), null, { icon: ICON_FOLDER, submenu: sub }]];
   items.push(SEP);
   items.push([tr("menu.archive"), () => batchArchive(), { icon: ICON_ARCHIVE }]);
   items.push([tr("menu.delete"), () => batchDelete(), { icon: ICON_DELETE }]);
@@ -14196,15 +14194,61 @@ function ensureFolderCtxMenu() {
   // fires even when an app element stops propagation on its own click handler.
   // A menu item's own action still runs: the click event is already in flight to
   // the button, so hiding the menu here doesn't cancel it.
-  document.addEventListener("click", () => hideFolderCtxMenu(), true);
-  document.addEventListener("contextmenu", (e) => { if (!m.contains(e.target)) hideFolderCtxMenu(); }, true);
+  // A click on an item that opens a submenu must not close the menu.
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.closest && e.target.closest(".ctx-has-submenu")) return;
+    hideFolderCtxMenu();
+  }, true);
+  document.addEventListener("contextmenu", (e) => {
+    if (!m.contains(e.target) && !(folderCtxSubmenu && folderCtxSubmenu.contains(e.target))) hideFolderCtxMenu();
+  }, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideFolderCtxMenu(); });
   document.addEventListener("scroll", () => hideFolderCtxMenu(), true);
   window.addEventListener("blur", () => hideFolderCtxMenu());
   window.addEventListener("resize", () => hideFolderCtxMenu());
   return m;
 }
-function hideFolderCtxMenu() { if (folderCtxMenu) folderCtxMenu.hidden = true; }
+function hideFolderCtxMenu() {
+  if (folderCtxMenu) folderCtxMenu.hidden = true;
+  hideFolderCtxSubmenu();
+}
+
+// The submenu is a second body-appended element styled like the menu. Only one
+// level of submenu is supported.
+let folderCtxSubmenu = null;
+let folderCtxSubmenuOwner = null;
+function ensureFolderCtxSubmenu() {
+  if (folderCtxSubmenu) return folderCtxSubmenu;
+  const m = document.createElement("div");
+  m.id = "folder-ctx-submenu";
+  m.hidden = true;
+  document.body.appendChild(m);
+  folderCtxSubmenu = m;
+  return m;
+}
+function hideFolderCtxSubmenu() {
+  if (folderCtxSubmenu) folderCtxSubmenu.hidden = true;
+  if (folderCtxSubmenuOwner) folderCtxSubmenuOwner.classList.remove("submenu-open");
+  folderCtxSubmenuOwner = null;
+}
+// openFolderCtxSubmenu shows items beside the owner button: to its right, or
+// to its left when there is no room, clamped to the viewport.
+function openFolderCtxSubmenu(owner, items) {
+  if (folderCtxSubmenuOwner === owner && !folderCtxSubmenu.hidden) return;
+  hideFolderCtxSubmenu();
+  const m = ensureFolderCtxSubmenu();
+  renderCtxItems(m, items);
+  m.hidden = false;
+  folderCtxSubmenuOwner = owner;
+  owner.classList.add("submenu-open");
+  const r = owner.getBoundingClientRect();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  let x = r.right + 2;
+  if (x + mw > window.innerWidth - 4) x = r.left - mw - 2;
+  const y = Math.min(r.top - 4, window.innerHeight - mh - 4);
+  m.style.left = Math.max(4, x) + "px";
+  m.style.top = Math.max(4, y) + "px";
+}
 
 // SEP is a separator sentinel for showFolderCtxMenu — renders a horizontal rule
 // that groups items like a traditional context menu.
@@ -14270,7 +14314,22 @@ function showFolderCtxMenu(ev, items) {
   ev.preventDefault();
   ev.stopPropagation();
   const m = ensureFolderCtxMenu();
+  hideFolderCtxSubmenu();
+  renderCtxItems(m, items);
+  m.hidden = false;
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  const x = Math.min(ev.clientX, window.innerWidth - mw - 4);
+  const y = Math.min(ev.clientY, window.innerHeight - mh - 4);
+  m.style.left = Math.max(4, x) + "px";
+  m.style.top = Math.max(4, y) + "px";
+}
+
+// renderCtxItems fills a context-menu element with [[label, action, opts], …]
+// (SEP entries become separators). opts.submenu (an items list) turns the item
+// into a "▸" entry that opens that list beside it, on hover or click.
+function renderCtxItems(m, items) {
   m.innerHTML = "";
+  const isSub = m === folderCtxSubmenu;
   let lastWasSep = true; // suppress a leading separator
   for (const item of items) {
     if (item === SEP) {
@@ -14297,10 +14356,21 @@ function showFolderCtxMenu(ev, items) {
     } else {
       btn.textContent = label;
     }
-    if (opts && opts.disabled) {
-      btn.disabled = true;
+    const submenu = !isSub && opts && opts.submenu;
+    if (submenu) {
+      btn.classList.add("ctx-has-submenu");
+      btn.insertAdjacentHTML("beforeend", `<span class="ctx-item-arrow" aria-hidden="true">${ICON_CHEVRON_RIGHT}</span>`);
+      btn.setAttribute("aria-haspopup", "menu");
+      btn.addEventListener("mouseenter", () => openFolderCtxSubmenu(btn, submenu));
+      btn.addEventListener("click", (e) => { e.stopPropagation(); openFolderCtxSubmenu(btn, submenu); });
     } else {
-      btn.addEventListener("click", (e) => { e.stopPropagation(); hideFolderCtxMenu(); action(); });
+      // Hovering any other item of the main menu closes an open submenu.
+      if (!isSub) btn.addEventListener("mouseenter", () => hideFolderCtxSubmenu());
+      if (opts && opts.disabled) {
+        btn.disabled = true;
+      } else {
+        btn.addEventListener("click", (e) => { e.stopPropagation(); hideFolderCtxMenu(); action(); });
+      }
     }
     m.appendChild(btn);
     lastWasSep = false;
@@ -14309,12 +14379,6 @@ function showFolderCtxMenu(ev, items) {
   while (m.lastChild && m.lastChild.classList && m.lastChild.classList.contains("folder-ctx-sep")) {
     m.removeChild(m.lastChild);
   }
-  m.hidden = false;
-  const mw = m.offsetWidth, mh = m.offsetHeight;
-  const x = Math.min(ev.clientX, window.innerWidth - mw - 4);
-  const y = Math.min(ev.clientY, window.innerHeight - mh - 4);
-  m.style.left = Math.max(4, x) + "px";
-  m.style.top = Math.max(4, y) + "px";
 }
 
 function buildFolderEntry(e, rel) {

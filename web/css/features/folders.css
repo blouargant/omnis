@@ -169,7 +169,8 @@
 
 /* Folders panel right-click context menu (body-appended, fixed so it escapes
  * the sidebar/panel overflow clipping). */
-#folder-ctx-menu {
+#folder-ctx-menu,
+#folder-ctx-submenu {
   position: fixed;
   z-index: 1000;
   min-width: 150px;
@@ -184,7 +185,15 @@
 }
 /* The id selector above outranks the UA `[hidden]{display:none}` rule, so this
  * explicit rule is required for `m.hidden = true` to actually hide the menu. */
-#folder-ctx-menu[hidden] { display: none; }
+#folder-ctx-menu[hidden],
+#folder-ctx-submenu[hidden] { display: none; }
+/* The submenu sits above its parent menu. */
+#folder-ctx-submenu { z-index: 1001; max-height: calc(100vh - 8px); overflow-y: auto; }
+/* An item opening a submenu: the chevron goes to the right edge, and the item
+   stays highlighted while its submenu is open. */
+.folder-ctx-item.ctx-has-submenu .ctx-item-label { flex: 1 1 auto; }
+.folder-ctx-item .ctx-item-arrow { display: inline-flex; margin-left: 12px; opacity: 0.7; }
+.folder-ctx-item.submenu-open { background: var(--accent, #0e639c); color: #fff; }
 .folder-ctx-item {
   display: block;
   width: 100%;
