@@ -6481,6 +6481,12 @@ function buildSessionRow(s, { archived }) {
     e.stopPropagation();
     openSessionCtxMenu(e, s, archived, li);
   });
+  // Right-click on the row opens the same menu — except in bulk-select mode
+  // and inside the rename field, which keep the browser's own menu.
+  li.addEventListener("contextmenu", (e) => {
+    if (selectMode || e.target.closest("input, textarea")) return;
+    openSessionCtxMenu(e, s, archived, li);
+  });
   li.querySelector(".session-delete-btn").addEventListener("click", async (e) => {
     e.stopPropagation();
     const ok = await uiConfirm({
