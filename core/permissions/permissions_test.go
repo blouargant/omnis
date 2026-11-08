@@ -482,6 +482,13 @@ func TestShippedConfigParity(t *testing.T) {
 		// glob only matches when the verb is the first token.
 		{"Bash", bash("kubectl --context=kubernetes-admin@kubernetes get nodes -o wide 2>&1"), DecisionAllow},
 		{"Bash", bash("kubectl -n kube-system describe pod x"), DecisionAllow},
+		// The read-only allowlist judges a command by its name; an output
+		// redirection to a real file makes it a write and must ask.
+		{"Bash", bash("echo x > ~/.bashrc"), DecisionAsk},
+		{"Bash", bash("cat a > /etc/x"), DecisionAsk},
+		{"Bash", bash("ls -la >> notes.txt"), DecisionAsk},
+		{"Bash", bash("ls -la 2>/dev/null"), DecisionAllow},
+		{"Bash", bash("grep -rn TODO . > /tmp/todo.txt 2>&1"), DecisionAllow},
 		{"Bash", bash("git push origin main"), DecisionAsk},
 		{"Bash", bash("rm file.txt"), DecisionAsk},
 		{"Bash", bash("kubectl delete pod x"), DecisionAsk},
