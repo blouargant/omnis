@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
@@ -67,7 +68,6 @@ var compoundOps = []string{"&&", "||", "|&", ";", "\n", "|", "&"}
 func splitCompound(cmd string) []string {
 	var out []string
 	var cur strings.Builder
-	var quote byte // 0, '\'' or '"'
 	flush := func() {
 		s := strings.TrimSpace(cur.String())
 		if s != "" {
@@ -75,23 +75,10 @@ func splitCompound(cmd string) []string {
 		}
 		cur.Reset()
 	}
+	active := unquotedMask(cmd)
 	for i := 0; i < len(cmd); i++ {
 		c := cmd[i]
-		if c == '\\' && quote != '\'' && i+1 < len(cmd) {
-			cur.WriteByte(c)
-			cur.WriteByte(cmd[i+1])
-			i++
-			continue
-		}
-		if quote != 0 {
-			cur.WriteByte(c)
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		if c == '\'' || c == '"' {
-			quote = c
+		if !active[i] {
 			cur.WriteByte(c)
 			continue
 		}
@@ -121,6 +108,94 @@ func splitCompound(cmd string) []string {
 		return []string{strings.TrimSpace(cmd)}
 	}
 	return out
+}
+
+// unquotedMask reports, for each byte of cmd, whether the shell reads it as
+// syntax: false inside single or double quotes (the quote characters
+// themselves included) and for a backslash escape and the byte it escapes
+// (outside single quotes, as in the shell, so `\"` does not close a
+// double-quoted string). splitCompound and hasWriteRedirect share it, so an
+// operator inside a quoted string is neither a separator nor a redirect.
+func unquotedMask(cmd string) []bool {
+	active := make([]bool, len(cmd))
+	var quote byte // 0, '\'' or '"'
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if c == '\\' && quote != '\'' && i+1 < len(cmd) {
+			i++ // both bytes stay inactive
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		active[i] = true
+	}
+	return active
+}
+
+// hasWriteRedirect reports whether a subcommand redirects output to a file
+// (`>`, `>>`, `>|`, `&>`, `&>>`, `<>`, `>&file`), which disqualifies it from the
+// read-only allowlist: `echo x > ~/.bashrc` writes a file whatever the command.
+// Harmless targets do not count: /dev/null, /dev/stdout, /dev/stderr, a file
+// descriptor duplication or close (`2>&1`, `>&2`, `>&-`), and a path under
+// /tmp/. A `>` inside quotes (an awk program, a grep pattern) is not a redirect.
+// A target the shell expands ($VAR, $(…), `…`, ~), a process substitution
+// `>(…)` or a missing target counts as a write.
+func hasWriteRedirect(sub string) bool {
+	active := unquotedMask(sub)
+	for i := 0; i < len(sub); i++ {
+		if !active[i] || sub[i] != '>' {
+			continue
+		}
+		j := i + 1
+		dup := false
+		if j < len(sub) && active[j] && (sub[j] == '>' || sub[j] == '|') {
+			j++ // >> or >|
+		} else if j < len(sub) && active[j] && sub[j] == '&' {
+			j++ // >&N, >&-, or >&file
+			dup = true
+		}
+		for j < len(sub) && (sub[j] == ' ' || sub[j] == '\t') {
+			j++
+		}
+		k := j
+		for k < len(sub) && !(active[k] && strings.IndexByte(" \t;|&<>()", sub[k]) >= 0) {
+			k++
+		}
+		if !harmlessRedirectTarget(sub[j:k], dup) {
+			return true
+		}
+		i = k - 1
+	}
+	return false
+}
+
+// fdNumber matches a file-descriptor operand of `>&` (`2>&1`, `>&2`).
+var fdNumber = regexp.MustCompile(`^[0-9]+$`)
+
+// harmlessRedirectTarget reports whether an output redirection to raw (the
+// target word as written, quotes included) cannot write a file outside /tmp.
+func harmlessRedirectTarget(raw string, dup bool) bool {
+	if raw == "" || strings.ContainsAny(raw, "$`~") {
+		return false
+	}
+	if dup && (raw == "-" || fdNumber.MatchString(raw)) {
+		return true
+	}
+	target := strings.NewReplacer(`"`, "", "'", "", `\`, "").Replace(raw)
+	switch target {
+	case "/dev/null", "/dev/stdout", "/dev/stderr":
+		return true
+	}
+	clean := path.Clean(target)
+	return strings.HasPrefix(clean, "/tmp/")
 }
 
 // isRedirectAmp reports whether the single '&' at cmd[i] is part of a
@@ -286,6 +361,10 @@ var readOnlyGitSubcommands = map[string]bool{
 func isReadOnlyCommand(sub string) bool {
 	fields := strings.Fields(sub)
 	if len(fields) == 0 {
+		return false
+	}
+	// An output redirection makes any command a file write.
+	if hasWriteRedirect(sub) {
 		return false
 	}
 	cmd := fields[0]

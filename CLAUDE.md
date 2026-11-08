@@ -3400,6 +3400,24 @@ calls fall through to the mode default (ask in `default` mode).
   word-boundary, compound-command splitting, wrapper stripping, built-in
   read-only allowlist); paths use gitignore anchors in
   [match_path.go](core/permissions/match_path.go).
+- **An output redirection disqualifies a read-only command**
+  (`hasWriteRedirect`, checked first in `isReadOnlyCommand`, so it covers step 5
+  of `CheckArgs`, `bashAllowed`, `allReadOnly` — plan mode and read-only agents —
+  and `find -exec`). The allowlist judges a command by its name, so
+  `echo x > ~/.bashrc` used to be auto-allowed as a "read-only command". `>`,
+  `>>`, `>|`, `&>`, `&>>`, `<>` and `>&file` now count as writes unless the
+  target is `/dev/null`, `/dev/stdout`, `/dev/stderr`, an fd duplication/close
+  (`2>&1`, `>&2`, `>&-`) or a path under `/tmp/` (cleaned, so `/tmp/../etc` is
+  refused); a target with `$`, a backtick or `~`, a process substitution `>(…)`
+  or a missing target counts as a write. A `>` inside quotes (awk program, grep
+  pattern) or backslash-escaped is not a redirect: `unquotedMask` is the quote
+  scanner `splitCompound` uses too. Such a command falls through to the default
+  ask. **Remaining gaps:** an explicit allow glob still covers a redirected
+  command (`Bash(kubectl get *)` allows `kubectl get pods > ~/x`, as in Claude
+  Code), a command substitution inside double quotes is not inspected
+  (`echo "$(rm x)"`), and a symlink under `/tmp/` pointing elsewhere is
+  trusted. Pinned by [redirect_test.go](core/permissions/redirect_test.go) and
+  `TestShippedConfigParity`.
 - **MultiEdit is checked per file** (`checkMultiEdit` in
   [permissions.go](core/permissions/permissions.go)). Its paths live in
   `files[].file_path`, which the path matchers (they read a top-level
