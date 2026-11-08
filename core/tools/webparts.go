@@ -145,6 +145,9 @@ func pdfParts(pages []string, max int) []pdfPart {
 	for i, p := range pages {
 		n := i + 1
 		p = strings.TrimSpace(p)
+		if len(pages) > 1 {
+			p = pdfPageMarker(n) + "\n\n" + p
+		}
 		if len(p) > max {
 			if cur != nil {
 				parts = append(parts, *cur)

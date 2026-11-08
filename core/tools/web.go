@@ -26,6 +26,7 @@ type WebFetchIn struct {
 	Section  string `json:"section,omitempty" jsonschema:"an id from the page outline"`
 	Find     string `json:"find,omitempty" jsonschema:"text to search for in the page or section"`
 	Part     int    `json:"part,omitempty" jsonschema:"1-based part of a long section"`
+	Pages    string `json:"pages,omitempty" jsonschema:"PDF only: pages to read, e.g. 3 or 3-5 or 1,4,7-9 (combine with find to search only those pages)"`
 	Selector string `json:"selector,omitempty" jsonschema:"CSS selector (advanced)"`
 	Raw      bool   `json:"raw,omitempty" jsonschema:"keep the page navigation"`
 }
@@ -43,8 +44,10 @@ type HTMLToMarkdownOut struct {
 func NewWebTools() []tool.Tool {
 	return []tool.Tool{
 		mustTool("WebFetch",
-			"Fetch a web page as Markdown (PDF: its text). A page longer than the limit returns its outline instead of its content: "+
-				"then fetch one part with section (an id from the outline), search it with find, or read a long section part by part.",
+			"Fetch a web page or document as Markdown: HTML, PDF (text, with [page N] markers), Word/OpenDocument/EPUB/RTF, plain text, JSON, CSV. "+
+				"A page longer than the limit returns its outline instead of its content: "+
+				"then fetch one part with section (an id from the outline), search it with find, or read a long section part by part. "+
+				"For a PDF, read given pages with pages (e.g. \"3-4\"). Use this tool rather than curl.",
 			func(tc adk.ToolContext, in WebFetchIn) (WebFetchOut, error) {
 				scope := webCacheScope(tc, tc.SessionID())
 				out := sharedWebCache.get(scope, webFetchResultKey(in), func() string {
@@ -122,6 +125,12 @@ func fetchPage(ctx context.Context, url string, raw bool) (*fetchedPage, string)
 			return nil, e
 		}
 		page.doc = buildPDFDoc(pages)
+	case officeFormat(mediaType, url) != "":
+		md, e := pandocMarkdown(cctx, body, officeFormat(mediaType, url))
+		if e != "" {
+			return nil, e
+		}
+		page.doc = buildMarkdownDoc(md, "")
 	case isHTMLMediaType(mediaType):
 		doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
@@ -164,7 +173,7 @@ func webFetchResultKey(in WebFetchIn) string {
 	if section == "" && in.Selector == "" {
 		section = frag
 	}
-	return strings.Join([]string{"fetch", url, in.Selector, section, in.Find, strconv.Itoa(in.Part), strconv.FormatBool(in.Raw)}, "\x00")
+	return strings.Join([]string{"fetch", url, in.Selector, section, in.Find, strconv.Itoa(in.Part), strings.TrimSpace(in.Pages), strconv.FormatBool(in.Raw)}, "\x00")
 }
 
 // splitFragment cuts the #fragment off a URL (the server never sees it).
@@ -194,6 +203,22 @@ func webFetchWith(ctx context.Context, in WebFetchIn, pages *pageCache, scope st
 		return e
 	}
 	d := page.doc
+	if spec := strings.TrimSpace(in.Pages); spec != "" {
+		if len(d.Pages) == 0 {
+			return "error pages applies to PDF documents only; on this page use section, find or part"
+		}
+		if strings.TrimSpace(in.Section) != "" || strings.TrimSpace(in.Selector) != "" || in.Part > 0 {
+			return "error pages cannot be combined with section, selector or part (find is allowed)"
+		}
+		nums, err := parsePageSpec(spec, len(d.Pages))
+		if err != nil {
+			return "error " + err.Error()
+		}
+		if in.Find != "" {
+			return renderFindIn(d, d.Root, in.Find, WebFetchLimit, nums)
+		}
+		return renderPages(d, nums, WebFetchLimit)
+	}
 	sel := d.Root
 	prefix := ""
 	switch {
@@ -330,4 +355,72 @@ func collapseBlankLines(s string) string {
 		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
 	}
 	return s
+}
+
+// officeFormats maps document media types pandoc can read to its input format.
+var officeFormats = map[string]string{
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/vnd.oasis.opendocument.text":                                 "odt",
+	"application/epub+zip":                                                    "epub",
+	"application/rtf":                                                         "rtf",
+	"text/rtf":                                                                "rtf",
+}
+
+// officeExtensions is the fallback when a server sends a generic type.
+var officeExtensions = map[string]string{".docx": "docx", ".odt": "odt", ".epub": "epub", ".rtf": "rtf"}
+
+// officeFormat returns the pandoc input format of a document, or "".
+func officeFormat(mediaType, rawURL string) string {
+	if f, ok := officeFormats[mediaType]; ok {
+		return f
+	}
+	switch mediaType {
+	case "", "application/octet-stream", "binary/octet-stream", "application/zip", "application/x-zip-compressed":
+	default:
+		return ""
+	}
+	p := rawURL
+	if u, err := neturl.Parse(rawURL); err == nil {
+		p = u.Path
+	}
+	p = strings.ToLower(p)
+	for ext, f := range officeExtensions {
+		if strings.HasSuffix(p, ext) {
+			return f
+		}
+	}
+	return ""
+}
+
+// pandocMarkdown converts a document to Markdown with pandoc.
+func pandocMarkdown(ctx context.Context, data []byte, format string) (string, string) {
+	bin, err := exec.LookPath("pandoc")
+	if err != nil {
+		return "", fmt.Sprintf("error fetching URL: the document is %s and pandoc is not installed to convert it", format)
+	}
+	f, err := os.CreateTemp("", "omnis-webfetch-*."+format)
+	if err != nil {
+		return "", fmt.Sprintf("error converting %s: %v", format, err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return "", fmt.Sprintf("error converting %s: %v", format, err)
+	}
+	f.Close()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, bin, "-f", format, "-t", "gfm", "--wrap=none", f.Name())
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Sprintf("error converting %s: %s", format, truncateAt(msg, 300))
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return "", fmt.Sprintf("error converting %s: the document has no text", format)
+	}
+	return string(out), ""
 }

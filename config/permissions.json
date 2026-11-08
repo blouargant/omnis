@@ -154,6 +154,10 @@
       "Read",
       "Edit(//tmp/**)",
       "Bash(pandoc *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(pdftotext *)",
+      "Bash(pdfinfo *)",
       "Bash(go build *)",
       "Bash(go test *)",
       "Bash(go vet *)",
@@ -265,11 +269,25 @@
         "tools": ["Bash"]
       },
       {
-        "regex": "\\bcurl\\b[^\"]*\\s(-o|-O|--output)\\b",
-        "reason": "curl downloading to disk — confirm the destination",
+        "regex": "\\b(?:curl|wget)\\b(?:\\\\.|[^\"\\\\])*\\s(?:-[A-Za-z]*(?-i:[dFTK])\\b|--data[\\w-]*|--form[\\w-]*|--json\\b|--upload-file\\b|--config\\b|--post-data\\b|--post-file\\b|--body-data\\b|--body-file\\b|--execute\\b|-[A-Za-z]*(?-i:X)\\s*(?:\\\\\"|')*(?:POST|PUT|PATCH|DELETE)|--request[=\\s]+(?:\\\\\"|')*(?:POST|PUT|PATCH|DELETE)|--method[=\\s]+(?:\\\\\"|')*(?:POST|PUT|PATCH|DELETE))",
+        "reason": "curl/wget sending data or a non-GET request (upload, POST, config file) — confirm what leaves the machine",
         "tools": ["Bash"]
       },
-      "Bash(wget *)",
+      {
+        "regex": "\\bwget\\b(?:\\\\.|[^\"\\\\])*\\s-[A-Za-z]*(?-i:e)\\b",
+        "reason": "wget -e runs a wgetrc command — confirm",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(?:curl|wget)\\b(?:\\\\.|[^\"\\\\])*(?:\\s(?:-[A-Za-z]*(?-i:[oODPc])|--(?:output|output-dir|output-document|directory-prefix|dump-header|cookie-jar|trace|trace-ascii|stderr|libcurl|etag-save|hsts|alt-svc))(?:=|\\s+)|>>?\\s*)(?:\\\\\"|')*(?:~|\\$|[^\\s\\\\\"']*\\.\\.|\\.[^\\s/\\\\\"'.]|/(?:[^td\\s\\\\\"']|t[^m]|tm[^p]|tmp[^/\\s\\\\\"']|d[^e]|de[^v]|dev[^/]))",
+        "reason": "curl/wget writing outside /tmp or the working directory (absolute, home, hidden or parent path) — confirm the destination",
+        "tools": ["Bash"]
+      },
+      {
+        "regex": "\\b(?:curl|wget)\\b(?:\\\\.|[^\"\\\\])*(?:\\$\\(|`|(?i:\\$\\{?[a-z_]*(?:key|token|secret|pass|auth|credential|cookie)[a-z_]*))",
+        "reason": "curl/wget with a command substitution or a secret-looking variable — confirm nothing private is sent",
+        "tools": ["Bash"]
+      },
       "Bash(git push *)",
       {
         "regex": "\\bgit\\s+(reset\\s+--hard|clean\\s+-[fd]+|checkout\\s+--|branch\\s+-D|tag\\s+-d|push\\s+.*--force)",
@@ -322,8 +340,8 @@
         "tools": ["Bash"]
       },
       {
-        "regex": "\\bcd\\s+/",
-        "reason": "Changing directory to an absolute path escapes the project root — confirm the destination",
+        "regex": "\\bcd\\s+(?:\\\\\"|')*/(?:[^t]|t[^m]|tm[^p]|tmp[^/\\s;&|\"\\\\'])",
+        "reason": "Changing directory to an absolute path (other than /tmp) escapes the project root — confirm the destination",
         "tools": ["Bash"]
       },
       {

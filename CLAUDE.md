@@ -6589,6 +6589,38 @@ contents and answered without the section it needed. Now:
   `web_fetcher`, `code_docs`, `knowledge_leader`) say to read the outline and
   fetch only the section they need, or `find` a value.
 
+**WebFetch: PDF pages and office documents** (2026-11-08). A
+`knowledge_leader` asked the user to approve `curl -o rs.pdf … ; pdftotext -f 3
+-l 4` to read two pages of an OECD PDF: `WebFetch` could not name pages, and the
+shipped `ask` tier had `curl … -o`, `Bash(wget *)` and `cd /` rules. **Web
+research must never solicit the user.** So:
+- `pages` ([core/tools/webpages.go](core/tools/webpages.go) `parsePageSpec` /
+  `renderPages`): `"3"`, `"3-5"`, `"1,4,7-9"`, `"10-"`; PDF only (an error on any
+  other page), combinable with `find` (`renderFindIn` restricts the search), not
+  with `section`/`selector`/`part`. Pages that do not fit are named in the header
+  (`fetch pages="…" next`); a single page over the limit is cut with a notice.
+  A multi-page PDF's text — whole or in parts — now heads each page with
+  `[page N]` (`joinPDFPages`, `pdfPageMarker`), so a value can be cited with its
+  page. Part headers point at `pages`.
+- Word (`.docx`), OpenDocument (`.odt`), EPUB and RTF are converted with
+  `pandoc -t gfm` (`officeFormat` — by media type, or by URL extension when the
+  server sends a generic type — and `pandocMarkdown`) and become a Markdown doc
+  with sections. Missing pandoc ⇒ an explicit error. (pandoc reads no pptx/xlsx.)
+- Permissions ([config/permissions.json](config/permissions.json), pinned by
+  [core/permissions/web_download_test.go](core/permissions/web_download_test.go)):
+  `Bash(curl *)`, `Bash(wget *)`, `Bash(pdftotext *)`, `Bash(pdfinfo *)` are
+  allowed; the old `curl -o` / `wget` asks are gone, and `cd /tmp…` is exempt from
+  the `cd /` ask. Four targeted `ask` regexes remain: sending data or a non-GET
+  method, `wget -e`, writing outside `/tmp`/the working directory (`-o`/`-O`/`-P`/
+  `-D`/`-c`/`--output…`/`>` to an absolute, `~`, `$`, hidden or `..` path; `/dev/`
+  allowed), and a command substitution or secret-looking variable. **GOTCHA:**
+  rule regexes are compiled with `(?i)` ([core/permissions/spec.go](core/permissions/spec.go)),
+  so a flag letter set must be wrapped in `(?-i:…)` — `[dFTK]` also matched
+  pdftotext's `-f` and curl's `-k`. The rules scan the JSON-escaped command with
+  `(?:\\.|[^"\\])*`, not `[^"]*`, which stopped at the first quoted argument.
+  Known gap (pre-existing, not changed): built-in read-only commands are judged
+  by their name only, so `echo x > ~/.bashrc` is auto-allowed.
+
 **Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
 `WebFetch` and every `WebSearch` provider go through `sharedWebCache`
 (15 min TTL, 512 entries, process memory), keyed by the turn's **root session**

@@ -25,15 +25,31 @@ type findHit struct {
 // case), each labelled with the section it is in. It never returns the
 // selection itself, even when it would fit.
 func renderFind(d *webDoc, s *webSection, term string, limit int) string {
+	return renderFindIn(d, s, term, limit, nil)
+}
+
+// renderFindIn is renderFind restricted to the given PDF pages (1-based);
+// nil searches every page.
+func renderFindIn(d *webDoc, s *webSection, term string, limit int, pages []int) string {
 	scope := "the page"
 	if s != d.Root {
 		scope = fmt.Sprintf("section %q", s.Title)
 	}
+	if pages != nil {
+		scope = "pages " + formatPageList(pages)
+	}
 	needle, _ := foldForFind(term)
 	var hits []findHit
 	if s == d.Root && len(d.Pages) > 0 {
-		for i, p := range d.Pages {
-			label := fmt.Sprintf("page %d", i+1)
+		if pages == nil {
+			pages = make([]int, len(d.Pages))
+			for i := range pages {
+				pages[i] = i + 1
+			}
+		}
+		for _, n := range pages {
+			p := d.Pages[n-1]
+			label := fmt.Sprintf("page %d", n)
 			for _, b := range mdBlocks(p) {
 				hits = append(hits, blockHits(b, needle, label)...)
 			}

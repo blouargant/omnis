@@ -54,6 +54,16 @@ argument.)
 
 ### omnis extensions
 
+- **Web downloads run without asking** — the shipped `allow` tier includes
+  `Bash(curl *)`, `Bash(wget *)`, `Bash(pdftotext *)` and `Bash(pdfinfo *)`, and
+  `cd /tmp` no longer asks, so a research agent that downloads a page or a PDF
+  never stops on a card. A `curl`/`wget` still asks when it sends data (`-d`,
+  `-F`, `-T`, `--data…`, `--json`, `-K`, a `POST`/`PUT`/`PATCH`/`DELETE`),
+  writes outside `/tmp` and the working directory (`-o`/`-O`/`-P`/`>` to an
+  absolute, `~`, `$…`, hidden or `..` path; `/dev/…` is fine), or carries a
+  command substitution or a secret-looking variable (`$GITHUB_TOKEN`). Most
+  research needs no shell at all: `WebFetch` reads HTML, PDF (with
+  `pages="3-4"`), Word, OpenDocument, EPUB, RTF, JSON and CSV.
 - **Object form** — `{ "rule": "Bash(...)", "reason": "...", "cwd": "..." }`
   attaches a prompt reason and a project-scoping `cwd` (rules with a `cwd` only
   apply inside that directory tree; used by "Allow in this project" grants).

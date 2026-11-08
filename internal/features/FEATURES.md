@@ -19,6 +19,7 @@
 
 ## 2.1 (in development) — Collection tree and settings dialog
 
+- **Web research no longer asks for permission** — the page fetcher reads given pages of a PDF (`pages="3-4"`) and Word, OpenDocument, EPUB and RTF documents, and when an agent still downloads a file with curl or wget it runs without a confirmation card; only uploads, writes outside /tmp and the working folder, or commands that could carry a secret still ask.
 - **Sturdier file edits and command output** — parallel edits of one file no longer overwrite each other; an edit still applies when the file uses Windows line endings or typographic quotes; a long command output keeps its end (where errors are) and saves the full output to a file; a long file read says which line to continue from.
 - **Sub-agents hold up on long tasks** — a sub-agent's context is now compacted like the main agent's, and a request its model refuses as too long is compacted and retried instead of failing.
 - **Unattended runs finish what they start** — with `OMNIS_NON_INTERACTIVE`, a one-shot run whose reply was cut at the output limit, or that wrote a summary instead of its next step, is automatically continued (up to twice).

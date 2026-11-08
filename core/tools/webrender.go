@@ -40,7 +40,7 @@ func renderSection(d *webDoc, s *webSection, part int, limit int) string {
 			return fmt.Sprintf("error part %d out of range: %q has %d parts", part, title, len(parts))
 		}
 		p := parts[part-1]
-		return fmt.Sprintf("[Part %d of %d (pages %d–%d of %d) — %s]\n\n%s",
+		return fmt.Sprintf("[Part %d of %d (pages %d–%d of %d) — %s Or read given pages with pages=\"N-M\", or search with find.]\n\n%s",
 			part, len(parts), p.First, p.Last, len(d.Pages), nextPart(part, len(parts)), p.Text)
 	}
 	parts := splitParts(s.Markdown(), limit-partReserve)

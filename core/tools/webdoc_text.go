@@ -80,8 +80,30 @@ func buildTextDoc(text string) *webDoc {
 }
 
 // buildPDFDoc wraps the text of a PDF; parts are cut on page boundaries.
+// Each page of a multi-page PDF starts with a [page N] line, so a value read
+// in the text can be cited with its page and re-read with pages="N".
 func buildPDFDoc(pages []string) *webDoc {
-	d := &webDoc{Root: &webSection{Own: cleanBody(strings.Join(pages, "\n\n"))}, Pages: pages}
+	d := &webDoc{Root: &webSection{Own: cleanBody(joinPDFPages(pages, 1, len(pages)))}, Pages: pages}
 	d.finalize()
 	return d
+}
+
+// pdfPageMarker heads page n of a multi-page PDF in WebFetch output.
+func pdfPageMarker(n int) string { return "[page " + strconv.Itoa(n) + "]" }
+
+// joinPDFPages joins pages first..last (1-based, inclusive) of pages, each
+// headed by its marker when the PDF has more than one page.
+func joinPDFPages(pages []string, first, last int) string {
+	var b strings.Builder
+	for n := first; n <= last; n++ {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		if len(pages) > 1 {
+			b.WriteString(pdfPageMarker(n))
+			b.WriteString("\n\n")
+		}
+		b.WriteString(strings.TrimSpace(pages[n-1]))
+	}
+	return b.String()
 }
