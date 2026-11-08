@@ -105,6 +105,85 @@ func (c *webCache) evictLocked() {
 	}
 }
 
+// pageCache keeps downloaded pages as section trees, per root session, so
+// navigating an outline (outline, then section, then find) downloads the page
+// once and sees the same positional ids. Bounded by bytes: pages are large.
+type pageCache struct {
+	mu       sync.Mutex
+	ttl      time.Duration
+	maxBytes int
+	used     int
+	m        map[string]pageCacheEntry
+	now      func() time.Time
+}
+
+type pageCacheEntry struct {
+	page *fetchedPage
+	at   time.Time
+}
+
+var sharedPageCache = newPageCache(webCacheTTL, 64<<20)
+
+func newPageCache(ttl time.Duration, maxBytes int) *pageCache {
+	return &pageCache{ttl: ttl, maxBytes: maxBytes, m: map[string]pageCacheEntry{}, now: time.Now}
+}
+
+// get returns the page cached for key in scope, or calls load. A non-empty
+// string is an error, never cached. A nil cache or an empty scope does not
+// cache.
+func (c *pageCache) get(scope, key string, load func() (*fetchedPage, string)) (*fetchedPage, string) {
+	if c == nil || scope == "" {
+		return load()
+	}
+	k := scope + "\x00" + key
+	c.mu.Lock()
+	if e, ok := c.m[k]; ok && c.now().Sub(e.at) < c.ttl {
+		c.mu.Unlock()
+		return e.page, ""
+	}
+	c.mu.Unlock()
+
+	page, errMsg := load()
+	if errMsg != "" || page == nil || page.size > c.maxBytes {
+		return page, errMsg
+	}
+	c.mu.Lock()
+	if old, ok := c.m[k]; ok {
+		c.used -= old.page.size
+	}
+	c.m[k] = pageCacheEntry{page: page, at: c.now()}
+	c.used += page.size
+	c.evictLocked(k)
+	c.mu.Unlock()
+	return page, ""
+}
+
+// evictLocked drops expired pages, then the oldest, until the cache is within
+// its budget; keep is the entry just added.
+func (c *pageCache) evictLocked(keep string) {
+	now := c.now()
+	for k, e := range c.m {
+		if k != keep && now.Sub(e.at) >= c.ttl {
+			c.used -= e.page.size
+			delete(c.m, k)
+		}
+	}
+	for c.used > c.maxBytes {
+		var oldest string
+		var at time.Time
+		for k, e := range c.m {
+			if k != keep && (oldest == "" || e.at.Before(at)) {
+				oldest, at = k, e.at
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		c.used -= c.m[oldest].page.size
+		delete(c.m, oldest)
+	}
+}
+
 func cacheableWebResult(s string) bool {
 	t := strings.TrimSpace(s)
 	return t != "" && t != "(no results)" && !strings.HasPrefix(t, "error ")

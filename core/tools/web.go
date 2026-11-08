@@ -7,8 +7,10 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,8 +22,12 @@ import (
 )
 
 type WebFetchIn struct {
-	URL      string `json:"url"`
-	Selector string `json:"selector,omitempty"`
+	URL      string `json:"url" jsonschema:"required"`
+	Section  string `json:"section,omitempty" jsonschema:"an id from the page outline"`
+	Find     string `json:"find,omitempty" jsonschema:"text to search for in the page or section"`
+	Part     int    `json:"part,omitempty" jsonschema:"1-based part of a long section"`
+	Selector string `json:"selector,omitempty" jsonschema:"CSS selector (advanced)"`
+	Raw      bool   `json:"raw,omitempty" jsonschema:"keep the page navigation"`
 }
 type WebFetchOut struct {
 	Content string `json:"content"`
@@ -37,13 +43,12 @@ type HTMLToMarkdownOut struct {
 func NewWebTools() []tool.Tool {
 	return []tool.Tool{
 		mustTool("WebFetch",
-			"Fetch a web page and return its content as Markdown (PDFs are returned as their extracted text). "+
-				"Arguments: `url` (string, required) — the URL to fetch; "+
-				"`selector` (string, optional) — CSS selector to extract a specific page section (e.g. \"main\", \"article\", \"#content\").",
+			"Fetch a web page as Markdown (PDF: its text). A page longer than the limit returns its outline instead of its content: "+
+				"then fetch one part with section (an id from the outline), search it with find, or read a long section part by part.",
 			func(tc adk.ToolContext, in WebFetchIn) (WebFetchOut, error) {
-				out := sharedWebCache.get(webCacheScope(tc, tc.SessionID()), "fetch\x00"+in.URL+"\x00"+in.Selector, func() string {
-					out, _ := runWebFetch(context.Background(), in)
-					return out
+				scope := webCacheScope(tc, tc.SessionID())
+				out := sharedWebCache.get(scope, webFetchResultKey(in), func() string {
+					return webFetchWith(context.Background(), in, sharedPageCache, scope)
 				})
 				return WebFetchOut{Content: out}, nil
 			}),
@@ -60,13 +65,27 @@ func NewWebTools() []tool.Tool {
 	}
 }
 
+// runWebFetch fetches without the page cache (tests and one-off callers).
 func runWebFetch(ctx context.Context, in WebFetchIn) (string, error) {
+	return webFetchWith(ctx, in, nil, ""), nil
+}
+
+// fetchedPage is a downloaded page turned into a section tree. html keeps the
+// raw HTML so a CSS selector can run on it.
+type fetchedPage struct {
+	doc  *webDoc
+	html []byte
+	size int
+}
+
+// fetchPage downloads url and builds its document.
+func fetchPage(ctx context.Context, url string, raw bool) (*fetchedPage, string) {
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, in.URL, nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Sprintf("error building request: %v", err), nil
+		return nil, fmt.Sprintf("error building request: %v", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -74,7 +93,7 @@ func runWebFetch(ctx context.Context, in WebFetchIn) (string, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Sprintf("error fetching URL: %v", err), nil
+		return nil, fmt.Sprintf("error fetching URL: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -82,55 +101,161 @@ func runWebFetch(ctx context.Context, in WebFetchIn) (string, error) {
 	// rendered as Markdown reads like a source, and the "error " prefix
 	// also keeps it out of the web cache.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Sprintf("error fetching URL: HTTP %s", resp.Status), nil
+		return nil, fmt.Sprintf("error fetching URL: HTTP %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxWebFetchBytes+1))
 	if err != nil {
-		return fmt.Sprintf("error reading response: %v", err), nil
+		return nil, fmt.Sprintf("error reading response: %v", err)
 	}
 	if len(body) > maxWebFetchBytes {
-		return fmt.Sprintf("error fetching URL: response larger than %d bytes", maxWebFetchBytes), nil
+		return nil, fmt.Sprintf("error fetching URL: response larger than %d bytes", maxWebFetchBytes)
 	}
 
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	mediaType = strings.ToLower(mediaType)
+	page := &fetchedPage{}
 	switch {
 	case mediaType == "application/pdf" || bytes.HasPrefix(body, []byte("%PDF-")):
-		return pdfToText(cctx, body), nil
+		pages, e := pdfPages(cctx, body)
+		if e != "" {
+			return nil, e
+		}
+		page.doc = buildPDFDoc(pages)
 	case isHTMLMediaType(mediaType):
-		// Fall through to the HTML → Markdown path below.
+		doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Sprintf("error parsing HTML: %v", err)
+		}
+		markHeadings(doc)
+		d, err := buildHTMLDoc(contentRoot(doc, raw), doc.Find("title").First().Text())
+		if err != nil {
+			return nil, fmt.Sprintf("error converting to markdown: %v", err)
+		}
+		page.doc, page.html = d, body
+	case mediaType == "text/markdown" || mediaType == "text/x-markdown" ||
+		(strings.HasPrefix(mediaType, "text/") && isMarkdownPath(url)):
+		page.doc = buildMarkdownDoc(string(body), "")
 	case strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" ||
 		strings.HasSuffix(mediaType, "+json"):
-		return truncate(collapseBlankLines(string(body))), nil
+		page.doc = buildTextDoc(string(body))
 	default:
-		return fmt.Sprintf("error fetching URL: unsupported content type %q (%d bytes); "+
-			"download it with Bash (curl -o) and use a tool suited to that format", mediaType, len(body)), nil
+		return nil, fmt.Sprintf("error fetching URL: unsupported content type %q (%d bytes); "+
+			"download it with Bash (curl -o) and use a tool suited to that format", mediaType, len(body))
 	}
+	page.size = len(page.html) + page.doc.Root.Size()
+	return page, ""
+}
 
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	if err != nil {
-		return fmt.Sprintf("error parsing HTML: %v", err), nil
+func isMarkdownPath(rawURL string) bool {
+	p := rawURL
+	if u, err := neturl.Parse(rawURL); err == nil {
+		p = u.Path
 	}
+	p = strings.ToLower(p)
+	return strings.HasSuffix(p, ".md") || strings.HasSuffix(p, ".markdown")
+}
 
-	var htmlContent string
-	if in.Selector != "" {
-		sel := doc.Find(in.Selector)
-		if sel.Length() > 0 {
-			htmlContent, _ = sel.First().Html()
-		} else {
-			htmlContent, _ = doc.Find("body").Html()
+// webFetchResultKey is the result cache key: the URL without its fragment and
+// every argument that changes the result.
+func webFetchResultKey(in WebFetchIn) string {
+	url, frag := splitFragment(in.URL)
+	section := in.Section
+	if section == "" && in.Selector == "" {
+		section = frag
+	}
+	return strings.Join([]string{"fetch", url, in.Selector, section, in.Find, strconv.Itoa(in.Part), strconv.FormatBool(in.Raw)}, "\x00")
+}
+
+// splitFragment cuts the #fragment off a URL (the server never sees it).
+func splitFragment(rawURL string) (string, string) {
+	i := strings.Index(rawURL, "#")
+	if i < 0 {
+		return rawURL, ""
+	}
+	frag := rawURL[i+1:]
+	if f, err := neturl.PathUnescape(frag); err == nil {
+		frag = f
+	}
+	return rawURL[:i], frag
+}
+
+// webFetchWith fetches a page (through pages when given) and returns the part
+// the arguments ask for, within WebFetchLimit.
+func webFetchWith(ctx context.Context, in WebFetchIn, pages *pageCache, scope string) string {
+	if strings.TrimSpace(in.Section) != "" && strings.TrimSpace(in.Selector) != "" {
+		return "error section and selector cannot be used together"
+	}
+	url, frag := splitFragment(strings.TrimSpace(in.URL))
+	page, e := pages.get(scope, url+"\x00"+strconv.FormatBool(in.Raw), func() (*fetchedPage, string) {
+		return fetchPage(ctx, url, in.Raw)
+	})
+	if e != "" {
+		return e
+	}
+	d := page.doc
+	sel := d.Root
+	prefix := ""
+	switch {
+	case strings.TrimSpace(in.Selector) != "":
+		if page.html == nil {
+			return "error selector needs an HTML page"
 		}
-	} else {
-		htmlContent, _ = doc.Find("body").Html()
+		hd, err := goquery.NewDocumentFromReader(bytes.NewReader(page.html))
+		if err != nil {
+			return fmt.Sprintf("error parsing HTML: %v", err)
+		}
+		markHeadings(hd)
+		m := hd.Find(in.Selector).First()
+		if m.Length() == 0 {
+			msg := fmt.Sprintf("error selector %q matched nothing on this page.", in.Selector)
+			return withOutline(msg, d, WebFetchLimit)
+		}
+		if idx, err := strconv.Atoi(m.AttrOr(headingAttr, "")); err == nil && d.byHeading[idx] != nil {
+			sel = d.byHeading[idx]
+			break
+		}
+		sd, err := buildHTMLDoc(m, d.Title)
+		if err != nil {
+			return fmt.Sprintf("error converting to markdown: %v", err)
+		}
+		d, sel = sd, sd.Root
+	default:
+		ref := strings.TrimSpace(in.Section)
+		explicit := ref != ""
+		if !explicit {
+			ref = frag
+		}
+		if ref == "" {
+			break
+		}
+		if s, ok := d.Lookup(ref); ok {
+			sel = s
+		} else if explicit {
+			return withOutline(fmt.Sprintf("error section %q not found on this page.", ref), d, WebFetchLimit)
+		} else {
+			prefix = fmt.Sprintf("[#%s is not a section of this page; showing the whole page.]\n\n", frag)
+		}
 	}
-
-	md, err := htmltomarkdown.ConvertString(htmlContent)
-	if err != nil {
-		return fmt.Sprintf("error converting to markdown: %v", err), nil
+	limit := WebFetchLimit - len(prefix)
+	if in.Find != "" {
+		return prefix + renderFind(d, sel, in.Find, limit)
 	}
+	return prefix + renderSection(d, sel, in.Part, limit)
+}
 
-	return truncate(collapseBlankLines(md)), nil
+// withOutline appends the page's sections to an error so the model can pick a
+// valid id: the outline when the page is long, else the list of sections.
+func withOutline(msg string, d *webDoc, limit int) string {
+	if len(d.Root.Children) == 0 {
+		return msg
+	}
+	room := limit - len(msg) - 2
+	if d.Root.Size() > limit {
+		return msg + "\n\n" + renderOutline(d, d.Root, room)
+	}
+	list := "Sections of this page:\n" + strings.Join(outlineEntries(d.Root, subtreeHeight(d.Root)), "\n")
+	return msg + "\n\n" + truncateAt(list, room)
 }
 
 // maxWebFetchBytes bounds how much of a response WebFetch reads. Large enough
@@ -148,24 +273,24 @@ func isHTMLMediaType(t string) bool {
 	return false
 }
 
-// pdfToText extracts a PDF's text layer with pdftotext (poppler). Before this
-// existed WebFetch handed PDF bytes to the HTML parser, which failed with
-// "open stack of elements exceeds 512 nodes" on every manual a research agent
-// tried to read.
-func pdfToText(ctx context.Context, data []byte) string {
+// pdfPages extracts a PDF's text layer with pdftotext (poppler), one string
+// per page. Before PDF support WebFetch handed PDF bytes to the HTML parser,
+// which failed with "open stack of elements exceeds 512 nodes" on every
+// manual a research agent tried to read.
+func pdfPages(ctx context.Context, data []byte) ([]string, string) {
 	bin, err := exec.LookPath("pdftotext")
 	if err != nil {
-		return "error fetching URL: the page is a PDF and pdftotext (poppler-utils) is not installed; " +
+		return nil, "error fetching URL: the page is a PDF and pdftotext (poppler-utils) is not installed; " +
 			"download it with Bash (curl -sL -o file.pdf URL) and extract its text with another tool"
 	}
 	f, err := os.CreateTemp("", "omnis-webfetch-*.pdf")
 	if err != nil {
-		return fmt.Sprintf("error extracting PDF text: %v", err)
+		return nil, fmt.Sprintf("error extracting PDF text: %v", err)
 	}
 	defer os.Remove(f.Name())
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		return fmt.Sprintf("error extracting PDF text: %v", err)
+		return nil, fmt.Sprintf("error extracting PDF text: %v", err)
 	}
 	f.Close()
 
@@ -177,17 +302,26 @@ func pdfToText(ctx context.Context, data []byte) string {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return fmt.Sprintf("error extracting PDF text: %s", msg)
+		return nil, fmt.Sprintf("error extracting PDF text: %s", msg)
 	}
-	lines := strings.Split(strings.ReplaceAll(stdout.String(), "\f", "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = strings.TrimRight(l, " \t")
+	raw := strings.Split(stdout.String(), "\f")
+	if len(raw) > 1 && strings.TrimSpace(raw[len(raw)-1]) == "" {
+		raw = raw[:len(raw)-1] // pdftotext ends every page with a form feed
 	}
-	text := strings.TrimSpace(collapseBlankLines(strings.Join(lines, "\n")))
-	if text == "" {
-		return "error extracting PDF text: the PDF has no text layer (probably scanned); it needs OCR"
+	pages := make([]string, len(raw))
+	any := false
+	for i, p := range raw {
+		lines := strings.Split(p, "\n")
+		for j, l := range lines {
+			lines[j] = strings.TrimRight(l, " \t")
+		}
+		pages[i] = strings.TrimSpace(collapseBlankLines(strings.Join(lines, "\n")))
+		any = any || pages[i] != ""
 	}
-	return truncate(text)
+	if !any {
+		return nil, "error extracting PDF text: the PDF has no text layer (probably scanned); it needs OCR"
+	}
+	return pages, ""
 }
 
 // collapseBlankLines squeezes runs of blank lines down to one.

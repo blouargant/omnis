@@ -88,7 +88,7 @@ type shaperBudget struct {
 // source/docs page) the line sat past the cut and web_agent answered from
 // memory; 32000 found it in 3/3 runs (omnis-benches tasks-callvolume,
 // 2026-11-01). Call volume is bounded by max_tool_calls_per_call instead.
-const webFetchMaxChars = 32000
+const webFetchMaxChars = fstools.WebFetchLimit
 
 const defaultNarrowHint = "narrow the request (an explicit line range, a more specific pattern, " +
 	"or a files-only search) to see the rest"
@@ -99,7 +99,7 @@ func budgetFor(name string) shaperBudget {
 		return shaperBudget{maxChars: shaperMaxChars, headRatio: 0.40}
 	case "WebFetch":
 		return shaperBudget{maxChars: webFetchMaxChars, headRatio: 0.85,
-			narrow: "fetch it again with a CSS `selector` (e.g. `main`, `article`, a section id) to read a specific part"}
+			narrow: "fetch it again with section (an id from the page outline) or find to read a specific part"}
 	}
 	return shaperBudget{maxChars: shaperMaxChars, headRatio: shaperHeadRatio}
 }

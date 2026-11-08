@@ -32,6 +32,9 @@ func (s *webSection) Markdown() string {
 }
 
 func (s *webSection) writeMarkdown(b *strings.Builder) {
+	if s.Level == 0 && s.Title != "" {
+		b.WriteString("# " + s.Title + "\n\n")
+	}
 	if s.Level > 0 {
 		b.WriteString(strings.Repeat("#", min(s.Level+1, 6)))
 		b.WriteString(" ")

@@ -70,3 +70,34 @@ func TestWebCacheScopePrefersRootSession(t *testing.T) {
 		t.Errorf("scope without a root = %q, want own", got)
 	}
 }
+
+func TestPageCacheBudget(t *testing.T) {
+	c := newPageCache(webCacheTTL, 64<<20)
+	clock := time.Unix(1000, 0)
+	c.now = func() time.Time { return clock }
+	big := func() *fetchedPage { return &fetchedPage{doc: buildTextDoc("x"), size: 40 << 20} }
+	loads := 0
+	load := func() (*fetchedPage, string) { loads++; return big(), "" }
+	c.get("s", "a", load)
+	clock = clock.Add(time.Second)
+	c.get("s", "b", load)
+	c.get("s", "b", load)
+	if loads != 2 {
+		t.Errorf("loads = %d, want 2 (b cached)", loads)
+	}
+	c.get("s", "a", load)
+	if loads != 3 {
+		t.Errorf("a should have been evicted: loads = %d", loads)
+	}
+	if _, e := c.get("s", "err", func() (*fetchedPage, string) { return nil, "error x" }); e != "error x" {
+		t.Errorf("error = %q", e)
+	}
+	c.get("s", "err", func() (*fetchedPage, string) { loads++; return big(), "" })
+	if loads != 4 {
+		t.Error("an error was cached")
+	}
+	c.get("t", "b", load)
+	if loads != 5 {
+		t.Error("scopes are shared")
+	}
+}
