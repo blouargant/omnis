@@ -1664,10 +1664,13 @@ already has that content in *its* context — one shared cache would hand a sub-
 a stub for a file it has never seen), and `fusion` is the leader's edit→verify loop.
 The shaper is stateless, so there is no cache to key, invalidate, or leak.
 
-**`WebFetch` gets its own budget** (`webFetchMaxChars` = 32000, 85 % head) and
-its own cut note pointing at the remedy it actually has — re-fetch with a CSS
-`selector` — instead of the generic "line range / narrower pattern" advice
-(`shaperBudget.narrow`, `capTextHint`). Fetched pages are the bulk of a research
+**`WebFetch` gets its own budget** (`webFetchMaxChars` = `fstools.WebFetchLimit`
+= 32000, 85 % head) and its own cut note pointing at the remedies it actually has
+— re-fetch with `section` or `find` — instead of the generic "line range /
+narrower pattern" advice (`shaperBudget.narrow`, `capTextHint`). Since `WebFetch`
+returns an outline for a page over that same limit (see "WebFetch: outline,
+section, find, part"), the shaper should no longer cut a `WebFetch` result; the
+shared constant is what keeps the two from drifting. Fetched pages are the bulk of a research
 sub-agent's context: in the 2026-10-31 Knowledge bench (`omnis-benches`
 `reports/model-cost-knowledge-2026-10-31`) a `web_agent` call carried 30–80k
 tokens on average, re-sent at each of its steps, and `web_agent` was ~60 % of the
@@ -6527,12 +6530,13 @@ behaviour; DDG only kicks in as a fallback when the agent explicitly declared
 `runWebFetch`). A non-2xx status is `error fetching URL: HTTP <status>` (an
 Akamai "Access Denied" 403 used to be rendered as Markdown and read as a source —
 and, lacking the `error ` prefix, cached). A PDF (`application/pdf`, or a body
-starting `%PDF-` whatever the header says) goes through `pdfToText` → `pdftotext
+starting `%PDF-` whatever the header says) goes through `pdfPages` → `pdftotext
 -layout` on a temp file; missing binary, no text layer (scanned) and extraction
 failures each return an explicit `error …` naming the remedy. `text/*` and JSON
-come back raw; any other binary type is an explicit error; HTML (or no
-Content-Type) takes the original goquery → Markdown path. Bodies are capped at
-32 MiB. **GOTCHA:** before this, every PDF went to the HTML parser and failed with
+come back as text (Markdown files — `text/markdown`, or a text URL ending in
+`.md` — are split at their `#` headings); any other binary type is an explicit
+error; HTML (or no Content-Type) takes the goquery → Markdown path. Bodies are
+capped at 32 MiB. **GOTCHA:** before this, every PDF went to the HTML parser and failed with
 `error parsing HTML: html: open stack of elements exceeds 512 nodes` — 9 of a
 single Knowledge research turn's fetches, including 4 retries of the same
 manufacturer manual, which the leader then had to fetch itself with `curl` +
@@ -6541,10 +6545,54 @@ declared package dependency; without it a PDF fetch degrades to that explicit
 error. Pinned by [core/tools/web_test.go](core/tools/web_test.go) (builds a
 minimal PDF in-process; skips the PDF case without `pdftotext`).
 
+**WebFetch: outline, section, find, part** (2026-11-08, spec
+[docs/superpowers/specs/2026-11-08-webfetch-outline-design.md](docs/superpowers/specs/2026-11-08-webfetch-outline-design.md)).
+A long page used to be cut at its head (50 000 chars, then 32 000 by the shaper),
+and on a documentation site the head is navigation: on the vLLM expert-parallel
+page the article started at char 29 818, so the model got menus and a table of
+contents and answered without the section it needed. Now:
+- **Content root** ([core/tools/webcontent.go](core/tools/webcontent.go)
+  `contentRoot`): `main`/`[role=main]` (or its single `article`), else a single
+  `article`, else `body`; inside it `nav`, `[role=navigation]`, scripts, and
+  layout `header`/`footer`/`aside` are removed. When that leaves < 200 chars of a
+  body of ≥ 1 000, the unstripped body is used. `raw: true` keeps everything.
+- **Section tree** ([core/tools/webdoc.go](core/tools/webdoc.go)
+  `buildHTMLDoc`/`assembleDoc`): each heading is replaced by a sentinel, the root
+  is converted to Markdown **once**, and the Markdown is cut at the sentinels
+  (document order, whatever the nesting). Ids: the heading's, else its wrapper
+  `section`/`div`'s (Sphinx, DocBook), else positional (`s2.3`); duplicates get
+  `-2`. Levels are relative; a single leading `h1` becomes the document root.
+  `Lookup` accepts an id in any case, with or without `#`, or a unique title.
+- **Rendering** ([core/tools/webrender.go](core/tools/webrender.go)): a selection
+  that fits `WebFetchLimit` (32 000) comes back whole; one that does not returns
+  its **outline** (ids + sizes, as many levels as fit 4 000 chars, deeper ones
+  folded into "N sub-sections", the first level always listed, a 1 000-char
+  lead) with a notice saying the content was NOT read; a selection with no
+  sub-sections comes in **parts** (`part`, tables keep their header, code blocks
+  stay fenced, PDFs cut on page boundaries). A section's outline is the same
+  shape plus a `Path:` line, so a section bigger than the limit opens level by
+  level. `find` ([core/tools/webfind.go](core/tools/webfind.go)) returns the
+  matching passages only (literal, case-insensitive; a table row with its
+  header, ±3 lines of code, at most 20, PDF matches labelled by page).
+- **Arguments**: `section` (a URL `#fragment` is used as the section when none
+  is given; an unknown fragment falls back to the whole page with a notice, an
+  unknown explicit section is an error listing the page's sections), `find`,
+  `part`, `selector` (kept; a selector on a heading selects that heading's
+  section, one matching nothing is now an error), `raw`. `section` + `selector`
+  is an error.
+- **Page cache** (`pageCache`, `sharedPageCache`): the processed page per (root
+  session, URL without fragment, raw), 15 min, 64 MiB, oldest evicted first —
+  navigating an outline downloads the page once and keeps the positional ids
+  stable. The result cache key adds section (or fragment), find, part, raw.
+- Every result, notices included, is ≤ `WebFetchLimit`; errors start with
+  `error ` (never cached). The research agents' instructions (`web_agent`,
+  `web_fetcher`, `code_docs`, `knowledge_leader`) say to read the outline and
+  fetch only the section they need, or `find` a value.
+
 **Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
 `WebFetch` and every `WebSearch` provider go through `sharedWebCache`
 (15 min TTL, 512 entries, process memory), keyed by the turn's **root session**
-(`events.RootSessionFromContext`, else the tool's own session) + URL/selector or
+(`events.RootSessionFromContext`, else the tool's own session) + URL/arguments or
 provider/query/max_results. Parallel `web_agent`/`web_fetcher` instances re-read
 the same pages (20–30 % of a deep-research turn's fetches in that bench); a hit
 saves the network round-trip and the search-provider call, **not context tokens**
