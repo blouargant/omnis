@@ -42,6 +42,7 @@
 - **Environment panel** — a right-hand panel under the tab bar shows the question you are reading the reply to, lists the session's squad, folder and git branch, context use, loaded skills, connectors, produced files, git changes, background tasks (with a stop button) and the file browser; tool calls shrink to one quiet line that unfolds on demand and is kept across reloads.
 - **Terminal in the chat** — each conversation has its own terminals, opened in its folder in the chat's right column (several with +), in the theme's light or dark colours; the environment panel comes back when you hide them.
 - **Max output tokens per model** — set a model's output ceiling in Settings → Models, so replies are no longer cut at 4096 tokens by a gateway that does not know a new Claude model; a reply that does hit its limit now ends with a visible notice instead of stopping mid-sentence.
+- **Long web pages read section by section** — research agents get a long page's outline and fetch only the section they need, or search the page for a term, instead of a page cut in the middle.
 - **Account menu and settings dialog** — the sidebar footer is one account button whose menu opens your archived sessions (search, read, restore), Settings (Ctrl+,), Appearance, Language and Documentation in a dialog over the chat.
 
 ## 2.0 — Durable agent questions

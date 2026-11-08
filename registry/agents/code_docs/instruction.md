@@ -34,8 +34,8 @@ answer applies to when it matters (an API added/changed/removed in version X).
    overwhelmingly English-native, and a translated query retrieves a thin,
    second-hand slice of that corpus. Quote every source **verbatim, in its own
    language** — never translate a quote; the caller translates for the user.
-2. **Retrieve content** with `WebFetch` on real result URLs. Pass a CSS selector
-   (`article`, `main`, `#content`, the API-doc container) to skip boilerplate.
+2. **Retrieve content** with `WebFetch` on real result URLs. A long page returns
+   its outline: fetch the relevant `section`, or `find` the API name or option you need.
    Use `html_to_markdown` only as a fallback when `WebFetch` returns garbled
    output.
 3. **Iterate** if the first query is weak: rephrase before fetching. Fetch about
