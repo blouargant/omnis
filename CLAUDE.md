@@ -7397,7 +7397,7 @@ commands, plus `WebSearch`/`WebFetch` calls (query or URL, globe icon), a
 sub-agent's action nested under its delegation. Client-only
 (`liveActions` in app.js, fed by `tool_call`/`agent_tool_call`, dropped on the
 result, cleared at turn end — not shown for injected turns or after a reload);
-a click scrolls to the call. The server task list is cached per session
+a click scrolls to the call. Between two actions the last finished one stays listed (dimmed, with its duration) and a "N actions finished" line counts the turn's finished actions — both kept after the turn ends and reset when this browser sends the next turn (`liveRecent`), so the card no longer blinks in and out as actions follow one another. The server task list is cached per session
 (`envTasksCache`, dropped by `refreshEnvTasks`) so a live update costs no fetch) and Fichiers (the old Files browser, `#folders-panel` re-parented; its
 `collapsed` class follows the card; **folded by default**, `defaultOpen: false`).
 While it is folded the listing is not loaded, so `syncEnvFolder` fetches the

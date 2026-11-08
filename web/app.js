@@ -10014,6 +10014,7 @@ async function sendMessage(panel) {
   sessionAbortCtrls.set(sessionId, ctrl);
   sessionStopped.delete(sessionId);
   sessionSending.add(sessionId);
+  resetLiveRecent(sessionId);
   setSessionBusy(sessionId, true);
   setSessionStatus(sessionId, "thinking…");
   applySessionUI(sessionId);
@@ -12612,6 +12613,7 @@ const ENV_ICON = {
   skill:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>`,
   task:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"/></svg>`,
   command: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>`,
+  check:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>`,
   web:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>`,
   stop:   `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`,
 };
@@ -12647,8 +12649,15 @@ function refreshEnvTasks(sessionId) {
 // delegation). Client-side only: added on tool_call / agent_tool_call, dropped
 // on the matching result, all cleared when the turn ends. A click scrolls the
 // transcript to the call.
+//
+// Actions follow one another quickly, so the last finished one stays on the
+// card (dimmed, with its duration) until the next starts, with a count of the
+// actions finished in this turn — otherwise the card blinks in and out between
+// two actions. Both are kept after the turn ends and reset when a new turn is
+// sent from this browser.
 
 const liveActions = new Map(); // sessionId → Map(callId → action)
+const liveRecent = new Map();  // sessionId → { last: action|null, done: n }
 const LIVE_COMMAND_TOOLS = new Set(["bash", "run_tests"]);
 const LIVE_WEB_TOOLS = new Set(["websearch", "webfetch"]);
 let liveActionSeq = 0;
@@ -12689,15 +12698,36 @@ function startLiveAction(sessionId, callId, name, args, parentAgent, block) {
   liveActionsChanged(sessionId);
 }
 
+function recordLiveDone(sessionId, a) {
+  let r = liveRecent.get(sessionId);
+  if (!r) { r = { last: null, done: 0 }; liveRecent.set(sessionId, r); }
+  r.done++;
+  r.last = { ...a, ended: Date.now() };
+}
+
 function endLiveAction(sessionId, callId) {
   const m = liveActions.get(sessionId);
-  if (!m || !callId || !m.delete(callId)) return;
+  const a = m && callId ? m.get(callId) : null;
+  if (!a) return;
+  m.delete(callId);
   if (!m.size) liveActions.delete(sessionId);
+  recordLiveDone(sessionId, a);
   liveActionsChanged(sessionId);
 }
 
+// clearLiveActions ends the turn: what is still listed is counted as finished
+// (the latest-started one becoming the last action shown).
 function clearLiveActions(sessionId) {
-  if (liveActions.delete(sessionId)) liveActionsChanged(sessionId);
+  const m = liveActions.get(sessionId);
+  if (!m) return;
+  liveActions.delete(sessionId);
+  for (const a of [...m.values()].sort((x, y) => x.started - y.started)) recordLiveDone(sessionId, a);
+  liveActionsChanged(sessionId);
+}
+
+// resetLiveRecent forgets the previous turn's actions when a new one starts.
+function resetLiveRecent(sessionId) {
+  if (liveRecent.delete(sessionId) && sessionId === activeSessionId && window.EnvPanel) EnvPanel.refresh("tasks");
 }
 
 function liveActionsChanged(sessionId) {
@@ -12727,8 +12757,10 @@ function appendLiveActionRows(body, live) {
 }
 
 function liveActionRow(a, nested) {
+  const finished = !!a.ended;
   const row = document.createElement("div");
-  row.className = "env-row env-task-row env-live-row" + (nested ? " is-nested" : "") + (a.block ? " env-row-btn" : "");
+  row.className = "env-row env-task-row env-live-row" + (nested ? " is-nested" : "") +
+    (finished ? " is-done" : "") + (a.block ? " env-row-btn" : "");
   if (a.tip) row.setAttribute("data-tip", a.tip);
   const icon = document.createElement("span");
   icon.className = "env-row-icon env-task-icon";
@@ -12737,9 +12769,15 @@ function liveActionRow(a, nested) {
   text.className = "env-row-text" + (a.kind === "command" ? " env-live-cmd" : "");
   text.textContent = a.text;
   const meta = document.createElement("span");
-  meta.className = "env-row-meta env-live-time";
-  meta.dataset.started = String(a.started);
-  meta.textContent = envDuration(Date.now() - a.started);
+  if (finished) {
+    // A finished action's duration is fixed: no env-live-time, so the ticker skips it.
+    meta.className = "env-row-meta env-live-took";
+    meta.textContent = envDuration(a.ended - a.started);
+  } else {
+    meta.className = "env-row-meta env-live-time";
+    meta.dataset.started = String(a.started);
+    meta.textContent = envDuration(Date.now() - a.started);
+  }
   row.append(icon, text, meta);
   if (a.block) {
     row.setAttribute("role", "button");
@@ -13062,15 +13100,25 @@ function registerEnvCards() {
         envTasksCache.set(ctx.sessionId, tasks);
       }
       const live = [...(liveActions.get(ctx.sessionId) || new Map()).values()];
+      const recent = liveRecent.get(ctx.sessionId);
       const running = tasks.filter((t) => t.status === "running");
       const done = tasks.filter((t) => t.status !== "running");
       const busy = running.length + live.length;
-      ctx.setVisible(tasks.length > 0 || live.length > 0);
+      ctx.setVisible(tasks.length > 0 || live.length > 0 || !!recent);
       ctx.setValue(busy ? `<span class="env-task-live"></span>${busy}` : "");
       scheduleEnvTasksTick(running.length > 0 && EnvPanel.isOpen()); // reopening the panel re-renders
       if (!ctx.open) return;
       body.innerHTML = "";
       appendLiveActionRows(body, live);
+      // Between two actions, the last finished one holds its place.
+      if (!live.length && recent && recent.last) body.appendChild(liveActionRow(recent.last, false));
+      if (recent && recent.done) {
+        const count = document.createElement("div");
+        count.className = "env-row env-live-count";
+        count.innerHTML = `<span class="env-row-icon">${ENV_ICON.check}</span>` +
+          `<span class="env-row-text">${escHtml(trN("env.liveDoneCount", recent.done))}</span>`;
+        body.appendChild(count);
+      }
       for (const t of running) body.appendChild(envTaskRow(t, ctx.sessionId));
       if (done.length) {
         const head = document.createElement("button");

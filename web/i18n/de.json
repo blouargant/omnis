@@ -1019,6 +1019,8 @@
   "env.liveDelegate": "Delegiert an {agent}",
   "env.liveSearch": "Suche: {what}",
   "env.liveFetch": "Lese {what}",
+  "env.liveDoneCount.one": "{count} Aktion abgeschlossen",
+  "env.liveDoneCount.other": "{count} Aktionen abgeschlossen",
   "env.tasksDone": "Beendet: {n}",
   "env.taskStop": "Stoppen",
   "env.taskNoOutput": "Noch keine Ausgabe.",
