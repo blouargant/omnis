@@ -1,0 +1,103 @@
+<style>
+  .md-stage { position:relative; width:1060px; max-width:100%; height:640px; border-radius:10px; overflow:hidden;
+    background:#1f1f22; border:1px solid #3a3a3e; font:13px/1.4 system-ui, sans-serif; color:#e8e8ea; }
+  .md-bg { position:absolute; inset:0; display:flex; filter:brightness(.45); }
+  .md-bg .side { width:250px; border-right:1px solid #303034; padding:12px; color:#bdbdc2; }
+  .md-bg .side div { padding:4px 0; }
+  .md-bg .chat { flex:1; padding:40px; color:#9a9aa0; }
+  .md-modal { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:860px; height:560px;
+    background:#26262a; border:1px solid #47474d; border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.6);
+    display:flex; flex-direction:column; overflow:hidden; }
+  .md-top { display:flex; align-items:center; padding:12px 16px; border-bottom:1px solid #38383d; font-size:15px; font-weight:600; }
+  .md-top .x { margin-left:auto; width:26px; height:26px; border-radius:6px; background:#34343a; display:flex; align-items:center; justify-content:center; font-weight:400; }
+  .md-main { flex:1; display:flex; min-height:0; }
+  .md-nav { width:210px; border-right:1px solid #38383d; padding:12px 10px; overflow:hidden; }
+  .md-search { border:1px solid #44444a; border-radius:7px; padding:5px 9px; color:#8d8d93; margin-bottom:10px; }
+  .md-grp { font-size:11px; color:#8d8d93; padding:10px 8px 4px; }
+  .md-it { padding:5px 8px; border-radius:6px; display:flex; gap:9px; align-items:center; }
+  .md-it.on { background:#3a3a41; }
+  .md-it .i { width:14px; color:#a8a8ae; text-align:center; }
+  .md-content { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+  .md-chead { display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid #38383d; }
+  .md-chead h4 { margin:0; font-size:15px; }
+  .md-toggle { display:flex; border:1px solid #44444a; border-radius:6px; overflow:hidden; font-size:12px; }
+  .md-toggle span { padding:3px 9px; }
+  .md-toggle .on { background:#3a3a41; }
+  .md-chead .sp { flex:1 }
+  .md-btn { padding:4px 11px; border-radius:6px; border:1px solid #47474d; font-size:12px; }
+  .md-btn.primary { background:#3f7cf0; border-color:#3f7cf0; color:#fff; }
+  .md-banner { margin:12px 18px 0; padding:8px 12px; border-radius:7px; background:#2c3a52; color:#cfe0ff; font-size:12px; display:flex; align-items:center; }
+  .md-banner .md-btn { margin-left:auto; background:#3f7cf0; border-color:#3f7cf0; color:#fff; }
+  .md-body { padding:14px 18px; overflow:hidden; }
+  .md-card { border:1px solid #3c3c42; border-radius:8px; padding:10px 12px; margin-bottom:10px; display:flex; align-items:center; gap:10px; }
+  .md-card .n { font-weight:600; }
+  .md-card .m { color:#8d8d93; font-size:12px; }
+  .md-card .r { margin-left:auto; color:#8d8d93; font-size:12px; }
+  .md-fab { position:absolute; right:16px; bottom:14px; width:40px; height:40px; border-radius:50%; background:#3f7cf0; display:flex; align-items:center; justify-content:center; font-size:17px; }
+  .md-guess { display:inline-block; font-size:10px; padding:1px 6px; border-radius:8px; background:#5a4a12; color:#ffd666; margin-left:6px; vertical-align:middle; font-weight:400; }
+  .md-notes { max-width:1060px; font-size:13px; margin-top:16px; }
+  .md-notes li { margin-bottom:6px; }
+</style>
+
+<h2>Paramètres dans une fenêtre modale</h2>
+<p class="subtitle">Ouverte depuis le menu du bas (Paramètres, Apparence ou Documentation, chacun mène à sa section). Les éléments marqués <span class="md-guess">supposé</span> sont mes suppositions.</p>
+
+<div class="md-stage">
+  <div class="md-bg">
+    <div class="side"><div><b>Omnis</b></div><div>＋ Nouvelle discussion</div><div>⌕ Rechercher</div><div style="margin-top:10px">▾ Général</div><div>&nbsp;&nbsp;Export docs…</div><div>▾ Kubernetes</div><div>&nbsp;&nbsp;Audit NetworkPolicy</div></div>
+    <div class="chat">… la discussion reste derrière, intacte …</div>
+  </div>
+
+  <div class="md-modal">
+    <div class="md-top">Paramètres<span class="x">✕</span></div>
+    <div class="md-main">
+      <div class="md-nav">
+        <div class="md-search">⌕ Rechercher <span class="md-guess">supposé</span></div>
+        <div class="md-grp">Préférences <span class="md-guess">supposé</span></div>
+        <div class="md-it"><span class="i">◐</span>Apparence</div>
+        <div class="md-grp">Agents</div>
+        <div class="md-it"><span class="i">⚇</span>Agents &amp; squads</div>
+        <div class="md-it"><span class="i">✦</span>Skills</div>
+        <div class="md-it"><span class="i">/</span>Commandes</div>
+        <div class="md-it"><span class="i">⏱</span>Automatisation</div>
+        <div class="md-grp">Connexions</div>
+        <div class="md-it on"><span class="i">◈</span>Modèles</div>
+        <div class="md-it"><span class="i">⇄</span>MCP</div>
+        <div class="md-it"><span class="i">⇆</span>A2A</div>
+        <div class="md-it"><span class="i">⬇</span>Registres</div>
+        <div class="md-grp">Sécurité</div>
+        <div class="md-it"><span class="i">⛨</span>Autorisations</div>
+        <div class="md-it"><span class="i">⚓</span>Hooks</div>
+        <div class="md-grp">Aide</div>
+        <div class="md-it"><span class="i">📖</span>Documentation</div>
+      </div>
+      <div class="md-content">
+        <div class="md-chead">
+          <h4>Modèles</h4>
+          <div class="md-toggle"><span class="on">Formulaire</span><span>JSON brut</span></div>
+          <span class="sp"></span>
+          <span class="md-btn">Annuler</span><span class="md-btn primary">Enregistrer</span>
+        </div>
+        <div class="md-banner">Configuration modifiée — à recharger pour l'appliquer.<span class="md-btn">Recharger</span></div>
+        <div class="md-body">
+          <div class="md-card"><span class="n">premium</span><span class="m">claude-sonnet · ChapsVision</span><span class="r">5 $ / 26 $</span></div>
+          <div class="md-card"><span class="n">high</span><span class="m">qwen3 · ChapsVision</span><span class="r">1 $ / 4 $</span></div>
+          <div class="md-card"><span class="n">balanced</span><span class="m">Scaleway</span><span class="r">0,4 $ / 1,6 $</span></div>
+          <div class="md-card"><span class="n">hosted</span><span class="m">auto-hébergé</span><span class="r">—</span></div>
+        </div>
+        <div class="md-fab">💬</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="md-notes">
+  <h3>Ce que je suppose</h3>
+  <ul>
+    <li>Le menu du bas mène à la même fenêtre : <b>Paramètres</b> s'ouvre sur la dernière section consultée, <b>Apparence</b> et <b>Documentation</b> sur la leur.</li>
+    <li>Les sections sont regroupées par thème, comme dans Claude Desktop ; la recherche filtre la liste par nom.</li>
+    <li>Formulaire / JSON brut, Annuler / Enregistrer et le bandeau « Recharger » restent en haut de la section.</li>
+    <li>L'assistant Paramètres (bulle 💬) s'ouvre dans la fenêtre.</li>
+    <li>Fermer la fenêtre avec des modifications non enregistrées demande confirmation, comme aujourd'hui quand on change de section.</li>
+  </ul>
+</div>

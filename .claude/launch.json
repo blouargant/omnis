@@ -1,0 +1,41 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "omnis-web-branch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "OMNIS_WEB_DIR=$PWD/web OMNIS_SERVER_TOKEN= OMNIS_SERVER_ADDR=:8095 OMNIS_UPDATE_CHECK=false exec /tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/c4217482-dd26-4d9f-93ab-810741d9b5dd/scratchpad/omnis-server --no-browser"
+      ],
+      "port": 8095
+    },
+    {
+      "name": "omnis-web-sandbox",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "mkdir -p /tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/c4217482-dd26-4d9f-93ab-810741d9b5dd/scratchpad/omnis-home && OMNIS_HOME=/tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/c4217482-dd26-4d9f-93ab-810741d9b5dd/scratchpad/omnis-home OMNIS_WEB_DIR=$PWD/web OMNIS_SERVER_TOKEN= OMNIS_SERVER_ADDR=:8096 OMNIS_UPDATE_CHECK=false exec /tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/c4217482-dd26-4d9f-93ab-810741d9b5dd/scratchpad/omnis-server --no-browser"
+      ],
+      "port": 8096
+    },
+    {
+      "name": "omnis-live-actions",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "mkdir -p /tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/ad60da41-468d-4051-9a27-3b2096ba58a3/scratchpad/home && OMNIS_HOME=/tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/ad60da41-468d-4051-9a27-3b2096ba58a3/scratchpad/home OMNIS_WEB_DIR=$PWD/web OMNIS_SERVER_TOKEN= OMNIS_SERVER_ADDR=:8097 OMNIS_UPDATE_CHECK=false exec /tmp/claude-1000/-home-bertrand-Documents-Dev-omnis/ad60da41-468d-4051-9a27-3b2096ba58a3/scratchpad/omnis-server --no-browser"
+      ],
+      "port": 8097
+    },
+    {
+      "name": "omnis-live-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "mkdir -p /tmp/claude-1000/-home-bertrand--claude-spares-spare-QYZFn6/fbc84282-55ec-4096-a6a4-e1b7a4b69135/scratchpad/home && OMNIS_HOME=/tmp/claude-1000/-home-bertrand--claude-spares-spare-QYZFn6/fbc84282-55ec-4096-a6a4-e1b7a4b69135/scratchpad/home OMNIS_WEB_DIR=$PWD/web OMNIS_SERVER_TOKEN= OMNIS_SERVER_ADDR=:8098 OMNIS_UPDATE_CHECK=false exec /tmp/claude-1000/-home-bertrand--claude-spares-spare-QYZFn6/fbc84282-55ec-4096-a6a4-e1b7a4b69135/scratchpad/omnis-server --no-browser"
+      ],
+      "port": 8098
+    }
+  ]
+}

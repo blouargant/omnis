@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#e9e6dc;color:#3d3d3a;padding:24px}
+  h2{font-weight:600;margin:0 0 4px} .sub{color:#73726c;margin:0 0 20px}
+  .opts{display:grid;grid-template-columns:1fr;gap:28px}
+  .opt{border:2px solid transparent;border-radius:14px;cursor:pointer;background:#fff;padding:10px}
+  .opt.selected{border-color:#d97757}
+  .opt h3{margin:4px 8px 10px;font-size:15px}
+  .app{display:flex;height:560px;border-radius:10px;overflow:hidden;border:1px solid #e3e0d6;font-size:14px}
+  .side{width:250px;background:#f5f4ed;border-right:1px solid #ebe8de;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+  .brand{font-weight:600;font-size:16px;padding:4px 8px 12px;display:flex;gap:8px;align-items:center}
+  .brand i{width:18px;height:18px;border-radius:5px;background:#d97757;display:inline-block}
+  .it{padding:7px 10px;border-radius:8px;color:#3d3d3a;display:flex;gap:10px;align-items:center}
+  .it:hover{background:#ebe9e0}
+  .it.act{background:#e8e6dc;font-weight:500}
+  .lbl{font-size:12px;color:#8a8880;padding:14px 10px 4px;display:flex;justify-content:space-between}
+  .cnt{margin-left:auto;font-size:12px;color:#a19f96}
+  .foot{margin-top:auto;border-top:1px solid #ebe8de;padding:10px 8px 2px;display:flex;gap:8px;align-items:center}
+  .av{width:24px;height:24px;border-radius:50%;background:#3d3d3a;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center}
+  .main{flex:1;background:#faf9f5;display:flex;flex-direction:column}
+  .tabs{height:40px;display:flex;align-items:flex-end;gap:2px;padding:0 14px;border-bottom:1px solid #ebe8de}
+  .tab{padding:8px 14px;color:#8a8880;font-size:13px}
+  .tab.on{color:#3d3d3a;border-bottom:2px solid #d97757}
+  .scroll{flex:1;overflow:hidden;padding:24px 0}
+  .col{max-width:680px;margin:0 auto;padding:0 20px}
+  .user{display:flex;justify-content:flex-end;margin-bottom:22px}
+  .user span{background:#f0eee6;border-radius:14px;padding:10px 14px;max-width:75%}
+  .asst p{line-height:1.65;margin:0 0 12px}
+  .asst h4{margin:16px 0 8px;font-size:15px}
+  .asst code{background:#f0eee6;border-radius:5px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,monospace;color:#3d3d3a}
+  .serif .asst p,.serif .asst h4{font-family:"Source Serif 4",Georgia,"Times New Roman",serif;font-size:15.5px}
+  table{border-collapse:collapse;font-size:13px;margin:4px 0 12px}
+  td,th{border-bottom:1px solid #e8e6dc;padding:6px 10px;text-align:left}
+  th{font-weight:600;color:#73726c}
+  .comp{max-width:680px;margin:0 auto 18px;padding:0 20px;width:100%;box-sizing:border-box}
+  .box{background:#fff;border:1px solid #e3e0d6;border-radius:18px;box-shadow:0 1px 6px rgba(0,0,0,.04);padding:12px 14px}
+  .ph{color:#a19f96;min-height:24px}
+  .row{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .ib{width:28px;height:28px;border-radius:8px;border:1px solid #e3e0d6;display:flex;align-items:center;justify-content:center;color:#73726c;font-size:15px}
+  .chip{font-size:12px;color:#73726c;padding:3px 8px;border-radius:999px;background:#f5f4ed}
+  .send{margin-left:auto;width:30px;height:30px;border-radius:9px;background:#d97757;color:#fff;display:flex;align-items:center;justify-content:center}
+  .meta{font-size:12px;color:#a19f96;margin-top:6px;padding-left:4px}
+</style></head><body>
+<h2>Proposition : Omnis façon Claude Desktop</h2>
+<p class="sub">Même interface deux fois. Seule différence : la police des réponses (sans-serif à gauche du choix A, serif pour B). Cliquez sur celle qui vous parle.</p>
+
+<div class="opts">
+<!-- template repeated -->
+<div class="opt" data-choice="sans" onclick="toggleSelect(this)">
+<h3>A — Réponses en sans-serif (comme Claude Code / Desktop)</h3>
+<div class="app">
+  <div class="side">
+    <div class="brand"><i></i>Omnis</div>
+    <div class="it">＋&nbsp; Nouveau chat</div>
+    <div class="it">⌕&nbsp; Rechercher</div>
+    <div class="it">⤓&nbsp; Importer</div>
+    <div class="lbl"><span>Collections</span><span>＋</span></div>
+    <div class="it">› ★ General <span class="cnt">27</span></div>
+    <div class="it">› ▢ LLM Models <span class="cnt">19</span></div>
+    <div class="it act">&nbsp;&nbsp;&nbsp;Avis sur le SSD Samsung</div>
+    <div class="it">&nbsp;&nbsp;&nbsp;Analyse du dépôt gpu-unl…</div>
+    <div class="it">› ▢ GPUs <span class="cnt">8</span></div>
+    <div class="it">› ▢ LiteLLM <span class="cnt">6</span></div>
+    <div class="lbl"><span>Archivés</span></div>
+    <div class="lbl"><span>Fichiers</span></div>
+    <div class="foot"><div class="av">B</div>Bertrand <span class="cnt">⌄</span></div>
+  </div>
+  <div class="main">
+    <div class="tabs"><div class="tab">Analyse du dépôt gpu-unl…</div><div class="tab on">Avis sur le SSD Samsung</div><div class="tab">＋</div></div>
+    <div class="scroll"><div class="col">
+      <div class="user"><span>comment savoir sous linux quelle norme m.2 mon pc supporte ?</span></div>
+      <div class="asst">
+        <p>Avec ce modèle, recherchez la fiche technique du fabricant (ASUS, MSI, Gigabyte…) pour connaître exactement les slots M.2 disponibles et leur génération PCIe.</p>
+        <h4>Récapitulatif des commandes clés</h4>
+        <table><tr><th>Objectif</th><th>Commande</th></tr>
+        <tr><td>Génération PCIe du slot</td><td><code>sudo lspci -vv | grep -i lnk</code></td></tr>
+        <tr><td>Slots M.2 du firmware</td><td><code>sudo dmidecode -t 9</code></td></tr>
+        <tr><td>Modèle de carte mère</td><td><code>sudo dmidecode -t 2</code></td></tr></table>
+        <p>Linux ne peut pas vous dire directement si un <b>slot M.2 vide</b> supporte SATA en plus du NVMe.</p>
+      </div>
+    </div></div>
+    <div class="comp"><div class="box">
+      <div class="ph">Répondre à Omnis…</div>
+      <div class="row"><div class="ib">＋</div><span class="chip">⚡ 1 skill</span><span class="chip">◔ 28 %</span><div class="send">↑</div></div>
+    </div><div class="meta">Squad : Knowledge · /commandes · @fichiers</div></div>
+  </div>
+</div>
+</div>
+
+<div class="opt serif" data-choice="serif" onclick="toggleSelect(this)">
+<h3>B — Réponses en serif (comme claude.ai), interface en sans-serif</h3>
+<div class="app">
+  <div class="side">
+    <div class="brand"><i></i>Omnis</div>
+    <div class="it">＋&nbsp; Nouveau chat</div>
+    <div class="it">⌕&nbsp; Rechercher</div>
+    <div class="it">⤓&nbsp; Importer</div>
+    <div class="lbl"><span>Collections</span><span>＋</span></div>
+    <div class="it">› ★ General <span class="cnt">27</span></div>
+    <div class="it">› ▢ LLM Models <span class="cnt">19</span></div>
+    <div class="it act">&nbsp;&nbsp;&nbsp;Avis sur le SSD Samsung</div>
+    <div class="it">&nbsp;&nbsp;&nbsp;Analyse du dépôt gpu-unl…</div>
+    <div class="it">› ▢ GPUs <span class="cnt">8</span></div>
+    <div class="it">› ▢ LiteLLM <span class="cnt">6</span></div>
+    <div class="lbl"><span>Archivés</span></div>
+    <div class="lbl"><span>Fichiers</span></div>
+    <div class="foot"><div class="av">B</div>Bertrand <span class="cnt">⌄</span></div>
+  </div>
+  <div class="main">
+    <div class="tabs"><div class="tab">Analyse du dépôt gpu-unl…</div><div class="tab on">Avis sur le SSD Samsung</div><div class="tab">＋</div></div>
+    <div class="scroll"><div class="col">
+      <div class="user"><span>comment savoir sous linux quelle norme m.2 mon pc supporte ?</span></div>
+      <div class="asst">
+        <p>Avec ce modèle, recherchez la fiche technique du fabricant (ASUS, MSI, Gigabyte…) pour connaître exactement les slots M.2 disponibles et leur génération PCIe.</p>
+        <h4>Récapitulatif des commandes clés</h4>
+        <table><tr><th>Objectif</th><th>Commande</th></tr>
+        <tr><td>Génération PCIe du slot</td><td><code>sudo lspci -vv | grep -i lnk</code></td></tr>
+        <tr><td>Slots M.2 du firmware</td><td><code>sudo dmidecode -t 9</code></td></tr>
+        <tr><td>Modèle de carte mère</td><td><code>sudo dmidecode -t 2</code></td></tr></table>
+        <p>Linux ne peut pas vous dire directement si un <b>slot M.2 vide</b> supporte SATA en plus du NVMe.</p>
+      </div>
+    </div></div>
+    <div class="comp"><div class="box">
+      <div class="ph">Répondre à Omnis…</div>
+      <div class="row"><div class="ib">＋</div><span class="chip">⚡ 1 skill</span><span class="chip">◔ 28 %</span><div class="send">↑</div></div>
+    </div><div class="meta">Squad : Knowledge · /commandes · @fichiers</div></div>
+  </div>
+</div>
+</div>
+</div>
+</body></html>

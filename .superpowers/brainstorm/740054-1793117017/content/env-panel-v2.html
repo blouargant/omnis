@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#e9e6dc;color:#3d3d3a;padding:24px}
+  h2{font-weight:600;margin:0 0 4px} .sub{color:#73726c;margin:0 0 18px;max-width:1100px}
+  .app{display:flex;height:640px;border-radius:10px;overflow:hidden;border:1px solid #e3e0d6;font-size:13.5px;background:#faf9f5}
+  .side{width:230px;background:#f5f4ed;border-right:1px solid #e8e6dc;padding:12px 8px;display:flex;flex-direction:column;gap:1px}
+  .brand{font-weight:600;font-size:15px;padding:2px 8px 12px;display:flex;gap:8px;align-items:center}
+  .brand i{width:18px;height:18px;border-radius:5px;background:#d97757;display:inline-block}
+  .it{padding:6px 10px;border-radius:8px;display:flex;gap:9px;align-items:center}
+  .it.act{background:#e8e6dc}
+  .lbl{font-size:12px;color:#8a8880;padding:12px 10px 4px}
+  .cnt{margin-left:auto;font-size:12px;color:#a19f96}
+  .foot{margin-top:auto;border-top:1px solid #e8e6dc;padding:10px 8px 2px;display:flex;gap:8px;align-items:center}
+  .av{width:22px;height:22px;border-radius:50%;background:#3d3d3a;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .tabs{height:40px;display:flex;align-items:flex-end;padding:0 14px;border-bottom:1px solid #e8e6dc;gap:2px}
+  .tab{padding:8px 14px;color:#8a8880}.tab.on{color:#3d3d3a;box-shadow:inset 0 -2px 0 #d97757}
+  .tbtn{margin-left:auto;align-self:center;font-size:12px;color:#73726c;border:1px solid #e3e0d6;border-radius:8px;padding:3px 8px;background:#fff}
+  .body{flex:1;display:flex;min-height:0}
+  .scroll{flex:1;overflow:hidden;padding:20px 0;min-width:0}
+  .col{max-width:600px;margin:0 auto;padding:0 20px}
+  .user{display:flex;justify-content:flex-end;margin-bottom:16px}
+  .user span{background:#f0eee6;border-radius:12px;padding:9px 14px;max-width:80%}
+  .asst p{line-height:1.6;margin:0 0 10px}
+  .used{color:#8a8880;margin:4px 0 12px;font-size:13px}
+  .used b{font-weight:400}
+  .used.open{color:#73726c}
+  .ucard{border:1px solid #e8e6dc;border-radius:12px;background:#fff;margin:-4px 0 14px;font-size:13px;color:#73726c}
+  .urow{padding:9px 14px;border-top:1px solid #efede6}
+  .urow:first-child{border-top:none}
+  .urow .args{margin-top:8px;line-height:1.7;color:#3d3d3a;font-size:12.5px}
+  .urow .args span{font-family:ui-monospace,monospace;color:#a19f96}
+  .urow .out{margin-top:6px;color:#73726c;font-size:12.5px}
+  .comp{max-width:600px;margin:0 auto 14px;padding:0 20px;width:100%;box-sizing:border-box}
+  .box{background:#fff;border:1px solid #e3e0d6;border-radius:18px;padding:11px 12px}
+  .ph{color:#a19f96;min-height:22px}
+  .row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .ib{width:28px;height:28px;border-radius:50%;border:1px solid #e3e0d6;display:flex;align-items:center;justify-content:center;color:#73726c}
+  .send{margin-left:auto;width:30px;height:30px;border-radius:50%;background:#d97757;color:#fff;display:flex;align-items:center;justify-content:center}
+  /* right panel */
+  .env{width:270px;border-left:1px solid #e8e6dc;background:#faf9f5;padding:12px;overflow:hidden;display:flex;flex-direction:column;gap:10px}
+  .card{background:#fff;border:1px solid #ebe9e0;border-radius:12px;padding:10px 12px}
+  .ch{display:flex;align-items:center;font-weight:500;gap:6px}
+  .ch .v{margin-left:auto;font-weight:400;color:#73726c;font-size:12.5px;display:flex;gap:6px;align-items:center}
+  .li{display:flex;gap:9px;align-items:center;padding:5px 0;color:#3d3d3a}
+  .li .ic{width:16px;color:#73726c;text-align:center}
+  .li .s{margin-left:auto;font-size:12px;color:#a19f96}
+  .bar{width:34px;height:6px;border-radius:3px;background:#ebe9e0;position:relative}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:48%;border-radius:3px;background:#d97757}
+  .dot{width:7px;height:7px;border-radius:50%;background:#3fa864;display:inline-block}
+  .dot.r{background:#d97757}
+  .dl{margin-left:auto;font-size:12px;border:1px solid #e3e0d6;border-radius:7px;padding:1px 7px;color:#73726c}
+  .note{font-size:12.5px;color:#73726c;margin-top:14px}
+</style></head><body>
+<h2>Omnis avec un panneau « Environnement » à droite, façon Claude Desktop</h2>
+<p class="sub">v2 — Dans le chat, chaque série d'appels devient une ligne grise résumant les actions (« A délégué 1 tâche, a écrit 1 fichier… »). Dépliée, c'est une carte arrondie avec une ligne par appel, au titre lisible ; chaque ligne se déplie à son tour pour montrer arguments et résultat (comme votre capture). Les skills, le contexte et les fichiers produits ne s'affichent plus dans le chat : ils sont dans le panneau.</p>
+<div class="app">
+  <div class="side">
+    <div class="brand"><i></i>Omnis</div>
+    <div class="it">＋&nbsp; New chat</div>
+    <div class="it">⌕&nbsp; Search</div>
+    <div class="it">⤓&nbsp; Import</div>
+    <div class="lbl">Collections</div>
+    <div class="it">› ★ General <span class="cnt">27</span></div>
+    <div class="it act">&nbsp;&nbsp;&nbsp;Avis sur le SSD Samsung</div>
+    <div class="it">&nbsp;&nbsp;&nbsp;Monter un partage NFS</div>
+    <div class="it">› ▢ LLM Models <span class="cnt">19</span></div>
+    <div class="lbl">Archived</div>
+    <div class="foot"><div class="av">B</div>Bertrand</div>
+  </div>
+  <div class="main">
+    <div class="tabs"><div class="tab on">Avis sur le SSD Samsung</div><div class="tab">＋</div><div class="tbtn">▣ Panneau</div></div>
+    <div class="body">
+      <div class="scroll"><div class="col">
+        <div class="user"><span>Quels sont les avis sur le SSD 870 EVO ? Fiable et performant ?</span></div>
+        <div class="used">A lancé 1 recherche, a utilisé 5 outils ▸</div>
+        <div class="asst"><p>Le 870 EVO est unanimement reconnu comme le SSD SATA 2,5" le plus rapide disponible…</p></div>
+        <div class="used open">A délégué 1 tâche, a écrit 1 fichier, a utilisé 1 outil ▾</div>
+        <div class="ucard">
+          <div class="urow">A délégué à web_agent ▾
+            <div class="args"><span>prompt:</span> avis fiabilité Samsung 870 EVO, sources récentes</div>
+            <div class="out">Synthèse de 6 sources (Tom's Hardware, Reddit r/DataHoarder, …)</div>
+          </div>
+          <div class="urow">A lu une page web ▸</div>
+          <div class="urow">A écrit rapport-870evo.md ▸</div>
+        </div>
+        <div class="asst"><p>J'ai rédigé un rapport complet, disponible dans le panneau Résultats.</p></div>
+      </div></div>
+      <div class="env">
+        <div class="card">
+          <div class="ch">Environnement ▾</div>
+          <div class="li"><span class="ic">⌂</span>Squad Knowledge</div>
+          <div class="li"><span class="ic">▢</span>omnis · ~/Documents/Dev</div>
+          <div class="li"><span class="ic">⑂</span>develop</div>
+          <div class="li"><span class="ic">★</span>Collection General</div>
+        </div>
+        <div class="card"><div class="ch">Contexte ▸ <span class="v">48 % <span class="bar"><i></i></span></span></div></div>
+        <div class="card">
+          <div class="ch">Skills ▾ <span class="v">2</span></div>
+          <div class="li"><span class="ic">⚡</span>deep-research</div>
+          <div class="li"><span class="ic">⚡</span>web-citations</div>
+        </div>
+        <div class="card"><div class="ch">Connecteurs ▸ <span class="v"><span class="dot"></span>3 MCP <span class="dot r"></span>1</span></div></div>
+        <div class="card">
+          <div class="ch">Résultats ▾</div>
+          <div class="li"><span class="ic">▤</span>rapport-870evo.md<span class="dl">⤓</span></div>
+        </div>
+        <div class="card"><div class="ch">Fichiers ▸ <span class="v">~/Documents/Dev/omnis</span></div></div>
+      </div>
+    </div>
+    <div class="comp"><div class="box"><div class="ph">Répondre à Omnis…</div>
+      <div class="row"><div class="ib">＋</div><div class="send">↑</div></div></div></div>
+  </div>
+</div>
+<p class="note">Le panneau « Fichiers » (l'ancien « Files » de la colonne de gauche) devient une section du panneau, avec le même navigateur de fichiers déplié dedans.</p>
+</body></html>

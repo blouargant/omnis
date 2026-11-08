@@ -1,0 +1,91 @@
+<style>
+  .sx-row { display:flex; gap:28px; flex-wrap:wrap; }
+  .sx-shot { width:520px; height:330px; display:flex; border:1px solid #3a3a3e; border-radius:10px; overflow:hidden;
+    background:#1f1f22; color:#e8e8ea; font:12.5px/1.35 system-ui, sans-serif; }
+  .sx-side { width:190px; border-right:1px solid #303034; display:flex; flex-direction:column; }
+  .sx-head { padding:10px 12px; font-weight:600; display:flex; gap:8px; align-items:center; }
+  .sx-logo { width:15px; height:15px; border-radius:4px; background:linear-gradient(135deg,#7c5cff,#3fb5ff); }
+  .sx-back { padding:6px 12px; color:#b8b8be; }
+  .sx-lbl { padding:8px 12px 4px; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:#8d8d93; }
+  .sx-it { padding:5px 12px; margin:0 6px; border-radius:6px; color:#d6d6da; }
+  .sx-it.on { background:#34343a; color:#fff; }
+  .sx-col { padding:5px 12px; font-weight:600; }
+  .sx-ses { padding:4px 12px 4px 26px; color:#c8c8cc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sx-foot { margin-top:auto; border-top:1px solid #303034; padding:7px 12px; }
+  .sx-main { flex:1; display:flex; flex-direction:column; }
+  .sx-mainhead { padding:10px 14px; border-bottom:1px solid #303034; font-weight:600; }
+  .sx-body { flex:1; display:flex; }
+  .sx-subnav { width:120px; border-right:1px solid #303034; padding-top:6px; }
+  .sx-content { flex:1; padding:12px 14px; color:#9a9aa0; }
+  .sx-card { height:34px; border:1px dashed #44444a; border-radius:6px; margin-bottom:8px; }
+</style>
+
+<h2>Où vont les sections des Paramètres ?</h2>
+<p class="subtitle">Aujourd'hui, la liste des sections (Agents, Modèles, Permissions…) remplace la liste des sessions dans la colonne du milieu. Celle-ci n'existe plus, donc il faut lui trouver une place.</p>
+
+<div class="cards sx-row">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="sx-shot">
+        <div class="sx-side">
+          <div class="sx-head"><span class="sx-logo"></span>Omnis</div>
+          <div class="sx-back">‹ Retour aux discussions</div>
+          <div class="sx-lbl">Paramètres</div>
+          <div class="sx-it">Agents</div>
+          <div class="sx-it">Squads</div>
+          <div class="sx-it on">Modèles</div>
+          <div class="sx-it">Permissions</div>
+          <div class="sx-it">MCP</div>
+          <div class="sx-it">Hooks</div>
+          <div class="sx-it">Automatisation</div>
+          <div class="sx-it">Registres</div>
+          <div class="sx-foot">B · bertrand</div>
+        </div>
+        <div class="sx-main">
+          <div class="sx-mainhead">Modèles</div>
+          <div class="sx-content"><div class="sx-card"></div><div class="sx-card"></div><div class="sx-card"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Les sections remplacent la colonne gauche <span style="font-size:11px;color:#ffd666">(ma supposition)</span></h3>
+      <p>On ouvre Paramètres et la colonne gauche affiche les sections, avec « ‹ Retour aux discussions ». C'est le même échange qu'aujourd'hui, simplement déplacé d'une colonne vers la gauche. Les sessions ne sont plus visibles tant que les Paramètres restent ouverts.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="sx-shot">
+        <div class="sx-side">
+          <div class="sx-head"><span class="sx-logo"></span>Omnis</div>
+          <div class="sx-lbl">Collections</div>
+          <div class="sx-col">▾ Général</div>
+          <div class="sx-ses">Export docs en plusieurs formats</div>
+          <div class="sx-ses">Scheduler resource insufficiency</div>
+          <div class="sx-col">▾ Kubernetes</div>
+          <div class="sx-ses">Audit NetworkPolicy</div>
+          <div class="sx-col">▸ IA Parc</div>
+          <div class="sx-foot">B · bertrand</div>
+        </div>
+        <div class="sx-main">
+          <div class="sx-mainhead">Paramètres</div>
+          <div class="sx-body">
+            <div class="sx-subnav">
+              <div class="sx-it">Agents</div>
+              <div class="sx-it">Squads</div>
+              <div class="sx-it on">Modèles</div>
+              <div class="sx-it">Permissions</div>
+              <div class="sx-it">MCP</div>
+              <div class="sx-it">Hooks</div>
+            </div>
+            <div class="sx-content"><div class="sx-card"></div><div class="sx-card"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · Les sections dans la page Paramètres</h3>
+      <p>La colonne gauche ne change pas : les sessions restent visibles et cliquables. La page Paramètres a sa propre liste de sections sur sa gauche, ce qui lui prend un peu de largeur.</p>
+    </div>
+  </div>
+</div>
