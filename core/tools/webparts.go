@@ -51,7 +51,13 @@ func splitParts(md string, max int) []string {
 			add(b)
 			continue
 		}
-		for _, piece := range splitBlock(b, max) {
+		// Start the cut block in the part being filled, so a heading or a
+		// short paragraph before it is not left alone in a part.
+		first := max
+		if cur != "" {
+			first = max - len(cur) - 2
+		}
+		for _, piece := range splitBlock(b, max, first) {
 			add(piece)
 		}
 	}
@@ -61,8 +67,9 @@ func splitParts(md string, max int) []string {
 	return parts
 }
 
-// splitBlock cuts one oversize block into pieces of at most max.
-func splitBlock(b string, max int) []string {
+// splitBlock cuts one oversize block into pieces of at most max, the first
+// one at most first.
+func splitBlock(b string, max, first int) []string {
 	lines := strings.Split(b, "\n")
 	prefix, suffix := "", ""
 	switch {
@@ -80,9 +87,13 @@ func splitBlock(b string, max int) []string {
 			lines = lines[1:]
 		}
 	}
-	room := max - len(prefix) - len(suffix)
-	if room < 100 { // a header longer than a part: give up keeping it
-		prefix, suffix, room = "", "", max
+	full := max - len(prefix) - len(suffix)
+	if full < 100 { // a header longer than a part: give up keeping it
+		prefix, suffix, full = "", "", max
+	}
+	room := first - len(prefix) - len(suffix)
+	if room < 100 {
+		room = full
 	}
 	var out []string
 	var cur []string
@@ -91,6 +102,7 @@ func splitBlock(b string, max int) []string {
 		if len(cur) > 0 {
 			out = append(out, prefix+strings.Join(cur, "\n")+suffix)
 			cur, size = nil, 0
+			room = full
 		}
 	}
 	for _, line := range lines {
@@ -99,6 +111,7 @@ func splitBlock(b string, max int) []string {
 			head := truncateAt(line, room)
 			out = append(out, prefix+head+suffix)
 			line = line[len(head):]
+			room = full
 		}
 		if size > 0 && size+1+len(line) > room {
 			flush()
@@ -137,7 +150,7 @@ func pdfParts(pages []string, max int) []pdfPart {
 				parts = append(parts, *cur)
 				cur = nil
 			}
-			for _, piece := range splitBlock(p, max) {
+			for _, piece := range splitBlock(p, max, max) {
 				parts = append(parts, pdfPart{First: n, Last: n, Text: piece})
 			}
 			continue
