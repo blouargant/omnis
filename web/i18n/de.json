@@ -1057,5 +1057,7 @@
   "set.plugins.discardConfirm": "Das Agentenformular enthält ungespeicherte Änderungen. Das Umschalten eines Plugins lädt die Liste neu und verwirft sie. Fortfahren?",
   "set.plugins.refreshFailed": "Das Plugin wurde geändert, aber die Liste konnte nicht aktualisiert werden: {error}",
   "set.plugins.reloadError": "Das Plugin wurde geändert, aber das Neuladen ist fehlgeschlagen: {error}",
-  "set.plugins.toggleAria": "Plugin {name} aktivieren"
+  "set.plugins.toggleAria": "Plugin {name} aktivieren",
+  "tree.showForks": "Kopien anzeigen ({count})",
+  "tree.hideForks": "Kopien ausblenden"
 }

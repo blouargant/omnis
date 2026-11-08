@@ -405,6 +405,20 @@ func TestForkConversation(t *testing.T) {
 	if f.Title != "Fork of fork-src" {
 		t.Fatalf("fork title = %q", f.Title)
 	}
+	// The fork remembers its parent (the sidebar nests it under the source),
+	// and the parent survives a restart via LoadPersistedSessions.
+	if f.ParentID != src {
+		t.Fatalf("fork parent = %q, want %q", f.ParentID, src)
+	}
+	var restored *SessionMeta
+	for _, m := range LoadPersistedSessions() {
+		if m.ID == dst {
+			restored = m
+		}
+	}
+	if restored == nil || restored.ParentID != src {
+		t.Fatalf("restored fork meta = %+v, want parent %q", restored, src)
+	}
 
 	// The source is untouched (still 4 turns).
 	if turns, _ := LoadConversationTurns(src); len(turns) != 4 {

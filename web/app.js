@@ -6428,6 +6428,7 @@ const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" 
 function buildSessionRow(s, { archived }) {
   const li = document.createElement("li");
   li.dataset.id = s.id;
+  if (s.parent_id) li.dataset.parent = s.parent_id;
   // Wear the session's collection colour so the selected (focused) row's left
   // rail matches its collection. Harmless on non-selected rows (CSS only uses it
   // on .active-focused). General/uncoloured leaves --col-accent unset.
@@ -6453,6 +6454,7 @@ function buildSessionRow(s, { archived }) {
     <span class="session-check" aria-hidden="true">${ICON_CHECK}</span>
     <span class="session-abbr" data-tip="${escHtml(displayName)}" aria-hidden="true">${escHtml(abbr)}</span>
     <div class="session-name-row">
+      <span class="session-fork-line" aria-hidden="true"></span>
       <span class="session-busy-dot"></span>
       <div class="session-name" data-tip="${escHtml(tip)}">${escHtml(displayName)}</div>
       <div class="session-actions">
@@ -6756,6 +6758,7 @@ function appendGroupRows(name, rows, { reset } = {}) {
       v.pinnedId = null;
     }
   }
+  nestForkRows(ul);
   // Prune ticks for rows no longer present (deleted elsewhere) so a batch action
   // never targets a gone session.
   if (selectMode) {
@@ -6763,6 +6766,84 @@ function appendGroupRows(name, rows, { reset } = {}) {
     for (const id of [...selectedSessions]) if (!present.has(id)) selectedSessions.delete(id);
   }
 }
+
+// ─── Forks nested under their parent ─────────────────────────────────────────
+// A forked session (parent_id set by POST /sessions/:id/fork) is shown right
+// under the conversation it was copied from, indented with a "└" connector,
+// like Claude Desktop. The parent gets a chevron that folds its forks; the fold
+// state is remembered per browser. A fork whose parent is not among the rows of
+// the same list (another collection, archived, deleted, not loaded yet) stays a
+// top-level row. nestForkRows reorders the list in place and is re-run after
+// every render of it, so a later page that brings in a parent re-nests.
+const FORK_OPEN_KEY = "agent_fork_open";
+let forkOpenState = (() => {
+  try { return JSON.parse(localStorage.getItem(FORK_OPEN_KEY) || "{}") || {}; } catch { return {}; }
+})();
+function isForkOpen(id) { return forkOpenState[id] !== false; }
+function setForkOpen(id, open) {
+  if (open) delete forkOpenState[id]; else forkOpenState[id] = false;
+  try { localStorage.setItem(FORK_OPEN_KEY, JSON.stringify(forkOpenState)); } catch { /* ignore */ }
+}
+
+function nestForkRows(ul) {
+  if (!ul) return;
+  const rows = [...ul.querySelectorAll(":scope > li[data-id]")];
+  const byId = new Map(rows.map((li) => [li.dataset.id, li]));
+  const kids = new Map();
+  const roots = [];
+  for (const li of rows) {
+    li.classList.remove("session-child", "has-forks", "fork-hidden");
+    li.style.removeProperty("--fork-depth");
+    li.querySelector(".session-fork-toggle")?.remove();
+    const p = li.dataset.parent;
+    // Walk the ancestry to refuse a cycle (never expected, but a bad file must
+    // not make rows vanish).
+    let ok = !!(p && byId.has(p) && p !== li.dataset.id);
+    for (let cur = p, hops = 0; ok && cur && hops <= rows.length; hops++) {
+      if (cur === li.dataset.id) ok = false;
+      cur = byId.get(cur)?.dataset.parent;
+    }
+    if (ok) {
+      if (!kids.has(p)) kids.set(p, []);
+      kids.get(p).push(li);
+    } else roots.push(li);
+  }
+  if (!kids.size) return;
+  const ordered = [];
+  const walk = (li, depth, hidden) => {
+    ordered.push(li);
+    if (depth > 0) {
+      li.classList.add("session-child");
+      li.style.setProperty("--fork-depth", String(depth));
+    }
+    if (hidden) li.classList.add("fork-hidden");
+    const children = kids.get(li.dataset.id);
+    if (!children) return;
+    const open = isForkOpen(li.dataset.id);
+    li.classList.add("has-forks");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "session-fork-toggle" + (open ? " open" : "");
+    btn.tabIndex = -1;
+    const label = tr(open ? "tree.hideForks" : "tree.showForks", { count: children.length });
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-expanded", String(open));
+    btn.dataset.tip = label;
+    btn.innerHTML = ICON_CHEVRON_DOWN_SMALL;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setForkOpen(li.dataset.id, !open);
+      nestForkRows(ul);
+    });
+    li.querySelector(".session-name")?.after(btn);
+    for (const c of children) walk(c, depth + 1, hidden || !open);
+  };
+  for (const li of roots) walk(li, 0, false);
+  // Roots keep their order (the pinned row, a root appended last, stays last);
+  // a pinned fork of a loaded parent simply shows under it.
+  for (const li of ordered) ul.appendChild(li);
+}
+const ICON_CHEVRON_DOWN_SMALL = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>`;
 
 // unpinSession drops a pinned row for `id` from every group (the session was
 // deleted, archived or moved), so a refresh can't rebuild it from stale meta.
@@ -8101,6 +8182,7 @@ async function runTreeSearch() {
     const ul = g.querySelector(".collection-sessions");
     ul.innerHTML = "";
     for (const s of hits) ul.appendChild(buildSessionRow(s, { archived: false }));
+    nestForkRows(ul);
     g.classList.toggle("search-hit", hits.length > 0);
   }
   els.treeSearchEmpty.hidden = rows.length > 0;

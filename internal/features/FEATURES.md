@@ -19,6 +19,7 @@
 
 ## 2.1 (in development) — Collection tree and settings dialog
 
+- **Forks show under their conversation** — a forked conversation is listed in the sidebar right below the one it was copied from, with a connector line; a chevron after the original folds its forks away.
 - **Web research no longer asks for permission** — the page fetcher reads given pages of a PDF (`pages="3-4"`) and Word, OpenDocument, EPUB and RTF documents, and when an agent still downloads a file with curl or wget it runs without a confirmation card; only uploads, writes outside /tmp and the working folder, or commands that could carry a secret still ask.
 - **Sturdier file edits and command output** — parallel edits of one file no longer overwrite each other; an edit still applies when the file uses Windows line endings or typographic quotes; a long command output keeps its end (where errors are) and saves the full output to a file; a long file read says which line to continue from.
 - **Sub-agents hold up on long tasks** — a sub-agent's context is now compacted like the main agent's, and a request its model refuses as too long is compacted and retried instead of failing.

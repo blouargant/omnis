@@ -603,3 +603,45 @@ body.resizing #sidebar-resize { transition: none; }
 #sidebar.collapsed ~ #sidebar-resize { cursor: pointer; }
 
 
+
+/* ─── Forks nested under their parent (nestForkRows in app.js) ─
+ * A fork is indented one step per level with a "└" connector before its title;
+ * the parent carries a small chevron after its title that folds its forks. */
+.session-fork-line { display: none; }
+.collection-sessions li.session-child {
+  padding-left: calc(10px + (var(--fork-depth, 1) - 1) * 16px);
+}
+.collection-sessions li.session-child .session-fork-line {
+  display: block;
+  flex-shrink: 0;
+  width: 10px;
+  height: 9px;
+  margin: -7px 2px 0 4px;
+  border-left: 1px solid var(--text-faint);
+  border-bottom: 1px solid var(--text-faint);
+  border-bottom-left-radius: 3px;
+  opacity: 0.7;
+}
+.collection-sessions li.fork-hidden { display: none; }
+.session-fork-toggle {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px;
+  margin: 0 0 0 -2px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform 0.12s, color 0.1s;
+}
+.session-fork-toggle.open { transform: none; }
+.session-fork-toggle:hover { color: var(--text); background: var(--bg-raised-hover); }
+/* The title shrinks to its text so the chevron sits right after it. */
+.collection-sessions li.has-forks .session-name { flex: 0 1 auto; }
+/* A search hit or a bulk selection must never hide behind a folded parent. */
+#collection-tree.searching .collection-sessions li.fork-hidden,
+#sidebar.selecting .collection-sessions li.fork-hidden { display: list-item; }

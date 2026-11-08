@@ -167,6 +167,7 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		_ = sessions.SetConversationOwner(newMeta.ID, owner)
 		d.Registry.SetTurns(newMeta.ID, len(kept))
 		d.Registry.SetTitle(newMeta.ID, title) // in-memory; ForkConversation wrote it to disk
+		d.Registry.SetParentID(newMeta.ID, id)
 		// Keep the fork in the source's collection (ForkConversation wrote it to
 		// disk; mirror it in-memory so the sidebar files it correctly right away).
 		if meta.Collection != "" {

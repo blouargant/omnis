@@ -71,6 +71,9 @@ type SessionMeta struct {
 	// The set of user-created collections is persisted separately in
 	// collections.json; this only records which one a session belongs to.
 	Collection string `json:"collection,omitempty"`
+	// ParentID is the session this one was forked from, mirrored from the
+	// conversation file (empty for an original conversation).
+	ParentID string `json:"parent_id,omitempty"`
 	// Harvested is set by the idle harvester after it fires curator evaluation
 	// for this session. A harvested session is skipped by the idle scanner until
 	// new activity (Touch) clears the flag. The flag is persisted in the
@@ -392,6 +395,18 @@ func (r *Registry) SetCollection(id, collection string) bool {
 		}
 	}()
 	return true
+}
+
+// SetParentID records the session a fork was made from, in memory only (the
+// fork's conversation file already carries it — see ForkConversation).
+func (r *Registry) SetParentID(id, parent string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.items[id]
+	if ok {
+		m.ParentID = parent
+	}
+	return ok
 }
 
 // Delete removes the session and its conversation file. Returns true

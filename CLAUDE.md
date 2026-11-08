@@ -5762,6 +5762,19 @@ source) and refuse to run while a turn is in flight (`RunGuard.tryAcquire` → 4
 A reseed failure is logged but never corrupts the already-truncated display
 history.
 
+**Forks nest under their parent in the sidebar.** `ForkConversation` records
+`ParentID` (`parent_id`) on the fork's conversation file; `handleFork` mirrors
+it in memory (`Registry.SetParentID`) and `LoadPersistedSessions` restores it,
+so `GET /api/sessions` rows carry `parent_id`. The web UI's `nestForkRows`
+([web/app.js](web/app.js), re-run after every render of a group's list and of a
+search group) reorders the list in place: a fork goes right under its parent,
+indented per level with a `└` connector (`.session-fork-line`), and the parent
+gets a chevron after its title (`.session-fork-toggle`) that folds its forks —
+fold state per browser in `localStorage["agent_fork_open"]` (default open). A
+fork whose parent is not in the same list (another collection, archived,
+deleted, not loaded yet) stays a top-level row; search and bulk-select show
+folded forks. Import drops `parent_id`.
+
 **Web UI** ([web/app.js](web/app.js)): `appendUserBubble` takes a `turnIndex` and
 stamps it on the row (`addTurnActions` adds the control); each render site
 (`rerenderSessionFromHistory`, `appendNewPushTurns`, the live send path, the

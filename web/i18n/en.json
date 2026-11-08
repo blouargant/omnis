@@ -1057,5 +1057,7 @@
   "set.plugins.discardConfirm": "You have unsaved changes in the agents form. Toggling a plugin reloads the list and discards them. Continue?",
   "set.plugins.refreshFailed": "The plugin was changed, but the list could not be refreshed: {error}",
   "set.plugins.reloadError": "The plugin was changed, but the reload failed: {error}",
-  "set.plugins.toggleAria": "Enable plugin {name}"
+  "set.plugins.toggleAria": "Enable plugin {name}",
+  "tree.showForks": "Show forks ({count})",
+  "tree.hideForks": "Hide forks"
 }

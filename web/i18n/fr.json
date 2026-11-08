@@ -1057,5 +1057,7 @@
   "set.plugins.discardConfirm": "Le formulaire des agents contient des modifications non enregistrées. Basculer un plugin recharge la liste et les perd. Continuer ?",
   "set.plugins.refreshFailed": "Le plugin a été modifié, mais la liste n'a pas pu être actualisée : {error}",
   "set.plugins.reloadError": "Le plugin a été modifié, mais le rechargement a échoué : {error}",
-  "set.plugins.toggleAria": "Activer le plugin {name}"
+  "set.plugins.toggleAria": "Activer le plugin {name}",
+  "tree.showForks": "Afficher les copies ({count})",
+  "tree.hideForks": "Masquer les copies"
 }

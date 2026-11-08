@@ -167,6 +167,9 @@ type ConversationFile struct {
 	// under. Empty means the virtual "General" collection. Persisted so the
 	// filing survives a server restart (see SessionMeta.Collection).
 	Collection string `json:"collection,omitempty"`
+	// ParentID is the session this one was forked from (empty for an original
+	// conversation). The web UI nests a fork under its parent in the sidebar.
+	ParentID string `json:"parent_id,omitempty"`
 	// PendingQuestions are durable AskUserQuestion prompts still waiting for an
 	// answer (see pending_questions.go). Never exported, forked or imported.
 	PendingQuestions []PendingQuestion `json:"pending_questions,omitempty"`
@@ -429,6 +432,7 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 		Title:      title,
 		Squad:      src.Squad,
 		Collection: src.Collection, // fork stays in the source's collection
+		ParentID:   srcID,
 		Skills:     skillsBefore(src.Skills, keep),
 		Produced:   producedBefore(src.Produced, keep),
 		Turns:      kept,
@@ -566,6 +570,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Goal:             f.Goal,
 			Cwd:              f.Cwd,
 			Collection:       f.Collection,
+			ParentID:         f.ParentID,
 			PendingQuestions: f.PendingQuestions,
 			UserID:           uid,
 			CreatedAt:        created,
