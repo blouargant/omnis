@@ -88,6 +88,10 @@ func renderOutline(d *webDoc, s *webSection, limit int) string {
 	if lead := cutLead(s.Own); lead != "" {
 		b.WriteString("\n" + lead)
 	}
+	if own := len(strings.TrimSpace(s.Own)); own > leadMax {
+		fmt.Fprintf(&b, "\n[Text before the first section: %s — read it with part=1; parts cover the whole %s.]",
+			fmtSize(own), map[bool]string{true: "page", false: "section"}[s == d.Root])
+	}
 	b.WriteString("\n\n")
 
 	height := subtreeHeight(s)

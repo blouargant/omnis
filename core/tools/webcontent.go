@@ -36,8 +36,28 @@ func contentRoot(doc *goquery.Document, raw bool) *goquery.Selection {
 	} else {
 		root = body
 	}
-	isArticle := goquery.NodeName(root) == "article"
+	clone := stripChrome(root, goquery.NodeName(root) == "article")
 
+	// A main element holding only an intro, with the article beside it: the
+	// page without its navigation keeps far more text, so use that instead.
+	if goquery.NodeName(root) != "body" {
+		page := stripChrome(body, false)
+		if textLen(clone) < textLen(page)/4 {
+			clone = page
+		}
+	}
+
+	// A page that keeps its text inside nav or aside elements would come out
+	// almost empty: give it back whole rather than return nothing.
+	if kept := textLen(clone); kept < 200 && textLen(body) > kept+200 {
+		return body.Clone()
+	}
+	return clone
+}
+
+// stripChrome returns a copy of root without navigation and scripts and, when
+// root is not an article, without its layout header, footer and aside.
+func stripChrome(root *goquery.Selection, isArticle bool) *goquery.Selection {
 	clone := root.Clone()
 	clone.Find(chromeSelector).Remove()
 	if !isArticle {
@@ -47,11 +67,7 @@ func contentRoot(doc *goquery.Document, raw bool) *goquery.Selection {
 			}
 		})
 	}
-
-	// A page that keeps its text inside nav or aside elements would come out
-	// empty: give it back whole rather than return nothing.
-	if len(strings.TrimSpace(clone.Text())) < 200 && len(strings.TrimSpace(body.Text())) >= 1000 {
-		return body.Clone()
-	}
 	return clone
 }
+
+func textLen(s *goquery.Selection) int { return len(strings.TrimSpace(s.Text())) }

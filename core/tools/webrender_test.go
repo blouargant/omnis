@@ -147,7 +147,7 @@ func TestRenderLeadUTF8(t *testing.T) {
 		t.Fatal("invalid UTF-8")
 	}
 	_, after, _ := strings.Cut(out, "# Lead\n")
-	lead, _, _ := strings.Cut(after, "\n\n")
+	lead, _, _ := strings.Cut(after, "\n")
 	if !strings.HasSuffix(lead, "…") || len(lead) > leadMax+len("…") {
 		t.Errorf("lead = %d chars, ends %q", len(lead), lead[len(lead)-6:])
 	}
