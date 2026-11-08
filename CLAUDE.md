@@ -6636,8 +6636,8 @@ research must never solicit the user.** So:
   so a flag letter set must be wrapped in `(?-i:…)` — `[dFTK]` also matched
   pdftotext's `-f` and curl's `-k`. The rules scan the JSON-escaped command with
   `(?:\\.|[^"\\])*`, not `[^"]*`, which stopped at the first quoted argument.
-  Known gap (pre-existing, not changed): built-in read-only commands are judged
-  by their name only, so `echo x > ~/.bashrc` is auto-allowed.
+  (The built-in read-only allowlist no longer covers a command with an output
+  redirection — see "An output redirection disqualifies a read-only command".)
 
 **Per-session web cache** ([core/tools/webcache.go](core/tools/webcache.go)).
 `WebFetch` and every `WebSearch` provider go through `sharedWebCache`
