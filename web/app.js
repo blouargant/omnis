@@ -7858,15 +7858,24 @@ function collectionContextDialog(name, snap, opts = {}) {
       document.removeEventListener("keydown", onKey, true);
       resolve(val);
     };
-    const submit = () => close({
+    // Every way out first asks before discarding a memory being edited.
+    let closing = false;
+    const tryClose = async (val) => {
+      if (done || closing) return;
+      closing = true;
+      const go = await memList.confirmDiscard();
+      closing = false;
+      if (go) close(typeof val === "function" ? val() : val);
+    };
+    const submit = () => tryClose(() => ({
       squad: body.querySelector(".cc-squad").value,
       cwd: body.querySelector(".cc-cwd").value.trim(),
       instructions: body.querySelector(".cc-instr").value,
-    });
+    }));
     if (!memoryOnly) ok.addEventListener("click", submit);
-    cancel.addEventListener("click", () => close(null));
-    overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
-    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    cancel.addEventListener("click", () => tryClose(null));
+    overlay.querySelector(".ui-modal-close").addEventListener("click", () => tryClose(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) tryClose(null); });
     const onKey = (e) => {
       // Enter inside a textarea inserts a newline; only Escape closes. Yield to a
       // child modal (the memory delete confirmation) and to an open help popup first.
@@ -7874,7 +7883,7 @@ function collectionContextDialog(name, snap, opts = {}) {
         if (_ccModalBusy) return; // the child uiConfirm handles this Escape
         e.preventDefault();
         if (_ccHelpPopup) { closeCcHelpPopup(); return; }
-        close(null);
+        tryClose(null);
       }
     };
     document.addEventListener("keydown", onKey, true);
@@ -7908,6 +7917,23 @@ function buildMemoryList(container, collection) {
   let destroyed = false;
 
   const charCount = (s) => [...(s || "")].length;
+
+  // confirmDiscard asks before an action throws away the open editor's unsaved
+  // changes (another row, Add memory, closing the dialog). true ⇒ go ahead.
+  const confirmDiscard = async () => {
+    if (!dirty || destroyed) return true;
+    _ccModalBusy = true;
+    try {
+      return !!(await uiConfirm({
+        title: tr("memory.discardTitle"),
+        message: tr("memory.discardConfirm"),
+        confirmText: tr("memory.discard"),
+        danger: true,
+      }));
+    } finally {
+      _ccModalBusy = false;
+    }
+  };
 
   const editorHTML = (isNew) =>
     `<div class="cc-mem-editor">` +
@@ -8041,7 +8067,8 @@ function buildMemoryList(container, collection) {
         btn.innerHTML = `<span class="cc-mem-row-name"></span><span class="cc-mem-row-desc"></span>`;
         btn.querySelector(".cc-mem-row-name").textContent = m.name;
         btn.querySelector(".cc-mem-row-desc").textContent = m.description || "";
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
+          if (!(await confirmDiscard())) return;
           if (open) { closeEditor(); return; }
           openName = m.name;
           dirty = false;
@@ -8079,12 +8106,14 @@ function buildMemoryList(container, collection) {
   container.innerHTML = `<div class="cc-mem-empty">${escHtml(tr("set.loading"))}</div>`;
   refresh();
   return {
-    add() {
+    async add() {
       if (openName === "") return;
+      if (!(await confirmDiscard())) return;
       openName = "";
       dirty = false;
       render();
     },
+    confirmDiscard,
     destroy() { destroyed = true; memoryListViews.delete(view); },
   };
 }
@@ -12070,8 +12099,13 @@ async function handleSlashCommand(raw, panel) {
     }
 
     case "memory": {
-      // The focused session's collection; a draft or editor tab ⇒ General.
-      openCollectionMemory(await memoryCollectionOf(panel.sessionId));
+      // The focused session's collection; a draft tab ⇒ the collection picked
+      // in its picker; an editor tab ⇒ General.
+      if (!panel.sessionId && isDraft(panel.activeTab)) {
+        openCollectionMemory(panel._pickerCollection || draftDefaultCollection() || GENERAL_COLLECTION);
+      } else {
+        openCollectionMemory(await memoryCollectionOf(panel.sessionId));
+      }
       break;
     }
 
