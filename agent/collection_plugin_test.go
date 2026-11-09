@@ -227,3 +227,34 @@ func TestLegacyMigrationIsSafeUnderConcurrentCalls(t *testing.T) {
 		t.Fatalf("legacy file should be removed, stat err=%v", err)
 	}
 }
+
+// A hidden utility session (Settings assistant, drafting assistants, session
+// search) gets its collection's instructions but no memory block.
+func TestCollectionCtxBlock_HiddenSessionGetsNoMemory(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	t.Cleanup(func() { SetCollectionResolver(nil); SetHiddenSessionResolver(nil) })
+	if err := collectionctx.WriteInstructions("Proj", "Project rules."); err != nil {
+		t.Fatal(err)
+	}
+	SetCollectionResolver(func(string) string { return "Proj" })
+	SetHiddenSessionResolver(func(id string) bool { return id == "hidden" })
+
+	for _, router := range []bool{false, true} {
+		got := collectionCtxBlock("hidden", router)
+		if strings.Contains(got, "<collection-memory") {
+			t.Fatalf("router=%v: hidden session must get no memory block, got %q", router, got)
+		}
+		if !strings.Contains(got, "Project rules.") {
+			t.Fatalf("router=%v: hidden session keeps the instructions block, got %q", router, got)
+		}
+	}
+	if got := collectionCtxBlock("visible", false); !strings.Contains(got, "<collection-memory") {
+		t.Fatalf("visible session should get the memory block, got %q", got)
+	}
+
+	// General + hidden: nothing at all.
+	SetCollectionResolver(func(string) string { return "" })
+	if got := collectionCtxBlock("hidden", false); got != "" {
+		t.Fatalf("hidden General session: want empty, got %q", got)
+	}
+}

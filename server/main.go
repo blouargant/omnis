@@ -306,8 +306,9 @@ func run() error {
 	// Inject a collection's persistent context (instructions + memory) into the
 	// answering root's system instruction for every session filed under it. The
 	// resolver maps a session id to its (normalised) collection name; the
-	// collection-context plugin then loads that collection's prose. General/blank
-	// collections resolve to "" ⇒ no injection. Process-wide (the registry
+	// collection-context plugin then loads that collection's instructions and
+	// memory. General/blank collections resolve to "" ⇒ no instructions block,
+	// but General's own memory is still injected. Process-wide (the registry
 	// survives hot-reload), server-only: CLI/TUI leave it nil.
 	agent.SetCollectionResolver(func(sessionID string) string {
 		m, ok := registry.Get(sessionID)
@@ -317,6 +318,14 @@ func run() error {
 		return sessions.NormalizeCollectionName(m.Collection)
 	})
 	defer agent.SetCollectionResolver(nil)
+	// Hidden utility sessions (Settings assistant, drafting assistants, session
+	// search) get no collection memory block; their turns are also memory
+	// read-only (memoryReadOnlyForSession).
+	agent.SetHiddenSessionResolver(func(sessionID string) bool {
+		m, ok := registry.Snapshot(sessionID)
+		return ok && m.Hidden
+	})
+	defer agent.SetHiddenSessionResolver(nil)
 	// Cookie mode: collections are per user, so the injected context is read
 	// from the session owner's directory rather than the shared root.
 	if cookie != nil {

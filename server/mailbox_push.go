@@ -416,7 +416,13 @@ func (pm *pushManager) injectNotification(ctx context.Context, d serverDeps, ses
 		pm.bcast.broadcast("task_notification", sessionID)
 		return
 	}
-	pm.injectTurn(ctx, d, sessionID, userID, bg.FormatBatch(batch), "task_notification")
+	// A task's output is not the user's words: the turn may read the
+	// collection's memory but not write it.
+	text := bg.FormatBatch(batch)
+	pm.injectTurnOpts(ctx, d, sessionID, userID, injectOpts{
+		AnswerPrompt: text, RouterPrompt: text, SSEEvent: "task_notification",
+		MemoryReadOnly: memoryReadOnlyFor("background"),
+	})
 }
 
 // injectTurn runs a synthetic, run-guarded agent turn carrying prompt, persists
@@ -631,7 +637,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	}
 
 	ctx = turnContext(ctx, d, sessionID, userID)
-	if o.MemoryReadOnly {
+	if o.MemoryReadOnly || meta.Hidden {
 		ctx = toolkitagent.WithMemoryReadOnly(ctx)
 	}
 
@@ -660,6 +666,10 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	// reply channel). When it did, the host backstop below stands down so the
 	// sender never gets a duplicate reply.
 	repliedToSender := false
+
+	// Memory writes made during the turn, persisted with it so the web UI shows
+	// their chip after a reload (injected turns emit no SSE tool frames).
+	var memCalls injectedMemoryRecorder
 
 	// run executes one squad hop and returns its final assistant text. On the
 	// router hop we suppress the router's chatter when it actually routed
@@ -706,9 +716,11 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 				}
 				if p.FunctionResponse != nil {
 					recordSkillLoad(sessionID, rootAgent, p.FunctionResponse.Name, p.FunctionResponse.Response)
+					memCalls.result(p.FunctionResponse)
 				}
 				// A mailbox send by the answering squad disarms the backstop.
 				if p.FunctionCall != nil {
+					memCalls.call(p.FunctionCall, utf16Len(buf.String()))
 					if o.ReplyTo != "" && (p.FunctionCall.Name == "teammate_tell" || p.FunctionCall.Name == "teammate_ask") {
 						repliedToSender = true
 					}
@@ -747,7 +759,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	if reply != "" {
 		// Persist the clean message (PersistPrompt, default routerPrompt), not the
 		// answer-only reply directive, so the transcript reads as the received message.
-		if perr := sessions.AppendConversationTurnFull(sessionID, o.PersistPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds()); perr != nil {
+		if perr := sessions.AppendConversationTurnRecord(sessionID, o.PersistPrompt, reply, usageAccum, time.Since(turnStart).Milliseconds(), memCalls.calls); perr != nil {
 			log.Printf("mailbox push: persist failed for %s: %v", sessionID, perr)
 		}
 		d.Registry.Touch(sessionID)

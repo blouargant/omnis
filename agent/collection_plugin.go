@@ -43,6 +43,33 @@ func resolveCollection(sessionID string) string {
 	return f(sessionID)
 }
 
+// hiddenSessionResolver, when set, reports whether a session is a hidden
+// utility session (the Settings assistant, the drafting assistants, the session
+// search squad). The server installs one backed by the registry's Hidden flag;
+// nil ⇒ no session is hidden. A hidden session gets no memory block: memory is
+// taught in a visible conversation, and a hidden session's writes would be
+// invisible and land in General.
+var (
+	hiddenSessionMu       sync.RWMutex
+	hiddenSessionResolver func(sessionID string) bool
+)
+
+// SetHiddenSessionResolver installs the session→hidden resolver. Pass nil to
+// clear it. Safe for concurrent use.
+func SetHiddenSessionResolver(f func(sessionID string) bool) {
+	hiddenSessionMu.Lock()
+	hiddenSessionResolver = f
+	hiddenSessionMu.Unlock()
+}
+
+// sessionHidden reports whether the installed resolver marks the session hidden.
+func sessionHidden(sessionID string) bool {
+	hiddenSessionMu.RLock()
+	f := hiddenSessionResolver
+	hiddenSessionMu.RUnlock()
+	return f != nil && f(sessionID)
+}
+
 // collectionRootResolver, when set, maps a session id to the state root its
 // collection context lives under — the owner's per-user directory in the shared
 // (cookie-identity) server. nil, or "" from it ⇒ the shared root.
@@ -116,20 +143,24 @@ const routerCollectionCtxNote = "The block below describes the workstream this "
 // to save the first memory), so it is never "" there. The router gets the memory
 // index only, and both parts under the routing-scoped note above; with no
 // instructions and no memories it gets "". Split out from the callback so the
-// content is unit-testable without an ADK context.
+// content is unit-testable without an ADK context. A hidden session (see
+// SetHiddenSessionResolver) gets the instructions block only, never memory.
 func collectionCtxBlock(sessionID string, forRouter bool) string {
 	store, col := memoryStoreFor(sessionID)
-	store.EnsureMigrated(col)
 
 	var instr string
 	if col != "" {
 		instr = resolveCollectionBlock(sessionID, col)
 	}
-	label := col
-	if label == "" {
-		label = "General"
+	var mem string
+	if !sessionHidden(sessionID) {
+		store.EnsureMigrated(col)
+		label := col
+		if label == "" {
+			label = "General"
+		}
+		mem = store.Render(col, label, forRouter)
 	}
-	mem := store.Render(col, label, forRouter)
 
 	var parts []string
 	for _, p := range []string{instr, mem} {

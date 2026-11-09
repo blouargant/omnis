@@ -177,14 +177,22 @@ func installMemoryChangeHook(d serverDeps) func() {
 
 // memoryReadOnlyFor reports whether a turn of this kind runs with a read-only
 // collection memory. Turns the user did not start — a message from another
-// session, an inbound A2A call, a spawned session's result notice — must not
-// write memory: their content did not come from the user. Interactive turns,
-// the user's own scheduled routines and loops, background-task notifications
-// and durable-question resumes keep write access.
+// session, an inbound A2A call, a spawned session's result notice, a
+// background-task notification — must not write memory: their content did not
+// come from the user. Interactive turns, the user's own scheduled routines and
+// loops, spawned tasks and durable-question resumes keep write access.
 func memoryReadOnlyFor(kind string) bool {
 	switch kind {
-	case "mailbox", "a2a", "spawn_result":
+	case "mailbox", "a2a", "spawn_result", "background":
 		return true
 	}
 	return false
+}
+
+// memoryReadOnlyForSession is memoryReadOnlyFor plus the session rule: every
+// turn of a hidden utility session (Settings assistant, drafting assistants,
+// session search) is memory read-only — its writes would be invisible to the
+// user and land in General.
+func memoryReadOnlyForSession(kind string, hidden bool) bool {
+	return hidden || memoryReadOnlyFor(kind)
 }

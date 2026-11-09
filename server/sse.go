@@ -231,6 +231,10 @@ func handleMessages(d serverDeps) gin.HandlerFunc {
 		// a concurrent turn on another session — the process-wide event bus would
 		// otherwise leak another session's sub-agent frames + token usage here.
 		runCtx = events.WithRootSession(runCtx, meta.ID)
+		// A hidden utility session may read its collection memory but never write it.
+		if memoryReadOnlyForSession("interactive", meta.Hidden) {
+			runCtx = toolkitagent.WithMemoryReadOnly(runCtx)
+		}
 		// Arm the per-turn spend ceiling. Counters reset here, so each turn gets a
 		// fresh budget (an extension granted last turn does not carry over), and
 		// the gate covers the whole dispatch loop — every hop, every sub-agent.

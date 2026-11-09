@@ -28,6 +28,9 @@ const (
 
 	MaxBodyChars = 4000
 	MaxMemories  = 200
+	// MaxDescriptionRunes caps a memory's one-line description (index lines
+	// are injected on every model call).
+	MaxDescriptionRunes = 200
 )
 
 var (
@@ -138,7 +141,7 @@ func (s *Store) Save(collection string, m Memory) (saved Memory, created bool, e
 	if utf8.RuneCountInString(body) > MaxBodyChars {
 		return Memory{}, false, ErrTooLarge
 	}
-	desc := oneLine(m.Description)
+	desc := truncateRunes(oneLine(m.Description), MaxDescriptionRunes)
 	if desc == "" {
 		first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
 		desc = truncateRunes(strings.TrimSpace(first), 80)

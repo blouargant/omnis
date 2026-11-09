@@ -4085,8 +4085,9 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   space/`_` to `-`, strips `.md` — the ONLY way a model- or route-supplied string
   becomes a path segment), type `feedback` / `user` / `project` / `reference`,
   body ≤ `MaxBodyChars` (4000 runes), ≤ `MaxMemories` (200) per collection (a
-  replace never counts), an empty description defaults to the body's first line
-  (80 runes). Writes take a process-wide **per-directory lock** and an **atomic**
+  replace never counts), the description is one line capped at
+  `MaxDescriptionRunes` (200 runes; an empty one defaults to the body's first
+  line, 80 runes). Writes take a process-wide **per-directory lock** and an **atomic**
   temp-file + rename. `List` orders by type then name and skips files that do not
   parse, whose `name` differs from the file stem, or whose type is unknown. The
   collection's rename/delete cascade moves/drops the whole collection directory,
@@ -4108,11 +4109,19 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   (`- name — description`) for `project` / `reference`, under "open with
   memory_read when relevant". **Budget** `BlockBudgetChars` = 12 000: past it,
   inlined bodies are demoted to index lines, least recently `updated` first (ties
-  by name), until it fits; index lines are never dropped and the block does not
-  announce the demotion. The **router** gets index lines only (every type, no
+  by name), until it fits; index lines are never dropped, and when anything was
+  demoted the block says so in one line after the rules (`collmem.DemotedNote`:
+  "Some memories were shortened to one line to fit; open them with
+  memory_read."). The **router** gets index lines only (every type, no
   rules, no bodies; `""` with no memories), under `routerCollectionCtxNote`.
   **General** — and CLI/TUI, where no resolver is installed — get General's
-  memory (`memoryStoreFor`). Sub-agents get nothing. `Render` is **cached** per
+  memory (`memoryStoreFor`). Sub-agents get nothing. A **hidden** utility session
+  (Settings assistant, the collection/agent-instruction drafting assistants, the
+  Session Search squad) gets **no memory block** — its collection instructions
+  block is unchanged — via the process-wide `agent.SetHiddenSessionResolver`,
+  installed by the server from the registry's `Hidden` flag
+  ([server/main.go](server/main.go)); memory is taught in a visible conversation,
+  and a hidden session's writes would be invisible and land in General. `Render` is **cached** per
   (memory dir, label, forRouter) on the directory's `*.md` entries (name, size,
   mtime), so the per-call cost is one `ReadDir`; a write costs one prompt-cache
   miss on the next call.
@@ -4135,12 +4144,17 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   user did not start it"; reading and injection are unaffected. Set by
   `memoryReadOnlyFor(kind)` ([server/collection_memories.go](server/collection_memories.go))
   for `mailbox` (message from another session), `a2a` (inbound A2A,
-  [server/a2a_server.go](server/a2a_server.go)) and `spawn_result` (a spawned
-  session's result delivered to its parent, [server/spawn.go](server/spawn.go)),
-  via `injectOpts.MemoryReadOnly` ([server/mailbox_push.go](server/mailbox_push.go)).
-  Interactive turns, `/loop` / `/schedule` runs, background-task notifications,
-  durable-question resumes and the spawned task itself keep write access (the
-  user authored their prompt). This is the host-side half of "only from the
+  [server/a2a_server.go](server/a2a_server.go)), `spawn_result` (a spawned
+  session's result delivered to its parent, [server/spawn.go](server/spawn.go))
+  and `background` (a background-task notification, `injectNotification` — its
+  content is tool output), via `injectOpts.MemoryReadOnly`
+  ([server/mailbox_push.go](server/mailbox_push.go)). **Every turn of a hidden
+  session** is read-only too: `memoryReadOnlyForSession(kind, hidden)` gates the
+  interactive turn's run context in `handleMessages`
+  ([server/sse.go](server/sse.go)), and `injectTurnOpts` adds it for a hidden
+  session's injected turns. Interactive turns of visible sessions, `/loop` /
+  `/schedule` runs, durable-question resumes and the spawned task itself keep
+  write access (the user authored their prompt). This is the host-side half of "only from the
   user's own words"; the rules are the other half.
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
@@ -4172,19 +4186,24 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   updated / deleted: *name*") whose click opens the memory view (`openMemoryView`:
   type, description, body, **Edit** / **Delete**); a read shows nothing; a
   failure shows the normal error tool block. Chips render live and on history
-  replay (from the persisted tool records — interactive turns only, like every
-  tool block). The environment panel's **Memory** card lists the focused
+  replay, from the persisted tool records: interactive turns record every tool
+  call (`toolRecorder`); injected turns (schedule, loop, spawned task, durable
+  resume…) emit no SSE tool frames, so `injectTurnOpts` records just their
+  `memory_save` / `memory_delete` calls + results from the ADK events
+  (`injectedMemoryRecorder`, [server/tool_record.go](server/tool_record.go)) —
+  enough for the chip to replay. The environment panel's **Memory** card lists the focused
   session's collection memories (hidden when there are none). Edit context
   (`collectionContextDialog`) holds the **memory list** (`buildMemoryList`:
   grouped by type, a row expands to an editor with a character counter, Save /
   Delete per memory, **Add memory**); General's ⋯ menu → **Memory…** opens the
   same dialog with the list only (`memoryOnly`), and **`/memory`** opens it for
-  the focused session's collection (`openCollectionMemory`; a draft/editor tab ⇒
-  General). `/memory` is reserved in
+  the focused session's collection (`openCollectionMemory`; a draft tab ⇒ the
+  collection picked in its picker, an editor tab ⇒ General). `/memory` is reserved in
   [internal/usercommands/](internal/usercommands/usercommands.go). Every view
   follows `memory_changed` (`onMemoryChanged`); an editor with unsaved text defers
-  the refresh. Known limit: opening another row discards the open editor's
-  unsaved text without asking. i18n keys `chat.memory.*`, `memory.*`,
+  the refresh, and opening another row, **Add memory**, Escape or closing the
+  dialog (✕, Cancel, backdrop, Save) asks (`uiConfirm`) before discarding it
+  (`confirmDiscard`; the editor's own Cancel discards without asking). i18n keys `chat.memory.*`, `memory.*`,
   `env.memory.*`, `collections.memory*`.
 - **No-op contract**: a collection with no memories injects only the rules block
   on answering roots and nothing on the router.

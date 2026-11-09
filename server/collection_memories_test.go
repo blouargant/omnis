@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
 	"github.com/blouargant/omnis/internal/collmem"
 	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
@@ -244,14 +246,63 @@ func TestMemoryChangedIsBroadcast(t *testing.T) {
 }
 
 func TestUnattendedTurnsAreMemoryReadOnly(t *testing.T) {
-	for _, k := range []string{"mailbox", "a2a", "spawn_result"} {
+	for _, k := range []string{"mailbox", "a2a", "spawn_result", "background"} {
 		if !memoryReadOnlyFor(k) {
 			t.Errorf("memoryReadOnlyFor(%q) = false, want true", k)
 		}
 	}
-	for _, k := range []string{"interactive", "schedule", "loop", "background", "durable_resume"} {
+	for _, k := range []string{"interactive", "schedule", "loop", "spawn", "durable_resume"} {
 		if memoryReadOnlyFor(k) {
 			t.Errorf("memoryReadOnlyFor(%q) = true, want false", k)
 		}
+	}
+}
+
+// Every turn of a hidden utility session (Settings assistant, drafting
+// assistants, session search) runs with a read-only memory; a visible
+// interactive turn keeps write access.
+func TestHiddenSessionTurnsAreMemoryReadOnly(t *testing.T) {
+	if memoryReadOnlyForSession("interactive", false) {
+		t.Error("visible interactive turn must keep memory write access")
+	}
+	for _, k := range []string{"interactive", "schedule", "durable_resume"} {
+		if !memoryReadOnlyForSession(k, true) {
+			t.Errorf("hidden session, %q turn: want read-only", k)
+		}
+	}
+	if !memoryReadOnlyForSession("mailbox", false) {
+		t.Error("mailbox turn stays read-only in a visible session")
+	}
+}
+
+// An injected turn (schedule, loop, durable resume…) emits no SSE tool frames,
+// so its memory writes are recorded from the ADK events and persisted with the
+// turn; the web UI then replays the chip after a reload.
+func TestInjectedTurnPersistsMemoryCalls(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	var r injectedMemoryRecorder
+	r.call(&genai.FunctionCall{ID: "c1", Name: "memory_read", Args: map[string]any{"name": "x"}}, 0)
+	r.call(&genai.FunctionCall{ID: "c2", Name: "memory_save", Args: map[string]any{"name": "no-force-push"}}, utf16Len("Noted. "))
+	r.result(&genai.FunctionResponse{ID: "c1", Name: "memory_read", Response: map[string]any{"found": true}})
+	r.result(&genai.FunctionResponse{ID: "c2", Name: "memory_save",
+		Response: map[string]any{"ok": true, "name": "no-force-push", "status": "created"}})
+
+	if err := sessions.AppendConversationTurnRecord("inj", "[schedule] run", "Noted. Done.", nil, 0, r.calls); err != nil {
+		t.Fatal(err)
+	}
+	f, err := sessions.LoadConversationFile("inj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := f.Turns[len(f.Turns)-1].Tools
+	if len(tools) != 1 || tools[0].Name != "memory_save" || tools[0].Offset != 7 {
+		t.Fatalf("want one memory_save at offset 7, got %+v", tools)
+	}
+	var res map[string]any
+	if err := json.Unmarshal(tools[0].Result, &res); err != nil || res["ok"] != true || res["status"] != "created" {
+		t.Fatalf("result not persisted: %s (%v)", tools[0].Result, err)
+	}
+	if !strings.Contains(string(tools[0].Args), "no-force-push") {
+		t.Fatalf("args not persisted: %s", tools[0].Args)
 	}
 }

@@ -33,6 +33,9 @@ const (
 	headUser     = "## About the user"
 	headIndex    = "## Also remembered (open with memory_read when relevant)"
 	headRouter   = "## Remembered for this collection"
+	// DemotedNote is added when the budget forced feedback/user bodies down to
+	// index lines, so the model knows to open them.
+	DemotedNote = "Some memories were shortened to one line to fit; open them with memory_read."
 )
 
 // Render returns the <collection-memory> block for a collection.
@@ -84,7 +87,7 @@ func (s *Store) render(collection, label string, forRouter bool) string {
 			inline[m.Name] = true
 		}
 	}
-	out := renderAnswering(label, mems, inline)
+	out := renderAnswering(label, mems, inline, false)
 	if len(out) <= BlockBudgetChars {
 		return out
 	}
@@ -104,7 +107,7 @@ func (s *Store) render(collection, label string, forRouter bool) string {
 	})
 	for _, m := range cand {
 		delete(inline, m.Name)
-		out = renderAnswering(label, mems, inline)
+		out = renderAnswering(label, mems, inline, true)
 		if len(out) <= BlockBudgetChars {
 			break
 		}
@@ -114,10 +117,14 @@ func (s *Store) render(collection, label string, forRouter bool) string {
 
 // renderAnswering builds the answering-root block; inline names the memories
 // whose bodies are shown in full, every other memory gets an index line.
-func renderAnswering(label string, mems []Memory, inline map[string]bool) string {
+// demoted adds DemotedNote (some feedback/user bodies were cut for the budget).
+func renderAnswering(label string, mems []Memory, inline map[string]bool, demoted bool) string {
 	var b strings.Builder
 	b.WriteString(openTag(label))
 	b.WriteString(Rules + "\n")
+	if demoted {
+		b.WriteString("\n" + DemotedNote + "\n")
+	}
 	section := func(head, typ string) {
 		first := true
 		for _, m := range mems {

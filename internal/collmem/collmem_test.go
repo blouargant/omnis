@@ -159,3 +159,21 @@ func TestListOrderAndDelete(t *testing.T) {
 		t.Fatal("still there")
 	}
 }
+
+func TestSaveCapsDescription(t *testing.T) {
+	s := In(t.TempDir())
+	long := strings.Repeat("é", 250) + "\nsecond line"
+	got, _, err := s.Save("Proxy", Memory{Name: "long-desc", Description: long, Type: TypeProject, Body: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len([]rune(got.Description)); n != MaxDescriptionRunes {
+		t.Fatalf("description is %d runes, want %d", n, MaxDescriptionRunes)
+	}
+	if strings.Contains(got.Description, "\n") {
+		t.Fatal("description must be one line")
+	}
+	if m, _ := s.Get("Proxy", "long-desc"); len([]rune(m.Description)) != MaxDescriptionRunes {
+		t.Fatalf("stored description is %d runes", len([]rune(m.Description)))
+	}
+}

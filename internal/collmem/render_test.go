@@ -80,6 +80,17 @@ func TestRenderBudgetDemotesOldestBodies(t *testing.T) {
 	if !strings.Contains(out, "memory_read") {
 		t.Error("the block must say demoted memories can be read")
 	}
+	if !strings.Contains(out, DemotedNote) {
+		t.Error("the block must say some memories were shortened")
+	}
+}
+
+func TestRenderNoDemotionNoNote(t *testing.T) {
+	s := In(t.TempDir())
+	s.Save("", Memory{Name: "tabs", Description: "Use tabs", Type: TypeFeedback, Body: "short"})
+	if out := s.Render("", "General", false); strings.Contains(out, DemotedNote) {
+		t.Fatalf("nothing was demoted, the note must be absent:\n%s", out)
+	}
 }
 
 // Render is cached per (directory, label, router flag) on the directory's

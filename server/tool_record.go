@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"unicode/utf16"
 
+	"google.golang.org/genai"
+
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -155,3 +157,57 @@ func capJSON(v json.RawMessage) json.RawMessage {
 	b, _ := json.Marshal(string(cut) + "…")
 	return b
 }
+
+// injectedMemoryRecorder records the memory_save / memory_delete calls of an
+// injected turn (mailbox, background, scheduled, loop, spawned task, durable
+// resume). Those turns emit no SSE frames, so toolRecorder never sees them; this
+// reads the turn's ADK events instead, so the web UI replays the memory chip
+// after a reload. Only the writes are kept: a read shows nothing anyway.
+type injectedMemoryRecorder struct {
+	calls []sessions.ToolCallRecord
+}
+
+func recordedMemoryWrite(name string) bool {
+	return name == "memory_save" || name == "memory_delete"
+}
+
+// call records a memory write; offset is the UTF-16 length of the hop's reply
+// text produced before it.
+func (r *injectedMemoryRecorder) call(fc *genai.FunctionCall, offset int) {
+	if fc == nil || !recordedMemoryWrite(fc.Name) || len(r.calls) >= maxRecordedCalls {
+		return
+	}
+	args, _ := json.Marshal(fc.Args)
+	r.calls = append(r.calls, sessions.ToolCallRecord{
+		CallID: fc.ID, Name: fc.Name, Args: capJSON(args), Offset: offset,
+	})
+}
+
+// result attaches a response to its call (by call id, else the latest
+// unresolved call of that name).
+func (r *injectedMemoryRecorder) result(fr *genai.FunctionResponse) {
+	if fr == nil || !recordedMemoryWrite(fr.Name) {
+		return
+	}
+	var c *sessions.ToolCallRecord
+	for i := len(r.calls) - 1; i >= 0; i-- {
+		if fr.ID != "" && r.calls[i].CallID == fr.ID {
+			c = &r.calls[i]
+			break
+		}
+		if c == nil && r.calls[i].Name == fr.Name && r.calls[i].Result == nil {
+			c = &r.calls[i]
+		}
+	}
+	if c == nil {
+		return
+	}
+	resp, _ := json.Marshal(fr.Response)
+	c.Result = capJSON(resp)
+	if e, ok := fr.Response["error"].(string); ok && e != "" {
+		c.Error = e
+	}
+}
+
+// utf16Len is the length of s in UTF-16 code units (what a JS String slices by).
+func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }

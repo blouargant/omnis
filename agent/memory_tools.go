@@ -67,8 +67,11 @@ const (
 
 func errMemNotFound(name string) string { return fmt.Sprintf("no memory named %q", name) }
 
-// memoryReadOnlyKey marks a run the user did not start (mailbox, background,
-// scheduled, spawned turns): its memory writes are refused.
+// memoryReadOnlyKey marks a run whose memory writes are refused: turns the user
+// did not start (a mailbox message, an inbound A2A call, a spawned session's
+// result notice, a background-task notification) and every turn of a hidden
+// utility session. Scheduled routines, loops, spawned tasks and durable-question
+// resumes keep write access.
 type memoryReadOnlyKey struct{}
 
 // WithMemoryReadOnly marks a run the user did not start: saves and deletes are refused.
