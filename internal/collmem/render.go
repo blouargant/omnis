@@ -1,8 +1,11 @@
 package collmem
 
 import (
+	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // BlockBudgetChars caps the size of the block injected for an answering root.
@@ -37,7 +40,29 @@ const (
 // forRouter: index lines for every memory, no rules, no bodies; "" when there are none.
 // !forRouter: Rules, then full bodies of feedback+user memories, then index lines
 // for project+reference memories; never "" (rules are always present).
+//
+// The result is cached per (memory directory, label, forRouter) and reused while
+// the directory's *.md entries (name, size, mtime) are unchanged, so calling it
+// on every model call is cheap. Nothing is cached when the directory cannot be
+// read (e.g. it does not exist yet).
 func (s *Store) Render(collection, label string, forRouter bool) string {
+	dir := s.Dir(collection)
+	sig, ok := dirSignature(dir)
+	key := fmt.Sprintf("%s\x00%s\x00%t", dir, label, forRouter)
+	if ok {
+		if out, hit := renderCacheGet(key, sig); hit {
+			return out
+		}
+	}
+	out := s.render(collection, label, forRouter)
+	if ok {
+		renderCachePut(key, sig, out)
+	}
+	return out
+}
+
+// render builds the block without consulting the cache.
+func (s *Store) render(collection, label string, forRouter bool) string {
 	mems := s.List(collection)
 	if forRouter {
 		if len(mems) == 0 {
@@ -132,4 +157,51 @@ func openTag(label string) string {
 
 func indexLine(m Memory) string {
 	return "- " + m.Name + " — " + m.Description + "\n"
+}
+
+// dirSignature describes the *.md entries of dir by name, size and mtime.
+// ok is false when the directory cannot be read.
+func dirSignature(dir string) (sig string, ok bool) {
+	if dir == "" {
+		return "", false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return "", false
+		}
+		fmt.Fprintf(&b, "%s|%d|%d\n", e.Name(), info.Size(), info.ModTime().UnixNano())
+	}
+	return b.String(), true
+}
+
+type renderEntry struct{ sig, text string }
+
+var (
+	renderCacheMu sync.RWMutex
+	renderCache   = map[string]renderEntry{}
+)
+
+func renderCacheGet(key, sig string) (string, bool) {
+	renderCacheMu.RLock()
+	e, ok := renderCache[key]
+	renderCacheMu.RUnlock()
+	if ok && e.sig == sig {
+		return e.text, true
+	}
+	return "", false
+}
+
+func renderCachePut(key, sig, text string) {
+	renderCacheMu.Lock()
+	renderCache[key] = renderEntry{sig: sig, text: text}
+	renderCacheMu.Unlock()
 }

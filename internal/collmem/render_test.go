@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // setUpdated rewrites the "updated:" line of a stored memory file.
@@ -78,5 +79,78 @@ func TestRenderBudgetDemotesOldestBodies(t *testing.T) {
 	}
 	if !strings.Contains(out, "memory_read") {
 		t.Error("the block must say demoted memories can be read")
+	}
+}
+
+// Render is cached per (directory, label, router flag) on the directory's
+// entries; every kind of change must still show on the next Render.
+func TestRenderCacheFollowsDirectoryChanges(t *testing.T) {
+	s := In(t.TempDir())
+	mustSave := func(m Memory) {
+		t.Helper()
+		if _, _, err := s.Save("Proxy", m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustSave(Memory{Name: "tabs", Description: "Use tabs", Type: TypeFeedback, Body: "BODY-ONE"})
+	if out := s.Render("Proxy", "Proxy", false); !strings.Contains(out, "BODY-ONE") {
+		t.Fatalf("first render:\n%s", out)
+	}
+	// Router and answering renders of the same directory never share an entry.
+	if out := s.Render("Proxy", "Proxy", true); strings.Contains(out, "BODY-ONE") || !strings.Contains(out, "- tabs — Use tabs") {
+		t.Fatalf("router render:\n%s", out)
+	}
+	if out := s.Render("Proxy", "Other", false); !strings.Contains(out, `collection="Other"`) {
+		t.Fatalf("label must key the cache:\n%s", out)
+	}
+
+	// Save (new memory and update).
+	mustSave(Memory{Name: "spaces", Description: "No spaces", Type: TypeFeedback, Body: "BODY-TWO"})
+	mustSave(Memory{Name: "tabs", Description: "Use tabs", Type: TypeFeedback, Body: "BODY-ONE-UPDATED"})
+	out := s.Render("Proxy", "Proxy", false)
+	if !strings.Contains(out, "BODY-TWO") || !strings.Contains(out, "BODY-ONE-UPDATED") {
+		t.Fatalf("after Save:\n%s", out)
+	}
+
+	// Delete.
+	if _, err := s.Delete("Proxy", "spaces"); err != nil {
+		t.Fatal(err)
+	}
+	if out := s.Render("Proxy", "Proxy", false); strings.Contains(out, "BODY-TWO") {
+		t.Fatalf("after Delete:\n%s", out)
+	}
+
+	// Out-of-band edit that changes the size.
+	path := filepath.Join(s.Dir("Proxy"), "tabs.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(data), "BODY-ONE-UPDATED", "EDITED-BY-HAND-LONGER", 1)
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := s.Render("Proxy", "Proxy", false); !strings.Contains(out, "EDITED-BY-HAND-LONGER") {
+		t.Fatalf("after size-changing edit:\n%s", out)
+	}
+
+	// Out-of-band edit of the same size: only the mtime tells it apart.
+	same := strings.Replace(edited, "EDITED-BY-HAND-LONGER", "SAME-SIZE-EDIT-ABCDEF", 1)
+	if len(same) != len(edited) {
+		t.Fatal("test setup: sizes differ")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(same), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := st.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if out := s.Render("Proxy", "Proxy", false); !strings.Contains(out, "SAME-SIZE-EDIT-ABCDEF") {
+		t.Fatalf("after same-size edit:\n%s", out)
 	}
 }
