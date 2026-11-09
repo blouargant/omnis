@@ -100,6 +100,9 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 		})
 		for _, n := range known {
 			squad, cwd := cols.CollectionProfile(n)
+			// Import a legacy memory.md before counting, so the count matches
+			// what the memories route will list.
+			mems.EnsureMigrated(n)
 			out = append(out, collectionInfo{
 				Name:       n,
 				Count:      counts[n],

@@ -105,6 +105,74 @@ func TestMemoryRoutesUseCanonicalCollectionName(t *testing.T) {
 	}
 }
 
+// A collection that still has its legacy memory.md shows it as imported-notes
+// on the first read, and a memory added before any model turn does not strand
+// it (the first Save creates the memory directory, after which nothing would
+// import the legacy file any more). The collection list counts it too.
+func TestMemoryRoutesMigrateLegacyMemory(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := sessions.AddCollection("Proxy"); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(paths.ConfigWriteDir(), "collections", "Proxy")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "memory.md"), []byte("The proxy repo is gitlab.example/proxy."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := newEngine(serverDeps{Registry: sessions.NewEmptyRegistry(), rootCtx: context.Background()})
+	list := func() []collmem.Memory {
+		t.Helper()
+		w := memReq(t, engine, http.MethodGet, "/api/collections/Proxy/memories", "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET = %d: %s", w.Code, w.Body)
+		}
+		var r struct {
+			Memories []collmem.Memory `json:"memories"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r.Memories
+	}
+	if m := list(); len(m) != 1 || m[0].Name != "imported-notes" || !strings.Contains(m[0].Body, "gitlab.example/proxy") {
+		t.Fatalf("first GET = %+v, want the imported notes", m)
+	}
+	if w := memReq(t, engine, http.MethodPut, "/api/collections/Proxy/memories/no-force-push", `{"description":"d","type":"feedback","body":"Never force-push."}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body)
+	}
+	if m := list(); len(m) != 2 {
+		t.Fatalf("after PUT = %+v, want imported-notes kept beside the new memory", m)
+	}
+}
+
+// The first write must import the legacy file too, not only a read.
+func TestMemoryPutFirstKeepsLegacyMemory(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if _, _, err := sessions.AddCollection("Proxy"); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(paths.ConfigWriteDir(), "collections", "Proxy")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "memory.md"), []byte("Old notes."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := newEngine(serverDeps{Registry: sessions.NewEmptyRegistry(), rootCtx: context.Background()})
+	if w := memReq(t, engine, http.MethodPut, "/api/collections/Proxy/memories/rate-limit", `{"description":"d","type":"project","body":"b"}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body)
+	}
+	if m, ok := collmem.In(paths.ConfigWriteDir()).Get("Proxy", "imported-notes"); !ok || m.Body != "Old notes." {
+		t.Fatalf("legacy notes stranded by the first PUT: %+v %v", m, ok)
+	}
+	w := memReq(t, engine, http.MethodGet, "/api/collections", "")
+	if !strings.Contains(w.Body.String(), `"name":"Proxy"`) || !strings.Contains(w.Body.String(), `"memories":2`) {
+		t.Fatalf("collections = %s, want Proxy with 2 memories", w.Body)
+	}
+}
+
 func TestMemoryRoutesAreOwnerScopedInCookieMode(t *testing.T) {
 	engine, _, _, _ := newCookieTestEngine(t)
 	if w := doWithBody(engine, "ta", http.MethodPut, "/api/collections/General/memories/alice-fact", `{"description":"d","type":"user","body":"Alice prefers French."}`); w.Code != http.StatusOK {

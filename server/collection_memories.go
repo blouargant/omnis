@@ -33,9 +33,14 @@ func resolveMemoryCollection(c *gin.Context) (string, bool) {
 	return resolveKnownCollection(c)
 }
 
-// memoryStoreForRequest is the caller's memory store (per-user root in cookie mode).
-func memoryStoreForRequest(c *gin.Context) *collmem.Store {
-	return collmem.In(userRoot(requestLogin(c)))
+// memoryStoreForRequest is the caller's memory store (per-user root in cookie
+// mode), with the collection's legacy memory.md already imported: every route
+// reads or writes through it, and the first Save would create the memory
+// directory and strand the legacy file for good. General ("") has no legacy file.
+func memoryStoreForRequest(c *gin.Context, collection string) *collmem.Store {
+	s := collmem.In(userRoot(requestLogin(c)))
+	s.EnsureMigrated(collection)
+	return s
 }
 
 // memoryRouteError maps a collmem error to an HTTP status + message.
@@ -73,7 +78,7 @@ func handleListMemories(d serverDeps) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		mems := memoryStoreForRequest(c).List(col)
+		mems := memoryStoreForRequest(c, col).List(col)
 		if mems == nil {
 			mems = []collmem.Memory{}
 		}
@@ -102,7 +107,7 @@ func handlePutMemory(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "memory body is empty"})
 			return
 		}
-		saved, created, err := memoryStoreForRequest(c).Save(col, collmem.Memory{
+		saved, created, err := memoryStoreForRequest(c, col).Save(col, collmem.Memory{
 			Name:        c.Param("mem"),
 			Description: in.Description,
 			Type:        strings.TrimSpace(in.Type),
@@ -135,7 +140,7 @@ func handleDeleteMemory(d serverDeps) gin.HandlerFunc {
 			c.JSON(code, gin.H{"error": msg})
 			return
 		}
-		removed, err := memoryStoreForRequest(c).Delete(col, name)
+		removed, err := memoryStoreForRequest(c, col).Delete(col, name)
 		if err != nil {
 			code, msg := memoryRouteError(err)
 			c.JSON(code, gin.H{"error": msg})

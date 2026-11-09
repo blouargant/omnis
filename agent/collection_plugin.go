@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"log"
 	"strings"
 	"sync"
 
@@ -92,39 +91,6 @@ func memoryStoreFor(sessionID string) (store *collmem.Store, collection string) 
 	return collmem.In(root), resolveCollection(sessionID)
 }
 
-// migrateLocks serialise the legacy memory.md migration per memory directory.
-// collectionCtxBlock runs on every model call of every root, so several sessions
-// of one collection can reach a first migration at the same time; unguarded, a
-// failing call's cleanup (RemoveAll of the memory dir) could wipe what a
-// concurrent call had just imported and whose memory.md it had removed. Once the
-// memory dir exists, MigrateLegacy returns after a single stat.
-var (
-	migrateLocksMu sync.Mutex
-	migrateLocks   = map[string]*sync.Mutex{}
-)
-
-func migrateLegacyMemory(store *collmem.Store, collection string) {
-	if collection == "" {
-		return
-	}
-	dir := store.Dir(collection)
-	if dir == "" {
-		return
-	}
-	migrateLocksMu.Lock()
-	l, ok := migrateLocks[dir]
-	if !ok {
-		l = &sync.Mutex{}
-		migrateLocks[dir] = l
-	}
-	migrateLocksMu.Unlock()
-	l.Lock()
-	defer l.Unlock()
-	if _, err := store.MigrateLegacy(collection); err != nil {
-		log.Printf("collection memory: migrating legacy memory.md of %q: %v", collection, err)
-	}
-}
-
 // routerCollectionCtxNote re-frames the collection block for the ROUTER hop.
 //
 // The rendered block tells its reader to treat the collection as "authoritative
@@ -153,7 +119,7 @@ const routerCollectionCtxNote = "The block below describes the workstream this "
 // content is unit-testable without an ADK context.
 func collectionCtxBlock(sessionID string, forRouter bool) string {
 	store, col := memoryStoreFor(sessionID)
-	migrateLegacyMemory(store, col)
+	store.EnsureMigrated(col)
 
 	var instr string
 	if col != "" {

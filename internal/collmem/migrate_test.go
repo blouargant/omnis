@@ -109,3 +109,34 @@ func TestMigrateLegacyNoopForGeneralAndWhenMemoryDirExists(t *testing.T) {
 		t.Error("nothing must be imported")
 	}
 }
+
+// EnsureMigrated is what every reader and writer calls first: repeated calls
+// import the legacy notes once, and a Save afterwards (which the first route
+// write would be) keeps them.
+func TestEnsureMigratedIsIdempotentAndSurvivesSave(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "collections", "Proxy")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "memory.md"), []byte("Old notes."), 0o644)
+	s := In(root)
+	s.EnsureMigrated("Proxy")
+	s.EnsureMigrated("Proxy")
+	// A second Store on the same root shares the lock and sees the import.
+	In(root).EnsureMigrated("Proxy")
+	if mems := s.List("Proxy"); len(mems) != 1 || mems[0].Name != "imported-notes" {
+		t.Fatalf("after EnsureMigrated: %+v", mems)
+	}
+	if _, _, err := s.Save("Proxy", Memory{Name: "rate-limit", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	s.EnsureMigrated("Proxy")
+	m, ok := s.Get("Proxy", "imported-notes")
+	if !ok || m.Body != "Old notes." {
+		t.Fatalf("imported notes lost after Save: %+v %v", m, ok)
+	}
+	if n := len(s.List("Proxy")); n != 2 {
+		t.Fatalf("want 2 memories, got %d", n)
+	}
+	// General ("") never migrates and never panics.
+	s.EnsureMigrated("")
+}
