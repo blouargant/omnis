@@ -9,14 +9,11 @@ import (
 )
 
 func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
-	t.Setenv("OMNIS_CURATOR_ENABLED", "true")
-	t.Setenv("CURATOR_KEY_ENV", "resolved-curator-key")
 	t.Setenv("JSON_KEY_ENV", "resolved-json-key")
 
 	dir := t.TempDir()
 	setupAgentsRegistry(t, dir, []AgentEntry{
 		{Name: "leader", ModelRef: "leader-default"},
-		{Name: "curator", ModelRef: "curator-fast", Enabled: ptrBool(false)},
 		{Name: "investigator", Enabled: ptrBool(false)},
 	})
 
@@ -27,7 +24,7 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
   "app_name": "json-app",
   "mcp_config_path": "json-mcp.json",
   "permissions_config_path": "json-perms.json",
-  "agents": ["leader", "curator", "investigator"]
+  "agents": ["leader", "investigator"]
 }`))
 	mustWrite(t, filepath.Join(dir, "models.json"), []byte(`{
   "models": {
@@ -39,22 +36,14 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
       "context_length": 200000,
       "input_token_price_per_million": 3,
       "output_token_price_per_million": 15
-    },
-    "curator-fast": {
-      "provider": "openai",
-      "model": "role-curator-model",
-      "api_key": "CURATOR_KEY_ENV",
-      "context_length": 128000
     }
   }
 }`))
 
-	curatorEnabled := false
 	runtime, err := ResolveRuntimeSettings(Options{
 		ConfigPath:       cfgPath,
 		ConfigPathStrict: true,
 		AppName:          "cli-app",
-		CuratorEnabled:   &curatorEnabled,
 	})
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
@@ -97,26 +86,6 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 	}
 	if got := leader.OutputTokenPricePerMillion; got != 15 {
 		t.Fatalf("leader.OutputTokenPricePerMillion = %v, want 15", got)
-	}
-
-	cur, ok := runtime.AgentConfig("curator")
-	if !ok {
-		t.Fatal("curator config missing")
-	}
-	if cur.Enabled {
-		t.Fatal("curator.Enabled = true, want false")
-	}
-	if got := cur.Provider; got != "openai" {
-		t.Fatalf("curator.Provider = %q, want openai", got)
-	}
-	if got := cur.Model; got != "role-curator-model" {
-		t.Fatalf("curator.Model = %q, want role-curator-model", got)
-	}
-	if got := cur.APIKey; got != "resolved-curator-key" {
-		t.Fatalf("curator.APIKey = %q, want resolved-curator-key", got)
-	}
-	if got := cur.ContextLength; got != 128000 {
-		t.Fatalf("curator.ContextLength = %d, want 128000", got)
 	}
 
 	inv, ok := runtime.AgentConfig("investigator")
@@ -419,7 +388,6 @@ func TestResolveRuntimeSettingsUnknownModelRef(t *testing.T) {
 }
 
 func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
-	t.Setenv("OMNIS_CURATOR_ENABLED", "")
 	// Pin path roots so assertions are stable regardless of the host's
 	// real $HOME or ./config layout.
 	home := t.TempDir()
@@ -439,12 +407,8 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if _, ok := runtime.AgentConfig("leader"); !ok {
 		t.Fatal("default leader config missing")
 	}
-	curator, ok := runtime.AgentConfig("curator")
-	if !ok {
-		t.Fatal("default curator config missing")
-	}
-	if !curator.Enabled {
-		t.Fatal("curator.Enabled = false, want true")
+	if _, ok := runtime.AgentConfig("curator"); ok {
+		t.Fatal("the removed curator agent is in the defaults")
 	}
 }
 
@@ -806,5 +770,87 @@ func setupAgentsRegistry(t *testing.T, baseDir string, agents []AgentEntry) {
 	// Also copy the default instruction if it exists.
 	if content, err := os.ReadFile(filepath.Join("..", "registry", "agents", "default.md")); err == nil {
 		mustWrite(t, filepath.Join(registryDir, "default.md"), content)
+	}
+}
+
+// The curator and reflector agents were removed with soft-skills. A config that
+// still names them (a user overlay in $OMNIS_HOME can carry them for years) must
+// keep loading: the names are ignored, never an error.
+func TestRemovedAgentsInConfigAreIgnored(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{Name: "investigator"},
+	})
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{
+  "agents": ["leader", "investigator", "curator", "reflector"],
+  "squads": [{"name": "system", "leader": "leader", "members": ["investigator", "curator"]}]
+}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	for _, name := range []string{"curator", "reflector"} {
+		if _, ok := runtime.AgentConfig(name); ok {
+			t.Fatalf("removed agent %q is still in RuntimeSettings", name)
+		}
+	}
+	sq, ok := runtime.Squad("system")
+	if !ok {
+		t.Fatal("system squad missing")
+	}
+	if !equalStringSlice(sq.Members, []string{"investigator"}) {
+		t.Fatalf("system squad members = %v, want [investigator]", sq.Members)
+	}
+}
+
+func TestRemovedAgentRegistryForkIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{Name: "investigator"},
+	})
+	curatorDir := filepath.Join(dir, "registry", "agents", "curator")
+	if err := os.MkdirAll(curatorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(curatorDir, "agent.json"), []byte(`{"name":"curator","model_ref":"x"}`))
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{"agents": ["leader", "investigator", "curator", "reflector"]}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	if _, ok := runtime.AgentConfig("curator"); ok {
+		t.Fatal("removed agent curator is still in RuntimeSettings")
+	}
+	def, ok := runtime.DefaultSquad()
+	if !ok {
+		t.Fatal("default squad missing")
+	}
+	if containsString(def.Members, "curator") {
+		t.Fatalf("synthesized default squad includes curator: %v", def.Members)
+	}
+}
+
+func TestCuratorEnvAndOptionsAreIgnored(t *testing.T) {
+	t.Setenv("OMNIS_CURATOR_ENABLED", "true")
+	t.Setenv("OMNIS_CURATOR_MIN_TURNS", "5")
+	t.Setenv("OMNIS_CURATOR_IDLE_TIMEOUT", "30m")
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{{Name: "leader"}, {Name: "investigator"}})
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{"agents": ["leader", "investigator"]}`))
+
+	enabled := true
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true, CuratorEnabled: &enabled})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	if _, ok := runtime.AgentConfig("curator"); ok {
+		t.Fatal("curator agent was re-added by the env/options")
 	}
 }

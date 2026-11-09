@@ -35,7 +35,7 @@ import (
 
 // validateSubAgentGraph rejects, at config-resolution time, any `subagents` graph
 // the builder could not construct: an unknown or disabled target, a
-// self-reference, a duplicate edge, the process-wide curator, or a cycle. Reported
+// self-reference, a duplicate edge, or a cycle. Reported
 // here (rather than mid-turn) so a bad edit fails loudly on the next reload.
 func validateSubAgentGraph(agents []RuntimeAgentConfig) error {
 	byName := make(map[string]RuntimeAgentConfig, len(agents))
@@ -51,8 +51,6 @@ func validateSubAgentGraph(agents []RuntimeAgentConfig) error {
 			switch {
 			case dep == a.Name:
 				return fmt.Errorf("agent %q lists itself in subagents", a.Name)
-			case dep == "curator":
-				return fmt.Errorf("agent %q lists the curator in subagents: the curator is a process-wide post-session hook, not a delegable agent", a.Name)
 			case seen[dep]:
 				return fmt.Errorf("agent %q lists %q twice in subagents", a.Name, dep)
 			}

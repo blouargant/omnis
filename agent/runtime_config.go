@@ -556,11 +556,68 @@ func defaultAgents() []RuntimeAgentConfig {
 			Enabled: true,
 			Tools:   []string{},
 		},
-		{
-			Name:    "curator",
-			Enabled: true,
-		},
 	}
+}
+
+// removedAgentNames are agents that no longer exist (the curator and reflector
+// went away with soft-skills). Configs naming them keep loading: the names are
+// dropped from the agents list, squads and `subagents` teams, never an error —
+// user overlays in $OMNIS_HOME will carry them for years.
+var removedAgentNames = map[string]bool{"curator": true, "reflector": true}
+
+func isRemovedAgent(name string) bool {
+	return removedAgentNames[strings.ToLower(strings.TrimSpace(name))]
+}
+
+// dropRemovedAgents strips the removed agent names from the agents list and
+// from every squad (a squad led by one has its leader cleared). It returns the
+// dropped occurrences, for logging.
+func dropRemovedAgents(cfg *runtimeConfigFile) []string {
+	var dropped []string
+	keep := cfg.Agents[:0:0]
+	for _, name := range cfg.Agents {
+		if isRemovedAgent(name) {
+			dropped = append(dropped, strings.ToLower(strings.TrimSpace(name)))
+			continue
+		}
+		keep = append(keep, name)
+	}
+	cfg.Agents = keep
+	for i := range cfg.Squads {
+		sq := &cfg.Squads[i]
+		if isRemovedAgent(sq.Leader) {
+			dropped = append(dropped, strings.ToLower(strings.TrimSpace(sq.Leader)))
+			sq.Leader = ""
+		}
+		members := sq.Members[:0:0]
+		for _, m := range sq.Members {
+			if isRemovedAgent(m) {
+				dropped = append(dropped, strings.ToLower(strings.TrimSpace(m)))
+				continue
+			}
+			members = append(members, m)
+		}
+		sq.Members = members
+	}
+	return dropped
+}
+
+// normalizeSubAgents normalises a `subagents` list and drops the removed agents.
+func normalizeSubAgents(in []string) []string {
+	out := normalizeNames(in)
+	if len(out) == 0 {
+		return out
+	}
+	keep := out[:0]
+	for _, n := range out {
+		if !removedAgentNames[n] {
+			keep = append(keep, n)
+		}
+	}
+	if len(keep) == 0 {
+		return nil
+	}
+	return keep
 }
 
 func normalizeProviderCatalog(providers map[string]ProviderEntry) map[string]RuntimeProviderConfig {
@@ -708,7 +765,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			MaxToolCalls:                      maxInt(e.MaxToolCalls, 0),
 			MaxToolCallsPerCall:               maxInt(e.MaxToolCallsPerCall, 0),
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
-			SubAgents:                         normalizeNames(e.SubAgents),
+			SubAgents:                         normalizeSubAgents(e.SubAgents),
 			DeferredTools:                     trimList(e.DeferredTools),
 			ReadOnly:                          e.ReadOnly,
 		})
@@ -772,17 +829,6 @@ func withInheritedModels(agents []RuntimeAgentConfig) ([]RuntimeAgentConfig, err
 	return out, nil
 }
 
-func applyCuratorEnabledOverride(agents []RuntimeAgentConfig, enabled bool) []RuntimeAgentConfig {
-	for i := range agents {
-		if agents[i].Name == "curator" {
-			agents[i].Enabled = enabled
-			return agents
-		}
-	}
-	agents = append(agents, RuntimeAgentConfig{Name: "curator", Enabled: enabled})
-	return agents
-}
-
 func mapAgentEntries(entries []RuntimeAgentConfig, fn func(RuntimeAgentConfig) RuntimeAgentConfig) []RuntimeAgentConfig {
 	out := make([]RuntimeAgentConfig, 0, len(entries))
 	for _, e := range entries {
@@ -824,7 +870,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		MaxToolCalls:                      maxInt(in.MaxToolCalls, 0),
 		MaxToolCallsPerCall:               maxInt(in.MaxToolCallsPerCall, 0),
 		ResumableSessions:                 in.ResumableSessions,
-		SubAgents:                         normalizeNames(in.SubAgents),
+		SubAgents:                         normalizeSubAgents(in.SubAgents),
 		DeferredTools:                     trimList(in.DeferredTools),
 		ReadOnly:                          in.ReadOnly,
 		Plugin:                            in.Plugin,
@@ -869,7 +915,6 @@ func maxInt(a, b int) int {
 //   - non-empty squad name; names lower-cased and unique
 //   - leader and members reference existing, enabled agents
 //   - the squad's leader is an agent marked `leader: true`
-//   - curator is not a member (it is process-wide)
 //   - members are de-duplicated; the leader is never listed as a member
 //
 // Returns the resolved squads and an error describing the first violation.
@@ -917,9 +962,6 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 			if _, ok := enabled[m]; !ok {
 				return nil, fmt.Errorf("runtime config: squad %q member %q is not an enabled agent", name, m)
 			}
-			if m == "curator" {
-				return nil, fmt.Errorf("runtime config: squad %q cannot include the curator agent (curator is process-wide)", name)
-			}
 			members = append(members, m)
 		}
 		if leaderless {
@@ -943,13 +985,12 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 
 // synthesizeDefaultSquad builds the fallback squad (named DefaultSquadName)
 // from the enabled agents when no `squads:` block is present. The leader is
-// the agent named "leader" (mandatory); members are every other enabled agent
-// except "curator" (which is process-wide).
+// the agent named "leader" (mandatory); members are every other enabled agent.
 func synthesizeDefaultSquad(agents []RuntimeAgentConfig) RuntimeSquadConfig {
 	sq := RuntimeSquadConfig{Name: DefaultSquadName, Leader: "leader"}
 	for _, a := range agents {
 		// A plugin agent belongs to its plugin's squad, not the fallback one.
-		if !a.Enabled || a.Name == "leader" || a.Name == "curator" || a.Plugin != "" {
+		if !a.Enabled || a.Name == "leader" || a.Plugin != "" {
 			continue
 		}
 		sq.Members = append(sq.Members, a.Name)
@@ -1393,6 +1434,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(cfg.EvalModelRef) != "" {
 		out.EvalModelRef = strings.ToLower(strings.TrimSpace(cfg.EvalModelRef))
 	}
+	if dropped := dropRemovedAgents(&cfg); len(dropped) > 0 {
+		log.Printf("config: ignoring removed agents %v (soft-skills were removed)", dropped)
+	}
 	if len(cfg.Agents) > 0 {
 		agentsRegistryDirs := paths.AgentsRegistrySearchDirs()
 		entries := make([]AgentEntry, 0, len(cfg.Agents))
@@ -1426,9 +1470,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	cfg.Squads = mergePluginSquads(cfg.Squads, plugins.squads)
 
 	// ENV
-	if v, ok := parseBoolEnv("OMNIS_CURATOR_ENABLED"); ok {
-		out.Agents = applyCuratorEnabledOverride(out.Agents, v)
-	}
 	// Per-turn spend ceiling. `>= 0` (not `> 0`) so an explicit 0 is honoured as
 	// "no ceiling on this axis" — setting both to 0 restores unbounded turns.
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOOL_CALLS"))); err == nil && v >= 0 {
@@ -1439,17 +1480,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOKENS")), 10, 64); err == nil && v >= 0 {
 		out.TurnBudget.MaxTokens = v
-	}
-	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_CURATOR_MIN_TURNS"))); err == nil && v > 0 {
-		out.CuratorMinTurns = v
-	}
-	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_CURATOR_MIN_SUB_AGENT_CALLS"))); err == nil && v > 0 {
-		out.CuratorMinSubAgentCalls = v
-	}
-	if raw := strings.TrimSpace(os.Getenv("OMNIS_CURATOR_IDLE_TIMEOUT")); raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-			out.CuratorIdleTimeout = d
-		}
 	}
 	if raw := strings.TrimSpace(os.Getenv("OMNIS_EMBED_MODEL_REF")); raw != "" {
 		out.EmbedModelRef = strings.ToLower(raw)
@@ -1480,12 +1510,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	if strings.TrimSpace(opts.PermissionsConfigPath) != "" {
 		out.PermissionsConfigPath = strings.TrimSpace(opts.PermissionsConfigPath)
-	}
-	if opts.CuratorEnabled != nil {
-		out.Agents = applyCuratorEnabledOverride(out.Agents, *opts.CuratorEnabled)
-	} else if opts.DisableAutoCurate {
-		// Backward-compatible alias for explicitly disabling the hook.
-		out.Agents = applyCuratorEnabledOverride(out.Agents, false)
 	}
 
 	out.Agents = mapAgentEntries(out.Agents, normalizedAgentConfig)

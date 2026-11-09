@@ -10,8 +10,6 @@
     "session_search",
     "summariser",
     "agentmd_reviewer",
-    "curator",
-    "reflector",
     "k8s_leader",
     "k8s_investigator",
     "k8s_editor",
