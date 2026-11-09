@@ -66,7 +66,6 @@ go run ./examples/sNN_<name> "<your prompt>"
 |-----|------------------------------|-------------------------------------------------------------------------------------|
 | s21 | `examples/s21_skills`        | Lazy skill loading from `./skills/`.                                                |
 | s22 | `examples/s22_subagents`     | A sub-agent (`summariser`) wrapped as a tool via `agenttool`.                       |
-| s23 | `examples/s23_softskills`    | Soft-skills curator distilling a synthetic session into reusable procedures.        |
 
 ## Tier 6 — Multi-process & distributed
 

@@ -564,7 +564,7 @@
   "set.model.internalEmbedding": "INTERNES EMBEDDING-MODELL",
   "set.model.embedDisabled": "(deaktiviert — semantischer Recall aus)",
   "set.model.noEmbedModels": "(keine Embedding-Modelle — markieren Sie EMBEDDING-MODELL bei einem Modell unten)",
-  "set.model.embedDesc": "Treibt den semantischen Recall von Soft-Skills / Präzedenzfällen / Codebasis an. Eine Änderung baut die Indizes bei der nächsten Verwendung neu auf; ein Server-Neustart wendet sie an.",
+  "set.model.embedDesc": "Treibt die semantische Suche in Code, Dokumentation, Registries und früheren Sitzungen an. Eine Änderung baut die Indizes bei der nächsten Verwendung neu auf; ein Server-Neustart wendet sie an.",
   "set.model.evalModel": "/GOAL-BEWERTUNGSMODELL",
   "set.model.evalDefault": "(Standard — verwendet das Leader-Modell)",
   "set.model.evalDesc": "Bewertet den /goal-Abschluss nach jedem Zug — ein günstiges, schnelles Modell ist ideal. Wenn nicht gesetzt, wird das Leader-Modell verwendet. Wird beim nächsten Konfigurations-Reload angewendet.",

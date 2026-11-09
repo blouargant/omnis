@@ -564,7 +564,7 @@
   "set.model.internalEmbedding": "INTERNAL EMBEDDING MODEL",
   "set.model.embedDisabled": "(disabled — semantic recall off)",
   "set.model.noEmbedModels": "(no embedding models — tick EMBEDDING MODEL on a model below)",
-  "set.model.embedDesc": "Drives soft-skill / precedent / codebase semantic recall. Changing it rebuilds the indexes on next use; a server restart applies it.",
+  "set.model.embedDesc": "Drives semantic search over code, docs, registries and past sessions. Changing it rebuilds the indexes on next use; a server restart applies it.",
   "set.model.evalModel": "/GOAL EVALUATOR MODEL",
   "set.model.evalDefault": "(default — uses the leader model)",
   "set.model.evalDesc": "Judges /goal completion after each turn — a cheap, fast model is ideal. When unset, the session's leader model is used. Applies on the next config reload.",

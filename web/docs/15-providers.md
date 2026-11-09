@@ -42,7 +42,6 @@ Different sub-agents can use different models. A common configuration:
 - **leader** — top-tier reasoning model (Opus, GPT-5, Gemini 2.x Pro).
 - **investigator / summariser** — smaller, faster model for evidence
   gathering and text condensation.
-- **curator** — runs offline at session end; usually a mid-tier model.
 
 The **Models** section in Settings (right after Agents) exposes every
 field with inline validation. It has two sub-tabs — Providers and Models

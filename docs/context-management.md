@@ -165,9 +165,7 @@ type StateLog struct {
 5. `TurnCount` is stamped from the atomic counter (always, even when no LLM delta was returned), then the merged log is persisted to `StateLogPath` (default `.agent_statelog.json`). This ensures `TurnCount` is always accurate and up-to-date regardless of whether an LLM extraction ran.
 6. On the next `PassSummarizeMiddle` run, `renderForPrompt()` prepends the log as a Markdown block above the prose summary, ensuring the model always receives durable facts even after heavy compression.
 
-`TurnCount` is consumed by the curator pre-flight gate to decide whether a session is substantive enough to warrant a full curation run (see [skills.md — Pre-flight gate](skills.md#lifecycle)).
-
-At session end the State Log is also indexed into the cross-session **precedent** store so future sessions can semantically recall how comparable goals/decisions were handled — see [semantic-recall.md](semantic-recall.md).
+The State Log is written for compression only: nothing reads the file once the session is over.
 
 ---
 
@@ -364,7 +362,6 @@ The script sources `.env`, creates a temporary namespace with a noisy log-emitti
 - [internal/compress/passes.go](../internal/compress/passes.go) — all four passes
 - [internal/compress/cache.go](../internal/compress/cache.go) — summary LRU cache
 - [internal/compress/statelog.go](../internal/compress/statelog.go) — State Log extraction and persistence
-- [docs/semantic-recall.md](semantic-recall.md) — how the State Log feeds the cross-session precedent index
 - [internal/compress/tasksniff.go](../internal/compress/tasksniff.go) — task-switch heuristic
 - [internal/compress/tool.go](../internal/compress/tool.go) — `compact_now` tool
 - [core/events/events.go](../core/events/events.go) — event bus and event name constants

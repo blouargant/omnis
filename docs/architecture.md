@@ -215,26 +215,13 @@ Key properties:
   also share its wiring, and the MCP pool dedups any subprocess.
 - **`default` is always present.** When the user's `squads:` list is
   empty or omits a `default`, the resolver synthesises one from the
-  enabled agents (excluding the curator).
+  enabled agents.
 - **Leaderless squads.** A squad whose `leader` is `"none"` (or empty)
   and that has **exactly one member** runs that single agent directly as
   the runner root — no coordinator, no sub-agent delegation tools, tools
   limited to exactly what the agent declares (plus the always-on mailbox
   and `ask_user`). This is the shape used by the `helper` squad and by the
   Omnis router (below). Squads with ≥2 members require a real leader.
-- **Curator stays process-wide.** It listens on the shared event bus
-  with the union of every squad's member names — not per-squad — so
-  session-end curation runs at most once per session regardless of
-  which squad it used.
-- **Reflector pipeline runs alongside the curator.** A `reflector`
-  agent (optional, configured the same way as the curator) is built
-  per generation. At every session end an in-process heuristic tags the
-  session's loaded soft-skills (`helpful` / `harmful` / `neutral`),
-  then — when enabled — the LLM Reflector layers its own tags on top
-  with reasons + a `key_insight`. The merged outcome and per-skill
-  stats (`softskills/_stats.json`) feed the curator's prompt so the
-  create / update / delete decision is grounded in concrete thresholds
-  rather than the curator's intuition. See [skills.md](skills.md#post-session-reflection-pipeline).
 
 Add a squad by editing `agents.json` (or the Squads sub-tab in
 the web UI's Agent settings); see [extending.md](extending.md#adding-a-squad).
@@ -338,22 +325,13 @@ recompiling:
 5. `AfterModel` — compress plugin checks context size; if over
    threshold, writes a memory snapshot and rewrites session.
 6. Session events are appended to the `session.Service`.
-7. `AfterRun` runs any **`Stop`** hook; `EventRunEnd` fires. The
-   sub-agent reflection hook walks every `EventSubAgentStart/End` pair
-   seen during this `run_id`, classifies the leader's reaction from its
-   assistant text, and applies `helpful` / `harmful` / `neutral` tags to
-   `softskills/_stats.json` for every soft-skill the sub-agents loaded.
+7. `AfterRun` runs any **`Stop`** hook; `EventRunEnd` fires.
 
-When a real session ends (TUI quit / web UI close / idle timeout):
+When a real session ends (TUI quit / session delete):
 
 8. `EventSessionEnd` fires (CLI/TUI; the server fires the `SessionEnd`
-   hook directly on session delete). The session reflection pipeline
-   drains its buckets, computes the heuristic outcome, applies the
-   heuristic tags to `_stats.json`, and emits `EventSessionReflected`.
-9. The curator hook receives `EventSessionReflected`. When a reflector
-   agent is configured, it runs the LLM reflector (60-second timeout)
-   to refine the tags + extract a `key_insight`, applies the deltas
-   via `Stats.Retag`, then runs the curator gate and curator agent.
+   hook directly on session delete). It runs any **`SessionEnd`** hook and
+   clears the session's permission grants.
 
 ## Where to look next
 

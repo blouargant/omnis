@@ -564,7 +564,7 @@
   "set.model.internalEmbedding": "MODELO DE EMBEDDING INTERNO",
   "set.model.embedDisabled": "(desactivado — recall semántico apagado)",
   "set.model.noEmbedModels": "(no hay modelos de embedding — marca MODELO DE EMBEDDING en un modelo de abajo)",
-  "set.model.embedDesc": "Impulsa el recall semántico de soft-skills / precedentes / base de código. Cambiarlo reconstruye los índices en el próximo uso; un reinicio del servidor lo aplica.",
+  "set.model.embedDesc": "Impulsa la búsqueda semántica en el código, la documentación, los registros y las sesiones anteriores. Cambiarlo reconstruye los índices en el próximo uso; un reinicio del servidor lo aplica.",
   "set.model.evalModel": "MODELO EVALUADOR DE /GOAL",
   "set.model.evalDefault": "(predeterminado — usa el modelo del líder)",
   "set.model.evalDesc": "Evalúa la finalización de un /goal tras cada turno — lo ideal es un modelo rápido y económico. Si no se define, se usa el modelo del líder. Se aplica en la próxima recarga de configuración.",

@@ -83,7 +83,7 @@ const BASE_PATH = window.BASE_PATH || "";
     { id: "themes",          file: "05-themes.md",          label: "Appearance & Themes", group: "Web UI" },
     { id: "architecture",    file: "10-architecture.md",    label: "Architecture",    group: "Core Concepts" },
     { id: "skills-concept",  file: "11-skills.md",          label: "Skills",          group: "Core Concepts" },
-    { id: "learning-recall", file: "20-learning-and-recall.md", label: "Learning & Recall", group: "Core Concepts" },
+    { id: "learning-recall", file: "20-learning-and-recall.md", label: "Memory & Recall", group: "Core Concepts" },
     { id: "agents-settings", file: "19-agents.md",          label: "Agents Settings",      group: "Core Concepts" },
     { id: "mcp-concept",     file: "12-mcp.md",             label: "MCP Servers",     group: "Core Concepts" },
     { id: "a2a",             file: "17-a2a.md",             label: "A2A Agents",          group: "Core Concepts" },

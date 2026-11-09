@@ -19,7 +19,7 @@ A split view: fleet list on the left, agent detail panel on the right.
 Agents are grouped into two sections:
 
 - **BUILT-IN AGENTS** — shipped with omnis: `omnis`, `leader`,
-  `skill_editor`, `helper`, `summariser`, `curator`, `reflector`. Fields
+  `skill_editor`, `helper`, `summariser`, and more. Fields
   are read-only where the binary bakes in defaults. The **`omnis`** agent is
   the **router** that runs at the start of every new chat and hands the
   conversation to the best squad (see [Architecture →
@@ -78,7 +78,6 @@ adds or removes it from the agent's `tools` list in `agent.json`.
 | `mime` | Detect MIME type of a file. |
 | `mcp` | Mount configured MCP servers as tools. |
 | `Skill` | Load authored skill playbooks (`load_skill`, `list_skills`). |
-| `softskills` | Load curator-distilled soft skills (`load_softskill`, `list_softskills`). |
 | `calc` | Math / expression evaluator. |
 | `ddg` | Web search via DuckDuckGo (no API key). Mutually exclusive with `serper` and `serpapi`. |
 | `serper` | Web search via Serper.dev (Google) — the recommended, cheaper provider (requires `serper_key` in Global Environment). Mutually exclusive with `ddg` and `serpapi`. |
@@ -125,7 +124,6 @@ the global values:
 
 | Field | Description |
 |---|---|
-| `softskills_dir` | Path to a custom soft-skills directory for this agent. |
 | `mcp_config_path` | Path to a custom `mcp_config.json` for this agent. |
 | `permissions_config_path` | Path to a custom `permissions.json` for this agent. |
 
@@ -148,8 +146,8 @@ The sub-tab shows a list on the left and a detail panel on the right:
 |---|---|
 | **Name** | Case-insensitive, unique. The `default` squad name is read-only. |
 | **Description** | Shown as the tooltip in the New Chat squad picker. |
-| **Leader** | Dropdown over enabled agents (excluding `curator` and `reflector`), plus a **`(none — run single agent directly)`** option. Picking `(none)` makes the squad **leaderless**: it must have **exactly one member**, which runs directly with no coordinator. |
-| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. `curator` and `reflector` are always excluded (they are process-wide). Leaderless squads switch this to single-select. |
+| **Leader** | Dropdown over enabled agents, plus a **`(none — run single agent directly)`** option. Picking `(none)` makes the squad **leaderless**: it must have **exactly one member**, which runs directly with no coordinator. |
+| **Members** | Checkbox grid of enabled agents. The current leader is disabled in the grid. Leaderless squads switch this to single-select. |
 
 The `default` squad is always present. If `agents.json` doesn't declare one,
 the editor synthesises it from all enabled agents the first time the sub-tab
@@ -270,12 +268,6 @@ minimal search (the key is checked on the server, never in the browser), reporti
 |---|---|
 | `serper_key` | API key for [Serper.dev](https://serper.dev/) web search — the recommended, cheaper provider. Required when any agent uses the `serper` tool. Resolved as an environment-variable name first (falls back to the literal value). Shown masked. |
 | `serpapi_key` | API key for SerpAPI web search. Required when any agent uses the `serpapi` tool. Resolved as an environment-variable name first. Shown masked. |
-
-### CORE DIRECTORIES
-
-| Field | Description |
-|---|---|
-| `softskills_dir` | Path to the directory where the curator writes distilled soft-skill playbooks. Agents read from here when `load_softskill` is called. |
 
 ### RUNTIME CONFIG
 

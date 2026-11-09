@@ -22,8 +22,6 @@ removed:
 | `/status` | Show session and agent status. |
 | `/init` | Analyse the repository and write a starter `AGENT.md`. |
 | `/memory` | Open the memory list of the current conversation's collection (General's for a chat outside any collection) — what Omnis has learned there, to read, edit, delete or add memories. See [Collection memory](03-sessions.md#collection-memory). |
-| `/learn` | Queue a soft-skill harvest for this session (reflectors run first; curator follows). |
-| `/learn-now` | Run the curator immediately on this session. The LLM reflector is skipped on this path — only the curator-gate's threshold + the existing audit/statelog are used. |
 | `/btw <question>` | Ask a quick **side question** about the session. The answer uses the conversation as context but is **not** saved to the transcript or the model's memory — a read-only aside (one off-stream LLM call). |
 | `/recap` | Summarise the current session so far (a few Markdown bullet points). Read-only aside, not saved. |
 | `/fork` | Branch a brand-new session that inherits this conversation's **full** context, then switch to it. The original session is left untouched, so you can explore a different direction without losing it (mirrors Claude Code's `/fork`). |

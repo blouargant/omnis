@@ -564,7 +564,7 @@
   "set.model.internalEmbedding": "MODÈLE D'EMBEDDING INTERNE",
   "set.model.embedDisabled": "(désactivé — recall sémantique inactif)",
   "set.model.noEmbedModels": "(aucun modèle d'embedding — cochez MODÈLE D'EMBEDDING sur un modèle ci-dessous)",
-  "set.model.embedDesc": "Pilote le recall sémantique des soft-skills / précédents / base de code. Le modifier reconstruit les index à la prochaine utilisation ; un redémarrage du serveur l'applique.",
+  "set.model.embedDesc": "Pilote la recherche sémantique dans le code, la documentation, les registres et les sessions passées. Le modifier reconstruit les index à la prochaine utilisation ; un redémarrage du serveur l'applique.",
   "set.model.evalModel": "MODÈLE D'ÉVALUATION /GOAL",
   "set.model.evalDefault": "(par défaut — utilise le modèle du leader)",
   "set.model.evalDesc": "Juge l'achèvement d'un /goal après chaque tour — un modèle rapide et économique est idéal. S'il n'est pas défini, le modèle du leader est utilisé. Appliqué au prochain rechargement de la configuration.",

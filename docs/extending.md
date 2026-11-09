@@ -164,8 +164,7 @@ new agent, no session will see it — that's how you keep an agent
 reserved for a specific squad.
 
 Built-in vs custom: the agents shipped with omnis (`omnis`, `leader`,
-`skill_editor`, `helper`, `summariser`, `curator`,
-`reflector`) carry `"builtin": true` in their `agent.json`. The web UI
+`skill_editor`, `helper`, `summariser`, …) carry `"builtin": true` in their `agent.json`. The web UI
 displays them under a **Built-in Agents** section, separated from
 user-added **Custom Agents**. Leave the flag out for your own agents.
 (`omnis` is the Omnis router and is auto-injected when your config doesn't
@@ -214,9 +213,6 @@ Rules:
   with no coordinator and no sub-agent delegation tools (the shape used by the
   `helper` squad and the Omnis router). Squads with two or more members need a
   real leader.
-- `curator` and `reflector` cannot be members — they stay process-wide
-  (one hook per generation, fired at `EventSessionEnd` /
-  `EventSessionReflected`).
 
 Each squad becomes a separate wired tree inside the current generation
 (leader + sub-agents + runner + plugins). New chat sessions pick a

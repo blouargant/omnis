@@ -15,7 +15,7 @@ same complexity order as [docs/examples-catalog.md](examples-catalog.md):
 | 2    | [s08_ask_user](../examples/s08_ask_user/s08_ask_user.ipynb) … [s10_mcp](../examples/s10_mcp/s10_mcp.ipynb) |
 | 3    | [s11_todo](../examples/s11_todo/s11_todo.ipynb) … [s17_interrupt](../examples/s17_interrupt/s17_interrupt.ipynb) |
 | 4    | [s18_events](../examples/s18_events/s18_events.ipynb) … [s20_compress](../examples/s20_compress/s20_compress.ipynb) |
-| 5    | [s21_skills](../examples/s21_skills/s21_skills.ipynb) … [s23_softskills](../examples/s23_softskills/s23_softskills.ipynb) |
+| 5    | [s21_skills](../examples/s21_skills/s21_skills.ipynb) … [s22_subagents](../examples/s22_subagents/s22_subagents.ipynb) |
 | 6    | [s24_worktree](../examples/s24_worktree/s24_worktree.ipynb) … [s29_redis](../examples/s29_redis/s29_redis.ipynb) |
 | 7    | [s30_k8s_context_e2e](../examples/s30_k8s_context_e2e/s30_k8s_context_e2e.ipynb) |
 

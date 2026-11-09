@@ -347,8 +347,6 @@ bin/omnis-server status                  # Report whether the background server 
 
 # Auxiliary subcommands
 go run . -d                             # debug: log full payloads (any mode)
-go run . curate --user u --session s    # manual soft-skill curation
-go run . reindex-precedents              # rebuild the cross-session precedent index (needs an embedder)
 go run . reindex-docs                    # rebuild the documentation semantic index (needs an embedder)
 go run . reindex-sessions                # rebuild the past-session search index (needs an embedder)
 go run . version                        # version info
@@ -437,8 +435,6 @@ main.go / server/
             │    └── "Session Search" ← HIDDEN leaderless squad (session_search) — machine-facing
             │                           entry point for the web UI search box; never offered in the
             │                           squad picker and never routable (SquadEntry.Hidden)
-            ├── reflector           ← post-session LLM analyst that tags loaded soft-skills (one hook per generation; optional — heuristic fallback when disabled)
-            └── curator             ← process-wide post-session soft-skill distiller (one hook per generation)
 ```
 
 A **squad** is a named group `{ leader, members[] }` composed from the
@@ -533,8 +529,8 @@ and the resumable wrapper's handle map are per-tool state, so a shared wrapper w
 make one caller's in-flight call report the agent "already running" to the other.
 
 **Validation is fatal, by design.** `validateSubAgentGraph` (called from
-`ResolveRuntimeSettings`) rejects an unknown/disabled target, a self-reference, the
-`curator`, a duplicate edge, or a **cycle** (unbuildable: wiring a needs b, and b
+`ResolveRuntimeSettings`) rejects an unknown/disabled target, a self-reference,
+a duplicate edge, or a **cycle** (unbuildable: wiring a needs b, and b
 needs a). A bad edge therefore fails the whole config on reload rather than silently
 crippling one agent. Consequences: the **install cascade must follow `subagents`**
 (recursively, `maxSubAgentInstallDepth` = 4) or installing a specialist would brick
@@ -833,13 +829,10 @@ reachable cross-session — another squad can `teammate_ask` the Helper to
 install a skill) and **ask_user**; on every **non-router** root also the
 collection-memory tools `memory_save`/`memory_read`/`memory_delete` (see
 "Collection memory"). **Coordinating-leader-only** (skipped when
-leaderless): sub-agent delegation tools, `curate_session`,
-`record_session_feedback`. A coordinating leader additionally keeps
-embedder-backed soft-skill recall (`toolsForAgentConfig`'s `asLeader` path);
-sub-agents and leaderless roots use the glob-only per-agent soft-skill loader.
+leaderless): sub-agent delegation tools.
 Because the default `leader` and `skill_editor` previously got several tools
 unconditionally, their `agent.json` now declares them explicitly
-(`planning`/`worktree`/`bg`, plus `softskills`/`calc` for `skill_editor`) so
+(`planning`/`worktree`/`bg`, plus `calc` for `skill_editor`) so
 behaviour is unchanged.
 
 **A choice put to the user goes in a MENU, not in prose** — `choicePolicyBlock`
@@ -990,11 +983,9 @@ counts:** each parallel call is now its own charged tool call, where one batch c
 **fan-out waves**, not calls (`research_critic` × `web_fetcher` ×10 ⇒ one wave = 10
 calls); a cap that fires on honest work just gets ignored or removed.
 The web UI Settings → Agent panel exposes it as a **Max parallel instances**
-numeric field (a `Parallelism` section, hidden for the leader and curator
-since both are excluded from fan-out); the value round-trips through the
+numeric field (a `Parallelism` section, hidden for the leader, which is
+excluded from fan-out); the value round-trips through the
 editor save and the GET only surfaces it when `> 1` to keep agent.json clean.
-The curator stays a single per-generation hook listening across every
-squad.
 
 **Durable / re-attachable sub-agent sessions (`resumable_sessions`)** —
 **opt-out, ON by default.** Each sub-agent's inner agenttool is swapped for
@@ -1022,7 +1013,7 @@ leader's own sessions have). This is what lets the leader **resume** a sub-agent
 it stopped for mid-turn steering (see "Mid-turn steering") rather than re-running
 it from scratch. The web UI Settings → Agent panel exposes it as a **Resumable
 sessions** toggle (a `Sessions` section beside `Parallelism`, hidden for the
-leader and curator since both are excluded from fan-out); the toggle round-trips
+leader, which is excluded from fan-out); the toggle round-trips
 through the editor save and the GET only surfaces the flag when **disabled** (an
 absent key reads as on), keeping agent.json clean for the default case.
 
@@ -1038,22 +1029,11 @@ restarted from scratch, re-read everything and ran its verification pass to the
 shared by every session of the generation and a short handle is guessable
 (`TestResumableHandleResolution`).
 
-**Soft-skill reflection pipeline** — at `EventSessionEnd`, [agent/load_recorder.go](agent/load_recorder.go)
-drains its in-memory bucket (leader-loaded skills, tool errors), runs
-the deterministic `softskills.ReflectHeuristic`, applies the heuristic
-tags to `softskills/_stats.json`, and emits `EventSessionReflected`
-with the gathered payload. [agent/curator_hook.go](agent/curator_hook.go)
-subscribes to that event: when a `reflector` agent is enabled it runs
-the LLM Reflector ([internal/softskills/reflector.go](internal/softskills/reflector.go))
-with a 60-second timeout, merges its Outcome over the heuristic (LLM
-wins on overlap), `Retag`s the stats to reflect the override, then
-gates and runs the curator. `EventCurateNow` (manual `/learn-now`)
-bypasses the reflector and drives the curator directly.
-
 **Sub-agent boundary events** — sub-agents run inside agenttool's private
 runner, so neither `EventRunStart/End` nor `EventBeforeRun/AfterRun` fire
-on the shared bus for their internal turns. To give reflection hooks a
-clean "one sub-agent invocation finished" signal, [agent/subagent_event.go](agent/subagent_event.go)
+on the shared bus for their internal turns. To give hooks a
+clean "one sub-agent invocation finished" signal (the `SubagentStop`
+lifecycle hook rides on it), [agent/subagent_event.go](agent/subagent_event.go)
 subscribes to the leader's `EventBeforeTool / EventAfterTool / EventToolError`
 and re-emits any payload whose `tool` name matches a sub-agent as
 `EventSubAgentStart / EventSubAgentEnd`. Payload keys: `agent` (the
@@ -1065,23 +1045,10 @@ names spanning every squad; subscriptions detach on hot-reload.
 **`run_id` on every event** — `EventRunStart / EventRunEnd / EventBeforeTool /
 EventAfterTool / EventToolError / EventBeforeModel / EventAfterModel`
 all carry a `run_id` field set to ADK's `InvocationContext.InvocationID()`.
-It is stable across BeforeRun + AfterRun for a single `Runner.Run` call
-and lets [agent/subagent_hook.go](agent/subagent_hook.go) buffer all
-sub-agent invocations observed during one leader turn for the Phase 6
-per-invocation tagger. Sub-agent internal runs get their own (different)
-`run_id`s, so the leader-side `EventSubAgentStart/End` events keep the
-leader's `run_id` (which is what we group on).
-
-**Sub-agent reflection pipeline (Phase 6)** —
-[agent/subagent_hook.go](agent/subagent_hook.go) opens a per-`run_id`
-buffer at each `EventSubAgentStart`, attributes `load_softskill` events
-and `tool_error`s to the open invocation, captures the leader's
-`AfterModel` text for the lexical reaction scan, and at `EventRunEnd`
-walks the buffer to call `softskills.TagInvocation` per invocation
-(retry detection via "same sub-agent appears later in the same run",
-`Error:` / empty output detection, leader reaction via
-`ClassifyLeaderReaction`'s approval / retry / unknown classifier).
-Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
+It is stable across BeforeRun + AfterRun for a single `Runner.Run` call,
+so a subscriber can group everything that happened during one leader turn.
+Sub-agent internal runs get their own (different) `run_id`s, so the
+leader-side `EventSubAgentStart/End` events keep the leader's `run_id`.
 
 ### Key packages
 
@@ -1116,9 +1083,7 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` (`<root>/collections/<name>/`) into a `<collection-context>` block with a per-root+name mtime cache; `Read/WriteInstructions`, `HasContext` (instructions only), `RenameDir`, `RemoveDir` (the whole collection dir, so its `memory/` follows). Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on **every** squad root (the router included, under a routing-scoped framing — see "Collection context") per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
 | `internal/collmem/` | **Collection memory** (see "Collection memory"): one Markdown file per fact under `<root>/collections/<name>/memory/<name>.md` (General: `<root>/general-memory/`). `Store` = `In(root)`; `Save`/`Get`/`Delete`/`List` (per-directory lock + atomic write; name `^[a-z0-9][a-z0-9-]{0,63}$`, types feedback/user/project/reference, body ≤ 4000 runes, ≤ 200 per collection); `Render` builds the injected `<collection-memory>` block (cached on the memory dir's entries); `EnsureMigrated` imports a legacy `memory.md`. Stdlib only |
 | `internal/claudeplugins/` | Discovers **Claude Code plugins** under `<AgentSkillsDir>/claude/` (marketplace.json → `plugin.json`, `agents/*.md`, `skills/`, `hooks/hooks.json`); read-only, a broken plugin is a warning. Conversion to omnis agents/squad/hook layers lives in [agent/claude_plugins.go](agent/claude_plugins.go). See "Claude Code plugins" |
-| `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
-| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
-| `internal/precedents/` | Cross-session precedent index over `semindex` at `index/precedents`; indexes each session's goal + decisions; `recall_precedents` tool |
+| `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all four recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
 | `internal/codeindex/` | Per-repo semantic code index over `semindex` (line-window chunks, `git ls-files`-aware, content-hash incremental); `search_code` + `reindex_code` tools |
 | `internal/regindex/` | Semantic index over **remote registry** items of **all seven kinds** (skills, agents, mcp, a2a, squads, commands, permissions) over `semindex` at `index/registries`; metadata-only (name+description+tags, no extra fetch beyond a browse); accurate `installed` flags via per-kind installed-name thunks on `Config` (shared with `buildRegistriesDeps`); `search_registries` + `reindex_registries` tools. Rebuilds on registry-set change (corpus-hash self-heal in `Search` + `registries.OnSave` background hook) |
 | `internal/sessindex/` | Search over **past chat sessions** (see "Session search"): a semantic index over `semindex` at `index/sessions` (one chunk per TURN — user text + assistant text only, never tool calls; per-session content-hash incremental; hits folded **by session**, best turn wins) **plus** `Scan` — a direct, literal walk of the conversation files used when no embedder is configured *and* when the index is still cold. `SearchOrScan` is the one entry point both the tool and the HTTP route call. The `sessions` tool group (`search_sessions`/`read_session`/`list_sessions`/`report_sessions`) mounts **unconditionally** (the scan fallback makes it work with no embedder). Unloads itself from RAM after `OMNIS_SESSION_INDEX_IDLE` of no searching |
@@ -1139,30 +1104,14 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 
 ### Semantic recall (embedder + vector indexes)
 
-Six **additive, embedder-gated** recall features share `core/embed` +
+Four **additive, embedder-gated** recall features share `core/embed` +
 `internal/semindex` (a wrapper over the `go-turbovec` pure-Go ANN index,
 BitWidth 4 + UnitNorm cosine):
 
-1. **`recall_softskills`** (leader) — semantically ranks curator-distilled
-   soft-skills for the user's task; mounted beside the glob `list_softskills`
-   ([internal/softskills/recall.go](internal/softskills/recall.go)). Index
-   refreshes on call, content-hash gated.
-2. **`recall_precedents`** (reflector + curator) — recalls past sessions' goals
-   + decisions ([internal/precedents/](internal/precedents/)). Indexed on
-   `EventSessionReflected` by [agent/precedents_hook.go](agent/precedents_hook.go).
-   Web UI sessions never fire `EventSessionEnd` (so never `EventSessionReflected`),
-   so the server also indexes them via the lightweight, indexing-only
-   `EventSessionIndexNow` trigger (same hook): the idle indexer
-   ([server/idle_indexer.go](server/idle_indexer.go)) fires it once a session
-   has been idle ≥ 5 min (fixed threshold, independent of the curator's
-   `OMNIS_CURATOR_IDLE_TIMEOUT`), and the archive handler fires it immediately on
-   `POST /api/sessions/:id/archive`. An in-memory `SessionMeta.Indexed` flag
-   (set by `Registry.MarkIndexed`, cleared by `Touch`) stops re-indexing every
-   scan tick. Backfill via `omnis reindex-precedents`.
-3. **`search_code` / `reindex_code`** (investigator) —
+1. **`search_code` / `reindex_code`** (investigator) —
    semantic code search over the repo ([internal/codeindex/](internal/codeindex/)),
    `git ls-files`-aware, content-hash incremental.
-4. **`search_registries` / `reindex_registries`** (helper) —
+2. **`search_registries` / `reindex_registries`** (helper) —
    semantic search over **every kind** advertised by the configured remote
    registries — skills, agents, mcp, a2a, squads, commands, permissions
    ([internal/regindex/](internal/regindex/)). Mounted alongside the
@@ -1179,7 +1128,7 @@ BitWidth 4 + UnitNorm cosine):
    changes); a `registries.OnSave` hook also rebuilds in the background after
    any web-UI/tool edit to `remote_registries.json`. Remote *content* drift
    (same URL, changed skills) is only caught by explicit `reindex_registries`.
-5. **`search_docs` / `reindex_docs`** (helper) — semantic search over **omnis's
+3. **`search_docs` / `reindex_docs`** (helper) — semantic search over **omnis's
    own documentation** so the Helper can answer questions about omnis and quote
    the source ([internal/docindex/](internal/docindex/)). Indexes markdown across
    every doc root from `docindex.Roots()` — the web UI user docs (`web/docs` →
@@ -1192,16 +1141,22 @@ BitWidth 4 + UnitNorm cosine):
    the background at server startup ([server/docs_indexer.go](server/docs_indexer.go)
    `startDocsIndexer`): the incremental `Reindex` builds on first boot and after
    docs/embedder change, no-op otherwise. Backfill via `omnis reindex-docs`.
-6. **`search_sessions`** (the `sessions` tool group / the web UI search box) —
+4. **`search_sessions`** (the `sessions` tool group / the web UI search box) —
    semantic search over **past chat sessions**, including archived ones
    ([internal/sessindex/](internal/sessindex/)); see "Session search". It is the
    ONE exception to the mounting contract below: the tool is mounted **whether or
    not** an embedder resolves, because its fallback is not glob/grep but a direct
    `Scan` of the conversation files — the same results, literal and slower.
-   Backfill via `omnis reindex-sessions`.
+   Web UI sessions never fire `EventSessionEnd`, so the server indexes them via
+   the lightweight, indexing-only `EventSessionIndexNow` trigger: the idle indexer
+   ([server/idle_indexer.go](server/idle_indexer.go)) fires it once a session
+   has been idle ≥ 5 min (fixed threshold), and the archive handler fires it
+   immediately on `POST /api/sessions/:id/archive`. An in-memory
+   `SessionMeta.Indexed` flag (set by `Registry.MarkIndexed`, cleared by `Touch`)
+   stops re-indexing every scan tick. Backfill via `omnis reindex-sessions`.
 
 The embedder and all index handles are process-wide on `Infrastructure`
-(`Embedder()`, `Precedents()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()`,
+(`Embedder()`, `CodeIndex()`, `RegistryIndex()`, `DocIndex()`,
 `SessionIndex()` in [agent/embedder.go](agent/embedder.go)),
 built lazily and surviving hot-reload. **Contract: when no embedder resolves,
 none of the recall tools are mounted and every path falls back to glob/grep —
@@ -1223,7 +1178,7 @@ index, a `dim×dim` rotation matrix (Π) and a `dim×dim` QJL matrix (S) — `O(
 memory and `O(dim³)` to construct (Modified Gram-Schmidt QR). The matrices are
 *not* stored on disk; only their seeds are, so each index reconstructs them on
 load. At `dim=4096` (e.g. `qwen3-embedding-8b`) that is ~134 MB **per index** and
-a multi-second QR; with docs+registries+precedents+code that is ~500 MB of RAM
+a multi-second QR; with docs+registries+sessions+code that is ~500 MB of RAM
 and seconds of CPU. **Prefer an embedding `dim` in go-turbovec's design range
 (~768–1536).** The OpenAI-compat embedder sends a `dimensions` request for any
 pinned non-default `dim` ([core/embed/openai.go](core/embed/openai.go)), so a
@@ -1360,23 +1315,21 @@ delegate* — the exact conflation `subagents` exists to undo. The Helper squad 
 leaderless, so its specialist was built into the catalogue and then **mounted on
 nothing**, and the failure is silent (the model just says it can't). The root's
 delegable set is now `squad.Members` (coordinating) **or** `rootCfg.SubAgents`
-(leaderless); the session-lifecycle tools (`curate_session`,
-`record_session_feedback`) stay keyed on `!leaderless`, so a leaderless root with a
-team does **not** become a session coordinator. Locked in by
+(leaderless). Locked in by
 [agent/leaderless_subagents_test.go](agent/leaderless_subagents_test.go).
 
 **Index lifecycle — built in the background, dropped when idle:**
 - **Freshness rides the EXISTING idle-indexer rail.** `registerSessionIndexHook`
   ([server/session_search.go](server/session_search.go)) subscribes to
-  `EventSessionIndexNow` — already fired for a session idle ≥5 min and on archive
-  (the same trigger the precedent index uses). Two things come free: on a fresh
+  `EventSessionIndexNow` — fired for a session idle ≥5 min and on archive.
+  Two things come free: on a fresh
   boot every persisted session is un-indexed, so the **first scan pass doubles as
   the backfill** (no boot-time build), and it is hash-gated, so later boots are a
   no-op. The **first keystroke** in the search box additionally fires
   `POST /api/search/sessions/refresh` (single-flighted) to catch sessions too fresh
   for the idle rail. `omnis reindex-sessions` builds it all now.
 - **The content hash covers only the indexed text**, so flipping an unrelated flag
-  (archived, harvested, cwd) does not re-embed the conversation.
+  (archived, cwd) does not re-embed the conversation.
 - **Idle unload.** Sessions accumulate without bound and their text lives in the
   metadata map, so unlike docs/registries this index is only worth holding while it
   is used: `StartIdleSweeper` drops it after `OMNIS_SESSION_INDEX_IDLE` (default
@@ -1804,27 +1757,22 @@ copies allowed), [core/tools/readonly_test.go](core/tools/readonly_test.go),
 
 ### Skill discovery reads the in-prompt catalogue
 
-`skills.LoaderProtocol` and `softskills.LoaderProtocol` used to make
-`list_skills` then `list_softskills` the mandatory first calls of **every**
-invocation of every agent holding those groups — two model round trips, each
-re-sending the whole context, to fetch a list ADK's skill toolset **already puts
-in the system prompt** (`<available_skills>`, one block per toolset). In the
-smoke every reviewer invocation spent its first three calls on
-`list_skills`/`list_softskills`/`load_skill`. The protocols now say to read that
-block and `load_skill` / `load_softskill` every matching entry before acting
+`skills.LoaderProtocol` used to make `list_skills` the mandatory first call of
+**every** invocation of every agent holding the `Skill` group — a model round
+trip, re-sending the whole context, to fetch a list ADK's skill toolset **already
+puts in the system prompt** (`<available_skills>`). In the smoke every reviewer
+invocation spent its first calls on discovery before `load_skill`. The rule now
+says to read that block and `load_skill` every matching entry before acting
 (load ALL matches is kept — the k8s audit precision depends on it); `list_*` stays
 for a missing block or a skill installed mid-session. The four instructions that
 repeated "call list_skills first" (`leader`, `k8s_leader`, `knowledge_leader`,
 `doc_agent`) were aligned. Verified live: the reviewer went straight to
 `load_skill review`.
 
-Since the fixed-prompt pass below, the skill and soft-skill rules live in **one
-place each**: the toolset's own system instruction (`skillInstruction` in
-[internal/skills/skills.go](internal/skills/skills.go), `instruction` in
-[internal/softskills/softskills.go](internal/softskills/softskills.go)), which ADK
-places right before its `<available_skills>` list. `skills.LoaderProtocol`,
-`softskills.LoaderProtocol` and `softskills.LoaderRule` are gone, and the leaders'
-own "call list_softskills once" lines were removed (they contradicted the rule).
+Since the fixed-prompt pass below, the skill rules live in **one place**: the
+toolset's own system instruction (`skillInstruction` in
+[internal/skills/skills.go](internal/skills/skills.go)), which ADK places right
+before its `<available_skills>` list. `skills.LoaderProtocol` is gone.
 
 ### Fixed prompt of every agent (measured, 2026-11-07)
 
@@ -1855,8 +1803,7 @@ followed (sum of first requests **185k → 139k tokens, −25 %**; System root 1
   (string, required)…") already in the schema, and warned against wrong argument
   names that `RepairToolArgs` now repairs (`cmd` → `command` was added for Bash).
   Descriptions of the fs tools, `AskUserQuestion`, the teammate tools,
-  `calculate`, `curate_session`, `record_session_feedback`, `handoff_to_router`
-  and the resumable sub-agent note were cut to what the schema does not say.
+  `calculate`, `handoff_to_router` and the resumable sub-agent note were cut to what the schema does not say.
 - **The router gets no operating contract** (`agentkit.AgentConfig.NoContract`,
   set for the router squad's root): "restate the request, plan, report" only cost
   it tokens — and output — on every message, and its text is withheld anyway.
@@ -1865,7 +1812,7 @@ followed (sum of first requests **185k → 139k tokens, −25 %**; System root 1
   `get_settings`) — the Helper's instruction does, in more detail.
 - **Leader instructions** (`leader`, `k8s_leader`, `knowledge_leader`) lost the
   steps the contract and blocks already state (restate, plan, respect
-  permissions, sub-agent statelessness, `list_softskills`).
+  permissions, sub-agent statelessness).
 
 Left as they are: the router's own instruction (routing accuracy is
 benchmarked), the k8s/knowledge domain rules, ADK's built-in "You are an agent.
@@ -2914,28 +2861,6 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
-| `softskills/` | Curator-distilled procedures from past sessions. The repo's top-level `softskills/` holds the **built-in** ones (`wrap-session`, `how-the-library-works`, `INDEX.md`) — see "Built-in soft-skills" below |
-
-**Built-in soft-skills (seeded, not read in place).** `load_softskill` reads
-only the per-user `$OMNIS_HOME/softskills` (`paths.SoftSkillsDir`) — there is no
-layered search chain for soft-skills, because the curator writes there. The
-repo's top-level `softskills/` is therefore **shipped into the system config
-layer** on every channel (nfpms `/etc/omnis/softskills`, the goreleaser archive
-→ Homebrew `pkgshare` + the MSI `data\softskills`, the pip wheel `sysconf/`) and
-**copied into the user dir** by `softskills.SeedBuiltins(softskills.BuiltinDir(),
-runtime.SoftSkillsDir)`, called at the top of `BuildInstance`
-([agent/instance.go](agent/instance.go), per generation — cheap and idempotent).
-Rules ([internal/softskills/seed.go](internal/softskills/seed.go)), driven by a
-`.builtin_seeded.json` hash marker in the destination: never seeded → copy;
-seeded then deleted → stays deleted (the documented way to disable
-`wrap-session`); present and never seeded (a user's own copy) or edited since
-seeding → never overwritten; untouched seeded copy whose shipped version changed
-→ refreshed. **GOTCHA:** before this existed nothing shipped or seeded the tree
-(nfpms only created an empty, unused `/var/lib/omnis/softskills`), so every
-leader's `load_softskill wrap-session` failed with `load frontmatter for skill
-"wrap-session": skill not found` on every install. The packaging side is pinned
-by [packaging/softskills_assets_test.go](packaging/softskills_assets_test.go),
-the build side by [agent/softskills_seed_test.go](agent/softskills_seed_test.go).
 
 **Removed: `token_optimization` / `bash_output_filters_dir` / `filters/`.** The
 Bash output filters (a snip-format port that rewrote/condensed `Bash` output)
@@ -2956,7 +2881,7 @@ objects; its `agents` field is a list of names that reference the registry:
 
 ```json
 {
-  "agents": ["leader", "investigator", "web_agent", "skill_editor", "helper", "summariser", "curator"],
+  "agents": ["leader", "investigator", "web_agent", "skill_editor", "helper", "summariser"],
   "squads": [ ... ]
 }
 ```
@@ -2996,7 +2921,7 @@ on a model still override the inherited values when set.
 agents via `model_ref` — they show up in the Web UI Models panel's "internal
 embedding model" selector and in nothing else. The top-level `models.json`
 field `"embed_model_ref"` names which embedding model is the active internal
-embedder for all semantic recall (soft-skills, precedents, codebase). It can be
+embedder for all semantic recall (code, registries, docs, past sessions). It can be
 overridden by `embed_model_ref` in `agents.json` and then by the
 `OMNIS_EMBED_MODEL_REF` env var; when none resolves (and no `OMNIS_EMBED_*` env is
 set) the embedder is absent and every recall feature silently falls back to its
@@ -3041,9 +2966,8 @@ for the leader + every sub-agent: a **valid** selection still builds eagerly
 re-attempts the build at first `GenerateContent` and surfaces the real error
 **there** — so the process starts, the web UI loads, and an actual turn (not
 boot) is what fails. CLI/TUI leave `DeferModelErrors` false and keep failing
-fast (a one-shot run is useless without a working model). Curator/reflector/
-`ask_squad` model builds are unchanged (they already degrade gracefully on a
-build error).
+fast (a one-shot run is useless without a working model). The `ask_squad`
+model build is unchanged (it already degrades gracefully on a build error).
 
 **Provider connection health (web UI).** On boot (and after every config
 reload) the web UI probes model-provider connectivity via
@@ -3087,7 +3011,7 @@ returns ids only.
 
 Each `registry/agents/<name>/agent.json` is the full `AgentEntry`. A
 `"builtin": true` flag marks agents shipped with omnis (leader,
-skill_editor, helper, summariser, curator); custom agents added
+skill_editor, helper, summariser, …); custom agents added
 by the user omit the flag. The web UI groups them under separate
 **Built-in** and **Custom** sections in the agents list.
 
@@ -3194,14 +3118,14 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   the chain wholesale).
 
 - **Write root for state**: `$HOME/.omnis/` by default (override via `OMNIS_HOME`).
-  Agent runtime state (logs, mailboxes, softskills, registry installs) always
+  Agent runtime state (logs, mailboxes, collection memory, registry installs) always
   lands here. For user-edited config (the web UI editor + the auto-install
   helpers), omnis is **layer-aware**: when the edited file or any of its
   references already lives in the project-local `.agents/` (or `agents/`)
   layer, the save is routed back to that layer so a local-only project
   never grows orphaned references under `$HOME/.omnis/`. Files originally
   in `/etc/omnis` still fork into `$HOME/.omnis/` on first edit (the system
-  layer is read-only). Other state files (logs, mailboxes, softskills)
+  layer is read-only). Other state files (logs, mailboxes, collection memory)
   remain anchored under `$HOME/.omnis/` regardless of layer:
 
   ```
@@ -3219,8 +3143,6 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   ├── mailboxes/        # JSONL inter-agent mailboxes
   ├── index/            # semantic vector indexes (paths.IndexDir())
   │   ├── embed_cache/  #   content-hash embedding cache (sha256(model+text))
-  │   ├── softskills.tvim + .meta.json   # recall_softskills index
-  │   ├── precedents.tvim + .meta.json   # recall_precedents index
   │   ├── registries.tvim + .meta.json   # search_registries index (remote skills+agents)
   │   ├── docs.tvim + .meta.json         # search_docs index (omnis's own docs)
   │   │                 #   + docs.files.json (per-file hash→chunk-ids)
@@ -3228,24 +3150,6 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   │   │                 #   + sessions.files.json (per-session hash→chunk-ids)
   │   └── <repo-hash>/  #   per-repo code index: codebase.tvim + .meta.json
   │                     #   + codebase.files.json (per-file hash→chunk-ids)
-  ├── softskills/       # curator-distilled procedures (read AND write)
-  │   ├── _stats.json   # per-skill load/helpful/harmful/neutral counters
-  │   │                 #   sidecar; keyed by <agent>/<name> or bare <name>
-  │   │                 #   for leader. Maintained by agent/load_recorder.go.
-  │   ├── .builtin_seeded.json  # hash of each built-in soft-skill last
-  │   │                 #   seeded here (softskills.SeedBuiltins) — tells
-  │   │                 #   "never seeded" / "deleted by the user" / "untouched,
-  │   │                 #   refresh on package update" apart.
-  │   └── wrap-session/ # built-in soft-skill (deletable) that asks one
-  │                     #   wrap-up question on interactive surfaces and
-  │                     #   persists the answer via record_session_feedback.
-  │                     #   SEEDED from <system-config-dir>/softskills (see
-  │                     #   "Built-in soft-skills" under Configuration files).
-  ├── logs/
-  │   └── agent_feedback_<key>.json  # Phase 5 wrap-session sidecar; one
-  │                                  #   record per session: {question,
-  │                                  #   answer, timestamp}. Consumed by
-  │                                  #   the heuristic + LLM reflectors.
   └── registry/
       ├── skills/       # web UI installed skills (override via OMNIS_SKILLS_REGISTRY_DIR)
       └── agents/       # web UI installed agents (override via OMNIS_AGENTS_REGISTRY_DIR)
@@ -3345,10 +3249,6 @@ mistaken for a broken reference.
 | `OMNIS_TURN_MAX_SECONDS` | Per-turn wall-clock limit in seconds (default `0` = none). Never enforced: past half of it, every model call of the turn (root and sub-agents) carries a "N min left" note, and in the last fifth a "finish now" note. Overrides `turn_budget.max_seconds` in `agents.json`. Armed on the server and, for this axis only, on the CLI/TUI. See "Per-turn spend budget" |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_SESSION_INDEX_IDLE` | How long the past-session search index may sit unused before it is dropped from memory (Go duration, default `10m`; `0` keeps it resident once loaded). The next search transparently re-reads it from disk. See "Session search" |
-| `OMNIS_CURATOR_ENABLED` | `true`/`false` — enable/disable post-session curator |
-| `OMNIS_CURATOR_IDLE_TIMEOUT` | Duration (e.g. `30m`) after which the idle harvester triggers automatic curation for a Web UI session; session is then marked **Harvested** and skipped until new activity; `0` disables (default: disabled) |
-| `OMNIS_CURATOR_MIN_TURNS` | Minimum model-response count before non-forced curation is considered (default: `3`) |
-| `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` | Minimum sub-agent invocations required when no decision is recorded (default: `2`) |
 | `OMNIS_SERVER_TOKEN` | Bearer token required to start the HTTP server |
 | `OMNIS_SERVER_ADDR` | HTTP server listen address (default `:8080`) |
 | `OMNIS_SERVER_GC_INTERVAL` | Period between sweeps that remove orphan files in `$OMNIS_HOME/logs` and `$OMNIS_HOME/logs/uploads` (default `1h`; `0` disables). The sweep ([server/gc.go](server/gc.go) `sweepLogsDir`) also **reaps orphaned atomic-write temp files** (`conversation_*.json.tmp` left behind when a fire-and-forget persistence goroutine is killed by a shutdown/restart between `os.CreateTemp` and `os.Rename` in `SaveConversationFile`), age-gated by `tmpReapAge` (1 min) so it never races a genuinely in-flight write |
@@ -3367,7 +3267,6 @@ mistaken for a broken reference.
 | `OMNIS_AUTH_CACHE_TTL` | Go duration bounding how long an accepted token is cached before re-validating (default 15m, further capped by the token's own JWT `exp` when it decodes as one). Overrides `server.yaml` `auth_cache_ttl` |
 | `OMNIS_APP_NAME` | Application name reported by the server (default `omnis-server`) |
 | `OMNIS_SESSION_REBIND_IDLE` | Idle delay before an idle session is rebound to the current generation (Go duration, default `5s`; `0` disables — [server/idle_rebind.go](server/idle_rebind.go) `resolveRebindIdle`) |
-| `OMNIS_SOFTSKILLS_DIR` | Overrides the soft-skills directory (default under `$OMNIS_HOME/softskills`) |
 | `OMNIS_NON_INTERACTIVE` | `1`/`true`/`yes`/`on` — declares that **nobody can answer a prompt in this process**, so a `PreToolUse` hook's `ask` escalation is **refused** instead of waiting on a card no one will ever resolve (`askuser.DefaultTimeout` is `0` by design, so that wait ends only with the run context). What a bench or a CI run needs. Opt-in and deliberately DECLARED, never inferred from "does this session have a listener" — see `canEscalate` in [agent/hooks_ask.go](agent/hooks_ask.go) for why that inference is unsound. Scoped to the hook escalation only: the permission layer already has `defaultMode: bypassPermissions` for the same need, and the `ask_user` tool is untouched. It also makes **`AskUserQuestion` answer itself** at once (`Cancelled` + `tools.NonInteractiveAnswer`: "nobody will answer — decide, state the assumption, continue") instead of waiting on a card nobody resolves (the first Harbor smoke had the coder ask which branch to use). `askuser.NonInteractive()` is the one reader |
 | `OMNIS_TASK_NOTIFY` | `true`/`false` (default `true`) — server-mode **active wake** for completed background tasks/monitors: when on, a result injects a guarded synthetic turn the model reacts to; when off it only fires a UI toast (result still readable via `bg_output`). Either way the bg watcher drains the queue, so it never wedges |
 | `OMNIS_HOME` | Per-user state root for all mutable files (default `$HOME/.omnis`) |
@@ -3547,7 +3446,7 @@ run a web search. The shipped [config/permissions.json](config/permissions.json)
 information-gathering tools by exact name so they never prompt: web research
 (`WebSearch`, `WebFetch`, `html_to_markdown`), `calculate`, the recall/search
 family (`search_code`, `search_docs`/`list_docs`/`read_doc`/`grep_docs`,
-`recall_softskills`/`recall_precedents`, `browse_registry`…), skills/soft-skills
+`search_sessions`, `browse_registry`…), the skill
 loaders, and read-only `Read`/Bash builtins. Mutating/executing tools (`Write`,
 `Edit`, `revert`, `ast_grep_rewrite`, `lsp_rename`, `worktree_*`, `run_tests`,
 `mcp__*`, mutating `Bash`) stay on the deny→ask default and prompt as before.
@@ -3555,14 +3454,12 @@ loaders, and read-only `Read`/Bash builtins. Mutating/executing tools (`Write`,
 locks this in. When adding a new sub-agent tool group, decide whether its tools
 are read-only-safe (add to the allow-list) or mutating (leave gated).
 
-**Two session-lifecycle writers are deliberate allow-list exceptions**:
-`curate_session` and `record_session_feedback` (the wrap-session soft-skill's
-persistence tool — see "Soft-skill reflection pipeline"). Both write, but each
-writes **one fixed path derived from the session suffix** with no model- or
-user-controlled path component, so the "mutating ⇒ gate it" rule buys nothing
-here — and gating `record_session_feedback` made the wrap-up question dead-end in
-a permission card, which is exactly the friction that skill exists to avoid.
-Don't "clean these up" back into the gated set.
+**The collection-memory writers are a deliberate allow-list exception**:
+`memory_save` and `memory_delete` write, but only inside the session's memory
+directory under host-validated names (see "Collection memory"), so the
+"mutating ⇒ gate it" rule buys nothing there — and a permission card on every
+remembered fact would defeat saving it in the turn. Don't "clean them up" back
+into the gated set.
 
 **No ask-user / permission timeout — wait, don't auto-deny.** An unanswered
 ask-user or permission card **waits indefinitely** rather than being dropped on a
@@ -3617,9 +3514,9 @@ Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurre
 - `agent_tasks_<u>_<ts>.json` — task graph
 - `agent_todo_<u>_<ts>.json` — todo plan
 - `agent_memory_<u>_<ts>.md` — compressed session memory
-- `agent_statelog_<u>_<ts>.json` — full state log (consumed by curator)
+- `agent_statelog_<u>_<ts>.json` — full state log (kept by context compression; nothing reads it after the session)
 - `agent_events_<ts>.log` — event audit log (global per build)
-- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Harvested` flag + `Archived` flag + active `/goal` condition + working-directory `cwd` + durable `pending_questions` (unanswered `AskUserQuestion` prompts that survive a restart) (server only)
+- `conversation_<id>.json` — Web UI turn history + title + `squad` name + `Archived` flag + active `/goal` condition + working-directory `cwd` + durable `pending_questions` (unanswered `AskUserQuestion` prompts that survive a restart) (server only)
 
 **Context restore after a restart.** The web UI persists turn *history* to
 `conversation_<id>.json`, but the model's working memory is the ADK runner's
@@ -4072,7 +3969,7 @@ known into **every turn** of every chat of that collection — nothing depends o
 the agent deciding to look it up. It replaces the collection's former single
 "Memory" text (see "Collection context"). Design:
 [docs/superpowers/specs/2026-11-09-collection-memory-design.md](docs/superpowers/specs/2026-11-09-collection-memory-design.md).
-Soft-skills still exist beside it on this branch (their removal is a later plan).
+It replaced soft-skills (see "Soft-skills removed" at the end of this section).
 
 - **Files** ([internal/collmem/](internal/collmem/), stdlib only):
   `<root>/collections/<collection>/memory/<name>.md`, and for **General** (the
@@ -4134,8 +4031,7 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   argument. Errors come back as `error` messages the model can act on (bad name /
   type, empty, too long, collection full). Allow-listed in
   [config/permissions.json](config/permissions.json) (they write only inside the
-  memory directory under host-validated names — same reasoning as
-  `record_session_feedback`), and the three names are in `omnisUnderscoreTools`
+  memory directory under host-validated names), and the three names are in `omnisUnderscoreTools`
   ([agent/claude_plugins.go](agent/claude_plugins.go)) so no plugin agent can be
   named after them. After each write `SetMemoryChangeHook` (installed by the
   server) broadcasts `memory_changed`.
@@ -4207,6 +4103,29 @@ Soft-skills still exist beside it on this branch (their removal is a later plan)
   `env.memory.*`, `collections.memory*`.
 - **No-op contract**: a collection with no memories injects only the rules block
   on answering roots and nothing on the router.
+
+**Soft-skills removed (2026-11-09).** Soft-skills (curator-distilled procedures),
+the curator and reflector agents, the precedents index, `/learn` and
+`/learn-now`, the idle curator, the session `Harvested` flag, `omnis curate`,
+`omnis reindex-precedents`, the `curate_session` / `record_session_feedback`
+tools and the built-in `wrap-session` soft-skill are gone; collection memory
+replaces them. What keeps older installs loading:
+- `curator` / `reflector` are dropped from the `agents` list and from squad
+  members and leaders (a squad they led gets its leader cleared), with one log
+  line per resolution (`dropRemovedAgents`), and silently from `subagents`
+  (`normalizeSubAgents`), both in [agent/runtime_config.go](agent/runtime_config.go).
+- A `"softskills"` tool key in an agent's `tools` is a no-op
+  (`toolsForAgentConfig`).
+- `softskills_dir` keys are ignored (unknown JSON); `OMNIS_CURATOR_*` and
+  `OMNIS_SOFTSKILLS_DIR` are not read.
+- The CLI flags `-softskills` and `-curator-enabled` are accepted and ignored
+  ([main.go](main.go)); `omnis curate` / `omnis reindex-precedents` are no
+  longer subcommands, so they are read as a prompt.
+- Old conversation files carrying `harvested` or recorded skills of kind
+  `softskill` load fine (`TestLegacyConversationWithHarvestedAndSoftskillLoads`);
+  the skills dock shows them as plain skills.
+- `$OMNIS_HOME/softskills` (and the `softskills.tvim` / `precedents.tvim` indexes)
+  are left on disk, unread.
 
 ### Automatic session titling (Web UI)
 
@@ -4529,8 +4448,7 @@ so an existing Claude Code config is portable.
     `EventCompressionStart`→PreCompact, `EventAskUser`→Notification (async so a
     permission prompt is never blocked by a slow hook). v1 ignores their outcome.
 - **Server-mode session lifecycle**: web-UI sessions never emit the bus
-  `EventSessionStart`/`EventSessionEnd` (those are CLI/TUI front-end signals, and
-  `EventSessionEnd` also drives the reflection/curation pipeline web sessions skip).
+  `EventSessionStart`/`EventSessionEnd` (those are CLI/TUI front-end signals).
   So the server fires those two hooks **directly** via `Infrastructure.FireHook`
   (bypassing the bus) — SessionStart on `POST /api/sessions`, SessionEnd on
   `DELETE /api/sessions/:id` ([server/server.go](server/server.go)), both async.
@@ -5345,7 +5263,7 @@ unit is a *wave*, not a call.
   calls of ONE invocation of a sub-agent, keyed by the ADK **invocation id**
   (agenttool starts a fresh runner run per call; a `resume_session` call is a new
   run too), so parallel instances do NOT share it. Same notice-then-terminate
-  escalation as the per-turn cap (`agentCapGraceCalls`), skill/soft-skill
+  escalation as the per-turn cap (`agentCapGraceCalls`), skill
   discovery tools are free (`callCapFreeTools`), and it is chained ahead of the
   turn budget in the sub-agent's budget slot (`chainBeforeTool`, shadowed per
   agent in [agent/build_subagents.go](agent/build_subagents.go)) so a refused call
@@ -5938,7 +5856,7 @@ engine is [server/export_import.go](server/export_import.go).
   against *this* instance (`Manager.HasSquad`; unknown/blank → router else
   `DefaultSquadName`, reported as `squad_changed`), the collection is kept only if
   it already exists here (else General), and the machine-specific / transient
-  fields (`cwd`, `goal`, `harvested`, `archived`, `hidden`) are **dropped** so an
+  fields (`cwd`, `goal`, `archived`, `hidden`) are **dropped** so an
   import always lands as a normal active chat rooted at the process cwd. Returns
   `{session_id, squad, title, turns, squad_changed}`.
 - **Route placement**: import lives at `/api/import/session` (a distinct top-level
@@ -6596,8 +6514,7 @@ Rules enforced at resolution time:
 - A squad named `system` (the value of `DefaultSquadName`) is always
   present; the resolver synthesises one (from enabled agents) when missing
   or when the user adds only a non-default squad in the editor.
-- `leader` and every `members[i]` must reference an enabled agent;
-  `curator` cannot be a member (it is process-wide).
+- `leader` and every `members[i]` must reference an enabled agent.
 - A non-`"none"` `leader` must be an agent marked `leader: true`.
 - A `leader` of `"none"` (or empty) makes the squad **leaderless** and
   requires **exactly one member** (it runs directly as the root — see
@@ -6636,7 +6553,7 @@ model to follow a prompt. Backed by [internal/deps/](internal/deps/) (`Ensure`).
   [agent/infrastructure.go](agent/infrastructure.go) via `newSkillDepGate`,
   [agent/skill_deps_gate.go](agent/skill_deps_gate.go)) decorates the
   `load_skill` tool ([internal/skills/deps_gate.go](internal/skills/deps_gate.go)
-  `gatedLoadTool`, mirroring softskills' `renamedTool` — it must pack **itself**
+  `gatedLoadTool` — it must pack **itself**
   in `ProcessRequest` or dispatch bypasses the gate). When a loaded skill's
   declared binary is missing it asks the user (`ask_user`), installs via the
   **Bash safety floor**, and rechecks. `skills.Toolset`'s signature is
@@ -6673,7 +6590,7 @@ named tools (as opposed to group keys) listed directly in an agent's `tools`.
 
 **An agent may declare more than one of the three groups on purpose** — the
 shipped `web_agent` ([registry/agents/web_agent/agent.json](registry/agents/web_agent/agent.json))
-declares `["Skill","serper","ddg","web","softskills"]`, meaning "use Serper
+declares `["Skill","serper","ddg","web"]`, meaning "use Serper
 when `serper_key` is configured, otherwise fall back to DuckDuckGo (no key
 needed)". Declaring a single keyed provider (`"serpapi"` or `"serper"` alone)
 with no matching key configured still yields **no** WebSearch tool at all —
@@ -7730,7 +7647,7 @@ stays organised as commands are added:
   **User commands** section (the per-user `user_commands.json` entries).
 - **Sorting** (`sortSlashSection`): the **`common` section is NOT alphabetical**
   — it follows the hand-curated `COMMON_ORDER` (`/help`, `/compress`, `/init`,
-  `/cost`, `/memory`, `/learn-now`, `/rollback`), i.e. the most-used commands first. **Every other section (and
+  `/cost`, `/memory`, `/rollback`), i.e. the most-used commands first. **Every other section (and
   the User-commands section) is sorted alphabetically** by command name. A
   `common` command missing from `COMMON_ORDER` sorts after the curated ones,
   alphabetically.
@@ -7774,9 +7691,8 @@ calls) and both maps are cleared on session delete.
 
 ### Web UI loaded-skills bar (composer dock)
 
-`load_skill` / `load_softskill` calls are **not** rendered in the transcript,
-nor are the `list_skills` / `list_softskills` discovery calls or the
-`load_skill_resource` / `load_softskill_resource` reads (shown nowhere unless
+`load_skill` calls are **not** rendered in the transcript, nor are the
+`list_skills` discovery calls or the `load_skill_resource` reads (shown nowhere unless
 they fail; they add nothing to the dock).
 They are listed in a per-pane **skills dock** above the composer (`.skills-dock`
 in the pane template, [web/index.html](web/index.html)), folded by default to
@@ -7797,8 +7713,7 @@ as markdown, and the head pulses when the count grows.
   (root events only: injected turns have no sub-agent bus). Only a
   **successful** load (a response with `instructions`) is recorded — except a
   **system skill** (frontmatter `metadata: {system: "true"}`, `isSystemSkill`;
-  today only the built-in `wrap-session` soft-skill), which is plumbing and
-  never listed; it then
+  none ships today), which is plumbing and never listed; it then
   fires `skillsChangedHook` → a `skills_changed` event on `/api/events`
   (session-scoped, so owner-filtered in cookie mode). Route
   `GET /api/sessions/:id/skills` → `{skills}`.
@@ -7892,8 +7807,8 @@ measurement feedback loop.
 ### Web UI subtle ask-user indicator
 
 `AskUserQuestion` takes an optional **`subtle`** flag for an optional question
-the user may ignore — the `wrap-session` soft-skill's closing check is the one
-user. It becomes `askuser.Question.Subtle` (carried as `subtle` by
+the user may ignore (the tool description suggests pairing it with
+`timeout_seconds`). It becomes `askuser.Question.Subtle` (carried as `subtle` by
 `QuestionToPayload`) and makes the question **non-durable** (nothing worth
 resuming after a restart). The web UI ([web/app.js](web/app.js) "Subtle
 ask-user indicator") then skips the ask-user card: `renderAskUserWidget` hands
@@ -7906,9 +7821,8 @@ one-line answer + Send/Skip; an empty Send is a skip. The streamed `tool_call` f
 swallowed too (`isSubtleAskCall`): no `AskUserQuestion` tool block and no
 "running AskUserQuestion…" status (cleared to empty) while it waits. The disc goes away on an
 answer, a skip, or any `ask_user_cancel` (timeout, Stop, archive —
-`cancelAskUserWidget` checks `clearSubtleAskByQuestion` first). The skill sets
-`timeout_seconds: 120`; it used to write `timeout_secs`, a name the tool does not
-have, so the question waited forever. CLI/TUI ignore the flag.
+`cancelAskUserWidget` checks `clearSubtleAskByQuestion` first). Without
+`timeout_seconds` it waits like any other question. CLI/TUI ignore the flag.
 
 ### Web UI small-screen layout (phone drawer)
 

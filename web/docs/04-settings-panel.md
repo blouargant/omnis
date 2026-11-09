@@ -48,9 +48,8 @@ The Agents section has five sub-tabs: **Agents**, **Squads**, **Remotes**,
 Key points:
 
 - **Agents** — fleet list split into **Built-in Agents** (`leader`,
-  `skill_editor`, `helper`, `summariser`, `curator`,
-  `reflector`) and **Custom Agents**. Each agent's detail panel exposes
-  its tool set, skill/MCP/A2A wiring, system instruction, and model
+  `skill_editor`, `helper`, `summariser`, …) and **Custom Agents**. Each
+  agent's detail panel exposes its tool set, skill/MCP/A2A wiring, system instruction, and model
   reference.
 - **Squads** — named groups `{ leader, members[] }` (see below).
 - **Remotes** — browse and install agent definitions from remote Git
@@ -59,7 +58,7 @@ Key points:
   context length, pricing) referenced by each agent's `model_ref`.
 - **Global configuration** — fleet-wide settings, in order: the web-search API
   keys (`serper_key`, `serpapi_key`, each with a **Test** button), then
-  `softskills_dir`, `bash_timeout_seconds`, and path overrides.
+  `bash_timeout_seconds`, and path overrides.
 
 The defaults are baked into the binary; the form highlights any field that
 diverges from the built-in baseline.
@@ -78,15 +77,13 @@ panel on the right:
 - **Name** — case-insensitive, unique within the file. The `default`
   squad is always present and its name is read-only.
 - **Description** — surfaced as the picker tooltip.
-- **Leader** — dropdown over the enabled agents (excluding `curator` and
-  `reflector`), plus a **`(none — run single agent directly)`** option that
+- **Leader** — dropdown over the enabled agents, plus a **`(none — run single agent directly)`** option that
   makes the squad **leaderless**: it then needs exactly one member, which
   runs directly with no coordinator (the shape used by `helper` and the
   Omnis router).
 - **Members** — checkbox grid over the enabled agents. The squad's
   current leader is disabled in the grid (a squad can never list its
-  own leader as a member). Curator and reflector are excluded — they stay
-  process-wide. A leaderless squad switches this to single-select.
+  own leader as a member). A leaderless squad switches this to single-select.
 - **Delete squad** — bottom-right; the `default` squad cannot be
   deleted.
 
@@ -177,8 +174,8 @@ The Commands section is client-only (no backing config file is loaded from
 the server-side config chain). It shows:
 
 - **Built-in commands** — read-only table of commands shipped with the Web UI
-  (`/help`, `/compress`, `/create-skill`, `/update-skill`, `/status`,
-  `/learn`, `/learn-now`). These names are reserved and cannot be reused.
+  (`/help`, `/compress`, `/create-skill`, `/update-skill`, `/status`, …).
+  These names are reserved and cannot be reused.
 - **User commands** — CRUD table of custom slash commands. Each command
   has a name, optional description, optional args hint, and a prompt
   template body. Template placeholders: `$1`, `$2`, … for positional
