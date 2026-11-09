@@ -139,7 +139,7 @@ func sweepLogsDir(stats gcStats, activeIDs, activeSuffixes map[string]struct{}) 
 		full := filepath.Join(logsDir(), name)
 
 		// Reap orphaned atomic-write temp files left behind when a fire-and-forget
-		// persistence goroutine (async title generation, idle indexer/curator,
+		// persistence goroutine (async title generation, idle indexer,
 		// scheduler auto-archive, injected background turns) is killed by a server
 		// shutdown/restart between os.CreateTemp and os.Rename. Age-gated so a live
 		// temp (present for only milliseconds) is never deleted mid-write.

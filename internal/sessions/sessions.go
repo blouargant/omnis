@@ -1,8 +1,7 @@
 // Package sessions owns the multi-session metadata registry and the
 // per-session conversation files on disk. Both the HTTP server and the
-// embedded TUI consume the same types here so chat history, squad
-// routing, and the idle-curator harvest flag stay consistent across
-// surfaces.
+// embedded TUI consume the same types here so chat history and squad
+// routing stay consistent across surfaces.
 package sessions
 
 import (
@@ -74,11 +73,6 @@ type SessionMeta struct {
 	// ParentID is the session this one was forked from, mirrored from the
 	// conversation file (empty for an original conversation).
 	ParentID string `json:"parent_id,omitempty"`
-	// Harvested is set by the idle harvester after it fires curator evaluation
-	// for this session. A harvested session is skipped by the idle scanner until
-	// new activity (Touch) clears the flag. The flag is persisted in the
-	// conversation file so it survives server restarts.
-	Harvested bool `json:"harvested,omitempty"`
 	// Archived marks a session as set-aside-but-kept: not active, but still
 	// present and viewable (read-only). Archived sessions stay in the registry
 	// (so the GC retains their files and they keep feeding semantic-recall
@@ -103,8 +97,8 @@ type SessionMeta struct {
 	// navigated" (resolves to the process root). The live cwd lives in the
 	// process-wide bashCwd store; this is only the durable value for resume.
 	Cwd string `json:"cwd,omitempty"`
-	// Indexed is set by the idle indexer (and on archive) once a session's
-	// StateLog has been pushed into the cross-session precedent index. It is
+	// Indexed is set by the idle indexer (and on archive) once the session has
+	// been handed to the session-search index (EventSessionIndexNow). It is
 	// in-memory only and cleared by Touch on new activity so a session that
 	// keeps evolving gets re-indexed; it is deliberately not persisted, so a
 	// server restart re-indexes idle sessions once (an idempotent upsert).
@@ -267,18 +261,14 @@ func (r *Registry) IsArchived(id string) (archived, ok bool) {
 }
 
 // Touch marks a session as used and increments the turn counter.
-// It also clears the Harvested flag so the idle harvester will re-evaluate
-// the session after enough new activity accumulates. The on-disk flag is
-// cleared by the next AppendConversationTurn call.
 func (r *Registry) Touch(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if m, ok := r.items[id]; ok {
 		m.LastUsedAt = time.Now()
 		m.Turns++
-		m.Harvested = false
-		// New activity means the goal/decisions may have changed; let the
-		// idle indexer re-index this session once it goes stale again.
+		// New activity changes the conversation; let the idle indexer
+		// re-index this session once it goes stale again.
 		m.Indexed = false
 	}
 }
@@ -291,22 +281,6 @@ func (r *Registry) MarkIndexed(id string) {
 	if m, ok := r.items[id]; ok {
 		m.Indexed = true
 	}
-}
-
-// MarkHarvested flags a session so the idle harvester skips it until new
-// activity arrives. The flag is persisted to disk asynchronously so it
-// survives server restarts.
-func (r *Registry) MarkHarvested(id string) {
-	r.mu.Lock()
-	if m, ok := r.items[id]; ok {
-		m.Harvested = true
-	}
-	r.mu.Unlock()
-	go func() {
-		if err := SetConversationHarvested(id, true); err != nil {
-			log.Printf("harvester: failed to persist harvested flag for session %s: %v", id, err)
-		}
-	}()
 }
 
 // SetArchived sets (or clears) the archived flag on a session. The flag is

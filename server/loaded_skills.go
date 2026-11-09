@@ -22,8 +22,6 @@ func skillKindForTool(tool string) string {
 	switch tool {
 	case "load_skill":
 		return sessions.SkillKindSkill
-	case "load_softskill":
-		return sessions.SkillKindSoftskill
 	}
 	return ""
 }
@@ -56,8 +54,7 @@ func loadedSkillFromResponse(agent, tool string, resp map[string]any) (sessions.
 }
 
 // isSystemSkill reports whether a skill's frontmatter marks it as a system
-// skill (`metadata: {system: "true"}`), e.g. the built-in wrap-session
-// soft-skill. System skills are plumbing, not something the user chose to
+// skill (`metadata: {system: "true"}`). System skills are plumbing, not something the user chose to
 // engage, so they are never listed in the composer skills dock.
 func isSystemSkill(fm map[string]any) bool {
 	md, ok := fm["metadata"].(map[string]any)
@@ -68,8 +65,8 @@ func isSystemSkill(fm map[string]any) bool {
 	return strings.EqualFold(strings.TrimSpace(v), "true")
 }
 
-// recordSkillLoad persists a successful skill / soft-skill load for the
-// session and notifies the browsers. A no-op for any other tool.
+// recordSkillLoad persists a successful skill load for the session and
+// notifies the browsers. A no-op for any other tool.
 func recordSkillLoad(sessionID, agent, tool string, resp map[string]any) {
 	if sessionID == "" {
 		return

@@ -28,10 +28,6 @@ import (
 	"github.com/blouargant/omnis/internal/steer"
 )
 
-// curateSSETimeout is how long the /curate SSE stream waits for curator_end
-// before giving up. Should exceed the curator's own 2-minute run timeout.
-const curateSSETimeout = 3 * time.Minute
-
 type renameRequest struct {
 	Title string `json:"title"`
 }
@@ -54,7 +50,8 @@ type serverDeps struct {
 	Registry    *sessions.Registry
 	WebDir      string
 	AgentEvents *agentEventBroadcaster
-	// EventBus is the agent event bus, used to emit curate-now events.
+	// EventBus is the agent event bus, used to emit compress-now and
+	// session-index events.
 	EventBus *events.Bus
 	// RegisterSession registers a newly created session in the cross-session
 	// mailbox registry so other leaders can address it by name.
@@ -191,8 +188,6 @@ func newAgentEventBroadcaster(bus *events.Bus) *agentEventBroadcaster {
 	// the browser dismiss the widget when a question is resolved server-side.
 	bus.On(events.EventAskUser, broadcast)
 	bus.On(events.EventAskUserCancel, broadcast)
-	bus.On(events.EventCuratorStart, broadcast)
-	bus.On(events.EventCuratorEnd, broadcast)
 	return b
 }
 
@@ -748,9 +743,8 @@ func newEngine(d serverDeps) *gin.Engine {
 		if d.PushEvents != nil {
 			d.PushEvents.notify(id)
 		}
-		// Archiving is a natural session-end signal: push the session's
-		// StateLog into the precedent index now rather than waiting for the
-		// idle indexer's staleness threshold.
+		// Archiving is a natural session-end signal: index the session now
+		// rather than waiting for the idle indexer's staleness threshold.
 		meta, _ := d.Registry.Get(id)
 		if meta != nil && d.EventBus != nil {
 			indexSession(d.Registry, d.EventBus, meta.UserID, id)
@@ -1022,96 +1016,6 @@ func newEngine(d serverDeps) *gin.Engine {
 	registerA2ARoutes(auth.Group("/a2a"))
 	registerSquadsRegistryRoutes(auth.Group("/squads-registry"))
 	registerPermissionsRoutes(auth.Group("/permissions-registry"))
-
-	auth.POST("/sessions/:id/curate", func(c *gin.Context) {
-		id := c.Param("id")
-		meta, ok := d.Registry.Get(id)
-		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-			return
-		}
-		var req struct {
-			Reason    string `json:"reason"`
-			Immediate bool   `json:"immediate"`
-		}
-		_ = c.ShouldBindJSON(&req)
-		if req.Reason == "" {
-			req.Reason = "manual /learn request from web UI"
-		}
-		_, err := toolkitagent.RequestCurateSession(meta.UserID, id, req.Reason)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if req.Immediate && d.EventBus != nil {
-			// Return an SSE stream so the browser can render a live curator block.
-			h := c.Writer.Header()
-			h.Set("Content-Type", "text/event-stream")
-			h.Set("Cache-Control", "no-cache")
-			h.Set("Connection", "keep-alive")
-			h.Set("X-Accel-Buffering", "no")
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Flush()
-
-			sseEmit := func(event string, payload any) {
-				data, err := json.Marshal(payload)
-				if err != nil {
-					return
-				}
-				_, _ = io.WriteString(c.Writer, "event: "+event+"\ndata: "+string(data)+"\n\n")
-				if f, ok := c.Writer.(interface{ Flush() }); ok {
-					f.Flush()
-				}
-			}
-
-			// Subscribe before emitting the trigger so no events are missed.
-			subCh := d.AgentEvents.subscribe()
-			defer d.AgentEvents.unsubscribe(subCh)
-
-			d.EventBus.Emit(events.EventCurateNow, map[string]any{
-				"user_id":    meta.UserID,
-				"session_id": id,
-			})
-
-			ctx := c.Request.Context()
-			timeout := time.NewTimer(curateSSETimeout)
-			defer timeout.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-timeout.C:
-					sseEmit("done", map[string]any{})
-					return
-				case be := <-subCh:
-					// Filter events to this session only.
-					if sid, _ := be.Payload["session_id"].(string); sid != id {
-						continue
-					}
-					switch be.Event {
-					case events.EventCuratorStart:
-						sseEmit("curator_start", map[string]any{"session_id": id})
-					case events.EventCuratorEnd:
-						p := be.Payload
-						summary, _ := p["summary"].(string)
-						skipped, _ := p["skipped"].(bool)
-						reason, _ := p["reason"].(string)
-						errMsg, _ := p["error"].(string)
-						sseEmit("curator_end", map[string]any{
-							"session_id": id,
-							"summary":    summary,
-							"skipped":    skipped,
-							"reason":     reason,
-							"error":      errMsg,
-						})
-						sseEmit("done", map[string]any{})
-						return
-					}
-				}
-			}
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "curation scheduled for session end"})
-	})
 
 	return r
 }

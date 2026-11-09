@@ -5,18 +5,17 @@ import (
 	"time"
 )
 
-// Skill kinds recorded in LoadedSkill.Kind.
-const (
-	SkillKindSkill     = "skill"     // authored skill (load_skill)
-	SkillKindSoftskill = "softskill" // curator-distilled soft-skill (load_softskill)
-)
+// SkillKindSkill is the kind recorded in LoadedSkill.Kind for an authored
+// skill (load_skill). Conversation files written by older builds may also
+// carry "softskill" entries; they are kept and served as recorded.
+const SkillKindSkill = "skill"
 
 // maxSkillInstructions caps the SKILL.md body kept per loaded skill so a huge
 // skill cannot bloat the conversation file. The web UI only needs it to show
 // the skill's content on demand.
 const maxSkillInstructions = 64 * 1024
 
-// LoadedSkill is one skill (or soft-skill) an agent loaded during the session.
+// LoadedSkill is one skill an agent loaded during the session.
 // The web UI lists these in a collapsible area of the composer instead of
 // rendering each load as a tool block in the transcript. Persisted so the list
 // survives a page reload / server restart.

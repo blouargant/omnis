@@ -24,15 +24,14 @@
 //
 //	OMNIS_SERVER_ADDR         Listen address. Default ":8080".
 //	OMNIS_HOME                Per-user state root. Default $HOME/.omnis. Every
-//	                            mutable file (logs, uploads, soft-skills,
-//	                            mailboxes, user config overrides) lands here.
+//	                            mutable file (logs, uploads, mailboxes,
+//	                            user config overrides) lands here.
 //	OMNIS_CONFIG_DIRS         Colon-separated config search chain (high→low
 //	                            precedence). Replaces the default chain of
 //	                            .agents : $OMNIS_HOME : /etc/omnis.
 //	OMNIS_CONFIG_PATH         Explicit path to agent.json (forwarded to
 //	                            agent.NewAgent; bypasses the chain).
 //	OMNIS_SKILLS_DIR          Skills directory.
-//	OMNIS_SOFTSKILLS_DIR      Soft-skills directory.
 //	OMNIS_WEB_DIR             Static UI directory. Default "web".
 //	OMNIS_DEBUG               "1"/"true" to enable debug logging on the agent.
 //	OMNIS_SERVER_GC_INTERVAL  How often to garbage-collect orphan log/upload
@@ -217,7 +216,6 @@ func run() error {
 	agentOpts := agent.Options{
 		ConfigPath:       os.Getenv("OMNIS_CONFIG_PATH"),
 		ConfigPathStrict: os.Getenv("OMNIS_CONFIG_PATH") != "",
-		SoftSkillsDir:    os.Getenv("OMNIS_SOFTSKILLS_DIR"),
 		AppName:          envOr("OMNIS_APP_NAME", "omnis-server"),
 		DebugLogging:     debug,
 		// The server runs pushManager, which drains each session's leader
@@ -356,15 +354,9 @@ func run() error {
 		unregister:   infra.UnregisterSession,
 	}, gcInterval)
 
-	startIdleCurator(rootCtx, IdleCuratorConfig{
-		Registry:    registry,
-		Bus:         infra.Bus,
-		IdleTimeout: firstInst.CuratorIdleTimeout,
-	})
-
-	// Index idle sessions into the cross-session precedent store. Runs on a
-	// fixed staleness threshold independent of the curator, so Web UI sessions
-	// (which never fire EventSessionEnd) still feed semantic recall.
+	// Index idle sessions into the past-session search index. Runs on a fixed
+	// staleness threshold, so Web UI sessions (which never fire
+	// EventSessionEnd) still get indexed.
 	startIdleIndexer(rootCtx, IdleIndexerConfig{
 		Registry: registry,
 		Bus:      infra.Bus,

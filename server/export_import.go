@@ -122,7 +122,7 @@ func parseImportedConversation(data []byte) (*sessions.ConversationFile, error) 
 // Portability sanitisation: the squad is validated against this instance and
 // falls back to the router/default squad when unknown; the collection is kept
 // only if it already exists here (else General); and the machine-specific /
-// transient fields (cwd, goal, harvested, archived, hidden) are dropped so an
+// transient fields (cwd, goal, archived, hidden) are dropped so an
 // import always lands as a normal, active chat rooted at the process cwd.
 // Returns {session_id, squad, title, turns, squad_changed}.
 func handleImportSession(d serverDeps) gin.HandlerFunc {
