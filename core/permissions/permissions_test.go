@@ -502,9 +502,8 @@ func TestShippedConfigParity(t *testing.T) {
 		{"WebFetch", map[string]any{"url": "https://go.dev"}, DecisionAllow},
 		{"html_to_markdown", map[string]any{"html": "<p>x</p>"}, DecisionAllow},
 		{"calculate", map[string]any{"expression": "2+2"}, DecisionAllow},
-		// The session-lifecycle writers (curate_session, record_session_feedback)
-		// were removed with soft-skills; their allow entries went with them, so a
-		// call under either name now falls through to the default ask.
+		// curate_session and record_session_feedback have no allow entry, so a
+		// call under either name falls through to the default ask.
 		{"record_session_feedback", map[string]any{"question": "are we good to wrap?", "answer": "yes"}, DecisionAsk},
 		{"curate_session", map[string]any{}, DecisionAsk},
 		// A nested gatherer is a sub-agent like any other: it only retrieves and

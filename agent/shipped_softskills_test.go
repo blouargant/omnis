@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"testing"
 )
 
@@ -12,6 +12,9 @@ import (
 // shipped agent may still declare the (now inert) "softskills" tool group or a
 // softskills_dir, and no shipped instruction may tell the model to load a
 // soft-skill that no longer exists.
+// softSkillRE matches every spelling: softskill, soft-skill, soft skill.
+var softSkillRE = regexp.MustCompile(`(?i)soft[- ]?skill`)
+
 func TestShippedAgentsDeclareNoSoftskills(t *testing.T) {
 	for _, name := range shippedAgentNames(t) {
 		data := readShippedAgentJSON(t, name)
@@ -37,7 +40,7 @@ func TestShippedAgentsDeclareNoSoftskills(t *testing.T) {
 			}
 			t.Fatalf("read %s: %v", path, err)
 		}
-		if strings.Contains(strings.ToLower(string(instr)), "softskill") {
+		if softSkillRE.Match(instr) {
 			t.Errorf("%s/instruction.md still mentions soft-skills", name)
 		}
 	}
