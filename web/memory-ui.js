@@ -8,6 +8,15 @@ function isMemoryTool(name) {
   return name === "memory_save" || name === "memory_read" || name === "memory_delete";
 }
 
+// memoryResult normalises a memory tool result: the live tool_result carries an
+// object, and a persisted tool record carries the raw JSON of the response,
+// which the server returns as an object too — unless it was stored as a string.
+// A JSON string is parsed; anything else is returned unchanged.
+function memoryResult(result) {
+  if (typeof result !== "string") return result;
+  try { return JSON.parse(result); } catch (_) { return result; }
+}
+
 // memoryToolFailed reports a memory call that must be shown as an error tool
 // block: no result, an error, or a save/delete that did not succeed. A read that
 // found nothing is not a failure.
@@ -29,5 +38,5 @@ function memoryChipLabel(toolName, result) {
   return null;
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { isMemoryTool, memoryToolFailed, memoryChipLabel };
-else { window.isMemoryTool = isMemoryTool; window.memoryToolFailed = memoryToolFailed; window.memoryChipLabel = memoryChipLabel; }
+if (typeof module !== "undefined" && module.exports) module.exports = { isMemoryTool, memoryResult, memoryToolFailed, memoryChipLabel };
+else { window.isMemoryTool = isMemoryTool; window.memoryResult = memoryResult; window.memoryToolFailed = memoryToolFailed; window.memoryChipLabel = memoryChipLabel; }

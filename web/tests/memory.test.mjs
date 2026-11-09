@@ -19,3 +19,14 @@ test("chip label follows the result", () => {
   assert.equal(memoryChipLabel("memory_save", { ok: false, error: "x" }), null);  // a failure renders as a normal error tool block
   assert.equal(memoryChipLabel("memory_read", { found: true }), null);            // reads show nothing
 });
+
+// A replayed turn gets the recorded result back from the server; the live
+// tool_result carries an object. Both must give the same chip.
+test("a recorded result renders the same chip as the live one", () => {
+  const { memoryResult } = require("../memory-ui.js");
+  const live = { ok: true, name: "tabs", status: "updated" };
+  assert.deepEqual(memoryResult(live), live);
+  assert.deepEqual(memoryChipLabel("memory_save", memoryResult(JSON.stringify(live))), { key: "chat.memory.updated", vars: { name: "tabs" } });
+  assert.equal(memoryResult("not json…"), "not json…");  // a truncated record stays as it was (and renders as a failure)
+  assert.equal(memoryChipLabel("memory_save", memoryResult("not json…")), null);
+});

@@ -2043,9 +2043,13 @@ function memoryCollectionKey(collection) {
   return !c || c.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? GENERAL_COLLECTION : c;
 }
 
-// memoryCollectionOf is the collection a session's memories live in.
-function memoryCollectionOf(sessionId) {
-  const meta = sessionId ? sessionMetaById(sessionId) : null;
+// memoryCollectionOf resolves the collection a session's memories live in. The
+// session metadata cache only holds sessions whose group page was loaded (a tab
+// restored at boot often is not), so a miss fetches the session's metadata
+// rather than guessing General.
+async function memoryCollectionOf(sessionId) {
+  if (!sessionId) return GENERAL_COLLECTION;
+  const meta = sessionMetaById(sessionId) || await fetchSessionMeta(sessionId);
   return meta ? effectiveCollection(meta) : GENERAL_COLLECTION;
 }
 
@@ -2075,7 +2079,10 @@ function onMemoryChanged(data) {
 }
 
 // appendMemoryChip renders the transcript chip for a successful save / delete.
-function appendMemoryChip(label, collection, container) {
+// The chip is bound to the session, and the collection is resolved when it is
+// clicked. Accepted limit: the tool result does not name the collection, so a
+// chip in a session moved to another collection since opens the NEW one.
+function appendMemoryChip(label, sessionId, container) {
   const row = document.createElement("div");
   row.className = "tool-row";
   const chip = document.createElement("button");
@@ -2083,7 +2090,7 @@ function appendMemoryChip(label, collection, container) {
   chip.className = "memory-chip";
   chip.innerHTML = `<span class="memory-chip-icon" aria-hidden="true">✎</span>` +
     `<span class="memory-chip-label">${escHtml(tr(label.key, label.vars))}</span>`;
-  chip.addEventListener("click", () => openMemoryView(collection, label.vars.name));
+  chip.addEventListener("click", async () => openMemoryView(await memoryCollectionOf(sessionId), label.vars.name));
   row.appendChild(chip);
   (container || fpTranscript()).appendChild(row);
 }
@@ -2092,6 +2099,7 @@ function appendMemoryChip(label, collection, container) {
 // chip for a successful save / delete, nothing for a read, and the normal tool
 // block for a failure so it stays visible.
 function renderMemoryCall(name, args, response, durationMs, sessionId, container) {
+  response = memoryResult(response);
   if (memoryToolFailed(name, response)) {
     const b = appendToolCall(name, args, container);
     resolveToolCall(b, response, durationMs);
@@ -2099,7 +2107,7 @@ function renderMemoryCall(name, args, response, durationMs, sessionId, container
     return;
   }
   const label = memoryChipLabel(name, response);
-  if (label) appendMemoryChip(label, memoryCollectionOf(sessionId), container);
+  if (label) appendMemoryChip(label, sessionId, container);
 }
 
 function memoryTypeLabel(type) {
@@ -9331,6 +9339,10 @@ async function subscribeGlobalEvents() {
           // A session was filed under a different collection (here or elsewhere)
           // — refresh the group it left and the one it joined (and the counts).
           refreshGroups([groupOf(sid), (data && data.collection) || GENERAL_COLLECTION]);
+          // The session's memories are its collection's: follow it to the new one.
+          const moved = sessionMetaById(sid);
+          if (moved) moved.collection = (data && data.collection) || "";
+          if (window.EnvPanel) EnvPanel.refresh("memory");
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
           refreshSkills(sid);
@@ -13347,7 +13359,8 @@ function registerEnvCards() {
     title: () => tr("env.memory.title"),
     sessionOnly: true,
     async render(body, ctx) {
-      const collection = memoryCollectionOf(ctx.sessionId);
+      const collection = await memoryCollectionOf(ctx.sessionId);
+      if (ctx.stale()) return;
       let memories = [];
       try { memories = await loadMemories(collection); } catch (_) { /* keep empty */ }
       if (ctx.stale()) return;
