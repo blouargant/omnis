@@ -15,9 +15,6 @@ single root).
 | `mcp_config.json`                             | MCP server definitions. |
 | `a2a_config.json`                             | Remote A2A agent endpoints — each entry becomes an `a2a_<name>` tool on the leader. |
 | `registry/skills/<name>/SKILL.md`             | Authored skill playbooks. |
-| `softskills/`                                 | Curator-distilled procedures + the `wrap-session` built-in. |
-| `softskills/_stats.json`                      | Sidecar: per-skill `loaded_count` + `helpful` / `harmful` / `neutral` counters. Maintained by the reflection pipeline. |
-| `logs/agent_feedback_<key>.json`              | Wrap-session sidecar: one `{question, answer, timestamp}` record per session, consumed by the reflectors. |
 
 `agents.json` carries three top-level lists:
 
@@ -35,8 +32,7 @@ Each agent's definition lives in its own directory under
 holds the structured fields (`description`, `model_ref`, `tools`,
 `enabled`, `leader`, `builtin`, ...), and an optional `instruction.md`
 provides the system prompt. Agents marked `"builtin": true` ship with
-omnis (`leader`, `skill_editor`, `helper`, `summariser`,
-`curator`, `reflector`); the Web UI displays them under a **Built-in
+omnis (`leader`, `skill_editor`, `helper`, `summariser`, …); the Web UI displays them under a **Built-in
 Agents** section, separate from user-added **Custom Agents**.
 
 The registry directory follows the same lookup described below:
@@ -64,7 +60,7 @@ Skills follow the same lookup against `registry/skills/` subdirectories.
 
 ## Write root (state)
 
-Runtime state — `logs/`, `uploads/`, `mailboxes/`, `softskills/`, and any
+Runtime state — `logs/`, `uploads/`, `mailboxes/`, collection memory, and any
 remote-registry-driven installs into `registry/skills` or `registry/agents` —
 always lands under `$HOME/.omnis/` (override with `OMNIS_HOME`).
 
@@ -84,17 +80,16 @@ $HOME/.omnis/
 ├── mcp_config.json      # editor writes — user MCP server overrides
 ├── logs/                # agent_tasks_*, agent_todo_*, agent_memory_*,
 │   │                    #   agent_statelog_*, agent_events_*,
-│   │                    #   agent_feedback_*.json (wrap-session answers),
-│   │                    #   conversation_*.json (turns + title + squad + harvested)
+│   │                    #   conversation_*.json (turns + title + squad)
 │   └── uploads/         # web UI file uploads (per-session)
 ├── mailboxes/           # JSONL inter-agent mailboxes
-├── softskills/          # curator-distilled procedures (read AND write)
-│   └── _stats.json      # per-skill load/helpful/harmful/neutral counters
+├── collections/         # per collection: instructions.md + memory/<name>.md
+├── general-memory/      # General's memories, <name>.md
 ├── index/               # semantic-recall vector indexes (see 20-learning-and-recall.md)
 │   ├── embed_cache/     #   content-hash embedding cache
-│   ├── precedents.tvim  #   cross-session goals + decisions (+ .meta.json sidecar)
-│   ├── softskills.tvim  #   recall_softskills index (+ .meta.json)
 │   ├── registries.tvim  #   search_registries index (+ .meta.json)
+│   ├── docs.tvim        #   search_docs index (+ .meta.json)
+│   ├── sessions.tvim    #   past-session search index (+ .meta.json)
 │   └── <repo-hash>/     #   per-repo code index
 └── registry/
     ├── skills/          # web UI installed skills (override: OMNIS_SKILLS_REGISTRY_DIR)

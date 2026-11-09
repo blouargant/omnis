@@ -29,13 +29,12 @@ Per-agent details live in `registry/agents/<name>/` — see
 ```json
 {
   "skills_dir": "skills",
-  "softskills_dir": "softskills",
   "app_name": "omnis",
   "mcp_config_path": ".agents/mcp_config.json",
   "permissions_config_path": ".agents/permissions.json",
   "hooks_config_path": ".agents/hooks.json",
 
-  "agents": ["leader", "investigator", "web_agent", "summariser", "curator"],
+  "agents": ["leader", "investigator", "web_agent", "summariser"],
 
   "router_squad": "omnis",
 
@@ -113,9 +112,9 @@ Common fields:
 | `description` | Short summary shown in the UI and exposed to the leader as the sub-agent tool description. |
 | `enabled` | When `false`, the agent is excluded from squads and the leader's tool list. |
 | `leader` | When `true`, this agent can be selected as a squad leader. |
-| `builtin` | When `true`, marks the agent as shipped with omnis. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins: `leader`, `skill_editor`, `helper`, `summariser`, `curator`. |
+| `builtin` | When `true`, marks the agent as shipped with omnis. The web UI groups built-in agents separately from user-added (custom) ones. Built-ins include `leader`, `skill_editor`, `helper`, `summariser`. |
 | `model_ref` | References a key in `models` for provider/model/base_url/api_key. |
-| `tools` | List of tool group names mounted on this agent (`fs`, `mcp`, `web`, `skills`, `softskills`, `calc`, `registries`, ...). |
+| `tools` | List of tool group names mounted on this agent (`fs`, `mcp`, `web`, `skills`, `calc`, `registries`, ...). |
 | `skills_dir` | Optional per-agent skills directory (overrides the global one). |
 | `max_instances` | Max parallel invocations the leader may launch in one tool call. `1` (default) keeps the classic one-at-a-time tool. `> 1` exposes a batch/fan-out tool — the leader passes a `tasks` array (up to `max_instances` independent jobs) that run concurrently and return one result per task. Per-agent; JSON-only for now (no web-UI field). |
 
@@ -146,7 +145,7 @@ Rules enforced at resolution time:
 
 - A squad named `default` is always present. When `squads:` is missing
   or contains only non-default entries, the resolver synthesises a
-  `default` from the enabled agents (everything except `curator`).
+  `default` from the enabled agents.
 - `leader` and every `members[i]` must reference an enabled agent.
 - A non-`"none"` `leader` must reference an agent marked `leader: true`.
 - A `leader` of `"none"` (or empty) makes the squad **leaderless** and
@@ -155,8 +154,6 @@ Rules enforced at resolution time:
   limited to exactly what it declares (plus the always-on mailbox and
   `ask_user`). This is the shape used by the `helper` squad and the Omnis
   router. Squads with two or more members need a real leader.
-- `curator` cannot be a squad member — it stays a single process-wide
-  hook listening across all squads.
 - Squad names are case-insensitive and must be unique within the file.
 
 The web UI exposes a **Squads** sub-tab in Settings → Agent (leader
@@ -269,26 +266,8 @@ var name, the env var value is used.
 - `--config` selects a runtime JSON file (default: resolved from the search chain — `.agents/agents.json`, then `$HOME/.omnis/agents.json`).
 - `--provider`, `--model`, `--base-url`, and `--api-key` override
   the leader agent model selection globally.
-- `--curator-enabled` (`true` or `false`) overrides the `curator`
-  agent's `enabled` value.
 - `OMNIS_PROVIDER`, `OMNIS_MODEL`, `OMNIS_BASE_URL`, and
   `OMNIS_API_KEY` override the leader agent model selection.
-- `OMNIS_CURATOR_ENABLED` overrides the `curator` agent's `enabled`
-  value.
-- `OMNIS_CURATOR_MIN_TURNS` — minimum number of model responses before
-  non-forced curation is considered (default: `3`). Sessions shorter
-  than this are skipped automatically.
-- `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` — minimum total sub-agent
-  invocations required when no explicit decision was recorded (default:
-  `2`). Together with `MIN_TURNS`, this forms the pre-flight gate that
-  avoids spinning up the curator LLM for trivial sessions.
-- `OMNIS_CURATOR_IDLE_TIMEOUT` — duration (e.g. `30m`, `2h`) after
-  which an idle Web UI session automatically triggers curator evaluation.
-  `0` or unset disables the idle trigger (default: disabled). The Web UI
-  never fires `EventSessionEnd`, so this is the primary auto-curation
-  path for server deployments. After firing, the session is marked
-  **Harvested** and skipped by all subsequent scans until the user sends
-  a new message — no repeated evaluations of long-idle sessions.
 
 ## `permissions.json`
 
@@ -719,14 +698,12 @@ omnis [flags] [<launcher-command> [launcher-args]]
 | Flag                | Default  | Effect                                                                                  |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `-s`, `--skills DIR`| `skills` | Directory scanned at startup for `<name>/SKILL.md` playbooks (see [skills.md](skills.md)). Pass an alternative folder to retarget the agent without touching the default `skills/` tree. |
-| `--softskills DIR`  | `softskills` | Directory where curator-generated soft-skills are loaded and stored. |
 | `--name NAME`       | `omnis` | Application name used by the runner/UI. |
 | `--config FILE`     | resolved from `.agents/agents.json` or `$HOME/.omnis/agents.json` | Runtime JSON config file path. |
 | `--provider NAME`   | from agents.json/env/defaults | Global model provider override. |
 | `--model NAME`      | from agents.json/env/defaults | Global model id override. |
 | `--base-url URL`    | from agents.json/env/defaults | Global model base URL override. |
 | `--api-key VALUE`   | from agents.json/env/defaults | Global model API key override. |
-| `--curator-enabled BOOL` | from agents.json/env/defaults | Enable/disable the auto-curator hook (`true`/`false`). |
 | `-d`, `--debug`     | _off_ | Write full conversation/event payloads to the run's event log instead of partial event summaries. Debug logs can contain prompts, tool outputs, conversation history and secrets already present in context. |
 | `--tui`             | _off_    | Launch the built-in [tview](https://github.com/rivo/tview) chat UI (`internal/tui`) instead of the ADK launcher. The launcher subcommand, if any, is ignored. |
 
@@ -769,10 +746,6 @@ so every model and tool invocation appears live.
 | `OMNIS_MODEL`      | `core/llm`            | Override the per-provider default model id       |
 | `OMNIS_BASE_URL`   | `core/llm`            | Override the model API base URL                  |
 | `OMNIS_API_KEY`    | `core/llm`            | Override the model API key                       |
-| `OMNIS_CURATOR_ENABLED` | `agent`         | Override `features.curator_enabled` (`true`/`false`) |
-| `OMNIS_CURATOR_MIN_TURNS` | `agent`     | Minimum model-response count before non-forced curation (default: `3`) |
-| `OMNIS_CURATOR_MIN_SUB_AGENT_CALLS` | `agent` | Minimum sub-agent calls required when no decision recorded (default: `2`) |
-| `OMNIS_CURATOR_IDLE_TIMEOUT` | `server` | Idle period after which the Web UI auto-triggers curator (e.g. `30m`; `0` = disabled); session is marked Harvested after firing |
 | `GOOGLE_API_KEY`     | gemini provider       | Auth                                             |
 | `GEMINI_API_KEY`     | gemini provider       | Auth (alias for `GOOGLE_API_KEY`)                |
 | `ANTHROPIC_API_KEY`  | anthropic provider    | Auth                                             |

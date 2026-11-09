@@ -22,7 +22,6 @@ distributable .deb / .rpm / .zip artifacts produced by `make package`.
     registry/agents/           built-in agent definitions (read-only)
     registry/skills/           bundled skill playbooks (read-only)
 /usr/share/omnis/web/           static UI assets served by omnis-server
-/var/lib/omnis/softskills/      curator-managed soft-skill library (mutable)
 /etc/profile.d/omnis.sh         exports OMNIS_WEB_DIR (deliberately NOT
                                  OMNIS_CONFIG_PATH — see the script's own
                                  comment; /etc/omnis is already the config

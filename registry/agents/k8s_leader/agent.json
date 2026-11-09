@@ -13,7 +13,6 @@
     "k8s-modification",
     "k8s-cleanup"
   ],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -25,7 +24,6 @@
     "revert",
     "mime",
     "mcp",
-    "softskills",
     "calc",
     "planning",
     "worktree",

@@ -14,10 +14,11 @@ func TestLoadedSkillFromResponse(t *testing.T) {
 		s.Agent != "k8s_leader" || s.DependencyStatus != "kubectl missing" {
 		t.Fatalf("got %+v ok=%v", s, ok)
 	}
-	if s, ok := loadedSkillFromResponse("leader", "load_softskill", resp); !ok || s.Kind != "softskill" {
-		t.Fatalf("softskill: %+v ok=%v", s, ok)
-	}
 	// Other tools and failed loads (no instructions) are not recorded.
+	// load_softskill is gone with soft-skills; a stray call is not a skill load.
+	if _, ok := loadedSkillFromResponse("leader", "load_softskill", resp); ok {
+		t.Error("load_softskill recorded")
+	}
 	if _, ok := loadedSkillFromResponse("leader", "list_skills", resp); ok {
 		t.Error("list_skills recorded")
 	}
@@ -28,18 +29,18 @@ func TestLoadedSkillFromResponse(t *testing.T) {
 
 func TestSystemSkillIsNotRecorded(t *testing.T) {
 	resp := map[string]any{
-		"skill_name":   "wrap-session",
-		"instructions": "# Wrap Session",
+		"skill_name":   "system-plumbing",
+		"instructions": "# System Plumbing",
 		"frontmatter": map[string]any{
-			"name":     "wrap-session",
+			"name":     "system-plumbing",
 			"metadata": map[string]any{"system": "true"},
 		},
 	}
-	if _, ok := loadedSkillFromResponse("leader", "load_softskill", resp); ok {
+	if _, ok := loadedSkillFromResponse("leader", "load_skill", resp); ok {
 		t.Fatal("a system skill must not be recorded for the skills dock")
 	}
 	resp["frontmatter"].(map[string]any)["metadata"] = map[string]any{"system": "false"}
-	if _, ok := loadedSkillFromResponse("leader", "load_softskill", resp); !ok {
+	if _, ok := loadedSkillFromResponse("leader", "load_skill", resp); !ok {
 		t.Fatal("system: false must still be recorded")
 	}
 }

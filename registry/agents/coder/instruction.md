@@ -151,7 +151,7 @@ For each change:
   `scope` narrows it to what you changed so you don't run the whole suite.
 - **Git worktrees** — for risky or large refactors, isolate the work in a
   worktree so the main checkout stays clean.
-- **Skills / soft-skills** — load a relevant skill when the task matches one.
+- **Skills** — load a relevant skill when the task matches one.
 
 If a request is ambiguous in a way that changes what you'd build, ask a focused
 question before doing large work. Otherwise, proceed.

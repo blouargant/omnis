@@ -65,14 +65,11 @@ func RootSessionFromContext(ctx context.Context) string {
 //   - EventRunStart / EventRunEnd fire on every Runner.Run() invocation
 //     (i.e. every user turn). They are emitted from the plugin's
 //     BeforeRun / AfterRun callbacks.
-//   - EventCurateNow is a manual trigger for immediate soft-skill
-//     curation during an active session (for example, TUI /learn-now).
 const (
 	EventSessionStart       = "session_start"
 	EventSessionEnd         = "session_end"
 	EventRunStart           = "run_start"
 	EventRunEnd             = "run_end"
-	EventCurateNow          = "curate_now"
 	EventBeforeModel        = "before_model"
 	EventAfterModel         = "after_model"
 	EventBeforeTool         = "before_tool"
@@ -89,18 +86,11 @@ const (
 	// EventAskUserCancel is fired when a question is resolved (answered,
 	// cancelled, or timed out). Payload keys: question_id, session_id.
 	EventAskUserCancel = "ask_user_cancel"
-	// EventCuratorStart is fired when the curator agent begins processing a
-	// session. Payload keys: user_id, session_id.
-	EventCuratorStart = "curator_start"
-	// EventCuratorEnd is fired when the curator finishes (or is skipped).
-	// Payload keys: user_id, session_id, summary (string), skipped (bool),
-	//               reason (string, when skipped), error (string, on failure).
-	EventCuratorEnd = "curator_end"
 	// EventSubAgentStart / EventSubAgentEnd are synthesised by
 	// agent/subagent_event.go: when a leader calls a sub-agent (via the
 	// agenttool wrapper) the surrounding before_tool / after_tool events
-	// are re-emitted under these names so per-invocation reflection hooks
-	// can subscribe to "a sub-agent invocation finished" without filtering
+	// are re-emitted under these names so listeners (the SubagentStop
+	// lifecycle hook) can subscribe to "a sub-agent invocation finished" without filtering
 	// every after_tool payload themselves.
 	//
 	// Payload keys (start): user_id, session_id, agent (the sub-agent name),
@@ -110,24 +100,11 @@ const (
 	//                       tool call raised).
 	EventSubAgentStart = "subagent_start"
 	EventSubAgentEnd   = "subagent_end"
-	// EventSessionReflected is fired by the session reflection pipeline
-	// (load_recorder) immediately after EventSessionEnd, once the
-	// heuristic reflector has run and its tags have been recorded to
-	// _stats.json. It carries the data the LLM reflector + curator
-	// needs to layer on top.
-	//
-	// Payload keys: user_id, session_id, audit_path, state_log_path,
-	//               loaded_skills ([]string), heuristic_success (string),
-	//               heuristic_tags (map[string]string),
-	//               tool_errors ([]map[string]any with tool/agent/error/when),
-	//               last_user_messages ([]string).
-	EventSessionReflected = "session_reflected"
 	// EventSessionIndexNow is a lightweight, indexing-only trigger: it asks
-	// the precedents hook to upsert a session's StateLog (goal + decisions)
-	// into the cross-session precedent index without driving the heavier
-	// reflection/curation pipeline. The server emits it when a session goes
-	// idle past the index-stale threshold or is archived, so Web UI sessions
-	// (which never fire EventSessionEnd) still feed semantic recall.
+	// the session-search index hook to (re)index a session's conversation.
+	// The server emits it when a session goes idle past the index-stale
+	// threshold or is archived, so Web UI sessions (which never fire
+	// EventSessionEnd) stay searchable.
 	//
 	// Payload keys: user_id, session_id (session_key optional — derived from
 	// the suffix when absent).
@@ -384,7 +361,7 @@ func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin
 			"session_id": s.ID(),
 			// ADK's InvocationID is stable across BeforeRun + AfterRun
 			// for a single Runner.Run call, so we use it as the run_id
-			// that Phase 6's subagent_hook keys its per-turn buffer on.
+			// that groups one turn's events.
 			"run_id": ctx.InvocationID(),
 		})
 		return nil, nil

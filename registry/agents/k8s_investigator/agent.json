@@ -14,7 +14,6 @@
     "k8s-log-investigation",
     "k8s-cleanup"
   ],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -26,7 +25,6 @@
     "revert",
     "mime",
     "mcp",
-    "softskills",
     "calc"
   ]
 }

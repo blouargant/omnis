@@ -370,17 +370,13 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Slash-command autocomplete: suggest matching commands when the
 	// user starts typing "/".
-	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/learn", "/learn-now", "/learn-now ", "/learn ", "/status", "/init", "/goal ", "/upload ", "/new"}
+	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/status", "/init", "/goal ", "/upload ", "/new"}
 	slashCommandsDisplay := []string{
 		"/help",
 		"/compress",
 		"/create-skill",
 		"/create-skill <name>",
 		"/update-skill <name>",
-		"/learn",
-		"/learn-now",
-		"/learn-now <reason>",
-		"/learn <reason>",
 		"/status",
 		"/init",
 		"/goal <condition>",
@@ -824,9 +820,6 @@ func Run(ctx context.Context, cfg Config) error {
 		})
 		cfg.Bus.On(events.EventRunEnd, func(_ string, _ map[string]any) {
 			appendTrace("[yellow]run end[-]")
-		})
-		cfg.Bus.On(events.EventCurateNow, func(_ string, _ map[string]any) {
-			appendTrace("[yellow]curate now[-]")
 		})
 		cfg.Bus.On(events.EventSessionStart, func(_ string, _ map[string]any) {
 			// Per-session counters live in tokenStore; the active session
@@ -1334,51 +1327,6 @@ func Run(ctx context.Context, cfg Config) error {
 				"session_id": cur.ID,
 			})
 			appendChat("[green]Context compression triggered.[-] It will run before the next model call.\n")
-		case "learn":
-			reason := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-			if reason == "" {
-				reason = "manual /learn request from TUI"
-			}
-			appendChat("\n[::b]assistant[-]\n")
-			cur := current.Load()
-			if cur == nil {
-				appendChat("[red]/learn failed:[-] no active session\n")
-				return
-			}
-			msg, err := toolkitagent.RequestCurateSession(cfg.UserID, cur.ID, reason)
-			if err != nil {
-				appendChat("[red]/learn failed:[-] %v\n", err)
-				return
-			}
-			appendChat("[green]%s[-]\n", msg)
-			appendChat("[gray]Tip:[-] curation runs on session end. Exit TUI with Ctrl-C when ready.\n")
-		case "learn-now":
-			reason := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-			if reason == "" {
-				reason = "manual /learn-now request from TUI"
-			}
-			appendChat("\n[::b]assistant[-]\n")
-			cur := current.Load()
-			if cur == nil {
-				appendChat("[red]/learn-now failed:[-] no active session\n")
-				return
-			}
-			msg, err := toolkitagent.RequestCurateSession(cfg.UserID, cur.ID, reason)
-			if err != nil {
-				appendChat("[red]/learn-now failed:[-] %v\n", err)
-				return
-			}
-			if cfg.Bus == nil {
-				appendChat("[green]%s[-]\n", msg)
-				appendChat("[yellow]Immediate curation unavailable:[-] event bus not configured.\n")
-				return
-			}
-			go cfg.Bus.Emit(events.EventCurateNow, map[string]any{
-				"user_id":    cfg.UserID,
-				"session_id": cur.ID,
-			})
-			appendChat("[green]%s[-]\n", msg)
-			appendChat("[green]Triggered curation now.[-] Check trace/logs for curator completion.\n")
 		case "status":
 			cur := current.Load()
 			appendChat("\n[::b]assistant[-]\n")
@@ -1390,13 +1338,11 @@ func Run(ctx context.Context, cfg Config) error {
 				appendChat("  event_bus_configured: [aqua]%t[-]\n", cfg.Bus != nil)
 				return
 			}
-			requested := toolkitagent.CurateSessionRequestedByIDs(cfg.UserID, cur.ID)
 			squad := cur.Squad
 			if squad == "" {
 				squad = toolkitagent.DefaultSquadName
 			}
 			appendChat("  session: [aqua]%s[-]  squad: [aqua]%s[-]\n", cur.ID, squad)
-			appendChat("  curation_requested: [aqua]%t[-]\n", requested)
 			appendChat("  event_bus_configured: [aqua]%t[-]\n", cfg.Bus != nil)
 		case "upload":
 			arg := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
@@ -1472,9 +1418,7 @@ func Run(ctx context.Context, cfg Config) error {
 			appendChat("  [aqua]/compress[-]              Trigger context compression before the next model call.\n")
 			appendChat("  [aqua]/create-skill <name>[-]   Create a new skill playbook with agent guidance.\n")
 			appendChat("  [aqua]/update-skill <name>[-]   Update an existing skill playbook with agent guidance.\n")
-			appendChat("  [aqua]/learn [reason][-]        Mark this session for soft-skill curation.\n")
-			appendChat("  [aqua]/learn-now [reason][-]  Mark and trigger soft-skill curation immediately.\n")
-			appendChat("  [aqua]/status[-]              Show current session and curation status.\n")
+			appendChat("  [aqua]/status[-]              Show current session status.\n")
 			appendChat("  [aqua]/init[-]                Analyze the repo and write a starter AGENT.md.\n")
 			appendChat("  [aqua]/loop <spec> <prompt>[-]  Re-run a prompt in this session on a timer (/loop stop, /loop list).\n")
 			appendChat("  [aqua]/schedule <spec> <prompt>[-]  Durable routine (/schedule list|remove <id>|run <id>).\n")
@@ -2019,8 +1963,8 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Emit real session lifecycle events around the TUI run. These are
 	// distinct from the per-turn EventRunStart/EventRunEnd: subscribers
-	// like the soft-skills curator should fire ONCE here, not on every
-	// user turn.
+	// like the SessionStart/SessionEnd lifecycle hooks should fire ONCE
+	// here, not on every user turn.
 	//
 	// EventSessionStart is fired from a goroutine so its handlers (which
 	// call appendTrace → QueueUpdateDraw) execute once app.Run() is

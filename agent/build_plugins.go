@@ -153,8 +153,8 @@ func buildPlugins(
 		AuditPathFunc: func(userID, sessionID string) string {
 			return filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_memory_%s.md", suffix(userID, sessionID)))
 		},
-		// Per-session State Log path — consumed by the curator agent
-		// after EventSessionEnd to mine successful procedures.
+		// Per-session State Log path — the compressor's running digest
+		// of goals, decisions and open issues.
 		StateLogPathFunc: func(userID, sessionID string) string {
 			return filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_statelog_%s.json", suffix(userID, sessionID)))
 		},

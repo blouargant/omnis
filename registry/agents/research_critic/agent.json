@@ -8,14 +8,12 @@
   "model_ref": "high",
   "name": "research_critic",
   "skills": [],
-  "softskills_dir": "",
   "subagents": [
     "web_fetcher"
   ],
   "tools": [
     "Skill",
-    "calc",
-    "softskills"
+    "calc"
   ],
   "max_tool_calls_per_call": 20
 }

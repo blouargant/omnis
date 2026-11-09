@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,13 +67,6 @@ func TestValidateSubAgentGraphRejectsBadEdges(t *testing.T) {
 				{Name: "b", Enabled: false},
 			},
 			want: "disabled agent",
-		},
-		"the curator is not delegable": {
-			agents: []RuntimeAgentConfig{
-				agentCfg("a", "curator"),
-				agentCfg("curator"),
-			},
-			want: "curator",
 		},
 		"duplicate edge": {
 			agents: []RuntimeAgentConfig{
@@ -229,4 +223,29 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// An agent overlay may still name the removed curator in its team: the edge is
+// dropped, never fatal.
+func TestSubAgentsNamingRemovedAgentAreDropped(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{Name: "investigator"},
+		{Name: "researcher", SubAgents: []string{"curator", "investigator"}},
+	})
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{"agents": ["leader", "investigator", "researcher"]}`))
+
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true})
+	if err != nil {
+		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
+	}
+	r, ok := runtime.AgentConfig("researcher")
+	if !ok {
+		t.Fatal("researcher missing")
+	}
+	if !equalStringSlice(r.SubAgents, []string{"investigator"}) {
+		t.Fatalf("researcher.SubAgents = %v, want [investigator]", r.SubAgents)
+	}
 }

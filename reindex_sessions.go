@@ -23,7 +23,6 @@ import (
 
 func runReindexSessions(ctx context.Context, opts options, _ []string) error {
 	runtime, err := agent.ResolveRuntimeSettings(agent.Options{
-		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",

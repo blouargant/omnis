@@ -26,7 +26,7 @@ func TestAttestGroupMountsOnlyWhereDeclared(t *testing.T) {
 			context.Background(),
 			RuntimeAgentConfig{Name: "probe", Tools: keys},
 			RuntimeSettings{},
-			nil, nil, nil, nil, nil, nil, nil, nil, store, false, nil,
+			nil, nil, nil, nil, nil, nil, nil, store,
 		)
 		for _, tl := range tools {
 			if tl.Name() == "record_validation" {

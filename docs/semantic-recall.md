@@ -1,16 +1,13 @@
 # Semantic Recall (embedder + vector indexes)
 
-Omnis turns the traces a session leaves behind — its goal, its decisions, the
-soft-skills it loaded — into **semantically searchable memory** for future
-sessions. This document covers the embedder that powers it, the shared vector
-store, the five recall features built on top, and how cross-session **precedents**
-are indexed end to end.
+Omnis can search the repository, the configured registries, its own
+documentation and your past chats **by meaning** rather than by literal text.
+This document covers the embedder that powers it, the shared vector store, and
+the four recall features built on top.
 
-For the upstream artefacts these indexes consume, see
-[context-management.md — State Log](context-management.md) (how the
-goal/decisions digest is produced during a session) and
-[skills.md — Post-session reflection](skills.md#post-session-reflection-pipeline)
-(how soft-skills are distilled and tagged).
+(What the agent learns from the user is not here: it is **collection memory**,
+plain Markdown files injected into every turn — see
+[Sessions → Collection memory](../web/docs/03-sessions.md#collection-memory).)
 
 ## The embedder (`core/embed`)
 
@@ -40,7 +37,8 @@ the Settings save banner detects this via `embedderFingerprint` and offers
 
 > When no embedder resolves, none of the recall tools are mounted and every path
 > falls back to its glob/grep equivalent — behaviour is byte-identical to a build
-> without these features.
+> without these features. (Session search is the exception: its tools are always
+> mounted, and without an embedder they scan the conversation files directly.)
 
 Every recall feature is additive and individually gated: a `nil` embedder makes
 `semindex.Open` return a usable but inert store, and `Upsert`/`Query` return
@@ -65,18 +63,17 @@ Every recall feature is additive and individually gated: a `nil` embedder makes
 All indexes live under `paths.IndexDir()` (`$OMNIS_HOME/index/`), alongside the
 `embed_cache/` content-hash cache.
 
-## The five recall features
+## The four recall features
 
 | Feature | Package | Tools | Mounted on | Index file |
 |---|---|---|---|---|
-| Soft-skill recall | [`internal/softskills`](../internal/softskills/recall.go) | `recall_softskills` | leader | `index/softskills.tvim` |
-| Precedent recall | [`internal/precedents`](../internal/precedents/) | `recall_precedents` | reflector + curator | `index/precedents.tvim` |
 | Code search | [`internal/codeindex`](../internal/codeindex/) | `search_code` / `reindex_code` | investigator | `index/<repo-hash>/codebase.tvim` |
 | Registry search | [`internal/regindex`](../internal/regindex/) | `search_registries` / `reindex_registries` | helper | `index/registries.tvim` |
 | Documentation search | [`internal/docindex`](../internal/docindex/) | `search_docs` / `reindex_docs` (+ glob `list_docs` / `read_doc` / `grep_docs`) | helper | `index/docs.tvim` |
+| Session search | [`internal/sessindex`](../internal/sessindex/) | `search_sessions` / `read_session` / `list_sessions` / `report_sessions` | session_search (nested under helper) | `index/sessions.tvim` |
 
-The index handles are process-wide on `Infrastructure` (`Precedents()`,
-`CodeIndex()`, `RegistryIndex()`, `DocIndex()` in [`agent/embedder.go`](../agent/embedder.go)),
+The index handles are process-wide on `Infrastructure` (`CodeIndex()`,
+`RegistryIndex()`, `DocIndex()`, `SessionIndex()` in [`agent/embedder.go`](../agent/embedder.go)),
 built lazily and surviving hot-reload.
 
 ### Documentation search (`internal/docindex`)
@@ -98,80 +95,20 @@ embedder changed, while being a no-op otherwise. Rebuild manually with
 is absent and the always-available `list_docs` / `read_doc` / `grep_docs` glob
 tools are the fallback.
 
-## Precedents end to end (`internal/precedents`)
+### Session search (`internal/sessindex`)
 
-The precedent index records each finished session's goal and decisions so later
-sessions can ask "how was a comparable problem solved before?".
-
-### What gets indexed
-
-One `semindex.Item` per goal and per decision in the session's
-[`StateLog`](context-management.md):
-
-- the goal → `kind="goal"`, index 0;
-- each `Decisions[i]` → `kind="decision"`, index `i`.
-
-Each item's metadata is `{session_key, kind, text, timestamp}`. Item IDs are an
-FNV-1a hash of `(sessionKey, kind, index)` — **deterministic**, so re-indexing a
-session overwrites its own entries rather than duplicating them. This is what
-makes the backfill idempotent.
-
-### When indexing happens
-
-At session end the reflection pipeline emits `EventSessionReflected`
-(see [`agent/load_recorder.go`](../agent/load_recorder.go)).
-[`agent/precedents_hook.go`](../agent/precedents_hook.go) subscribes to it,
-reads `$OMNIS_HOME/logs/agent_statelog_<key>.json`, and calls
-`store.IndexStateLog(key, sl, ts)` (timestamp = the statelog's mtime). The hook
-is registered per generation in [`agent/instance.go`](../agent/instance.go) and
-detached on hot-reload; it is wired only when an embedder resolves.
-
-### Recall
-
-`Store.Tool()` returns the `recall_precedents` tool (`query` required, `k`
-optional, default 5). It is mounted on the **reflector** and **curator** agents —
-the post-session analysts — and passed to them as `precedentsTool` in
-`registerCuratorHook`. Both treat results as *weak prior evidence*: the prompt
-hint instructs the model never to invent precedents the tool did not return, and
-the hard create/update/delete gates come from the reflector's `Outcome`, not from
-precedents (see [skills.md — Curator gating rules](skills.md#curator-gating-rules)).
-
-### Backfill
-
-[`reindex_precedents.go`](../reindex_precedents.go) (`omnis reindex-precedents`)
-globs every `agent_statelog_*.json`, calls `store.Add` for each, then `Save`
-once. Because IDs are deterministic it converges to the same index on repeated
-runs; it errors out cleanly when no embedder is configured.
-
-## Leader vs. sub-agents
-
-Sub-agents run inside agenttool's private runner, so the shared bus never sees
-their internal model turns — to the leader a sub-agent call is one tool call.
-The two halves of the learning loop draw the line accordingly:
-
-| Mechanism | Leader | Sub-agents |
-|---|---|---|
-| StateLog (goal/decisions) | yes — extracted per turn | none of their own; surfaces only via the leader's tool-call output |
-| Precedents index / `recall_precedents` | yes | no |
-| Soft-skill directory + glob `list/load_softskill` | `softskills/<skill>/` | `softskills/<agent>/<skill>/` |
-| Semantic `recall_softskills` | yes | no — glob-only loader (nil embedder passed) |
-| Per-invocation helpful/harmful tagging | n/a | yes — Phase 6, see [skills.md](skills.md#per-sub-agent-micro-reflection) |
-| Curator create/update/delete | yes (root) | yes (per-agent dirs) |
-
-**StateLog and precedents are leader-level** — they capture the session goal and
-the leader's decisions and treat each sub-agent invocation as a black box. The
-**soft-skill loop reaches inside** that boundary: each sub-agent accumulates and
-is graded on its own skills, and the per-agent soft-skill toolset is built with a
-`nil` embedder so sub-agents use the glob loader while the leader gets semantic
-recall.
+Session search finds a past chat, archived ones included, from the web UI's
+new-tab search box or from a chat (through the Helper's `session_search`
+sub-agent). It indexes one chunk per turn — the user's text and the assistant's
+text only, never tool calls — and folds hits by session. Sessions are indexed by
+the server's idle indexer (`EventSessionIndexNow`, fired once a session has been
+idle for 5 minutes and when it is archived); `omnis reindex-sessions` builds the
+whole index. With no embedder, or while the index is still cold, it scans the
+conversation files directly.
 
 ## Further reading
 
 - [`core/embed/embed.go`](../core/embed/embed.go) — embedder interface + providers
 - [`internal/semindex/semindex.go`](../internal/semindex/semindex.go) — shared vector store
-- [`internal/precedents/precedents.go`](../internal/precedents/precedents.go) — precedent index + `recall_precedents`
 - [`agent/embedder.go`](../agent/embedder.go) — `ResolveEmbedder` + process-wide index handles
-- [`agent/precedents_hook.go`](../agent/precedents_hook.go) — session-end indexing hook
-- [`reindex_precedents.go`](../reindex_precedents.go) — backfill command
-- [context-management.md](context-management.md) — the StateLog these indexes consume
-- [skills.md](skills.md) — soft-skills, reflection, and curator gating
+- [`server/session_search.go`](../server/session_search.go) — session-search routes and indexing hook

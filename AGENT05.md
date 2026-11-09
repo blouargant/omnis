@@ -86,9 +86,7 @@ The flags defined in the current `main.go` are:
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--softskills DIR` | _(empty)_ | Directory of curator-generated soft-skills. |
 | `--config PATH` | _(empty)_ — falls back to `OMNIS_CONFIG_PATH` env var, then config search chain | Runtime JSON config path. |
-| `--curator-enabled BOOL` | _(empty)_ — inherits from `OMNIS_CURATOR_ENABLED` env var | Enable/disable the auto-curator hook. |
 | `--name NAME` | _(empty)_ | Application name. |
 | `-d`, `--debug` | `false` | Write full conversation/event payloads to the event log. |
 
@@ -100,8 +98,7 @@ Provider, model, and API key are set via environment variables (see the env vars
 
 ```
 omnis/
-├── main.go                   # Root binary entry: CLI / TUI / curate dispatch. The only wiring file.
-├── curate.go                 # `omnis curate` one-shot subcommand
+├── main.go                   # Root binary entry: CLI / TUI dispatch. The only wiring file.
 ├── server/                   # Separate binary: HTTP + SSE API + web UI server
 ├── web/                      # Vanilla-JS chat UI assets served by server/
 │   └── docs/                 # In-app documentation (Markdown, served to the web UI)
@@ -124,14 +121,13 @@ omnis/
 │   ├── compress/             # Context compression plugin
 │   ├── cache/                # Prompt-cache stats plugin
 │   ├── skills/               # Skill loader (skilltoolset wrapper)
-│   ├── softskills/           # Curator-distilled procedures + reflectors
+│   ├── collmem/              # Per-collection memory (one Markdown file per fact)
 │   ├── mcp/                  # MCP config loader
 │   ├── a2a/                  # A2A protocol client + tool wiring
 │   └── paths/                # Centralised filesystem location resolution
 ├── registry/
 │   ├── agents/<name>/        # Per-agent definitions (agent.json + instruction.md)
 │   └── skills/<name>/        # Skill playbooks (SKILL.md + optional assets/)
-├── softskills/               # Curator output (incl. _stats.json sidecar + wrap-session built-in)
 ├── config/                   # Project-local config: agents.json, permissions.json, mcp_config.json, server.yaml, models.json
 ├── .agents/                  # Development-agent bootstrap skills (project-overview, build-and-test, coding-conventions, …)
 │   └── skills/               # Skills loaded by *the dev agent working on this repo*
@@ -172,10 +168,10 @@ Skill and agent registries live one level deeper inside each layer:
 
 All mutable runtime state is written under `$HOME/.omnis` (default) or `$OMNIS_HOME`:
 
-- `$OMNIS_HOME/softskills/` — curator-distilled soft-skills
+- `$OMNIS_HOME/collections/` and `$OMNIS_HOME/general-memory/` — collection instructions and memory
 - `$OMNIS_HOME/registry/skills/` — skills installed via the web UI
 - `$OMNIS_HOME/registry/agents/` — agents installed via the web UI
-- `$OMNIS_HOME/logs/` — session event logs and feedback sidecars
+- `$OMNIS_HOME/logs/` — session event logs, conversations and per-session state files
 
 ### Key environment variables
 
@@ -193,7 +189,6 @@ All mutable runtime state is written under `$HOME/.omnis` (default) or `$OMNIS_H
 | `OMNIS_SERVER_TOKEN` | Bearer token required by the HTTP server |
 | `OMNIS_SERVER_ADDR` | Server listen address (default: `:8080`) |
 | `OMNIS_DEBUG` | Log full conversation/event payloads |
-| `OMNIS_CURATOR_ENABLED` | `true` / `false` — enable auto-curator hook |
 | `REDIS_URL` | Redis backend for mailboxes (optional; in-memory used when unset) |
 
 See `web/docs/16-env-vars.md` for the complete list.
@@ -298,7 +293,7 @@ Copy `.env.example` to `.env` and fill in your keys. `make env-tests` sources `.
 | `docs/providers.md` | Configuring Gemini / Anthropic / OpenAI / compat |
 | `docs/extending.md` | Adding new tools, sub-agents, squads, and plugins |
 | `docs/context-management.md` | Context compression + session decision log |
-| `docs/semantic-recall.md` | Embedder, vector indexes, and cross-session precedents |
+| `docs/semantic-recall.md` | Embedder, vector indexes, and semantic search (code, registries, docs, past sessions) |
 | `docs/examples-catalog.md` | The 30 single-component demos |
 | `docs/notebooks.md` | Jupyter notebook examples and learning path |
 | `web/docs/` | In-app documentation served by the web UI |

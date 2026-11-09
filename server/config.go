@@ -818,7 +818,6 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							"recommended_model":       recommendedModel,
 							"tools":                   a.Tools,
 							"skills":                  a.Skills,
-							"softskills_dir":          a.SoftSkillsDir,
 							"allow_file_attachments":  a.AllowFileAttachments,
 							"mcp_config_path":         a.MCPConfigPath,
 							"mcp_servers":             a.MCPServers,
@@ -1042,7 +1041,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 							switch k {
 							case "name", "description", "enabled", "leader", "builtin",
 								"model_ref", "provider", "base_url", "api_key",
-								"tools", "skills", "softskills_dir", "allow_file_attachments",
+								"tools", "skills", "allow_file_attachments",
 								"mcp_config_path", "mcp_servers", "permissions_config_path",
 								"a2a_agents", "max_instances", "resumable_sessions",
 								// A key missing from this list is DROPPED on save. `subagents`

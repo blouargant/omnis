@@ -105,82 +105,10 @@ without your approval.
 > The same `requires` mechanism is available for **MCP servers** — see
 > [MCP Servers](12-mcp.md).
 
-## Skills vs. soft-skills
+## Skills vs. memory
 
-Both are markdown playbooks. The difference is provenance:
-
-- **Skills** are **authored**: a human writes the body, commits it.
-- **Soft-skills** are **distilled**: the curator agent extracts procedures
-  from past session transcripts and writes them to
-  `$OMNIS_HOME/softskills/`. The leader loads them via the analogous
-  `list_softskills` / `load_softskill` tools.
-
-Soft-skills make the agent better at recurring tasks over time without
-human authoring. They are also recalled semantically — see
-[Learning & Recall](20-learning-and-recall.md) for the StateLog, the
-cross-session precedents index, and the embedder that powers recall.
-
-## Post-session reflection
-
-The curator no longer judges sessions alone. At every session end omnis
-runs a two-stage reflection pipeline that informs the curator's
-decisions:
-
-1. **Heuristic reflector** (always on, no LLM) scans the StateLog
-   (open issues, decisions, tools), the last few user messages, tool
-   errors, and any explicit wrap-up feedback to produce a verdict
-   (`positive` / `negative` / `ambiguous` / `unknown`) and one
-   `helpful` / `harmful` / `neutral` tag per loaded soft-skill.
-2. **LLM reflector** (the `reflector` agent — optional) refines the
-   heuristic with reasons and extracts a single `key_insight` worth
-   distilling. The LLM wins on overlap; the heuristic fills the gaps.
-
-Tag counts live in `$OMNIS_HOME/softskills/_stats.json` (keyed by
-`<agent>/<name>` for sub-agent skills, bare `<name>` for leader
-skills). The curator consults the counts plus the reflector's reasons
-to apply concrete gating rules:
-
-| Action | When |
-|---|---|
-| **create** | `success == positive` AND `key_insight` is non-empty AND no near-duplicate exists |
-| **update** | The `key_insight` cleanly extends an existing skill |
-| **delete** | `(stats.harmful >= 3 && stats.harmful > stats.helpful)` OR the reflector tagged the skill harmful with a reason mentioning "wrong assumptions" or "superseded" |
-| **skip** | Default — none of the above is satisfied |
-
-### Per-sub-agent micro-reflection
-
-The same pipeline runs at `EventRunEnd` (every user turn, not just
-session end) for the sub-agents that the leader called during the
-turn. For each invocation:
-
-- If the leader retried the sub-agent later in the same turn → the
-  first call's loaded skills are tagged `harmful`.
-- If the sub-agent's reply started with `Error:` or was effectively
-  empty → tagged `harmful`.
-- If the leader's text cited the sub-agent approvingly ("per
-  investigator", "investigator reported …") → tagged `helpful`.
-- Otherwise → `neutral`.
-
-This is a lexical scan; over-counting from false-positive citations is
-the trade-off vs. running a dedicated micro-classifier per turn.
-
-### Explicit wrap-up feedback
-
-A built-in `wrap-session` soft-skill ships in the default
-`softskills/` library. On interactive surfaces (TUI / Web UI) the
-leader loads it once per session when the user's work is complete; it
-asks one optional feedback question ("did my answer give you what you needed? Tell me what was wrong, missing or could be better — or just \"all good\"")
-(shown in the web UI as a small pulsing "?" in the composer) and persists the answer
-via the `record_session_feedback` tool to
-`logs/agent_feedback_<session-suffix>.json`. Both reflectors treat the
-answer as the dominant verdict signal.
-
-The built-in soft-skills are installed with omnis under the system
-config directory (`/etc/omnis/softskills/` on Linux packages) and copied
-into your `$OMNIS_HOME/softskills/` the first time omnis starts. Your
-copy is never overwritten: if you edit it, it stays edited; if you leave
-it untouched, a package update refreshes it.
-
-Delete `$OMNIS_HOME/softskills/wrap-session/` to disable the wrap-up
-question. Omnis remembers it seeded that soft-skill and will not put it
-back.
+Skills are **authored** playbooks: a human writes the body and installs it.
+What the agent learns from you while you work — corrections, preferences,
+decisions — goes into the collection's **memory** instead, saved by the agent
+in the turn where it learns it. See
+[Memory & Recall](20-learning-and-recall.md).

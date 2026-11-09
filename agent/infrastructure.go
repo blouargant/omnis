@@ -122,10 +122,6 @@ type Infrastructure struct {
 	// reloads — the client is expensive and the indexes it feeds live on disk.
 	embed embedderCache
 
-	// precedents memoises the process-wide cross-session precedent index (see
-	// Precedents). Backed by the same embedder; on-disk so it survives reloads.
-	precedents precedentsCache
-
 	// codeIndex memoises the process-wide project code-search index (see
 	// CodeIndex). Keyed by the repo root; backed by the same embedder.
 	codeIndex codeIndexCache

@@ -7,7 +7,6 @@
   "model_ref": "hosted",
   "name": "web_fetcher",
   "skills": [],
-  "softskills_dir": "",
   "max_instances": 10,
   "tools": [
     "serper",

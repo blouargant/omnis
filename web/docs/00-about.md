@@ -40,9 +40,9 @@ agents, configuration, and session store.
   key moments (before/after a tool, on prompt submit, on session end).
 - **Run itself.** Set a recurring prompt with `/loop`, a durable cron routine
   with `/schedule`, or a self-driving completion goal with `/goal`.
-- **Remember and learn.** Project memory (`AGENT.md`) is injected on every turn,
-  and a post-session curator distils reusable soft-skills, with semantic recall
-  across past sessions, your codebase, and the docs.
+- **Remember and learn.** Project memory (`AGENT.md`) and each collection's
+  memory are injected on every turn — the agent saves what you teach it as you
+  go — with semantic recall across past sessions, your codebase, and the docs.
 - **Edit its own configuration.** Change models, agents, permissions, themes,
   and more from the Settings panel — or just ask the in-app assistant to do it.
 

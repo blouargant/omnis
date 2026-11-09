@@ -139,7 +139,6 @@ func TestStateDirsUnderHome(t *testing.T) {
 		{LogsDir(), filepath.Join(home, "logs")},
 		{UploadsDir(), filepath.Join(home, "logs", "uploads")},
 		{MailboxesDir(), filepath.Join(home, "mailboxes")},
-		{SoftSkillsDir(), filepath.Join(home, "softskills")},
 		{ConfigWriteDir(), home},
 	}
 	for _, c := range cases {

@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	adkagent "google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/plugin"
@@ -23,7 +22,6 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/llm"
 	fstools "github.com/blouargant/omnis/core/tools"
@@ -42,7 +40,6 @@ import (
 	"github.com/blouargant/omnis/internal/sessindex"
 	"github.com/blouargant/omnis/internal/settings"
 	"github.com/blouargant/omnis/internal/skills"
-	"github.com/blouargant/omnis/internal/softskills"
 	"github.com/blouargant/omnis/internal/testrun"
 	"github.com/blouargant/omnis/internal/usercommands"
 )
@@ -79,10 +76,6 @@ type AgentResult struct {
 	// deliver answers. Call AskUserRegistry.SetNotify / SetCancel to attach
 	// a surface after agent construction.
 	AskUserRegistry *askuser.Registry
-	// CuratorIdleTimeout is the idle-session duration after which the server
-	// should trigger an automatic curation run. Zero means disabled.
-	CuratorIdleTimeout time.Duration
-
 	// RegisterSession registers a session's leader mailbox in the cross-session
 	// registry under displayName. Call this when a new session is created so
 	// other sessions can address it by name.
@@ -108,13 +101,6 @@ type AgentResult struct {
 
 // Options allows customizing the agent creation.
 type Options struct {
-	// SoftSkillsDir is the directory to load curator-generated soft-skills
-	// from (default: "softskills"). Created if missing.
-	SoftSkillsDir string
-	// DisableAutoCurate disables the EventSessionEnd hook that fires the
-	// curator agent in the background. The manual `curate` CLI subcommand
-	// remains available regardless.
-	DisableAutoCurate bool
 	// Repo is the repository root for worktree tools (default: current working directory).
 	Repo string
 	// MCPSConfigPath is the path to the MCP config file (default: resolved from .agents/mcp_config.json or $HOME/.omnis/mcp_config.json).
@@ -127,8 +113,6 @@ type Options struct {
 	ConfigPath string
 	// ConfigPathStrict returns an error when ConfigPath does not exist.
 	ConfigPathStrict bool
-	// CuratorEnabled explicitly enables/disables curator auto-run.
-	CuratorEnabled *bool
 	// DebugLogging enables full event payload logging, including model requests.
 	DebugLogging bool
 	// BackgroundMailboxDelivery declares that the host drains the leader's
@@ -192,8 +176,6 @@ func defaultAgentDescription(name string) string {
 		return "Gathers evidence with read-only tools (file reads, log inspection, MCP queries) and reports findings."
 	case "summariser":
 		return "Condenses long content into a structured brief."
-	case "curator":
-		return "Post-session soft-skill curator."
 	default:
 		return "Specialist helper agent."
 	}
@@ -217,16 +199,6 @@ func defaultToolKeys(name string) []string {
 	}
 }
 
-// toolsForAgentConfig resolves an agent's tools from its declared `tools`
-// groups. It is shared by sub-agents and by squad roots (both coordinating
-// leaders and leaderless single-agent squads), so a root agent is limited to
-// exactly the capability groups it declares.
-//
-// asLeader marks the coordinating-leader case: the leader keeps the
-// embedder-backed, top-level soft-skill toolset passed in (so recall_softskills
-// stays mounted) instead of rebuilding a per-agent glob loader, and — when emb
-// is non-nil — advertises recall in its instruction. Sub-agents and leaderless
-// roots pass asLeader=false (per-agent glob soft-skills, no recall).
 // sessionIndexFn resolves the process-wide past-session search index on demand.
 // It is a thunk rather than a resolved *sessindex.Index because that index is
 // deliberately opened late and dropped between bursts of searching (see
@@ -236,7 +208,11 @@ func defaultToolKeys(name string) []string {
 // conversation files directly.
 type sessionIndexFn func() *sessindex.Index
 
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS, softSkillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, attestStore *attest.Store, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+// toolsForAgentConfig resolves an agent's tools from its declared `tools`
+// groups. It is shared by sub-agents and by squad roots (both coordinating
+// leaders and leaderless single-agent squads), so a root agent is limited to
+// exactly the capability groups it declares.
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, attestStore *attest.Store) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)
@@ -248,22 +224,6 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	resolvedSkillTS := skillTS // fallback if Toolset fails
 	if ts, err := skills.Toolset(ctx, cfg.Skills); err == nil {
 		resolvedSkillTS = ts
-	}
-	resolvedSoftSkillTS := softSkillTS
-	if !asLeader {
-		// Sub-agents and leaderless roots use the glob-only, per-agent soft-skill
-		// loader (recall is a coordinating-leader feature); pass a nil embedder.
-		// The coordinating leader keeps the embedder-backed top-level toolset
-		// passed in as softSkillTS.
-		agentSoftSkillsDir := cfg.SoftSkillsDir
-		if agentSoftSkillsDir == "" && cfg.Name != "" {
-			agentSoftSkillsDir = filepath.Join(runtime.SoftSkillsDir, cfg.Name)
-		}
-		if agentSoftSkillsDir != "" && agentSoftSkillsDir != runtime.SoftSkillsDir {
-			if sts, err := softskills.Toolset(ctx, agentSoftSkillsDir, nil); err == nil {
-				resolvedSoftSkillTS = sts
-			}
-		}
 	}
 	// Resolve the candidate MCP handle pool for this agent: by default the
 	// leader's handles, unless the agent points at its own mcp_config.json.
@@ -295,7 +255,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	agentTools := []tool.Tool{}
 	agentTools = append(agentTools, webSearchTools...)
 	toolsets := []tool.Toolset{}
-	hasSoftSkills, hasRegistries, hasSettings := false, false, false
+	hasRegistries, hasSettings := false, false
 	var mountedMCPNames []string
 	for _, key := range keys {
 		switch key {
@@ -319,10 +279,8 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 				toolsets = append(toolsets, resolvedSkillTS)
 			}
 		case "softskills":
-			if resolvedSoftSkillTS != nil {
-				toolsets = append(toolsets, resolvedSoftSkillTS)
-				hasSoftSkills = true
-			}
+			// Soft-skills were removed; the key survives in older agent.json
+			// overlays and is ignored on purpose.
 		case "calc":
 			agentTools = append(agentTools, fstools.NewCalcTools()...)
 		case "ddg", "serpapi", "serper":
@@ -431,16 +389,9 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			}
 		}
 	}
-	// The skill and soft-skill rules are stated once, in each toolset's own
-	// system instruction next to its <available_skills> list.
+	// The skill rules are stated once, in the skill toolset's own system
+	// instruction next to its <available_skills> list.
 	var instructionParts []string
-	if hasSoftSkills {
-		if asLeader && emb != nil {
-			// The coordinating leader's soft-skill toolset is embedder-backed, so
-			// advertise recall_softskills alongside the glob loader.
-			instructionParts = append(instructionParts, softskills.RecallProtocolAddendum)
-		}
-	}
 	// A group's protocol is the default guide for an agent that mounts it; an
 	// instruction that already documents those tools (the Helper's does, in
 	// more detail) does not get it a second time.
@@ -922,12 +873,12 @@ func parseSkillFrontMatter(b []byte) (name, description string) {
 
 // buildSubAgentCapabilitiesBlock generates a structured block of sub-agent
 // information for the leader's instruction. It lists all enabled sub-agents
-// (excluding leader and curator) with their descriptions, tools, skill
+// (excluding the leader) with their descriptions, tools, skill
 // catalogs (when the agent has the `skills` tool group), and how to invoke them.
 func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime RuntimeSettings) string {
 	var enabled []RuntimeAgentConfig
 	for _, cfg := range runtimeAgents {
-		if cfg.Name == "leader" || !cfg.Enabled || cfg.Name == "curator" {
+		if cfg.Name == "leader" || !cfg.Enabled {
 			continue
 		}
 		enabled = append(enabled, cfg)
@@ -1191,7 +1142,6 @@ func assembleAgentResult(infra *Infrastructure, inst *Instance) *AgentResult {
 		LeaderCachedInputTokenPricePerMillion:   leaderCfg.CachedInputTokenPricePerMillion,
 		LeaderCacheCreationTokenPricePerMillion: leaderCfg.CacheCreationTokenPricePerMillion,
 		LeaderAllowFileAttachments:              inst.LeaderAllowFileAttachments,
-		CuratorIdleTimeout:                      inst.CuratorIdleTimeout,
 		RunnerConfig:                            inst.RunnerConfig,
 		AgentLoader:                             inst.AgentLoader,
 		RegisterSession:                         infra.RegisterSession,
@@ -1225,7 +1175,7 @@ func sanitizeID(s string) string {
 
 // SessionSuffix returns the deterministic per-session filename suffix used
 // across all components (tasks, todo, mailbox, audit, statelog). Exposed
-// so external callers (notably the `curate` CLI) can reconstruct the
+// so external callers can reconstruct the
 // per-session paths without duplicating the sanitizer.
 func SessionSuffix(userID, sessionID string) string {
 	u := sanitizeID(userID)

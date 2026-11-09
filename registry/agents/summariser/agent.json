@@ -7,6 +7,5 @@
   "model_ref": "balanced",
   "name": "summariser",
   "skills": null,
-  "softskills_dir": "",
   "tools": null
 }

@@ -12,7 +12,6 @@
     "pandoc",
     "pdf"
   ],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -23,7 +22,6 @@
     "Skill",
     "revert",
     "mime",
-    "softskills",
     "calc"
   ]
 }

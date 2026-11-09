@@ -460,8 +460,8 @@ func TestParsedAgentSave_NoShadowForUnchangedAgents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	alphaJSON := `{"name":"alpha","description":"Alpha agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"high","skills":[],"softskills_dir":"","tools":["Read"]}`
-	betaJSON := `{"name":"beta","description":"Beta agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"low","skills":[],"softskills_dir":"","tools":["Grep"]}`
+	alphaJSON := `{"name":"alpha","description":"Alpha agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"high","skills":[],"tools":["Read"]}`
+	betaJSON := `{"name":"beta","description":"Beta agent","enabled":true,"leader":false,"builtin":false,"allow_file_attachments":false,"model_ref":"low","skills":[],"tools":["Grep"]}`
 	alphaInstr := "# Alpha\n\nDo alpha things.\n"
 	betaInstr := "# Beta\n\nDo beta things.\n"
 	seedSysAgent("alpha", alphaJSON, alphaInstr)
@@ -490,7 +490,12 @@ func TestParsedAgentSave_NoShadowForUnchangedAgents(t *testing.T) {
 		}
 		return m
 	}
-	alpha := toPayload(alphaJSON, alphaInstr, func(m map[string]any) { m["description"] = "Alpha agent EDITED" })
+	alpha := toPayload(alphaJSON, alphaInstr, func(m map[string]any) {
+		m["description"] = "Alpha agent EDITED"
+		// A key soft-skills used to own, sent by an older cached client: it is
+		// no longer an agent field and must be dropped, not persisted.
+		m["softskills_dir"] = "/legacy/softskills"
+	})
 	beta := toPayload(betaJSON, betaInstr, nil)
 
 	r := newTestEngine(t, editorFiles())
@@ -518,7 +523,7 @@ func TestParsedAgentSave_NoShadowForUnchangedAgents(t *testing.T) {
 	if !strings.Contains(string(ov), "EDITED") {
 		t.Fatalf("alpha overlay should carry the edited description, got: %s", ov)
 	}
-	for _, unexpected := range []string{"model_ref", "\"tools\"", "instruction"} {
+	for _, unexpected := range []string{"model_ref", "\"tools\"", "instruction", "softskills_dir"} {
 		if strings.Contains(string(ov), unexpected) {
 			t.Fatalf("alpha overlay should be a minimal delta, but contains %q: %s", unexpected, ov)
 		}

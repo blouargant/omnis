@@ -102,7 +102,7 @@ func TestSquadsDefaultSynthesized(t *testing.T) {
 	if def.Leader != "leader" {
 		t.Fatalf("default squad leader = %q, want leader", def.Leader)
 	}
-	// Curator must NOT be in the synthesized members list.
+	// The removed curator agent is ignored, so it is never a member.
 	for _, m := range def.Members {
 		if m == "curator" {
 			t.Fatal("default squad must not include curator")
@@ -179,15 +179,6 @@ func TestSquadsValidation(t *testing.T) {
   "squads": [{"name": "default", "leader": "leader", "members": ["ghost"]}]
 }`,
 			wantError: `member "ghost"`,
-		},
-		{
-			name:   "curator as member",
-			agents: []AgentEntry{{Name: "leader"}, {Name: "curator"}},
-			config: `{
-  "agents": ["leader", "curator"],
-  "squads": [{"name": "default", "leader": "leader", "members": ["curator"]}]
-}`,
-			wantError: "cannot include the curator agent",
 		},
 		{
 			name:   "duplicate squad name",

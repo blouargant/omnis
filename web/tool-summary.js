@@ -12,7 +12,7 @@ const TOOL_KIND_RULES = [
   [/^(edit|multiedit|revert|lsp_rename|ast_grep_rewrite|lsp_code_action)$/, "edit"],
   [/^(websearch|webfetch|html_to_markdown)$/, "web"],
   [/^mcp__/, "mcp"],
-  [/^(load_skill|load_softskill)$/, "skill"],
+  [/^load_skill$/, "skill"],
 ];
 
 function toolKind(name, subAgents) {

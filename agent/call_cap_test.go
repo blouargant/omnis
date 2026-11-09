@@ -81,7 +81,7 @@ func TestPerCallCapSkipsBookkeepingAndIsOffAtZero(t *testing.T) {
 	}
 	cb := perCallCapCallback("web_agent", 1)
 	c := newCapCtx("inv")
-	for _, n := range []string{"list_skills", "load_softskill", "todo_write", "list_softskills"} {
+	for _, n := range []string{"list_skills", "load_skill", "todo_write", "load_skill_resource"} {
 		if out, _ := cb(c, namedTool{name: n}, nil); out != nil {
 			t.Errorf("%s was counted", n)
 		}

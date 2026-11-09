@@ -10,7 +10,6 @@
   "skills": [
     "linux-admin"
   ],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -22,7 +21,6 @@
     "revert",
     "mime",
     "mcp",
-    "softskills",
     "calc",
     "bg"
   ]

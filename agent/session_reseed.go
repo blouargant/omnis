@@ -26,8 +26,7 @@ import (
 
 // Exchange is one persisted user→assistant turn, flattened to plain text. The
 // agent package cannot import internal/sessions (that package imports agent), so
-// callers (the server) map their ConversationTurn slices onto this local type —
-// mirroring conversationTurnShim in session_signals.go.
+// callers (the server) map their ConversationTurn slices onto this local type.
 type Exchange struct {
 	User      string
 	Assistant string

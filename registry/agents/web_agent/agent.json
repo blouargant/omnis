@@ -7,14 +7,12 @@
   "model_ref": "balanced",
   "name": "web_agent",
   "skills": null,
-  "softskills_dir": "",
   "max_instances": 10,
   "tools": [
     "Skill",
     "serper",
     "ddg",
-    "web",
-    "softskills"
+    "web"
   ],
   "max_tool_calls_per_call": 20
 }

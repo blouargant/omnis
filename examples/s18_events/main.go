@@ -31,7 +31,6 @@ func main() {
 		events.EventToolError,
 		events.EventSessionStart, events.EventSessionEnd,
 		events.EventRunStart, events.EventRunEnd,
-		events.EventCurateNow,
 	} {
 		bus.On(ev, logger).On(ev, counterH)
 	}

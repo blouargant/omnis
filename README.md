@@ -9,12 +9,10 @@ code changes required to retarget the agent at a new domain.
 > The same binary becomes a code reviewer, a Kubernetes triage assistant,
 > a DBA helper, or a release engineer purely by changing what is mounted.
 
-After every session a two-stage **reflection pipeline** (a deterministic
-heuristic + an optional LLM reflector) tags the soft-skills the session
-loaded as helpful, harmful, or neutral, extracts a key insight, and
-hands the verdict to a **curator** that distills a new soft-skill or
-prunes a misleading one. The corpus improves itself over time without
-manual authoring.
+What the agent learns from you — a correction, a preference, "remember
+that…" — it saves as **collection memory** in the same turn: one small
+Markdown file per fact, injected into every later turn of the chats filed
+under that collection, and visible and editable in the web UI.
 
 ---
 
@@ -293,7 +291,7 @@ See [docs/architecture.md](docs/architecture.md) (§7 Omnis router) and
 | [docs/architecture.md](docs/architecture.md)  | Component map, data flow, plugin lifecycle        |
 | [docs/methodology.md](docs/methodology.md)    | The Claude Code 7-step operating method           |
 | [docs/context-management.md](docs/context-management.md) | How context compression works + session decision log |
-| [docs/semantic-recall.md](docs/semantic-recall.md) | Embedder, vector indexes, and cross-session precedents |
+| [docs/semantic-recall.md](docs/semantic-recall.md) | Embedder, vector indexes, and semantic search (code, registries, docs, past sessions) |
 | [docs/providers.md](docs/providers.md)        | Configuring Gemini / Anthropic / OpenAI / compat  |
 | [docs/specialising.md](docs/specialising.md)  | How to retarget the agent at a new domain         |
 | [docs/skills.md](docs/skills.md)              | Authoring `SKILL.md` files                        |
@@ -357,13 +355,11 @@ go run . tui                               # TUI
 | Flag                  | Default    | Effect                                                                  |
 |-----------------------|------------|-------------------------------------------------------------------------|
 | `-s`, `--skills DIR`  | `skills`   | Directory scanned for `<name>/SKILL.md` playbooks at startup.           |
-| `--softskills DIR`    | `softskills` | Directory of curator-generated soft-skills.                           |
 | `--config PATH`       | `config/agents.json` | Runtime JSON config path.                                     |
 | `--provider NAME`     | _(config)_ | Global model provider override (e.g. `anthropic`).                      |
 | `--model NAME`        | _(config)_ | Global model override.                                                  |
 | `--base-url URL`      | _(config)_ | API endpoint override.                                                  |
 | `--api-key KEY`       | _(config/env)_| API-key override.                                                    |
-| `--curator-enabled BOOL` | _(env)_ | Enable/disable the auto-curator hook.                                  |
 | `--name NAME`         | `omnis`     | Application name (used in runner + session metadata).                   |
 | `-d`, `--debug`       | _off_      | Write full conversation/event payloads to the event log.               |
 
@@ -404,8 +400,7 @@ learning path (setup in [docs/notebooks.md](docs/notebooks.md)).
 
 ```
 omnis/
-├── main.go                      # root binary entry point: CLI / TUI / curate dispatch
-├── curate.go                    # `omnis curate` one-shot subcommand
+├── main.go                      # root binary entry point: CLI / TUI dispatch
 ├── server/                      # separate binary: HTTP + SSE API + web UI
 ├── web/                         # vanilla-JS chat UI assets served by server/
 ├── agent/                       # NewAgent() — single wiring entry point
@@ -428,12 +423,11 @@ omnis/
 │   ├── cache/                   # prompt-cache stats plugin
 │   ├── hooks/                   # Claude Code-style lifecycle hooks engine
 │   ├── skills/                  # skill loader (skilltoolset wrapper)
-│   ├── softskills/              # curator-distilled procedures + reflectors (heuristic + LLM)
+│   ├── collmem/                 # per-collection memory (one Markdown file per fact)
 │   ├── mcp/                     # MCP config loader
 │   └── a2a/                     # A2A protocol client + tool wiring
 ├── examples/sNN_*/              # single-component demos (opt-in via `make examples`)
 ├── skills/                      # specialisation playbooks
-├── softskills/                  # curator output (incl. _stats.json sidecar + wrap-session built-in)
 ├── config/                      # agents.json, permissions.json, hooks.json, mcp_config.json
 ├── doc.go                       # package-level overview
 └── docs/                        # extended documentation

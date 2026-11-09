@@ -9,7 +9,7 @@ agent produces is scoped by `(userID, buildTimestamp, sessionID)`.
 - Task graph (`agent_tasks_*.json`).
 - Todo list (`agent_todo_*.json`).
 - Compressed memory (`agent_memory_*.md`).
-- State log feeding the curator (`agent_statelog_*.json`).
+- State log kept by context compression (`agent_statelog_*.json`).
 - Mailbox namespace for inter-agent messages.
 - Uploaded files under `logs/uploads/<session>/`.
 
@@ -237,38 +237,12 @@ To **disable routing** entirely, set `router_squad` to `"none"` in
 on the squad you pick (or `default`). To define new squads, see the
 **Squads** sub-tab under Settings → Agents.
 
-## Session lifecycle and the curator
+## Optional questions
 
-When a session ends (closed, deleted, or **idle** for `OMNIS_CURATOR_IDLE_TIMEOUT`),
-omnis runs a two-stage reflection pipeline followed by the curator:
-
-1. **Heuristic reflector** tags every soft-skill the session loaded as
-   `helpful` / `harmful` / `neutral` based on the StateLog, the last
-   user messages, tool errors, and any explicit wrap-up feedback. Tag
-   counts land in `$OMNIS_HOME/softskills/_stats.json`.
-2. **LLM reflector** (the `reflector` agent, when enabled) refines the
-   tags with reasons and extracts a `key_insight`.
-3. The **curator** sub-agent reads the audit + StateLog + per-skill
-   stats + the reflector's verdict, and creates / updates / deletes
-   soft-skill files under `$OMNIS_HOME/softskills/`. The create / delete
-   thresholds are concrete (see [11-skills.md](11-skills.md#post-session-reflection))
-   so the curator skips by default.
-
-Soft-skills show up in future sessions as additional knowledge the
-leader can `load_softskill` on demand. The session's StateLog is also
-indexed into the cross-session precedents store — see
-[Learning & Recall](20-learning-and-recall.md) for how the StateLog is
-built and recalled.
-
-Idle-harvested sessions are marked **Harvested** in the sidebar and skipped on
-re-runs until new activity occurs.
-
-On interactive surfaces the leader is told to load the built-in
-**wrap-session** soft-skill once per session, which asks one closing
-question ("did my answer give you what you needed? Tell me what was wrong, missing or could be better — or just \"all good\""). The web UI shows it discreetly, as a small pulsing
-"?" in the composer toolbar; click it to answer, or ignore it and it goes
-away after two minutes. The answer is persisted via `record_session_feedback` and becomes the dominant
-verdict signal for both reflectors.
+An agent can ask a question you are free to ignore. The web UI shows it
+discreetly, as a small pulsing "?" in the composer toolbar instead of a question
+card: click it to answer or skip it. If you ignore it, it goes away when its
+time limit runs out (when the agent set one) or when the turn is stopped.
 
 ## Hot reload
 

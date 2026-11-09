@@ -8,7 +8,6 @@
   "model_ref": "balanced",
   "name": "session_search",
   "skills": [],
-  "softskills_dir": "",
   "tools": [
     "sessions"
   ]

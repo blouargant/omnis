@@ -13,7 +13,6 @@ import (
 	"github.com/blouargant/omnis/internal/codeindex"
 	"github.com/blouargant/omnis/internal/docindex"
 	"github.com/blouargant/omnis/internal/paths"
-	"github.com/blouargant/omnis/internal/precedents"
 	"github.com/blouargant/omnis/internal/regindex"
 	"github.com/blouargant/omnis/internal/registries"
 	"github.com/blouargant/omnis/internal/sessindex"
@@ -116,34 +115,6 @@ func (i *Infrastructure) Embedder(ctx context.Context, runtime RuntimeSettings) 
 		log.Printf("embed: semantic recall enabled (model %q)", i.embed.emb.Model())
 	})
 	return i.embed.emb
-}
-
-// precedentsCache memoises the process-wide precedent index.
-type precedentsCache struct {
-	once  sync.Once
-	store *precedents.Store
-}
-
-// Precedents lazily opens and caches the cross-session precedent index, backed
-// by the process-wide embedder. Returns nil when no embedder is configured, so
-// callers skip mounting recall_precedents and the session-end indexing hook.
-func (i *Infrastructure) Precedents(ctx context.Context, runtime RuntimeSettings) *precedents.Store {
-	if i == nil {
-		return nil
-	}
-	emb := i.Embedder(ctx, runtime)
-	if emb == nil {
-		return nil
-	}
-	i.precedents.once.Do(func() {
-		st, err := precedents.Open(emb)
-		if err != nil {
-			log.Printf("precedents: index unavailable: %v", err)
-			return
-		}
-		i.precedents.store = st
-	})
-	return i.precedents.store
 }
 
 // codeIndexCache memoises the process-wide code-search index.

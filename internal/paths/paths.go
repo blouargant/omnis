@@ -330,10 +330,6 @@ func UploadsDir() string { return filepath.Join(LogsDir(), "uploads") }
 // MailboxesDir returns Home()/mailboxes — JSONL inter-agent mailbox files.
 func MailboxesDir() string { return filepath.Join(Home(), "mailboxes") }
 
-// SoftSkillsDir returns Home()/softskills — curator-distilled procedures.
-// Always anchored under Home() (read AND write).
-func SoftSkillsDir() string { return filepath.Join(Home(), "softskills") }
-
 // IndexDir returns Home()/index — semantic vector indexes (go-turbovec
 // .tvim files, metadata sidecars, manifests) and the embedding cache.
 // State (write root), not config, so always anchored under Home().

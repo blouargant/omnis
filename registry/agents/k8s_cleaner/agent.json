@@ -10,7 +10,6 @@
     "k8s-cleanup",
     "k8s-triage"
   ],
-  "softskills_dir": "",
   "subagents": ["k8s_validator"],
   "tools": [
     "Bash",
@@ -20,7 +19,6 @@
     "Skill",
     "mime",
     "mcp",
-    "softskills",
     "calc"
   ]
 }

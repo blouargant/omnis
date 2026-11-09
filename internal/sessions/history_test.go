@@ -227,7 +227,7 @@ func TestHiddenFlagRoundTrip(t *testing.T) {
 }
 
 // TestConcurrentMutatorsDoNotLoseTurns exercises the per-session lock: many
-// goroutines append turns while others flip the harvested/archived/title flags
+// goroutines append turns while others flip the hidden/archived/title flags
 // on the same session. Every append must survive — the old unsynchronised
 // load-modify-save lost updates (and could read a half-written file and reset
 // the whole history). Run with -race to also catch the data race directly.
@@ -253,7 +253,7 @@ func TestConcurrentMutatorsDoNotLoseTurns(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = SetConversationHarvested(sid, true)
+			_ = SetConversationHidden(sid, true)
 			_ = SetConversationTitle(sid, "t")
 			_ = SetConversationArchived(sid, false)
 		}()
@@ -461,5 +461,52 @@ func TestRegistrySetArchived(t *testing.T) {
 	}
 	if reg.SetArchived("does-not-exist", true) {
 		t.Fatalf("SetArchived(missing) = true, want false")
+	}
+}
+
+// TestLegacyConversationWithHarvestedAndSoftskillLoads pins backward
+// compatibility after the soft-skills removal: a conversation file written by
+// an older build still carries `"harvested": true` and skill entries of kind
+// "softskill". Both must keep loading (unknown fields are ignored, the skill
+// entry is served as recorded) and the session must still be listed.
+func TestLegacyConversationWithHarvestedAndSoftskillLoads(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("OMNIS_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const sid = "legacy-harvested"
+	raw := `{
+  "title": "Legacy",
+  "harvested": true,
+  "turns": [{"user_text":"hi","assistant_text":"hello","at":"2026-01-02T03:04:05Z"}],
+  "skills": [{"kind":"softskill","name":"wrap-session","agent":"leader","count":1}]
+}`
+	if err := os.WriteFile(ConversationPath(sid), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	f, err := LoadConversationFile(sid)
+	if err != nil {
+		t.Fatalf("LoadConversationFile: %v", err)
+	}
+	if len(f.Turns) != 1 || f.Turns[0].UserText != "hi" {
+		t.Fatalf("turns = %+v, want the one legacy turn", f.Turns)
+	}
+	if len(f.Skills) != 1 || f.Skills[0].Kind != "softskill" || f.Skills[0].Name != "wrap-session" {
+		t.Fatalf("skills = %+v, want the legacy softskill entry", f.Skills)
+	}
+
+	var found *SessionMeta
+	for _, m := range LoadPersistedSessions() {
+		if m.ID == sid {
+			found = m
+		}
+	}
+	if found == nil {
+		t.Fatalf("legacy session %q not registered by LoadPersistedSessions", sid)
+	}
+	if found.Turns != 1 || found.Title != "Legacy" {
+		t.Fatalf("meta = %+v, want 1 turn titled Legacy", found)
 	}
 }

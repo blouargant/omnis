@@ -9,7 +9,6 @@
   "read_only": true,
   "max_tool_calls_per_call": 40,
   "skills": ["review"],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -17,7 +16,6 @@
     "Glob",
     "Skill",
     "mime",
-    "softskills",
     "code_search"
   ]
 }

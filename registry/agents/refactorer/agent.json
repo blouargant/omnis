@@ -8,7 +8,6 @@
   "model_ref": "high",
   "name": "refactorer",
   "skills": [],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -18,7 +17,6 @@
     "Glob",
     "revert",
     "mime",
-    "softskills",
     "calc",
     "code_search",
     "worktree"

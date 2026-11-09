@@ -21,10 +21,10 @@ func logsDir() string { return paths.LogsDir() }
 // convLocks serialises read-modify-write access to each session's conversation
 // file. Every mutator below loads the file, edits it, and writes it back;
 // without a per-session lock two goroutines (a user turn, a background mailbox
-// push, the idle curator's harvest-flag write, the idle indexer, async title
-// generation) can interleave their load/save — losing each other's updates or,
-// worse, reading a half-written file and treating it as corrupt. Keyed by
-// sessionID so unrelated sessions never contend.
+// push, the idle indexer, async title generation) can interleave their
+// load/save — losing each other's updates or, worse, reading a half-written
+// file and treating it as corrupt. Keyed by sessionID so unrelated sessions
+// never contend.
 var convLocks sync.Map // sessionID -> *sync.Mutex
 
 func convLock(sessionID string) *sync.Mutex {
@@ -145,10 +145,9 @@ type ConversationFile struct {
 	// multi-user support; LoadPersistedSessions attributes those to the
 	// process's configured user (one container, one user). Never overwritten
 	// once set — a file that names another login keeps it.
-	UserID    string `json:"user_id,omitempty"`
-	Squad     string `json:"squad,omitempty"`
-	Harvested bool   `json:"harvested,omitempty"`
-	Archived  bool   `json:"archived,omitempty"`
+	UserID   string `json:"user_id,omitempty"`
+	Squad    string `json:"squad,omitempty"`
+	Archived bool   `json:"archived,omitempty"`
 	// Hidden marks a utility session kept out of the sidebar list (see
 	// SessionMeta.Hidden). Persisted so the flag survives a server restart.
 	Hidden bool `json:"hidden,omitempty"`
@@ -341,8 +340,7 @@ func LoadConversationTurns(sessionID string) ([]ConversationTurn, error) {
 	return f.Turns, nil
 }
 
-// AppendConversationTurn appends one user→assistant exchange and clears
-// the Harvested flag so a fresh idle scan re-evaluates the session.
+// AppendConversationTurn appends one user→assistant exchange.
 func AppendConversationTurn(sessionID, userText, assistantText string) error {
 	return AppendConversationTurnWithUsage(sessionID, userText, assistantText, nil)
 }
@@ -380,15 +378,13 @@ func AppendConversationTurnRecord(sessionID, userText, assistantText string, usa
 			Usage:         usage,
 			Tools:         tools,
 		})
-		f.Harvested = false // new activity resets the harvest flag
 	})
 }
 
 // TruncateConversationTurns rewinds a session's history to its first `keep`
-// turns, dropping everything after, and clears the Harvested flag so a fresh
-// idle scan re-evaluates the (now shorter) session. `keep` is clamped to
-// [0, len(turns)], so a keep ≥ len is a no-op and a negative keep empties the
-// history. Returns the kept turns. The write is atomic (see SaveConversationFile).
+// turns, dropping everything after. `keep` is clamped to [0, len(turns)], so a
+// keep ≥ len is a no-op and a negative keep empties the history. Returns the
+// kept turns. The write is atomic (see SaveConversationFile).
 func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, error) {
 	var kept []ConversationTurn
 	err := mutateConversation(sessionID, func(f *ConversationFile) {
@@ -401,7 +397,6 @@ func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, 
 		f.Turns = f.Turns[:keep]
 		f.Skills = skillsBefore(f.Skills, keep)
 		f.Produced = producedBefore(f.Produced, keep)
-		f.Harvested = false
 		// Copy out so the caller never aliases the slice we just wrote.
 		kept = append([]ConversationTurn(nil), f.Turns...)
 	})
@@ -441,12 +436,6 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 		return nil, err
 	}
 	return kept, nil
-}
-
-// SetConversationHarvested persists the Harvested flag to disk without
-// touching the conversation turns. Called by the idle harvester.
-func SetConversationHarvested(sessionID string, v bool) error {
-	return mutateConversation(sessionID, func(f *ConversationFile) { f.Harvested = v })
 }
 
 // SetConversationArchived persists the Archived flag to disk without touching
@@ -564,7 +553,6 @@ func LoadPersistedSessions() []*SessionMeta {
 			ID:               id,
 			Title:            f.Title,
 			Squad:            f.Squad,
-			Harvested:        f.Harvested,
 			Archived:         f.Archived,
 			Hidden:           f.Hidden,
 			Goal:             f.Goal,
