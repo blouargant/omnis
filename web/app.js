@@ -2003,17 +2003,17 @@ function openSubtleAskPop(anchor, sessionId, q) {
 }
 
 // ─── Composer skills dock ────────────────────────────────────────────────────
-// Skill / soft-skill loads (load_skill, load_softskill) are not rendered in the
+// Skill loads (load_skill) are not rendered in the
 // transcript: they are listed in a collapsible dock above the composer, folded
 // by default to "⚡ N skills". The list is persisted server-side
 // (GET /api/sessions/:id/skills) and refreshed on the `skills_changed` event.
 
 // isSkillLoadTool covers the skill tools kept out of the transcript: the loads
-// (listed in the dock), the list_skills / list_softskills discovery calls and
-// the load_skill_resource / load_softskill_resource reads (pure bookkeeping —
+// (listed in the dock), the list_skills discovery call and the
+// load_skill_resource reads (pure bookkeeping —
 // shown nowhere unless they fail).
 function isSkillLoadTool(name) {
-  return /^((load|list)_(skill|softskill)s?|load_(skill|softskill)_resource)$/.test((name || "").toLowerCase());
+  return /^((load|list)_skills?|load_skill_resource)$/.test((name || "").toLowerCase());
 }
 
 // skillLoadFailed reports a skill-tool call that must still be shown in the
@@ -2271,8 +2271,7 @@ function renderSkillsDock(panel) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "skills-dock-row";
-    const kindLabel = s.kind === "softskill" ? tr("skillsDock.softskill") : tr("skillsDock.skill");
-    row.innerHTML = `<span class="skills-dock-kind kind-${escHtml(s.kind || "skill")}">${escHtml(kindLabel)}</span>
+    row.innerHTML = `<span class="skills-dock-kind">${escHtml(tr("skillsDock.skill"))}</span>
       <span class="skills-dock-name">${escHtml(s.name)}</span>
       ${s.count > 1 ? `<span class="skills-dock-times">×${s.count}</span>` : ""}
       <span class="skills-dock-agent">${escHtml(s.agent || "")}</span>`;
@@ -3656,10 +3655,8 @@ function jumpReplyNav(panel) {
 function extractResponse(response) {
   if (typeof response === "string") return response;
   if (!response || typeof response !== "object") return JSON.stringify(response, null, 2);
-  // Skills/softskills: parse XML into a readable list
-  for (const k of ["skills", "softskills"]) {
-    if (typeof response[k] === "string") return formatSkillsList(response[k]);
-  }
+  // Skills: parse XML into a readable list
+  if (typeof response.skills === "string") return formatSkillsList(response.skills);
   // Common single-key wrappers the tool functions return
   for (const k of ["output", "content", "matches", "result", "results", "markdown", "text", "plan"]) {
     if (typeof response[k] === "string") return response[k];
@@ -3680,28 +3677,6 @@ function formatSkillsList(xml) {
   }
   if (!skills.length) return txt;
   return skills.map(s => `${s.name}\n  ${s.description}`).join("\n\n");
-}
-
-// "how-the-library-works" is the curator's own meta-procedure — it explains
-// the soft-skill system to the lead agent itself and is not user-facing
-// content. We strip it from list_softskills chips: if it's the only entry,
-// the chip is suppressed entirely; otherwise it's filtered out of the list.
-const CURATOR_META_SOFTSKILL = "how-the-library-works";
-
-function countSoftskillsExcludingCurator(xml) {
-  const re = /<skill>\s*<name>([\s\S]*?)<\/name>/g;
-  let kept = 0, total = 0, m;
-  while ((m = re.exec(xml)) !== null) {
-    total++;
-    if (m[1].trim() !== CURATOR_META_SOFTSKILL) kept++;
-  }
-  return { kept, total };
-}
-
-function stripCuratorSoftskill(xml) {
-  const re = /<skill>\s*<name>([\s\S]*?)<\/name>[\s\S]*?<\/skill>\s*/g;
-  return xml.replace(re, (match, name) =>
-    name.trim() === CURATOR_META_SOFTSKILL ? "" : match);
 }
 
 // ─── Markdown ────────────────────────────────────────────────────────────────
@@ -5339,7 +5314,7 @@ function toolSummaryT(key, n) {
 
 // refreshToolGroup recomputes a run's summary line from its current calls.
 // Derived from the DOM each time because a resolved call can remove its own
-// row (empty teammate/soft-skill output).
+// row (empty teammate output).
 function refreshToolGroup(group) {
   if (!group) return;
   const blocks = group.querySelectorAll(":scope > .tool-group-body > .tool-row > .tool-block");
@@ -5513,64 +5488,6 @@ function appendTodoBlock(sessionId, list, container) {
   sessionTodoBlock.set(sessionId, block);
   scrollBottom(paneOfNode(row));
   return block;
-}
-
-// ─── Curator block ───────────────────────────────────────────────────────────
-
-function appendCuratorBlock(container) {
-  const block = document.createElement("div");
-  block.className = "tool-block border-orange";
-  block.innerHTML =
-    `<div class="tool-header">` +
-      `<span class="tool-dot pending"></span>` +
-      `<span class="tool-badge badge-orange">Curator</span>` +
-      `<span class="tool-desc">analyzing session…</span>` +
-      `<span class="tool-chevron">▶</span>` +
-    `</div>` +
-    `<div class="tool-body"><div class="tool-out-slot"></div></div>`;
-  block.querySelector(".tool-header").addEventListener("click", () => block.classList.toggle("expanded"));
-  const row = document.createElement("div");
-  row.className = "tool-row";
-  row.appendChild(block);
-  (container || fpTranscript()).appendChild(row);
-  scrollBottom(paneOfNode(row));
-  return block;
-}
-
-function resolveCuratorBlock(block, data, errorMsg) {
-  const dot  = block.querySelector(".tool-dot");
-  const desc = block.querySelector(".tool-desc");
-  const slot = block.querySelector(".tool-out-slot");
-
-  if (errorMsg) {
-    if (dot)  { dot.classList.remove("pending"); dot.classList.add("error"); }
-    if (desc) desc.textContent = tr("app.curation.failed");
-    if (slot) {
-      const div = document.createElement("div");
-      div.className = "tool-section";
-      div.innerHTML =
-        `<div class="tool-section-label label-error">ERROR</div>` +
-        `<pre class="tool-pre tool-error">${escHtml(errorMsg)}</pre>`;
-      slot.replaceWith(div);
-    }
-    return;
-  }
-
-  const text = data.skipped
-    ? (data.reason || "Session too shallow for soft-skill curation.")
-    : (data.summary || "Curation complete.");
-
-  if (dot)  { dot.classList.remove("pending"); dot.classList.add("done"); }
-  if (desc) desc.textContent = data.skipped ? "nothing to learn" : "curation complete";
-  if (slot) {
-    const div = document.createElement("div");
-    div.className = "tool-section";
-    div.innerHTML =
-      `<div class="tool-section-label label-out">OUT</div>` +
-      `<pre class="tool-pre output">${escHtml(text)}</pre>`;
-    slot.replaceWith(div);
-  }
-  if (!data.skipped) block.classList.add("expanded");
 }
 
 // ─── Ask-user wizard ─────────────────────────────────────────────────────────
@@ -6384,7 +6301,6 @@ function resolveToolCall(block, response, durationMs) {
   const isError = response && typeof response === "object" && typeof response.error === "string";
   const toolName = block.dataset.toolName || "";
   const isTeammate = /^teammate/.test(toolName);
-  const isSoftskillList = /^list_softskill/.test(toolName);
 
   const dot = block.querySelector(".tool-dot");
   if (dot) { dot.classList.remove("pending"); dot.classList.add(isError ? "error" : "done"); }
@@ -6392,31 +6308,6 @@ function resolveToolCall(block, response, durationMs) {
 
   const slot = block.querySelector(".tool-out-slot");
   if (!slot) return;
-
-  if (isSoftskillList && !isError && response && typeof response === "object") {
-    // The wrapped list_softskills tool inherits upstream skilltoolset's
-    // response schema, which uses the key `skills` — not `softskills` — so
-    // we have to filter whichever string field carries the XML payload.
-    const xmlKey = typeof response.softskills === "string" ? "softskills"
-                 : typeof response.skills === "string" ? "skills"
-                 : null;
-    if (xmlKey) {
-      const { kept } = countSoftskillsExcludingCurator(response[xmlKey]);
-      if (kept === 0) {
-        // Only the curator's own meta-procedure was listed — suppress the chip.
-        const row = block.closest(".tool-row");
-        const parentNested = block.parentElement && block.parentElement.classList.contains("tool-nested")
-          ? block.parentElement
-          : null;
-        block.remove();
-        if (parentNested && parentNested.children.length === 0) parentNested.remove();
-        if (row && row.children.length === 0) row.remove();
-        return;
-      }
-      // Hide the curator entry from the rendered list but keep the chip.
-      response = { ...response, [xmlKey]: stripCuratorSoftskill(response[xmlKey]) };
-    }
-  }
 
   if (isTeammate && !isError) {
     const formatted = formatTeammateResponse(response);
@@ -9469,7 +9360,7 @@ async function subscribeGlobalEvents() {
           // browser): drop that collection's cache, refresh the card and view.
           onMemoryChanged(data);
         } else if (event === "skills_changed" && sid) {
-          // A skill / soft-skill was loaded in this session — refresh its dock.
+          // A skill was loaded in this session — refresh its dock.
           if (panelsWithTab(sid).length > 0 || sessionSkills.has(sid)) refreshSkills(sid);
         } else if ((event === "goal_set" || event === "goal_cleared") && sid) {
           // A /goal was set or cleared (here or in another browser) — resync the
@@ -10978,7 +10869,6 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/init",          args: "",           desc: "Analyze the repo and write a starter AGENT.md", kind: "common", builtin: true },
   { cmd: "/cost",          args: "",           desc: "Alias for /usage", kind: "common", builtin: true },
   { cmd: "/memory",        args: "",           desc: tr("slash.memory"), kind: "common", builtin: true },
-  { cmd: "/learn-now",     args: "[reason]",   desc: "Immediately run soft-skill curation and show result", kind: "common", builtin: true },
   { cmd: "/rollback",      args: "[N|all]",    desc: "Undo recent settings changes (revert the last one, N of them, or all)", kind: "common", builtin: true },
   // Session — actions/info about the current conversation.
   { cmd: "/status",        args: "",           desc: "Show current session info", kind: "session", builtin: true },
@@ -10993,10 +10883,9 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/loop",          args: "<spec> <prompt>", desc: "Re-run a prompt in this session on a timer (/loop stop, /loop list)", kind: "automation", builtin: true },
   { cmd: "/schedule",      args: "<spec> <prompt>", desc: "Durable routine on a cron/interval (/schedule list|remove <id>|run <id>)", kind: "automation", builtin: true },
   { cmd: "/goal",          args: "<condition>", desc: "Keep working across turns until a condition is met (/goal shows status, /goal clear stops)", kind: "automation", builtin: true },
-  // Skills — soft-skill / skill-playbook management.
+  // Skills — skill-playbook management.
   { cmd: "/create-skill",  args: "[name]",     desc: "Create a new skill playbook with agent guidance", kind: "skills", builtin: true },
   { cmd: "/update-skill",  args: "<name>",     desc: "Update an existing skill playbook with agent guidance", kind: "skills", builtin: true },
-  { cmd: "/learn",         args: "[reason]",   desc: "Mark session for soft-skill curation (runs on session end)", kind: "skills", builtin: true },
 ];
 const BUILTIN_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.cmd.slice(1)));
 
@@ -11016,7 +10905,7 @@ const SLASH_SECTIONS = [
 ];
 // Fixed (non-alphabetical) order for the "common" section — most-used commands
 // first. A "common" command not listed here sorts after these, alphabetically.
-const COMMON_ORDER = ["/help", "/compress", "/init", "/cost", "/memory", "/learn-now", "/rollback"];
+const COMMON_ORDER = ["/help", "/compress", "/init", "/cost", "/memory", "/rollback"];
 
 // sortSlashSection orders one section's rows: the "common" section follows the
 // curated COMMON_ORDER (importance, not A→Z); every other section is A→Z by cmd.
@@ -11734,8 +11623,7 @@ async function handleSlashCommand(raw, panel) {
     case "status": {
       const sid = panel.sessionId || "none";
       appendCommandBubble(
-        `**Session status**\n\n- Session: \`${sid}\`\n` +
-        `- Use \`/learn\` to schedule soft-skill curation`,
+        `**Session status**\n\n- Session: \`${sid}\``,
         false, panel
       );
       break;
@@ -11774,77 +11662,6 @@ async function handleSlashCommand(raw, panel) {
         appendCommandBubble(msg, false, panel);
       } catch (err) {
         appendCommandBubble(String(err), true, panel);
-      }
-      break;
-    }
-
-    case "learn": {
-      if (!panel.sessionId) {
-        appendCommandBubble("No active session — start a chat first.", true, panel);
-        return;
-      }
-      const reason = argPart || "manual /learn request from web UI";
-      try {
-        const res = await apiFetch(`/api/sessions/${panel.sessionId}/curate`, {
-          method: "POST",
-          body: JSON.stringify({ reason, immediate: false }),
-        });
-        if (!res.ok) {
-          const d = await res.json();
-          appendCommandBubble(d.error || "curate request failed", true, panel);
-          return;
-        }
-        appendCommandBubble("Session marked for soft-skill curation — runs on session end.", false, panel);
-      } catch (err) {
-        appendCommandBubble(String(err), true, panel);
-      }
-      break;
-    }
-
-    case "learn-now": {
-      if (!panel.sessionId) {
-        appendCommandBubble("No active session — start a chat first.", true, panel);
-        return;
-      }
-      const reason = argPart || "manual /learn-now request from web UI";
-      const container = getContainer(panel.sessionId);
-      mountInPanel(panel, panel.sessionId);
-      const curatorBlock = appendCuratorBlock(container);
-      scrollBottom(panel, true);
-      try {
-        const res = await apiFetch(`/api/sessions/${panel.sessionId}/curate`, {
-          method: "POST",
-          body: JSON.stringify({ reason, immediate: true }),
-        });
-        if (!res.ok) {
-          const txt = await res.text();
-          let errMsg = "curate request failed";
-          try { const d = JSON.parse(txt); errMsg = d.error || errMsg; } catch (_) {}
-          resolveCuratorBlock(curatorBlock, {}, errMsg);
-          return;
-        }
-        let gotStart = false;
-        for await (const { event, data } of parseSSE(res)) {
-          if (event === "curator_start") {
-            gotStart = true;
-          } else if (event === "curator_end") {
-            resolveCuratorBlock(curatorBlock, data || {}, (data && data.error) || null);
-          } else if (event === "done") {
-            break;
-          }
-        }
-        // If the curator was skipped before emitting curator_start, gotStart
-        // is false and curator_end was emitted directly — the block is already
-        // resolved. Nothing extra to do.
-        if (!gotStart) {
-          // curator_end may not have arrived (timeout / empty session); show generic skip.
-          const dot = curatorBlock.querySelector(".tool-dot");
-          if (dot && dot.classList.contains("pending")) {
-            resolveCuratorBlock(curatorBlock, { skipped: true, reason: "no response from curator" }, null);
-          }
-        }
-      } catch (err) {
-        resolveCuratorBlock(curatorBlock, {}, String(err));
       }
       break;
     }
@@ -13504,7 +13321,7 @@ function registerEnvCards() {
         row.className = "env-row env-row-btn";
         row.innerHTML = `<span class="env-row-icon">${ENV_ICON.skill}</span>` +
           `<span class="env-row-text">${escHtml(s.name)}</span>` +
-          `<span class="env-row-meta">${s.kind === "softskill" ? escHtml(tr("skillsDock.softskill")) : ""}${s.count > 1 ? ` ×${s.count}` : ""}</span>`;
+          `<span class="env-row-meta">${s.count > 1 ? ` ×${s.count}` : ""}</span>`;
         if (s.description) {
           row.setAttribute("data-tip", s.description);
           // A skill list is crossed on the way to other cards: only a pointer

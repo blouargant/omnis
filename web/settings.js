@@ -254,7 +254,7 @@ const BASE_PATH = window.BASE_PATH || "";
   const RESTART_REQUIRED_FLAG = "agent_toolkit_restart_required";
   const BANNER_DISMISS_FLAG = "agent_toolkit_restart_dismissed";
   const ACTIVE_AGENT_KEY = "agent_toolkit_active_agent";
-  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "softskills", "calc", "ddg", "serper", "serpapi", "web", "registries", "code_search", "docs"];
+  const TOOL_GROUPS = ["Bash", "Read", "Write", "Edit", "Grep", "Glob", "revert", "mime", "mcp", "Skill", "calc", "ddg", "serper", "serpapi", "web", "registries", "code_search", "docs"];
   const TOOL_DESCRIPTIONS = {
     Bash:       tr("tool.desc.Bash"),
     Read:       tr("tool.desc.Read"),
@@ -266,7 +266,6 @@ const BASE_PATH = window.BASE_PATH || "";
     mime:       tr("tool.desc.mime"),
     mcp:        tr("tool.desc.mcp"),
     Skill:      tr("tool.desc.Skill"),
-    softskills: tr("tool.desc.softskills"),
     calc:       tr("tool.desc.calc"),
     ddg:        tr("tool.desc.ddg"),
     serper:     tr("tool.desc.serper"),
@@ -940,7 +939,7 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // loadBuiltinAgents fetches the embedded default description + system
   // instruction for each built-in agent (leader, investigator, web_agent,
-  // summariser, curator). Cached for the lifetime of the page. Failures
+  // summariser). Cached for the lifetime of the page. Failures
   // degrade to "no built-in metadata" — the UI then treats every agent as
   // user-configured.
   async function loadBuiltinAgents() {
@@ -2082,7 +2081,7 @@ const BASE_PATH = window.BASE_PATH || "";
     let leader = (enabled.find(a => (a.name || "").toLowerCase() === "leader") || enabled[0] || { name: "leader" }).name;
     const members = enabled
       .map(a => a.name)
-      .filter(n => n && n.toLowerCase() !== "leader" && n.toLowerCase() !== "curator");
+      .filter(n => n && n.toLowerCase() !== "leader");
     return {
       name: DEFAULT_SQUAD_NAME,
       description: "General-purpose squad — automatically generated.",
@@ -2193,10 +2192,10 @@ const BASE_PATH = window.BASE_PATH || "";
     const sq = d.squads[idx];
     const isLeaderAgent = a => !!a.leader || (a.name || "").toLowerCase() === "leader";
     const leaderCandidates = d.agents
-      .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator" && isLeaderAgent(a))
+      .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && isLeaderAgent(a))
       .map(a => a.name);
     const memberCandidates = d.agents
-      .filter(a => a && a.name && (a.enabled === undefined || a.enabled) && (a.name || "").toLowerCase() !== "curator");
+      .filter(a => a && a.name && (a.enabled === undefined || a.enabled));
     const members = Array.isArray(sq.members) ? sq.members : [];
     const isDefault = (sq.name || "").toLowerCase() === DEFAULT_SQUAD_NAME;
     const isReadonly = isSystemSquad(sq);
@@ -2769,14 +2768,6 @@ const BASE_PATH = window.BASE_PATH || "";
       body.appendChild(secretField("serpapi_key", "serpapi"));
     }));
 
-    // CORE DIRECTORIES
-    el.appendChild(envSection(tr("set.env.coreDirectories"), tr("set.env.softskillsDesc"), body => {
-      const g = document.createElement("div");
-      g.className = "env-grid-2";
-      g.appendChild(envText("softskills_dir"));
-      body.appendChild(g);
-    }));
-
     // RUNTIME CONFIG
     el.appendChild(envSection(tr("set.env.runtimeConfig"), null, body => {
       const g = document.createElement("div");
@@ -3193,8 +3184,8 @@ const BASE_PATH = window.BASE_PATH || "";
 
   // buildEmbedField returns the "internal embedding model" field — a dropdown of
   // the models flagged `embedding: true`. The selection is persisted as
-  // models.json `embed_model_ref` and drives semantic recall (soft-skills,
-  // precedents, codebase). When unset, recall is disabled and the agent uses its
+  // models.json `embed_model_ref` and drives semantic recall (codebase,
+  // docs, registries, past sessions). When unset, recall is disabled and the agent uses its
   // glob/grep fallbacks.
   function buildEmbedField(d) {
     const embedModels = Object.keys(d.models || {}).filter(n => d.models[n] && d.models[n].embedding);
@@ -3874,7 +3865,6 @@ const BASE_PATH = window.BASE_PATH || "";
     mime:       `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>`,
     mcp:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>`,
     Skill:      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
-    softskills: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     calc:       `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="12" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/><line x1="16" y1="10" x2="16" y2="18"/></svg>`,
     ddg:        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
     serper:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
@@ -3888,7 +3878,7 @@ const BASE_PATH = window.BASE_PATH || "";
     Bash: tr("tool.display.Bash"), Read: tr("tool.display.Read"), Write: tr("tool.display.Write"), Edit: tr("tool.display.Edit"),
     Grep: tr("tool.display.Grep"), Glob: tr("tool.display.Glob"), revert: tr("tool.display.revert"), mime: tr("tool.display.mime"),
     mcp: tr("tool.display.mcp"), Skill: tr("tool.display.Skill"),
-    softskills: tr("tool.display.softskills"), calc: tr("tool.display.calc"), ddg: tr("tool.display.ddg"),
+    calc: tr("tool.display.calc"), ddg: tr("tool.display.ddg"),
     serper: tr("tool.display.serper"), serpapi: tr("tool.display.serpapi"), web: tr("tool.display.web"), registries: tr("tool.display.registries"),
     code_search: tr("tool.display.code_search"), docs: tr("tool.display.docs"),
   };
@@ -4346,11 +4336,10 @@ const BASE_PATH = window.BASE_PATH || "";
     // ── Parallelism (max_instances) + Sessions (resumable_sessions) ──
     // Both only matter for sub-agents: max_instances caps how many invocations
     // the leader may fan out in one call, and resumable sessions keep a handle
-    // the leader can resume. The leader is never fanned out and the curator is a
-    // process-wide hook (both excluded by buildSubAgents), so the controls are
-    // hidden for them. Rendered as two fields in the General grid (their long
+    // the leader can resume. The leader is never fanned out (excluded by
+    // buildSubAgents), so the controls are hidden for it. Rendered as two fields in the General grid (their long
     // descriptions live in the "?" popups, not as hint lines).
-    if (!isLeader && (a.name || "").toLowerCase() !== "curator") {
+    if (!isLeader) {
       // Max parallel instances — custom stepper (matches the app look instead of
       // the browser's native number spinner).
       const parField = document.createElement("div");
@@ -4450,24 +4439,19 @@ const BASE_PATH = window.BASE_PATH || "";
     // into a cheap gatherer's context instead of accumulating it in its own —
     // retrieval cost is quadratic in ONE agent's tool calls, so who holds the
     // fetched pages decides the bill.
-    //
-    // Offered for every agent EXCEPT the curator (a process-wide post-session hook,
-    // never delegable and never a delegator).
-    if ((a.name || "").toLowerCase() !== "curator") {
-      const teamSec = document.createElement("section");
-      teamSec.className = "agent-detail-section";
-      const teamHdr = document.createElement("div");
-      teamHdr.className = "agent-section-hdr";
-      teamHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><h3>${escHtml(tr("set.hdr.team"))}</h3>`;
-      teamSec.appendChild(teamHdr);
+    const teamSec = document.createElement("section");
+    teamSec.className = "agent-detail-section";
+    const teamHdr = document.createElement("div");
+    teamHdr.className = "agent-section-hdr";
+    teamHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><h3>${escHtml(tr("set.hdr.team"))}</h3>`;
+    teamSec.appendChild(teamHdr);
 
-      const teamBody = document.createElement("div");
-      teamBody.className = "agent-block-body";
-      renderAgentTeamBlock(teamBody, a, d.agents, onChange);
-      teamSec.appendChild(teamBody);
-      teamSec._foldCount = () => (a.subagents || []).length;
-      body.appendChild(teamSec);
-    }
+    const teamBody = document.createElement("div");
+    teamBody.className = "agent-block-body";
+    renderAgentTeamBlock(teamBody, a, d.agents, onChange);
+    teamSec.appendChild(teamBody);
+    teamSec._foldCount = () => (a.subagents || []).length;
+    body.appendChild(teamSec);
 
     // ── Skills ──
     const skillsSec = document.createElement("section");
@@ -4611,7 +4595,6 @@ const BASE_PATH = window.BASE_PATH || "";
     const advGrid = document.createElement("div");
     advGrid.className = "agent-gen-grid";
     for (const [key, label] of [
-      ["softskills_dir", "softskills_dir"],
       ["mcp_config_path", "mcp_config_path"], ["permissions_config_path", "permissions_config_path"],
     ]) {
       const f = document.createElement("div");
@@ -6410,11 +6393,11 @@ const BASE_PATH = window.BASE_PATH || "";
     container.innerHTML = "";
 
     const self = (agent.name || "").toLowerCase();
-    // Candidates: every enabled agent except this one, the curator, and any agent
+    // Candidates: every enabled agent except this one and any agent
     // that (transitively) already delegates to this one — see the cycle note above.
     const candidates = (allAgents || []).filter(x => {
       const n = (x.name || "").toLowerCase();
-      if (!n || n === self || n === "curator") return false;
+      if (!n || n === self) return false;
       if (x.enabled === false) return false;
       if (subAgentDependsOn(allAgents, n, self)) return false;
       return true;

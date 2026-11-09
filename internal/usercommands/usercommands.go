@@ -148,8 +148,6 @@ var ReservedNames = map[string]struct{}{
 	"create-skill": {},
 	"update-skill": {},
 	"status":       {},
-	"learn":        {},
-	"learn-now":    {},
 	"init":         {},
 	"fork":         {},
 	"spawn":        {},
