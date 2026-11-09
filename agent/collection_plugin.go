@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"log"
+	"strings"
 	"sync"
 
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/collectionctx"
+	"github.com/blouargant/omnis/internal/collmem"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // collectionResolver, when set, maps a user-facing session id to the name of the
@@ -16,7 +20,7 @@ import (
 // installs one backed by the session registry (SetCollectionResolver); CLI/TUI
 // leave it nil. It is process-wide because the registry is — and it survives a
 // hot-reload — so the collection-context plugin of every generation resolves the
-// same live mapping. Nil resolver ⇒ no injection (byte-identical to before).
+// same live mapping. Nil resolver ⇒ every session is General.
 var (
 	collectionResolverMu sync.RWMutex
 	collectionResolver   func(sessionID string) string
@@ -56,18 +60,69 @@ func SetCollectionRootResolver(f func(sessionID string) string) {
 	collectionRootMu.Unlock()
 }
 
-// resolveCollectionBlock renders a collection's context from the session's
-// state root (per-user when a root resolver is installed, else shared).
-func resolveCollectionBlock(sessionID, name string) string {
+// collectionRoot returns the state root of a session's collection data: the
+// root resolver's answer when one is installed and non-empty, else "" (meaning
+// the shared root).
+func collectionRoot(sessionID string) string {
 	collectionRootMu.RLock()
 	rootFn := collectionRootResolver
 	collectionRootMu.RUnlock()
-	if rootFn != nil {
-		if root := rootFn(sessionID); root != "" {
-			return collectionctx.In(root).Resolve(name)
-		}
+	if rootFn == nil {
+		return ""
+	}
+	return rootFn(sessionID)
+}
+
+// resolveCollectionBlock renders a collection's instructions block from the
+// session's state root (per-user when a root resolver is installed, else shared).
+func resolveCollectionBlock(sessionID, name string) string {
+	if root := collectionRoot(sessionID); root != "" {
+		return collectionctx.In(root).Resolve(name)
 	}
 	return collectionctx.Resolve(name)
+}
+
+// memoryStoreFor returns the memory store and collection ("" = General) of a session.
+// No resolver installed (CLI/TUI) ⇒ shared root, General.
+func memoryStoreFor(sessionID string) (store *collmem.Store, collection string) {
+	root := collectionRoot(sessionID)
+	if root == "" {
+		root = paths.ConfigWriteDir()
+	}
+	return collmem.In(root), resolveCollection(sessionID)
+}
+
+// migrateLocks serialise the legacy memory.md migration per memory directory.
+// collectionCtxBlock runs on every model call of every root, so several sessions
+// of one collection can reach a first migration at the same time; unguarded, a
+// failing call's cleanup (RemoveAll of the memory dir) could wipe what a
+// concurrent call had just imported and whose memory.md it had removed. Once the
+// memory dir exists, MigrateLegacy returns after a single stat.
+var (
+	migrateLocksMu sync.Mutex
+	migrateLocks   = map[string]*sync.Mutex{}
+)
+
+func migrateLegacyMemory(store *collmem.Store, collection string) {
+	if collection == "" {
+		return
+	}
+	dir := store.Dir(collection)
+	if dir == "" {
+		return
+	}
+	migrateLocksMu.Lock()
+	l, ok := migrateLocks[dir]
+	if !ok {
+		l = &sync.Mutex{}
+		migrateLocks[dir] = l
+	}
+	migrateLocksMu.Unlock()
+	l.Lock()
+	defer l.Unlock()
+	if _, err := store.MigrateLegacy(collection); err != nil {
+		log.Printf("collection memory: migrating legacy memory.md of %q: %v", collection, err)
+	}
 }
 
 // routerCollectionCtxNote re-frames the collection block for the ROUTER hop.
@@ -89,16 +144,34 @@ const routerCollectionCtxNote = "The block below describes the workstream this "
 	"other than your routing tools. The squad you route to receives this same " +
 	"context and will act on it."
 
-// collectionCtxBlock renders what to prepend for a session, or "" when there is
-// nothing to inject (no resolver, no collection, or a collection with no prose).
-// forRouter leads with the routing-scoped note above. Split out from the
-// callback so the framing is unit-testable without an ADK context.
+// collectionCtxBlock renders what to prepend for a session: the collection's
+// instructions block (if any), then its memory block, separated by a blank line.
+// An answering root always gets the memory block (its rules tell the model how
+// to save the first memory), so it is never "" there. The router gets the memory
+// index only, and both parts under the routing-scoped note above; with no
+// instructions and no memories it gets "". Split out from the callback so the
+// content is unit-testable without an ADK context.
 func collectionCtxBlock(sessionID string, forRouter bool) string {
-	col := resolveCollection(sessionID)
-	if col == "" {
-		return ""
+	store, col := memoryStoreFor(sessionID)
+	migrateLegacyMemory(store, col)
+
+	var instr string
+	if col != "" {
+		instr = resolveCollectionBlock(sessionID, col)
 	}
-	block := resolveCollectionBlock(sessionID, col)
+	label := col
+	if label == "" {
+		label = "General"
+	}
+	mem := store.Render(col, label, forRouter)
+
+	var parts []string
+	for _, p := range []string{instr, mem} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	block := strings.Join(parts, "\n\n")
 	if block == "" || !forRouter {
 		return block
 	}
@@ -112,8 +185,9 @@ func collectionCtxBlock(sessionID string, forRouter bool) string {
 // including the router (forRouter switches the framing, not the content) —
 // routing is precisely the decision that needs to know what the workstream is
 // about. Root-only injection means ctx.SessionID() is always the real
-// user-facing session id. With no resolver, no collection, or no prose for the
-// collection it is a no-op.
+// user-facing session id. With no resolver the session is General under the
+// shared root; an answering root then still gets the memory rules block, while
+// the router gets nothing unless there are instructions or memories.
 func collectionCtxPlugin(name string, forRouter bool) (*plugin.Plugin, error) {
 	return plugin.New(plugin.Config{
 		Name: name,

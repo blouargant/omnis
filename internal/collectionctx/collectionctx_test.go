@@ -30,10 +30,34 @@ func TestWriteReadResolve(t *testing.T) {
 		t.Fatal("HasContext = false")
 	}
 	block := Resolve("Client X")
-	for _, want := range []string{`name="Client X"`, "<instructions>", "Use a formal tone.", "<memory>", "Client is on GCP.", "</collection-context>"} {
+	for _, want := range []string{`name="Client X"`, "<instructions>", "Use a formal tone.", "</collection-context>"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block missing %q:\n%s", want, block)
 		}
+	}
+	if strings.Contains(block, "<memory>") || strings.Contains(block, "Client is on GCP.") {
+		t.Fatalf("memory.md is no longer rendered by collectionctx:\n%s", block)
+	}
+}
+
+// memory.md is owned by internal/collmem now: on its own it contributes neither
+// a block nor a "has context" badge.
+func TestMemoryOnlyIsNotContext(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	if err := WriteMemory("M", "Some notes."); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resolve("M"); got != "" {
+		t.Fatalf("memory-only collection should resolve empty, got %q", got)
+	}
+	if HasContext("M") {
+		t.Fatal("HasContext must be true only when instructions are non-empty")
+	}
+	if err := WriteInstructions("M", "Be brief."); err != nil {
+		t.Fatal(err)
+	}
+	if !HasContext("M") {
+		t.Fatal("HasContext should be true once instructions exist")
 	}
 }
 

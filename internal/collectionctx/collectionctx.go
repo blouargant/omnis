@@ -2,13 +2,15 @@
 // cross-repo memory layer. Where AGENT.md (see internal/agentmd) scopes project
 // memory to a working directory, a collection carries persistent context that
 // follows a *workstream* across repos: hand-authored instructions plus a
-// distilled memory block, injected into the answering root's system instruction
-// for every session filed under that collection.
+// memory (owned by internal/collmem, which also renders it); this package renders
+// the instructions block injected into every squad root's system instruction for
+// every session filed under that collection.
 //
 // Storage is filesystem-only under $OMNIS_HOME/collections/<name>/:
 //
 //	instructions.md — hand-edited, stable (imperative guidance)
-//	memory.md       — distilled/evolving facts (the Phase-2 target; user-typed today)
+//	memory.md       — legacy memory, migrated into internal/collmem on first use
+//	                  (still read/written by the server until it moves to collmem)
 //
 // The package depends only on internal/paths + stdlib (no agent/sessions import),
 // so the agent package can resolve the injected block without an import cycle and
@@ -234,17 +236,17 @@ func (s *Store) RemoveDir(name string) error {
 	return nil
 }
 
-// HasContext reports whether a collection has any non-empty prose (instructions
-// or memory) — used to badge configured collections in the UI without shipping
-// the full text.
+// HasContext reports whether a collection has non-empty instructions — used to
+// badge configured collections in the UI without shipping the full text. The
+// collection's memory is owned by internal/collmem and is not counted here.
 func (s *Store) HasContext(name string) bool {
-	return strings.TrimSpace(s.ReadInstructions(name)) != "" ||
-		strings.TrimSpace(s.ReadMemory(name)) != ""
+	return strings.TrimSpace(s.ReadInstructions(name)) != ""
 }
 
-// Resolve returns the rendered context block for a collection, ready to prepend
-// to a system instruction, or "" when the collection has no prose (or the name
-// is the empty General bucket / unusable). Cached per collection and re-rendered
+// Resolve returns the rendered instructions block for a collection, ready to
+// prepend to a system instruction, or "" when the collection has no instructions
+// (or the name is the empty General bucket / unusable). The collection's memory
+// is rendered separately by internal/collmem. Cached per collection and re-rendered
 // only when a contributing file's size or mtime changes, so calling it on every
 // turn is cheap.
 func (s *Store) Resolve(name string) string {
@@ -252,24 +254,22 @@ func (s *Store) Resolve(name string) string {
 		return ""
 	}
 	instr := s.InstructionsPath(name)
-	mem := s.MemoryPath(name)
-	sig := signature(name, instr, mem)
+	sig := signature(name, instr)
 	key := s.base + "\x00" + name // per-root: two users' same-named collections never share an entry
 	if cached, ok := cacheGet(key, sig); ok {
 		return cached
 	}
-	out := render(name, readFile(instr), readFile(mem))
+	out := render(name, readFile(instr))
 	cachePut(key, sig, out)
 	return out
 }
 
-// render wraps a collection's instructions + memory in a stable container so the
-// model can tell workstream context apart from its own instruction and from
-// AGENT.md project memory. Empty sections are omitted; both empty ⇒ "".
-func render(name, instructions, memory string) string {
+// render wraps a collection's instructions in a stable container so the model
+// can tell workstream context apart from its own instruction and from AGENT.md
+// project memory. Empty instructions ⇒ "".
+func render(name, instructions string) string {
 	instructions = strings.TrimSpace(instructions)
-	memory = strings.TrimSpace(memory)
-	if instructions == "" && memory == "" {
+	if instructions == "" {
 		return ""
 	}
 	var b strings.Builder
@@ -277,29 +277,22 @@ func render(name, instructions, memory string) string {
 	b.WriteString("The following is persistent context for this collection " +
 		"(a thematic group of chats). Treat it as authoritative guidance for " +
 		"this workstream.\n")
-	if instructions != "" {
-		fmt.Fprintf(&b, "<instructions>\n%s\n</instructions>\n", instructions)
-	}
-	if memory != "" {
-		fmt.Fprintf(&b, "<memory>\n%s\n</memory>\n", memory)
-	}
+	fmt.Fprintf(&b, "<instructions>\n%s\n</instructions>\n", instructions)
 	b.WriteString("</collection-context>")
 	return b.String()
 }
 
-// signature builds a cheap change key from the two files' sizes and mtimes, plus
-// the name (so a rename re-renders the header). A missing file contributes a
-// stable marker so its later creation invalidates the cache.
-func signature(name, instr, mem string) string {
+// signature builds a cheap change key from the instructions file's size and
+// mtime, plus the name (so a rename re-renders the header). A missing file
+// contributes a stable marker so its later creation invalidates the cache.
+func signature(name, instr string) string {
 	var b strings.Builder
 	b.WriteString(name)
 	b.WriteByte('\n')
-	for _, p := range []string{instr, mem} {
-		if st, err := os.Stat(p); err == nil {
-			fmt.Fprintf(&b, "%s|%d|%d\n", p, st.Size(), st.ModTime().UnixNano())
-		} else {
-			fmt.Fprintf(&b, "%s|-\n", p)
-		}
+	if st, err := os.Stat(instr); err == nil {
+		fmt.Fprintf(&b, "%s|%d|%d\n", instr, st.Size(), st.ModTime().UnixNano())
+	} else {
+		fmt.Fprintf(&b, "%s|-\n", instr)
 	}
 	return b.String()
 }
