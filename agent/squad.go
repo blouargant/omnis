@@ -349,6 +349,11 @@ func buildSquadInstance(
 	}
 
 	leadTools = append(leadTools, fstools.NewAskUserTool(infra.AskUserRegistry))
+	// memory_save / memory_read / memory_delete keep the collection's memory.
+	// Answering roots only: the router never acts, and sub-agents never get them.
+	if !isRouter {
+		leadTools = append(leadTools, memoryTools()...)
+	}
 
 	rootDescription := rootCfg.Description
 	if rootDescription == "" {

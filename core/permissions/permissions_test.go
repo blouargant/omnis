@@ -517,6 +517,11 @@ func TestShippedConfigParity(t *testing.T) {
 		// question stop on a permission card before the agent could read
 		// references/projects.md.
 		{"load_skill_resource", map[string]any{"skill_name": "iaparc", "resource_path": "references/projects.md"}, DecisionAllow},
+		// The collection-memory tools write one fixed directory per collection with
+		// a validated name; prompting on each would make the memory unusable.
+		{"memory_save", map[string]any{"name": "a", "description": "d", "type": "user", "content": "c"}, DecisionAllow},
+		{"memory_read", map[string]any{"name": "a"}, DecisionAllow},
+		{"memory_delete", map[string]any{"name": "a"}, DecisionAllow},
 		// …but a sub-agent's mutating tools still prompt (fall through to ask).
 		{"Write", file("/proj/x.go"), DecisionAsk},
 		{"Edit", file("/proj/x.go"), DecisionAsk},
