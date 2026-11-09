@@ -49,9 +49,6 @@ func TestResolveRuntimeSettingsPrecedence(t *testing.T) {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
 
-	if got := runtime.SoftSkillsDir; got != "json-soft" {
-		t.Fatalf("SoftSkillsDir = %q, want json-soft", got)
-	}
 	if got := runtime.AppName; got != "cli-app" {
 		t.Fatalf("AppName = %q, want cli-app", got)
 	}
@@ -398,9 +395,6 @@ func TestResolveRuntimeSettingsDefaultsWithoutConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}
-	if got, want := runtime.SoftSkillsDir, filepath.Join(home, "softskills"); got != want {
-		t.Fatalf("SoftSkillsDir = %q, want %q", got, want)
-	}
 	if got := runtime.AppName; got != "omnis" {
 		t.Fatalf("AppName = %q, want omnis", got)
 	}
@@ -651,7 +645,6 @@ func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 		{Name: "leader", Enabled: true, Leader: true},
 		{Name: "investigator", Enabled: true, Tools: []string{"fs", "Skill"}},
 		{Name: "summariser", Enabled: true, Tools: []string{}},
-		{Name: "curator", Enabled: true},
 	}, RuntimeSettings{})
 
 	want := []string{
@@ -669,8 +662,8 @@ func TestSubAgentCapabilitiesBlockIncludesRoleUsageGuidance(t *testing.T) {
 			t.Fatalf("capabilities block missing %q\n%s", s, block)
 		}
 	}
-	if strings.Contains(block, "**leader**") || strings.Contains(block, "**curator**") {
-		t.Fatalf("capabilities block should exclude leader and curator\n%s", block)
+	if strings.Contains(block, "**leader**") {
+		t.Fatalf("capabilities block should exclude the leader\n%s", block)
 	}
 }
 
@@ -836,7 +829,7 @@ func TestRemovedAgentRegistryForkIsIgnored(t *testing.T) {
 	}
 }
 
-func TestCuratorEnvAndOptionsAreIgnored(t *testing.T) {
+func TestCuratorEnvIsIgnored(t *testing.T) {
 	t.Setenv("OMNIS_CURATOR_ENABLED", "true")
 	t.Setenv("OMNIS_CURATOR_MIN_TURNS", "5")
 	t.Setenv("OMNIS_CURATOR_IDLE_TIMEOUT", "30m")
@@ -845,8 +838,7 @@ func TestCuratorEnvAndOptionsAreIgnored(t *testing.T) {
 	cfgPath := filepath.Join(dir, "agent.json")
 	mustWrite(t, cfgPath, []byte(`{"agents": ["leader", "investigator"]}`))
 
-	enabled := true
-	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true, CuratorEnabled: &enabled})
+	runtime, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true})
 	if err != nil {
 		t.Fatalf("ResolveRuntimeSettings() error = %v", err)
 	}

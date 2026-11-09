@@ -741,7 +741,6 @@ func synthesizeRouterAgentConfig(rs RuntimeSettings, name string) (RuntimeAgentC
 	cfg.Instruction = "" // resolved in buildSquadInstance
 	cfg.Tools = nil      // route_to_squad + AskUserQuestion/mailbox mounted as always-on
 	cfg.Skills = nil
-	cfg.SoftSkillsDir = ""
 	cfg.MCPConfigPath = ""
 	cfg.MCPServers = nil
 	cfg.A2AAgents = nil

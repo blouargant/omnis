@@ -31,7 +31,7 @@ func buildTree(t *testing.T, members []RuntimeAgentConfig, catalogue []RuntimeAg
 
 	subAgentMap, _, leaderTools, _, err := buildSubAgentsFromConfigs(
 		context.Background(), members, runtime,
-		nil, nil, nil, nil,
+		nil, nil, nil,
 		modelFor, events.AgentCallbacks{},
 		nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil,

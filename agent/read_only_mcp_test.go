@@ -22,7 +22,7 @@ func TestReadOnlyAgentMountsOnlyReadOnlyMCPServers(t *testing.T) {
 		{Name: "docs", Toolset: namedToolset{"docs"}, ReadOnly: true},
 	}
 	names := func(cfg RuntimeAgentConfig) map[string]bool {
-		_, ts, _, _ := toolsForAgentConfig(context.Background(), cfg, RuntimeSettings{}, nil, nil, handles, nil, nil, nil, nil, nil, nil, false, nil)
+		_, ts, _, _ := toolsForAgentConfig(context.Background(), cfg, RuntimeSettings{}, nil, handles, nil, nil, nil, nil, nil, nil, false, nil)
 		out := map[string]bool{}
 		for _, s := range ts {
 			out[s.Name()] = true

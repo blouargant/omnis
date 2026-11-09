@@ -178,7 +178,7 @@ func (g *gatedLoadTool) Run(ctx adk.ToolContext, args any) (map[string]any, erro
 // ProcessRequest packs THIS wrapper under the load_skill name so the runner
 // dispatches calls through Run (which runs the gate). Packing the embedded tool
 // instead — what the inherited ProcessRequest would do — keys req.Tools to the
-// inner tool and bypasses the gate. Mirrors softskills' renamedTool.
+// inner tool and bypasses the gate.
 func (g *gatedLoadTool) ProcessRequest(_ adk.ToolContext, req *model.LLMRequest) error {
 	return toolutils.PackTool(req, g)
 }

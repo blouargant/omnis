@@ -57,7 +57,7 @@ func registerSubAgentBoundary(bus *events.Bus, subAgentNames []string) []*events
 			"run_id":     payload["run_id"],
 		}
 		// Preserve the calling agent (the leader, in practice) so a
-		// reflector can distinguish nested sub-agent calls if those ever
+		// listener can distinguish nested sub-agent calls if those ever
 		// appear. The payload's "agent" key is overwritten with the
 		// sub-agent's own name to keep semantics consistent across both
 		// new event names.

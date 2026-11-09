@@ -203,7 +203,7 @@ func handleSessionSearchStatus(d serverDeps) gin.HandlerFunc {
 //
 // It rides the EXISTING idle-indexer rail (EventSessionIndexNow), which the
 // server already fires for a session that has been idle 5 minutes and for one
-// that was just archived — the same trigger the precedent index uses. Two
+// that was just archived. Two
 // properties come free with it: on a fresh boot every persisted session is
 // un-indexed, so the first scan pass doubles as the backfill (no separate
 // boot-time build), and the whole thing is hash-gated, so on later boots it is a

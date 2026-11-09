@@ -6,14 +6,12 @@ import (
 
 	"google.golang.org/adk/v2/tool"
 
-	"github.com/blouargant/omnis/core/embed"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/skills"
-	"github.com/blouargant/omnis/internal/softskills"
 )
 
-// buildLeaderToolsets resolves the leader's effective skills, soft-skills
-// and MCP toolsets, applying per-agent overrides on top of the global
+// buildLeaderToolsets resolves the leader's effective skills and MCP
+// toolsets, applying per-agent overrides on top of the global
 // runtime defaults. It returns the individual toolsets (so they can be
 // passed to sub-agent wiring), the aggregated slice destined for the
 // leader's `Toolsets` field, and the MCP pool handles that the calling
@@ -23,12 +21,7 @@ func buildLeaderToolsets(
 	runtime RuntimeSettings,
 	leaderCfg RuntimeAgentConfig,
 	pool *mcpcfg.Pool,
-	emb embed.Embedder,
-) (skillTS, softSkillTS tool.Toolset, mcpToolsets, allToolsets []tool.Toolset, mcpHandles []*mcpcfg.Handle) {
-	leaderSoftSkillsDir := runtime.SoftSkillsDir
-	if leaderCfg.SoftSkillsDir != "" {
-		leaderSoftSkillsDir = leaderCfg.SoftSkillsDir
-	}
+) (skillTS tool.Toolset, mcpToolsets, allToolsets []tool.Toolset, mcpHandles []*mcpcfg.Handle) {
 	// Explicit per-agent MCP config path is read verbatim; the default resolves
 	// through the layered deep-merge (LoadMerged) so a per-user overlay evolves
 	// with package-shipped servers instead of shadowing them.
@@ -42,10 +35,6 @@ func buildLeaderToolsets(
 	if ts, err := skills.Toolset(ctx, leaderCfg.Skills); err == nil {
 		skillTS = ts
 		allToolsets = append(allToolsets, ts)
-	}
-	if sts, err := softskills.Toolset(ctx, leaderSoftSkillsDir, emb); err == nil {
-		softSkillTS = sts
-		allToolsets = append(allToolsets, sts)
 	}
 	if mc, err := loadLeaderMCP(); err == nil && pool != nil {
 		if _, hs, err := pool.AcquireAll(mc); err == nil {

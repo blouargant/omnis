@@ -29,9 +29,7 @@ import (
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
-	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessindex"
-	"github.com/blouargant/omnis/internal/softskills"
 	"github.com/blouargant/omnis/internal/teammates"
 	"github.com/blouargant/omnis/internal/worktree"
 )
@@ -76,7 +74,7 @@ type squadBuildResult struct {
 	Squad         *SquadInstance
 	PluginCloser  func() error
 	MCPHandles    []*mcpcfg.Handle
-	SubAgentNames []string // members participating in this squad, for the curator gate
+	SubAgentNames []string // members participating in this squad, for the sub-agent event bridge
 }
 
 // buildSquadInstance constructs the leader+sub-agents tree for one squad,
@@ -145,12 +143,12 @@ func buildSquadInstance(
 	}
 
 	emb := infra.Embedder(ctx, runtime)
-	// buildLeaderToolsets resolves the root's skill/soft-skill/MCP toolsets and
+	// buildLeaderToolsets resolves the root's skill/MCP toolsets and
 	// acquires its MCP handles (also handed to sub-agents). Its aggregated
 	// toolset slice is intentionally discarded: the root's tools are assembled
 	// from its declared `tools` groups via toolsForAgentConfig, exactly like a
 	// sub-agent, so a specialised root only gets what it asks for.
-	skillTS, softSkillTS, _, _, leaderHandles := buildLeaderToolsets(ctx, runtime, rootCfg, infra.MCPPool, emb)
+	skillTS, _, _, leaderHandles := buildLeaderToolsets(ctx, runtime, rootCfg, infra.MCPPool)
 	allMCPHandles := append([]*mcpcfg.Handle(nil), leaderHandles...)
 
 	nameFunc := func(u, s, name string) string { return infra.NameFunc(u, s, name) }
@@ -163,10 +161,8 @@ func buildSquadInstance(
 	sessIdx := sessionIndexFn(func() *sessindex.Index { return infra.SessionIndex(ctx, runtime) })
 
 	// ── Root capability tools — config-driven from rootCfg.Tools ──
-	// A coordinating leader (asLeader=true) keeps embedder-backed soft-skill
-	// recall; a leaderless root uses sub-agent (glob) soft-skill semantics.
 	capTools, capToolsets, capInstruction, capHandles := toolsForAgentConfig(
-		ctx, rootCfg, runtime, skillTS, softSkillTS, leaderHandles,
+		ctx, rootCfg, runtime, skillTS, leaderHandles,
 		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, !leaderless, emb)
 	allMCPHandles = append(allMCPHandles, capHandles...)
 
@@ -318,7 +314,7 @@ func buildSquadInstance(
 		var berr error
 		subAgentMap, subAgents, subAgentLeaderTools, subAgentMCPHandles, berr = buildSubAgentsFromConfigs(
 			ctx, memberCfgs, runtime,
-			skillTS, softSkillTS, leaderHandles, infra.MCPPool,
+			skillTS, leaderHandles, infra.MCPPool,
 			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
 			budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel,
@@ -332,20 +328,6 @@ func buildSquadInstance(
 		}
 		allMCPHandles = append(allMCPHandles, subAgentMCPHandles...)
 		leadTools = append(leadTools, subAgentLeaderTools...)
-	}
-
-	// Session-lifecycle tools belong to a COORDINATOR that owns the session —
-	// keyed on leaderless, not on "has a team": a leaderless root may now hold its
-	// own `subagents` (above) without thereby becoming a session coordinator.
-	if !leaderless {
-		leadTools = append(leadTools, curateSessionTool())
-		// record_session_feedback persists the wrap-session answer to
-		// $OMNIS_HOME/logs/agent_feedback_<suffix>.json so the post-session
-		// reflector can treat it as the dominant verdict signal.
-		leadTools = append(leadTools, softskills.NewFeedbackTool(
-			paths.LogsDir(),
-			func(u, s string) string { return infra.SessionSuffix(u, s) },
-		))
 	}
 
 	leadTools = append(leadTools, fstools.NewAskUserTool(infra.AskUserRegistry))
@@ -375,7 +357,7 @@ func buildSquadInstance(
 		rootInstruction = routerCatalogueBlock(runtime) + base
 	} else {
 		// capInstruction carries the loader protocols for the groups actually
-		// mounted (skills, soft-skills + recall, registries, MCP, A2A); prepend it
+		// mounted (skills, registries, MCP, A2A); prepend it
 		// so the tool docs precede the agent's own prompt.
 		rootInstruction = capInstruction + rootInstruction
 		if len(memberCfgs) > 0 {

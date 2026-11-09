@@ -95,11 +95,6 @@ func TestLeaderlessRootMountsItsOwnSubAgents(t *testing.T) {
 		t.Errorf("session_search missing from the squad's sub-agent map: %v", sq.SubAgents)
 	}
 
-	// A leaderless root is still NOT a session coordinator: the session-lifecycle
-	// tools stay off it even now that it has a team.
-	if got := agentToolNames(t, sq.Leader); has(got, "curate_session") {
-		t.Errorf("leaderless root gained the coordinator-only curate_session tool: %v", got)
-	}
 }
 
 // A leaderless root that declares NO subagents must build exactly as before —

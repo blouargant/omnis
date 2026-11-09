@@ -32,8 +32,6 @@ import (
 // sub-agent does once per call and which retrieve nothing.
 var callCapFreeTools = map[string]bool{
 	"list_skills": true, "load_skill": true, "load_skill_resource": true,
-	"list_softskills": true, "load_softskill": true, "load_softskill_resource": true,
-	"recall_softskills": true,
 }
 
 // callCapNotice is returned in place of a tool result past the per-call cap.

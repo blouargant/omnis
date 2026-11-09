@@ -235,9 +235,9 @@ func deleteSession(d serverDeps, id string) bool {
 	if !d.Registry.Delete(id) {
 		return false
 	}
-	// Fire SessionEnd hooks. Driven directly (not via the bus EventSessionEnd,
-	// which also runs the reflection/curation pipeline that web-UI sessions
-	// deliberately skip). Async so a slow hook never delays the response.
+	// Fire SessionEnd hooks. Driven directly: web-UI sessions never emit the
+	// bus EventSessionEnd (a CLI/TUI front-end signal). Async so a slow hook
+	// never delays the response.
 	if d.Manager != nil {
 		go d.Manager.Infra().FireHook(context.Background(), hooks.SessionEnd, "", hooks.Input{
 			SessionID: id,

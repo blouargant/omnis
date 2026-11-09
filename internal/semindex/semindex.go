@@ -3,9 +3,8 @@
 // (external id → opaque Meta) and a manifest (embedder model, dim, corpus
 // hash) so callers can detect staleness and rebuild when the embedder changes.
 //
-// One Store backs each semantic feature (softskill recall, precedent recall,
-// codebase search). All three share this code; only the corpus and the id
-// scheme differ.
+// One Store backs each semantic feature (code, registry, docs and session
+// search). They all share this code; only the corpus and the id scheme differ.
 //
 // Graceful degradation: Open with a nil embedder returns a usable handle whose
 // Query/Upsert return ErrNoEmbedder, letting callers fall back to glob/grep
@@ -60,7 +59,7 @@ const bitWidth = 4
 
 // indexSeed fixes the rotation/QJL seed for every semindex index. go-turbovec
 // treats Config.Seed == 0 as "draw a random seed", which would give each index
-// (docs, registries, precedents, per-repo code) a distinct rotation matrix.
+// (docs, registries, sessions, per-repo code) a distinct rotation matrix.
 // Pinning a shared, non-zero seed lets go-turbovec memoise the O(dim²) Π and S
 // matrices across all same-dim indexes — they build/load the matrices once and
 // share them, instead of every index allocating its own ~67 MB pair at dim

@@ -57,7 +57,6 @@ type AgentEntry struct {
 	AllowFileAttachments  *bool    `json:"allow_file_attachments"`
 	Tools                 []string `json:"tools"`
 	Skills                []string `json:"skills"`
-	SoftSkillsDir         string   `json:"softskills_dir"`
 	MCPConfigPath         string   `json:"mcp_config_path"`
 	MCPServers            []string `json:"mcp_servers"`
 	A2AAgents             []string `json:"a2a_agents,omitempty"`
@@ -219,7 +218,6 @@ type runtimeConfigFile struct {
 	// DisabledPlugins names the Claude Code plugins that are installed but
 	// switched off: their agents, squad, skills and hooks are not loaded.
 	DisabledPlugins       []string `json:"disabled_plugins,omitempty"`
-	SoftSkillsDir         string   `json:"softskills_dir"`
 	AppName               string   `json:"app_name"`
 	BashTimeoutSeconds    int      `json:"bash_timeout_seconds"`
 	MCPConfigPath         string   `json:"mcp_config_path"`
@@ -228,7 +226,7 @@ type runtimeConfigFile struct {
 	SerpAPIKey            string   `json:"serpapi_key"`
 	SerperKey             string   `json:"serper_key"`
 	// EmbedModelRef names the model in models.json used for internal semantic
-	// embedding (softskill/precedent/codebase recall). It must reference a
+	// embedding (code, registry, docs and session search). It must reference a
 	// model entry flagged `"embedding": true`. Empty disables semantic recall
 	// unless the OMNIS_EMBED_* environment provides an embedder instead.
 	EmbedModelRef string `json:"embed_model_ref,omitempty"`
@@ -322,7 +320,6 @@ type RuntimeAgentConfig struct {
 	// Skills is the explicit list of skill names this agent can access from
 	// the shared registry. Nil/empty means all installed skills are visible.
 	Skills        []string
-	SoftSkillsDir string
 	MCPConfigPath string
 	// MCPServers is the per-agent whitelist of MCP server names (matching
 	// `name` fields in the resolved mcp_config.json). An empty / unset list
@@ -384,7 +381,6 @@ type RuntimeSettings struct {
 	ConfigPath            string
 	ModelsConfigPath      string
 	Providers             map[string]RuntimeProviderConfig
-	SoftSkillsDir         string
 	AppName               string
 	BashTimeoutSeconds    int
 	MCPConfigPath         string
@@ -431,14 +427,6 @@ type RuntimeSettings struct {
 	// StartSquad is the resolved squad new chats start on, or "" to start on the
 	// router (or the default squad when routing is off). See Manager.StartSquad.
 	StartSquad string
-	// Curator gate thresholds (OMNIS_CURATOR_MIN_TURNS / OMNIS_CURATOR_MIN_SUB_AGENT_CALLS).
-	// Zero values fall back to the defaults in CuratorGateConfig.
-	CuratorMinTurns         int
-	CuratorMinSubAgentCalls int
-	// CuratorIdleTimeout is the idle-session duration after which the Web UI
-	// server fires an automatic curation run (OMNIS_CURATOR_IDLE_TIMEOUT).
-	// Zero means disabled.
-	CuratorIdleTimeout time.Duration
 	// TurnBudget is the resolved per-turn spend ceiling. When a turn crosses it
 	// the user is asked whether to continue; an unlimited value (both axes zero)
 	// disables the gate entirely. See internal/budget and agent/budget_plugin.go.
@@ -756,7 +744,6 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			AllowFileAttachments:              allowFileAttachments,
 			Tools:                             normalizeTools(e.Tools),
 			Skills:                            normalizeNames(e.Skills),
-			SoftSkillsDir:                     strings.TrimSpace(e.SoftSkillsDir),
 			MCPConfigPath:                     strings.TrimSpace(e.MCPConfigPath),
 			MCPServers:                        normalizeNames(e.MCPServers),
 			PermissionsConfigPath:             strings.TrimSpace(e.PermissionsConfigPath),
@@ -861,7 +848,6 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		AllowFileAttachments:              in.AllowFileAttachments,
 		Tools:                             normalizeTools(in.Tools),
 		Skills:                            normalizeNames(in.Skills),
-		SoftSkillsDir:                     strings.TrimSpace(in.SoftSkillsDir),
 		MCPConfigPath:                     strings.TrimSpace(in.MCPConfigPath),
 		MCPServers:                        normalizeNames(in.MCPServers),
 		PermissionsConfigPath:             strings.TrimSpace(in.PermissionsConfigPath),
@@ -1328,7 +1314,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out := RuntimeSettings{
 		ConfigPath:            paths.FindConfig("agents.json"),
 		ModelsConfigPath:      paths.FindConfig("models.json"),
-		SoftSkillsDir:         paths.SoftSkillsDir(),
 		AppName:               "omnis",
 		BashTimeoutSeconds:    120,
 		MCPConfigPath:         paths.FindConfig("mcp_config.json"),
@@ -1391,9 +1376,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	out.OverrideModelEnabled = modelsCfg.OverrideModelEnabled
 
 	// File
-	if strings.TrimSpace(cfg.SoftSkillsDir) != "" {
-		out.SoftSkillsDir = strings.TrimSpace(cfg.SoftSkillsDir)
-	}
 	if strings.TrimSpace(cfg.AppName) != "" {
 		out.AppName = strings.TrimSpace(cfg.AppName)
 	}
@@ -1499,9 +1481,6 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 
 	// Options (highest precedence)
-	if strings.TrimSpace(opts.SoftSkillsDir) != "" {
-		out.SoftSkillsDir = strings.TrimSpace(opts.SoftSkillsDir)
-	}
 	if strings.TrimSpace(opts.AppName) != "" {
 		out.AppName = strings.TrimSpace(opts.AppName)
 	}

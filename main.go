@@ -7,7 +7,6 @@
 //	                            # is provided)
 //	omnis [flags] run [prompt]   # explicit CLI form
 //	omnis [flags] tui            # tview chat UI
-//	omnis [flags] curate ...     # one-shot soft-skill curator
 //	omnis version                # print version information
 //
 // The HTTP API server lives in the separate `omnis-server` binary (see
@@ -25,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/blouargant/omnis/internal/sandbox"
@@ -53,21 +51,21 @@ var (
 
 // options holds CLI flags consumed before the subcommand keyword.
 type options struct {
-	softSkillsDir string
-	appName       string
-	configPath    string
-	curatorRaw    string
-	debug         bool
+	appName    string
+	configPath string
+	debug      bool
 }
 
 // newFlagSet wires the global omnis flags onto opts and returns the
 // flag.FlagSet so callers can either Parse() or print usage.
 func newFlagSet(opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("omnis", flag.ContinueOnError)
-	fs.StringVar(&opts.softSkillsDir, "softskills", opts.softSkillsDir, "Directory to load curator-generated soft-skills from")
+	// -softskills and -curator-enabled went away with soft-skills; they stay
+	// registered so existing command lines and scripts keep parsing.
+	fs.String("softskills", "", "Deprecated, ignored")
 	fs.StringVar(&opts.appName, "name", opts.appName, "Application name")
 	fs.StringVar(&opts.configPath, "config", "", "Path to runtime JSON config file (default: config/agents.json)")
-	fs.StringVar(&opts.curatorRaw, "curator-enabled", "", "Enable/disable auto-curator hook (true/false)")
+	fs.String("curator-enabled", "", "Deprecated, ignored")
 	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
 	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
 	fs.Usage = func() { printUsage(fs) }
@@ -92,8 +90,6 @@ Usage:
   omnis [flags] [prompt...]      run a one-shot turn (or REPL if stdin is a TTY)
   omnis [flags] run [prompt]     same as above; the explicit form
   omnis [flags] tui              launch the interactive TUI
-  omnis [flags] curate ...       run the soft-skill curator one-shot
-  omnis [flags] reindex-precedents  rebuild the cross-session precedent index
   omnis [flags] reindex-docs        rebuild the documentation semantic index
   omnis [flags] reindex-sessions    rebuild the past-session search index
   omnis [flags] embed-test [text]   probe the configured embedder (semantic recall)
@@ -139,10 +135,6 @@ func run(ctx context.Context, opts options, args []string) error {
 			var dummy options
 			printUsage(newFlagSet(&dummy))
 			return nil
-		case "curate":
-			return runCurate(ctx, opts, args[1:])
-		case "reindex-precedents":
-			return runReindexPrecedents(ctx, opts, args[1:])
 		case "reindex-docs":
 			return runReindexDocs(ctx, opts, args[1:])
 		case "reindex-sessions":
@@ -171,16 +163,10 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 	// the router routes each request to the best-suited squad and squads can
 	// hand control back. The default-squad runner is still passed for
 	// back-compat with examples that build a bare runner.
-	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
-	if err != nil {
-		return err
-	}
 	agentOpts := agent.Options{
-		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	}
 	infra, err := agent.BuildInfrastructure(ctx, agentOpts)
@@ -243,16 +229,10 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 // the same Infrastructure+Manager combo the HTTP server uses so the
 // TUI and server share session storage and skills.
 func runTUI(ctx context.Context, opts options) error {
-	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
-	if err != nil {
-		return err
-	}
 	agentOpts := agent.Options{
-		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	}
 	infra, err := agent.BuildInfrastructure(ctx, agentOpts)
@@ -312,18 +292,12 @@ func runTUI(ctx context.Context, opts options) error {
 }
 
 // buildAgent assembles the lead agent from the user-supplied options.
-// Shared between CLI, TUI, and curate subcommands.
+// Shared between the CLI and TUI subcommands.
 func buildAgent(ctx context.Context, opts options) (*agent.AgentResult, error) {
-	curatorEnabled, err := parseOptionalBool(opts.curatorRaw)
-	if err != nil {
-		return nil, err
-	}
 	return agent.NewAgent(ctx, agent.Options{
-		SoftSkillsDir:    opts.softSkillsDir,
 		AppName:          opts.appName,
 		ConfigPath:       opts.configPath,
 		ConfigPathStrict: opts.configPath != "",
-		CuratorEnabled:   curatorEnabled,
 		DebugLogging:     opts.debug,
 	})
 }
@@ -423,16 +397,4 @@ func appendAgentNameToConfig(readPath, writePath, name string) error {
 		return err
 	}
 	return os.WriteFile(writePath, out, 0o644)
-}
-
-func parseOptionalBool(raw string) (*bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid boolean %q (expected true/false)", raw)
-	}
-	return &v, nil
 }

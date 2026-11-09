@@ -16,14 +16,14 @@ func TestParseFlagsDebugShort(t *testing.T) {
 }
 
 func TestParseFlagsLongFlagsKeepSubcommandArgs(t *testing.T) {
-	opts, args, err := parseFlags([]string{"--debug", "curate", "--user", "u1"})
+	opts, args, err := parseFlags([]string{"--debug", "reindex-docs", "--user", "u1"})
 	if err != nil {
 		t.Fatalf("parseFlags() error = %v", err)
 	}
 	if !opts.debug {
 		t.Fatal("debug = false, want true")
 	}
-	want := []string{"curate", "--user", "u1"}
+	want := []string{"reindex-docs", "--user", "u1"}
 	if len(args) != len(want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
 	}
@@ -49,5 +49,17 @@ func TestParseFlagsBarePromptArgs(t *testing.T) {
 		if args[i] != v {
 			t.Fatalf("args[%d] = %q, want %q", i, args[i], v)
 		}
+	}
+}
+
+// -softskills and -curator-enabled went away with soft-skills but stay
+// registered as no-ops, so existing command lines keep parsing.
+func TestRemovedFlagsAreAccepted(t *testing.T) {
+	_, args, err := parseFlags([]string{"-softskills", "/x", "-curator-enabled", "true", "tui"})
+	if err != nil {
+		t.Fatalf("parseFlags() error = %v", err)
+	}
+	if len(args) != 1 || args[0] != "tui" {
+		t.Fatalf("args = %#v, want [tui]", args)
 	}
 }

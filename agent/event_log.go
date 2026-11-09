@@ -26,7 +26,6 @@ var eventLogEvents = []string{
 	events.EventToolError,
 	events.EventSessionStart, events.EventSessionEnd,
 	events.EventRunStart, events.EventRunEnd,
-	events.EventCurateNow,
 }
 
 // EventLog opens the process-wide event audit log

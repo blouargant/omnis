@@ -21,14 +21,13 @@ import (
 	"github.com/blouargant/omnis/internal/steer"
 )
 
-// buildSubAgents constructs every enabled sub-agent (skipping leader and
-// curator) declared in the runtime config. Equivalent to
-// buildSubAgentsFromConfigs called with every non-leader / non-curator
-// enabled agent. Kept for any callers that want the full default behaviour.
+// buildSubAgents constructs every enabled sub-agent (skipping the leader)
+// declared in the runtime config. Equivalent to
+// buildSubAgentsFromConfigs called with every non-leader enabled agent. Kept for any callers that want the full default behaviour.
 func buildSubAgents(
 	ctx context.Context,
 	runtime RuntimeSettings,
-	skillTS, softSkillTS tool.Toolset,
+	skillTS tool.Toolset,
 	leaderMCPHandles []*mcpcfg.Handle,
 	pool *mcpcfg.Pool,
 	modelForAgent func(RuntimeAgentConfig) (model.LLM, error),
@@ -54,12 +53,12 @@ func buildSubAgents(
 ) {
 	filtered := make([]RuntimeAgentConfig, 0, len(runtime.Agents))
 	for _, cfg := range runtime.Agents {
-		if cfg.Name == "leader" || cfg.Name == "curator" || !cfg.Enabled {
+		if cfg.Name == "leader" || !cfg.Enabled {
 			continue
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -91,7 +90,7 @@ func buildSubAgentsFromConfigs(
 	ctx context.Context,
 	configs []RuntimeAgentConfig,
 	runtime RuntimeSettings,
-	skillTS, softSkillTS tool.Toolset,
+	skillTS tool.Toolset,
 	leaderMCPHandles []*mcpcfg.Handle,
 	pool *mcpcfg.Pool,
 	modelForAgent func(RuntimeAgentConfig) (model.LLM, error),
@@ -150,7 +149,7 @@ func buildSubAgentsFromConfigs(
 			instr = defaultAgentInstruction(cfg.Name)
 		}
 
-		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, softSkillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore, false, nil)
+		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore, false, nil)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 		subTools = applyReadOnly(cfg, subTools, subToolsets)

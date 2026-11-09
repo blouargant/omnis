@@ -1,5 +1,4 @@
-// Package fsutil provides small fs.FS helpers shared by the skills and
-// softskills toolsets.
+// Package fsutil provides small fs.FS helpers for the skills toolset.
 package fsutil
 
 import (
